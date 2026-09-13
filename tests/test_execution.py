@@ -400,3 +400,18 @@ def test_make_executor_docker_with_a_live_probe(tmp_path: Path) -> None:
 def test_make_executor_unknown_kind() -> None:
     with pytest.raises(ValueError, match="unknown executor"):
         make_executor("podman")
+
+
+def test_local_executor_closes_stdin_so_input_fails_fast(tmp_path: Path) -> None:
+    """A repository test that blocks on stdin (click's termui tests do) must fail
+    immediately with EOF, never hang until the wall-clock timeout."""
+    from crb.core.execution import Command, LocalExecutor
+
+    cmd = Command(
+        (sys.executable, "-c", "import sys; sys.stdin.readline(); print('read')"),
+        tmp_path,
+        timeout=10,
+    )
+    r = LocalExecutor().run(cmd)
+    assert not r.timed_out and r.duration_s < 5
+    assert "read" in r.stdout  # readline() returns '' at EOF instantly

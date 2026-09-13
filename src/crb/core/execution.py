@@ -161,6 +161,7 @@ class LocalExecutor:
             list(cmd.argv),
             cwd=str(cwd),
             env=env,
+            stdin=subprocess.DEVNULL,  # a test that waits for input must fail, never hang
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
