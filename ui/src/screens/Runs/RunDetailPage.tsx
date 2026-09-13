@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
 import { useCancelRun, useRun, useRunEvents, useRunTasks } from '../../api/hooks'
 import type { EventSourceFactory } from '../../api/sse'
@@ -169,6 +170,15 @@ export function RunDetailPage({ eventSourceFactory }: RunDetailPageProps = {}) {
   const terminal = isRunTerminal(run.data?.status)
   const events = useRunEvents(id, { factory: eventSourceFactory })
   const [pack, setPack] = useState<string | null>(null)
+  const qc = useQueryClient()
+  // The server's `event: done` is authoritative: refetch the run (status, counts) and its
+  // task table at once instead of waiting for the next poll — which is paused while the
+  // tab is hidden.
+  useEffect(() => {
+    if (events.status === 'done') {
+      void qc.invalidateQueries({ queryKey: ['runs'] })
+    }
+  }, [events.status, qc])
 
   return (
     <>
