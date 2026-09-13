@@ -201,3 +201,40 @@ class TestClaudeCodeModelDefault:
         assert r.status_code == 201 and r.json()["model"] == ""
         r = env.post("/runs", json={"repo": ALPHA, "kind": "mine"})
         assert r.status_code == 201 and r.json()["model"] == ""
+
+
+# --- POST /runs retain -----------------------------------------------------------------------
+
+
+class TestRetain:
+    """Per-run raw retention is the operator's call at queue time (ADR-0006 default: none)."""
+
+    def test_default_is_no_retention_and_no_params_key(self, env: Env, jobs: list[Run]) -> None:
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "replay", "builder": "b"})
+        assert r.status_code == 201, r.text
+        assert r.json()["retain"] == {"worktrees": False, "transcripts": False}
+        (run,) = jobs
+        assert "retain" not in run.params_json
+
+    def test_retain_stored_under_params_and_served(self, env: Env, jobs: list[Run]) -> None:
+        r = env.post(
+            "/runs",
+            json={
+                "repo": ALPHA,
+                "kind": "replay",
+                "builder": "b",
+                "retain": {"worktrees": True, "transcripts": True},
+            },
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["retain"] == {"worktrees": True, "transcripts": True}
+        (run,) = jobs
+        assert run.params_json["retain"] == {"worktrees": True, "transcripts": True}
+        assert env.get(f"/runs/{run.id}").json()["retain"]["worktrees"] is True
+
+    def test_unknown_retain_key_422(self, env: Env, jobs: list[Run]) -> None:
+        r = env.post(
+            "/runs",
+            json={"repo": ALPHA, "kind": "replay", "builder": "b", "retain": {"diffs": True}},
+        )
+        assert r.status_code == 422 and jobs == []

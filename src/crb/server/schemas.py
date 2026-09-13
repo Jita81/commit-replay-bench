@@ -306,6 +306,7 @@ class RunOut(BaseModel):
     limit: int | None
     task_ids: list[str]
     builder_config: dict[str, Any]
+    retain: RunRetention
     actor: str
     created: str
     started: str | None
@@ -319,6 +320,15 @@ class RunOut(BaseModel):
     heartbeat: str | None
     counts: RunCounts
     progress: RunProgress
+
+
+class RunRetention(BaseModel):
+    """Per-run raw-retention switches (both default off)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    worktrees: bool = False
+    transcripts: bool = False
 
 
 class RunCreateRequest(BaseModel):
@@ -341,6 +351,12 @@ class RunCreateRequest(BaseModel):
     #: ``params.builder_config``, passed as ``builder_overrides`` by the worker and
     #: stamped into the run's apparatus. Identity and credential keys are refused.
     builder_config: dict[str, Any] = Field(default_factory=dict)
+    #: Retention for THIS run, decided by the operator who queues it (ADR-0006 keeps the
+    #: default at zero raw retention): ``worktrees`` keeps every attempt's worktree under
+    #: the worker's scratch so a human can read the accepted patch; ``transcripts`` keeps
+    #: the builder transcript (redacted, referenced from the evidence pack). Stored under
+    #: ``params.retain`` and served on the run.
+    retain: RunRetention = Field(default_factory=RunRetention)
 
     @field_validator("kind")
     @classmethod

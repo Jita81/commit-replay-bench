@@ -60,6 +60,7 @@ from crb.server.schemas import (
     RunCreateRequest,
     RunOut,
     RunProgress,
+    RunRetention,
     RunTaskRow,
     StepEventOut,
 )
@@ -341,6 +342,7 @@ def run_out(session: Session, run: Run) -> RunOut:
         limit=int(limit) if limit else None,
         task_ids=[str(t) for t in params.get("task_ids", []) or []],
         builder_config=dict(params.get("builder_config") or {}),
+        retain=RunRetention(**dict(params.get("retain") or {})),
         actor=run.actor,
         created=run.created,
         started=_opt(run.started),
@@ -443,6 +445,8 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     }
     if body.builder_config:
         params["builder_config"] = dict(body.builder_config)
+    if body.retain.worktrees or body.retain.transcripts:
+        params["retain"] = body.retain.model_dump()
     return Run(
         id=uuid.uuid4().hex,
         repo=body.repo,

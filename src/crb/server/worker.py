@@ -883,6 +883,7 @@ class Worker:
         ctx.counts.update({"tasks": 0, "total": total, "rows": 0, "clean": 0})
         ladder = self._ladder(ctx)
         budget = Budget.from_dict(dict(p.get("budget") or {}))
+        retain = dict(p.get("retain") or {})
         runner = self._runner(ctx)
         executor = self._executor(ctx)
         run_ledger = _RunLedger(self.ledger, self.factory, self.evidence_dir, ctx, runner.name)
@@ -900,7 +901,9 @@ class Worker:
             timeout=ctx.timeout,
             corpus_sha=str(p.get("corpus_sha") or ""),
             policy_version=str(p.get("policy_version") or ""),
-            keep_worktrees=bool(p.get("keep_worktrees", self.settings.keep_worktrees)),
+            keep_worktrees=bool(
+                p.get("keep_worktrees", retain.get("worktrees", self.settings.keep_worktrees))
+            ),
             extra={
                 "worker": self.worker_id,
                 "budget": budget.to_dict(),
@@ -916,7 +919,11 @@ class Worker:
             config=ctx.config,
             on_event=ctx.on_event,
             message_for=lambda t: ctx.git.message(t.task_id),
-            transcript_dir=self.transcripts_dir(run.id) if p.get("keep_transcripts") else None,
+            transcript_dir=(
+                self.transcripts_dir(run.id)
+                if p.get("keep_transcripts") or retain.get("transcripts")
+                else None
+            ),
             builder_overrides=dict(p.get("builder_config") or {}),
         )
         self._progress(ctx, 0, total)
