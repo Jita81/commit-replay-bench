@@ -1,0 +1,22 @@
+crb {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}
+
+Image ........ {{ include "crb.image" . }}
+Secret ....... {{ .Values.existingSecret }} (CRB_SECRET_KEY, CRB_DATABASE_URL, …)
+PostgreSQL ... {{ .Values.postgresql.mode }}{{ if eq .Values.postgresql.mode "embedded" }} (EVALUATION ONLY — {{ include "crb.postgresHost" . }}){{ end }}
+Sandbox ...... worker.sandbox.mode={{ .Values.worker.sandbox.mode }}{{ if eq .Values.worker.sandbox.mode "none" }}  ← runs will be BLOCKED (fail-closed) until a daemon is provided{{ end }}
+NetworkPolicy  {{ if .Values.networkPolicy.enabled }}enabled (default-deny; model endpoint CIDRs: {{ .Values.networkPolicy.modelEndpoint.cidrs | join ", " | default "NONE — worker cannot reach a model" }}){{ else }}DISABLED{{ end }}
+
+Migrations ran as a pre-{{ if .Release.IsInstall }}install{{ else }}upgrade{{ end }} Job ({{ include "crb.fullname" . }}-migrate).
+
+Check health:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "crb.fullname" . }}-api 8000:{{ .Values.service.port }}
+  curl -fsS http://127.0.0.1:8000/api/v1/health
+
+{{- if .Values.ingress.enabled }}
+UI / API: https://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+{{- else }}
+No Ingress rendered (ingress.enabled=false). Expose the Service through your own gateway.
+{{- end }}
+
+Next: docs/OPERATOR.md — log in with the bootstrap admin, configure OIDC, add a repository,
+probe its sandbox image, run a sweep.

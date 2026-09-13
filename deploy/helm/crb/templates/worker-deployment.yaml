@@ -1,0 +1,168 @@
+{{- if .Values.worker.enabled }}
+{{- $mode := .Values.worker.sandbox.mode }}
+{{- if not (has $mode (list "none" "dind" "hostSocket")) }}
+{{- fail (printf "worker.sandbox.mode must be none | dind | hostSocket (got %q)" $mode) }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "crb.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  revisionHistoryLimit: 3
+  # A worker owns its worktrees on a RWO volume: replace, never run two generations at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "crb.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "crb.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+        crb.dev/sandbox-mode: {{ $mode }}
+        {{- with .Values.worker.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.worker.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "crb.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- if eq $mode "hostSocket" }}
+        supplementalGroups: [{{ .Values.worker.sandbox.hostSocket.gid }}]
+        {{- end }}
+      # Long enough for an in-flight task to finish its belts; the worker resumes orphaned
+      # runs from the queue after a restart in any case.
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: worker
+          image: {{ include "crb.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["worker"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          envFrom:
+            {{- include "crb.envFrom" . | nindent 12 }}
+          env:
+            {{- include "crb.commonEnv" . | nindent 12 }}
+            - name: CRB_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- if eq $mode "dind" }}
+            - name: DOCKER_HOST
+              value: unix:///var/run/docker/docker.sock
+            {{- else if eq $mode "hostSocket" }}
+            - name: DOCKER_HOST
+              value: unix:///var/run/docker.sock
+            {{- end }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "crb.scratchMounts" . | nindent 12 }}
+            - name: work
+              mountPath: /srv/crb
+            {{- if eq $mode "dind" }}
+            - name: docker-sock
+              mountPath: /var/run/docker
+            {{- else if eq $mode "hostSocket" }}
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            {{- end }}
+        {{- if eq $mode "dind" }}
+        # Docker-in-Docker sidecar: the daemon that runs the sandbox containers. It must be
+        # privileged (it needs to create cgroups/namespaces); the blast radius is this pod,
+        # not the node's container runtime. The work volume is mounted at the SAME path so
+        # the worker's bind-mount paths resolve inside the sidecar. Never expose its socket
+        # beyond the pod; it listens on a unix socket in a shared emptyDir, TLS/TCP off.
+        - name: dind
+          image: {{ .Values.worker.sandbox.dind.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --host=unix:///var/run/docker/docker.sock
+            - --group={{ .Values.podSecurityContext.runAsGroup }}
+            - --storage-driver=overlay2
+            - --icc=false
+            - --userland-proxy=false
+            - --live-restore=false
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsNonRoot: false
+            readOnlyRootFilesystem: false
+            allowPrivilegeEscalation: true
+          resources:
+            {{- toYaml .Values.worker.sandbox.dind.resources | nindent 12 }}
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker
+            - name: docker-data
+              mountPath: /var/lib/docker
+            - name: work
+              mountPath: /srv/crb
+          livenessProbe:
+            exec:
+              command: ["docker", "-H", "unix:///var/run/docker/docker.sock", "info", "--format", "{{ "{{" }}.ServerVersion{{ "}}" }}"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+        {{- end }}
+      volumes:
+        {{- include "crb.scratchVolumes" . | nindent 8 }}
+        - name: work
+          {{- if eq .Values.worker.workDir.type "pvc" }}
+          persistentVolumeClaim:
+            claimName: {{ include "crb.fullname" . }}-work
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.worker.workDir.size }}
+          {{- end }}
+        {{- if eq $mode "dind" }}
+        - name: docker-sock
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: docker-data
+          emptyDir:
+            sizeLimit: {{ .Values.worker.sandbox.dind.storageSizeLimit }}
+        {{- else if eq $mode "hostSocket" }}
+        - name: docker-sock
+          hostPath:
+            path: {{ .Values.worker.sandbox.hostSocket.path }}
+            type: Socket
+        {{- end }}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
