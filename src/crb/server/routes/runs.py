@@ -43,12 +43,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
+from crb.builders.claude_code import default_model as claude_code_default_model
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
 from crb.server.schemas import (
+    BUILD_KINDS,
     TERMINAL_STATUSES,
     Belts,
     Page,
@@ -415,9 +417,23 @@ def list_runs(
     )
 
 
+def default_model_for(builder: str) -> str:
+    """The model a build run gets when the request names none. Only ``claude_code`` has
+    a default (``CRB_CLAUDE_CODE_MODEL`` on the API host, else the adapter's
+    ``DEFAULT_MODEL``); every other builder needs an explicit model."""
+    if builder == "claude_code":
+        return claude_code_default_model()
+    return ""
+
+
 def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     """A ``queued`` Run row from a validated request (id assigned here so the response
-    can name it even if the queue does not)."""
+    can name it even if the queue does not). A build kind without a model gets the
+    builder's default (see :func:`default_model_for`) so the stored row — and every
+    ledger row it produces — names the model that actually ran."""
+    model = body.model
+    if body.kind in BUILD_KINDS and body.builder and not model:
+        model = default_model_for(body.builder)
     params: dict[str, Any] = {
         "task_ids": list(body.task_ids),
         "limit": body.limit,
@@ -434,7 +450,7 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         mode=body.mode or "sighted",
         status="queued",
         builder=body.builder,
-        model=body.model,
+        model=model,
         provider=body.provider,
         ladder_json=list(body.ladder) or ["r1"],
         params_json=params,

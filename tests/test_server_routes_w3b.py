@@ -170,3 +170,34 @@ class TestRepoUrlPolicy:
             json={"name": "x", "language": "python", "url": "http://alice:s3cretT0ken@host/x"},
         )
         assert r.status_code == 422 and "s3cretT0ken" not in r.text
+
+
+# --- POST /runs model default for claude_code ---------------------------------------------
+
+
+class TestClaudeCodeModelDefault:
+    def test_claude_code_without_a_model_gets_the_default(
+        self, env: Env, jobs: list[Run], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("CRB_CLAUDE_CODE_MODEL", raising=False)
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "replay", "builder": "claude_code"})
+        assert r.status_code == 201, r.text
+        assert r.json()["model"] == "claude-sonnet-5" and jobs[-1].model == "claude-sonnet-5"
+        monkeypatch.setenv("CRB_CLAUDE_CODE_MODEL", "claude-opus-5")
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", "builder": "claude_code"})
+        assert r.status_code == 201 and r.json()["model"] == "claude-opus-5"
+        # an explicit model always wins; other builders get no default
+        r = env.post(
+            "/runs",
+            json={
+                "repo": ALPHA,
+                "kind": "replay",
+                "builder": "claude_code",
+                "model": "claude-opus-5",
+            },
+        )
+        assert r.json()["model"] == "claude-opus-5"
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "replay", "builder": "editblock"})
+        assert r.status_code == 201 and r.json()["model"] == ""
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "mine"})
+        assert r.status_code == 201 and r.json()["model"] == ""

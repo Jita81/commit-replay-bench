@@ -186,3 +186,46 @@ def test_builder_config_absent_means_no_overrides(hr: Harness) -> None:
     assert done.status == STATUS_SUCCEEDED, done.error
     assert RecordingBuilder.seen == [{"model": "m", "provider": "p"}]
     assert done.apparatus_json["extra"]["builder_config"] == {}
+
+
+# --- bare rung labels (the API's default ladder) ----------------------------------------------
+
+
+def test_bare_rung_labels_mean_the_runs_own_builder_model(hr: Harness) -> None:
+    """``POST /runs`` stores ``ladder_json=["r1"]`` by default; the worker resolves a bare
+    label to the run's ``builder:model@provider`` (found by the UI walkthrough: every
+    API-created replay used to fail with ``rung 'r1' must look like builder:model``)."""
+    run = hr.enqueue(
+        "replay", builder="recording", model="m", provider="p", ladder_json=["r1", "r2"]
+    )
+    done = hr.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert done.ladder_json == ["r1", "r2"]  # the declared ladder is kept as written
+    rows = list(hr.worker.ledger.rows(run_id=run.id))
+    # rung 1 already clean → one attempt; the rung climbed only on a non-clean attempt
+    assert [(r.trial, r.builder, r.model, r.provider) for r in rows] == [
+        ("r1", "recording", "m", "p")
+    ]
+    assert rows[0].labels["rung"] == "r1" and rows[0].clean
+
+
+def test_bare_rung_labels_without_a_model_fail_closed(hr: Harness) -> None:
+    hr.enqueue("replay", builder="recording", model="", ladder_json=["r1"])
+    done = hr.run_one()
+    assert done.status == STATUS_FAILED and "needs builder + model" in done.error
+
+
+def test_explicit_labels_mix_with_bare_ones(hr: Harness) -> None:
+    builders_pkg._REGISTRY["recording"] = lambda **cfg: RecordingBuilder(
+        behaviour="noop" if cfg["model"] == "m" else "gold", **cfg
+    )
+    run = hr.enqueue(
+        "replay", builder="recording", model="m", ladder_json=["r1", "recording:strong@q"]
+    )
+    done = hr.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    rows = list(hr.worker.ledger.rows(run_id=run.id))
+    assert [(r.trial, r.model, r.provider, r.clean) for r in rows] == [
+        ("r1", "m", "", False),
+        ("r2", "strong", "q", True),
+    ]

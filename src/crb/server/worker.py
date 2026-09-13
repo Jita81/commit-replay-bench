@@ -851,12 +851,24 @@ class Worker:
         return STATUS_SUCCEEDED, counts, ""
 
     def _ladder(self, ctx: RunContext) -> EscalationLadder:
+        """The run's escalation ladder. A bare rung label (``r1``, ``r2`` … — no ``:``; the
+        API's default ladder is ``["r1"]``) means one attempt with the run's own
+        ``builder:model[@provider]``; a ``builder:model[:provider]`` label is a rung as
+        written. The stored ``ladder_json`` stays what the operator declared."""
         run = ctx.run
         labels: list[str] = [str(x) for x in (ctx.params.get("ladder") or run.ladder_json or [])]
-        if not labels and run.builder and run.model:
-            labels = [f"{run.builder}:{run.model}" + (f"@{run.provider}" if run.provider else "")]
+        own = ""
+        if run.builder and run.model:
+            own = f"{run.builder}:{run.model}" + (f"@{run.provider}" if run.provider else "")
+        if not labels and own:
+            labels = [own]
         if not labels:
             raise ValueError("a replay run needs a ladder (rung labels) or builder + model")
+        if any(":" not in lbl for lbl in labels) and not own:
+            raise ValueError(
+                "a replay run with bare rung labels (r1, r2 …) needs builder + model on the run"
+            )
+        labels = [own if ":" not in lbl else lbl for lbl in labels]
         provider = str(run.provider or ctx.params.get("provider") or "")
         return ladder_from_spec(labels, default_provider=provider)
 
