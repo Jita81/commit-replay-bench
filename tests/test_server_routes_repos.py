@@ -337,5 +337,8 @@ class TestTasks:
         assert env.get("/repos/nope/tasks").status_code == 404
 
     def test_route_paths_are_under_prefix(self, env: Env) -> None:
-        assert env.client.get("/repos").status_code == 404
+        # Without the prefix there is no API: either 404 (no UI built) or the SPA shell
+        # (index.html deep-link fallback) — never a JSON list.
+        r = env.client.get("/repos")
+        assert r.status_code == 404 or r.headers["content-type"].startswith("text/html")
         assert env.client.get(f"{API_PREFIX}/repos").status_code == 200

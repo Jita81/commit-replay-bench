@@ -31,12 +31,14 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from http.cookies import CookieError, SimpleCookie
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.datastructures import Headers, MutableHeaders
@@ -428,6 +430,11 @@ def _lifespan_factory(
         app.state.engine = engine
         app.state.session_factory = factory
         bootstrap_admin_if_empty(factory, settings)
+        # Mounted at startup (not in the factory) so routes a caller adds after
+        # create_app() still take precedence over the catch-all SPA mount.
+        if not getattr(app.state, "ui_mounted", False):
+            app.state.ui_dist = mount_ui(app, settings)
+            app.state.ui_mounted = True
         app.state.started_at = time.time()
         log.info(
             "crb server ready",
@@ -506,6 +513,42 @@ def create_app(
     if mount_routes:
         register_routers(app)
     return app
+
+
+class _SpaStaticFiles(StaticFiles):
+    """Static files with an ``index.html`` fallback so client-side routes deep-link.
+
+    Mounted LAST and only when the built UI exists. API paths are never reached
+    here because the API routers are matched first.
+    """
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and not path.startswith("api/"):
+                return await super().get_response("index.html", scope)
+            raise
+
+
+def resolve_ui_dist(settings: Settings) -> Path | None:
+    candidates = [settings.ui_dist] if settings.ui_dist else ["ui/dist", "/app/ui/dist"]
+    for c in candidates:
+        p = Path(c)
+        if (p / "index.html").is_file():
+            return p
+    return None
+
+
+def mount_ui(app: FastAPI, settings: Settings) -> Path | None:
+    """Serve the built SPA at ``/`` when present; a no-op (with a log line) otherwise."""
+    dist = resolve_ui_dist(settings)
+    if dist is None:
+        log.info("no built UI found (CRB_UI_DIST unset and ui/dist absent); API only")
+        return None
+    app.mount("/", _SpaStaticFiles(directory=str(dist), html=True), name="ui")
+    log.info("serving UI from %s", dist)
+    return dist
 
 
 __all__ = [

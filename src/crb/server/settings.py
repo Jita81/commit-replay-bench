@@ -119,6 +119,9 @@ class Settings(BaseSettings):
     bind_port: int = Field(default=8000, ge=1, le=65535)
     #: Seconds after which a running run with a stale heartbeat is reported degraded.
     worker_heartbeat_stale_s: int = Field(default=120, ge=1)
+    #: Built UI directory (``ui/dist``). When it exists the API serves it at ``/`` with an
+    #: ``index.html`` fallback for deep links; API paths never fall through to it.
+    ui_dist: str = ""
 
     @field_validator("cors_origins", "trusted_proxies", mode="before")
     @classmethod
