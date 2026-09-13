@@ -12,6 +12,26 @@ exactly ``Read/Edit/Bash`` (:data:`BARE_TOOLS`); ``bare=False`` restores the
 full ``Read/Edit/Write/Glob/Grep/Bash`` set at the cost of that isolation.
 ``--no-session-persistence`` keeps transcripts off disk.
 
+Authentication modes (``auth=``)
+--------------------------------
+``api_key`` (default, production)
+    ``--bare``; ``ANTHROPIC_API_KEY`` is required and is the only credential; the
+    isolation above holds in full.
+``cli`` (developer / evaluation only — never production)
+    No ``--bare``; the key is NOT required and NOT forwarded: the CLI authenticates
+    with the **operator's own login** (OAuth profile / keychain), so spend and
+    identity are the operator's, not a service account's. What is still isolated:
+    the tool set (``--tools``/``--allowedTools``), the deny rules
+    (``--disallowedTools``), slash commands (``--disable-slash-commands``), the
+    target repo's ``.claude/settings.json`` hooks and permission rules
+    (``--setting-sources user`` loads the operator's user settings only), the
+    minimal environment, session persistence off, and every post-hoc guard (test
+    tamper, git archaeology, network) — the grader decides regardless. What is
+    NOT isolated: the target repository's ``CLAUDE.md`` files are auto-discovered
+    (``--bare`` is the only switch that skips them — a prompt-injection surface),
+    the operator's own ``~/.claude/CLAUDE.md`` and user-level settings load, and
+    the keychain is read. The mode is recorded in ``describe()`` / the apparatus.
+
 The system prompt is the census ``wf_wave.js`` contract: no test edits, no git
 archaeology, no network, ~25 tool-call budget, ``{done, summary}`` structured
 output. The same :class:`TestFileGuard` is applied **post hoc** (diff the
@@ -77,6 +97,18 @@ KNOWN_MODELS: frozenset[str] = frozenset(
     }
 )
 API_KEY_ENV = "ANTHROPIC_API_KEY"
+
+#: ``auth`` modes. ``api_key`` is production (``--bare``, key required); ``cli`` relies on
+#: the operator's own CLI login (developer / evaluation only — see the module docstring).
+AUTH_API_KEY = "api_key"
+AUTH_CLI = "cli"
+AUTH_MODES: tuple[str, ...] = (AUTH_API_KEY, AUTH_CLI)
+#: Where the CLI keeps its login/config when the operator relocated it; forwarded in
+#: ``cli`` mode only (``HOME`` is always forwarded; the macOS keychain is process-level).
+CLI_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
+#: ``cli`` mode: load the operator's user settings only — never the target repository's
+#: ``.claude/settings.json`` (hooks, permission rules) nor its ``.claude/settings.local.json``.
+CLI_SETTING_SOURCES = "user"
 
 #: Built-in tools requested. Under ``--bare`` (simple mode) the CLI exposes exactly
 #: ``Bash, Edit, Read`` whatever is requested — verified against claude 2.1.132 —
@@ -503,10 +535,13 @@ class ClaudeCodeBuilder:
         claude_binary: str = "",
         spawn: SpawnFn | None = None,
         effort: str = "",
-        bare: bool = True,
+        bare: bool | None = None,
+        auth: str = AUTH_API_KEY,
         keep_transcript: bool = False,
-        extra_args: tuple[str, ...] = (),
+        extra_args: tuple[str, ...] | list[str] = (),
     ) -> None:
+        """``bare`` defaults to ``True`` under ``auth="api_key"`` and to ``False`` under
+        ``auth="cli"`` (``--bare`` forces API-key auth, so the two cannot combine)."""
         self.model = model
         if model not in KNOWN_MODELS:
             warnings.warn(
@@ -514,13 +549,23 @@ class ClaudeCodeBuilder:
                 "aliases move over time — prefer an exact id",
                 stacklevel=2,
             )
+        if auth not in AUTH_MODES:
+            raise ValueError(f"claude_code: auth must be one of {AUTH_MODES}, not {auth!r}")
+        if bare is None:
+            bare = auth == AUTH_API_KEY
+        if bare and auth == AUTH_CLI:
+            raise ValueError(
+                "claude_code: auth='cli' cannot combine with bare=True (--bare makes "
+                "authentication strictly ANTHROPIC_API_KEY)"
+            )
         self.claude_binary = claude_binary
         self._spawn = spawn
         self.effort = effort
+        self.auth = auth
         self.bare = bare
         self.tools: tuple[str, ...] = BARE_TOOLS if bare else FULL_TOOLS
         self.keep_transcript = keep_transcript
-        self.extra_args = tuple(extra_args)
+        self.extra_args = tuple(str(a) for a in extra_args)
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -530,6 +575,7 @@ class ClaudeCodeBuilder:
             "process": "claude -p stream-json, tools=" + ",".join(self.tools),
             "effort": self.effort or "default",
             "bare": self.bare,
+            "auth": self.auth,
         }
 
     def _binary(self) -> str:
@@ -576,16 +622,33 @@ class ClaudeCodeBuilder:
             args += ["--effort", self.effort]
         if self.bare:
             args.append("--bare")
+        if self.auth == AUTH_CLI:
+            args += ["--setting-sources", CLI_SETTING_SOURCES]
         args += list(self.extra_args)
         return args
 
     @staticmethod
-    def env() -> dict[str, str]:
+    def env(auth: str = AUTH_API_KEY) -> dict[str, str]:
+        """The child's environment: the passthrough set plus the CLI's hygiene flags.
+
+        ``api_key``: ``ANTHROPIC_API_KEY`` is required (``PermissionError`` otherwise)
+        and forwarded. ``cli``: the key is neither required nor forwarded — the
+        CLI's own login is the only credential, so a run can never silently bill
+        a key the operator meant for production; ``CLAUDE_CONFIG_DIR`` is forwarded
+        when set so a relocated login is found.
+        """
         env = {k: v for k, v in os.environ.items() if k in _ENV_PASSTHROUGH}
-        key = os.environ.get(API_KEY_ENV, "").strip()
-        if not key:
-            raise PermissionError(f"{API_KEY_ENV} is not set — the claude_code builder needs it")
-        env[API_KEY_ENV] = key
+        if auth == AUTH_CLI:
+            cfg_dir = os.environ.get(CLI_CONFIG_DIR_ENV, "").strip()
+            if cfg_dir:
+                env[CLI_CONFIG_DIR_ENV] = cfg_dir
+        else:
+            key = os.environ.get(API_KEY_ENV, "").strip()
+            if not key:
+                raise PermissionError(
+                    f"{API_KEY_ENV} is not set — the claude_code builder needs it (auth={auth!r})"
+                )
+            env[API_KEY_ENV] = key
         env.setdefault("LANG", "C.UTF-8")
         env["NO_COLOR"] = "1"
         env["CI"] = "1"
@@ -640,14 +703,21 @@ class ClaudeCodeBuilder:
 
         try:
             binary = self._binary()
-            env = self.env()
+            env = self.env(self.auth)
         except (FileNotFoundError, PermissionError) as exc:
             errors.append(f"model_error: {exc}")
             return finish(done=False, summary="", stop=STOP_MODEL_ERROR, extra={})
 
         argv = self.argv(brief, budget, workspace.root, binary=binary)
         spawn = self._spawn or subprocess_spawn
-        emit(on_event, "build.start", builder=self.name, model=self.model, mode=brief.mode)
+        emit(
+            on_event,
+            "build.start",
+            builder=self.name,
+            model=self.model,
+            mode=brief.mode,
+            auth=self.auth,
+        )
         over_cap = False
         try:
             handle = spawn(argv, env, workspace.root, budget.wall_clock_s)
@@ -657,9 +727,13 @@ class ClaudeCodeBuilder:
                     emit(on_event, "build.event", **{k: v for k, v in ev.items() if k != "text"})
                 if stats.auth_failed:
                     # the CLI retries 401/403 ten times with backoff; auth is not transient
+                    hint = (
+                        "run `claude login` as the worker's user"
+                        if self.auth == AUTH_CLI
+                        else f"check {API_KEY_ENV}"
+                    )
                     errors.append(
-                        f"model_error: authentication failed (HTTP {stats.api_retries[-1]}) — "
-                        f"check {API_KEY_ENV}"
+                        f"model_error: authentication failed (HTTP {stats.api_retries[-1]}) — {hint}"
                     )
                     handle.kill()
                     break
@@ -709,7 +783,12 @@ class ClaudeCodeBuilder:
 
 __all__ = [
     "API_KEY_ENV",
+    "AUTH_API_KEY",
+    "AUTH_CLI",
+    "AUTH_MODES",
     "BARE_TOOLS",
+    "CLI_CONFIG_DIR_ENV",
+    "CLI_SETTING_SOURCES",
     "DEFAULT_MODEL",
     "DENY_RULES",
     "FULL_TOOLS",

@@ -1,0 +1,188 @@
+"""The worker clones a URL-registered repo on its first run (W3-B): into
+``<home>/repos/<name>``, persisted on the row, ``repo.clone.start`` / ``repo.clone.done``
+on the run's trace, credentials never in an event or an error, policy-refused sources
+fail the run closed, and a second run reuses the clone. Also: ``params.builder_config``
+reaches the builder as constructor overrides and is stamped into the apparatus."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, ClassVar
+
+import pytest
+
+import crb.builders as builders_pkg
+from crb.core.git import LOCAL_CLONE_ENV, GitRepo
+from crb.observability.events import StepStatus
+from crb.store.jobs import STATUS_FAILED, STATUS_SUCCEEDED
+from crb.store.models import Repo, Run
+from fixtures import pyrepo as pr
+from fixtures.remote import bare_remote
+from test_worker import FakeBuilder, Harness
+
+
+@pytest.fixture
+def remote(pyrepo: pr.PyRepo, tmp_path: Path) -> str:
+    return bare_remote(pyrepo.path, tmp_path / "remote.git")
+
+
+@pytest.fixture
+def h(tmp_path: Path, pyrepo: pr.PyRepo) -> Harness:
+    return Harness(tmp_path, pyrepo)
+
+
+def add_url_repo(h: Harness, url: str, *, clone_path: str = "") -> None:
+    cfg = h.pyrepo.config.to_dict()
+    cfg["path"] = clone_path
+    cfg["url"] = url
+    with h.factory() as s:
+        s.add(
+            Repo(
+                name=pr.REPO_NAME,
+                language="python",
+                runner="pytest",
+                clone_path=clone_path,
+                url=url,
+                config_json=cfg,
+            )
+        )
+        s.commit()
+
+
+def test_first_run_clones_by_url_and_persists_the_path(
+    h: Harness, remote: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(LOCAL_CLONE_ENV, "1")
+    add_url_repo(h, remote)  # the fixture's config (src/ layout + python) is what the row carries
+    h.add_task(h.pyrepo.feat_task())
+    run = h.queue.enqueue(Run(repo=pr.REPO_NAME, kind="probe", actor="tester"))
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    dest = h.home / "repos" / pr.REPO_NAME
+    assert GitRepo(dest).is_repo() and GitRepo(dest).rev_parse() == h.pyrepo.docs_sha
+    assert GitRepo(dest).log_shas(10) == [
+        h.pyrepo.docs_sha,
+        h.pyrepo.feat_sha,
+        h.pyrepo.initial_sha,
+    ]
+    row = h.repo_row()
+    assert row.clone_path == str(dest) and row.config_json["path"] == str(dest)
+    assert row.url == remote
+    # events, in order, on the run's trace, stage=system
+    ev = h.events(run.id)
+    actions = [e.action for e in ev]
+    assert actions[:3] == ["run.claimed", "repo.clone.start", "repo.clone.done"]
+    start = ev[1]
+    assert start.stage == "system" and start.payload == {"url": remote, "dest": str(dest)}
+    finish = ev[2]
+    assert finish.stage == "system" and finish.status is StepStatus.OK
+    assert finish.duration_ms is not None and finish.duration_ms >= 0
+    assert finish.payload["head"] == h.pyrepo.docs_sha and finish.payload["dest"] == str(dest)
+    # the probe ran against the fresh clone
+    probe_start = next(e for e in ev if e.action == "probe.start")
+    assert probe_start.payload["path"] == str(dest)
+    # a second run finds the persisted clone: no clone events, same path
+    run2 = h.queue.enqueue(Run(repo=pr.REPO_NAME, kind="probe", actor="tester"))
+    done2 = h.run_one()
+    assert done2.status == STATUS_SUCCEEDED, done2.error
+    assert not [e for e in h.events(run2.id) if e.action.startswith("repo.clone")]
+    assert sorted(p.name for p in (h.home / "repos").iterdir()) == [pr.REPO_NAME]
+
+
+def test_unusable_clone_path_with_url_is_recloned(
+    h: Harness, remote: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row whose ``clone_path`` points at nothing (or a plain directory) but carries a
+    URL is cloned rather than failed — the path is stale, the URL is the truth."""
+    monkeypatch.setenv(LOCAL_CLONE_ENV, "1")
+    stale = tmp_path / "stale"
+    stale.mkdir()
+    add_url_repo(h, remote, clone_path=str(stale))
+    h.queue.enqueue(Run(repo=pr.REPO_NAME, kind="probe", actor="tester"))
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert h.repo_row().clone_path == str(h.home / "repos" / pr.REPO_NAME)
+
+
+def test_policy_refused_url_fails_the_run_closed(
+    h: Harness, remote: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(LOCAL_CLONE_ENV, raising=False)
+    add_url_repo(h, remote)  # file:// without the dev switch
+    run = h.queue.enqueue(Run(repo=pr.REPO_NAME, kind="probe", actor="tester"))
+    done = h.run_one()
+    assert (
+        done.status == STATUS_FAILED and "refused" in done.error and LOCAL_CLONE_ENV in done.error
+    )
+    assert not (h.home / "repos" / pr.REPO_NAME).exists()
+    assert h.repo_row().clone_path == ""
+    ev = h.events(run.id)
+    clone_done = next(e for e in ev if e.action == "repo.clone.done")
+    assert clone_done.status is StepStatus.ERROR and clone_done.error_code == "CloneUrlError"
+
+
+def test_no_url_and_no_clone_keeps_the_old_errors(h: Harness) -> None:
+    add_url_repo(h, "")
+    h.queue.enqueue(Run(repo=pr.REPO_NAME, kind="probe", actor="tester"))
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and "has no clone path" in done.error
+
+
+def test_credentials_in_the_url_never_reach_events_or_errors(h: Harness) -> None:
+    url = "https://alice:s3cretT0ken@127.0.0.1:1/org/repo.git"  # nothing listens: fails fast
+    add_url_repo(h, url)
+    run = h.queue.enqueue(Run(repo=pr.REPO_NAME, kind="probe", actor="tester"))
+    done = h.run_one()
+    assert (
+        done.status == STATUS_FAILED
+        and "clone of https://127.0.0.1:1/org/repo.git failed" in done.error
+    )
+    assert "s3cretT0ken" not in done.error and "alice" not in done.error
+    for e in h.events(run.id):
+        blob = repr(e.to_dict())
+        assert "s3cretT0ken" not in blob and "alice:" not in blob
+    start = next(e for e in h.events(run.id) if e.action == "repo.clone.start")
+    assert start.payload["url"] == "https://127.0.0.1:1/org/repo.git"
+
+
+# --- builder_config passthrough --------------------------------------------------------------
+
+
+class RecordingBuilder(FakeBuilder):
+    """A fake that records the constructor kwargs the adapter hands it."""
+
+    name = "recording"
+    seen: ClassVar[list[dict[str, Any]]] = []
+
+    def __init__(self, *, model: str, provider: str = "", **kw: Any) -> None:
+        super().__init__(model=model, provider=provider, behaviour=str(kw.pop("behaviour", "gold")))
+        RecordingBuilder.seen.append({"model": model, "provider": provider, **kw})
+
+
+@pytest.fixture
+def hr(tmp_path: Path, pyrepo: pr.PyRepo, monkeypatch: pytest.MonkeyPatch) -> Harness:
+    monkeypatch.setitem(builders_pkg._REGISTRY, "recording", RecordingBuilder)
+    RecordingBuilder.seen = []
+    harness = Harness(tmp_path, pyrepo)
+    harness.add_repo()
+    harness.add_task(pyrepo.feat_task())
+    return harness
+
+
+def test_builder_config_reaches_the_builder_and_the_apparatus(hr: Harness) -> None:
+    cfg = {"auth": "cli", "effort": "high", "extra_args": ["--x"]}
+    run = hr.enqueue("replay", ladder_json=["recording:m@p"], params_json={"builder_config": cfg})
+    done = hr.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert RecordingBuilder.seen == [{"model": "m", "provider": "p", **cfg}]
+    assert done.apparatus_json["extra"]["builder_config"] == cfg
+    (row,) = hr.worker.ledger.rows(run_id=run.id)
+    assert row.clean and row.model == "m"
+
+
+def test_builder_config_absent_means_no_overrides(hr: Harness) -> None:
+    hr.enqueue("replay", ladder_json=["recording:m@p"])
+    done = hr.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert RecordingBuilder.seen == [{"model": "m", "provider": "p"}]
+    assert done.apparatus_json["extra"]["builder_config"] == {}

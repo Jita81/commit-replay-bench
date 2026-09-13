@@ -17,6 +17,7 @@ Invariants encoded on purpose:
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Annotated, Any
@@ -25,6 +26,7 @@ from fastapi import Depends, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from crb.core.capability import TIERS
+from crb.core.git import CloneUrlError, validate_clone_url
 from crb.core.grade import MODES
 from crb.core.ledger import CELL_FIELDS
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RUNNERS, SIZE_TIER_NAMES
@@ -44,6 +46,24 @@ EXECUTORS: tuple[str, ...] = ("local", "docker")
 _LADDER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{7,64}$")
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_KWARG_RE = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
+
+#: ``builder_config`` keys that would rewrite the run's recorded identity (the ledger row
+#: names the rung's ``model``/``provider``; an override would make the row lie).
+BUILDER_CONFIG_IDENTITY_KEYS: frozenset[str] = frozenset({"model", "provider", "name"})
+#: ``builder_config`` keys that look like credentials. Secrets come from the worker's
+#: environment (or the vault), never from a request body that is persisted and served.
+BUILDER_CONFIG_SECRET_MARKERS: tuple[str, ...] = (
+    "api_key",
+    "apikey",
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "credential",
+)
+BUILDER_CONFIG_MAX_KEYS = 32
+BUILDER_CONFIG_MAX_BYTES = 8192
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +186,13 @@ class _RepoConfigFields(BaseModel):
 
 
 class RepoCreateRequest(_RepoConfigFields):
-    """``POST /repos``. Exactly one of ``clone_path`` / ``url`` is required."""
+    """``POST /repos``. One of ``clone_path`` / ``url`` is required.
+
+    With ``clone_path`` the URL is informational. Without it the worker clones the
+    URL on the repo's first run, so the URL is policy-checked here
+    (:func:`crb.core.git.validate_clone_url`: https/ssh only, no local sources) — a
+    repo that could never be cloned is refused at registration, not at first run.
+    """
 
     name: str = Field(min_length=1, max_length=64)
     language: str = Field(min_length=1, max_length=32)
@@ -182,6 +208,11 @@ class RepoCreateRequest(_RepoConfigFields):
     def _needs_location(self) -> RepoCreateRequest:
         if not (self.clone_path or self.url):
             raise ValueError("one of clone_path or url is required")
+        if not self.clone_path and self.url:
+            try:
+                self.url = validate_clone_url(self.url)
+            except CloneUrlError as exc:
+                raise ValueError(f"url: {exc}") from exc
         return self
 
 
@@ -274,6 +305,7 @@ class RunOut(BaseModel):
     pool: str
     limit: int | None
     task_ids: list[str]
+    builder_config: dict[str, Any]
     actor: str
     created: str
     started: str | None
@@ -304,12 +336,41 @@ class RunCreateRequest(BaseModel):
     pool: str = ""
     executor: str = ""
     timeout: int | None = Field(default=None, ge=1, le=24 * 3600)
+    #: Constructor keyword arguments applied to EVERY builder on the ladder (e.g.
+    #: ``{"auth": "cli", "effort": "high"}`` for ``claude_code``). Stored in
+    #: ``params.builder_config``, passed as ``builder_overrides`` by the worker and
+    #: stamped into the run's apparatus. Identity and credential keys are refused.
+    builder_config: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("kind")
     @classmethod
     def _kind_known(cls, v: str) -> str:
         if v not in RUN_KINDS:
             raise ValueError(f"kind must be one of {RUN_KINDS}")
+        return v
+
+    @field_validator("builder_config")
+    @classmethod
+    def _builder_config_shape(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if len(v) > BUILDER_CONFIG_MAX_KEYS:
+            raise ValueError(f"builder_config has more than {BUILDER_CONFIG_MAX_KEYS} keys")
+        for key in v:
+            if not _KWARG_RE.match(key):
+                raise ValueError(
+                    f"builder_config key {key!r} is not a builder keyword (lowercase identifier)"
+                )
+            if key in BUILDER_CONFIG_IDENTITY_KEYS:
+                raise ValueError(
+                    f"builder_config must not set {key!r}: the rung's builder:model[:provider] "
+                    "is the recorded identity"
+                )
+            if any(marker in key for marker in BUILDER_CONFIG_SECRET_MARKERS):
+                raise ValueError(
+                    f"builder_config must not carry credentials ({key!r}); "
+                    "provider keys come from the worker's environment"
+                )
+        if len(json.dumps(v, ensure_ascii=False)) > BUILDER_CONFIG_MAX_BYTES:
+            raise ValueError(f"builder_config exceeds {BUILDER_CONFIG_MAX_BYTES} bytes")
         return v
 
     @field_validator("mode")
@@ -833,6 +894,10 @@ class OracleReportOut(BaseModel):
 
 
 __all__ = [
+    "BUILDER_CONFIG_IDENTITY_KEYS",
+    "BUILDER_CONFIG_MAX_BYTES",
+    "BUILDER_CONFIG_MAX_KEYS",
+    "BUILDER_CONFIG_SECRET_MARKERS",
     "BUILD_KINDS",
     "EXECUTORS",
     "PAGE_DEFAULT",

@@ -315,7 +315,8 @@ def _current_task(session: Session, run: Run) -> str | None:
 
 def run_out(session: Session, run: Run) -> RunOut:
     """The API's view of a run: the row + ``counts`` + ``progress`` + the params it was
-    created with (``executor``, ``timeout``, ``pool``, ``limit``, ``task_ids``)."""
+    created with (``executor``, ``timeout``, ``pool``, ``limit``, ``task_ids``,
+    ``builder_config``)."""
     params = dict(run.params_json or {})
     apparatus = dict(run.apparatus_json or {})
     cost = session.execute(
@@ -337,6 +338,7 @@ def run_out(session: Session, run: Run) -> RunOut:
         pool=str(params.get("pool", "") or ""),
         limit=int(limit) if limit else None,
         task_ids=[str(t) for t in params.get("task_ids", []) or []],
+        builder_config=dict(params.get("builder_config") or {}),
         actor=run.actor,
         created=run.created,
         started=_opt(run.started),
@@ -423,6 +425,8 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         "executor": body.executor,
         "timeout": body.timeout or 0,
     }
+    if body.builder_config:
+        params["builder_config"] = dict(body.builder_config)
     return Run(
         id=uuid.uuid4().hex,
         repo=body.repo,

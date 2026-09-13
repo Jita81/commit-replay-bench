@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +31,15 @@ from crb.cli.commands import (
     table,
     workdir_of,
 )
-from crb.core.git import GitRepo
+from crb.core.git import (
+    DEFAULT_CLONE_TIMEOUT_S,
+    CloneUrlError,
+    GitError,
+    GitRepo,
+    clone_repo,
+    redact_url,
+    validate_clone_url,
+)
 from crb.core.legacy import import_repo_configs
 from crb.core.runners import BaseRunner, SetupResult, get_runner
 from crb.core.spec import (
@@ -57,9 +67,19 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser("repo", help="register repos, probe toolchains, import configs")
     rs = p.add_subparsers(dest="repo_cmd", metavar="<subcommand>")
 
-    a = rs.add_parser("add", help="register a local clone as a benchmark repo")
+    a = rs.add_parser("add", help="register a benchmark repo (a local clone, or clone it by URL)")
     a.add_argument("name", help="short id, lowercase [a-z0-9._-]")
-    a.add_argument("--path", required=True, help="path to the local git clone")
+    a.add_argument(
+        "--path",
+        default="",
+        help="path to an existing local git clone (or omit and give --url to clone now)",
+    )
+    a.add_argument(
+        "--clone-timeout",
+        type=int,
+        default=DEFAULT_CLONE_TIMEOUT_S,
+        help="wall clock for `git clone` when --url is used without --path (seconds)",
+    )
     a.add_argument("--language", required=True, help="python|go|javascript|jvm|rust (or py/js/…)")
     a.add_argument(
         "--runner", default="", help=f"one of {', '.join(RUNNERS)} (default per language)"
@@ -76,7 +96,14 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     )
     a.add_argument("--probe", default="", help="known-green test scope for `crb repo probe`")
     a.add_argument("--sandbox-image", default="", help="container image for --executor docker")
-    a.add_argument("--url", default="", help="upstream URL (informational)")
+    a.add_argument(
+        "--url",
+        default="",
+        help=(
+            "git URL (https:// or ssh://); with --path it is recorded as the upstream, "
+            "without --path the repo is cloned now into <workdir>/repos/<name> (full history)"
+        ),
+    )
     a.add_argument(
         "--runner-opt",
         action="append",
@@ -129,13 +156,46 @@ def _usage(p: argparse.ArgumentParser) -> int:
     return 2
 
 
+def _clone_for_add(args: argparse.Namespace, wd: Workdir) -> tuple[Path, str]:
+    """``--url`` without ``--path``: clone into ``<workdir>/repos/<name>`` now.
+
+    The same :func:`crb.core.git.clone_repo` the worker uses: policy-checked URL
+    (https/ssh; ``file://`` only under ``CRB_ALLOW_LOCAL_CLONE=1``), full history,
+    atomic, idempotent (an existing clone at the destination is reused). Returns
+    ``(clone_path, head_sha)``; the URL in any error is redacted.
+    """
+    dest = wd.repos_dir / args.name
+    try:
+        validate_clone_url(args.url)
+    except CloneUrlError as e:
+        raise CliError(f"--url: {e}") from e
+    print_lines([f"cloning {redact_url(args.url)} -> {dest} …"], stream=sys.stderr)
+    try:
+        head = clone_repo(args.url, dest, timeout=max(1, int(args.clone_timeout)))
+    except (CloneUrlError, GitError) as e:
+        raise CliError(f"clone failed: {e}") from e
+    return dest, head
+
+
 def cmd_add(args: argparse.Namespace) -> int:
     wd = workdir_of(args)
-    clone = Path(args.path).expanduser().resolve()
-    if not clone.is_dir():
-        raise CliError(f"--path {clone} is not a directory")
-    if not GitRepo(clone).is_repo():
-        raise CliError(f"--path {clone} is not a git repository")
+    head = ""
+    if args.path:
+        clone = Path(args.path).expanduser().resolve()
+        if not clone.is_dir():
+            raise CliError(f"--path {clone} is not a directory")
+        if not GitRepo(clone).is_repo():
+            raise CliError(f"--path {clone} is not a git repository")
+    elif args.url:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", args.name):
+            raise CliError(f"repo name {args.name!r} must be lowercase [a-z0-9._-], ≤64 chars")
+        if wd.repo_file(args.name).exists() and not args.force:
+            raise CliError(
+                f"repo {args.name!r} already exists at {wd.repo_file(args.name)} (use --force to replace)"
+            )
+        clone, head = _clone_for_add(args, wd)
+    else:
+        raise CliError("one of --path (an existing clone) or --url (clone it now) is required")
     try:
         config = RepoConfig(
             name=args.name,
@@ -156,11 +216,16 @@ def cmd_add(args: argparse.Namespace) -> int:
         raise CliError(str(e)) from e
     f = wd.save_repo(config, clone, force=args.force)
     out: dict[str, Any] = {"repo": config.name, "file": str(f), "path": str(clone)}
+    if head:
+        out["cloned"] = {"url": redact_url(args.url), "head": head}
     out["config"] = config.to_dict()
     if args.json:
         print_json(out)
     else:
-        print_lines([f"registered {config.name} ({config.language.value}/{config.runner}) -> {f}"])
+        lines = [f"registered {config.name} ({config.language.value}/{config.runner}) -> {f}"]
+        if head:
+            lines.insert(0, f"cloned {redact_url(args.url)} -> {clone} (HEAD {head[:12]})")
+        print_lines(lines)
     return EXIT_OK
 
 

@@ -42,6 +42,13 @@ Honesty properties
   tasks; a cancelled run ends ``cancelled`` with its partial counts.
 * **Resumable event cursors.** A reclaimed run's emitter resumes ``seq`` after
   the last stored event so ``?after=<seq>`` never replays or skips.
+* **Clone once, by policy.** A repo registered by URL only is cloned on its first
+  run (:meth:`Worker._load_repo`): https/ssh only, credentials redacted from every
+  event and error, ``repo.clone.start`` / ``repo.clone.done`` on the run's trace,
+  the path persisted so no later run clones again.
+* **Builder config is recorded.** ``params.builder_config`` (from ``POST /runs``)
+  is passed to every builder as constructor overrides AND stamped into the run's
+  apparatus (``extra.builder_config``) so a row's method can be read back.
 """
 
 from __future__ import annotations
@@ -68,7 +75,14 @@ from crb.builders.adapter import (
 )
 from crb.builders.base import Budget, EscalationLadder
 from crb.core.execution import DockerSettings, Executor, SandboxUnavailable, make_executor
-from crb.core.git import GitRepo
+from crb.core.git import (
+    DEFAULT_CLONE_TIMEOUT_S,
+    CloneUrlError,
+    GitError,
+    GitRepo,
+    clone_repo,
+    redact_url,
+)
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED
 from crb.core.ledger import GradeRow, false_q1_total
 from crb.core.mine import MineOutcome, mine
@@ -440,7 +454,7 @@ class Worker:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
                     raise ValueError(f"unknown run kind {run.kind!r}")
-                config, git = self._load_repo(run.repo)
+                config, git = self._load_repo(run.repo, emitter)
                 ctx = RunContext(run=run, emitter=emitter, config=config, git=git)
                 status, counts, error = handler(ctx)
         except SandboxUnavailable as exc:
@@ -478,7 +492,14 @@ class Worker:
         )
 
     # --- repo / harness ----------------------------------------------------------
-    def _load_repo(self, name: str) -> tuple[RepoConfig, GitRepo]:
+    def _load_repo(self, name: str, emitter: Emitter | None = None) -> tuple[RepoConfig, GitRepo]:
+        """The repo's config and clone. A row with a ``url`` but no usable clone
+        (``clone_path`` empty or not a git repository) is cloned once into
+        ``<home>/repos/<name>`` — full history, ``--no-tags``, 30-minute wall clock,
+        URL policy-checked and redacted — and the path is persisted on the row and
+        in ``config_json["path"]`` so every later run finds it. ``repo.clone.start`` /
+        ``repo.clone.done`` (stage ``system``) carry the redacted URL, the duration and
+        the head sha on the run's trace when ``emitter`` is given."""
         with self.factory() as s:
             row = s.get(Repo, name)
         if row is None:
@@ -488,12 +509,42 @@ class Worker:
         cfg.setdefault("runner", row.runner)
         config = RepoConfig.from_dict(row.name, cfg)
         clone = row.clone_path or config.path
-        if not clone:
-            raise LookupError(f"repo {name!r} has no clone path")
-        git = GitRepo(clone)
-        if not git.is_repo():
+        url = str(row.url or config.url or "").strip()
+        if clone and GitRepo(clone).is_repo():
+            return config, GitRepo(clone)
+        if not url:
+            if not clone:
+                raise LookupError(f"repo {name!r} has no clone path")
             raise LookupError(f"repo {name!r}: {clone!r} is not a git repository")
-        return config, git
+        dest = self.home / "repos" / name
+        safe_url = redact_url(url)
+        started = time.monotonic()
+        if emitter is not None:
+            emitter.emit("system", "repo.clone.start", url=safe_url, dest=str(dest))
+        try:
+            head = clone_repo(url, dest, timeout=DEFAULT_CLONE_TIMEOUT_S)
+        except (CloneUrlError, GitError) as exc:
+            if emitter is not None:
+                emitter.error("system", "repo.clone.done", exc, url=safe_url, dest=str(dest))
+            raise LookupError(
+                f"repo {name!r}: clone of {safe_url} failed: {redact_and_cap(str(exc), max_chars=500)}"
+            ) from exc
+        with self.factory() as s:
+            fresh = s.get(Repo, name)
+            if fresh is not None:
+                fresh.clone_path = str(dest)
+                fresh.config_json = {**dict(fresh.config_json or {}), "path": str(dest)}
+                s.commit()
+        if emitter is not None:
+            emitter.emit(
+                "system",
+                "repo.clone.done",
+                duration_ms=int((time.monotonic() - started) * 1000),
+                url=safe_url,
+                dest=str(dest),
+                head=head,
+            )
+        return RepoConfig.from_dict(row.name, {**cfg, "path": str(dest)}), GitRepo(dest)
 
     def _set_probe(self, name: str, status: str, detail: str) -> None:
         with self.factory() as s:
@@ -835,7 +886,11 @@ class Worker:
             corpus_sha=str(p.get("corpus_sha") or ""),
             policy_version=str(p.get("policy_version") or ""),
             keep_worktrees=bool(p.get("keep_worktrees", self.settings.keep_worktrees)),
-            extra={"worker": self.worker_id, "budget": budget.to_dict()},
+            extra={
+                "worker": self.worker_id,
+                "budget": budget.to_dict(),
+                "builder_config": dict(p.get("builder_config") or {}),
+            },
         )
         self.queue.set_apparatus(run.id, spec.apparatus().to_dict(), worker_id=self.worker_id)
         build_fn = build_fn_for(
@@ -847,6 +902,7 @@ class Worker:
             on_event=ctx.on_event,
             message_for=lambda t: ctx.git.message(t.task_id),
             transcript_dir=self.transcripts_dir(run.id) if p.get("keep_transcripts") else None,
+            builder_overrides=dict(p.get("builder_config") or {}),
         )
         self._progress(ctx, 0, total)
 

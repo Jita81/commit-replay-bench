@@ -296,6 +296,106 @@ def test_env_is_minimal_and_key_only_from_env(monkeypatch: pytest.MonkeyPatch) -
 
 
 # ---------------------------------------------------------------------------
+# auth modes: api_key (production, --bare) vs cli (operator login, no --bare)
+# ---------------------------------------------------------------------------
+
+
+def test_auth_api_key_mode_is_the_default_and_bare(tmp_path: Path) -> None:
+    fx = make_fixture(tmp_path)
+    brief = base.BuildBrief.from_task(fx.task, config=fx.config, test_command="pytest")
+    b = cc.ClaudeCodeBuilder()
+    assert b.auth == cc.AUTH_API_KEY and b.bare is True and b.tools == cc.BARE_TOOLS
+    argv = b.argv(brief, base.Budget(), tmp_path / "wt")
+    assert "--bare" in argv and "--setting-sources" not in argv
+    assert b.describe()["auth"] == "api_key" and b.describe()["bare"] is True
+    # an explicit bare=False under api_key is still allowed (full tools, key auth)
+    full = cc.ClaudeCodeBuilder(bare=False)
+    assert full.auth == cc.AUTH_API_KEY and full.bare is False and full.tools == cc.FULL_TOOLS
+
+
+def test_auth_cli_mode_argv_drops_bare_and_restricts_setting_sources(tmp_path: Path) -> None:
+    fx = make_fixture(tmp_path)
+    brief = base.BuildBrief.from_task(fx.task, config=fx.config, test_command="pytest")
+    b = cc.ClaudeCodeBuilder(auth="cli", model="claude-sonnet-5")
+    assert b.auth == cc.AUTH_CLI and b.bare is False and b.tools == cc.FULL_TOOLS
+    budget = base.Budget(max_turns=7, max_tool_calls=25, max_cost_usd=0.5)
+    argv = b.argv(brief, budget, tmp_path / "wt", binary="claude")
+    assert "--bare" not in argv
+    assert argv[argv.index("--setting-sources") + 1] == "user"
+    # everything else that isolates the run is unchanged
+    assert argv[argv.index("--permission-mode") + 1] == "dontAsk"
+    assert argv[argv.index("--tools") + 1] == "Read,Edit,Write,Glob,Grep,Bash"
+    assert argv[argv.index("--allowedTools") + 1] == "Read,Edit,Write,Glob,Grep,Bash"
+    deny = argv[argv.index("--disallowedTools") + 1]
+    assert "Bash(git log:*)" in deny and "WebFetch" in deny and "Bash(curl:*)" in deny
+    assert "--no-session-persistence" in argv and "--disable-slash-commands" in argv
+    assert argv[argv.index("--max-budget-usd") + 1] == "0.5000"
+    assert b.describe() == {
+        "builder": "claude_code",
+        "model": "claude-sonnet-5",
+        "provider": "anthropic",
+        "process": "claude -p stream-json, tools=Read,Edit,Write,Glob,Grep,Bash",
+        "effort": "default",
+        "bare": False,
+        "auth": "cli",
+    }
+
+
+def test_auth_cli_mode_env_needs_no_key_and_never_forwards_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/Users/op/.claude-eval")
+    env = cc.ClaudeCodeBuilder.env("cli")
+    assert "ANTHROPIC_API_KEY" not in env  # set in the shell by the autouse fixture: not forwarded
+    assert env["CLAUDE_CONFIG_DIR"] == "/Users/op/.claude-eval" and "HOME" in env
+    assert "SOME_OTHER_SECRET" not in env and env["CI"] == "1"
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+    env = cc.ClaudeCodeBuilder.env("cli")  # no key: not an error in cli mode
+    assert "ANTHROPIC_API_KEY" not in env and "CLAUDE_CONFIG_DIR" not in env
+    with pytest.raises(PermissionError, match="auth='api_key'"):
+        cc.ClaudeCodeBuilder.env("api_key")
+
+
+def test_auth_cli_build_without_a_key_runs_and_grades(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    spawn = FakeSpawn(GOOD_RUN, side_effect=_fix_calc)
+    fx, ws, out = _setup(tmp_path, spawn, auth="cli")
+    assert out.stop_reason == base.STOP_DONE and out.done and not out.errors, out.errors
+    assert "--bare" not in spawn.argv and "ANTHROPIC_API_KEY" not in spawn.env
+    res = grade(
+        ws, fx.task, config=fx.config, runner=get_runner(fx.config), executor=LocalExecutor()
+    )
+    assert res.clean
+    ws.remove()
+
+
+def test_auth_cli_auth_failure_hint_names_the_login(tmp_path: Path) -> None:
+    lines = [
+        ev_init(),
+        json.dumps({"type": "system", "subtype": "api_retry", "error_status": 401}),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), auth="cli")
+    assert out.stop_reason == base.STOP_MODEL_ERROR
+    assert any("claude login" in e for e in out.errors) and not any(
+        "ANTHROPIC_API_KEY" in e for e in out.errors
+    )
+    ws.remove()
+
+
+def test_auth_mode_validation() -> None:
+    with pytest.raises(ValueError, match="auth must be one of"):
+        cc.ClaudeCodeBuilder(auth="oauth")
+    with pytest.raises(ValueError, match="cannot combine"):
+        cc.ClaudeCodeBuilder(auth="cli", bare=True)
+    # builder_config from the API arrives as JSON: a list for extra_args must work
+    b = cc.ClaudeCodeBuilder(auth="cli", extra_args=["--x", "1"])
+    assert b.extra_args == ("--x", "1")
+
+
+# ---------------------------------------------------------------------------
 # Stream parsing + end-to-end
 # ---------------------------------------------------------------------------
 
