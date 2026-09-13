@@ -300,14 +300,36 @@ def workdir_of(args: argparse.Namespace) -> Workdir:
     return Workdir.resolve(getattr(args, "workdir", None))
 
 
-def parse_kv(items: Sequence[str] | None) -> dict[str, str]:
-    out: dict[str, str] = {}
+def parse_kv(items: Sequence[str] | None) -> dict[str, Any]:
+    """``KEY=VALUE`` pairs. A value that is valid JSON (a list, object, number or
+    boolean — e.g. ``pip='["click","pytest"]'``) is decoded; anything else stays a
+    string, so ``pythonpath_suffix=/src`` is untouched."""
+    out: dict[str, Any] = {}
     for item in items or ():
         if "=" not in item:
             raise CliError(f"expected KEY=VALUE, got {item!r}")
         k, v = item.split("=", 1)
-        out[k.strip()] = v
+        value: Any = v
+        stripped = v.strip()
+        if (
+            stripped[:1] in "[{"
+            or stripped in {"true", "false", "null"}
+            or _looks_numeric(stripped)
+        ):
+            try:
+                value = json.loads(stripped)
+            except ValueError:
+                value = v
+        out[k.strip()] = value
     return out
+
+
+def _looks_numeric(s: str) -> bool:
+    try:
+        float(s)
+    except ValueError:
+        return False
+    return True
 
 
 __all__ = [
