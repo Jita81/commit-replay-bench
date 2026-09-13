@@ -1,0 +1,2593 @@
+{
+ "d9307dbcbbe796a64d9e0ef23452da888dd7f904": {
+  "task": "d9307dbcbbe796a64d9e0ef23452da888dd7f904",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2026-06-22T22:34:41+07:00",
+  "subject": "fix(context): skip chmod on pre-existing dirs in SaveUploadedFile (#4702)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestSaveUploadedFileToExistingDir"
+  ],
+  "src_churn": 17,
+  "size": "S",
+  "gold_clean": true
+ },
+ "4a3eb31fb15b2a2d78b4bdbe0c31a2c564b1977a": {
+  "task": "4a3eb31fb15b2a2d78b4bdbe0c31a2c564b1977a",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "recovery_test.go"
+  ],
+  "src_files": [
+   "recovery.go"
+  ],
+  "authored": "2026-06-22T20:56:28+08:00",
+  "subject": "fix(recovery): record recovered panics in c.Errors (#4698)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestPanicInHandlerRecordsError",
+   "github.com/gin-gonic/gin::TestPanicInHandlerRecordsError/error_panic",
+   "github.com/gin-gonic/gin::TestPanicInHandlerRecordsError/string_panic"
+  ],
+  "src_churn": 7,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "293ad7edebb3ae30369288bd6416ca0d78474727": {
+  "task": "293ad7edebb3ae30369288bd6416ca0d78474727",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2026-06-22T14:39:26+03:30",
+  "subject": "fix(context): Copy() copies Errors and Accepted fields (#4695)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextCopyCopiesErrors"
+  ],
+  "src_churn": 10,
+  "size": "S",
+  "gold_clean": true
+ },
+ "d75fcd4c9ab260e5225de590f1f0f8c0e0e12d11": {
+  "task": "d75fcd4c9ab260e5225de590f1f0f8c0e0e12d11",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "response_writer_test.go"
+  ],
+  "src_files": [
+   "response_writer.go"
+  ],
+  "authored": "2026-06-02T07:02:14-07:00",
+  "subject": "fix(response): panic on Hijack/CloseNotify when wrapper unsupported (#4645)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestResponseWriterHijack"
+  ],
+  "src_churn": 11,
+  "size": "S",
+  "gold_clean": true
+ },
+ "96ece6a14123923d00081320486042f568adef32": {
+  "task": "96ece6a14123923d00081320486042f568adef32",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2026-06-02T19:48:53+06:00",
+  "subject": "feat(context): add Scheme() with proper reverse proxy support (#4655)",
+  "baseline_failing": [],
+  "src_churn": 27,
+  "size": "S",
+  "gold_clean": true
+ },
+ "052d1a79aafe3f04078a2716f8e77d4340308383": {
+  "task": "052d1a79aafe3f04078a2716f8e77d4340308383",
+  "target_tests": [
+   "./",
+   "./render"
+  ],
+  "test_files": [
+   "context_test.go",
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "render/pdf.go",
+   "render/render.go"
+  ],
+  "authored": "2026-02-28T18:34:54+05:30",
+  "subject": "feat(render): add PDF renderer and tests (#4491)",
+  "baseline_failing": [],
+  "src_churn": 33,
+  "size": "S",
+  "gold_clean": true
+ },
+ "ae3f524974fc4f55d18c9e7fae4614503c015226": {
+  "task": "ae3f524974fc4f55d18c9e7fae4614503c015226",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "debug_test.go"
+  ],
+  "src_files": [
+   "debug.go"
+  ],
+  "authored": "2026-02-28T17:37:02+08:00",
+  "subject": "ci: update Go version support to 1.25+ across CI and docs (#4550)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestDebugPrintWARNINGDefaultWithUnsupportedVersion"
+  ],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "472d086af2acd924cb4b9d7be0525f7d790f69bc": {
+  "task": "472d086af2acd924cb4b9d7be0525f7d790f69bc",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "tree_test.go"
+  ],
+  "src_files": [
+   "tree.go"
+  ],
+  "authored": "2026-02-27T19:15:27-08:00",
+  "subject": "fix(tree): panic in findCaseInsensitivePathRec with RedirectFixedPath (#4535)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestTreeFindCaseInsensitivePathWithMultipleChildrenAndWildcard"
+  ],
+  "src_churn": 67,
+  "size": "M",
+  "gold_clean": true
+ },
+ "5c00df8afadd06cc5be530dde00fe6d9fa4a2e4a": {
+  "task": "5c00df8afadd06cc5be530dde00fe6d9fa4a2e4a",
+  "target_tests": [
+   "./render"
+  ],
+  "test_files": [
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "render/data.go"
+  ],
+  "authored": "2026-02-28T09:07:31+07:00",
+  "subject": "fix(render): write content length in Data.Render (#4206)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/render::TestRenderData",
+   "github.com/gin-gonic/gin/render::TestRenderDataContentLength",
+   "github.com/gin-gonic/gin/render::TestRenderDataContentLength/100000"
+  ],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "db309081bc5c137b2aa15701ef53f7f19788da25": {
+  "task": "db309081bc5c137b2aa15701ef53f7f19788da25",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_test.go"
+  ],
+  "src_files": [
+   "logger.go"
+  ],
+  "authored": "2026-02-27T09:33:46-06:00",
+  "subject": "chore(logger): allow skipping query string output (#4547)",
+  "baseline_failing": [],
+  "src_churn": 7,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "ba093d19477b896ac89a7fc3246af23d290b8e26": {
+  "task": "ba093d19477b896ac89a7fc3246af23d290b8e26",
+  "target_tests": [
+   "./",
+   "./binding",
+   "./render"
+  ],
+  "test_files": [
+   "binding/binding_test.go",
+   "context_test.go",
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "binding/bson.go",
+   "render/bson.go"
+  ],
+  "authored": "2026-02-27T23:20:01+08:00",
+  "subject": "chore(binding): upgrade bson dependency to mongo-driver v2 (#4549)",
+  "baseline_failing": [],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "53410d2e07054369e0960fbe2eed97e1b9966f12": {
+  "task": "53410d2e07054369e0960fbe2eed97e1b9966f12",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2026-01-24T15:54:37+06:00",
+  "subject": "feat(context): add GetError and GetErrorSlice methods for error retrieval (#4502)",
+  "baseline_failing": [],
+  "src_churn": 10,
+  "size": "S",
+  "gold_clean": true
+ },
+ "192ac89eefc1c30f7c97ae48a9ffb1c6f1c8c8bc": {
+  "task": "192ac89eefc1c30f7c97ae48a9ffb1c6f1c8c8bc",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "authored": "2026-01-24T02:20:24-05:00",
+  "subject": "feat(binding): add support for encoding.UnmarshalText in uri/query binding (#4203)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingCustomArrayOfArrayForm",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomArrayOfArrayUri",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomPointerStructTypeUnmarshalTextForm",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomPointerStructTypeUnmarshalTextUri",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomSliceOfSliceForm",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomSliceOfSliceUri",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomSliceUnmarshalTextUri",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomStructTypeUnmarshalTextForm",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomStructTypeUnmarshalTextUri",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomUnmarshalParamHexDefault",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomUnmarshalTextHexDefault",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomUnmarshalTextHexForm",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomUnmarshalTextHexUri"
+  ],
+  "src_churn": 68,
+  "size": "M",
+  "gold_clean": true
+ },
+ "b2b489dbf4826c2c630717a77fd5e42774625410": {
+  "task": "b2b489dbf4826c2c630717a77fd5e42774625410",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2026-01-18T12:56:22+08:00",
+  "subject": "chore(context): always trust xff headers from unix socket (#3359)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextClientIP"
+  ],
+  "src_churn": 27,
+  "size": "S",
+  "gold_clean": true
+ },
+ "9914178584e42458ff7d23891463a880f58c9d86": {
+  "task": "9914178584e42458ff7d23891463a880f58c9d86",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2026-01-02T02:15:27Z",
+  "subject": "fix(context): ClientIP handling for multiple X-Forwarded-For header values (#4472)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextClientIPWithMultipleHeaders"
+  ],
+  "src_churn": 3,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "915e4c90d28ec4cffc6eb146e208ab5a65eac772": {
+  "task": "915e4c90d28ec4cffc6eb146e208ab5a65eac772",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "gin_test.go"
+  ],
+  "src_files": [
+   "utils.go"
+  ],
+  "authored": "2025-12-27T08:25:17-03:00",
+  "subject": "refactor(context): replace hardcoded localhost IPs with constants (#4481)",
+  "baseline_failing": [],
+  "src_churn": 6,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "64a6ed9a41ab72076506bd590dc4b916ca4b66a5": {
+  "task": "64a6ed9a41ab72076506bd590dc4b916ca4b66a5",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "recovery_test.go"
+  ],
+  "src_files": [
+   "recovery.go"
+  ],
+  "authored": "2025-12-12T13:42:03+08:00",
+  "subject": "perf(recovery): optimize line reading in stack function (#4466)",
+  "baseline_failing": [],
+  "src_churn": 54,
+  "size": "M",
+  "gold_clean": true
+ },
+ "19b877fa50cbbb9282763099fb177a1e5cc5c850": {
+  "task": "19b877fa50cbbb9282763099fb177a1e5cc5c850",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "debug_test.go"
+  ],
+  "src_files": [
+   "debug.go"
+  ],
+  "authored": "2025-12-05T12:18:08+09:00",
+  "subject": "test(debug): improve the test coverage of debug.go to 100% (#4404)",
+  "baseline_failing": [],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "b917b14ff9d189f16a7492be79d123a47806ee19": {
+  "task": "b917b14ff9d189f16a7492be79d123a47806ee19",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "authored": "2025-12-03T19:18:10+08:00",
+  "subject": "fix(binding): empty value error (#2169)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingTimeDuration",
+   "github.com/gin-gonic/gin/binding::TestMappingTimeUnixNano"
+  ],
+  "src_churn": 19,
+  "size": "S",
+  "gold_clean": true
+ },
+ "f416d1e594a027063e73f66ac873a82113036fd8": {
+  "task": "f416d1e594a027063e73f66ac873a82113036fd8",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "gin_integration_test.go",
+   "gin_test.go"
+  ],
+  "src_files": [
+   "test_helpers.go"
+  ],
+  "authored": "2025-11-30T15:38:07+08:00",
+  "subject": "test(gin): resolve race conditions in integration tests (#4453)",
+  "baseline_failing": [],
+  "src_churn": 31,
+  "size": "S",
+  "gold_clean": true
+ },
+ "63dd3e60cab89c27fb66bce1423bd268d52abad1": {
+  "task": "63dd3e60cab89c27fb66bce1423bd268d52abad1",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "recovery_test.go"
+  ],
+  "src_files": [
+   "recovery.go"
+  ],
+  "authored": "2025-11-27T23:20:52+08:00",
+  "subject": "fix(recover): suppress http.ErrAbortHandler in recover (#4336)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestPanicWithAbortHandler"
+  ],
+  "src_churn": 3,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "771dcc6476d7bc6abb9ec0235ecefa4d38fe6fb0": {
+  "task": "771dcc6476d7bc6abb9ec0235ecefa4d38fe6fb0",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "gin_test.go"
+  ],
+  "src_files": [
+   "gin.go"
+  ],
+  "authored": "2025-11-27T10:55:34+01:00",
+  "subject": "feat(gin): add option to use escaped path (#4420)",
+  "baseline_failing": [],
+  "src_churn": 16,
+  "size": "S",
+  "gold_clean": true
+ },
+ "440eb14ab8ed503d4a31dfecc9946a90cd73b955": {
+  "task": "440eb14ab8ed503d4a31dfecc9946a90cd73b955",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "path_test.go"
+  ],
+  "src_files": [
+   "gin.go",
+   "path.go"
+  ],
+  "authored": "2025-11-26T23:32:18+08:00",
+  "subject": "perf(path): replace regex with custom functions in redirectTrailingSlash (#4414)",
+  "baseline_failing": [],
+  "src_churn": 76,
+  "size": "M",
+  "gold_clean": true
+ },
+ "5fad976b372e381312f8de69f0969f1284d229d3": {
+  "task": "5fad976b372e381312f8de69f0969f1284d229d3",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "gin_test.go"
+  ],
+  "src_files": [
+   "gin.go"
+  ],
+  "authored": "2025-11-16T06:52:07+05:30",
+  "subject": "fix(gin): literal colon routes not working with engine.Handler() (#4415)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestLiteralColonWithDirectServeHTTP",
+   "github.com/gin-gonic/gin::TestLiteralColonWithHTTPServer",
+   "github.com/gin-gonic/gin::TestLiteralColonWithHandler",
+   "github.com/gin-gonic/gin::TestUpdateRouteTreesCalledOnce"
+  ],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "acc55e049e33b401e810dbd8c0d6dcb6b3ba2b05": {
+  "task": "acc55e049e33b401e810dbd8c0d6dcb6b3ba2b05",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2025-11-07T11:59:58+08:00",
+  "subject": "feat(context): add Protocol Buffers support to content negotiation (#4423)",
+  "baseline_failing": [],
+  "src_churn": 22,
+  "size": "S",
+  "gold_clean": true
+ },
+ "38e765119241d990705169bedb5002a29ae0cbd1": {
+  "task": "38e765119241d990705169bedb5002a29ae0cbd1",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2025-10-17T08:51:34+05:30",
+  "subject": "feat(context): implemented Delete method",
+  "baseline_failing": [],
+  "src_churn": 10,
+  "size": "S",
+  "gold_clean": true
+ },
+ "c3d1092b3b48addf6f9cd00fe274ec3bd14650eb": {
+  "task": "c3d1092b3b48addf6f9cd00fe274ec3bd14650eb",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "authored": "2025-10-11T19:20:41+08:00",
+  "subject": "fix(binding): improve empty slice/array handling in form binding (#4380)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingEmptyValues",
+   "github.com/gin-gonic/gin/binding::TestMappingEmptyValues/slice_with_default"
+  ],
+  "src_churn": 14,
+  "size": "S",
+  "gold_clean": true
+ },
+ "4dec17afdff48e8018c83618fbbe69fceeb2b41d": {
+  "task": "4dec17afdff48e8018c83618fbbe69fceeb2b41d",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_test.go"
+  ],
+  "src_files": [
+   "logger.go"
+  ],
+  "authored": "2025-10-05T11:23:57+08:00",
+  "subject": "feat(logger): color latency (#4146)",
+  "baseline_failing": [],
+  "src_churn": 38,
+  "size": "S",
+  "gold_clean": true
+ },
+ "234a6d4c00cb77af9852aca0b8289745d5529b4b": {
+  "task": "234a6d4c00cb77af9852aca0b8289745d5529b4b",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "response_writer_test.go"
+  ],
+  "src_files": [
+   "response_writer.go"
+  ],
+  "authored": "2025-09-26T08:13:39+08:00",
+  "subject": "fix(response): refine hijack behavior for response lifecycle (#4373)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestResponseWriterHijackAfterWriteHeaderNow",
+   "github.com/gin-gonic/gin::TestResponseWriterHijackAfterWriteHeaderNow/hijack_after_WriteHeaderNow_only_should_succeed_(websocket_pattern)"
+  ],
+  "src_churn": 6,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "f9bd00a6b7939b941fde3fdd239367f4a7d6b137": {
+  "task": "f9bd00a6b7939b941fde3fdd239367f4a7d6b137",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2025-09-14T07:29:11+08:00",
+  "subject": "perf(context): optimize getMapFromFormData performance (#4339)",
+  "baseline_failing": [],
+  "src_churn": 19,
+  "size": "S",
+  "gold_clean": true
+ },
+ "45b805f6d59ba0b4f315adffe81ed4a82a51a591": {
+  "task": "45b805f6d59ba0b4f315adffe81ed4a82a51a591",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "recovery_test.go"
+  ],
+  "src_files": [
+   "recovery.go"
+  ],
+  "authored": "2025-08-02T12:30:14+08:00",
+  "subject": "perf(recovery): optimize the log output of CustomRecoveryWithWriter (#4258)",
+  "baseline_failing": [],
+  "src_churn": 39,
+  "size": "S",
+  "gold_clean": true
+ },
+ "32065bbd4298d566d060d234e452bbf44e92161d": {
+  "task": "32065bbd4298d566d060d234e452bbf44e92161d",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "response_writer_test.go"
+  ],
+  "src_files": [
+   "response_writer.go"
+  ],
+  "authored": "2025-08-02T13:16:58+09:00",
+  "subject": "chore(response): prevention of Hijack() runtime panics (#4295)",
+  "baseline_failing": [],
+  "src_churn": 6,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "e4c2a2762448fbd094463a2022e97bc5be98ec63": {
+  "task": "e4c2a2762448fbd094463a2022e97bc5be98ec63",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2025-07-22T11:19:08+08:00",
+  "subject": "refactor(context): remove unused Context dependency in get method (#4304)",
+  "baseline_failing": [],
+  "src_churn": 19,
+  "size": "S",
+  "gold_clean": true
+ },
+ "dbd8a2515093ad47cadc5c1fface89861a0b765c": {
+  "task": "dbd8a2515093ad47cadc5c1fface89861a0b765c",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2025-07-13T08:40:35+07:00",
+  "subject": "feat: added `AbortWithStatusPureJSON()` in `Context` (#4290)",
+  "baseline_failing": [],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "e30123ad7314411664a693f23ed0ade498ccdaf0": {
+  "task": "e30123ad7314411664a693f23ed0ade498ccdaf0",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "recovery_test.go"
+  ],
+  "src_files": [
+   "recovery.go"
+  ],
+  "authored": "2025-06-02T13:38:19+09:00",
+  "subject": "refactor(recovery): extract Authorization header masking into maskAuthorization func (#4143)",
+  "baseline_failing": [],
+  "src_churn": 17,
+  "size": "S",
+  "gold_clean": true
+ },
+ "3c12d2a80e40930632fc4a4a4e1a45140f33fb12": {
+  "task": "3c12d2a80e40930632fc4a4a4e1a45140f33fb12",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "recovery_test.go"
+  ],
+  "src_files": [
+   "recovery.go"
+  ],
+  "authored": "2025-05-31T08:41:13+08:00",
+  "subject": "perf(recover): replace bytes with strings in function for better performance (#4252)",
+  "baseline_failing": [],
+  "src_churn": 21,
+  "size": "S",
+  "gold_clean": true
+ },
+ "41d8591eb16bf23732de9ae2b699d6cae54c2ae8": {
+  "task": "41d8591eb16bf23732de9ae2b699d6cae54c2ae8",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "logger_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "logger.go"
+  ],
+  "authored": "2025-05-26T23:15:14+08:00",
+  "subject": "refactor(context): refactor `Keys` type to `map[any]any` (#3963)",
+  "baseline_failing": [],
+  "src_churn": 83,
+  "size": "M",
+  "gold_clean": true
+ },
+ "674522db91d637d179c16c372d87756ea26fa089": {
+  "task": "674522db91d637d179c16c372d87756ea26fa089",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "authored": "2025-05-21T19:21:46+08:00",
+  "subject": "fix(time): binding time with empty value (#4103)",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingTime"
+  ],
+  "src_churn": 10,
+  "size": "S",
+  "gold_clean": false
+ },
+ "fb09c825e8e13134daaa90debfda198520e1b347": {
+  "task": "fb09c825e8e13134daaa90debfda198520e1b347",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "authored": "2025-05-21T09:20:44+09:00",
+  "subject": "feat(context): add SetCookieData (#4240)",
+  "baseline_failing": [],
+  "src_churn": 13,
+  "size": "S",
+  "gold_clean": true
+ },
+ "b38c59de7fef67400a1c98efeae700a689c45783": {
+  "task": "b38c59de7fef67400a1c98efeae700a689c45783",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "errors_test.go"
+  ],
+  "src_files": [
+   "errors.go"
+  ],
+  "authored": "2025-05-11T18:38:33+04:00",
+  "subject": "fix(errors): change Unwrap method receiver to value type (#4232)",
+  "baseline_failing": [],
+  "src_churn": 2,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "8763f33c65f7df8be5b9fe7504ab7fcf20abb41d": {
+  "task": "8763f33c65f7df8be5b9fe7504ab7fcf20abb41d",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "gin_test.go"
+  ],
+  "src_files": [
+   "gin.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-03-20T17:40:41+02:00",
+  "subject": "fix: prevent middleware re-entry issue in HandleContext (#3987)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestEngineHandleContextPreventsMiddlewareReEntry"
+  ],
+  "gold_clean": true
+ },
+ "4ccfa7c275c449990818e46759d5974a953cc1c1": {
+  "task": "4ccfa7c275c449990818e46759d5974a953cc1c1",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/binding_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-03-20T11:33:10-04:00",
+  "subject": "feat(binding): add support for unixMilli and unixMicro (#4190)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestBindingFormForTime",
+   "github.com/gin-gonic/gin/binding::TestBindingFormForTime2"
+  ],
+  "gold_clean": true
+ },
+ "90cf4602698dcbce18df3165b2d24e2940670a41": {
+  "task": "90cf4602698dcbce18df3165b2d24e2940670a41",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "debug_test.go"
+  ],
+  "src_files": [
+   "debug.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-03-20T10:13:47+08:00",
+  "subject": "chore: update Go versions and dependencies for improved compatibility (#4187)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3f818c3fa69e03feb46d2b49d2a8084c425cbed6": {
+  "task": "3f818c3fa69e03feb46d2b49d2a8084c425cbed6",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "debug_test.go"
+  ],
+  "src_files": [
+   "debug.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-30T11:40:37+08:00",
+  "subject": "chore(security): upgrade quic-go version to 0.48.2 (#4127)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e46bd521859fdfc83c508f1d42c92cb7f91e9fcb": {
+  "task": "e46bd521859fdfc83c508f1d42c92cb7f91e9fcb",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-16T00:54:06+09:00",
+  "subject": "refactor(context): add an optional permission parameter to the SaveUploadedFile method (#4068) (#4088)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f05f966a0824b1d302ee556183e2579c91954266": {
+  "task": "f05f966a0824b1d302ee556183e2579c91954266",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-21T11:24:18-04:00",
+  "subject": "feat(form): Support default values for collections in form binding (#4048)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingMultipleDefaultWithCollectionFormat"
+  ],
+  "gold_clean": true
+ },
+ "9d7c0e9e1a301f417df9dc89a8cadc3bf9063db2": {
+  "task": "9d7c0e9e1a301f417df9dc89a8cadc3bf9063db2",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-15T08:58:59+08:00",
+  "subject": "feat(context): GetXxx added support for more go native types (#3633)",
+  "src_churn": 144,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "28e57f58b184b2305ace192e02496bb89f6fd8cb": {
+  "task": "28e57f58b184b2305ace192e02496bb89f6fd8cb",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-06T08:21:19+03:00",
+  "subject": "fix(form): Set default value for form fields (#4047)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingFormWithEmptyToDefault"
+  ],
+  "gold_clean": true
+ },
+ "3cb30679b5e3021db16c776ed7e70d380586e9ce": {
+  "task": "3cb30679b5e3021db16c776ed7e70d380586e9ce",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-08-24T15:16:30+09:00",
+  "subject": "feat(form): add array collection format in form binding (#3986)",
+  "src_churn": 40,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingCollectionFormat"
+  ],
+  "gold_clean": true
+ },
+ "626d55b0c02937645c21774cacc021713de88604": {
+  "task": "626d55b0c02937645c21774cacc021713de88604",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "gin_test.go"
+  ],
+  "src_files": [
+   "gin.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-22T16:19:04+02:00",
+  "subject": "fix(gin): Do not panic when handling method not allowed on empty tree (#4003)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestMethodNotAllowedNoRoute"
+  ],
+  "gold_clean": true
+ },
+ "4621b7ac982335d9a74432e182dd2bfc6d841431": {
+  "task": "4621b7ac982335d9a74432e182dd2bfc6d841431",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "gin_integration_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "gin.go",
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-01T13:44:57+08:00",
+  "subject": "feat(router): add literal colon support (#1432) (#2857)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "24d67647cb9b4e0bbdcdec7f0c2086e8004e1572": {
+  "task": "24d67647cb9b4e0bbdcdec7f0c2086e8004e1572",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-23T10:16:11+08:00",
+  "subject": "feat(form): add custom string slice for form tag unmarshal (#3970) (#3971)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingCustomSliceUri"
+  ],
+  "gold_clean": true
+ },
+ "e0d46ded6cb6974d55a255ab122d1aa6ca0cd60e": {
+  "task": "e0d46ded6cb6974d55a255ab122d1aa6ca0cd60e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-18T19:48:07-07:00",
+  "subject": "fix(context): verify URL is Non-nil in initQueryCache() (#3969)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextInitQueryCache",
+   "github.com/gin-gonic/gin::TestContextInitQueryCache/queryCache_should_be_empty_when_Request.URL_is_nil"
+  ],
+  "gold_clean": true
+ },
+ "4f339e6a35b163d31b30916b37f4176d385f41bd": {
+  "task": "4f339e6a35b163d31b30916b37f4176d385f41bd",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-14T10:25:54+08:00",
+  "subject": "fix(context): YAML judgment logic in Negotiate (#3966)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "36b0dede4b8c4a67d92c4107cebc5a068364321d": {
+  "task": "36b0dede4b8c4a67d92c4107cebc5a068364321d",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-13T14:55:41+08:00",
+  "subject": "fix(context): check handler is nil (#3413)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextHandlerNames"
+  ],
+  "gold_clean": true
+ },
+ "3ac729dc4a497d360a23b9d7e766c622b3c99f51": {
+  "task": "3ac729dc4a497d360a23b9d7e766c622b3c99f51",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "gin_integration_test.go"
+  ],
+  "src_files": [
+   "gin.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-09T09:17:06+08:00",
+  "subject": "feat(gin): support http3 using quic-go/quic-go (#3210)",
+  "src_churn": 52,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8791c96960e719ff2f41e24163c5898656cee474": {
+  "task": "8791c96960e719ff2f41e24163c5898656cee474",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "fs_test.go"
+  ],
+  "src_files": [
+   "fs.go",
+   "routergroup.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-08T09:47:54+02:00",
+  "subject": "feat(fs): Export, test and document OnlyFilesFS (#3939)",
+  "src_churn": 52,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7d147928ee232fce156ea7ce8ae6329e148aeb41": {
+  "task": "7d147928ee232fce156ea7ce8ae6329e148aeb41",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mode_test.go"
+  ],
+  "src_files": [
+   "debug.go",
+   "mode.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-08T04:13:36+03:00",
+  "subject": "fix(gin): data race warning for gin mode (#1580)",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a18219566ca25fc51e6d2886bed849c6c3a0cd12": {
+  "task": "a18219566ca25fc51e6d2886bed849c6c3a0cd12",
+  "target_tests": [
+   "./",
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go",
+   "gin_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-07T09:43:15+08:00",
+  "subject": "feat(binding): Support custom BindUnmarshaler for binding. (#3933)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingCustomPointerStructTypeWithFormTag",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomStructTypeWithFormTag",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomStructTypeWithURITag",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomUnmarshalParamHexWithFormTag",
+   "github.com/gin-gonic/gin/binding::TestMappingCustomUnmarshalParamHexWithURITag",
+   "github.com/gin-gonic/gin::TestCustomUnmarshalStruct"
+  ],
+  "gold_clean": true
+ },
+ "7a865dcf1dbe6ec52e074b1ddce830d278eb72cf": {
+  "task": "7a865dcf1dbe6ec52e074b1ddce830d278eb72cf",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-23T22:09:02+08:00",
+  "subject": "feat(bind): ShouldBindBodyWith shortcut and change doc (#3871)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d4e413648824333726ef65de5defc457e9dbf095": {
+  "task": "d4e413648824333726ef65de5defc457e9dbf095",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/query_test.go"
+  ],
+  "src_files": [
+   "binding/query.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-22T10:01:27+08:00",
+  "subject": "Revert \"fix(uri): query binding bug (#3236)\" (#3899)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestBindingQuery",
+   "github.com/gin-gonic/gin/binding::TestBindingQuery2",
+   "github.com/gin-gonic/gin/binding::TestBindingQueryBoolFail",
+   "github.com/gin-gonic/gin/binding::TestBindingQueryFail",
+   "github.com/gin-gonic/gin/binding::TestBindingQueryFail2",
+   "github.com/gin-gonic/gin::TestContextBindWithQuery",
+   "github.com/gin-gonic/gin::TestContextShouldBindWithQuery"
+  ],
+  "gold_clean": false
+ },
+ "8790d08909fc4d193c6c787c9c72f3089168f411": {
+  "task": "8790d08909fc4d193c6c787c9c72f3089168f411",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/query_test.go"
+  ],
+  "src_files": [
+   "binding/query.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-21T16:28:42+02:00",
+  "subject": "fix(uri): query binding bug (#3236)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestQueryBinding"
+  ],
+  "gold_clean": false
+ },
+ "2b1da2b0b38dfc5d5841266037c0c8b249eca1dd": {
+  "task": "2b1da2b0b38dfc5d5841266037c0c8b249eca1dd",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-21T21:08:41+08:00",
+  "subject": "fix(context): make context Value method adhere to Go standards (#3897)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ac5e84d93ce34359bfd2f346cb2971ea754d83e3": {
+  "task": "ac5e84d93ce34359bfd2f346cb2971ea754d83e3",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "gin_test.go"
+  ],
+  "src_files": [
+   "gin.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-11T22:35:30+08:00",
+  "subject": "feat(engine): Added `OptionFunc` and `With` (#3572)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5f458dd1a6d631f324e4af9a4f5429ffdf199342": {
+  "task": "5f458dd1a6d631f324e4af9a4f5429ffdf199342",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "auth_test.go"
+  ],
+  "src_files": [
+   "auth.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-11T22:22:58+08:00",
+  "subject": "feat(auth): add proxy-server authentication (#3877)",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "09f8224593e31edf3c58ab3f13bc31ef53473733": {
+  "task": "09f8224593e31edf3c58ab3f13bc31ef53473733",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-06T14:16:53+05:30",
+  "subject": "fix(route): Add fullPath in context copy (#3784)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextCopy"
+  ],
+  "gold_clean": true
+ },
+ "9c61295efeea99f6c9d1722294f1bf61d8e464d6": {
+  "task": "9c61295efeea99f6c9d1722294f1bf61d8e464d6",
+  "target_tests": [
+   "./",
+   "./binding",
+   "./render"
+  ],
+  "test_files": [
+   "binding/binding_test.go",
+   "context_test.go",
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "binding/binding.go",
+   "binding/binding_nomsgpack.go",
+   "render/yaml.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-05T14:54:35+01:00",
+  "subject": "chore(header): Add support for RFC 9512: application/yaml (#3851)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/render::TestRenderYAML",
+   "github.com/gin-gonic/gin::TestContextNegotiationWithYAML",
+   "github.com/gin-gonic/gin::TestContextRenderYAML"
+  ],
+  "gold_clean": true
+ },
+ "bb3519d26f52835cf00e5e430b52651a9c378c97": {
+  "task": "bb3519d26f52835cf00e5e430b52651a9c378c97",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "gin.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-07T07:18:53-05:00",
+  "subject": "chore(IP): add TrustedPlatform constant for Fly.io. (#3839)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "82bcd6d39bfe9c22032764ff3b0b6f8ef1673e49": {
+  "task": "82bcd6d39bfe9c22032764ff3b0b6f8ef1673e49",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/validate_test.go"
+  ],
+  "src_files": [
+   "binding/default_validator.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-07T06:44:11-05:00",
+  "subject": "fix(binding): dereference pointer to struct (#3199)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestValidateAndModifyStruct"
+  ],
+  "gold_clean": true
+ },
+ "86ff4a64c7efe1a1c875529835eeef9e15de1e86": {
+  "task": "86ff4a64c7efe1a1c875529835eeef9e15de1e86",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "routes_test.go"
+  ],
+  "src_files": [
+   "gin.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-06T04:08:56+01:00",
+  "subject": "fix(header): Allow header according to RFC 7231 (HTTP 405) (#3759)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestRouteNotAllowedEnabled3"
+  ],
+  "gold_clean": true
+ },
+ "3dc1cd6572b4e3a0cd170a15debe546c2c72294f": {
+  "task": "3dc1cd6572b4e3a0cd170a15debe546c2c72294f",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-05T10:46:35+08:00",
+  "subject": "fix(binding): binding error while not upload file (#3819) (#3820)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingBaseTypes"
+  ],
+  "gold_clean": true
+ },
+ "c6ae2e69666a2b36203b29650ee75d172c725c66": {
+  "task": "c6ae2e69666a2b36203b29650ee75d172c725c66",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_test.go"
+  ],
+  "src_files": [
+   "logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-02T05:22:26+03:30",
+  "subject": "feat(logger): ability to skip logs based on user-defined logic (#3593)",
+  "src_churn": 51,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "386d244068db3693f938db4ead6d1f5f85942e3f": {
+  "task": "386d244068db3693f938db4ead6d1f5f85942e3f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "routes_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-12-07T00:38:55Z",
+  "subject": "fix(tree): correctly expand the capacity of params (#3502)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestRouteParamsNotEmpty"
+  ],
+  "gold_clean": true
+ },
+ "44d0dd70924dd154e3b98bc340accc53484efa9c": {
+  "task": "44d0dd70924dd154e3b98bc340accc53484efa9c",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/form_mapping_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-16T21:16:43+05:30",
+  "subject": "fix: Add pointer support for url query params (#3659) (#3666)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/binding::TestMappingPtrField"
+  ],
+  "gold_clean": true
+ },
+ "a481ee2897af1e368de5c919fbeb21b89aa26fc7": {
+  "task": "a481ee2897af1e368de5c919fbeb21b89aa26fc7",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_test.go"
+  ],
+  "src_files": [
+   "logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-27T12:47:11+05:30",
+  "subject": "chore(http): use white color for HTTP 1XX (#3741)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestColorForStatus"
+  ],
+  "gold_clean": true
+ },
+ "bb1fc2e0fe97c63dab1527baab88d01183853b8f": {
+  "task": "bb1fc2e0fe97c63dab1527baab88d01183853b8f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-29T01:59:35Z",
+  "subject": "fix Request.Context() checks (#3512)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "2d4bbec941551479b1fdf1e54ece03e6e82a7e72": {
+  "task": "2d4bbec941551479b1fdf1e54ece03e6e82a7e72",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-29T10:57:53+09:00",
+  "subject": "fix lack of escaping of filename in Content-Disposition (#3556)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextRenderAndEscapeAttachment"
+  ],
+  "gold_clean": true
+ },
+ "4cee78f5382d5245c3652e6c15fee715eec505c3": {
+  "task": "4cee78f5382d5245c3652e6c15fee715eec505c3",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "routes_test.go"
+  ],
+  "src_files": [
+   "gin.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-19T22:25:48+09:00",
+  "subject": "Fix #3500 Add escape logic for header (#3503)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestRouteRedirectTrailingSlash"
+  ],
+  "gold_clean": true
+ },
+ "81ac7d55a09e34013225db0aeac6e70c1ae68928": {
+  "task": "81ac7d55a09e34013225db0aeac6e70c1ae68928",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "routes_test.go"
+  ],
+  "src_files": [
+   "gin.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-17T11:00:19+09:00",
+  "subject": "Add escape logic for header (#3500)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestRouteRedirectTrailingSlash"
+  ],
+  "gold_clean": false
+ },
+ "c1d06e3d08692f9eddde381a5e277b41fff5a297": {
+  "task": "c1d06e3d08692f9eddde381a5e277b41fff5a297",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "response_writer_test.go"
+  ],
+  "src_files": [
+   "response_writer.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-12T00:01:43-05:00",
+  "subject": "add supprt for go1.20 http.rwUnwrapper to gin.responseWriter (#3489)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "0c96a20209ca035964be126a745c167196fb6db3": {
+  "task": "0c96a20209ca035964be126a745c167196fb6db3",
+  "target_tests": [
+   "./",
+   "./render"
+  ],
+  "test_files": [
+   "context_test.go",
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "render/json.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-12T05:01:33+03:00",
+  "subject": "Stop useless panicking in context and render (#2150)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/render::TestRenderJSONError",
+   "github.com/gin-gonic/gin::TestContextRenderIfErr"
+  ],
+  "gold_clean": true
+ },
+ "e02ae6ae61fada360379b5bdc7f23e46f21ce5de": {
+  "task": "e02ae6ae61fada360379b5bdc7f23e46f21ce5de",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "routergroup_test.go"
+  ],
+  "src_files": [
+   "routergroup.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-06T11:16:42+03:30",
+  "subject": "chore(router): match method added to routergroup for multiple HTTP methods supporting (#3464)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7cb151bb4c4cfc6018a00a125422ff38a041b9f8": {
+  "task": "7cb151bb4c4cfc6018a00a125422ff38a041b9f8",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-16T15:50:07+01:00",
+  "subject": "fix(context): panic on NegotiateFormat - index out of range (#3397)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextNegotiationFormat2"
+  ],
+  "gold_clean": true
+ },
+ "8eb5f832bac1853fc84c508a2b9406134d39492e": {
+  "task": "8eb5f832bac1853fc84c508a2b9406134d39492e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "routes_test.go"
+  ],
+  "src_files": [
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-07T01:57:54+01:00",
+  "subject": "fix(router): tree bug where loop index is not decremented. (#3460)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestEngineHandleMethodNotAllowedCornerCase"
+  ],
+  "gold_clean": true
+ },
+ "c9b27249fbb6092bcc7f749811d73ef1d50eee73": {
+  "task": "c9b27249fbb6092bcc7f749811d73ef1d50eee73",
+  "target_tests": [
+   "./render"
+  ],
+  "test_files": [
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "binding/yaml.go",
+   "render/yaml.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-02T12:40:48+08:00",
+  "subject": "chore(yaml): upgrade dependency to v3 version (#3456)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin/render::TestRenderYAML"
+  ],
+  "gold_clean": true
+ },
+ "41f2669ebcc24dbbef7dcca705a4cd75b7c43f28": {
+  "task": "41f2669ebcc24dbbef7dcca705a4cd75b7c43f28",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "response_writer_test.go"
+  ],
+  "src_files": [
+   "response_writer.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-02T07:08:53+03:30",
+  "subject": "console logger HTTP status bug fixed and the corresponding unit test added (#3453)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestResponseWriterStatusCode"
+  ],
+  "gold_clean": true
+ },
+ "55e27f12465e058058180280d5f0bdc473eb3302": {
+  "task": "55e27f12465e058058180280d5f0bdc473eb3302",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "gin.go",
+   "test_helpers.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-06T17:08:11+08:00",
+  "subject": "fix(engine): missing route params for CreateTestContext (#2778) (#2803)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8b9c55e8b059a1ffcc69e3b5dc0b9d583958811f": {
+  "task": "8b9c55e8b059a1ffcc69e3b5dc0b9d583958811f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "tree_test.go"
+  ],
+  "src_files": [
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-06T17:02:40+08:00",
+  "subject": "fix(route): redirectSlash bug (#3227)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestRedirectTrailingSlash"
+  ],
+  "gold_clean": true
+ },
+ "fa58bff301a823ce25af800614d3f016b10ae586": {
+  "task": "fa58bff301a823ce25af800614d3f016b10ae586",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "debug_test.go"
+  ],
+  "src_files": [
+   "debug.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-16T09:32:28+08:00",
+  "subject": "chore(dep): Changes minimum support go version to go1.16 (#3361)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextFormFileFailed17"
+  ],
+  "gold_clean": false
+ },
+ "088cdd74d42df20d4e58aa17d3f4403a22e8a545": {
+  "task": "088cdd74d42df20d4e58aa17d3f4403a22e8a545",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "debug_test.go"
+  ],
+  "src_files": [
+   "debug.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-07-01T10:31:31+08:00",
+  "subject": "Fix the value of ginSupportMinGoVer constant by semantic (#3221)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextFormFileFailed17"
+  ],
+  "gold_clean": false
+ },
+ "d7776de7d444935ea4385999711bd6331a98fecb": {
+  "task": "d7776de7d444935ea4385999711bd6331a98fecb",
+  "target_tests": [
+   "./",
+   "./binding",
+   "./render"
+  ],
+  "test_files": [
+   "binding/binding_test.go",
+   "context_test.go",
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "binding/binding.go",
+   "binding/binding_nomsgpack.go",
+   "binding/bson.go",
+   "context.go",
+   "render/bson.go"
+  ],
+  "pool": "hard",
+  "authored": "2026-01-27T03:09:01+01:00",
+  "subject": "feat(render): add bson protocol (#4145)",
+  "src_churn": 83,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "40725d85badd647870df6f9fa7a75ac76341f804": {
+  "task": "40725d85badd647870df6f9fa7a75ac76341f804",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "internal/json/go_json.go",
+   "internal/json/json.go",
+   "internal/json/jsoniter.go",
+   "internal/json/sonic.go"
+  ],
+  "pool": "hard",
+  "authored": "2025-05-25T05:36:33-07:00",
+  "subject": "chore(bind): return 413 status code when error is `http.MaxBytesError` (#4227)",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "71496abe6836462e2ed70436b7d72ea2a3585417": {
+  "task": "71496abe6836462e2ed70436b7d72ea2a3585417",
+  "target_tests": [
+   "./",
+   "./internal/fs",
+   "./render"
+  ],
+  "test_files": [
+   "gin_test.go",
+   "internal/fs/fs_test.go",
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "gin.go",
+   "ginS/gins.go",
+   "internal/fs/fs.go",
+   "render/html.go"
+  ],
+  "pool": "hard",
+  "authored": "2025-04-21T00:11:16+08:00",
+  "subject": "feat(fs): Implement loading HTML from http.FileSystem (#4053)",
+  "src_churn": 59,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6ca8ddb1aed78d9ffaf984e5489111838242fedb": {
+  "task": "6ca8ddb1aed78d9ffaf984e5489111838242fedb",
+  "target_tests": [
+   "./",
+   "./binding"
+  ],
+  "test_files": [
+   "binding/binding_test.go",
+   "context_test.go"
+  ],
+  "src_files": [
+   "binding/binding.go",
+   "binding/binding_nomsgpack.go",
+   "binding/plain.go",
+   "context.go"
+  ],
+  "pool": "hard",
+  "authored": "2024-05-13T11:11:56+08:00",
+  "subject": "feat(binding): add BindPlain (#3904)",
+  "src_churn": 75,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b04917c53e310e3746ec90cd93106cda8c956211": {
+  "task": "b04917c53e310e3746ec90cd93106cda8c956211",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "errors_test.go",
+   "logger_test.go",
+   "middleware_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "errors.go",
+   "ginS/gins.go",
+   "mode.go",
+   "path.go",
+   "recovery.go",
+   "routergroup.go"
+  ],
+  "pool": "hard",
+  "authored": "2022-08-15T21:38:20+08:00",
+  "subject": "chore: upgrade golangci-lint and fix golangci-lint error (#3278)",
+  "src_churn": 104,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/gin-gonic/gin::TestContextFormFileFailed17"
+  ],
+  "gold_clean": false
+ },
+ "ed03102ef0b08c552bc3d0a73fbd98307461abcc": {
+  "task": "ed03102ef0b08c552bc3d0a73fbd98307461abcc",
+  "target_tests": [
+   "./",
+   "./binding"
+  ],
+  "test_files": [
+   "binding/binding_test.go",
+   "binding/toml_test.go",
+   "context_test.go"
+  ],
+  "src_files": [
+   "binding/binding.go",
+   "binding/binding_nomsgpack.go",
+   "binding/toml.go",
+   "context.go",
+   "render/render.go",
+   "render/toml.go"
+  ],
+  "pool": "hard",
+  "authored": "2022-05-27T16:34:43-08:00",
+  "subject": "[GIN-001] - Add TOML bining for gin (#3081)",
+  "src_churn": 93,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "435a76b735db28b6223b323d30503de51c637b89": {
+  "task": "435a76b735db28b6223b323d30503de51c637b89",
+  "target_tests": [
+   "./",
+   "./binding",
+   "./render"
+  ],
+  "test_files": [
+   "binding/binding_test.go",
+   "binding/form_mapping_test.go",
+   "context_test.go",
+   "render/render_test.go",
+   "response_writer_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go",
+   "binding/protobuf.go",
+   "binding/uri.go",
+   "mode.go",
+   "render/json.go",
+   "render/protobuf.go",
+   "testdata/protoexample/test.pb.go"
+  ],
+  "pool": "hard",
+  "authored": "2021-08-19T09:46:31+02:00",
+  "subject": "chore(ci): update dependencies (#2827)",
+  "src_churn": 320,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "982daeb1ecdced87bbef6c11783a640eb88a193a": {
+  "task": "982daeb1ecdced87bbef6c11783a640eb88a193a",
+  "target_tests": [
+   "./internal/bytesconv"
+  ],
+  "test_files": [
+   "internal/bytesconv/bytesconv_test.go"
+  ],
+  "src_files": [
+   "auth.go",
+   "binding/form_mapping.go",
+   "gin.go",
+   "internal/bytesconv/bytesconv.go",
+   "render/json.go"
+  ],
+  "pool": "hard",
+  "authored": "2020-01-18T00:32:50+08:00",
+  "subject": "Use zero-copy approach to convert types between string and byte\u2026 (#2206)",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "521d06c81d5e49a004473daa81b71e1d34fe7a05": {
+  "task": "521d06c81d5e49a004473daa81b71e1d34fe7a05",
+  "target_tests": [
+   "./",
+   "./binding"
+  ],
+  "test_files": [
+   "binding/binding_test.go",
+   "githubapi_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "binding/binding.go",
+   "binding/form_mapping.go",
+   "binding/uri.go",
+   "context.go"
+  ],
+  "pool": "hard",
+  "authored": "2018-11-22T09:29:48+08:00",
+  "subject": "support bind uri param (#1612)",
+  "src_churn": 49,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "72db8acd99feab85e81ac6e2ebd16c76e0f986be": {
+  "task": "72db8acd99feab85e81ac6e2ebd16c76e0f986be",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "errors_test.go"
+  ],
+  "src_files": [
+   "binding/json.go",
+   "errors.go",
+   "internal/json/json.go",
+   "internal/json/jsoniter.go",
+   "render/json.go",
+   "render/json_17.go"
+  ],
+  "pool": "hard",
+  "authored": "2018-08-30T19:04:03+08:00",
+  "subject": "add internal package which includes json package (#1504)",
+  "src_churn": 41,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6073a79ee08657ea9784c26b8521a8f8ef9e1644": {
+  "task": "6073a79ee08657ea9784c26b8521a8f8ef9e1644",
+  "target_tests": [
+   "./render"
+  ],
+  "test_files": [
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "render/json.go",
+   "render/protobuf.go",
+   "render/render.go"
+  ],
+  "pool": "hard",
+  "authored": "2018-08-19T17:39:58+08:00",
+  "subject": "not use protobuf on context but use it on render (#1496)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "995fa8e9ce404a7a8dc293c90ec018367639ffa9": {
+  "task": "995fa8e9ce404a7a8dc293c90ec018367639ffa9",
+  "target_tests": [
+   "./",
+   "./binding"
+  ],
+  "test_files": [
+   "binding/binding_body_test.go",
+   "context_test.go"
+  ],
+  "src_files": [
+   "binding/binding.go",
+   "binding/json.go",
+   "binding/msgpack.go",
+   "binding/protobuf.go",
+   "binding/xml.go",
+   "context.go"
+  ],
+  "pool": "hard",
+  "authored": "2018-05-11T11:33:33+09:00",
+  "subject": "Fix #216: Enable to call binding multiple times in some formats (#1341)",
+  "src_churn": 83,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6d913fc343cfac80d656db5be67a0ffb1323ba0d": {
+  "task": "6d913fc343cfac80d656db5be67a0ffb1323ba0d",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/validate_test.go"
+  ],
+  "src_files": [
+   "binding/binding.go",
+   "binding/default_validator.go",
+   "binding/json.go",
+   "examples/custom-validation/server.go",
+   "examples/struct-lvl-validations/server.go"
+  ],
+  "pool": "hard",
+  "authored": "2018-03-29T12:03:07+05:30",
+  "subject": "fix(binding): Expose validator engine used by the default Validator (#1277)",
+  "src_churn": 104,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6f94fd05c98d1043e329398f6f742dc680be9b29": {
+  "task": "6f94fd05c98d1043e329398f6f742dc680be9b29",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "benchmarks_test.go",
+   "gin_integration_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "binding/form_mapping.go",
+   "errors.go",
+   "examples/custom-validation/server.go",
+   "examples/realtime-advanced/stats.go",
+   "gin.go",
+   "mode.go",
+   "tree.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-11-29T04:50:14+02:00",
+  "subject": "Linting and optimizing struct memory signature. (#1184)",
+  "src_churn": 58,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ce670a64977a513d8caa58c143471ddbbf641bd4": {
+  "task": "ce670a64977a513d8caa58c143471ddbbf641bd4",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "errors_test.go"
+  ],
+  "src_files": [
+   "binding/json.go",
+   "errors.go",
+   "json/json.go",
+   "json/jsoniter.go",
+   "render/json.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-07-18T16:01:29-05:00",
+  "subject": "refactor(json): make jsonite optional with build tags (#1026)",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "75ed286c6038b2a366ecf033a79d31764eeeb041": {
+  "task": "75ed286c6038b2a366ecf033a79d31764eeeb041",
+  "target_tests": [
+   "./",
+   "./render"
+  ],
+  "test_files": [
+   "context_test.go",
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "gin.go",
+   "render/json.go",
+   "render/render.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-07-08T01:21:30+08:00",
+  "subject": "feat: add SecureJSON func to prevent json hijacking",
+  "src_churn": 59,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4ad3baf44e2e00c9982b0ce24fb2283e2184105f": {
+  "task": "4ad3baf44e2e00c9982b0ce24fb2283e2184105f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "benchmarks_test.go",
+   "gin_integration_test.go"
+  ],
+  "src_files": [
+   "binding/default_validator.go",
+   "context_appengine.go",
+   "fs.go",
+   "test_helpers.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-06-12T14:04:52+08:00",
+  "subject": "Add license for some files (#940)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5be2123c1a4407f41062d33500db4de65e05bab1": {
+  "task": "5be2123c1a4407f41062d33500db4de65e05bab1",
+  "target_tests": [
+   "./binding",
+   "./render"
+  ],
+  "test_files": [
+   "binding/binding_test.go",
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "binding/binding.go",
+   "binding/msgpack.go",
+   "render/msgpack.go",
+   "render/render.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-02-23T15:08:37+01:00",
+  "subject": "Added support for MessagePack binding and rendering (#808)",
+  "src_churn": 66,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d64a1fb91c1cc5e14ae78c97d7ba623abd82965c": {
+  "task": "d64a1fb91c1cc5e14ae78c97d7ba623abd82965c",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "auth.go",
+   "context.go",
+   "gin.go",
+   "utils.go"
+  ],
+  "pool": "hard",
+  "authored": "2016-01-28T00:35:09+01:00",
+  "subject": "Cosmetic changes",
+  "src_churn": 44,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8f3047814e86442c8efbd91ef7007905d47cf6c9": {
+  "task": "8f3047814e86442c8efbd91ef7007905d47cf6c9",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "routergroup_test.go"
+  ],
+  "src_files": [
+   "auth.go",
+   "context.go",
+   "debug.go",
+   "gin.go",
+   "response_writer.go",
+   "routergroup.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-07-02T20:24:54+02:00",
+  "subject": "Comments + IRoutes + IRouter + unexported AbortIndex",
+  "src_churn": 190,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1f56e500839e7fab34e15f97d57ff0acfada4272": {
+  "task": "1f56e500839e7fab34e15f97d57ff0acfada4272",
+  "target_tests": [
+   "./render"
+  ],
+  "test_files": [
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "render/data.go",
+   "render/html.go",
+   "render/json.go",
+   "render/redirect.go",
+   "render/render.go",
+   "render/text.go",
+   "render/xml.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-06-04T05:25:21+02:00",
+  "subject": "Using Render() instead of Write()",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0c9f086b7496e38f39a96246fe9cb30049d99f28": {
+  "task": "0c9f086b7496e38f39a96246fe9cb30049d99f28",
+  "target_tests": [
+   "./binding"
+  ],
+  "test_files": [
+   "binding/validate_test.go"
+  ],
+  "src_files": [
+   "binding/binding.go",
+   "binding/default_validator.go",
+   "binding/form.go",
+   "binding/json.go",
+   "binding/xml.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-05-31T16:30:00+02:00",
+  "subject": "Renames Validate() to validate()",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "835f66fdc9ce24a3074055b3b801a7f8e101993f": {
+  "task": "835f66fdc9ce24a3074055b3b801a7f8e101993f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "gin_test.go",
+   "middleware_test.go",
+   "path_test.go",
+   "routes_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "errors.go",
+   "gin.go",
+   "path.go",
+   "render/data.go",
+   "render/text.go",
+   "response_writer.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-05-30T14:45:13+02:00",
+  "subject": "404 not found performance improvements",
+  "src_churn": 40,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "99694bb7168de2276a19d9cd2dcaaa2107ac672c": {
+  "task": "99694bb7168de2276a19d9cd2dcaaa2107ac672c",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "logger_test.go",
+   "recovery_test.go",
+   "utils_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "errors.go",
+   "logger.go",
+   "recovery.go",
+   "response_writer.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-05-12T15:22:13+02:00",
+  "subject": "Fixes errors",
+  "src_churn": 64,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a9dad532aeba656a59131f3e3e2365b3d272989e": {
+  "task": "a9dad532aeba656a59131f3e3e2365b3d272989e",
+  "target_tests": [
+   "./render"
+  ],
+  "test_files": [
+   "render/render_test.go"
+  ],
+  "src_files": [
+   "render/html.go",
+   "render/json.go",
+   "render/render.go",
+   "render/text.go",
+   "render/xml.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-05-11T01:02:17+02:00",
+  "subject": "Performance improvement in renders",
+  "src_churn": 51,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b690611c381a2c9765ac7cdbd6588da7714c4790": {
+  "task": "b690611c381a2c9765ac7cdbd6588da7714c4790",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "debug_test.go"
+  ],
+  "src_files": [
+   "debug.go",
+   "errors.go",
+   "gin.go",
+   "routergroup.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-05-09T03:34:43+02:00",
+  "subject": "Better debug logging + unit tests",
+  "src_churn": 60,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "eb3e9293edcf988c66ce5a4fcdc2ebb75a6a8661": {
+  "task": "eb3e9293edcf988c66ce5a4fcdc2ebb75a6a8661",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "debug_test.go",
+   "gin_test.go",
+   "githubapi_test.go",
+   "routes_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "debug.go",
+   "gin.go",
+   "routergroup.go",
+   "tree.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-05-07T11:30:01+02:00",
+  "subject": "Renames []HandleFunc to HandlersChain",
+  "src_churn": 33,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f4146483847f5fad5cc40df195964e0450cde091": {
+  "task": "f4146483847f5fad5cc40df195964e0450cde091",
+  "target_tests": [
+   "./",
+   "./binding",
+   "./render"
+  ],
+  "test_files": [
+   "binding/binding_test.go",
+   "context_test.go",
+   "middleware_test.go",
+   "render/render_test.go",
+   "routes_test.go"
+  ],
+  "src_files": [
+   "binding/binding.go",
+   "binding/form.go",
+   "binding/post_form.go",
+   "context.go",
+   "gin.go",
+   "input_holder.go",
+   "render/html_debug.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-05-05T15:06:38+02:00",
+  "subject": "- More unit tests - Improves HTML debug render - InputHolder removed - More debug logs",
+  "src_churn": 226,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2915fa0ffedb73c8cc979c144f7ce4b046006db8": {
+  "task": "2915fa0ffedb73c8cc979c144f7ce4b046006db8",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "path_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "deprecated.go",
+   "gin.go",
+   "path.go",
+   "routergroup.go",
+   "tree.go",
+   "utils.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-03-31T21:39:06+02:00",
+  "subject": "Zero allocation router, first commit",
+  "src_churn": 989,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "48fec0650dd70e158755b5d2fd839832dbae4437": {
+  "task": "48fec0650dd70e158755b5d2fd839832dbae4437",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "auth_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "debug.go",
+   "deprecated.go",
+   "logger.go",
+   "mode.go",
+   "routergroup.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-03-23T06:03:12+01:00",
+  "subject": "Cosmetic changes",
+  "src_churn": 52,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}

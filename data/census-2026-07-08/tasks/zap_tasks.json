@@ -1,0 +1,1701 @@
+{
+ "0ab0d5aae5986395e2ca497385d977ccd7cdfc5e": {
+  "task": "0ab0d5aae5986395e2ca497385d977ccd7cdfc5e",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/entry_test.go"
+  ],
+  "src_files": [
+   "zapcore/entry.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-16T09:29:11-07:00",
+  "subject": "zapcore: Add PreWriteHook for transforming entries before write (#1534)",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d6b395b76053053ec6ae18121c01e08718708bc3": {
+  "task": "d6b395b76053053ec6ae18121c01e08718708bc3",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/lazy_with_test.go"
+  ],
+  "src_files": [
+   "zapcore/lazy_with.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-19T13:07:54-08:00",
+  "subject": "Update lazy logger not to materialize unless it's being written to (#1519)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestLazyCore",
+   "go.uber.org/zap/zapcore::TestLazyCore/1_log,_discarded,_no-chains,_inner_core_with_never_called"
+  ],
+  "gold_clean": true
+ },
+ "07077a697f639389cc998ff91b8885feb25f520d": {
+  "task": "07077a697f639389cc998ff91b8885feb25f520d",
+  "target_tests": [
+   "./",
+   "./benchmarks",
+   "./zapcore"
+  ],
+  "test_files": [
+   "benchmarks/zap_test.go",
+   "field_test.go",
+   "zapcore/field_test.go"
+  ],
+  "src_files": [
+   "field.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-06-02T18:00:36+02:00",
+  "subject": "Prevent zap.Object from panicing on nils (#1501)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "go.uber.org/zap::TestFieldConstructors",
+   "go.uber.org/zap::TestFieldConstructors/Object:Nil"
+  ],
+  "gold_clean": false
+ },
+ "5786471c1d41c255c1d8b63ad30a82b68eda2c21": {
+  "task": "5786471c1d41c255c1d8b63ad30a82b68eda2c21",
+  "target_tests": [
+   "./",
+   "./zapcore"
+  ],
+  "test_files": [
+   "example_test.go",
+   "field_test.go",
+   "zapcore/field_test.go"
+  ],
+  "src_files": [
+   "field.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-08-18T05:25:15-04:00",
+  "subject": "Add `func DictObject` (#1460)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f9b9f66ea72d4e221f0249fef3b21430864cb2aa": {
+  "task": "f9b9f66ea72d4e221f0249fef3b21430864cb2aa",
+  "target_tests": [
+   "./zaptest/observer"
+  ],
+  "test_files": [
+   "zaptest/observer/observer_test.go"
+  ],
+  "src_files": [
+   "zaptest/observer/observer.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-07-22T17:30:47-03:00",
+  "subject": "zaptest: add ability to filter observer logs by logger name (#1452)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8a805fa71066f3dc8d1fcb8e9fb36d580c4de3f6": {
+  "task": "8a805fa71066f3dc8d1fcb8e9fb36d580c4de3f6",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/level_test.go"
+  ],
+  "src_files": [
+   "zapcore/level.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-06T08:49:58+02:00",
+  "subject": "zapcore: add warning as Level (#1429)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestLevelText",
+   "go.uber.org/zap/zapcore::TestLevelText/unmarshal_warning_compatability"
+  ],
+  "gold_clean": true
+ },
+ "e5a56ee593d51f611de3a73cf3140f1c1927d68e": {
+  "task": "e5a56ee593d51f611de3a73cf3140f1c1927d68e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_test.go"
+  ],
+  "src_files": [
+   "logger.go",
+   "options.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-20T09:18:30-08:00",
+  "subject": "Add WithPanicHook logger option for panic log tests (#1416)",
+  "src_churn": 54,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "956a21c19cf77ea7a78f9f08ca44b6f77f95053a": {
+  "task": "956a21c19cf77ea7a78f9f08ca44b6f77f95053a",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "sugar_test.go"
+  ],
+  "src_files": [
+   "sugar.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-13T19:36:32+01:00",
+  "subject": "Add methods for logging with level as argument (#1406)",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "35ded09102db8ce0b2eba3e87f54ba6ce14f2359": {
+  "task": "35ded09102db8ce0b2eba3e87f54ba6ce14f2359",
+  "target_tests": [
+   "./exp/zapslog"
+  ],
+  "test_files": [
+   "exp/zapslog/handler_test.go"
+  ],
+  "src_files": [
+   "exp/zapslog/handler.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-06T02:59:30+09:00",
+  "subject": "zapslog: fix all with slogtest, support inline group, ignore empty group. (#1408)",
+  "src_churn": 62,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "27b96e378909082d0bf2f0c5802a9f648150fe98": {
+  "task": "27b96e378909082d0bf2f0c5802a9f648150fe98",
+  "target_tests": [
+   "./zaptest"
+  ],
+  "test_files": [
+   "zaptest/logger_test.go"
+  ],
+  "src_files": [
+   "zaptest/logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-01-31T22:36:47+05:00",
+  "subject": "Make zaptest.NewTestingWriter public (#1399)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fa1b6aed5c1b3f14d54e031c453dc07056c282ba": {
+  "task": "fa1b6aed5c1b3f14d54e031c453dc07056c282ba",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "sugar_test.go"
+  ],
+  "src_files": [
+   "sugar.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-25T09:31:57+03:00",
+  "subject": "Extend WithLazy() method to SugaredLogger (#1378)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "87577d85d58b6d92d0158967df29303d04d30e36": {
+  "task": "87577d85d58b6d92d0158967df29303d04d30e36",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/console_encoder_test.go",
+   "zapcore/json_encoder_test.go"
+  ],
+  "src_files": [
+   "zapcore/console_encoder.go",
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-10-05T14:06:11-04:00",
+  "subject": "zapcore: Ignore nil Entry.Time in encoders (#1369)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestConsoleEncodeEntry",
+   "go.uber.org/zap/zapcore::TestConsoleEncodeEntry/zero_time_omitted",
+   "go.uber.org/zap/zapcore::TestJSONEncodeEntry",
+   "go.uber.org/zap/zapcore::TestJSONEncodeEntry/zero_time_omitted"
+  ],
+  "gold_clean": true
+ },
+ "ed7ddb5f06ddd62e35aa8987b8338bfda1365f4c": {
+  "task": "ed7ddb5f06ddd62e35aa8987b8338bfda1365f4c",
+  "target_tests": [
+   "./",
+   "./exp/zapfield",
+   "./exp/zapslog",
+   "./zapcore"
+  ],
+  "test_files": [
+   "exp/zapfield/zapfield_test.go",
+   "exp/zapslog/handler_test.go",
+   "logger_test.go",
+   "zapcore/console_encoder_test.go",
+   "zapcore/lazy_with_test.go"
+  ],
+  "src_files": [
+   "zapgrpc/zapgrpc.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-30T08:57:49-07:00",
+  "subject": "fmt: Prefer gofumpt over gofmt (#1366)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2f09c515a1360152dfb60e76f2aca99ab207de49": {
+  "task": "2f09c515a1360152dfb60e76f2aca99ab207de49",
+  "target_tests": [
+   "./benchmarks"
+  ],
+  "test_files": [
+   "benchmarks/scenario_bench_test.go",
+   "benchmarks/slog_test.go"
+  ],
+  "src_files": [
+   "internal/readme/readme.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-24T01:56:36+08:00",
+  "subject": "benchmark/slog: exp => std log/slog (#1363)",
+  "src_churn": 25,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c17272e1a53876c9e27a3b92888b9a116a9c489f": {
+  "task": "c17272e1a53876c9e27a3b92888b9a116a9c489f",
+  "target_tests": [
+   "./",
+   "./zapcore"
+  ],
+  "test_files": [
+   "logger_bench_test.go",
+   "logger_test.go",
+   "zapcore/lazy_with_test.go"
+  ],
+  "src_files": [
+   "logger.go",
+   "zapcore/lazy_with.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-14T13:13:27-07:00",
+  "subject": "Add WithLazy Logger method (#1319)",
+  "src_churn": 76,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5a27bab892609ff777311bab2a10e67b656245b3": {
+  "task": "5a27bab892609ff777311bab2a10e67b656245b3",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/json_encoder_bench_test.go",
+   "zapcore/json_encoder_impl_test.go"
+  ],
+  "src_files": [
+   "buffer/buffer.go",
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-09T13:03:59-07:00",
+  "subject": "perf: Faster string encoding (#1350)",
+  "src_churn": 148,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "82c728b02339ba8ce9beb07b5d4ef5904a9c7a5f": {
+  "task": "82c728b02339ba8ce9beb07b5d4ef5904a9c7a5f",
+  "target_tests": [
+   "./internal/ztest"
+  ],
+  "test_files": [
+   "internal/ztest/clock_test.go"
+  ],
+  "src_files": [
+   "internal/ztest/clock.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-09T08:55:39-07:00",
+  "subject": "Replace benbjohnson/clock with custom MockClock (#1349)",
+  "src_churn": 123,
+  "size": "L",
+  "baseline_failing": [
+   "go.uber.org/zap/internal/ztest::TestMockClock_Add_negative"
+  ],
+  "gold_clean": true
+ },
+ "b7aed24b01afcaee6f6c286e421f11d21691f9a7": {
+  "task": "b7aed24b01afcaee6f6c286e421f11d21691f9a7",
+  "target_tests": [
+   "./exp/zapslog"
+  ],
+  "test_files": [
+   "exp/zapslog/handler_test.go"
+  ],
+  "src_files": [
+   "exp/zapslog/handler.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-08T18:14:01-07:00",
+  "subject": "zapslog: Handle empty attrs centrally (#1351)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b90012881de282809444123f305689edc93a00ec": {
+  "task": "b90012881de282809444123f305689edc93a00ec",
+  "target_tests": [
+   "./exp/zapslog"
+  ],
+  "test_files": [
+   "exp/zapslog/example_test.go",
+   "exp/zapslog/handler_test.go"
+  ],
+  "src_files": [
+   "exp/zapslog/handler.go",
+   "exp/zapslog/options.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-01T22:01:58+02:00",
+  "subject": "feat(zapslog): implement stack trace handling (#1339)",
+  "src_churn": 123,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e9f4bda47a9063599df43477df69ddad9250097c": {
+  "task": "e9f4bda47a9063599df43477df69ddad9250097c",
+  "target_tests": [
+   "./exp/zapslog"
+  ],
+  "test_files": [
+   "exp/zapslog/handler_test.go"
+  ],
+  "src_files": [
+   "exp/zapslog/handler.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-01T10:34:56-07:00",
+  "subject": "zapslog: Handler should ignore an empty Attr (#1344)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "98e9c4fe632cc00c99033d8d616f1318b7063eee": {
+  "task": "98e9c4fe632cc00c99033d8d616f1318b7063eee",
+  "target_tests": [
+   "./",
+   "./internal/stacktrace"
+  ],
+  "test_files": [
+   "field_test.go",
+   "internal/stacktrace/stack_test.go"
+  ],
+  "src_files": [
+   "field.go",
+   "internal/stacktrace/stack.go",
+   "logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-25T06:16:17-07:00",
+  "subject": "chore: Move stacktrace capturing into internal/ (#1341)",
+  "src_churn": 193,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "613271a78f64d735b1bb72e31b43fb452e3ebcdc": {
+  "task": "613271a78f64d735b1bb72e31b43fb452e3ebcdc",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "array_go118_test.go",
+   "array_test.go",
+   "example_go118_test.go",
+   "example_test.go"
+  ],
+  "src_files": [
+   "array.go",
+   "array_go118.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-16T12:15:00-07:00",
+  "subject": "Remove Go 1.18 build tags (#1322)",
+  "src_churn": 283,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "fcfd368624a286486e62d46deba7e42c20164616": {
+  "task": "fcfd368624a286486e62d46deba7e42c20164616",
+  "target_tests": [
+   "./",
+   "./zapcore"
+  ],
+  "test_files": [
+   "example_test.go",
+   "field_test.go",
+   "zapcore/field_test.go"
+  ],
+  "src_files": [
+   "field.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-14T23:03:36+09:00",
+  "subject": "feat(field): add zap.Dict to Field constructor list (#1297)",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9c3c581292e8c0340da0e35446a804f7507c352a": {
+  "task": "9c3c581292e8c0340da0e35446a804f7507c352a",
+  "target_tests": [
+   "./exp/zapslog"
+  ],
+  "test_files": [
+   "exp/zapslog/example_test.go",
+   "exp/zapslog/slog_test.go"
+  ],
+  "src_files": [
+   "exp/zapslog/slog.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-03T09:12:03-07:00",
+  "subject": "zapslog: Drop HandlerOptions.New, use NewHandler (#1315)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "24b79770f15487182d38aec5d3fcb34c7fb8fe66": {
+  "task": "24b79770f15487182d38aec5d3fcb34c7fb8fe66",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_test.go"
+  ],
+  "src_files": [
+   "logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-07T09:41:42+07:00",
+  "subject": "Add Name() to Logger (#1273)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "1155ed31d6c730acbade1eb0d8c4fac021dd20a6": {
+  "task": "1155ed31d6c730acbade1eb0d8c4fac021dd20a6",
+  "target_tests": [
+   "./exp/zapfield"
+  ],
+  "test_files": [
+   "exp/zapfield/zapfield_test.go"
+  ],
+  "src_files": [
+   "exp/zapfield/zapfield.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-06T11:49:45-07:00",
+  "subject": "Introduce Str + Strs generic string helpers (#1281)",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f2f1f41bca85b8a97b1bc90f24eadf390c425a07": {
+  "task": "f2f1f41bca85b8a97b1bc90f24eadf390c425a07",
+  "target_tests": [
+   "./exp/zapslog"
+  ],
+  "test_files": [
+   "exp/zapslog/example_test.go",
+   "exp/zapslog/slog_test.go"
+  ],
+  "src_files": [
+   "exp/zapslog/doc.go",
+   "exp/zapslog/slog.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-03-17T21:15:50+08:00",
+  "subject": "[Feature] Add  experiment `zapslog` package to integrate with slog (#1246)",
+  "src_churn": 214,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "54862f5ff9f1af9a2b61b4c5fb3ec499b5912d58": {
+  "task": "54862f5ff9f1af9a2b61b4c5fb3ec499b5912d58",
+  "target_tests": [
+   "./benchmarks"
+  ],
+  "test_files": [
+   "benchmarks/scenario_bench_test.go",
+   "benchmarks/slog_test.go"
+  ],
+  "src_files": [
+   "internal/readme/readme.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-03-16T01:44:09-04:00",
+  "subject": "benchmark: add slog (#1245)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9b86a50a3e27e0e12ccb6b47288de27df7fd3d5b": {
+  "task": "9b86a50a3e27e0e12ccb6b47288de27df7fd3d5b",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "sugar_test.go"
+  ],
+  "src_files": [
+   "sugar.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-15T09:13:25-07:00",
+  "subject": "SugaredLogger: Turn error into zap.Error  (#1185)",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7cabba7950dca373f2a057217620a7421ff2afcb": {
+  "task": "7cabba7950dca373f2a057217620a7421ff2afcb",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "sink_test.go",
+   "sink_windows_test.go",
+   "writer_test.go"
+  ],
+  "src_files": [
+   "sink.go",
+   "writer.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-12T09:04:47-07:00",
+  "subject": "Open absolute paths as files, limited Windows support (#1159)",
+  "src_churn": 102,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "eae3743bc3e91db68bf977bc563263d4cb60777c": {
+  "task": "eae3743bc3e91db68bf977bc563263d4cb60777c",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_test.go",
+   "sugar_test.go"
+  ],
+  "src_files": [
+   "logger.go",
+   "sugar.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-29T17:08:06-07:00",
+  "subject": "Logger, SugaredLogger: Add Level method (#1148)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "23d6cc75062ae86d8b27f973f2878b387f7dec20": {
+  "task": "23d6cc75062ae86d8b27f973f2878b387f7dec20",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "array_go118_test.go"
+  ],
+  "src_files": [
+   "array_go118.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-23T18:50:39-04:00",
+  "subject": "Add Stringers field constructor for slices of Stringer-compatible objects (#1155)",
+  "src_churn": 34,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "19a5d8ab78285961f45bffddf88e5630bee984d5": {
+  "task": "19a5d8ab78285961f45bffddf88e5630bee984d5",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "writer_test.go"
+  ],
+  "src_files": [
+   "writer.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-16T05:50:52-07:00",
+  "subject": "Open: expose error cause, test for fs.ErrNotExist (#1149)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "78c80fbae8e745f49704cca337f9ad0eca1ca93f": {
+  "task": "78c80fbae8e745f49704cca337f9ad0eca1ca93f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_test.go"
+  ],
+  "src_files": [
+   "logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-22T16:02:48-07:00",
+  "subject": "Logger: Add Log method (#1118)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e06e09a6d396031c89b87383eef3cad6f647cf2c": {
+  "task": "e06e09a6d396031c89b87383eef3cad6f647cf2c",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "example_test.go",
+   "logger_test.go"
+  ],
+  "src_files": [
+   "logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-03T10:34:29-07:00",
+  "subject": "Add Must(*Logger, error) *Logger function (#1105)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9e61a39e216ee8b356cef2dbfb0e7872a9292e74": {
+  "task": "9e61a39e216ee8b356cef2dbfb0e7872a9292e74",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_test.go"
+  ],
+  "src_files": [
+   "logger.go",
+   "options.go",
+   "zapcore/entry.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-04-29T10:17:02-07:00",
+  "subject": "CheckWriteHook: Don't allow Noop action (#1089)",
+  "src_churn": 47,
+  "size": "M",
+  "baseline_failing": [
+   "go.uber.org/zap::TestLoggerFatalOnNoop"
+  ],
+  "gold_clean": true
+ },
+ "d38507c4e0f79e79e89f06b6ef570e216921ace9": {
+  "task": "d38507c4e0f79e79e89f06b6ef570e216921ace9",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "sugar_test.go"
+  ],
+  "src_files": [
+   "sugar.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-04-13T01:43:07+09:00",
+  "subject": "SugaredLogger: Add *ln variants (#1080)",
+  "src_churn": 72,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1d435ba52bfab52b187ef66596203ddcf65e51cb": {
+  "task": "1d435ba52bfab52b187ef66596203ddcf65e51cb",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "sugar_test.go"
+  ],
+  "src_files": [
+   "sugar.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-04-08T10:16:09-07:00",
+  "subject": "SugaredLogger: Add WithOptions (#1079)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cac228a27d181e5418fe1b86fbbae02c0590d050": {
+  "task": "cac228a27d181e5418fe1b86fbbae02c0590d050",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "array_go118_test.go",
+   "example_go118_test.go",
+   "example_test.go"
+  ],
+  "src_files": [
+   "array_go118.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-18T15:52:04-07:00",
+  "subject": "Add ObjectValues field constructor",
+  "src_churn": 82,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1ab8406ea1e9164e3c67302a2e5700f110cc91e7": {
+  "task": "1ab8406ea1e9164e3c67302a2e5700f110cc91e7",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "array_go118_test.go",
+   "example_go118_test.go"
+  ],
+  "src_files": [
+   "array_go118.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-18T16:11:43-07:00",
+  "subject": "Add Objects field constructor for array of objects",
+  "src_churn": 54,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "32a858eb8445a4ccb856a2bbeecef7201c067ff8": {
+  "task": "32a858eb8445a4ccb856a2bbeecef7201c067ff8",
+  "target_tests": [
+   "./benchmarks"
+  ],
+  "test_files": [
+   "benchmarks/kit_test.go"
+  ],
+  "src_files": [
+   "zaptest/observer/observer.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-15T14:39:27-07:00",
+  "subject": "CI: Run against Go 1.17 and 1.18 (#1068)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": false
+ },
+ "a7613b2969c327fe3557f4a59440da8c4bcd9a05": {
+  "task": "a7613b2969c327fe3557f4a59440da8c4bcd9a05",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/json_encoder_test.go"
+  ],
+  "src_files": [
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-02-04T17:14:16+01:00",
+  "subject": "JSON Encoder: Don't panic if EncodeLevel unset (#1058)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestNoEncodeLevelSupplied",
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "a1155d9e0204a6fa8bd48177b4b028e26cf02eb7": {
+  "task": "a1155d9e0204a6fa8bd48177b4b028e26cf02eb7",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_bench_test.go",
+   "stacktrace_test.go"
+  ],
+  "src_files": [
+   "logger.go",
+   "stacktrace.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-01-27T08:54:04-08:00",
+  "subject": "Optimize AddCaller+AddStacktrace by sharing stacks (#1052)",
+  "src_churn": 242,
+  "size": "L",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": false
+ },
+ "3f20106b7d58ac39493a3f02378ff13446373773": {
+  "task": "3f20106b7d58ac39493a3f02378ff13446373773",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "clock_test.go",
+   "global_test.go",
+   "logger_test.go",
+   "sugar_test.go"
+  ],
+  "src_files": [
+   "logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-01-24T17:48:33-08:00",
+  "subject": "lint: Remove redundant embedded field accesses (#1051)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": false
+ },
+ "c087e079edefbb0aca0d5a3eeab167b61fff6093": {
+  "task": "c087e079edefbb0aca0d5a3eeab167b61fff6093",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "level_test.go"
+  ],
+  "src_files": [
+   "level.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-01-14T09:40:43+01:00",
+  "subject": "zap: Add ParseAtomicLevel func (#1048)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e751939b68425b6aedd6bbf93704363c482880da": {
+  "task": "e751939b68425b6aedd6bbf93704363c482880da",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/level_test.go"
+  ],
+  "src_files": [
+   "zapcore/level.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-01-13T21:34:39+01:00",
+  "subject": "zapcore: Add ParseLevel (#1047)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "369c1bdf2a994a436ea89247432544ad7184020b": {
+  "task": "369c1bdf2a994a436ea89247432544ad7184020b",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/json_encoder_impl_test.go",
+   "zapcore/json_encoder_test.go"
+  ],
+  "src_files": [
+   "zapcore/encoder.go",
+   "zapcore/json_encoder.go",
+   "zapcore/reflected_encoder.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-12-15T07:07:33+05:30",
+  "subject": "feat: support custom ReflectType encoder (#1039)",
+  "src_churn": 58,
+  "size": "M",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "9367581ad2e434689582eb20f68ca9b65e73da55": {
+  "task": "9367581ad2e434689582eb20f68ca9b65e73da55",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/sampler_test.go"
+  ],
+  "src_files": [
+   "zapcore/sampler.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-12-08T13:17:55-08:00",
+  "subject": "sampler: Support thereafter of zero (#1033)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestSamplerWithZeroThereafter",
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "7a9e717dc0c5cb5059ad477e35945e31bd8304a1": {
+  "task": "7a9e717dc0c5cb5059ad477e35945e31bd8304a1",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/encoder_test.go"
+  ],
+  "src_files": [
+   "zapcore/console_encoder.go",
+   "zapcore/encoder.go",
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-11-09T13:26:20+09:00",
+  "subject": "Added SkipLineEnding to zapcore.EncoderConfig (#989)",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "b62116b3231598b4b3e30bcc462254320e766f85": {
+  "task": "b62116b3231598b4b3e30bcc462254320e766f85",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/json_encoder_impl_test.go",
+   "zapcore/memory_encoder_test.go"
+  ],
+  "src_files": [
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-11-08T15:05:18-05:00",
+  "subject": "jsonEncoder: Close namespaces opened in an object (#1017)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestJSONEncoderArrays",
+   "go.uber.org/zap/zapcore::TestJSONEncoderArrays/object_(with_nested_namespace)_then_string",
+   "go.uber.org/zap/zapcore::TestJSONEncoderObjectFields",
+   "go.uber.org/zap/zapcore::TestJSONEncoderObjectFields/multiple_open_namespaces",
+   "go.uber.org/zap/zapcore::TestJSONEncoderObjectFields/object_(with_nested_namespace)",
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "221696890252bfa141f23b303652c37fe6d7a9ec": {
+  "task": "221696890252bfa141f23b303652c37fe6d7a9ec",
+  "target_tests": [
+   "./zapgrpc/internal/test"
+  ],
+  "test_files": [
+   "zapgrpc/internal/test/grpc_test.go"
+  ],
+  "src_files": [
+   "zapgrpc/internal/test/grpc.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-11-05T10:54:02-07:00",
+  "subject": "Update benchmarks (#1024)",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": false
+ },
+ "10d89a76cc8b9787e408aee8882e40a8bd29c585": {
+  "task": "10d89a76cc8b9787e408aee8882e40a8bd29c585",
+  "target_tests": [
+   "./internal/ztest",
+   "./zapcore"
+  ],
+  "test_files": [
+   "internal/ztest/clock_test.go",
+   "zapcore/buffered_write_syncer_test.go",
+   "zapcore/clock_test.go",
+   "zapcore/sampler_test.go"
+  ],
+  "src_files": [
+   "internal/ztest/clock.go",
+   "zapcore/clock.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-09-10T15:49:26-07:00",
+  "subject": "zapcore: Unflake TestSamplerConcurrent (#1012)",
+  "src_churn": 54,
+  "size": "M",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "5e08337298b78f832ef87173a3b7203ecb61fc58": {
+  "task": "5e08337298b78f832ef87173a3b7203ecb61fc58",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/json_encoder_bench_test.go",
+   "zapcore/json_encoder_impl_test.go"
+  ],
+  "src_files": [
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-09-10T14:13:03-07:00",
+  "subject": "JSON: Fix complex64 encoding precision (#1011)",
+  "src_churn": 58,
+  "size": "M",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestJSONEncoderObjectFields",
+   "go.uber.org/zap/zapcore::TestJSONEncoderObjectFields/complex64#01",
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "305c249974e46e5f60704efc2911a04fa4ba9f55": {
+  "task": "305c249974e46e5f60704efc2911a04fa4ba9f55",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/json_encoder_test.go"
+  ],
+  "src_files": [
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-09-08T13:28:53-07:00",
+  "subject": "json: Fix float32 encoding and add test (#1003)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestJSONEncodeEntry",
+   "go.uber.org/zap/zapcore::TestJSONEncodeEntry/info_entry_with_some_fields",
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "914c4ff628cdc5329a10e22b46b8e0697da23b0e": {
+  "task": "914c4ff628cdc5329a10e22b46b8e0697da23b0e",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/json_encoder_test.go"
+  ],
+  "src_files": [
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-09-08T23:23:52+05:30",
+  "subject": "json: Fix encoding complex with negative i (#1001)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestJSONEncodeEntry",
+   "go.uber.org/zap/zapcore::TestJSONEncodeEntry/info_entry_with_some_fields",
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "007a55e182f26b2d1def98d192078af9c365348f": {
+  "task": "007a55e182f26b2d1def98d192078af9c365348f",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/sampler_test.go"
+  ],
+  "src_files": [
+   "zapcore/sampler.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-30T17:53:27-07:00",
+  "subject": "Discard counters for out-of-bounds levels (#975)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestSamplerUnknownLevels",
+   "go.uber.org/zap/zapcore::TestSamplerUnknownLevels/Level(-2)",
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "7ea57ce36ae5d9a4816ba3bfeb00fb68a46c2ea3": {
+  "task": "7ea57ce36ae5d9a4816ba3bfeb00fb68a46c2ea3",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "logger_test.go"
+  ],
+  "src_files": [
+   "logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-28T11:59:20-07:00",
+  "subject": "NopLogger: Fix nil Clock panic",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestNopLogger",
+   "go.uber.org/zap::TestNopLogger/DPanic"
+  ],
+  "gold_clean": false
+ },
+ "d5c2a1a70f518ebfa95414f78ba4ac1f6de2d18c": {
+  "task": "d5c2a1a70f518ebfa95414f78ba4ac1f6de2d18c",
+  "target_tests": [
+   "./zapio"
+  ],
+  "test_files": [
+   "zapio/writer_test.go"
+  ],
+  "src_files": [
+   "zapio/writer.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-24T18:04:12-07:00",
+  "subject": "Add zapio.Writer (#971)",
+  "src_churn": 120,
+  "size": "L",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "5afb307f5522c834363a39fe082557270c861245": {
+  "task": "5afb307f5522c834363a39fe082557270c861245",
+  "target_tests": [
+   "./buffer"
+  ],
+  "test_files": [
+   "buffer/buffer_test.go"
+  ],
+  "src_files": [
+   "buffer/buffer.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-24T23:01:11+03:00",
+  "subject": "Add Buffer.WriteByte and WriteString methods (#691)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "fb71758054e7cd2eace15c75474540e93277d3db": {
+  "task": "fb71758054e7cd2eace15c75474540e93277d3db",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/buffered_write_syncer_test.go"
+  ],
+  "src_files": [
+   "zapcore/buffered_write_syncer.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-25T03:53:20+09:00",
+  "subject": "zapcore: add stopped for Stop method called exactly once (#966)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [
+   "go.uber.org/zap/zapcore::TestBufferWriter",
+   "go.uber.org/zap/zapcore::TestBufferWriter/stop_twice",
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": true
+ },
+ "845ca51d5b8d9fed9fe14f35ab13b6b160d5762d": {
+  "task": "845ca51d5b8d9fed9fe14f35ab13b6b160d5762d",
+  "target_tests": [
+   "./internal/pool"
+  ],
+  "test_files": [
+   "internal/pool/pool_test.go"
+  ],
+  "src_files": [
+   "buffer/pool.go",
+   "error.go",
+   "internal/pool/pool.go",
+   "stacktrace.go",
+   "zapcore/console_encoder.go",
+   "zapcore/entry.go",
+   "zapcore/error.go",
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "hard",
+  "authored": "2023-03-21T10:43:32-04:00",
+  "subject": "internal: Add and use a generic pool instead of using sync.Pool directly (#1262)",
+  "src_churn": 156,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "71ecc42cb266598d06797bffb795187666359ec0": {
+  "task": "71ecc42cb266598d06797bffb795187666359ec0",
+  "target_tests": [
+   "./",
+   "./internal/exit",
+   "./zapcore"
+  ],
+  "test_files": [
+   "internal/exit/exit_test.go",
+   "logger_test.go",
+   "zapcore/entry_test.go"
+  ],
+  "src_files": [
+   "internal/exit/exit.go",
+   "logger.go",
+   "options.go",
+   "zapcore/entry.go"
+  ],
+  "pool": "hard",
+  "authored": "2022-04-26T23:46:15+02:00",
+  "subject": "Support arbitrary hook for fatal logs (#1088)",
+  "src_churn": 94,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "76996732cc3439fb985593e7db19bb48aaf9e94b": {
+  "task": "76996732cc3439fb985593e7db19bb48aaf9e94b",
+  "target_tests": [
+   "./",
+   "./zapcore"
+  ],
+  "test_files": [
+   "clock_test.go",
+   "zapcore/clock_test.go"
+  ],
+  "src_files": [
+   "clock.go",
+   "logger.go",
+   "options.go",
+   "zapcore/clock.go"
+  ],
+  "pool": "hard",
+  "authored": "2021-05-25T09:57:47-07:00",
+  "subject": "clock: Move to zapcore (#950)",
+  "src_churn": 65,
+  "size": "M",
+  "baseline_failing": [
+   "go.uber.org/zap::TestConfig",
+   "go.uber.org/zap::TestConfig/development",
+   "go.uber.org/zap::TestConfig/production",
+   "go.uber.org/zap::TestConfigWithSamplingHook",
+   "go.uber.org/zap::TestLoggerAddCaller",
+   "go.uber.org/zap::TestSugarAddCaller"
+  ],
+  "gold_clean": false
+ },
+ "f8ef92631288f7c470cee0675ff455540486a83e": {
+  "task": "f8ef92631288f7c470cee0675ff455540486a83e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "clock_test.go"
+  ],
+  "src_files": [
+   "clock.go",
+   "logger.go",
+   "options.go",
+   "zapcore/entry.go"
+  ],
+  "pool": "hard",
+  "authored": "2021-01-08T03:40:07+03:00",
+  "subject": "Add WithClock Option (#897)",
+  "src_churn": 58,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2314926ec34c23ee21f3dd4399438469668f8097": {
+  "task": "2314926ec34c23ee21f3dd4399438469668f8097",
+  "target_tests": [
+   "./",
+   "./zapcore"
+  ],
+  "test_files": [
+   "logger_test.go",
+   "zapcore/console_encoder_test.go",
+   "zapcore/encoder_test.go",
+   "zapcore/json_encoder_test.go"
+  ],
+  "src_files": [
+   "config.go",
+   "logger.go",
+   "options.go",
+   "zapcore/console_encoder.go",
+   "zapcore/encoder.go",
+   "zapcore/entry.go",
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "hard",
+  "authored": "2020-08-15T00:23:37+07:00",
+  "subject": "Add New Function Log Entry (#844)",
+  "src_churn": 83,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f85c78b1dd998214c5f2138155b320a4a43fbe36": {
+  "task": "f85c78b1dd998214c5f2138155b320a4a43fbe36",
+  "target_tests": [
+   "./zaptest"
+  ],
+  "test_files": [
+   "zaptest/timeout_test.go",
+   "zaptest/writer_test.go"
+  ],
+  "src_files": [
+   "internal/ztest/timeout.go",
+   "zaptest/doc.go",
+   "zaptest/timeout.go",
+   "zaptest/writer.go",
+   "zaptest/writer_go_19.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-10-30T16:38:06-07:00",
+  "subject": "Make zaptest a wrapper around internal/ztest",
+  "src_churn": 103,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e15639dab1b6ca5a651fe7ebfd8d682683b7d6a8": {
+  "task": "e15639dab1b6ca5a651fe7ebfd8d682683b7d6a8",
+  "target_tests": [
+   "./internal/multierror",
+   "./zapcore"
+  ],
+  "test_files": [
+   "internal/multierror/multierror_test.go",
+   "zapcore/json_encoder_impl_test.go"
+  ],
+  "src_files": [
+   "internal/multierror/multierror.go",
+   "sugar.go",
+   "writer.go",
+   "zapcore/entry.go",
+   "zapcore/hook.go",
+   "zapcore/tee.go",
+   "zapcore/write_syncer.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-06-27T17:25:10-07:00",
+  "subject": "Use go.uber.org/multierr (#458)",
+  "src_churn": 137,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cea6c27e79e5fd11f29021359e19bb5d02be1682": {
+  "task": "cea6c27e79e5fd11f29021359e19bb5d02be1682",
+  "target_tests": [
+   "./zapcore"
+  ],
+  "test_files": [
+   "zapcore/encoder_test.go"
+  ],
+  "src_files": [
+   "config.go",
+   "zapcore/console_encoder.go",
+   "zapcore/encoder.go",
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-05-05T19:16:31+01:00",
+  "subject": "Make line endings configurable (#424)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c0dfce3bb4a0d64523ce6bbb2c9e197a3d3ea861": {
+  "task": "c0dfce3bb4a0d64523ce6bbb2c9e197a3d3ea861",
+  "target_tests": [
+   "./buffer",
+   "./zapcore"
+  ],
+  "test_files": [
+   "buffer/buffer_test.go",
+   "buffer/pool_test.go",
+   "zapcore/console_encoder_bench_test.go",
+   "zapcore/json_encoder_bench_test.go"
+  ],
+  "src_files": [
+   "buffer/buffer.go",
+   "buffer/pool.go",
+   "internal/bufferpool/bufferpool.go",
+   "internal/multierror/multierror.go",
+   "stacktrace.go",
+   "zapcore/console_encoder.go",
+   "zapcore/core.go",
+   "zapcore/entry.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-03-14T16:08:57-07:00",
+  "subject": "Expose Buffer pools to third-party encoders (#376)",
+  "src_churn": 111,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "294882331e38cb94ce961785f566b850b96f8f8c": {
+  "task": "294882331e38cb94ce961785f566b850b96f8f8c",
+  "target_tests": [
+   "./",
+   "./zapcore"
+  ],
+  "test_files": [
+   "array_test.go",
+   "field_test.go",
+   "logger_bench_test.go",
+   "zapcore/field_test.go",
+   "zapcore/json_encoder_impl_test.go"
+  ],
+  "src_files": [
+   "array.go",
+   "field.go",
+   "zapcore/encoder.go",
+   "zapcore/field.go",
+   "zapcore/json_encoder.go",
+   "zapcore/memory_encoder.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-03-15T00:43:53+03:00",
+  "subject": "Add ByteString API (#366)",
+  "src_churn": 135,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "640110d9443f2aaa4b3fd389bc7ad85be9e71eec": {
+  "task": "640110d9443f2aaa4b3fd389bc7ad85be9e71eec",
+  "target_tests": [
+   "./",
+   "./benchmarks",
+   "./zapcore"
+  ],
+  "test_files": [
+   "benchmarks/zap_test.go",
+   "config_test.go",
+   "zapcore/encoder_test.go",
+   "zapcore/entry_test.go"
+  ],
+  "src_files": [
+   "config.go",
+   "zapcore/console_encoder.go",
+   "zapcore/encoder.go",
+   "zapcore/entry.go",
+   "zapcore/json_encoder.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-03-14T21:12:38+03:00",
+  "subject": "Make caller serialization configurable (#327)",
+  "src_churn": 120,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ed01b7b57e0bb0d81c1f013cb57eda0fc784c8d0": {
+  "task": "ed01b7b57e0bb0d81c1f013cb57eda0fc784c8d0",
+  "target_tests": [
+   "./",
+   "./zapcore"
+  ],
+  "test_files": [
+   "logger_test.go",
+   "zapcore/core_test.go",
+   "zapcore/sampler_test.go",
+   "zapcore/tee_test.go"
+  ],
+  "src_files": [
+   "internal/observer/observer.go",
+   "logger.go",
+   "sugar.go",
+   "zapcore/core.go",
+   "zapcore/tee.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-03-10T07:51:20-08:00",
+  "subject": "Add APIs to support buffering (#364)",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}

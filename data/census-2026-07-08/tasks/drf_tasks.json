@@ -1,0 +1,2733 @@
+{
+ "fbb02d9be78b1e232784dbb813c3fa118c1ba076": {
+  "task": "fbb02d9be78b1e232784dbb813c3fa118c1ba076",
+  "target_tests": [
+   "tests/test_views.py"
+  ],
+  "test_files": [
+   "tests/test_views.py"
+  ],
+  "src_files": [
+   "rest_framework/compat.py",
+   "rest_framework/views.py"
+  ],
+  "authored": "2026-06-26T00:24:23+01:00",
+  "subject": "Replace `cc_delim_re usage` with `split_header_value` for Django 6.1+ compatibility (#9978)",
+  "baseline_failing": [],
+  "src_churn": 18,
+  "size": "S",
+  "gold_clean": true
+ },
+ "cf582fb58e9e5ffcc8ed78a2cb9aaa8f4865666a": {
+  "task": "cf582fb58e9e5ffcc8ed78a2cb9aaa8f4865666a",
+  "target_tests": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "src_files": [
+   "rest_framework/schemas/openapi.py"
+  ],
+  "authored": "2026-06-10T10:40:50+05:00",
+  "subject": "Fix OpenAPI zero numeric bounds for list children (#9977)",
+  "baseline_failing": [],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "2a910c8c2b31b857db7695c83d27ef3cf70a4054": {
+  "task": "2a910c8c2b31b857db7695c83d27ef3cf70a4054",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "authored": "2026-06-09T18:01:13+09:00",
+  "subject": "fix: Handle unhashable BooleanField representation values (#9973)",
+  "baseline_failing": [],
+  "src_churn": 13,
+  "size": "S",
+  "gold_clean": false
+ },
+ "3e40eb4ec395c5925ee1100d44acc22cb2af2dc7": {
+  "task": "3e40eb4ec395c5925ee1100d44acc22cb2af2dc7",
+  "target_tests": [
+   "tests/test_renderers.py"
+  ],
+  "test_files": [
+   "tests/test_renderers.py"
+  ],
+  "src_files": [
+   "rest_framework/renderers.py"
+  ],
+  "authored": "2026-05-13T01:43:14-07:00",
+  "subject": "Fix#6855 browsable api extra action (#9934)",
+  "baseline_failing": [],
+  "src_churn": 11,
+  "size": "S",
+  "gold_clean": true
+ },
+ "65aa4b8608e3fd5f32d1d077504e8671991ebe28": {
+  "task": "65aa4b8608e3fd5f32d1d077504e8671991ebe28",
+  "target_tests": [
+   "tests/test_fields.py",
+   "tests/test_serializer_lists.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py",
+   "tests/test_serializer_lists.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "authored": "2026-04-02T10:52:04+03:00",
+  "subject": "Fix partial form data updates involving `ListField` (#9902)",
+  "baseline_failing": [],
+  "src_churn": 14,
+  "size": "S",
+  "gold_clean": false
+ },
+ "84ae65b59d3223d8508ecbd08c58945b6bf9cb97": {
+  "task": "84ae65b59d3223d8508ecbd08c58945b6bf9cb97",
+  "target_tests": [
+   "tests/test_model_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_model_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/utils/field_mapping.py"
+  ],
+  "authored": "2026-03-29T11:57:50+02:00",
+  "subject": "Include `choices` param for non-editable fields (#9929)",
+  "baseline_failing": [],
+  "src_churn": 7,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "c0407dee6ef8a5603c2d5d34373d724be7b98188": {
+  "task": "c0407dee6ef8a5603c2d5d34373d724be7b98188",
+  "target_tests": [
+   "tests/test_renderers.py"
+  ],
+  "test_files": [
+   "tests/test_renderers.py"
+  ],
+  "src_files": [
+   "rest_framework/renderers.py"
+  ],
+  "authored": "2026-03-24T19:56:42+05:30",
+  "subject": "Fix `HTMLFormRenderer` with empty `datetime` values (#9928)",
+  "baseline_failing": [],
+  "src_churn": 11,
+  "size": "S",
+  "gold_clean": true
+ },
+ "a4504226fc46d30d7cf079c9507c7bc435669116": {
+  "task": "a4504226fc46d30d7cf079c9507c7bc435669116",
+  "target_tests": [
+   "tests/test_fields.py",
+   "tests/test_serializer_nested.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py",
+   "tests/test_serializer_nested.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "authored": "2026-02-26T17:40:41+08:00",
+  "subject": "Preserve ordering in `MultipleChoiceField` (#9735)",
+  "baseline_failing": [],
+  "src_churn": 23,
+  "size": "S",
+  "gold_clean": false
+ },
+ "d6ffc95532f66f16df1230b5e95533c835520c66": {
+  "task": "d6ffc95532f66f16df1230b5e95533c835520c66",
+  "target_tests": [
+   "tests/test_authtoken.py"
+  ],
+  "test_files": [
+   "tests/test_authtoken.py"
+  ],
+  "src_files": [
+   "rest_framework/authtoken/admin.py"
+  ],
+  "authored": "2025-12-08T04:06:33+01:00",
+  "subject": "Updates for TokenAdmin. (#9836)",
+  "baseline_failing": [],
+  "src_churn": 5,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "f9f10e041f9b2a2c936ee54a437d4c255f76e626": {
+  "task": "f9f10e041f9b2a2c936ee54a437d4c255f76e626",
+  "target_tests": [
+   "tests/test_fields.py",
+   "tests/test_model_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py",
+   "tests/test_model_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py",
+   "rest_framework/serializers.py",
+   "rest_framework/settings.py"
+  ],
+  "authored": "2025-12-02T15:44:53+01:00",
+  "subject": "Bigint coerce to string (#9775)",
+  "baseline_failing": [],
+  "src_churn": 28,
+  "size": "S",
+  "gold_clean": false
+ },
+ "d692b87a2be24315717944736b306753ada9cfe7": {
+  "task": "d692b87a2be24315717944736b306753ada9cfe7",
+  "target_tests": [
+   "tests/test_decorators.py"
+  ],
+  "test_files": [
+   "tests/test_decorators.py"
+  ],
+  "src_files": [
+   "rest_framework/decorators.py"
+  ],
+  "authored": "2025-11-29T19:06:58+05:30",
+  "subject": "Add validation for decorator order with @api_view (#9821)",
+  "baseline_failing": [],
+  "src_churn": 26,
+  "size": "S",
+  "gold_clean": true
+ },
+ "ad0fea04de0b51657adc1cbc677034f562727684": {
+  "task": "ad0fea04de0b51657adc1cbc677034f562727684",
+  "target_tests": [
+   "tests/test_encoders.py"
+  ],
+  "test_files": [
+   "tests/test_encoders.py"
+  ],
+  "src_files": [
+   "rest_framework/utils/encoders.py"
+  ],
+  "authored": "2025-10-30T11:27:20+01:00",
+  "subject": "Add support for ipaddress objects in JSONEncoder (#9087)",
+  "baseline_failing": [],
+  "src_churn": 10,
+  "size": "S",
+  "gold_clean": true
+ },
+ "01659c075a9dedb6cb6d29ba23012d447aff0c8b": {
+  "task": "01659c075a9dedb6cb6d29ba23012d447aff0c8b",
+  "target_tests": [
+   "tests/test_renderers.py"
+  ],
+  "test_files": [
+   "tests/test_renderers.py"
+  ],
+  "src_files": [
+   "rest_framework/renderers.py"
+  ],
+  "authored": "2025-10-30T05:23:54-05:00",
+  "subject": "Fixed #5363 -- HTML5 datetime-local valid format HTMLFormRenderer (#9365)",
+  "baseline_failing": [],
+  "src_churn": 30,
+  "size": "S",
+  "gold_clean": true
+ },
+ "577bb3c81973eaa543e3eb47ae3bdd4c4968cc01": {
+  "task": "577bb3c81973eaa543e3eb47ae3bdd4c4968cc01",
+  "target_tests": [
+   "tests/test_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/serializers.py"
+  ],
+  "authored": "2025-10-14T03:22:23-03:00",
+  "subject": "Validation on ManyToManyField when default=None (#9790)",
+  "baseline_failing": [],
+  "src_churn": 7,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "9cf6efb4a8de4e99ee77217f088879889b4b3e85": {
+  "task": "9cf6efb4a8de4e99ee77217f088879889b4b3e85",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/serializers.py",
+   "rest_framework/validators.py"
+  ],
+  "authored": "2025-10-09T21:47:30+04:00",
+  "subject": "Support `violation_error_code` and `violation_error_message` from `UniqueConstraint` in `UniqueTogetherValidator` (#9766)",
+  "baseline_failing": [],
+  "src_churn": 31,
+  "size": "S",
+  "gold_clean": true
+ },
+ "cf923511e7bbd1d05b6919af9af4e5edd81f5b71": {
+  "task": "cf923511e7bbd1d05b6919af9af4e5edd81f5b71",
+  "target_tests": [
+   "tests/test_decorators.py"
+  ],
+  "test_files": [
+   "tests/test_decorators.py"
+  ],
+  "src_files": [
+   "rest_framework/decorators.py"
+  ],
+  "authored": "2025-09-20T11:12:17+01:00",
+  "subject": "Add missing decorators: `@versioning_class()`, `@content_negotiation_class()`, `@metadata_class()` for function based views (#9719)",
+  "baseline_failing": [],
+  "src_churn": 30,
+  "size": "S",
+  "gold_clean": true
+ },
+ "513ddb4ffbfaef9d0117b281121ffc7319106f2f": {
+  "task": "513ddb4ffbfaef9d0117b281121ffc7319106f2f",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/validators.py"
+  ],
+  "authored": "2025-08-13T06:53:25+02:00",
+  "subject": "Condition of UniqueTogetherValidator can be read-only (#9764)",
+  "baseline_failing": [],
+  "src_churn": 7,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "c8b6d3dcdf0a9fe04eb914e29e18efa42fe59a6c": {
+  "task": "c8b6d3dcdf0a9fe04eb914e29e18efa42fe59a6c",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/__init__.py",
+   "rest_framework/fields.py",
+   "rest_framework/settings.py"
+  ],
+  "authored": "2025-08-12T16:21:01+02:00",
+  "subject": "DurationField output format (#8532)",
+  "baseline_failing": [],
+  "src_churn": 45,
+  "size": "M",
+  "gold_clean": false
+ },
+ "e454758fb6edf1dcf5aa5417a388b940c871469c": {
+  "task": "e454758fb6edf1dcf5aa5417a388b940c871469c",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/serializers.py"
+  ],
+  "authored": "2025-06-10T14:47:28+03:00",
+  "subject": "Fix regression in unique_together validation with SerializerMethodField (#9712)",
+  "baseline_failing": [
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_accepts_custom_schema_generator",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_renders_openapi_json_schema",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_writes_schema_to_file_on_parameter",
+   "tests/schemas/test_openapi.py::TestGenerator::test_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_duplicate_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_mount_url_prefixed_to_paths",
+   "tests/schemas/test_openapi.py::TestGenerator::test_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_prefixed_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information_empty",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_timedelta_to_yaml_with_validator",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_json",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_yaml",
+   "tests/schemas/test_openapi.py::TestGenerator::test_serializer_model",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_auto_generated_apiview_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_duplicate_operation_id",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_rendering_without_aliases",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_safestring_render",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_name",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_operation_id_base",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_generation",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_plural",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_viewset",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_overridden_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_path_without_parameters",
+   "tests/test_validators.py::TestUniquenessTogetherValidation::test_uniq_together_validation_uses_model_fields_method_field",
+   "tests/test_validators.py::TestUniquenessTogetherValidation::test_uniq_together_validation_uses_model_fields_with_source_field"
+  ],
+  "src_churn": 3,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "543996711d323722a1017e376619ae462a726ada": {
+  "task": "543996711d323722a1017e376619ae462a726ada",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/validators.py"
+  ],
+  "authored": "2025-04-23T04:03:14-05:00",
+  "subject": "Fix `UniqueTogetherValidator` to handle fields w/ `source` attr (#9688)",
+  "baseline_failing": [
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_accepts_custom_schema_generator",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_renders_openapi_json_schema",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_writes_schema_to_file_on_parameter",
+   "tests/schemas/test_openapi.py::TestGenerator::test_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_duplicate_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_mount_url_prefixed_to_paths",
+   "tests/schemas/test_openapi.py::TestGenerator::test_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_prefixed_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information_empty",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_timedelta_to_yaml_with_validator",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_json",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_yaml",
+   "tests/schemas/test_openapi.py::TestGenerator::test_serializer_model",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_auto_generated_apiview_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_duplicate_operation_id",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_rendering_without_aliases",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_safestring_render",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_name",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_operation_id_base",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_generation",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_plural",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_viewset",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_overridden_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_path_without_parameters",
+   "tests/test_validators.py::TestUniqueConstraintValidation::test_unique_constraint_source"
+  ],
+  "src_churn": 3,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "17e95604f5056c4f5ceb40ca30cd349acd74c101": {
+  "task": "17e95604f5056c4f5ceb40ca30cd349acd74c101",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/compat.py",
+   "rest_framework/serializers.py",
+   "rest_framework/validators.py"
+  ],
+  "authored": "2025-02-17T10:01:32+02:00",
+  "subject": "Fix unique together validator doesn't respect condition's fields (#9360)",
+  "baseline_failing": [
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_accepts_custom_schema_generator",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_renders_openapi_json_schema",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_writes_schema_to_file_on_parameter",
+   "tests/schemas/test_openapi.py::TestGenerator::test_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_duplicate_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_mount_url_prefixed_to_paths",
+   "tests/schemas/test_openapi.py::TestGenerator::test_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_prefixed_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information_empty",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_timedelta_to_yaml_with_validator",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_json",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_yaml",
+   "tests/schemas/test_openapi.py::TestGenerator::test_serializer_model",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_auto_generated_apiview_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_duplicate_operation_id",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_rendering_without_aliases",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_safestring_render",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_name",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_operation_id_base",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_generation",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_plural",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_viewset",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_overridden_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_path_without_parameters",
+   "tests/test_validators.py::TestUniqueConstraintValidation::test_repr",
+   "tests/test_validators.py::TestUniqueConstraintValidation::test_unique_together_condition",
+   "tests/test_validators.py::TestUniqueConstraintValidation::test_unique_together_condition_fields_required"
+  ],
+  "src_churn": 106,
+  "size": "M",
+  "gold_clean": true
+ },
+ "4a1d773b8f7d86e08e3fd7c6809fd1092eb69d6e": {
+  "task": "4a1d773b8f7d86e08e3fd7c6809fd1092eb69d6e",
+  "target_tests": [
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "rest_framework/test.py"
+  ],
+  "authored": "2025-01-10T22:56:36+04:00",
+  "subject": "Fixed regression that tests using format still work (#9615)",
+  "baseline_failing": [
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_accepts_custom_schema_generator",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_renders_openapi_json_schema",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_writes_schema_to_file_on_parameter",
+   "tests/schemas/test_openapi.py::TestGenerator::test_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_duplicate_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_mount_url_prefixed_to_paths",
+   "tests/schemas/test_openapi.py::TestGenerator::test_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_prefixed_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information_empty",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_timedelta_to_yaml_with_validator",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_json",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_yaml",
+   "tests/schemas/test_openapi.py::TestGenerator::test_serializer_model",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_auto_generated_apiview_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_duplicate_operation_id",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_rendering_without_aliases",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_safestring_render",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_name",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_operation_id_base",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_generation",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_plural",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_viewset",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_overridden_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_path_without_parameters",
+   "tests/test_testing.py::TestAPITestClient::test_delete_based_on_format"
+  ],
+  "src_churn": 11,
+  "size": "S",
+  "gold_clean": true
+ },
+ "089f6a697445af20f52832db99f2ab94baea4ece": {
+  "task": "089f6a697445af20f52832db99f2ab94baea4ece",
+  "target_tests": [
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "rest_framework/test.py"
+  ],
+  "authored": "2024-12-28T11:22:21+01:00",
+  "subject": "support django 2.1 test client json data automatically serialized (#6511)",
+  "baseline_failing": [
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_accepts_custom_schema_generator",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_renders_openapi_json_schema",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_writes_schema_to_file_on_parameter",
+   "tests/schemas/test_openapi.py::TestGenerator::test_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_duplicate_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_mount_url_prefixed_to_paths",
+   "tests/schemas/test_openapi.py::TestGenerator::test_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_prefixed_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information_empty",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_timedelta_to_yaml_with_validator",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_json",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_yaml",
+   "tests/schemas/test_openapi.py::TestGenerator::test_serializer_model",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_auto_generated_apiview_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_duplicate_operation_id",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_rendering_without_aliases",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_safestring_render",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_name",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_operation_id_base",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_generation",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_plural",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_viewset",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_overridden_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_path_without_parameters",
+   "tests/test_testing.py::TestAPITestClient::test_post_encodes_data_based_on_json_content_type"
+  ],
+  "src_churn": 17,
+  "size": "S",
+  "gold_clean": true
+ },
+ "a8595a8eae2649b763f4882da643c1dc9183d6f1": {
+  "task": "a8595a8eae2649b763f4882da643c1dc9183d6f1",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/serializers.py"
+  ],
+  "authored": "2024-12-14T09:08:22Z",
+  "subject": "Fix raising on nullable fields part of `UniqueConstraint` (#9531)",
+  "baseline_failing": [
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_accepts_custom_schema_generator",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_renders_openapi_json_schema",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_writes_schema_to_file_on_parameter",
+   "tests/schemas/test_openapi.py::TestGenerator::test_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_duplicate_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_mount_url_prefixed_to_paths",
+   "tests/schemas/test_openapi.py::TestGenerator::test_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_prefixed_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information_empty",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_timedelta_to_yaml_with_validator",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_json",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_yaml",
+   "tests/schemas/test_openapi.py::TestGenerator::test_serializer_model",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_auto_generated_apiview_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_duplicate_operation_id",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_rendering_without_aliases",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_safestring_render",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_name",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_operation_id_base",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_generation",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_plural",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_viewset",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_overridden_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_path_without_parameters",
+   "tests/test_validators.py::TestUniqueConstraintValidation::test_nullable_unique_constraint_fields_are_not_required",
+   "tests/test_validators.py::TestUniquenessTogetherValidation::test_ignore_validation_for_missing_nullable_fields"
+  ],
+  "src_churn": 2,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "2ede857de0bbcc8863fadd6acdb1f8d5570d87dc": {
+  "task": "2ede857de0bbcc8863fadd6acdb1f8d5570d87dc",
+  "target_tests": [
+   "tests/test_middleware.py",
+   "tests/test_views.py",
+   "tests/test_viewsets.py"
+  ],
+  "test_files": [
+   "tests/test_middleware.py",
+   "tests/test_views.py",
+   "tests/test_viewsets.py"
+  ],
+  "src_files": [
+   "rest_framework/views.py",
+   "rest_framework/viewsets.py"
+  ],
+  "authored": "2024-09-07T12:21:18+01:00",
+  "subject": "Add official support for Django 5.1 (#9514)",
+  "baseline_failing": [
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_accepts_custom_schema_generator",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_renders_openapi_json_schema",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_writes_schema_to_file_on_parameter",
+   "tests/schemas/test_openapi.py::TestGenerator::test_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_duplicate_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_mount_url_prefixed_to_paths",
+   "tests/schemas/test_openapi.py::TestGenerator::test_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_prefixed_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information_empty",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_timedelta_to_yaml_with_validator",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_json",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_yaml",
+   "tests/schemas/test_openapi.py::TestGenerator::test_serializer_model",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_auto_generated_apiview_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_duplicate_operation_id",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_rendering_without_aliases",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_safestring_render",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_name",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_operation_id_base",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_generation",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_plural",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_viewset",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_overridden_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_path_without_parameters",
+   "tests/test_middleware.py::TestLoginRequiredMiddlewareCompat::test_class_based_view",
+   "tests/test_middleware.py::TestLoginRequiredMiddlewareCompat::test_function_based_view",
+   "tests/test_middleware.py::TestLoginRequiredMiddlewareCompat::test_viewset_list",
+   "tests/test_middleware.py::TestLoginRequiredMiddlewareCompat::test_viewset_list_action",
+   "tests/test_views.py::TestLoginRequiredMiddlewareCompat::test_class_based_view_opted_out",
+   "tests/test_views.py::TestLoginRequiredMiddlewareCompat::test_function_based_view_opted_out",
+   "tests/test_viewsets.py::InitializeViewSetsTestCase::test_login_required_middleware_compat"
+  ],
+  "src_churn": 13,
+  "size": "S",
+  "gold_clean": true
+ },
+ "125ad42eb3922cd5ce1f4b332c91baf6d6162fb3": {
+  "task": "125ad42eb3922cd5ce1f4b332c91baf6d6162fb3",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "authored": "2024-09-07T12:07:28+01:00",
+  "subject": "Accept integers as min/max values of DecimalField (#9515)",
+  "baseline_failing": [
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_accepts_custom_schema_generator",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_renders_openapi_json_schema",
+   "tests/schemas/test_managementcommand.py::GenerateSchemaTests::test_writes_schema_to_file_on_parameter",
+   "tests/schemas/test_openapi.py::TestGenerator::test_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_duplicate_component_name",
+   "tests/schemas/test_openapi.py::TestGenerator::test_mount_url_prefixed_to_paths",
+   "tests/schemas/test_openapi.py::TestGenerator::test_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_prefixed_paths_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_construction",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_information_empty",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_timedelta_to_yaml_with_validator",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_json",
+   "tests/schemas/test_openapi.py::TestGenerator::test_schema_rendering_to_yaml",
+   "tests/schemas/test_openapi.py::TestGenerator::test_serializer_model",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_auto_generated_apiview_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_duplicate_operation_id",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_rendering_without_aliases",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_openapi_yaml_safestring_render",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_name",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_custom_operation_id_base",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_generation",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_plural",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_operation_id_viewset",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_overridden_tags",
+   "tests/schemas/test_openapi.py::TestOperationIntrospection::test_path_without_parameters",
+   "tests/test_fields.py::TestMinMaxDecimalField::test_warning_when_not_decimal_types"
+  ],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "518eb22e67b443521f4a7e2be41cce603e59480b": {
+  "task": "518eb22e67b443521f4a7e2be41cce603e59480b",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/validators.py"
+  ],
+  "authored": "2024-08-05T03:36:50-07:00",
+  "subject": "Fix unique_together validation with source (#9482)",
+  "baseline_failing": [],
+  "src_churn": 13,
+  "size": "S",
+  "gold_clean": true
+ },
+ "8e304e1adbb0f99f91a15ed3abd379104bba3b89": {
+  "task": "8e304e1adbb0f99f91a15ed3abd379104bba3b89",
+  "target_tests": [
+   "tests/test_request.py"
+  ],
+  "test_files": [
+   "tests/test_request.py"
+  ],
+  "src_files": [
+   "rest_framework/request.py"
+  ],
+  "authored": "2024-07-17T12:51:39-04:00",
+  "subject": "Fixed AttributeError raised by data property being silently ignored (#9455)",
+  "baseline_failing": [],
+  "src_churn": 11,
+  "size": "S",
+  "gold_clean": true
+ },
+ "f74185b6ddd51758f5c54a4ac10e354de0c98f1e": {
+  "task": "f74185b6ddd51758f5c54a4ac10e354de0c98f1e",
+  "target_tests": [
+   "tests/test_htmlrenderer.py"
+  ],
+  "test_files": [
+   "tests/test_htmlrenderer.py"
+  ],
+  "src_files": [
+   "rest_framework/renderers.py"
+  ],
+  "authored": "2024-07-15T17:03:40+01:00",
+  "subject": "Fix get_template_context to handle also lists (#9467)",
+  "baseline_failing": [],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "e596f43c4e8183e4639996f95477b71eba3c8d80": {
+  "task": "e596f43c4e8183e4639996f95477b71eba3c8d80",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "authored": "2024-04-27T13:15:06+02:00",
+  "subject": "use warnings rather than logging a warning for DecimalField warnings (#9367)",
+  "baseline_failing": [],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "7f18ec1b536a90b1fc194ef6140a6dcd8b605051": {
+  "task": "7f18ec1b536a90b1fc194ef6140a6dcd8b605051",
+  "target_tests": [
+   "tests/test_pagination.py"
+  ],
+  "test_files": [
+   "tests/test_pagination.py"
+  ],
+  "src_files": [
+   "rest_framework/pagination.py"
+  ],
+  "authored": "2024-04-27T06:07:05-05:00",
+  "subject": "Revert \"Ensure CursorPagination respects nulls in the ordering field (#8912)\" (#9381)",
+  "baseline_failing": [],
+  "src_churn": 16,
+  "size": "S",
+  "gold_clean": true
+ },
+ "4ef3aaf0ad0e31efe13d3c503a7099915a7c8875": {
+  "task": "4ef3aaf0ad0e31efe13d3c503a7099915a7c8875",
+  "target_tests": [
+   "tests/test_metadata.py",
+   "tests/test_model_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_metadata.py",
+   "tests/test_model_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/metadata.py",
+   "rest_framework/utils/field_mapping.py"
+  ],
+  "authored": "2024-03-22T08:40:34Z",
+  "subject": "Revert #9030 (#9333)",
+  "baseline_failing": [],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "2ef77b18335322f10c8c6160b6f7794ff6bc92b7": {
+  "task": "2ef77b18335322f10c8c6160b6f7794ff6bc92b7",
+  "target_tests": [
+   "tests/browsable_api/test_browsable_api.py"
+  ],
+  "test_files": [
+   "tests/browsable_api/test_browsable_api.py"
+  ],
+  "src_files": [
+   "rest_framework/templatetags/rest_framework.py"
+  ],
+  "authored": "2024-02-20T01:28:04+03:00",
+  "subject": "Use POST method instead of GET to perform logout in browsable API (#9208)",
+  "baseline_failing": [],
+  "src_churn": 13,
+  "size": "S",
+  "gold_clean": false
+ },
+ "41edb3b9dde2105b9fb015ce6b8171e7822baa30": {
+  "task": "41edb3b9dde2105b9fb015ce6b8171e7822baa30",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/validators.py"
+  ],
+  "authored": "2024-01-26T02:36:18-08:00",
+  "subject": "Avoid unnecessary unique together checking (#9154)",
+  "baseline_failing": [],
+  "src_churn": 17,
+  "size": "S",
+  "gold_clean": false
+ },
+ "d32346bae55f3e4718a185fb60e9f7a28e389c85": {
+  "task": "d32346bae55f3e4718a185fb60e9f7a28e389c85",
+  "target_tests": [
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "rest_framework/utils/model_meta.py"
+  ],
+  "authored": "2023-10-04T19:03:10+02:00",
+  "subject": "Fix type name of `FieldInfo` namedtuple (#9124)",
+  "baseline_failing": [],
+  "src_churn": 2,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "5c07060ce0dcbdad1e38be8a509f5c23b6e9fc63": {
+  "task": "5c07060ce0dcbdad1e38be8a509f5c23b6e9fc63",
+  "target_tests": [
+   "tests/test_routers.py"
+  ],
+  "test_files": [
+   "tests/test_routers.py"
+  ],
+  "src_files": [
+   "rest_framework/routers.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-16T15:11:50+01:00",
+  "subject": "Use str as default path converter (#9066)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "da9288878b27479bd8b031b530337a346a82b104": {
+  "task": "da9288878b27479bd8b031b530337a346a82b104",
+  "target_tests": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "src_files": [
+   "rest_framework/schemas/openapi.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-13T08:36:19+04:00",
+  "subject": "Partial serializer should not have required fields (#7563)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7a9db57eaf829367601fbaac5f1811d1fcb712fb": {
+  "task": "7a9db57eaf829367601fbaac5f1811d1fcb712fb",
+  "target_tests": [
+   "tests/test_metadata.py",
+   "tests/test_model_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_metadata.py",
+   "tests/test_model_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/metadata.py",
+   "rest_framework/utils/field_mapping.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-07T12:05:54+05:30",
+  "subject": "Propagate 'default' from model_field to serializer field. (#9030)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "589b5dca9e7613f7742af8baed6ed870476dd23b": {
+  "task": "589b5dca9e7613f7742af8baed6ed870476dd23b",
+  "target_tests": [
+   "tests/test_serializer_lists.py"
+  ],
+  "test_files": [
+   "tests/test_serializer_lists.py"
+  ],
+  "src_files": [
+   "rest_framework/serializers.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-26T06:27:49+02:00",
+  "subject": "Allow to override child.run_validation call in ListSerializer (#8035)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b99df0cf780adc3d65362a4425f9bb6d85410bcb": {
+  "task": "b99df0cf780adc3d65362a4425f9bb6d85410bcb",
+  "target_tests": [
+   "tests/test_filters.py"
+  ],
+  "test_files": [
+   "tests/test_filters.py"
+  ],
+  "src_files": [
+   "rest_framework/compat.py",
+   "rest_framework/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-25T14:01:23+01:00",
+  "subject": "Align SearchFilter behaviour to django.contrib.admin search (#9017)",
+  "src_churn": 91,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5c3b6e496c9892463f48f6b50cf9a0f1d2c29e78": {
+  "task": "5c3b6e496c9892463f48f6b50cf9a0f1d2c29e78",
+  "target_tests": [
+   "tests/test_model_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_model_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/serializers.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-25T09:51:25+02:00",
+  "subject": "class name added to unkown field error (#9019)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7658ffd71d4ad07ddada20b2b9538b889ec02403": {
+  "task": "7658ffd71d4ad07ddada20b2b9538b889ec02403",
+  "target_tests": [
+   "tests/test_pagination.py"
+  ],
+  "test_files": [
+   "tests/test_pagination.py"
+  ],
+  "src_files": [
+   "rest_framework/pagination.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-15T02:26:56-07:00",
+  "subject": "Fix: Pagination response schemas. (#9049)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "66d86d0177673b90723664e3fde2919df66f2b60": {
+  "task": "66d86d0177673b90723664e3fde2919df66f2b60",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-13T20:50:49+08:00",
+  "subject": "Fix choices in ChoiceField to support IntEnum (#8955)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4f7e9ed3bbb0fb3567884ef4e3d340bc2f77bc68": {
+  "task": "4f7e9ed3bbb0fb3567884ef4e3d340bc2f77bc68",
+  "target_tests": [
+   "tests/test_filters.py"
+  ],
+  "test_files": [
+   "tests/test_filters.py"
+  ],
+  "src_files": [
+   "rest_framework/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-02T09:57:20+02:00",
+  "subject": "Fix SearchFilter renders field with invalid value (#9023)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9cfa4bd7cca19df0bc8e456d906c3ab7ce285cf4": {
+  "task": "9cfa4bd7cca19df0bc8e456d906c3ab7ce285cf4",
+  "target_tests": [
+   "tests/schemas/test_openapi.py",
+   "tests/schemas/views.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_openapi.py",
+   "tests/schemas/views.py"
+  ],
+  "src_files": [
+   "rest_framework/renderers.py",
+   "rest_framework/utils/encoders.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-17T08:48:25+05:30",
+  "subject": "Fix OpenAPI Schema yaml rendering for timedelta (#9007)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "71f87a586400074f1840276c5cf36fc7da1c2c4c": {
+  "task": "71f87a586400074f1840276c5cf36fc7da1c2c4c",
+  "target_tests": [
+   "tests/test_versioning.py"
+  ],
+  "test_files": [
+   "tests/test_versioning.py"
+  ],
+  "src_files": [
+   "rest_framework/versioning.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-14T06:24:09-07:00",
+  "subject": "Fix NamespaceVersioning ignoring DEFAULT_VERSION on non-None namespaces (#7278)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a180bde0fd965915718b070932418cabc831cee1": {
+  "task": "a180bde0fd965915718b070932418cabc831cee1",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-12T11:21:18-04:00",
+  "subject": "Permit mixed casing of string values for BooleanField validation (#8970)",
+  "src_churn": 51,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "02d9bfc2ddee0ddf1d6e9cb0e23a52b80fdb4242": {
+  "task": "02d9bfc2ddee0ddf1d6e9cb0e23a52b80fdb4242",
+  "target_tests": [
+   "tests/test_renderers.py"
+  ],
+  "test_files": [
+   "tests/test_renderers.py"
+  ],
+  "src_files": [
+   "rest_framework/renderers.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-12T16:28:28+03:00",
+  "subject": "Fixes `BrowsableAPIRenderer` for usage with `ListSerializer`. (#7530)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "376a5cbbba3f8df9c9db8c03a7c8fa2a6e6c05f4": {
+  "task": "376a5cbbba3f8df9c9db8c03a7c8fa2a6e6c05f4",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-04T07:24:07+02:00",
+  "subject": "remove dependency on pytz (#8984)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e2a4559c03247f69e85b2e0e7ede4e8b6201adc2": {
+  "task": "e2a4559c03247f69e85b2e0e7ede4e8b6201adc2",
+  "target_tests": [
+   "tests/test_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/serializers.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-29T19:03:11+05:00",
+  "subject": "Fix validation for ListSerializer (#8979)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d252d22343b9c9688db77b59aa72dabd540bd252": {
+  "task": "d252d22343b9c9688db77b59aa72dabd540bd252",
+  "target_tests": [
+   "tests/test_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py",
+   "rest_framework/serializers.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-24T10:59:42-03:00",
+  "subject": "Make set_value a method within `Serializer` (#8001)",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a25aac7d6739c43a4997829a0ff79cce12e8c0de": {
+  "task": "a25aac7d6739c43a4997829a0ff79cce12e8c0de",
+  "target_tests": [
+   "tests/test_versioning.py"
+  ],
+  "test_files": [
+   "tests/test_versioning.py"
+  ],
+  "src_files": [
+   "rest_framework/versioning.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-18T05:46:40+02:00",
+  "subject": "fix URLPathVersioning reverse fallback (#7247)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "99e8b4033efa44930ace40fb48a4d7bcd224f9fb": {
+  "task": "99e8b4033efa44930ace40fb48a4d7bcd224f9fb",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-09T16:50:29+02:00",
+  "subject": "feat: enforce Decimal type in min_value and max_value arguments of DecimalField (#8972)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e08e606c82afd0d5ec82b2c58badec11a4ce825e": {
+  "task": "e08e606c82afd0d5ec82b2c58badec11a4ce825e",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-03T12:08:07+05:00",
+  "subject": "Fix mapping for choice values (#8968)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f1a11d41cbd1d16871e8d8426cbf290da57dfb6d": {
+  "task": "f1a11d41cbd1d16871e8d8426cbf290da57dfb6d",
+  "target_tests": [
+   "tests/test_pagination.py"
+  ],
+  "test_files": [
+   "tests/test_pagination.py"
+  ],
+  "src_files": [
+   "rest_framework/pagination.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-02T02:55:59+02:00",
+  "subject": "fix: fallback on CursorPagination ordering if unset on the view (#8954)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1ce0853ac51635526dc1a285e6b83c9848002f0e": {
+  "task": "1ce0853ac51635526dc1a285e6b83c9848002f0e",
+  "target_tests": [
+   "tests/test_metadata.py"
+  ],
+  "test_files": [
+   "tests/test_metadata.py"
+  ],
+  "src_files": [
+   "rest_framework/metadata.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-27T07:54:13+03:30",
+  "subject": "Refactor get_field_info method to include max_digits and decimal_places attributes in SimpleMetadata class (#8943)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0d6ef034d2eed788f4fe6f9721148bf3874802ec": {
+  "task": "0d6ef034d2eed788f4fe6f9721148bf3874802ec",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/validators.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-09T03:53:47-05:00",
+  "subject": "Implement `__eq__` for validators (#8925)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b1cec517ff33d633d3ebcf5794a5f0f0583fabe6": {
+  "task": "b1cec517ff33d633d3ebcf5794a5f0f0583fabe6",
+  "target_tests": [
+   "tests/test_pagination.py"
+  ],
+  "test_files": [
+   "tests/test_pagination.py"
+  ],
+  "src_files": [
+   "rest_framework/pagination.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-08T12:42:28+02:00",
+  "subject": "Ensure CursorPagination respects nulls in the ordering field (#8912)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "62abf6ac1f20b48809c55f92d086d5f06d4c6c55": {
+  "task": "62abf6ac1f20b48809c55f92d086d5f06d4c6c55",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py",
+   "rest_framework/utils/timezone.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-08T04:16:00-05:00",
+  "subject": "Use ZoneInfo as primary source of timezone data (#8924)",
+  "src_churn": 33,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "959085c1455a7075a8c237a0283c2a6e35dfcd76": {
+  "task": "959085c1455a7075a8c237a0283c2a6e35dfcd76",
+  "target_tests": [
+   "tests/test_relations.py",
+   "tests/utils.py"
+  ],
+  "test_files": [
+   "tests/test_relations.py",
+   "tests/utils.py"
+  ],
+  "src_files": [
+   "rest_framework/relations.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-08T08:27:14+02:00",
+  "subject": "Handle Nested Relation in SlugRelatedField when many=False (#8922)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b7523f4b9f5ec354cd50bd514784e6248be47a37": {
+  "task": "b7523f4b9f5ec354cd50bd514784e6248be47a37",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/serializers.py",
+   "rest_framework/utils/field_mapping.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-03-03T09:04:47+02:00",
+  "subject": "Support UniqueConstraint (#7438)",
+  "src_churn": 111,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4abfa28e0879e2df45937ac8c7a9ffa161561955": {
+  "task": "4abfa28e0879e2df45937ac8c7a9ffa161561955",
+  "target_tests": [
+   "tests/test_validation_error.py"
+  ],
+  "test_files": [
+   "tests/test_validation_error.py"
+  ],
+  "src_files": [
+   "rest_framework/exceptions.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-06T15:00:48+03:30",
+  "subject": "feat: Add some changes to ValidationError to support django style vadation errors (#8863)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0618fa88e1a8c2cf8a2aab29ef6de66b49e5f7ed": {
+  "task": "0618fa88e1a8c2cf8a2aab29ef6de66b49e5f7ed",
+  "target_tests": [
+   "tests/test_permissions.py"
+  ],
+  "test_files": [
+   "tests/test_permissions.py"
+  ],
+  "src_files": [
+   "rest_framework/permissions.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-13T14:22:54+05:30",
+  "subject": "Fix Respect `can_read_model` permission in DjangoModelPermissions (#8009)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2d19f233ab36805264ec6d4655a0105d8b37f989": {
+  "task": "2d19f233ab36805264ec6d4655a0105d8b37f989",
+  "target_tests": [
+   "tests/test_routers.py"
+  ],
+  "test_files": [
+   "tests/test_routers.py"
+  ],
+  "src_files": [
+   "rest_framework/routers.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-12T09:16:48+01:00",
+  "subject": "Add SimplePathRouter (#6789)",
+  "src_churn": 48,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2b34aa42916882cba03cfea41a1f82b7ae18476a": {
+  "task": "2b34aa42916882cba03cfea41a1f82b7ae18476a",
+  "target_tests": [
+   "tests/test_prefetch_related.py"
+  ],
+  "test_files": [
+   "tests/test_prefetch_related.py"
+  ],
+  "src_files": [
+   "rest_framework/mixins.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-11T01:30:15-08:00",
+  "subject": "Re-prefetch related objects after updating (#8043)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "89d6ce7d438a89cd62ea03c8d137ea7d7459d250": {
+  "task": "89d6ce7d438a89cd62ea03c8d137ea7d7459d250",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-04T20:21:57+01:00",
+  "subject": "fix FilePathField required argument (#8805)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "48a21aa0eb3a95d32456c2a927eff9552a04231e": {
+  "task": "48a21aa0eb3a95d32456c2a927eff9552a04231e",
+  "target_tests": [
+   "tests/test_routers.py"
+  ],
+  "test_files": [
+   "tests/test_routers.py"
+  ],
+  "src_files": [
+   "rest_framework/routers.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-10T10:50:41-06:00",
+  "subject": "raise ImproperlyConfigured exception if `basename` is not unique (#8438)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b79099f7baf104336bfe7fff7a8c57bc451a8d96": {
+  "task": "b79099f7baf104336bfe7fff7a8c57bc451a8d96",
+  "target_tests": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "src_files": [
+   "rest_framework/schemas/openapi.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-11T01:48:43+09:00",
+  "subject": "Use PrimaryKeyRelatedField pkfield in openapi (#8315)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1355890f9f11dd6225a995e53b87c23d94657fa5": {
+  "task": "1355890f9f11dd6225a995e53b87c23d94657fa5",
+  "target_tests": [
+   "tests/authentication/test_authentication.py"
+  ],
+  "test_files": [
+   "tests/authentication/test_authentication.py"
+  ],
+  "src_files": [
+   "rest_framework/authentication.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-08T04:52:35+01:00",
+  "subject": "replace partition with split in BasicAuthentication (#8790)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1fbe16a8d26ff5be64797cafb7004898f72ca52b": {
+  "task": "1fbe16a8d26ff5be64797cafb7004898f72ca52b",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-06T06:04:50-03:00",
+  "subject": "Fix BooleanField's allow_null behavior (#8614)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ee15731cbc78d364b4a5428c09a15a1019050ccd": {
+  "task": "ee15731cbc78d364b4a5428c09a15a1019050ccd",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-04T15:37:47+01:00",
+  "subject": "Handle Django's ValidationErrors in ListField (#6423)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "52f4139674ed8156d6956e6fca507f5aea64f627": {
+  "task": "52f4139674ed8156d6956e6fca507f5aea64f627",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-24T12:27:45+01:00",
+  "subject": "Properly handle OverflowError in DurationField deserialization (#8042)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9e328a9549b8cc5fbeff7b70cf2523fa3d97518f": {
+  "task": "9e328a9549b8cc5fbeff7b70cf2523fa3d97518f",
+  "target_tests": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "src_files": [
+   "rest_framework/schemas/openapi.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-24T16:48:05+09:00",
+  "subject": "Fix OpenAPI operation name plural appropriately (#8017)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ebde56b932e638c83d3a164ca89b618c520d0ca2": {
+  "task": "ebde56b932e638c83d3a164ca89b618c520d0ca2",
+  "target_tests": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "src_files": [
+   "rest_framework/renderers.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-23T21:42:06+07:00",
+  "subject": "Represent SafeString as plain string on schema rendering. (#8429)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c0d95cb9678b1693f8f1a8658d4665c51de87ddf": {
+  "task": "c0d95cb9678b1693f8f1a8658d4665c51de87ddf",
+  "target_tests": [
+   "tests/test_permissions.py"
+  ],
+  "test_files": [
+   "tests/test_permissions.py"
+  ],
+  "src_files": [
+   "rest_framework/permissions.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-22T15:21:16+01:00",
+  "subject": "Fix #8771 - Checking for authentication even if `_ignore_model_permissions = True` (#8772)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0ae3323bd237b70d62873fb052cf5617fc446229": {
+  "task": "0ae3323bd237b70d62873fb052cf5617fc446229",
+  "target_tests": [
+   "tests/test_pagination.py"
+  ],
+  "test_files": [
+   "tests/test_pagination.py"
+  ],
+  "src_files": [
+   "rest_framework/pagination.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-22T14:37:31+08:00",
+  "subject": "fix 404 when page query parameter is empty string (#8578)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "03c2ef1787c416a0e333d82089659a00bd0cbf80": {
+  "task": "03c2ef1787c416a0e333d82089659a00bd0cbf80",
+  "target_tests": [
+   "tests/models.py",
+   "tests/test_serializer_lists.py"
+  ],
+  "test_files": [
+   "tests/models.py",
+   "tests/test_serializer_lists.py"
+  ],
+  "src_files": [
+   "rest_framework/serializers.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-22T14:01:01+08:00",
+  "subject": "Fixes instance check in ListSerializer.to_representation (#8726) (#8727)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9e56f54efb422459dc8765caa1fd1a21ce583039": {
+  "task": "9e56f54efb422459dc8765caa1fd1a21ce583039",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-22T05:15:25Z",
+  "subject": "FloatField will crash if the input is a number that is too big (#8725)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d5f228dd0012fe514e552224c1501782237eecb0": {
+  "task": "d5f228dd0012fe514e552224c1501782237eecb0",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-16T15:31:50+01:00",
+  "subject": "Possibility to remove trailing zeros on DecimalFields representation (#6514)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "35c5be6ec23af6e68914812599c905fe0fa2c0cc": {
+  "task": "35c5be6ec23af6e68914812599c905fe0fa2c0cc",
+  "target_tests": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "src_files": [
+   "rest_framework/schemas/openapi.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-17T13:47:45+04:00",
+  "subject": "Add a method for getting serializer field name (OpenAPI) (#7493)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "56946fac8f29aa44ce84391f138d63c4c8a2a285": {
+  "task": "56946fac8f29aa44ce84391f138d63c4c8a2a285",
+  "target_tests": [
+   "tests/test_generics.py"
+  ],
+  "test_files": [
+   "tests/test_generics.py"
+  ],
+  "src_files": [
+   "rest_framework/views.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-11T14:48:57+02:00",
+  "subject": "Preserve exception messages for wrapped Django exceptions (#8051)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "911b207fa13f7e1cd65f62a7b6b16fb4a9854098": {
+  "task": "911b207fa13f7e1cd65f62a7b6b16fb4a9854098",
+  "target_tests": [
+   "tests/test_pagination.py"
+  ],
+  "test_files": [
+   "tests/test_pagination.py"
+  ],
+  "src_files": [
+   "rest_framework/pagination.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-11T12:50:33+02:00",
+  "subject": "Added examples to schema of CursorPagination (#8687)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d507cd851c4b1185e3dc720de9ba6a642459d738": {
+  "task": "d507cd851c4b1185e3dc720de9ba6a642459d738",
+  "target_tests": [
+   "tests/test_request.py"
+  ],
+  "test_files": [
+   "tests/test_request.py"
+  ],
+  "src_files": [
+   "rest_framework/request.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-07T12:58:38+02:00",
+  "subject": "Fix infinite recursion with deepcopy on Request (#8684)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4aea8dd65a82c7d8f73c9bffe39309b1adb2ae2f": {
+  "task": "4aea8dd65a82c7d8f73c9bffe39309b1adb2ae2f",
+  "target_tests": [
+   "tests/test_permissions.py"
+  ],
+  "test_files": [
+   "tests/test_permissions.py"
+  ],
+  "src_files": [
+   "rest_framework/permissions.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-21T12:19:33+01:00",
+  "subject": "Change semantic of OR of two permission classes (#7522)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "354ae73ffb37494016f377527a52ea51ed4c29f7": {
+  "task": "354ae73ffb37494016f377527a52ea51ed4c29f7",
+  "target_tests": [
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "rest_framework/test.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-15T09:35:48+01:00",
+  "subject": "Make `APIClient.force_authenticate()` work with `user=None` (#8212)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "df584350b4f77143d84615f05000f71408aec9c0": {
+  "task": "df584350b4f77143d84615f05000f71408aec9c0",
+  "target_tests": [
+   "tests/schemas/test_coreapi.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_coreapi.py"
+  ],
+  "src_files": [
+   "rest_framework/schemas/coreapi.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-12T13:00:55+02:00",
+  "subject": "Prevent head method mapping to coerce action name (#7729)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8b2ccccbe53f855fd9ee9a06e7b7997270e26dda": {
+  "task": "8b2ccccbe53f855fd9ee9a06e7b7997270e26dda",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-08T03:18:49-07:00",
+  "subject": "Stop calling `set_context`, planned for 3.13 drop (#8589)",
+  "src_churn": 34,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5185cc934862a5ab13316c85402c12a6d744f94c": {
+  "task": "5185cc934862a5ab13316c85402c12a6d744f94c",
+  "target_tests": [
+   "tests/test_model_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_model_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/relations.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-08T15:46:19+02:00",
+  "subject": "Handle unset fields with 'many=True' (#7574)",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1396f6886a39acb7fe52729c7b99fe2d7d245dac": {
+  "task": "1396f6886a39acb7fe52729c7b99fe2d7d245dac",
+  "target_tests": [
+   "tests/test_validators.py"
+  ],
+  "test_files": [
+   "tests/test_validators.py"
+  ],
+  "src_files": [
+   "rest_framework/utils/field_mapping.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-06T15:53:42+03:00",
+  "subject": "Respect model error_messages for relation (#7599)",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "281fc074ba255ed9c5724cc971fa86c78d4dca38": {
+  "task": "281fc074ba255ed9c5724cc971fa86c78d4dca38",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-06T14:54:57+03:00",
+  "subject": "improve performance for noncallble attributes (#8502)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1660c22f3ad80f08c4a6eaecf2344b22d520078e": {
+  "task": "1660c22f3ad80f08c4a6eaecf2344b22d520078e",
+  "target_tests": [
+   "tests/schemas/test_coreapi.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_coreapi.py"
+  ],
+  "src_files": [
+   "rest_framework/__init__.py",
+   "rest_framework/filters.py",
+   "rest_framework/pagination.py",
+   "rest_framework/schemas/coreapi.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-10-30T18:02:24Z",
+  "subject": "Delay CoreAPI deprecation until DRF 3.18 (#9810)",
+  "src_churn": 30,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ade172e1d5db87dc86bc616cbb4df7ccd2eb2fd3": {
+  "task": "ade172e1d5db87dc86bc616cbb4df7ccd2eb2fd3",
+  "target_tests": [
+   "tests/browsable_api/test_browsable_api.py",
+   "tests/browsable_api/test_browsable_nested_api.py",
+   "tests/test_fields.py",
+   "tests/test_serializer_lists.py"
+  ],
+  "test_files": [
+   "tests/browsable_api/test_browsable_api.py",
+   "tests/browsable_api/test_browsable_nested_api.py",
+   "tests/test_fields.py",
+   "tests/test_serializer_lists.py"
+  ],
+  "src_files": [
+   "rest_framework/generics.py",
+   "rest_framework/mixins.py",
+   "rest_framework/schemas/coreapi.py",
+   "rest_framework/schemas/openapi.py",
+   "rest_framework/serializers.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-10-27T22:14:48+05:30",
+  "subject": "Standardize spelling to American English in documentation (#9804)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ab694eccdeb94faeb8c36647f6b5d2e07729fbdb": {
+  "task": "ab694eccdeb94faeb8c36647f6b5d2e07729fbdb",
+  "target_tests": [
+   "tests/schemas/test_openapi.py",
+   "tests/test_response.py",
+   "tests/test_serializer_nested.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_openapi.py",
+   "tests/test_response.py",
+   "tests/test_serializer_nested.py"
+  ],
+  "src_files": [
+   "rest_framework/filters.py",
+   "rest_framework/schemas/generators.py",
+   "rest_framework/schemas/openapi.py",
+   "rest_framework/settings.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-01-24T23:17:01+01:00",
+  "subject": "Fix typo (#9231)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a16dbfd11018fa01ceaf6dee7df34ab0430282cf": {
+  "task": "a16dbfd11018fa01ceaf6dee7df34ab0430282cf",
+  "target_tests": [
+   "tests/schemas/test_coreapi.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_coreapi.py"
+  ],
+  "src_files": [
+   "rest_framework/__init__.py",
+   "rest_framework/filters.py",
+   "rest_framework/pagination.py",
+   "rest_framework/schemas/coreapi.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-06-13T07:55:22+01:00",
+  "subject": "Added Deprecation Warnings for CoreAPI (#7519)",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "15c613a9eb645c63102b9e894199bcf1c9bf4d65": {
+  "task": "15c613a9eb645c63102b9e894199bcf1c9bf4d65",
+  "target_tests": [
+   "tests/test_fields.py",
+   "tests/test_generics.py",
+   "tests/test_request.py",
+   "tests/test_response.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py",
+   "tests/test_generics.py",
+   "tests/test_request.py",
+   "tests/test_response.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py",
+   "rest_framework/generics.py",
+   "rest_framework/request.py",
+   "rest_framework/response.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-02-22T07:39:01-08:00",
+  "subject": "Allow generic requests, responses, fields, views (#8825)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b658915846c257531db5d869feaada7af71980f0": {
+  "task": "b658915846c257531db5d869feaada7af71980f0",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/__init__.py",
+   "rest_framework/fields.py",
+   "rest_framework/metadata.py",
+   "rest_framework/schemas/openapi.py",
+   "rest_framework/serializers.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-09-21T08:08:12-05:00",
+  "subject": "Version 3.14.0 proposal (#8599)",
+  "src_churn": 131,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e888fc11c76d1a671f6f7d3c080915ffe722f3f6": {
+  "task": "e888fc11c76d1a671f6f7d3c080915ffe722f3f6",
+  "target_tests": [
+   "tests/test_model_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_model_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/__init__.py",
+   "rest_framework/fields.py",
+   "rest_framework/serializers.py",
+   "rest_framework/utils/field_mapping.py"
+  ],
+  "pool": "hard",
+  "authored": "2020-05-13T09:59:04-04:00",
+  "subject": "Merge NullBooleanField with BooleanField(allow_null=True) (#7122)",
+  "src_churn": 63,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e57c1505fc4ed957332ae547a35c8713acfdf30c": {
+  "task": "e57c1505fc4ed957332ae547a35c8713acfdf30c",
+  "target_tests": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "test_files": [
+   "tests/schemas/test_openapi.py"
+  ],
+  "src_files": [
+   "rest_framework/schemas/__init__.py",
+   "rest_framework/schemas/coreapi.py",
+   "rest_framework/schemas/generators.py",
+   "rest_framework/schemas/openapi.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-09-03T16:07:30+02:00",
+  "subject": "Replaced 'TODO' hardcoded version info by a parameter with default '0.1.0' (#6899)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "db37512a6e4fa5ba793b7e401d7014dfd0984995": {
+  "task": "db37512a6e4fa5ba793b7e401d7014dfd0984995",
+  "target_tests": [
+   "tests/test_decorators.py",
+   "tests/test_permissions.py"
+  ],
+  "test_files": [
+   "tests/test_decorators.py",
+   "tests/test_permissions.py"
+  ],
+  "src_files": [
+   "rest_framework/__init__.py",
+   "rest_framework/compat.py",
+   "rest_framework/decorators.py",
+   "rest_framework/filters.py",
+   "rest_framework/routers.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-05-21T10:36:55-07:00",
+  "subject": "Remove 3.10 deprecations (#6687)",
+  "src_churn": 119,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5e1619bc9ef6725ed5d317bc100ad26d2b9106e0": {
+  "task": "5e1619bc9ef6725ed5d317bc100ad26d2b9106e0",
+  "target_tests": [
+   "tests/test_renderers.py"
+  ],
+  "test_files": [
+   "tests/test_renderers.py"
+  ],
+  "src_files": [
+   "rest_framework/parsers.py",
+   "rest_framework/renderers.py",
+   "rest_framework/schemas/generators.py",
+   "rest_framework/schemas/inspectors.py",
+   "rest_framework/utils/representation.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-04-30T22:51:54-07:00",
+  "subject": "Remove unnecessary assignments immediately before a return statement (#6619)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "513a49d63b6332e373c89fb0737a0745c1f0a734": {
+  "task": "513a49d63b6332e373c89fb0737a0745c1f0a734",
+  "target_tests": [
+   "tests/authentication/test_authentication.py",
+   "tests/browsable_api/test_browsable_api.py",
+   "tests/browsable_api/test_browsable_nested_api.py",
+   "tests/test_generics.py",
+   "tests/test_parsers.py",
+   "tests/test_renderers.py",
+   "tests/test_routers.py",
+   "tests/test_templates.py"
+  ],
+  "test_files": [
+   "tests/authentication/test_authentication.py",
+   "tests/browsable_api/test_browsable_api.py",
+   "tests/browsable_api/test_browsable_nested_api.py",
+   "tests/test_generics.py",
+   "tests/test_parsers.py",
+   "tests/test_renderers.py",
+   "tests/test_routers.py",
+   "tests/test_templates.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py",
+   "rest_framework/management/commands/generateschema.py",
+   "rest_framework/parsers.py",
+   "rest_framework/renderers.py",
+   "rest_framework/utils/encoders.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-04-30T22:49:17-07:00",
+  "subject": "Drop default 'utf-8' to .encode()/.decode() (#6633)",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ff86f09f74a0f60b657576abc8cf805c308a3974": {
+  "task": "ff86f09f74a0f60b657576abc8cf805c308a3974",
+  "target_tests": [
+   "tests/test_renderers.py",
+   "tests/test_serializer.py"
+  ],
+  "test_files": [
+   "tests/test_renderers.py",
+   "tests/test_serializer.py"
+  ],
+  "src_files": [
+   "rest_framework/compat.py",
+   "rest_framework/fields.py",
+   "rest_framework/serializers.py",
+   "rest_framework/utils/serializer_helpers.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-04-30T22:44:33-07:00",
+  "subject": "Remove unnecessary compatibility shims from rest_framework/compat.py (#6631)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "94593b3a503472c7d1ca97b8e191ef5c8a3c00ff": {
+  "task": "94593b3a503472c7d1ca97b8e191ef5c8a3c00ff",
+  "target_tests": [
+   "tests/test_decorators.py",
+   "tests/test_permissions.py",
+   "tests/test_routers.py"
+  ],
+  "test_files": [
+   "tests/test_decorators.py",
+   "tests/test_permissions.py",
+   "tests/test_routers.py"
+  ],
+  "src_files": [
+   "rest_framework/__init__.py",
+   "rest_framework/decorators.py",
+   "rest_framework/filters.py",
+   "rest_framework/routers.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-03-03T09:20:45+01:00",
+  "subject": "Introduce RemovedInDRF\u2026Warning classes to simplify deprecations. (#6480)",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2c9c0f1b7f24e2fbedacbb85e6b56eb244a2353c": {
+  "task": "2c9c0f1b7f24e2fbedacbb85e6b56eb244a2353c",
+  "target_tests": [
+   "tests/test_decorators.py",
+   "tests/test_routers.py",
+   "tests/test_schemas.py"
+  ],
+  "test_files": [
+   "tests/test_decorators.py",
+   "tests/test_routers.py",
+   "tests/test_schemas.py"
+  ],
+  "src_files": [
+   "rest_framework/__init__.py",
+   "rest_framework/decorators.py",
+   "rest_framework/routers.py",
+   "rest_framework/schemas/generators.py"
+  ],
+  "pool": "hard",
+  "authored": "2018-10-18T10:38:46+01:00",
+  "subject": "Version 3.9 (#6247)",
+  "src_churn": 44,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a628a2dbce8f8f3047d30fe5345f86ae843bcdcc": {
+  "task": "a628a2dbce8f8f3047d30fe5345f86ae843bcdcc",
+  "target_tests": [
+   "tests/test_fields.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py"
+  ],
+  "src_files": [
+   "rest_framework/authentication.py",
+   "rest_framework/authtoken/serializers.py",
+   "rest_framework/compat.py",
+   "rest_framework/fields.py",
+   "rest_framework/urls.py"
+  ],
+  "pool": "hard",
+  "authored": "2018-07-06T06:14:31-04:00",
+  "subject": "Drop Django 1.10 support (#5657)",
+  "src_churn": 40,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0148a9f8dac6730981f4a3d666d8def4570fdae0": {
+  "task": "0148a9f8dac6730981f4a3d666d8def4570fdae0",
+  "target_tests": [
+   "tests/test_decorators.py",
+   "tests/test_description.py",
+   "tests/test_renderers.py",
+   "tests/test_routers.py",
+   "tests/test_schemas.py",
+   "tests/test_utils.py",
+   "tests/test_viewsets.py"
+  ],
+  "test_files": [
+   "tests/test_decorators.py",
+   "tests/test_description.py",
+   "tests/test_renderers.py",
+   "tests/test_routers.py",
+   "tests/test_schemas.py",
+   "tests/test_utils.py",
+   "tests/test_viewsets.py"
+  ],
+  "src_files": [
+   "rest_framework/decorators.py",
+   "rest_framework/renderers.py",
+   "rest_framework/routers.py",
+   "rest_framework/utils/breadcrumbs.py",
+   "rest_framework/views.py",
+   "rest_framework/viewsets.py"
+  ],
+  "pool": "hard",
+  "authored": "2018-07-06T04:33:10-04:00",
+  "subject": "Improvements to ViewSet extra actions (#5605)",
+  "src_churn": 150,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2854679f563252f3ad398133bf16159049a4f0b3": {
+  "task": "2854679f563252f3ad398133bf16159049a4f0b3",
+  "target_tests": [
+   "tests/test_description.py"
+  ],
+  "test_files": [
+   "tests/test_description.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py",
+   "rest_framework/pagination.py",
+   "rest_framework/parsers.py",
+   "rest_framework/reverse.py",
+   "rest_framework/serializers.py",
+   "rest_framework/test.py"
+  ],
+  "pool": "hard",
+  "authored": "2018-02-14T21:12:14+01:00",
+  "subject": "Upgrade isort (#5817)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "791539acecb801f3830948dea727f459cbd4b122": {
+  "task": "791539acecb801f3830948dea727f459cbd4b122",
+  "target_tests": [
+   "tests/test_schemas.py"
+  ],
+  "test_files": [
+   "tests/test_schemas.py"
+  ],
+  "src_files": [
+   "rest_framework/schemas/__init__.py",
+   "rest_framework/schemas/inspectors.py",
+   "rest_framework/settings.py",
+   "rest_framework/views.py"
+  ],
+  "pool": "hard",
+  "authored": "2017-12-14T11:24:21+01:00",
+  "subject": "Add DEFAULT_SCHEMA_CLASS setting (#5658)",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ff556a91fdd62b389b9b0b6c353d2161263346bc": {
+  "task": "ff556a91fdd62b389b9b0b6c353d2161263346bc",
+  "target_tests": [
+   "tests/test_atomic_requests.py",
+   "tests/test_fields.py",
+   "tests/test_filters.py"
+  ],
+  "test_files": [
+   "tests/test_atomic_requests.py",
+   "tests/test_fields.py",
+   "tests/test_filters.py"
+  ],
+  "src_files": [
+   "rest_framework/authtoken/serializers.py",
+   "rest_framework/renderers.py",
+   "rest_framework/urls.py",
+   "rest_framework/utils/model_meta.py"
+  ],
+  "pool": "hard",
+  "authored": "2017-11-20T00:35:54-08:00",
+  "subject": "Remove references to unsupported Django versions in docs and code (#5602)",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8d7ce3726d307dd783747e69ccbd9b06d7db0557": {
+  "task": "8d7ce3726d307dd783747e69ccbd9b06d7db0557",
+  "target_tests": [
+   "tests/test_permissions.py",
+   "tests/test_reverse.py",
+   "tests/test_urlpatterns.py",
+   "tests/utils.py"
+  ],
+  "test_files": [
+   "tests/test_permissions.py",
+   "tests/test_reverse.py",
+   "tests/test_urlpatterns.py",
+   "tests/utils.py"
+  ],
+  "src_files": [
+   "rest_framework/compat.py",
+   "rest_framework/relations.py",
+   "rest_framework/reverse.py",
+   "rest_framework/routers.py",
+   "rest_framework/schemas/generators.py",
+   "rest_framework/templatetags/rest_framework.py",
+   "rest_framework/urlpatterns.py",
+   "rest_framework/utils/breadcrumbs.py"
+  ],
+  "pool": "hard",
+  "authored": "2017-11-10T03:41:03-05:00",
+  "subject": "Compat cleanup (#5581)",
+  "src_churn": 80,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0552810410bd772b35e48c738a1ebc37f67c9255": {
+  "task": "0552810410bd772b35e48c738a1ebc37f67c9255",
+  "target_tests": [
+   "tests/test_fields.py",
+   "tests/test_multitable_inheritance.py",
+   "tests/test_one_to_one_with_inheritance.py",
+   "tests/test_renderers.py",
+   "tests/test_serializer_nested.py"
+  ],
+  "test_files": [
+   "tests/test_fields.py",
+   "tests/test_multitable_inheritance.py",
+   "tests/test_one_to_one_with_inheritance.py",
+   "tests/test_renderers.py",
+   "tests/test_serializer_nested.py"
+  ],
+  "src_files": [
+   "rest_framework/decorators.py",
+   "rest_framework/schemas/generators.py",
+   "rest_framework/schemas/inspectors.py",
+   "rest_framework/serializers.py"
+  ],
+  "pool": "hard",
+  "authored": "2017-11-06T01:03:01-08:00",
+  "subject": "Use dict and set literals instead of calls to dict() and set() (#5559)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d740bae95a30d473e9de0019bc31475900caa435": {
+  "task": "d740bae95a30d473e9de0019bc31475900caa435",
+  "target_tests": [
+   "tests/test_renderers.py",
+   "tests/test_routers.py"
+  ],
+  "test_files": [
+   "tests/test_renderers.py",
+   "tests/test_routers.py"
+  ],
+  "src_files": [
+   "rest_framework/fields.py",
+   "rest_framework/parsers.py",
+   "rest_framework/renderers.py",
+   "rest_framework/utils/serializer_helpers.py"
+  ],
+  "pool": "hard",
+  "authored": "2017-07-07T12:47:08-04:00",
+  "subject": "Update json imports",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7b1582e00e91001ec07cd394520ec5cdd2c2add1": {
+  "task": "7b1582e00e91001ec07cd394520ec5cdd2c2add1",
+  "target_tests": [
+   "tests/test_schemas.py"
+  ],
+  "test_files": [
+   "tests/test_schemas.py"
+  ],
+  "src_files": [
+   "rest_framework/decorators.py",
+   "rest_framework/routers.py",
+   "rest_framework/schemas/generators.py",
+   "rest_framework/schemas/views.py",
+   "rest_framework/views.py"
+  ],
+  "pool": "hard",
+  "authored": "2017-09-20T11:29:47+02:00",
+  "subject": "Allow `schema = None`. Deprecate `exclude_from_schema` (#5422)",
+  "src_churn": 30,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d54df8c438d224616a8bcd745589b65e16db0989": {
+  "task": "d54df8c438d224616a8bcd745589b65e16db0989",
+  "target_tests": [
+   "tests/test_decorators.py",
+   "tests/test_schemas.py"
+  ],
+  "test_files": [
+   "tests/test_decorators.py",
+   "tests/test_schemas.py"
+  ],
+  "src_files": [
+   "rest_framework/decorators.py",
+   "rest_framework/routers.py",
+   "rest_framework/schemas/__init__.py",
+   "rest_framework/schemas/generators.py",
+   "rest_framework/schemas/inspectors.py",
+   "rest_framework/schemas/utils.py",
+   "rest_framework/schemas/views.py",
+   "rest_framework/views.py"
+  ],
+  "pool": "hard",
+  "authored": "2017-09-14T10:46:34+02:00",
+  "subject": "Refactor schema generation to allow per-view customisation (#5354)",
+  "src_churn": 904,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c1f31492aec99e69bbf945932ae992b3c0305a68": {
+  "task": "c1f31492aec99e69bbf945932ae992b3c0305a68",
+  "target_tests": [
+   "tests/browsable_api/test_form_rendering.py",
+   "tests/test_authentication.py",
+   "tests/test_description.py",
+   "tests/test_generics.py",
+   "tests/test_prefetch_related.py",
+   "tests/test_relations_pk.py",
+   "tests/test_renderers.py"
+  ],
+  "test_files": [
+   "tests/browsable_api/test_form_rendering.py",
+   "tests/test_authentication.py",
+   "tests/test_description.py",
+   "tests/test_generics.py",
+   "tests/test_prefetch_related.py",
+   "tests/test_relations_pk.py",
+   "tests/test_renderers.py"
+  ],
+  "src_files": [
+   "rest_framework/authtoken/models.py",
+   "rest_framework/fields.py",
+   "rest_framework/filters.py",
+   "rest_framework/validators.py"
+  ],
+  "pool": "hard",
+  "authored": "2017-04-07T10:28:35-04:00",
+  "subject": "Update links after moving to encode org",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "52db57a6e78cb50808197085e2d871133862201f": {
+  "task": "52db57a6e78cb50808197085e2d871133862201f",
+  "target_tests": [
+   "tests/test_filters.py"
+  ],
+  "test_files": [
+   "tests/test_filters.py"
+  ],
+  "src_files": [
+   "rest_framework/__init__.py",
+   "rest_framework/compat.py",
+   "rest_framework/filters.py",
+   "rest_framework/renderers.py",
+   "rest_framework/routers.py",
+   "rest_framework/templatetags/rest_framework.py"
+  ],
+  "pool": "hard",
+  "authored": "2017-03-09T14:49:51Z",
+  "subject": "Version 3.6 (#4943)",
+  "src_churn": 95,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "68d2020112d312c69b8407c42179e0f3e9d9baa0": {
+  "task": "68d2020112d312c69b8407c42179e0f3e9d9baa0",
+  "target_tests": [
+   "tests/test_api_client.py",
+   "tests/test_schemas.py"
+  ],
+  "test_files": [
+   "tests/test_api_client.py",
+   "tests/test_schemas.py"
+  ],
+  "src_files": [
+   "rest_framework/compat.py",
+   "rest_framework/documentation.py",
+   "rest_framework/filters.py",
+   "rest_framework/pagination.py",
+   "rest_framework/permissions.py",
+   "rest_framework/renderers.py",
+   "rest_framework/schemas.py",
+   "rest_framework/templatetags/rest_framework.py"
+  ],
+  "pool": "hard",
+  "authored": "2017-03-03T15:24:37Z",
+  "subject": "Live API documentation (#4755)",
+  "src_churn": 438,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a3802504a0a26f1d03d2cf6f851030314b7372fd": {
+  "task": "a3802504a0a26f1d03d2cf6f851030314b7372fd",
+  "target_tests": [
+   "tests/test_exceptions.py",
+   "tests/test_validation.py",
+   "tests/test_validation_error.py"
+  ],
+  "test_files": [
+   "tests/test_exceptions.py",
+   "tests/test_validation.py",
+   "tests/test_validation_error.py"
+  ],
+  "src_files": [
+   "rest_framework/authtoken/serializers.py",
+   "rest_framework/exceptions.py",
+   "rest_framework/fields.py",
+   "rest_framework/serializers.py",
+   "rest_framework/validators.py"
+  ],
+  "pool": "hard",
+  "authored": "2016-10-11T10:25:21+01:00",
+  "subject": "Error codes (#4550)",
+  "src_churn": 212,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8385ae42c06b8e68a714cb67b7f0766afe316883": {
+  "task": "8385ae42c06b8e68a714cb67b7f0766afe316883",
+  "target_tests": [
+   "tests/test_settings.py"
+  ],
+  "test_files": [
+   "tests/test_settings.py"
+  ],
+  "src_files": [
+   "rest_framework/__init__.py",
+   "rest_framework/routers.py",
+   "rest_framework/serializers.py",
+   "rest_framework/settings.py"
+  ],
+  "pool": "hard",
+  "authored": "2016-07-13T16:30:41+01:00",
+  "subject": "3.4.0 Release (#4258)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6ff9840bdecbd877732d678e08c84bfaf288a3f8": {
+  "task": "6ff9840bdecbd877732d678e08c84bfaf288a3f8",
+  "target_tests": [
+   "tests/test_routers.py",
+   "tests/test_schemas.py"
+  ],
+  "test_files": [
+   "tests/test_routers.py",
+   "tests/test_schemas.py"
+  ],
+  "src_files": [
+   "rest_framework/compat.py",
+   "rest_framework/filters.py",
+   "rest_framework/pagination.py",
+   "rest_framework/renderers.py",
+   "rest_framework/routers.py",
+   "rest_framework/schemas.py",
+   "rest_framework/utils/encoders.py",
+   "rest_framework/viewsets.py"
+  ],
+  "pool": "hard",
+  "authored": "2016-07-04T16:38:17+01:00",
+  "subject": "Schemas & client libraries. (#4179)",
+  "src_churn": 412,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}

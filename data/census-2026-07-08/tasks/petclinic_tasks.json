@@ -1,0 +1,553 @@
+{
+ "3aa79e3944ab1b626288f5d0629e61643ab8fb4a": {
+  "task": "3aa79e3944ab1b626288f5d0629e61643ab8fb4a",
+  "target_tests": [
+   "CrashControllerIntegrationTests",
+   "MySqlIntegrationTests",
+   "PetClinicIntegrationTests",
+   "PostgresIntegrationTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/MySqlIntegrationTests.java",
+   "src/test/java/org/springframework/samples/petclinic/PetClinicIntegrationTests.java",
+   "src/test/java/org/springframework/samples/petclinic/PostgresIntegrationTests.java",
+   "src/test/java/org/springframework/samples/petclinic/system/CrashControllerIntegrationTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/system/CacheConfiguration.java"
+  ],
+  "authored": "2025-09-01T17:42:56+02:00",
+  "subject": "Upgrade to Spring Boot 4.0.0-M2",
+  "baseline_failing": [],
+  "src_churn": 2,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "142321aa3ed056eeda0662c1987b76db25b3d736": {
+  "task": "142321aa3ed056eeda0662c1987b76db25b3d736",
+  "target_tests": [
+   "ClinicServiceTests",
+   "PetControllerTests",
+   "PetTypeFormatterTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java",
+   "src/test/java/org/springframework/samples/petclinic/owner/PetTypeFormatterTests.java",
+   "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/OwnerRepository.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/PetController.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/PetTypeFormatter.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/PetTypeRepository.java"
+  ],
+  "authored": "2025-06-04T21:51:16+02:00",
+  "subject": "Extracted findPetTypes",
+  "baseline_failing": [],
+  "src_churn": 67,
+  "size": "M",
+  "gold_clean": true
+ },
+ "1cad4124b7685d3e66ac376f44874a3d5319cb06": {
+  "task": "1cad4124b7685d3e66ac376f44874a3d5319cb06",
+  "target_tests": [
+   "ClinicServiceTests",
+   "OwnerControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+   "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/OwnerRepository.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/PetController.java"
+  ],
+  "authored": "2024-11-10T20:51:23+08:00",
+  "subject": "Refactor code logic <refactor>: remove useless logic cod. <refactor>: detele useless annotation which is provided by Jpa. <refactor>: refactor implement of `fin",
+  "baseline_failing": [],
+  "src_churn": 19,
+  "size": "S",
+  "gold_clean": true
+ },
+ "14af47d4e5b4e12e0ca28e5c2c8437528546c25d": {
+  "task": "14af47d4e5b4e12e0ca28e5c2c8437528546c25d",
+  "target_tests": [
+   "OwnerControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java"
+  ],
+  "authored": "2024-11-06T20:09:08+08:00",
+  "subject": "Refactor: - <optimize>: delete logic `add owner to model` because of the comment `@ModelAttribute(\"owner\")`. - <fix>: add logical judgment in ordet to avoid `ow",
+  "baseline_failing": [
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testProcessUpdateOwnerFormWithIdMismatch"
+  ],
+  "src_churn": 15,
+  "size": "S",
+  "gold_clean": true
+ },
+ "405cdc635b10770a2f5ed70be973cdf905cfa736": {
+  "task": "405cdc635b10770a2f5ed70be973cdf905cfa736",
+  "target_tests": [
+   "OwnerControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/Owner.java"
+  ],
+  "authored": "2024-03-20T18:54:40-03:00",
+  "subject": "Add user friendly error message",
+  "baseline_failing": [],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "4926e292700f79260a58d6faf55b232ce075b70e": {
+  "task": "4926e292700f79260a58d6faf55b232ce075b70e",
+  "target_tests": [
+   "ValidatorTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/model/ValidatorTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/model/Person.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/Owner.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/PetController.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/PetValidator.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/Visit.java"
+  ],
+  "authored": "2023-08-10T02:52:46+09:00",
+  "subject": "Change validation annotations and whitespace handling",
+  "baseline_failing": [
+   "org.springframework.samples.petclinic.model.ValidatorTests::shouldNotValidateWhenFirstNameEmpty"
+  ],
+  "src_churn": 24,
+  "size": "S",
+  "gold_clean": true
+ },
+ "d381fb658cb435a04e2271ca85bd3e8627a5e7e4": {
+  "task": "d381fb658cb435a04e2271ca85bd3e8627a5e7e4",
+  "target_tests": [
+   "OwnerControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/PetController.java",
+   "src/main/resources/application.properties"
+  ],
+  "authored": "2022-04-11T13:24:49Z",
+  "subject": "Use open session in view and populate model attrs",
+  "baseline_failing": [
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testProcessUpdateOwnerFormUnchangedSuccess"
+  ],
+  "src_churn": 14,
+  "size": "S",
+  "gold_clean": true
+ },
+ "e765e3ffe16002beb30c6a5c6f06409816259bf4": {
+  "task": "e765e3ffe16002beb30c6a5c6f06409816259bf4",
+  "target_tests": [
+   "OwnerControllerTests",
+   "PetclinicIntegrationTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/PetclinicIntegrationTests.java",
+   "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java"
+  ],
+  "authored": "2022-01-10T08:08:43Z",
+  "subject": "Fix lazy loading issue in owner details",
+  "baseline_failing": [
+   "org.springframework.samples.petclinic.PetclinicIntegrationTests::testOwnerDetails"
+  ],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "472575378c7b377862cc01b713cab38eaa8f9c64": {
+  "task": "472575378c7b377862cc01b713cab38eaa8f9c64",
+  "target_tests": [
+   "ClinicServiceTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/Owner.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/VisitController.java"
+  ],
+  "authored": "2022-01-06T11:00:14+01:00",
+  "subject": "Additional tweaks in aggregate model.",
+  "baseline_failing": [],
+  "src_churn": 25,
+  "size": "S",
+  "gold_clean": true
+ },
+ "423a3375434eb90d1631a47849fd5e56700585f7": {
+  "task": "423a3375434eb90d1631a47849fd5e56700585f7",
+  "target_tests": [
+   "ClinicServiceTests",
+   "OwnerControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+   "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/Pet.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/Visit.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/VisitController.java"
+  ],
+  "authored": "2022-01-05T09:32:03Z",
+  "subject": "Move Visit to owner package (it's aggregate root)",
+  "baseline_failing": [],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "58fe6298f83615fbcc14d55b47d09c947d9a958d": {
+  "task": "58fe6298f83615fbcc14d55b47d09c947d9a958d",
+  "target_tests": [
+   "ClinicServiceTests",
+   "OwnerControllerTests",
+   "VisitControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+   "src/test/java/org/springframework/samples/petclinic/owner/VisitControllerTests.java",
+   "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/Pet.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/Visit.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/VisitController.java",
+   "src/main/java/org/springframework/samples/petclinic/visit/VisitRepository.java"
+  ],
+  "authored": "2022-01-05T08:55:24Z",
+  "subject": "Also remove VisitRepository",
+  "baseline_failing": [
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testInitCreationForm",
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testInitFindForm",
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testInitUpdateOwnerForm",
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testProcessCreationFormHasErrors",
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testProcessCreationFormSuccess",
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testProcessFindFormByLastName",
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testProcessFindFormNoOwnersFound",
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testProcessFindFormSuccess",
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testProcessUpdateOwnerFormHasErrors",
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testProcessUpdateOwnerFormSuccess",
+   "org.springframework.samples.petclinic.owner.OwnerControllerTests::testShowOwner",
+   "org.springframework.samples.petclinic.owner.VisitControllerTests::testInitNewVisitForm",
+   "org.springframework.samples.petclinic.owner.VisitControllerTests::testProcessNewVisitFormHasErrors",
+   "org.springframework.samples.petclinic.owner.VisitControllerTests::testProcessNewVisitFormSuccess",
+   "org.springframework.samples.petclinic.service.ClinicServiceTests::shouldAddNewVisitForPet",
+   "org.springframework.samples.petclinic.service.ClinicServiceTests::shouldFindVisitsByPetId"
+  ],
+  "src_churn": 191,
+  "size": "L",
+  "gold_clean": false
+ },
+ "7ef045dac8effb41d5f24c1e1011869b59a3d0a2": {
+  "task": "7ef045dac8effb41d5f24c1e1011869b59a3d0a2",
+  "target_tests": [
+   "OwnerControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/Pet.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/VisitController.java"
+  ],
+  "authored": "2019-09-06T09:13:41+01:00",
+  "subject": "Make Pet.visits @Transient",
+  "baseline_failing": [],
+  "src_churn": 36,
+  "size": "S",
+  "gold_clean": false
+ },
+ "5ff057d90baf36d40bdf81b69752143dc46782ee": {
+  "task": "5ff057d90baf36d40bdf81b69752143dc46782ee",
+  "target_tests": [
+   "PetclinicIntegrationTests",
+   "ProductionConfigurationTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/PetclinicIntegrationTests.java",
+   "src/test/java/org/springframework/samples/petclinic/system/ProductionConfigurationTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/system/CacheConfig.java",
+   "src/main/resources/application.properties"
+  ],
+  "authored": "2018-07-10T08:50:58+02:00",
+  "subject": "Remove misleading production profile",
+  "baseline_failing": [],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "4c22d010ea92796f61be2d814ebc3c03beb9d4cf": {
+  "task": "4c22d010ea92796f61be2d814ebc3c03beb9d4cf",
+  "target_tests": [
+   "ClinicServiceTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/Pet.java",
+   "src/main/java/org/springframework/samples/petclinic/visit/Visit.java"
+  ],
+  "authored": "2018-07-09T16:47:34+02:00",
+  "subject": "Polish \"Use Java 8 LocalDate instead of java.util.Date\"",
+  "baseline_failing": [],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "c0748e3e8224ab91bb7fea41a5bc0c71158e2ce8": {
+  "task": "c0748e3e8224ab91bb7fea41a5bc0c71158e2ce8",
+  "target_tests": [
+   "ClinicServiceTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/owner/Pet.java",
+   "src/main/java/org/springframework/samples/petclinic/visit/Visit.java",
+   "src/main/resources/templates/owners/ownerDetails.html",
+   "src/main/resources/templates/pets/createOrUpdateVisitForm.html"
+  ],
+  "authored": "2018-06-27T18:34:37+02:00",
+  "subject": "Use Java 8 LocalDate instead of java.util.Date",
+  "baseline_failing": [],
+  "src_churn": 36,
+  "size": "S",
+  "gold_clean": false
+ },
+ "eebca43df803aeb08754f43a86d6996630063500": {
+  "task": "eebca43df803aeb08754f43a86d6996630063500",
+  "target_tests": [
+   "VetControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/vet/VetControllerTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/vet/VetController.java",
+   "src/main/resources/templates/vets/vetList.html"
+  ],
+  "authored": "2018-06-04T10:48:39+02:00",
+  "subject": "Polish \"Fix content negotiation for /vets\"",
+  "baseline_failing": [],
+  "src_churn": 9,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "8eb5074770eb8d943e0aee0bcdc28f62149e7344": {
+  "task": "8eb5074770eb8d943e0aee0bcdc28f62149e7344",
+  "target_tests": [
+   "VetControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/vet/VetControllerTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/vet/VetController.java",
+   "src/main/resources/templates/vets/vetList.html"
+  ],
+  "authored": "2018-05-27T01:40:43-04:00",
+  "subject": "Fix content negotiation for /vets",
+  "baseline_failing": [],
+  "src_churn": 5,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "cf352663366ecabc4ed9aad125e7373e040bca45": {
+  "task": "cf352663366ecabc4ed9aad125e7373e040bca45",
+  "target_tests": [
+   "PetTypeFormatterTests",
+   "ValidatorTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/model/ValidatorTests.java",
+   "src/test/java/org/springframework/samples/petclinic/owner/PetTypeFormatterTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/model/Person.java",
+   "src/main/java/org/springframework/samples/petclinic/owner/Owner.java",
+   "src/main/java/org/springframework/samples/petclinic/system/CrashController.java",
+   "src/main/java/org/springframework/samples/petclinic/visit/Visit.java"
+  ],
+  "authored": "2018-01-11T09:15:18Z",
+  "subject": "Tidy up compiler warnings",
+  "baseline_failing": [],
+  "src_churn": 37,
+  "size": "S",
+  "gold_clean": false
+ },
+ "0a51540ad04b48b5b18fd6fd400363fc02512134": {
+  "task": "0a51540ad04b48b5b18fd6fd400363fc02512134",
+  "target_tests": [
+   "VetTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/vet/VetTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/model/BaseEntity.java",
+   "src/main/java/org/springframework/samples/petclinic/vet/Vet.java",
+   "src/main/resources/application.properties"
+  ],
+  "authored": "2017-02-03T10:02:07Z",
+  "subject": "Fix serializability of Vet",
+  "baseline_failing": [],
+  "src_churn": 11,
+  "size": "S",
+  "gold_clean": false
+ },
+ "80269539e27062592f4c28b0d5498f38fbc2d578": {
+  "task": "80269539e27062592f4c28b0d5498f38fbc2d578",
+  "target_tests": [
+   "CrashControllerTests",
+   "ProductionConfigurationTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/system/CrashControllerTests.java",
+   "src/test/java/org/springframework/samples/petclinic/system/ProductionConfigurationTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/vet/Specialty.java",
+   "src/main/java/org/springframework/samples/petclinic/vet/Vet.java",
+   "src/main/resources/application.properties"
+  ],
+  "authored": "2017-01-08T15:45:20Z",
+  "subject": "Configure caching properly to avoid error in vets",
+  "baseline_failing": [],
+  "src_churn": 14,
+  "size": "S",
+  "gold_clean": false
+ },
+ "a9b6565fcf24d59ec29f32c4d8e5c9001d7e1988": {
+  "task": "a9b6565fcf24d59ec29f32c4d8e5c9001d7e1988",
+  "target_tests": [
+   "ClinicServiceSpringDataJpaTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceSpringDataJpaTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/model/Pet.java",
+   "src/main/java/org/springframework/samples/petclinic/model/Visit.java",
+   "src/main/webapp/WEB-INF/jsp/owners/ownerDetails.jsp",
+   "src/main/webapp/WEB-INF/jsp/pets/createOrUpdateVisitForm.jsp"
+  ],
+  "authored": "2016-09-19T15:03:53+08:00",
+  "subject": "Remove dependency with joda time to simplify the project dependencies",
+  "baseline_failing": [],
+  "src_churn": 66,
+  "size": "M",
+  "gold_clean": false
+ },
+ "4c722465d8091cfa29b54674138c24c199259172": {
+  "task": "4c722465d8091cfa29b54674138c24c199259172",
+  "target_tests": [
+   "VetControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/web/VetControllerTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/web/VetController.java"
+  ],
+  "authored": "2016-06-28T08:11:40+02:00",
+  "subject": "Update vetsXml test using xpath",
+  "baseline_failing": [],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "077f4eb1055f83aaa5de3de9532b93b10f546ef6": {
+  "task": "077f4eb1055f83aaa5de3de9532b93b10f546ef6",
+  "target_tests": [
+   "VetControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/web/VetControllerTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/PetClinicApplication.java",
+   "src/main/java/org/springframework/samples/petclinic/config/CustomViewsConfiguration.java",
+   "src/main/java/org/springframework/samples/petclinic/web/VetController.java"
+  ],
+  "authored": "2016-06-28T11:05:42+08:00",
+  "subject": "simplify content negotiation setup",
+  "baseline_failing": [],
+  "src_churn": 71,
+  "size": "M",
+  "gold_clean": false
+ },
+ "4da41dbbdacc4dc349b3627231147a977cc91004": {
+  "task": "4da41dbbdacc4dc349b3627231147a977cc91004",
+  "target_tests": [
+   "OwnerControllerTests",
+   "PetControllerTests",
+   "VetControllerTests",
+   "VisitControllerTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/web/OwnerControllerTests.java",
+   "src/test/java/org/springframework/samples/petclinic/web/PetControllerTests.java",
+   "src/test/java/org/springframework/samples/petclinic/web/VetControllerTests.java",
+   "src/test/java/org/springframework/samples/petclinic/web/VisitControllerTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/PetClinicApplication.java",
+   "src/main/java/org/springframework/samples/petclinic/config/CacheConfig.java",
+   "src/main/resources/application.properties"
+  ],
+  "authored": "2016-06-24T21:18:38+02:00",
+  "subject": "#164 Disable cache configuration for unit tests",
+  "baseline_failing": [],
+  "src_churn": 18,
+  "size": "S",
+  "gold_clean": false
+ },
+ "ca755be44a2844e10876b8e38e68b9adf736b486": {
+  "task": "ca755be44a2844e10876b8e38e68b9adf736b486",
+  "target_tests": [
+   "AbstractClinicServiceTests"
+  ],
+  "test_files": [
+   "src/test/java/org/springframework/samples/petclinic/service/AbstractClinicServiceTests.java"
+  ],
+  "src_files": [
+   "src/main/java/org/springframework/samples/petclinic/repository/jdbc/JdbcVisitRepositoryImpl.java",
+   "src/main/java/org/springframework/samples/petclinic/repository/jpa/JpaVisitRepositoryImpl.java",
+   "src/main/java/org/springframework/samples/petclinic/service/ClinicService.java",
+   "src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java"
+  ],
+  "authored": "2016-06-15T22:46:47+02:00",
+  "subject": "Improvements in VisitRepository.findByPetId implementation.",
+  "baseline_failing": [],
+  "src_churn": 36,
+  "size": "S",
+  "gold_clean": false
+ }
+}

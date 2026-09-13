@@ -1,0 +1,4061 @@
+{
+ "1a4768959ef1b41f2c3e2b447233e90455697239": {
+  "task": "1a4768959ef1b41f2c3e2b447233e90455697239",
+  "target_tests": [
+   "t/unit/app/test_amqp.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_amqp.py"
+  ],
+  "src_files": [
+   "celery/app/amqp.py"
+  ],
+  "authored": "2026-07-07T22:50:35+07:00",
+  "subject": "Defer default queue lookup for explicitly routed tasks (#10357)",
+  "baseline_failing": [
+   "t/unit/app/test_amqp.py::test_AMQP::test_send_task_message__no_default_queue"
+  ],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "201573a11fb8c6cf8f712deea3b23142146b2cbb": {
+  "task": "201573a11fb8c6cf8f712deea3b23142146b2cbb",
+  "target_tests": [
+   "t/unit/worker/test_control.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_control.py"
+  ],
+  "src_files": [
+   "celery/worker/pidbox.py"
+  ],
+  "authored": "2026-07-06T20:24:17+05:00",
+  "subject": "Fix pidbox consumer cleanup during reset cycles (#10363)",
+  "baseline_failing": [
+   "celery.worker.pidbox:pidbox.py:48",
+   "t/unit/worker/test_control.py::test_Pidbox::test_pidbox_repeated_reset_cancels_previous_consumers",
+   "t/unit/worker/test_control.py::test_Pidbox::test_reset_cancels_old_consumer"
+  ],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "379a629dc2580380c15b6d1bd44a28db50e45288": {
+  "task": "379a629dc2580380c15b6d1bd44a28db50e45288",
+  "target_tests": [
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "src_files": [
+   "celery/canvas.py"
+  ],
+  "authored": "2026-07-05T21:13:28+08:00",
+  "subject": "Preserve group errback mutability (#10385)",
+  "baseline_failing": [
+   "t/unit/tasks/test_canvas.py::test_group::test_link_error_with_dict_sig"
+  ],
+  "src_churn": 2,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "730ab395c9b9654fcf248d400b551f1f693b35e1": {
+  "task": "730ab395c9b9654fcf248d400b551f1f693b35e1",
+  "target_tests": [
+   "t/unit/worker/test_worker.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_worker.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/events.py"
+  ],
+  "authored": "2026-07-05T19:38:48+07:00",
+  "subject": "Update reserved requests to use new event dispatcher on reconnect (#10383)",
+  "baseline_failing": [
+   "t/unit/worker/test_worker.py::test_Consumer::test_events_start_updates_request_eventers_on_reconnect"
+  ],
+  "src_churn": 3,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "3f2cf57d395a105dda9179b203040a1471d40a78": {
+  "task": "3f2cf57d395a105dda9179b203040a1471d40a78",
+  "target_tests": [
+   "t/unit/tasks/test_trace.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_trace.py"
+  ],
+  "src_files": [
+   "celery/app/trace.py"
+  ],
+  "authored": "2026-07-05T15:54:57+05:30",
+  "subject": "Raise a clear error instead of a bare ValueError when fast_trace_task's worker registry is empty (#10397)",
+  "baseline_failing": [
+   "t/unit/tasks/test_trace.py::test_trace::test_fast_trace_task__empty_registry_raises_helpful_error"
+  ],
+  "src_churn": 14,
+  "size": "S",
+  "gold_clean": true
+ },
+ "2e150f8330df059858ff5d481390a29b73c59600": {
+  "task": "2e150f8330df059858ff5d481390a29b73c59600",
+  "target_tests": [
+   "t/unit/app/test_amqp.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_amqp.py"
+  ],
+  "src_files": [
+   "celery/app/amqp.py"
+  ],
+  "authored": "2026-07-01T11:36:29+07:00",
+  "subject": "Fix queue selection by alias to store the real queue name (#10358)",
+  "baseline_failing": [
+   "t/unit/app/test_amqp.py::test_Queues::test_deselect_by_real_name_removes_queue_selected_by_alias"
+  ],
+  "src_churn": 7,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "d6131816f172750f7ba6204f903cd2fc243853ad": {
+  "task": "d6131816f172750f7ba6204f903cd2fc243853ad",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/consumer.py"
+  ],
+  "authored": "2026-06-27T18:27:51+07:00",
+  "subject": "Tolerate task cancellation errors after connection loss (#10382)",
+  "baseline_failing": [
+   "t/unit/worker/test_consumer.py::test_Consumer::test_cancel_long_running_tasks_on_connection_loss__cancel_error_is_swallowed"
+  ],
+  "src_churn": 5,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "e2b276e603b3974392d0363a76b00cb2263880a0": {
+  "task": "e2b276e603b3974392d0363a76b00cb2263880a0",
+  "target_tests": [
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/worker/request.py"
+  ],
+  "authored": "2026-06-27T13:12:02+03:30",
+  "subject": "Mark rejected tasks as failed when not requeued (#10369)",
+  "baseline_failing": [
+   "t/unit/worker/test_request.py::test_Request::test_on_failure_Reject_marks_as_failure",
+   "t/unit/worker/test_request.py::test_Request::test_on_failure_Reject_marks_as_failure_when_already_acked",
+   "t/unit/worker/test_request.py::test_Request::test_on_failure_Reject_respects_send_failed_event"
+  ],
+  "src_churn": 21,
+  "size": "S",
+  "gold_clean": true
+ },
+ "4a11650b11504c78f8351be836890c04c6e7a413": {
+  "task": "4a11650b11504c78f8351be836890c04c6e7a413",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py"
+  ],
+  "authored": "2026-06-24T10:48:09-04:00",
+  "subject": "Redis ResultConsumer: clean up leaked _pending_messages after on_wait_for_pending (#10366)",
+  "baseline_failing": [
+   "t/unit/backends/test_redis.py::test_RedisResultConsumer::test_on_wait_for_pending_cleans_up_leaked_failure_messages",
+   "t/unit/backends/test_redis.py::test_RedisResultConsumer::test_on_wait_for_pending_cleans_up_leaked_success_messages"
+  ],
+  "src_churn": 20,
+  "size": "S",
+  "gold_clean": true
+ },
+ "7f9a6e5d02f3501dd1137e7024148330c6dce804": {
+  "task": "7f9a6e5d02f3501dd1137e7024148330c6dce804",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/consumer.py"
+  ],
+  "authored": "2026-06-14T15:51:13+07:00",
+  "subject": "Fix add_consumer not restoring consume_from for known queues (#10352)",
+  "baseline_failing": [
+   "t/unit/worker/test_consumer.py::test_Consumer::test_readd_cancelled_queue_restores_consume_from"
+  ],
+  "src_churn": 2,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "d4eb32a781713ac3b6da3c61e49b21bfe936eda7": {
+  "task": "d4eb32a781713ac3b6da3c61e49b21bfe936eda7",
+  "target_tests": [
+   "t/unit/concurrency/test_prefork.py"
+  ],
+  "test_files": [
+   "t/unit/concurrency/test_prefork.py"
+  ],
+  "src_files": [
+   "celery/concurrency/asynpool.py"
+  ],
+  "authored": "2026-06-10T13:31:18+02:00",
+  "subject": "Fix free worker stalling after broker reconnect (AsynPool.flush clearing _busy_workers) (#10346)",
+  "baseline_failing": [
+   "t/unit/concurrency/test_prefork.py::test_AsynPool::test_flush_preserves_accepted_and_releases_unaccepted_together",
+   "t/unit/concurrency/test_prefork.py::test_AsynPool::test_flush_preserves_busy_worker_for_accepted_job",
+   "t/unit/concurrency/test_prefork.py::test_AsynPool::test_flush_preserves_busy_worker_via_scheduled_for_fallback"
+  ],
+  "src_churn": 33,
+  "size": "S",
+  "gold_clean": true
+ },
+ "74a7a63bb4844f4f8e426fa1f6b6a073a89ef01d": {
+  "task": "74a7a63bb4844f4f8e426fa1f6b6a073a89ef01d",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py"
+  ],
+  "authored": "2026-06-10T07:13:13-04:00",
+  "subject": "fix(redis): prevent _pending_messages memory leak in ResultConsumer (#10342)",
+  "baseline_failing": [
+   "t/unit/backends/test_redis.py::test_RedisResultConsumer::test_on_wait_for_pending_does_not_leak_ready_messages"
+  ],
+  "src_churn": 18,
+  "size": "S",
+  "gold_clean": true
+ },
+ "ece6862996dd03181e0f5c996ab0def973f27fe8": {
+  "task": "ece6862996dd03181e0f5c996ab0def973f27fe8",
+  "target_tests": [
+   "t/unit/app/test_amqp.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_amqp.py"
+  ],
+  "src_files": [
+   "celery/app/amqp.py"
+  ],
+  "authored": "2026-06-10T15:39:50+07:00",
+  "subject": "Fix Queues.deselect leaking routing-only queues into consumers (#10348)",
+  "baseline_failing": [
+   "t/unit/app/test_amqp.py::test_Queues::test_deselect_without_explicit_consume_selection_keeps_routing_only_queue_unconsumed",
+   "t/unit/app/test_amqp.py::test_Queues::test_deselect_without_explicit_consume_selection_removes_excluded_queue"
+  ],
+  "src_churn": 9,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "477c816f9c6a4aa601825fa36d4f203dba375c48": {
+  "task": "477c816f9c6a4aa601825fa36d4f203dba375c48",
+  "target_tests": [
+   "t/unit/backends/test_base.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_base.py"
+  ],
+  "src_files": [
+   "celery/backends/base.py"
+  ],
+  "authored": "2026-06-10T16:32:08+08:00",
+  "subject": "Fix: wrap new-style errback calls in try/except to prevent silent chain halt (#10214)",
+  "baseline_failing": [
+   "t/unit/backends/test_base.py::test_BaseBackend_dict::test_new_style_errback_exception_does_not_halt_chain"
+  ],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "1cc9ecf430717b371892573ecad252929213e75e": {
+  "task": "1cc9ecf430717b371892573ecad252929213e75e",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/consumer.py"
+  ],
+  "authored": "2026-06-08T18:48:46+02:00",
+  "subject": "Fix Consumer.on_close() wiping in-flight reservations and breaking worker_disable_prefetch (#10345)",
+  "baseline_failing": [
+   "t/unit/worker/test_consumer.py::test_Consumer::test_disable_prefetch_after_connection_loss_keeps_gate_closed",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_on_close_purges_orphan_reservations_from_requests_dict"
+  ],
+  "src_churn": 7,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "c30f42ad2f7acb429d0ebfa5fe46d3056f8c5c0c": {
+  "task": "c30f42ad2f7acb429d0ebfa5fe46d3056f8c5c0c",
+  "target_tests": [
+   "t/unit/utils/test_time.py"
+  ],
+  "test_files": [
+   "t/unit/utils/test_time.py"
+  ],
+  "src_files": [
+   "celery/utils/time.py"
+  ],
+  "authored": "2026-06-08T22:16:49+05:30",
+  "subject": "Handle DST gaps in make_aware (#10324)",
+  "baseline_failing": [],
+  "src_churn": 17,
+  "size": "S",
+  "gold_clean": true
+ },
+ "aa4c3b10181057dafba229aa1bf25faff02681f8": {
+  "task": "aa4c3b10181057dafba229aa1bf25faff02681f8",
+  "target_tests": [
+   "t/unit/backends/test_database.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_database.py"
+  ],
+  "src_files": [
+   "celery/backends/database/__init__.py"
+  ],
+  "authored": "2026-06-03T09:47:08+02:00",
+  "subject": "Apply backend retry policy to all DatabaseBackend DB operations (#10334)",
+  "baseline_failing": [],
+  "src_churn": 9,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "066e96e01c3eab72c1c4bf601d11c80b5ba876ef": {
+  "task": "066e96e01c3eab72c1c4bf601d11c80b5ba876ef",
+  "target_tests": [
+   "t/unit/app/test_amqp.py",
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_amqp.py",
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/app/amqp.py"
+  ],
+  "authored": "2026-06-03T14:20:55+07:00",
+  "subject": "Fix worker consuming unexpected queues after connection loss (#10335)",
+  "baseline_failing": [
+   "t/unit/worker/test_consumer.py::test_Consumer::test_recreated_task_consumer_does_not_consume_late_added_queue"
+  ],
+  "src_churn": 6,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "bf1cf69e24e3ede7d7053c17d47e381be959880e": {
+  "task": "bf1cf69e24e3ede7d7053c17d47e381be959880e",
+  "target_tests": [
+   "t/unit/app/test_preload_cli.py",
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_preload_cli.py",
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "src_files": [
+   "celery/canvas.py"
+  ],
+  "authored": "2026-05-25T11:01:20+05:30",
+  "subject": "Skip empty groups in chains (#10321)",
+  "baseline_failing": [
+   "t/unit/tasks/test_canvas.py::test_chain::test_empty_group_body_is_skipped_when_chain_upgrades_to_chord",
+   "t/unit/tasks/test_canvas.py::test_chain::test_empty_groups_are_skipped_in_chain",
+   "t/unit/tasks/test_canvas.py::test_chain::test_known_empty_generator_backed_group_is_skipped_in_chain",
+   "t/unit/tasks/test_canvas.py::test_chord::test_freeze_empty_group_body_returns_result"
+  ],
+  "src_churn": 16,
+  "size": "S",
+  "gold_clean": true
+ },
+ "be0e2de234324a06c61b5561fdd0ff18fabcea38": {
+  "task": "be0e2de234324a06c61b5561fdd0ff18fabcea38",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py"
+  ],
+  "authored": "2026-05-20T15:26:36+03:00",
+  "subject": "Allow Redis backend SSL config with redis URLs (#10313)",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_backend_ssl_with_redis_scheme"
+  ],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "8f0842b336bb95b38e436ca0739e9646ac016ae4": {
+  "task": "8f0842b336bb95b38e436ca0739e9646ac016ae4",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py"
+  ],
+  "authored": "2026-05-08T22:16:01-07:00",
+  "subject": "fix(redis): keep _reconnect_pubsub compatible with redis-py < 5.3.0 (#10298)",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_redis.py::test_RedisResultConsumer::test__reconnect_pubsub_redis_py_below_5_3_compat"
+  ],
+  "src_churn": 13,
+  "size": "S",
+  "gold_clean": true
+ },
+ "03c79ac140b2098520011a94d2e9a52f83571260": {
+  "task": "03c79ac140b2098520011a94d2e9a52f83571260",
+  "target_tests": [
+   "t/unit/worker/test_control.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_control.py"
+  ],
+  "src_files": [
+   "celery/worker/control.py"
+  ],
+  "authored": "2026-05-04T00:36:16-07:00",
+  "subject": "fix(worker): guard heartbeat control command against None event_dispatcher (#10295)",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/worker/test_control.py::test_ControlPanel::test_disable_events_no_dispatcher",
+   "t/unit/worker/test_control.py::test_ControlPanel::test_enable_events_no_dispatcher",
+   "t/unit/worker/test_control.py::test_ControlPanel::test_heartbeat_no_dispatcher"
+  ],
+  "src_churn": 7,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "5013b4a999c202f53594addb2d609498eee330de": {
+  "task": "5013b4a999c202f53594addb2d609498eee330de",
+  "target_tests": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/delayed_delivery.py"
+  ],
+  "authored": "2026-04-29T10:38:11+03:00",
+  "subject": "fix(worker): skip Broadcast queues in native delayed delivery binding (#10293)",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_bind_queues_skips_broadcast_queues"
+  ],
+  "src_churn": 3,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "f8668fcf5a9d8170485b2bc682558e55c914b127": {
+  "task": "f8668fcf5a9d8170485b2bc682558e55c914b127",
+  "target_tests": [
+   "t/unit/backends/test_rpc.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_rpc.py"
+  ],
+  "src_files": [
+   "celery/backends/asynchronous.py"
+  ],
+  "authored": "2026-04-29T00:53:00-06:00",
+  "subject": "Removed socket.timeout from reconnection conditions (#10285)",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_rpc.py::test_RPCResultConsumer::test_drain_events_socket_timeout_does_not_trigger_reconnect"
+  ],
+  "src_churn": 6,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "323f21d3f4b28d57d0e8a14aed9dfd8f901d3933": {
+  "task": "323f21d3f4b28d57d0e8a14aed9dfd8f901d3933",
+  "target_tests": [
+   "t/unit/backends/test_rpc.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_rpc.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/backends/rpc.py"
+  ],
+  "authored": "2026-04-26T22:43:47Z",
+  "subject": "fix(defaults,rpc): RabbitMQ 4.3.0 compatibility for transient queues (#10290)",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_rpc.py::test_RPCBackend::test_binding"
+  ],
+  "src_churn": 6,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "7bfa8d0c32e0af83b955a5f170c2051c3f1ec788": {
+  "task": "7bfa8d0c32e0af83b955a5f170c2051c3f1ec788",
+  "target_tests": [
+   "t/unit/backends/test_rpc.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_rpc.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/backends/rpc.py"
+  ],
+  "authored": "2026-04-26T20:29:38Z",
+  "subject": "Revert \"fix(defaults): default to exclusive queues for RabbitMQ 4.3.0 compati\u2026\" (#10289)",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_rpc.py::test_RPCBackend::test_binding"
+  ],
+  "src_churn": 6,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "d9b39790d526085b83770ee4de15fb0da14ee2e6": {
+  "task": "d9b39790d526085b83770ee4de15fb0da14ee2e6",
+  "target_tests": [
+   "t/unit/backends/test_rpc.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_rpc.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/backends/rpc.py"
+  ],
+  "authored": "2026-04-26T20:24:43Z",
+  "subject": "fix(defaults): default to exclusive queues for RabbitMQ 4.3.0 compatibility (#10287)",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_rpc.py::test_RPCBackend::test_binding"
+  ],
+  "src_churn": 6,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "9c8145fc0d97b7304786c77cf16852abc8876d30": {
+  "task": "9c8145fc0d97b7304786c77cf16852abc8876d30",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py",
+   "t/unit/worker/test_loops.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py",
+   "t/unit/worker/test_loops.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/consumer.py"
+  ],
+  "authored": "2026-04-23T01:29:27-07:00",
+  "subject": "Deferred ack synloop bug (#10263)",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_create_task_handler",
+   "t/unit/worker/test_consumer.py::test_Consumer_CallSoonAck::test_call_soon_ack_delegates_to_hub_when_present",
+   "t/unit/worker/test_consumer.py::test_Consumer_CallSoonAck::test_call_soon_ack_does_not_append_to_pending_ops",
+   "t/unit/worker/test_consumer.py::test_Consumer_CallSoonAck::test_call_soon_ack_executes_immediately_without_hub",
+   "t/unit/worker/test_consumer.py::test_Consumer_CallSoonAck::test_call_soon_ack_logs_callback_exception",
+   "t/unit/worker/test_consumer.py::test_Consumer_CallSoonAck::test_call_soon_ack_returns_ppartial_without_hub",
+   "t/unit/worker/test_loops.py::test_asynloop::test_on_task_received",
+   "t/unit/worker/test_loops.py::test_asynloop::test_on_task_received_executes_on_task_message"
+  ],
+  "src_churn": 30,
+  "size": "S",
+  "gold_clean": true
+ },
+ "8b4b29c935db900b294122c7a751e93fb3f9d178": {
+  "task": "8b4b29c935db900b294122c7a751e93fb3f9d178",
+  "target_tests": [
+   "t/unit/events/test_events.py",
+   "t/unit/worker/test_worker.py"
+  ],
+  "test_files": [
+   "t/unit/events/test_events.py",
+   "t/unit/worker/test_worker.py"
+  ],
+  "src_files": [
+   "celery/events/dispatcher.py",
+   "celery/worker/consumer/events.py"
+  ],
+  "authored": "2026-04-23T16:54:36+09:00",
+  "subject": "fix(events): stop leaking exceptions and cancel stale Heart timers (#10280)",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/events/test_events.py::test_EventDispatcher::test_buffered_entries_do_not_retain_exception",
+   "t/unit/worker/test_worker.py::test_Consumer::test_close_connection__heart_shutdown"
+  ],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "fbd01579c47acc8f1967ed8d5281bf41565dca8d": {
+  "task": "fbd01579c47acc8f1967ed8d5281bf41565dca8d",
+  "target_tests": [
+   "t/unit/app/test_app.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_app.py"
+  ],
+  "src_files": [
+   "celery/app/base.py"
+  ],
+  "authored": "2026-04-23T00:49:42-07:00",
+  "subject": "fix(send_task): honour per-task serializer and execution options (#10217)",
+  "baseline_failing": [
+   "t/unit/app/test_app.py::test_App::test_send_task_honours_task_serializer",
+   "t/unit/app/test_app.py::test_App::test_send_task_registry_without_get_method",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]"
+  ],
+  "src_churn": 62,
+  "size": "M",
+  "gold_clean": true
+ },
+ "acce2acc7a7cbc17c681dc53178c8ba429d59318": {
+  "task": "acce2acc7a7cbc17c681dc53178c8ba429d59318",
+  "target_tests": [
+   "t/unit/events/test_events.py"
+  ],
+  "test_files": [
+   "t/unit/events/test_events.py"
+  ],
+  "src_files": [
+   "celery/events/dispatcher.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-22T19:49:59+09:00",
+  "subject": "fix(events): skip publish when producer is None to stop memory leak after broker reconnect (#10277)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/events/test_events.py::test_EventDispatcher::test_send_skipped_after_close_when_producer_is_none"
+  ],
+  "gold_clean": true
+ },
+ "b313b6412b4fb382fe16471c7c437cc053290477": {
+  "task": "b313b6412b4fb382fe16471c7c437cc053290477",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/consumer.py",
+   "celery/worker/consumer/tasks.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-20T14:04:05+05:00",
+  "subject": "fix(consumer): skip prefetch reduction when per-consumer QoS is in effect (#10253)",
+  "src_churn": 59,
+  "size": "M",
+  "baseline_failing": [
+   "celery.worker.consumer.consumer:consumer.py:386",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_on_connection_error_skip_resets_prior_reduced_state",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_prefetch_count_reduction_respects_qos_global[qos_global_default_none]",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_prefetch_count_reduction_respects_qos_global[qos_global_false]",
+   "t/unit/worker/test_consumer.py::test_Tasks::test_start_records_qos_global_on_consumer_classic",
+   "t/unit/worker/test_consumer.py::test_Tasks::test_start_records_qos_global_on_consumer_quorum"
+  ],
+  "gold_clean": true
+ },
+ "d68250e55d8baaf83b04d757a5ee2686d4b46621": {
+  "task": "d68250e55d8baaf83b04d757a5ee2686d4b46621",
+  "target_tests": [
+   "t/unit/concurrency/test_thread.py"
+  ],
+  "test_files": [
+   "t/unit/concurrency/test_thread.py"
+  ],
+  "src_files": [
+   "celery/concurrency/thread.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-09T09:59:29+01:00",
+  "subject": "Fix warm shutdown not cancelling prefetched tasks in thread pool (#10183)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/concurrency/test_thread.py::test_thread_TaskPool::test_on_stop_cancels_pending_futures"
+  ],
+  "gold_clean": true
+ },
+ "72e9240aa1e22b5a124534f6b469d32629a066e2": {
+  "task": "72e9240aa1e22b5a124534f6b469d32629a066e2",
+  "target_tests": [
+   "t/unit/backends/test_base.py",
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_base.py",
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "src_files": [
+   "celery/backends/base.py",
+   "celery/canvas.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-06T17:35:42+03:00",
+  "subject": "fix#4834 (canvas): fix chord error handling when body is a chain (#10247)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_base.py::test_BaseBackend_dict::test_chord_error_from_stack_generates_id_when_callback_id_is_none",
+   "t/unit/tasks/test_canvas.py::test_chain::test_chain_id_matches_result_after_freeze"
+  ],
+  "gold_clean": true
+ },
+ "1a39f8ca68a3a4c89a6d471f100cfe0b2a22e65c": {
+  "task": "1a39f8ca68a3a4c89a6d471f100cfe0b2a22e65c",
+  "target_tests": [
+   "t/unit/app/test_app.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_app.py"
+  ],
+  "src_files": [
+   "celery/app/base.py",
+   "celery/app/defaults.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-06T15:11:54+03:00",
+  "subject": "fix(base): add timeout to broker pool acquisition to prevent indefinite blocking (#10174)",
+  "src_churn": 98,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_app.py::test_App::test_acquire_connection_raises_on_pool_exhaustion",
+   "t/unit/app/test_app.py::test_App::test_acquire_connection_success_with_pool",
+   "t/unit/app/test_app.py::test_App::test_acquire_producer_raises_on_pool_exhaustion",
+   "t/unit/app/test_app.py::test_App::test_acquire_producer_success",
+   "t/unit/app/test_app.py::test_App::test_broker_pool_acquire_timeout_default",
+   "t/unit/app/test_app.py::test_App::test_producer_or_acquire_passes_configured_timeout",
+   "t/unit/app/test_app.py::test_App::test_producer_or_acquire_passes_timeout_none_through",
+   "t/unit/app/test_app.py::test_App::test_send_task_raises_on_pool_exhaustion",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]"
+  ],
+  "gold_clean": true
+ },
+ "feb789accf0dcbbe1323ab59148b9e8b1e363bdd": {
+  "task": "feb789accf0dcbbe1323ab59148b9e8b1e363bdd",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/connection.py",
+   "celery/worker/consumer/consumer.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-06T08:24:25+03:00",
+  "subject": "fix: prevent graceful shutdown regression in connection recovery (GH-9705) (#10242)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0472aaccbfed884ddf96212f9b29da27ab8493f2": {
+  "task": "0472aaccbfed884ddf96212f9b29da27ab8493f2",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-04T14:51:46+05:00",
+  "subject": "feat(redis): support configuring additional connection errors (#10158)",
+  "src_churn": 42,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_additional_connection_errors",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_additional_connection_errors_bad_import_ignored",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_additional_connection_errors_non_exception_ignored",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_additional_connection_errors_non_type_ignored",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_additional_connection_errors_passed_to_result_consumer",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_additional_connection_errors_scalar_class",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_additional_connection_errors_scalar_string",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_additional_connection_errors_string"
+  ],
+  "gold_clean": true
+ },
+ "f9ea6771e67205a4fbb8b4dc3890f3ad5d704924": {
+  "task": "f9ea6771e67205a4fbb8b4dc3890f3ad5d704924",
+  "target_tests": [
+   "t/unit/backends/test_database.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_database.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/backends/database/__init__.py",
+   "celery/backends/database/session.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-02T16:55:25+02:00",
+  "subject": "Add `engine_callback` to database backend `SessionManager` (#10135)",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]"
+  ],
+  "gold_clean": false
+ },
+ "7135768008f982f96cb11e6061d3b309be374583": {
+  "task": "7135768008f982f96cb11e6061d3b309be374583",
+  "target_tests": [
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/worker/request.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-01T00:02:37+08:00",
+  "subject": "fix: send the task failure in hard timeout (#10226)",
+  "src_churn": 49,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/worker/test_request.py::test_Request::test_on_hard_timeout_calls_after_return",
+   "t/unit/worker/test_request.py::test_Request::test_on_hard_timeout_calls_task_on_failure",
+   "t/unit/worker/test_request.py::test_Request::test_on_hard_timeout_sends_task_failed_event",
+   "t/unit/worker/test_request.py::test_Request::test_on_hard_timeout_sends_task_failure_signal"
+  ],
+  "gold_clean": true
+ },
+ "1fe2a08d0c71ec83a242e1032d48fb804f92337a": {
+  "task": "1fe2a08d0c71ec83a242e1032d48fb804f92337a",
+  "target_tests": [
+   "t/unit/tasks/test_context.py",
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_context.py",
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "src_files": [
+   "celery/app/task.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-30T19:10:48+08:00",
+  "subject": "Fix/10022 request time limits (#10206)",
+  "src_churn": 30,
+  "size": "S",
+  "baseline_failing": [
+   "celery.app.trace:trace.py:309",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/tasks/test_context.py::test_Context::test_update_timelimit_none_clears_limits",
+   "t/unit/tasks/test_context.py::test_Context::test_update_timelimit_via_dict",
+   "t/unit/tasks/test_context.py::test_Context::test_update_timelimit_via_dict_items",
+   "t/unit/tasks/test_context.py::test_Context::test_update_timelimit_via_kwarg",
+   "t/unit/tasks/test_context.py::test_Context::test_update_timelimit_via_list_of_pairs",
+   "t/unit/tasks/test_context.py::test_Context::test_update_without_timelimit_does_not_touch_limits",
+   "t/unit/tasks/test_tasks.py::test_apply_task::test_apply_with_app_conf_time_limit_sets_request_fields",
+   "t/unit/tasks/test_tasks.py::test_apply_task::test_apply_without_time_limit_keeps_timelimit_none",
+   "t/unit/tasks/test_tasks.py::test_tasks::test_context_timelimit_none_leaves_fields_none",
+   "t/unit/tasks/test_tasks.py::test_tasks::test_context_timelimit_tuple_format_also_unpacked",
+   "t/unit/tasks/test_tasks.py::test_tasks::test_context_timelimit_unpacked_into_time_limit_fields",
+   "t/unit/tasks/test_tasks.py::test_tasks::test_task_inherits_time_limit_from_app_config"
+  ],
+  "gold_clean": true
+ },
+ "19775b237f3ae2208b94f9005800a67c628017a8": {
+  "task": "19775b237f3ae2208b94f9005800a67c628017a8",
+  "target_tests": [
+   "t/unit/app/test_beat.py",
+   "t/unit/app/test_schedules.py",
+   "t/unit/backends/test_gcs.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_beat.py",
+   "t/unit/app/test_schedules.py",
+   "t/unit/backends/test_gcs.py"
+  ],
+  "src_files": [
+   "celery/backends/gcs.py",
+   "celery/events/cursesmon.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-28T05:18:19-05:00",
+  "subject": "Replace remaining deprecated datetime.utcnow() calls (#10224)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_expire_chord_key",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_set_key[-86400]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_set_key[test_folder/-86400]"
+  ],
+  "gold_clean": true
+ },
+ "c167ccf4a12cc3fd11e8c31837a642e65fab6bbb": {
+  "task": "c167ccf4a12cc3fd11e8c31837a642e65fab6bbb",
+  "target_tests": [
+   "t/unit/worker/test_loops.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_loops.py"
+  ],
+  "src_files": [
+   "celery/worker/loops.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-26T10:49:55-03:00",
+  "subject": "fix(worker): add hub.reset() to synloop on connection error (#10204)",
+  "src_churn": 25,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/worker/test_loops.py::test_synloop::test_hub_reset_error_is_logged",
+   "t/unit/worker/test_loops.py::test_synloop::test_hub_reset_error_logs_exception",
+   "t/unit/worker/test_loops.py::test_synloop::test_hub_reset_on_connection_error"
+  ],
+  "gold_clean": true
+ },
+ "c38600d429eb0d457ce57ae4ec6b52fe9e40a28d": {
+  "task": "c38600d429eb0d457ce57ae4ec6b52fe9e40a28d",
+  "target_tests": [
+   "t/unit/worker/test_loops.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_loops.py"
+  ],
+  "src_files": [
+   "celery/worker/loops.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-26T13:24:37+08:00",
+  "subject": "fix: clear the timer while catch the exception (#10218)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [
+   "celery.worker.loops:loops.py:110",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/worker/test_loops.py::test_asynloop::test_hub_timer_clear_error_still_reraises_original",
+   "t/unit/worker/test_loops.py::test_asynloop::test_hub_timer_cleared_even_when_reset_raises",
+   "t/unit/worker/test_loops.py::test_asynloop::test_hub_timer_cleared_on_connection_error"
+  ],
+  "gold_clean": true
+ },
+ "b8f85213f45c937670a6a6806ce55326a0eb537f": {
+  "task": "b8f85213f45c937670a6a6806ce55326a0eb537f",
+  "target_tests": [
+   "t/unit/tasks/test_trace.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_trace.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/app/trace.py",
+   "celery/worker/request.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-15T18:51:04+08:00",
+  "subject": "Fix: prioritize request ignore_result over task definition (#10184)",
+  "src_churn": 51,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/tasks/test_trace.py::test_trace::test_ignore_result_priority__request_overrides_app_config",
+   "t/unit/tasks/test_trace.py::test_trace::test_ignore_result_priority__request_overrides_task_false",
+   "t/unit/tasks/test_trace.py::test_trace::test_ignore_result_priority__request_overrides_task_true",
+   "t/unit/worker/test_request.py::test_Request::test_ignore_result_default_from_task_true",
+   "t/unit/worker/test_request.py::test_Request::test_ignore_result_from_request_none",
+   "t/unit/worker/test_request.py::test_Request::test_store_errors_request_overrides_task_ignore_result"
+  ],
+  "gold_clean": true
+ },
+ "8eec5af31b191c113a0622326a9dbf916a5f3538": {
+  "task": "8eec5af31b191c113a0622326a9dbf916a5f3538",
+  "target_tests": [
+   "t/unit/backends/test_asynchronous.py",
+   "t/unit/backends/test_rpc.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_asynchronous.py",
+   "t/unit/backends/test_rpc.py"
+  ],
+  "src_files": [
+   "celery/backends/asynchronous.py",
+   "celery/backends/redis.py",
+   "celery/backends/rpc.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-10T15:47:22+08:00",
+  "subject": "Extract `reconnect_on_error` to `BaseResultConsumer` (#10189)",
+  "src_churn": 89,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_asynchronous.py::test_BaseResultConsumer_reconnect::test_reconnect_base_implementation_is_noop",
+   "t/unit/backends/test_asynchronous.py::test_BaseResultConsumer_reconnect::test_reconnect_on_error_calls_reconnect_on_connection_error",
+   "t/unit/backends/test_asynchronous.py::test_BaseResultConsumer_reconnect::test_reconnect_on_error_default_connection_errors_empty",
+   "t/unit/backends/test_asynchronous.py::test_BaseResultConsumer_reconnect::test_reconnect_on_error_ignores_non_connection_error",
+   "t/unit/backends/test_asynchronous.py::test_BaseResultConsumer_reconnect::test_reconnect_on_error_no_exception_passes_through",
+   "t/unit/backends/test_asynchronous.py::test_BaseResultConsumer_reconnect::test_reconnect_on_error_raises_runtime_when_reconnect_also_fails",
+   "t/unit/backends/test_asynchronous.py::test_BaseResultConsumer_reconnect::test_reconnect_on_error_runtime_chained_from_connection_error",
+   "t/unit/backends/test_rpc.py::test_RPCResultConsumer::test_drain_events_raises_runtime_when_reconnect_also_fails"
+  ],
+  "gold_clean": true
+ },
+ "865922abda9551876c2fd6cd7fb1ce59e7f2291a": {
+  "task": "865922abda9551876c2fd6cd7fb1ce59e7f2291a",
+  "target_tests": [
+   "t/unit/tasks/test_trace.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_trace.py"
+  ],
+  "src_files": [
+   "celery/app/trace.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-09T14:06:27+03:00",
+  "subject": "fix(trace): dispatch chain/callbacks on dedup fast-path for redelivered tasks (#10159)",
+  "src_churn": 131,
+  "size": "L",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/tasks/test_trace.py::test_trace::test_chain_dispatch_does_not_mutate_request_chain",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__backend_dedup_adds_to_successful_requests",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__backend_dedup_chain_and_callbacks",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__backend_dedup_dispatch_failure_logged",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__backend_dedup_dispatch_failure_skips_successful_requests",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__backend_dedup_dispatches_callbacks",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__backend_dedup_dispatches_chain",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__backend_dedup_memory_error_propagates",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__backend_dedup_multi_element_chain",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__backend_read_failure_rejects",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__reject_propagates_through_trace_task",
+   "t/unit/tasks/test_trace.py::test_trace::test_deduplicate_successful_tasks__root_id_fallback"
+  ],
+  "gold_clean": true
+ },
+ "df57d9ab919945fee49403c640f5a8c0a7c69cb3": {
+  "task": "df57d9ab919945fee49403c640f5a8c0a7c69cb3",
+  "target_tests": [
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "src_files": [
+   "celery/canvas.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-08T11:10:32Z",
+  "subject": "Fix O(K\u00b2) message bloat in a chain of chords (#10171)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/tasks/test_canvas.py::test_chain::test_chain_of_chords_stays_flat"
+  ],
+  "gold_clean": true
+ },
+ "6b20dcd2d16b360bb4c4c7bf01a2c0c72b204517": {
+  "task": "6b20dcd2d16b360bb4c4c7bf01a2c0c72b204517",
+  "target_tests": [
+   "t/unit/backends/test_asynchronous.py",
+   "t/unit/backends/test_rpc.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_asynchronous.py",
+   "t/unit/backends/test_rpc.py"
+  ],
+  "src_files": [
+   "celery/backends/asynchronous.py",
+   "celery/backends/rpc.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-08T11:25:40+08:00",
+  "subject": "Fix #6912 rpc backend reconnection error (#10179)",
+  "src_churn": 86,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_asynchronous.py::test_Drainer::test_drain_catches_and_logs_oserror",
+   "t/unit/backends/test_asynchronous.py::test_Drainer_without_greenlets::test_drain_catches_oserror_and_logs",
+   "t/unit/backends/test_asynchronous.py::test_GeventDrainer::test_drain_catches_and_logs_oserror",
+   "t/unit/backends/test_asynchronous.py::test_GeventDrainer::test_run_catches_and_logs_oserror",
+   "t/unit/backends/test_asynchronous.py::test_greenletDrainer::test_run_catches_oserror_and_logs",
+   "t/unit/backends/test_rpc.py::test_RPCResultConsumer::test_drain_events_channel_error_triggers_reconnect",
+   "t/unit/backends/test_rpc.py::test_RPCResultConsumer::test_drain_events_reconnect_preserves_queues",
+   "t/unit/backends/test_rpc.py::test_RPCResultConsumer::test_drain_events_reconnects_on_connection_error",
+   "t/unit/backends/test_rpc.py::test_RPCResultConsumer::test_reconnect_handles_close_failures_gracefully"
+  ],
+  "gold_clean": true
+ },
+ "22a03fa1315e94ddd2f26e2c7fdb64bc4c9d0767": {
+  "task": "22a03fa1315e94ddd2f26e2c7fdb64bc4c9d0767",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-03T11:27:09+02:00",
+  "subject": "Add redis-py DriverInfo support to Redis backend (#10040)",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_driver_info_fallback_redis_version_unknown",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_driver_info_fallback_to_lib_name",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_driver_info_fallback_with_attribute_error",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_driver_info_with_driverinfo_class",
+   "t/unit/tasks/test_stamping.py::test_canvas_stamping::test_stamping_headers_in_options[stamped_linked_canvas-canvas_workflow8-stamping_visitor4]",
+   "t/unit/tasks/test_stamping.py::test_canvas_stamping::test_stamping_headers_in_options[stamped_linked_canvas-canvas_workflow9-stamping_visitor0]",
+   "t/unit/tasks/test_stamping.py::test_canvas_stamping::test_stamping_headers_in_options[stamped_linked_canvas-canvas_workflow9-stamping_visitor1]",
+   "t/unit/tasks/test_stamping.py::test_canvas_stamping::test_stamping_headers_in_options[stamped_linked_canvas-canvas_workflow9-stamping_visitor2]",
+   "t/unit/tasks/test_stamping.py::test_canvas_stamping::test_stamping_headers_in_options[stamped_linked_canvas-canvas_workflow9-stamping_visitor3]",
+   "t/unit/tasks/test_stamping.py::test_canvas_stamping::test_stamping_headers_in_options[stamped_linked_canvas-canvas_workflow9-stamping_visitor4]",
+   "t/unit/worker/test_worker.py::test_WorkController::test_with_autoscaler_file_descriptor_safety"
+  ],
+  "gold_clean": false
+ },
+ "026682218858c574fdc1e0f4a564d18acf602311": {
+  "task": "026682218858c574fdc1e0f4a564d18acf602311",
+  "target_tests": [
+   "t/unit/backends/test_base.py",
+   "t/unit/backends/test_database.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_base.py",
+   "t/unit/backends/test_database.py"
+  ],
+  "src_files": [
+   "celery/backends/base.py",
+   "celery/backends/database/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-01T17:45:28+08:00",
+  "subject": "Database Backend Should Support the retry config parameters #6540 (#10130)",
+  "src_churn": 140,
+  "size": "L",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_base.py::test_BaseBackend_dict::test_save_group",
+   "t/unit/concurrency/test_prefork.py::test_AsynPool::test_schedule_writes_hub_remove_writer_ready_fd_not_in_all_inqueues"
+  ],
+  "gold_clean": true
+ },
+ "40c2349199b16d52521e9470ffa561cb903a7c86": {
+  "task": "40c2349199b16d52521e9470ffa561cb903a7c86",
+  "target_tests": [
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/app/task.py",
+   "celery/worker/request.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-28T18:46:21+05:00",
+  "subject": "feat(task): decouple acks_on_failure and acks_on_timeout (#10150)",
+  "src_churn": 64,
+  "size": "M",
+  "baseline_failing": [
+   "celery.worker.request:request.py:656",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/worker/test_request.py::test_Request::test_on_failure_acks_on_failure_false_rejects",
+   "t/unit/worker/test_request.py::test_Request::test_on_failure_mixed_acks_on_failure_true_timeout_false",
+   "t/unit/worker/test_request.py::test_Request::test_on_failure_timelimit_uses_acks_on_timeout_not_failure",
+   "t/unit/worker/test_request.py::test_Request::test_on_hard_timeout_acks_on_failure_or_timeout",
+   "t/unit/worker/test_request.py::test_Request::test_on_hard_timeout_acks_on_timeout_false_requeues"
+  ],
+  "gold_clean": true
+ },
+ "63f70cf9ef7de9934f74eb96719e697bac562288": {
+  "task": "63f70cf9ef7de9934f74eb96719e697bac562288",
+  "target_tests": [
+   "t/unit/backends/test_database.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_database.py"
+  ],
+  "src_files": [
+   "celery/backends/database/models.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-22T19:31:39+08:00",
+  "subject": "Database Backend: Add missing index on date_done (Fixes #10097) (#10098)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]"
+  ],
+  "gold_clean": false
+ },
+ "b1007a4bbf4cc7dcf305053d30cd170d3ce78bc1": {
+  "task": "b1007a4bbf4cc7dcf305053d30cd170d3ce78bc1",
+  "target_tests": [
+   "t/unit/backends/test_database.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_database.py"
+  ],
+  "src_files": [
+   "celery/backends/database/session.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-21T17:01:43+08:00",
+  "subject": "Database Backend filter unsupport sql engine arguments with nullpool #7355 (#10134)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]"
+  ],
+  "gold_clean": false
+ },
+ "67b328abd7d1cbafe7393081609552aab3948204": {
+  "task": "67b328abd7d1cbafe7393081609552aab3948204",
+  "target_tests": [
+   "t/unit/worker/test_worker.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_worker.py"
+  ],
+  "src_files": [
+   "celery/__init__.py",
+   "celery/apps/worker.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-16T00:27:04+08:00",
+  "subject": "Fix warm shutdown RuntimeError with eventlet>=0.37.0 (#10083) (#10123)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/worker/test_worker.py::test_WorkerApp::test_safe_say_uses_original_os_write",
+   "t/unit/worker/test_worker.py::test_WorkerApp::test_safe_say_works_with_patched_os_write"
+  ],
+  "gold_clean": true
+ },
+ "26dab80cb26ca05f47ff96463394fca27f1e61ed": {
+  "task": "26dab80cb26ca05f47ff96463394fca27f1e61ed",
+  "target_tests": [
+   "t/unit/backends/test_database.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_database.py"
+  ],
+  "src_files": [
+   "celery/backends/database/models.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-15T21:56:12+08:00",
+  "subject": "Fix/10106 onupdate col use lambda func (#10108)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]"
+  ],
+  "gold_clean": false
+ },
+ "1690dd3acc4de2cc123a71dca8f9df53b65b401c": {
+  "task": "1690dd3acc4de2cc123a71dca8f9df53b65b401c",
+  "target_tests": [
+   "t/unit/concurrency/test_prefork.py"
+  ],
+  "test_files": [
+   "t/unit/concurrency/test_prefork.py"
+  ],
+  "src_files": [
+   "celery/concurrency/asynpool.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-14T08:42:42+01:00",
+  "subject": "fix(asynpool): avoid AttributeError when proc lacks _sentinel_poll (#10086)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/concurrency/test_prefork.py::test_AsynPool::test_untrack_child_process_without_sentinel_poll"
+  ],
+  "gold_clean": true
+ },
+ "41bad6f22b66a4e510a58bf7130935cf0916f9db": {
+  "task": "41bad6f22b66a4e510a58bf7130935cf0916f9db",
+  "target_tests": [
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "src_files": [
+   "celery/app/task.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-11T13:30:18+01:00",
+  "subject": "fix: avoid cycle detection in native delayed delivery (#10095)",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/tasks/test_tasks.py::test_task_retries::test_signature_from_request__filters_x_death_headers"
+  ],
+  "gold_clean": true
+ },
+ "8ea903b6ddadcdf34e50e117e6761f8e10f7c622": {
+  "task": "8ea903b6ddadcdf34e50e117e6761f8e10f7c622",
+  "target_tests": [
+   "t/unit/contrib/test_worker.py",
+   "t/unit/worker/test_components.py"
+  ],
+  "test_files": [
+   "t/unit/contrib/test_worker.py",
+   "t/unit/worker/test_components.py"
+  ],
+  "src_files": [
+   "celery/contrib/testing/worker.py",
+   "celery/worker/components.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-06T01:42:00+07:00",
+  "subject": "Fix Django worker recursion bug + defensive checks for pool_cls.__module__ (#10048)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/contrib/test_worker.py::test_TestWorkController::test_init_with_string_pool_cls_gevent",
+   "t/unit/contrib/test_worker.py::test_TestWorkController::test_init_with_string_pool_cls_prefork",
+   "t/unit/contrib/test_worker.py::test_TestWorkController::test_init_with_string_pool_cls_solo",
+   "t/unit/worker/test_components.py::test_Beat::test_create__green_string_pool_cls",
+   "t/unit/worker/test_components.py::test_Beat::test_create__green_string_pool_cls_eventlet"
+  ],
+  "gold_clean": true
+ },
+ "333a82f746734151c5cbe848916085455b0a3748": {
+  "task": "333a82f746734151c5cbe848916085455b0a3748",
+  "target_tests": [
+   "t/unit/worker/test_control.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_control.py"
+  ],
+  "src_files": [
+   "celery/worker/control.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-04T14:11:56+02:00",
+  "subject": "Bugfix: Revoked tasks now immediately update backend status to REVOKED (#9869)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/worker/test_control.py::test_ControlPanel::test_revoke_backend_status_update",
+   "t/unit/worker/test_control.py::test_ControlPanel::test_revoke_terminate_backend_update"
+  ],
+  "gold_clean": true
+ },
+ "9d6ab110d947270c4edf0b42454266d2954e653d": {
+  "task": "9d6ab110d947270c4edf0b42454266d2954e653d",
+  "target_tests": [
+   "t/unit/fixups/test_django.py"
+  ],
+  "test_files": [
+   "t/unit/fixups/test_django.py"
+  ],
+  "src_files": [
+   "celery/fixups/django.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-04T02:14:16-05:00",
+  "subject": "Fix recursive WorkController instantiation in DjangoWorkerFixup + AttributeError when pool_cls is a string (#10045)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/fixups/test_django.py::test_DjangoWorkerFixup::test__is_prefork",
+   "t/unit/fixups/test_django.py::test_DjangoWorkerFixup::test_install",
+   "t/unit/fixups/test_django.py::test_DjangoWorkerFixup::test_no_recursive_worker_instantiation"
+  ],
+  "gold_clean": true
+ },
+ "ba20bed7723c684d12ddd62d6a7c0c0d901b3351": {
+  "task": "ba20bed7723c684d12ddd62d6a7c0c0d901b3351",
+  "target_tests": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/delayed_delivery.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-22T17:26:18Z",
+  "subject": "Only use exceptiongroup backport for Python < 3.11 (#10033)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cb08d5042a8ce1758a7460ca6856491b36949f20": {
+  "task": "cb08d5042a8ce1758a7460ca6856491b36949f20",
+  "target_tests": [
+   "t/unit/fixups/test_django.py"
+  ],
+  "test_files": [
+   "t/unit/fixups/test_django.py"
+  ],
+  "src_files": [
+   "celery/fixups/django.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-16T12:24:23+01:00",
+  "subject": "reliable prefork detection (#10023)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cc3350ef9867a34b1f3563222bd015d123ef1ad7": {
+  "task": "cc3350ef9867a34b1f3563222bd015d123ef1ad7",
+  "target_tests": [
+   "t/unit/fixups/test_django.py"
+  ],
+  "test_files": [
+   "t/unit/fixups/test_django.py"
+  ],
+  "src_files": [
+   "celery/fixups/django.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-09T12:17:06+02:00",
+  "subject": "Fix: Avoid unnecessary Django database connection creation during cleanup (#10015)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9f0a61c61ff7e6a7280542a03895e6fa7cb80552": {
+  "task": "9f0a61c61ff7e6a7280542a03895e6fa7cb80552",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-03T11:05:46+01:00",
+  "subject": "Fix Redis Sentinel ACL authentication support (#10013)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "63c1910221d9fb8c1931ff62c80c4c37232b2d58": {
+  "task": "63c1910221d9fb8c1931ff62c80c4c37232b2d58",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/apps/worker.py",
+   "celery/worker/consumer/consumer.py",
+   "celery/worker/request.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-17T23:40:22+02:00",
+  "subject": "Don't fail task on timeout during cold shutdown (#9678)",
+  "src_churn": 82,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2aebae52ebc9b5156faa040fe957fb8ef5421556": {
+  "task": "2aebae52ebc9b5156faa040fe957fb8ef5421556",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-26T17:32:26+11:00",
+  "subject": "Bug Fix: Nested Chords Fail When Using django-celery-results with a Redis Backend (#9950)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "26bee54d621d98b9322abd9aa2bb14f4b1a59972": {
+  "task": "26bee54d621d98b9322abd9aa2bb14f4b1a59972",
+  "target_tests": [
+   "t/unit/app/test_beat.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_beat.py"
+  ],
+  "src_files": [
+   "celery/beat.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-25T19:37:43+03:00",
+  "subject": "Handle UnpicklingError in persistent scheduler initialization (#9952)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7d501cac24cbbb4046a9752ae2a5c53660be8cd7": {
+  "task": "7d501cac24cbbb4046a9752ae2a5c53660be8cd7",
+  "target_tests": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/delayed_delivery.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-25T18:35:41+02:00",
+  "subject": "fix(worker): continue to attempt to bind other queues after a native delayed delivery binding failure has occurred (#9959)",
+  "src_churn": 30,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1ad3bd45369106e22b6aabad047480119140b8ea": {
+  "task": "1ad3bd45369106e22b6aabad047480119140b8ea",
+  "target_tests": [
+   "t/unit/fixups/test_django.py"
+  ],
+  "test_files": [
+   "t/unit/fixups/test_django.py"
+  ],
+  "src_files": [
+   "celery/fixups/django.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-20T15:13:23+02:00",
+  "subject": "Add support for Django Connection pool (#9953)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/fixups/test_django.py::test_DjangoWorkerFixup::test_close_database_conn_pool_based_on_settings",
+   "t/unit/fixups/test_django.py::test_DjangoWorkerFixup::test_close_database_suppresses_close_pool_keyerror"
+  ],
+  "gold_clean": true
+ },
+ "8063230bba321ddda3a8e0549f1f4c86ba3b5469": {
+  "task": "8063230bba321ddda3a8e0549f1f4c86ba3b5469",
+  "target_tests": [
+   "t/unit/bin/test_worker.py",
+   "t/unit/worker/test_autoscale.py",
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/bin/test_worker.py",
+   "t/unit/worker/test_autoscale.py",
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/bin/worker.py",
+   "celery/worker/consumer/tasks.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-30T09:13:18+03:00",
+  "subject": "fix: restrict disable-prefetch feature to Redis brokers only (#9919)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_worker.py::test_disable_prefetch_ignored_for_non_redis_brokers",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_disable_prefetch_ignored_for_non_redis_brokers"
+  ],
+  "gold_clean": true
+ },
+ "e7a95502fa81bc47d1bdd7d9d893fce35d254e6b": {
+  "task": "e7a95502fa81bc47d1bdd7d9d893fce35d254e6b",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/consumer.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-28T10:31:41-07:00",
+  "subject": "Fix broker connection retry attempt counter in the error log (#9911)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_connect_error_handler_progress"
+  ],
+  "gold_clean": true
+ },
+ "8297e70abac8daede32bafc7c9ba1576d1a11020": {
+  "task": "8297e70abac8daede32bafc7c9ba1576d1a11020",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/app/task.py",
+   "celery/backends/redis.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-28T18:42:55+02:00",
+  "subject": "Support redis client name (#9900)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_backend_redis_client_name",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_backend_redis_client_name_not_set"
+  ],
+  "gold_clean": true
+ },
+ "c276fed72cc18b5e88077004124eaad0327ac666": {
+  "task": "c276fed72cc18b5e88077004124eaad0327ac666",
+  "target_tests": [
+   "t/unit/backends/test_database.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_database.py"
+  ],
+  "src_files": [
+   "celery/backends/database/models.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-21T16:57:23+02:00",
+  "subject": "Fix arithmetic overflow for MSSQL result backend (#9904)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings"
+  ],
+  "gold_clean": false
+ },
+ "989aac0889ad0157fa7db8228c81461d9a3fa75e": {
+  "task": "989aac0889ad0157fa7db8228c81461d9a3fa75e",
+  "target_tests": [
+   "t/unit/app/test_app.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_app.py"
+  ],
+  "src_files": [
+   "celery/utils/time.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-20T06:32:03+02:00",
+  "subject": "Celery.timezone: try tzlocal.get_localzone() before using LocalTimezone (#9862)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_app.py::test_App::test_use_local_timezone",
+   "t/unit/app/test_app.py::test_App::test_use_local_timezone_failure",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings"
+  ],
+  "gold_clean": true
+ },
+ "893ce604859a736e9b508991847a6ed8d89bc916": {
+  "task": "893ce604859a736e9b508991847a6ed8d89bc916",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-18T16:07:13+02:00",
+  "subject": "Feature: Add support credential_provider to Redis Backend (#9879)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_credential_provider_from_redis_conf",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_url_with_credential_provider"
+  ],
+  "gold_clean": true
+ },
+ "6da32827cebaf332d22f906386c47e552ec0e38f": {
+  "task": "6da32827cebaf332d22f906386c47e552ec0e38f",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py",
+   "t/unit/worker/test_strategy.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py",
+   "t/unit/worker/test_strategy.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/worker/consumer/tasks.py",
+   "celery/worker/strategy.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-31T14:57:30+05:30",
+  "subject": "Add worker_eta_task_limit configuration to manage ETA task memory usage (#9853)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/worker/test_consumer.py::test_Tasks::test_qos_with_worker_eta_task_limit",
+   "t/unit/worker/test_consumer.py::test_Tasks::test_qos_with_zero_worker_eta_task_limit"
+  ],
+  "gold_clean": true
+ },
+ "246bca18e3c65e6881a4a8fef89dd15e1b506a5f": {
+  "task": "246bca18e3c65e6881a4a8fef89dd15e1b506a5f",
+  "target_tests": [
+   "t/unit/bin/test_worker.py",
+   "t/unit/worker/test_autoscale.py",
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/bin/test_worker.py",
+   "t/unit/worker/test_autoscale.py",
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/bin/worker.py",
+   "celery/worker/consumer/tasks.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-31T12:15:42+03:00",
+  "subject": "Feature/disable prefetch fixes (#9863)",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_worker.py::test_cli_disable_prefetch_flag",
+   "t/unit/bin/test_worker.py::test_disable_prefetch_affects_qos_behavior",
+   "t/unit/worker/test_autoscale.py::test_Autoscaler::test_disable_prefetch_respects_max_concurrency",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_disable_prefetch_enabled_basic",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_disable_prefetch_respects_autoscale_max_concurrency",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_disable_prefetch_respects_reserved_requests_limit"
+  ],
+  "gold_clean": true
+ },
+ "6804ea8615afcdbc95ed68e95b47ae623080fa2b": {
+  "task": "6804ea8615afcdbc95ed68e95b47ae623080fa2b",
+  "target_tests": [
+   "t/unit/backends/test_asynchronous.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_asynchronous.py"
+  ],
+  "src_files": [
+   "celery/backends/asynchronous.py",
+   "celery/backends/redis.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-30T23:16:02-07:00",
+  "subject": "fix: prevent celery from hanging due to spawned greenlet errors in greenlet drainers (#9371)",
+  "src_churn": 109,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "31d05ed4d52807422dd0f8ba23345beba4ce28a1": {
+  "task": "31d05ed4d52807422dd0f8ba23345beba4ce28a1",
+  "target_tests": [
+   "t/unit/backends/test_couchdb.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_couchdb.py"
+  ],
+  "src_files": [
+   "celery/backends/couchdb.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-26T07:13:33+03:00",
+  "subject": "Fix `AsyncResult.forget()` with couchdb backend method raises `TypeError: a bytes-like object is required, not 'str'` (#9865)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings"
+  ],
+  "gold_clean": false
+ },
+ "7adc9e6afc132c5ced1678fb7b8ed09a8a68f07a": {
+  "task": "7adc9e6afc132c5ced1678fb7b8ed09a8a68f07a",
+  "target_tests": [
+   "t/unit/tasks/test_result.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_result.py"
+  ],
+  "src_files": [
+   "celery/result.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-11T09:28:54+02:00",
+  "subject": "Fix pending_result memory leak (#9806)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/tasks/test_result.py::test_AsyncResult::test_forget_remove_pending_result"
+  ],
+  "gold_clean": true
+ },
+ "da4a80dc449301fde4355153b47af8c42caed37c": {
+  "task": "da4a80dc449301fde4355153b47af8c42caed37c",
+  "target_tests": [
+   "t/unit/fixups/test_django.py"
+  ],
+  "test_files": [
+   "t/unit/fixups/test_django.py"
+  ],
+  "src_files": [
+   "celery/fixups/django.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-10T03:19:25-04:00",
+  "subject": "Revert \"Use Django DB max age connection setting\" (#9824)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/fixups/test_django.py::test_DjangoWorkerFixup::test__close_database",
+   "t/unit/fixups/test_django.py::test_DjangoWorkerFixup::test_close_database_always_closes_connections",
+   "t/unit/fixups/test_django.py::test_DjangoWorkerFixup::test_on_worker_process_init"
+  ],
+  "gold_clean": true
+ },
+ "46443dc86df23fc2c0aacadbb98ce14160fc58ec": {
+  "task": "46443dc86df23fc2c0aacadbb98ce14160fc58ec",
+  "target_tests": [
+   "t/unit/events/test_dumper.py"
+  ],
+  "test_files": [
+   "t/unit/events/test_dumper.py"
+  ],
+  "src_files": [
+   "celery/events/dumper.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-03T23:02:47+03:00",
+  "subject": "Fix Python 3.13 compatibility in events dumper (#9826)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/events/test_dumper.py::test_on_event_non_task",
+   "t/unit/events/test_dumper.py::test_on_event_task_received"
+  ],
+  "gold_clean": true
+ },
+ "23521b1db66d538a6f4686a39248a817b74de93a": {
+  "task": "23521b1db66d538a6f4686a39248a817b74de93a",
+  "target_tests": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/delayed_delivery.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-07-05T08:35:37+03:00",
+  "subject": "Replace DelayedDelivery connection creation to use context manger (#9793)",
+  "src_churn": 50,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_start_native_delayed_delivery_topic_exchange"
+  ],
+  "gold_clean": true
+ },
+ "a83070e5ec748c32325332db422756cfdd709aae": {
+  "task": "a83070e5ec748c32325332db422756cfdd709aae",
+  "target_tests": [
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "src_files": [
+   "celery/app/task.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-07-03T05:32:55+02:00",
+  "subject": "Fix #9738 : Add root_id and parent_id to .apply() (#9784)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/tasks/test_tasks.py::test_apply_task::test_apply_nested_parent_child_relationship",
+   "t/unit/tasks/test_tasks.py::test_apply_task::test_apply_single_task_ids",
+   "t/unit/tasks/test_tasks.py::test_apply_task::test_apply_with_parent_task_no_root_id"
+  ],
+  "gold_clean": true
+ },
+ "2a030962ed36b8433a877032e1baf867f6468c70": {
+  "task": "2a030962ed36b8433a877032e1baf867f6468c70",
+  "target_tests": [
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "src_files": [
+   "celery/canvas.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-06-24T07:39:08+02:00",
+  "subject": "fix: (#9773) task_id must not be empty with chain as body of a chord (#9774)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/tasks/test_canvas.py::test_chord::test_chord_run_body_freeze_with_no_external_task_id",
+   "t/unit/tasks/test_canvas.py::test_chord::test_chord_run_ensures_body_has_valid_task_id",
+   "t/unit/tasks/test_canvas.py::test_chord::test_chord_run_generates_task_id_when_none_provided"
+  ],
+  "gold_clean": true
+ },
+ "7054a0ee978af3672a8435f7a35d4494f04c02de": {
+  "task": "7054a0ee978af3672a8435f7a35d4494f04c02de",
+  "target_tests": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/delayed_delivery.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-06-10T02:55:16-03:00",
+  "subject": "Makes _on_retry return a float as required to be used as errback on retry_over_time (#9741)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_retry_over_time_with_float_return"
+  ],
+  "gold_clean": true
+ },
+ "b06e53f324f0cfe2b1c98b99d7a8a158d7034dea": {
+  "task": "b06e53f324f0cfe2b1c98b99d7a8a158d7034dea",
+  "target_tests": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/delayed_delivery.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-05-18T18:18:22-03:00",
+  "subject": "Fixes issue with retry callback argument types in DelayedDelivery (#9708)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_on_retry_logging"
+  ],
+  "gold_clean": true
+ },
+ "5c1a13cffe0331391bf8bc808196a1573f8922ad": {
+  "task": "5c1a13cffe0331391bf8bc808196a1573f8922ad",
+  "target_tests": [
+   "t/unit/app/test_app.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_app.py"
+  ],
+  "src_files": [
+   "celery/app/base.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-05-09T21:33:07+03:00",
+  "subject": "Support apply_async without queue argument on quorum queues (#9686)",
+  "src_churn": 56,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_app.py::test_App::test_native_delayed_delivery__no_queue_arg__no_eta",
+   "t/unit/app/test_app.py::test_App::test_native_delayed_delivery__no_queue_arg__with_countdown",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings"
+  ],
+  "gold_clean": true
+ },
+ "f0c726121468f4368cc6d149a6370900d1b0dbf6": {
+  "task": "f0c726121468f4368cc6d149a6370900d1b0dbf6",
+  "target_tests": [
+   "t/unit/utils/test_time.py"
+  ],
+  "test_files": [
+   "t/unit/utils/test_time.py"
+  ],
+  "src_files": [
+   "celery/utils/time.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-04-18T00:49:41+02:00",
+  "subject": "Fix calculating remaining time across DST changes (#9669)",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/utils/test_time.py::test_remaining"
+  ],
+  "gold_clean": true
+ },
+ "f110e3c797df36e8b3efb40449b028664c88f6ea": {
+  "task": "f110e3c797df36e8b3efb40449b028664c88f6ea",
+  "target_tests": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/delayed_delivery.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-04-04T03:38:45+03:00",
+  "subject": "Fixed \"AttributeError: list object has no attribute strip\" with quorum queues and failover brokers (#9657)",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_validate_broker_urls_invalid[123-ValueError-broker_url",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_validate_broker_urls_invalid[broker_urls4-ValueError-All",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_validate_broker_urls_valid[broker_urls2-expected_result2]"
+  ],
+  "gold_clean": true
+ },
+ "53dc515c77efd1fb19aad599b05ad96d886e5327": {
+  "task": "53dc515c77efd1fb19aad599b05ad96d886e5327",
+  "target_tests": [
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/worker/request.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-03-20T02:30:09-05:00",
+  "subject": "Reject task when hard time limit is exceeded with acks_on_failure_or_timeout=False (#9626)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "celery.worker.request:request.py:643",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/worker/test_request.py::test_Request::test_on_failure_TimeLimitExceeded_rejects_with_requeue"
+  ],
+  "gold_clean": true
+ },
+ "301dda12eac95f56228111869d9fc156b85a8942": {
+  "task": "301dda12eac95f56228111869d9fc156b85a8942",
+  "target_tests": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-03-13T17:53:30+01:00",
+  "subject": "feat: define exception_safe_to_retry for redisbackend (#9614)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/backends/test_redis.py::test_RedisBackend::test_exception_safe_to_retry"
+  ],
+  "gold_clean": true
+ },
+ "c8de124d1ce0443ede4447b4d6d79d9b237718c8": {
+  "task": "c8de124d1ce0443ede4447b4d6d79d9b237718c8",
+  "target_tests": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_native_delayed_delivery.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/delayed_delivery.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-03-06T22:44:54+02:00",
+  "subject": "Refactored and Enhanced DelayedDelivery bootstep (#9599)",
+  "src_churn": 226,
+  "size": "L",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_on_retry_logging",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_setup_bind_error",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_setup_declare_error",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_start_configuration_validation_error",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_start_retry_on_connection_error",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_start_with_no_queues",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_validate_broker_urls_empty",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_validate_broker_urls_invalid",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_validate_broker_urls_valid",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_validate_queue_type_empty",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_validate_queue_type_invalid",
+   "t/unit/worker/test_native_delayed_delivery.py::test_DelayedDelivery::test_validate_queue_type_valid"
+  ],
+  "gold_clean": true
+ },
+ "dbf2de8d13d0469b5df36d517579bc51f0f88826": {
+  "task": "dbf2de8d13d0469b5df36d517579bc51f0f88826",
+  "target_tests": [
+   "t/unit/app/test_app.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_app.py"
+  ],
+  "src_files": [
+   "celery/app/base.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-12T12:38:17+07:00",
+  "subject": "Fix send_task method when detect is native delayed delivery approach available (#9552)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_app.py::test_App::test_native_delayed_delivery_countdown",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]"
+  ],
+  "gold_clean": true
+ },
+ "3ae15c1dfc80c102aed05ad9c1d38470218b2fc8": {
+  "task": "3ae15c1dfc80c102aed05ad9c1d38470218b2fc8",
+  "target_tests": [
+   "t/unit/tasks/test_canvas.py",
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_canvas.py",
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "src_files": [
+   "celery/canvas.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-25T17:12:21+02:00",
+  "subject": "Unroll group when chaining a group with a single item to another signature when using the | operator. (#9456)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/tasks/test_canvas.py::test_chord::test_no_chord_upgrade_on_chaining_with_group_of_a_single_item",
+   "t/unit/tasks/test_canvas.py::test_group::test_group_unroll"
+  ],
+  "gold_clean": true
+ },
+ "1fef0cc4add1c771f172e5c2bfefc8a0701ab157": {
+  "task": "1fef0cc4add1c771f172e5c2bfefc8a0701ab157",
+  "target_tests": [
+   "t/unit/backends/test_cassandra.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_cassandra.py"
+  ],
+  "src_files": [
+   "celery/backends/cassandra.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-23T22:30:40+09:00",
+  "subject": "Fix cassandra backend port settings not working (#9465)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_cassandra.py::test_CassandraBackend::test_options",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]"
+  ],
+  "gold_clean": true
+ },
+ "3baea167a301ca4d2d6163ff44574736586cdb53": {
+  "task": "3baea167a301ca4d2d6163ff44574736586cdb53",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/consumer.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-12T20:55:40+02:00",
+  "subject": "Bugfix: SIGQUIT not initiating cold shutdown when `task_acks_late=False` (#9461)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_cancel_all_unacked_requests"
+  ],
+  "gold_clean": true
+ },
+ "01863590513efb32e85e90f22966f449dda68381": {
+  "task": "01863590513efb32e85e90f22966f449dda68381",
+  "target_tests": [
+   "t/unit/concurrency/test_prefork.py"
+  ],
+  "test_files": [
+   "t/unit/concurrency/test_prefork.py"
+  ],
+  "src_files": [
+   "celery/concurrency/asynpool.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-02T00:52:12+08:00",
+  "subject": "Prevent event_mask from being overwritten. (#9432)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/concurrency/test_prefork.py::test_AsynPool::test_select_unpatched"
+  ],
+  "gold_clean": true
+ },
+ "3f2aed4b565d0d9dc4c8dc7fec6e8516a29017ba": {
+  "task": "3f2aed4b565d0d9dc4c8dc7fec6e8516a29017ba",
+  "target_tests": [
+   "t/unit/backends/test_azureblockblob.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_azureblockblob.py"
+  ],
+  "src_files": [
+   "celery/backends/azureblockblob.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-28T16:48:15+01:00",
+  "subject": "Allowing managed credentials for azureblockblob (#9430)",
+  "src_churn": 33,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_azureblockblob.py::test_AzureBlockBlobBackend::test_create_client__default_azure_credentials",
+   "t/unit/backends/test_azureblockblob.py::test_AzureBlockBlobBackend::test_create_client__managed_identity_azure_credentials",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]"
+  ],
+  "gold_clean": true
+ },
+ "80dff7dcdec5894b4cf3ac52bd1a01a98f08e7fc": {
+  "task": "80dff7dcdec5894b4cf3ac52bd1a01a98f08e7fc",
+  "target_tests": [
+   "t/unit/contrib/test_worker.py"
+  ],
+  "test_files": [
+   "t/unit/contrib/test_worker.py"
+  ],
+  "src_files": [
+   "celery/contrib/testing/worker.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-10T18:46:36+01:00",
+  "subject": "Allow custom hostname for celery_worker in celery.contrib.pytest / celery.contrib.testing.worker (#9405)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/contrib/test_worker.py::test_worker::test_start_worker_with_hostname_config"
+  ],
+  "gold_clean": true
+ },
+ "8eecebbb9551449587be56ddcf13c4e2549774cb": {
+  "task": "8eecebbb9551449587be56ddcf13c4e2549774cb",
+  "target_tests": [
+   "t/unit/app/test_app.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_app.py"
+  ],
+  "src_files": [
+   "celery/app/base.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-02T01:21:43+02:00",
+  "subject": "default strict to False for pydantic tasks (#9393)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_app.py::test_App::test_task_with_pydantic_with_non_strict_validation",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]"
+  ],
+  "gold_clean": true
+ },
+ "1fc305837a785dda8ed8cb196aec654427fe433e": {
+  "task": "1fc305837a785dda8ed8cb196aec654427fe433e",
+  "target_tests": [
+   "t/unit/test_loops.py",
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/test_loops.py",
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/consumer.py",
+   "celery/worker/loops.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-17T21:43:13+03:00",
+  "subject": "fix(perform_pending_operations): prevent task duplication on shutdown\u2026 (#9348)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/test_loops.py::test_synloop_perform_pending_operations_on_system_exit"
+  ],
+  "gold_clean": true
+ },
+ "9f43916da91e71c56a9eb51ea657e54d128d2726": {
+  "task": "9f43916da91e71c56a9eb51ea657e54d128d2726",
+  "target_tests": [
+   "t/unit/backends/test_gcs.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_gcs.py"
+  ],
+  "src_files": [
+   "celery/backends/gcs.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-17T21:39:52+03:00",
+  "subject": "Add native incr support for GCSBackend (#9302)",
+  "src_churn": 227,
+  "size": "L",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_apply_chord_incr",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_bucket",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_bucket_ttl_missing_lifecycle_rule",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_delete_chord_key",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_delete_existing_key[]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_delete_existing_key[test_folder/]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_delete_missing_key[]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_delete_missing_key[test_folder/]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_expire_chord_key",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_firestore_document",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_firestore_project",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_firestore_ttl_policy_disabled",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_get_blob",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_get_key[]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_get_key[test_folder/]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_get_missing_key",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_incr",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_is_firestore_ttl_policy_enabled",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_mget[]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_mget[test_folder/]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_missing_firestore_module",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_new_client_after_fork",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_new_firestore_client_after_fork",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_on_chord_part_return",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_parse_url[]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_parse_url[test_folder/]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_restore_deps",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_set_key[-86400]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_set_key[-None]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_set_key[test_folder/-86400]",
+   "t/unit/backends/test_gcs.py::test_GCSBackend::test_set_key[test_folder/-None]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]"
+  ],
+  "gold_clean": true
+ },
+ "d8c57584efdeacbcf76d380eec5113357cd5b5a1": {
+  "task": "d8c57584efdeacbcf76d380eec5113357cd5b5a1",
+  "target_tests": [
+   "t/unit/app/test_beat.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_beat.py"
+  ],
+  "src_files": [
+   "celery/beat.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-08T11:53:41-07:00",
+  "subject": "Fix: Treat dbm.error as a corrupted schedule file (#9331)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_beat.py::test_PersistentScheduler::test_create_schedule_corrupted_dbm_error",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]"
+  ],
+  "gold_clean": true
+ },
+ "6c2a779fc09133e76efacb0e87a6b1f3f908fa4d": {
+  "task": "6c2a779fc09133e76efacb0e87a6b1f3f908fa4d",
+  "target_tests": [
+   "t/unit/app/test_app.py",
+   "t/unit/utils/test_annotations.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_app.py",
+   "t/unit/utils/test_annotations.py"
+  ],
+  "src_files": [
+   "celery/app/base.py",
+   "celery/utils/annotations.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-28T12:04:59+02:00",
+  "subject": "Pydantic typehints: Fix optional, allow generics (#9319)",
+  "src_churn": 67,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e6dd621683f5666d5854ec3ed8c9953e10c8a27d": {
+  "task": "e6dd621683f5666d5854ec3ed8c9953e10c8a27d",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/tasks.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-24T13:45:28+03:00",
+  "subject": "Add log when global qos is disabled (#9296)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/worker/test_consumer.py::test_Tasks::test_log_when_qos_is_false"
+  ],
+  "gold_clean": true
+ },
+ "674656e8232eef12b0b7f02cfcb03e47244ffca7": {
+  "task": "674656e8232eef12b0b7f02cfcb03e47244ffca7",
+  "target_tests": [
+   "t/unit/backends/test_database.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_database.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/backends/database/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-18T14:18:26+02:00",
+  "subject": "Non-lazy table creation for database backend (#9228)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]"
+  ],
+  "gold_clean": false
+ },
+ "89ff576eb9ae4efceeb169b6e956fdb57794f331": {
+  "task": "89ff576eb9ae4efceeb169b6e956fdb57794f331",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/worker/consumer/tasks.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-17T18:13:14-04:00",
+  "subject": "Updated quorum queue detection to handle multiple broker instances (#9294)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/worker/test_consumer.py::test_Tasks::test_detect_quorum_queues_not_rabbitmq"
+  ],
+  "gold_clean": true
+ },
+ "ddc9bac87bff11ad199d2260f1f5dae563da4fd8": {
+  "task": "ddc9bac87bff11ad199d2260f1f5dae563da4fd8",
+  "target_tests": [
+   "t/unit/utils/test_dispatcher.py"
+  ],
+  "test_files": [
+   "t/unit/utils/test_dispatcher.py"
+  ],
+  "src_files": [
+   "celery/utils/dispatch/signal.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-13T05:17:00-04:00",
+  "subject": "Fixes #9119: inject dispatch_uid for retry-wrapped receivers (#9247)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/utils/test_dispatcher.py::test_Signal::test_disconnect_retryable_decorator"
+  ],
+  "gold_clean": true
+ },
+ "21f73b8e8f09d999af411006ebc6126992f5fd9c": {
+  "task": "21f73b8e8f09d999af411006ebc6126992f5fd9c",
+  "target_tests": [
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "src_files": [
+   "celery/app/task.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-09T22:48:26+08:00",
+  "subject": "Correct the error description in exception message when validate soft_time_limit (#9246)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/tasks/test_tasks.py::test_tasks::test_soft_time_limit_failure"
+  ],
+  "gold_clean": true
+ },
+ "a8ecf180e0279778067b37cf62ce076d8b2eb204": {
+  "task": "a8ecf180e0279778067b37cf62ce076d8b2eb204",
+  "target_tests": [
+   "t/unit/worker/test_worker.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_worker.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/worker/worker.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-03T21:13:08+03:00",
+  "subject": "Added worker_enable_soft_shutdown_on_idle (#9231)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/worker/test_worker.py::test_WorkController::test_wait_for_soft_shutdown_no_tasks"
+  ],
+  "gold_clean": true
+ },
+ "71e8db96fbff455b346dd47a3fe617864b0d6697": {
+  "task": "71e8db96fbff455b346dd47a3fe617864b0d6697",
+  "target_tests": [
+   "t/unit/tasks/test_trace.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_trace.py"
+  ],
+  "src_files": [
+   "celery/app/task.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-02T12:42:26+02:00",
+  "subject": "fix: passes current request context when pushing to request_stack (#9208)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/tasks/test_trace.py::test_stackprotection::test_stackprotection_headers_passed_on_new_request_stack",
+   "t/unit/tasks/test_trace.py::test_stackprotection::test_stackprotection_headers_persisted_calling_task_directly"
+  ],
+  "gold_clean": true
+ },
+ "f436f10303b25291c43329704d98a906095f08b8": {
+  "task": "f436f10303b25291c43329704d98a906095f08b8",
+  "target_tests": [
+   "t/unit/backends/test_elasticsearch.py",
+   "t/unit/tasks/test_result.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_elasticsearch.py",
+   "t/unit/tasks/test_result.py"
+  ],
+  "src_files": [
+   "celery/backends/base.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-01T22:42:53+09:00",
+  "subject": "Fix date_done timezone issue (#8385)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/tasks/test_result.py::test_AsyncResult::test_date_done[America/Los_Angeles-2024-08-23T17:00:00-07:00]",
+   "t/unit/tasks/test_result.py::test_AsyncResult::test_date_done[Europe/Berlin-2024-08-24T02:00:00+02:00]",
+   "t/unit/tasks/test_result.py::test_AsyncResult::test_date_done[Pacific/Kwajalein-2024-08-24T12:00:00+12:00]",
+   "t/unit/tasks/test_result.py::test_AsyncResult::test_date_done[UTC-2024-08-24T00:00:00+00:00]"
+  ],
+  "gold_clean": true
+ },
+ "b8f20ec53d335d3c14088e996f63bd22f0534f78": {
+  "task": "b8f20ec53d335d3c14088e996f63bd22f0534f78",
+  "target_tests": [
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "src_files": [
+   "celery/app/task.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-08-06T22:37:27+03:00",
+  "subject": "Add check for soft_time_limit and time_limit values (#9173)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/tasks/test_tasks.py::test_tasks::test_soft_time_limit_failure"
+  ],
+  "gold_clean": true
+ },
+ "6560531827c64bc362460e39fb8b4024eff5e086": {
+  "task": "6560531827c64bc362460e39fb8b4024eff5e086",
+  "target_tests": [
+   "t/unit/concurrency/test_gevent.py"
+  ],
+  "test_files": [
+   "t/unit/concurrency/test_gevent.py"
+  ],
+  "src_files": [
+   "celery/concurrency/gevent.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-08-06T23:13:55+08:00",
+  "subject": "Terminate job implementation for gevent concurrency backend (#9083)",
+  "src_churn": 58,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/concurrency/test_gevent.py::test_TaskPool::test_cleanup_after_job_finish",
+   "t/unit/concurrency/test_gevent.py::test_TaskPool::test_make_killable_target",
+   "t/unit/concurrency/test_gevent.py::test_TaskPool::test_terminate_job"
+  ],
+  "gold_clean": true
+ },
+ "eec5172cba77e4644cb2a0d93ef77bae14a84f4f": {
+  "task": "eec5172cba77e4644cb2a0d93ef77bae14a84f4f",
+  "target_tests": [
+   "t/unit/backends/test_dynamodb.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_dynamodb.py"
+  ],
+  "src_files": [
+   "celery/backends/dynamodb.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-08-06T13:31:18+02:00",
+  "subject": "Allow local dynamodb to be installed on another host than localhost (#8965)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "50732166b645013626b28fc015ddd95895b6c5a3": {
+  "task": "50732166b645013626b28fc015ddd95895b6c5a3",
+  "target_tests": [
+   "t/unit/backends/test_base.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_base.py"
+  ],
+  "src_files": [
+   "celery/backends/base.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-26T17:37:57+02:00",
+  "subject": "Don't add a separator to global_keyprefix if it already has one (#9080)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cd52e4db159888a45225b71bc56e5dbd275a13e4": {
+  "task": "cd52e4db159888a45225b71bc56e5dbd275a13e4",
+  "target_tests": [
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_canvas.py"
+  ],
+  "src_files": [
+   "celery/canvas.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-24T02:17:45+03:00",
+  "subject": "Bugfix - a task will run multiple times when chaining chains with groups (#9021)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/tasks/test_canvas.py::test_chain::test_upgrade_to_chord_on_chain"
+  ],
+  "gold_clean": true
+ },
+ "20c15764b084d0e0d4459faed30fc6bf989c0b4c": {
+  "task": "20c15764b084d0e0d4459faed30fc6bf989c0b4c",
+  "target_tests": [
+   "t/unit/app/test_schedules.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_schedules.py"
+  ],
+  "src_files": [
+   "celery/schedules.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-19T10:06:44+02:00",
+  "subject": "Class method to process crontab string (#9079)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/app/test_schedules.py::test_crontab_from_string::test_every_minute",
+   "t/unit/app/test_schedules.py::test_crontab_from_string::test_every_minute_on_sunday",
+   "t/unit/app/test_schedules.py::test_crontab_from_string::test_invalid_crontab_string",
+   "t/unit/app/test_schedules.py::test_crontab_from_string::test_once_per_month",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]"
+  ],
+  "gold_clean": true
+ },
+ "4c3e5a1a25ee7d67cc50d9db560e0102e0b06c23": {
+  "task": "4c3e5a1a25ee7d67cc50d9db560e0102e0b06c23",
+  "target_tests": [
+   "t/unit/concurrency/test_prefork.py",
+   "t/unit/worker/test_loops.py"
+  ],
+  "test_files": [
+   "t/unit/concurrency/test_prefork.py",
+   "t/unit/worker/test_loops.py"
+  ],
+  "src_files": [
+   "celery/concurrency/asynpool.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-16T09:48:28+03:00",
+  "subject": "Use hub.remove_writer instead of hub.remove for write fds (#4185) (#9055)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2d560f5c16972ab542171d2e17bddd5b76a85b31": {
+  "task": "2d560f5c16972ab542171d2e17bddd5b76a85b31",
+  "target_tests": [
+   "t/unit/backends/test_base.py",
+   "t/unit/backends/test_database.py",
+   "t/unit/backends/test_mongodb.py",
+   "t/unit/tasks/test_result.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_base.py",
+   "t/unit/backends/test_database.py",
+   "t/unit/backends/test_mongodb.py",
+   "t/unit/tasks/test_result.py"
+  ],
+  "src_files": [
+   "celery/backends/base.py",
+   "celery/backends/database/__init__.py",
+   "celery/backends/mongodb.py",
+   "celery/result.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-03-13T21:56:02-07:00",
+  "subject": "Add exists() method to AsyncResult (#10142)",
+  "src_churn": 63,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_base.py::test_BaseBackend_dict::test_task_result_exists_failure_state",
+   "t/unit/backends/test_base.py::test_BaseBackend_dict::test_task_result_exists_false",
+   "t/unit/backends/test_base.py::test_BaseBackend_dict::test_task_result_exists_true",
+   "t/unit/backends/test_base.py::test_KeyValueStoreBackend::test_task_result_exists_after_failure",
+   "t/unit/backends/test_base.py::test_KeyValueStoreBackend::test_task_result_exists_after_forget",
+   "t/unit/backends/test_base.py::test_KeyValueStoreBackend::test_task_result_exists_after_retry",
+   "t/unit/backends/test_base.py::test_KeyValueStoreBackend::test_task_result_exists_after_store",
+   "t/unit/backends/test_base.py::test_KeyValueStoreBackend::test_task_result_exists_missing",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_task_result_exists_found",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_task_result_exists_not_found",
+   "t/unit/tasks/test_result.py::test_AsyncResult::test_exists",
+   "t/unit/tasks/test_result.py::test_AsyncResult::test_exists_returns_bool"
+  ],
+  "gold_clean": true
+ },
+ "7735d2ba9451bcfe3fd905942f95cd85e049cc3b": {
+  "task": "7735d2ba9451bcfe3fd905942f95cd85e049cc3b",
+  "target_tests": [
+   "t/unit/bin/test_control.py"
+  ],
+  "test_files": [
+   "t/unit/bin/test_control.py"
+  ],
+  "src_files": [
+   "celery/bin/base.py",
+   "celery/bin/control.py",
+   "celery/bin/events.py",
+   "celery/bin/graph.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-03-11T23:15:14+08:00",
+  "subject": "Fix#9722 friendly status errors for CLI (#10190)",
+  "src_churn": 89,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/bin/test_control.py::test_control_shows_friendly_error_when_broker_unreachable",
+   "t/unit/bin/test_control.py::test_control_unexpected_error_is_summarized",
+   "t/unit/bin/test_control.py::test_events_camera_shows_friendly_error_when_broker_unreachable",
+   "t/unit/bin/test_control.py::test_events_dump_shows_friendly_error_when_broker_unreachable",
+   "t/unit/bin/test_control.py::test_events_evtop_shows_friendly_error_when_broker_unreachable",
+   "t/unit/bin/test_control.py::test_graph_workers_shows_friendly_error_when_broker_unreachable",
+   "t/unit/bin/test_control.py::test_handle_remote_command_error_reraises_click_exception",
+   "t/unit/bin/test_control.py::test_inspect_shows_friendly_error_when_broker_unreachable",
+   "t/unit/bin/test_control.py::test_inspect_unexpected_error_is_summarized",
+   "t/unit/bin/test_control.py::test_status_shows_friendly_error_when_broker_unreachable",
+   "t/unit/bin/test_control.py::test_status_unexpected_error_is_summarized"
+  ],
+  "gold_clean": false
+ },
+ "7ca0e0f18abedeba2b3142a1cdc9c1d3300cc190": {
+  "task": "7ca0e0f18abedeba2b3142a1cdc9c1d3300cc190",
+  "target_tests": [
+   "t/unit/test_generics.py"
+  ],
+  "test_files": [
+   "t/unit/test_generics.py"
+  ],
+  "src_files": [
+   "celery/app/base.py",
+   "celery/app/task.py",
+   "celery/canvas.py",
+   "celery/local.py",
+   "celery/result.py",
+   "celery/utils/objects.py",
+   "celery/utils/threads.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-02-28T23:56:56-05:00",
+  "subject": "Add `__class_getitem__` to generic classes (#10038)",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/test_generics.py::test_Generics::test_AsyncResult__class_getitem__",
+   "t/unit/test_generics.py::test_Generics::test_Celery__class_getitem__",
+   "t/unit/test_generics.py::test_Generics::test_FallbackContext__class_getitem__",
+   "t/unit/test_generics.py::test_Generics::test_Task__class_getitem__",
+   "t/unit/test_generics.py::test_Generics::test__FastLocalStack__class_getitem__",
+   "t/unit/test_generics.py::test_Generics::test__LocalStack__class_getitem__",
+   "t/unit/test_generics.py::test_Generics::test_class_property__class_getitem__"
+  ],
+  "gold_clean": true
+ },
+ "0348d6425d6ca72007b7da93645eb12037c91dec": {
+  "task": "0348d6425d6ca72007b7da93645eb12037c91dec",
+  "target_tests": [
+   "t/unit/backends/test_base.py",
+   "t/unit/backends/test_database.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_base.py",
+   "t/unit/backends/test_database.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/backends/base.py",
+   "celery/backends/database/__init__.py",
+   "celery/backends/database/session.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-02-16T23:12:31+08:00",
+  "subject": "Fix 10109 db backend connection health (#10124)",
+  "src_churn": 62,
+  "size": "M",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_base.py::test_backend_retries::test_get_with_retries",
+   "t/unit/backends/test_base.py::test_backend_retries::test_get_with_retries_hook_failure_continues",
+   "t/unit/backends/test_base.py::test_backend_retries::test_store_result_with_retries",
+   "t/unit/backends/test_base.py::test_backend_retries::test_store_result_with_retries_hook_failure_continues"
+  ],
+  "gold_clean": true
+ },
+ "ab711a0b2de8fcc5aa8ec6701cdcb0530d6daebb": {
+  "task": "ab711a0b2de8fcc5aa8ec6701cdcb0530d6daebb",
+  "target_tests": [
+   "t/unit/concurrency/test_prefork.py",
+   "t/unit/worker/test_consumer.py"
+  ],
+  "test_files": [
+   "t/unit/concurrency/test_prefork.py",
+   "t/unit/worker/test_consumer.py"
+  ],
+  "src_files": [
+   "celery/concurrency/prefork.py",
+   "celery/worker/components.py",
+   "celery/worker/consumer/consumer.py",
+   "celery/worker/loops.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-12-05T00:09:02-05:00",
+  "subject": "Fix: Broker heartbeats not sent during graceful shutdown (#9986)",
+  "src_churn": 88,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "166f705adcae57a43423b0ae7286ab828b55b244": {
+  "task": "166f705adcae57a43423b0ae7286ab828b55b244",
+  "target_tests": [
+   "t/unit/app/test_amqp.py",
+   "t/unit/app/test_control.py",
+   "t/unit/events/test_events.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_amqp.py",
+   "t/unit/app/test_control.py",
+   "t/unit/events/test_events.py"
+  ],
+  "src_files": [
+   "celery/app/amqp.py",
+   "celery/app/control.py",
+   "celery/app/defaults.py",
+   "celery/events/receiver.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-08-31T07:00:21+02:00",
+  "subject": "Choose queue type and exchange type when creating missing queues (fix #9671) (#9815)",
+  "src_churn": 86,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9cb389d31ad838a42a1786df8a605c8991547cc2": {
+  "task": "9cb389d31ad838a42a1786df8a605c8991547cc2",
+  "target_tests": [
+   "t/unit/backends/test_base.py",
+   "t/unit/backends/test_gcs.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_base.py",
+   "t/unit/backends/test_gcs.py"
+  ],
+  "src_files": [
+   "celery/app/builtins.py",
+   "celery/backends/base.py",
+   "celery/backends/gcs.py",
+   "celery/backends/redis.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-07-02T10:21:48+02:00",
+  "subject": "fix: (#8786) time out when chord header fails with group body (#9788)",
+  "src_churn": 140,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "bbe7c2ef4e9f0eab06ef49695823845c7efc0e08": {
+  "task": "bbe7c2ef4e9f0eab06ef49695823845c7efc0e08",
+  "target_tests": [
+   "t/unit/utils/test_platforms.py",
+   "t/unit/utils/test_term.py"
+  ],
+  "test_files": [
+   "t/unit/utils/test_platforms.py",
+   "t/unit/utils/test_term.py"
+  ],
+  "src_files": [
+   "celery/app/log.py",
+   "celery/apps/worker.py",
+   "celery/platforms.py",
+   "celery/utils/term.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-02-13T14:01:33+06:00",
+  "subject": "Reverted PR #7814 & minor code improvement (#9494)",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d31fdc6181f6178e6f45b7892a02679800cf12ba": {
+  "task": "d31fdc6181f6178e6f45b7892a02679800cf12ba",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py",
+   "t/unit/worker/test_worker.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py",
+   "t/unit/worker/test_worker.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/apps/worker.py",
+   "celery/worker/consumer/consumer.py",
+   "celery/worker/request.py",
+   "celery/worker/worker.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-09-03T15:07:20+03:00",
+  "subject": "Added Soft Shutdown Mechanism (#9213)",
+  "src_churn": 176,
+  "size": "L",
+  "baseline_failing": [
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params0]",
+   "t/unit/app/test_preload_cli.py::test_preload_options[subcommand_with_params1]",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_get_connection_with_authmechanism_no_username",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_mongodb_dnspython2_pymongo4_seedlist",
+   "t/unit/backends/test_mongodb.py::test_MongoBackend::test_init_with_settings",
+   "t/unit/bin/test_control.py::test_custom_remote_command[control-custom_cmd1]",
+   "t/unit/bin/test_control.py::test_custom_remote_command[inspect-custom_cmd0]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-custom_inspect_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[control-this_command_does_not_exist]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-custom_control_cmd]",
+   "t/unit/bin/test_control.py::test_unrecognized_remote_command[inspect-this_command_does_not_exist]",
+   "t/unit/worker/test_consumer.py::test_Consumer::test_cancel_all_unacked_requests",
+   "t/unit/worker/test_worker.py::test_WorkController::test_wait_for_soft_shutdown"
+  ],
+  "gold_clean": true
+ },
+ "da1146ab60065847b9742bb61190d52a7a2c5fdf": {
+  "task": "da1146ab60065847b9742bb61190d52a7a2c5fdf",
+  "target_tests": [
+   "t/unit/contrib/django/__init__.py",
+   "t/unit/contrib/django/test_task.py",
+   "t/unit/fixups/test_django.py"
+  ],
+  "test_files": [
+   "t/unit/contrib/django/__init__.py",
+   "t/unit/contrib/django/test_task.py",
+   "t/unit/fixups/test_django.py"
+  ],
+  "src_files": [
+   "celery/app/base.py",
+   "celery/contrib/django/__init__.py",
+   "celery/contrib/django/task.py",
+   "celery/fixups/django.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-01-29T17:12:43Z",
+  "subject": "Add a Task class specialised for Django (#8491)",
+  "src_churn": 25,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fa1d98c2a86bf6a3d7987b85253a6a2fb9b90f74": {
+  "task": "fa1d98c2a86bf6a3d7987b85253a6a2fb9b90f74",
+  "target_tests": [
+   "t/unit/app/test_beat.py",
+   "t/unit/backends/test_elasticsearch.py",
+   "t/unit/backends/test_mongodb.py",
+   "t/unit/utils/test_time.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_beat.py",
+   "t/unit/backends/test_elasticsearch.py",
+   "t/unit/backends/test_mongodb.py",
+   "t/unit/utils/test_time.py"
+  ],
+  "src_files": [
+   "celery/backends/base.py",
+   "celery/backends/database/models.py",
+   "celery/backends/elasticsearch.py",
+   "celery/utils/time.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-01-14T14:30:58-05:00",
+  "subject": "Remove usage of utcnow (#8791)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5092598fb88c1f18e3fe709861cdb31df90a7264": {
+  "task": "5092598fb88c1f18e3fe709861cdb31df90a7264",
+  "target_tests": [
+   "t/unit/app/test_control.py",
+   "t/unit/worker/test_control.py",
+   "t/unit/worker/test_state.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_control.py",
+   "t/unit/worker/test_control.py",
+   "t/unit/worker/test_state.py"
+  ],
+  "src_files": [
+   "celery/app/control.py",
+   "celery/result.py",
+   "celery/worker/control.py",
+   "celery/worker/request.py",
+   "celery/worker/state.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-10-27T01:29:20+03:00",
+  "subject": "New control command `revoke_by_stamped_headers` (#7838)",
+  "src_churn": 162,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8b84b46f1bb56ce7e90768c9137fe0552e0c0ad8": {
+  "task": "8b84b46f1bb56ce7e90768c9137fe0552e0c0ad8",
+  "target_tests": [
+   "t/unit/utils/test_platforms.py"
+  ],
+  "test_files": [
+   "t/unit/utils/test_platforms.py"
+  ],
+  "src_files": [
+   "celery/app/log.py",
+   "celery/apps/worker.py",
+   "celery/platforms.py",
+   "celery/utils/term.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-10-16T20:37:19+02:00",
+  "subject": "Remove isatty wrapper function",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "13d545b2155ebe9ee0ffad9e9d9ffc09a39185df": {
+  "task": "13d545b2155ebe9ee0ffad9e9d9ffc09a39185df",
+  "target_tests": [
+   "t/unit/app/test_app.py",
+   "t/unit/events/test_state.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_app.py",
+   "t/unit/events/test_state.py"
+  ],
+  "src_files": [
+   "celery/beat.py",
+   "celery/canvas.py",
+   "celery/platforms.py",
+   "celery/schedules.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-10-16T22:42:21+02:00",
+  "subject": "Fix grammar typos on the whole project",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1c4ff33bd22cf94e297bd6449a06b5a30c2c1fbc": {
+  "task": "1c4ff33bd22cf94e297bd6449a06b5a30c2c1fbc",
+  "target_tests": [
+   "t/unit/conftest.py",
+   "t/unit/tasks/test_canvas.py",
+   "t/unit/tasks/test_chord.py"
+  ],
+  "test_files": [
+   "t/unit/conftest.py",
+   "t/unit/tasks/test_canvas.py",
+   "t/unit/tasks/test_chord.py"
+  ],
+  "src_files": [
+   "celery/app/amqp.py",
+   "celery/app/base.py",
+   "celery/app/task.py",
+   "celery/backends/base.py",
+   "celery/canvas.py",
+   "celery/utils/functional.py",
+   "celery/worker/request.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-06-29T14:08:14+03:00",
+  "subject": "Canvas Header Stamping (#7384)",
+  "src_churn": 398,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "744ef43c4d83e190d85c034a8e5cb4ca7b7a22e0": {
+  "task": "744ef43c4d83e190d85c034a8e5cb4ca7b7a22e0",
+  "target_tests": [
+   "t/unit/app/test_app.py",
+   "t/unit/security/__init__.py",
+   "t/unit/security/test_key.py",
+   "t/unit/security/test_security.py",
+   "t/unit/security/test_serialization.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_app.py",
+   "t/unit/security/__init__.py",
+   "t/unit/security/test_key.py",
+   "t/unit/security/test_security.py",
+   "t/unit/security/test_serialization.py"
+  ],
+  "src_files": [
+   "celery/app/base.py",
+   "celery/app/defaults.py",
+   "celery/security/__init__.py",
+   "celery/security/key.py",
+   "celery/security/serialization.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-02-22T14:36:55+01:00",
+  "subject": "Add `security_key_password` option (#7292)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5d68d781de807b4576cf5f574e5ba0aaf0d17388": {
+  "task": "5d68d781de807b4576cf5f574e5ba0aaf0d17388",
+  "target_tests": [
+   "t/unit/backends/test_redis.py",
+   "t/unit/tasks/test_canvas.py",
+   "t/unit/utils/test_collections.py",
+   "t/unit/worker/test_worker.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py",
+   "t/unit/tasks/test_canvas.py",
+   "t/unit/utils/test_collections.py",
+   "t/unit/worker/test_worker.py"
+  ],
+  "src_files": [
+   "celery/app/autoretry.py",
+   "celery/concurrency/asynpool.py",
+   "celery/contrib/pytest.py",
+   "celery/loaders/base.py",
+   "celery/utils/functional.py",
+   "celery/utils/text.py",
+   "celery/utils/threads.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-10-30T07:12:22+08:00",
+  "subject": "Fix typos",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "117cd9ca410e8879f71bd84be27b8e69e462c56a": {
+  "task": "117cd9ca410e8879f71bd84be27b8e69e462c56a",
+  "target_tests": [
+   "t/unit/backends/test_mongodb.py",
+   "t/unit/utils/test_platforms.py",
+   "t/unit/utils/test_timer2.py",
+   "t/unit/worker/test_autoscale.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_mongodb.py",
+   "t/unit/utils/test_platforms.py",
+   "t/unit/utils/test_timer2.py",
+   "t/unit/worker/test_autoscale.py"
+  ],
+  "src_files": [
+   "celery/backends/redis.py",
+   "celery/bin/base.py",
+   "celery/canvas.py",
+   "celery/concurrency/__init__.py",
+   "celery/exceptions.py",
+   "celery/utils/threads.py",
+   "celery/utils/timer2.py",
+   "celery/worker/consumer/consumer.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-06-27T03:51:05-04:00",
+  "subject": "Fixes build for PyPy3 (#6635)",
+  "src_churn": 44,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8d6778810c5153c9e4667eed618de2d0bf72663e": {
+  "task": "8d6778810c5153c9e4667eed618de2d0bf72663e",
+  "target_tests": [
+   "t/unit/tasks/test_trace.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_trace.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/app/trace.py",
+   "celery/worker/request.py",
+   "celery/worker/state.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-04-28T18:37:08+03:00",
+  "subject": "Deduplicate successful tasks (#6722)",
+  "src_churn": 55,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "934a2271c1636364486eb737a598d224e5184cf8": {
+  "task": "934a2271c1636364486eb737a598d224e5184cf8",
+  "target_tests": [
+   "t/unit/worker/test_consumer.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_consumer.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/app/defaults.py",
+   "celery/bin/amqp.py",
+   "celery/worker/consumer/consumer.py",
+   "celery/worker/request.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-04-28T12:53:06+03:00",
+  "subject": "Terminate tasks with late acknoledgement on connection loss (#6654)",
+  "src_churn": 99,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8ebcce1523d79039f23da748f00bec465951de2a": {
+  "task": "8ebcce1523d79039f23da748f00bec465951de2a",
+  "target_tests": [
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/app/amqp.py",
+   "celery/app/base.py",
+   "celery/app/task.py",
+   "celery/backends/base.py",
+   "celery/worker/request.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-04-18T16:01:24+03:00",
+  "subject": "`some_task.apply_async(ignore_result=True)` now avoids persisting the result (#6713)",
+  "src_churn": 76,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6734024e59a60ef2814eabed63365829a3270cc2": {
+  "task": "6734024e59a60ef2814eabed63365829a3270cc2",
+  "target_tests": [
+   "t/unit/backends/test_base.py",
+   "t/unit/backends/test_cache.py",
+   "t/unit/backends/test_redis.py",
+   "t/unit/tasks/test_canvas.py",
+   "t/unit/tasks/test_chord.py",
+   "t/unit/utils/test_functional.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_base.py",
+   "t/unit/backends/test_cache.py",
+   "t/unit/backends/test_redis.py",
+   "t/unit/tasks/test_canvas.py",
+   "t/unit/tasks/test_chord.py",
+   "t/unit/utils/test_functional.py"
+  ],
+  "src_files": [
+   "celery/backends/base.py",
+   "celery/backends/cache.py",
+   "celery/backends/redis.py",
+   "celery/canvas.py",
+   "celery/utils/functional.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-03-04T08:22:31-05:00",
+  "subject": "start chord header tasks as soon as possible (#6576)",
+  "src_churn": 294,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b37182855fab80a356ff41a2153c72c00cf045d9": {
+  "task": "b37182855fab80a356ff41a2153c72c00cf045d9",
+  "target_tests": [
+   "t/unit/tasks/test_trace.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_trace.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/app/base.py",
+   "celery/app/trace.py",
+   "celery/worker/request.py",
+   "celery/worker/strategy.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-01-14T23:26:05+01:00",
+  "subject": "Trace task optimizations are now set via Celery app instance",
+  "src_churn": 34,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c6eef1b339f57296c7d94130c1083b945e39e567": {
+  "task": "c6eef1b339f57296c7d94130c1083b945e39e567",
+  "target_tests": [
+   "t/unit/concurrency/test_gevent.py"
+  ],
+  "test_files": [
+   "t/unit/concurrency/test_gevent.py"
+  ],
+  "src_files": [
+   "celery/__init__.py",
+   "celery/backends/asynchronous.py",
+   "celery/backends/redis.py",
+   "celery/backends/riak.py"
+  ],
+  "pool": "hard",
+  "authored": "2020-07-31T09:42:38+01:00",
+  "subject": "fix LTGM Alert: Module '...' is imported with both 'import' and 'imp\u2026 (#6264)",
+  "src_churn": 40,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "792515b4340253e944ed4a1709c9dbee337644c0": {
+  "task": "792515b4340253e944ed4a1709c9dbee337644c0",
+  "target_tests": [
+   "t/unit/bin/test_worker.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/bin/test_worker.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/app/autoretry.py",
+   "celery/contrib/pytest.py",
+   "celery/contrib/testing/manager.py",
+   "celery/contrib/testing/mocks.py",
+   "celery/contrib/testing/worker.py"
+  ],
+  "pool": "hard",
+  "authored": "2020-07-29T15:45:18+01:00",
+  "subject": "fix lint violations and CI errors: use rabbitmq via docker and only for integration-rabbitmq tests (#6253)",
+  "src_churn": 96,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "455e0a0e86679eaaba9f0da533066627b1d79296": {
+  "task": "455e0a0e86679eaaba9f0da533066627b1d79296",
+  "target_tests": [
+   "t/unit/backends/test_redis.py",
+   "t/unit/tasks/test_canvas.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "test_files": [
+   "t/unit/backends/test_redis.py",
+   "t/unit/tasks/test_canvas.py",
+   "t/unit/worker/test_request.py"
+  ],
+  "src_files": [
+   "celery/app/amqp.py",
+   "celery/app/base.py",
+   "celery/app/task.py",
+   "celery/backends/redis.py",
+   "celery/canvas.py",
+   "celery/utils/abstract.py",
+   "celery/worker/request.py"
+  ],
+  "pool": "hard",
+  "authored": "2020-07-19T14:51:18+10:00",
+  "subject": "Preserve order of group results with Redis result backend (#6218)",
+  "src_churn": 61,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9dddf8c3050c2e2e7e7de0bf6aac85d9c37558f9": {
+  "task": "9dddf8c3050c2e2e7e7de0bf6aac85d9c37558f9",
+  "target_tests": [
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_tasks.py"
+  ],
+  "src_files": [
+   "celery/app/autoretry.py",
+   "celery/app/base.py",
+   "celery/app/registry.py",
+   "celery/contrib/pytest.py"
+  ],
+  "pool": "hard",
+  "authored": "2020-07-19T07:47:19+03:00",
+  "subject": "Class-based tasks autoretry (#6233)",
+  "src_churn": 120,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cf829307991da3815e1f7b105e736d13dbc7a325": {
+  "task": "cf829307991da3815e1f7b105e736d13dbc7a325",
+  "target_tests": [
+   "t/unit/concurrency/test_thread.py"
+  ],
+  "test_files": [
+   "t/unit/concurrency/test_thread.py"
+  ],
+  "src_files": [
+   "celery/backends/dynamodb.py",
+   "celery/backends/redis.py",
+   "celery/concurrency/thread.py",
+   "celery/utils/__init__.py",
+   "celery/utils/log.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-12-08T16:50:00+02:00",
+  "subject": "isort.",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "240ef1f64c8340bfffc31359f842ea4a6c8c493a": {
+  "task": "240ef1f64c8340bfffc31359f842ea4a6c8c493a",
+  "target_tests": [
+   "t/unit/tasks/test_context.py",
+   "t/unit/worker/test_components.py"
+  ],
+  "test_files": [
+   "t/unit/tasks/test_context.py",
+   "t/unit/worker/test_components.py"
+  ],
+  "src_files": [
+   "celery/app/control.py",
+   "celery/app/defaults.py",
+   "celery/backends/base.py",
+   "celery/bin/base.py",
+   "celery/contrib/migrate.py",
+   "celery/contrib/rdb.py",
+   "celery/events/event.py",
+   "celery/utils/text.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-06-23T14:28:49+10:00",
+  "subject": "Fix typo (#5601)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8cf8fae70630954cff3448485588bbe2a77ff3ab": {
+  "task": "8cf8fae70630954cff3448485588bbe2a77ff3ab",
+  "target_tests": [
+   "t/unit/app/test_beat.py",
+   "t/unit/utils/test_platforms.py"
+  ],
+  "test_files": [
+   "t/unit/app/test_beat.py",
+   "t/unit/utils/test_platforms.py"
+  ],
+  "src_files": [
+   "celery/__init__.py",
+   "celery/app/task.py",
+   "celery/beat.py",
+   "celery/security/__init__.py",
+   "celery/utils/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-06-14T22:24:54+02:00",
+  "subject": "Make CI GREEN (#5600)",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}
