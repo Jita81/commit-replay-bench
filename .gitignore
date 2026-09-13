@@ -3,6 +3,7 @@
 .DS_Store
 .claude/
 .crb/
+.hypothesis/
 .pytest_cache/
 .ruff_cache/
 .venv/
