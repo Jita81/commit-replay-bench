@@ -116,10 +116,12 @@ function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => v
         }
       >
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <Pill tone={d.tone} glyph={d.glyph} label={d.describe}>
+          <Pill tone={d.tone} glyph={d.glyph} label={d.describe} data-testid="repo-probe">
             {d.label}
           </Pill>
-          <span className="text-on-surface-muted">{repo.probe.detail || 'The probe runs the configured known-green scope through the sandboxed runner.'}</span>
+          <span className="text-on-surface-muted" data-testid="repo-probe-detail">
+            {repo.probe.detail || 'The probe runs the configured known-green scope through the sandboxed runner.'}
+          </span>
           {repo.probe.checked && <span className="text-xs text-on-surface-muted">checked {fmtDate(repo.probe.checked)}</span>}
           {repo.probe.run_id && (
             <Link to={`/runs/${repo.probe.run_id}`} className="font-mono text-xs">

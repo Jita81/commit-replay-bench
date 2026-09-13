@@ -30,6 +30,18 @@ npm run e2e         # Playwright smoke + axe (WCAG 2.1 AA); needs `npm run e2e:i
 `npm run e2e` builds, serves `dist/` with `vite preview` on 127.0.0.1:4173 and
 intercepts `/api/v1/**` with fixtures — it never contacts a real server.
 
+```sh
+../scripts/walkthrough.sh   # the full-browser WALKTHROUGH against a LIVE stack (API + worker)
+npm run walkthrough         # the same specs against a stack you booted (needs CRB_E2E_*)
+```
+
+The walkthrough (`e2e/walkthrough/`, its own `playwright.walkthrough.config.ts`) drives
+a real deployment through login → onboard → probe → mine → oracle → controls → replay →
+ledger → capability → sign-off → cancel → settings, entirely through the UI, and runs
+axe on every screen with live data. Tier 1 is hermetic (fixture repo, no model, ~35 s);
+tier 2 (`CRB_E2E_PUBLIC=1`) onboards cobra + click from GitHub. See
+[e2e/walkthrough/README.md](e2e/walkthrough/README.md).
+
 **Install note.** `npm install` on npm 10.9 can fail with
 `Cannot read properties of null (reading 'edgesOut')` while resolving
 vitest's optional browser peers. `--legacy-peer-deps` sidesteps the bug; the
@@ -59,6 +71,7 @@ src/
               · Factory · Settings · NotFound
   test/       setup.ts · utils.tsx (mockApi + renderApp)
 e2e/          smoke.spec.ts (login + shell against a mocked API, axe WCAG 2.1 AA)
+              walkthrough/ (01–07: the live-stack story; support.ts; README.md)
 ```
 
 ## The API client

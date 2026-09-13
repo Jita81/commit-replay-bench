@@ -33,7 +33,7 @@ function Header({ run }: { run: Run }) {
       title={`Run ${shortId(run.id, 8)}`}
       purpose={
         <span className="inline-flex flex-wrap items-center gap-2">
-          <Pill tone={d.tone} glyph={d.glyph} label={d.describe}>
+          <Pill tone={d.tone} glyph={d.glyph} label={d.describe} data-testid="run-status">
             <span className={run.status === 'running' ? 'crb-pulse' : ''}>{d.label}</span>
           </Pill>
           {run.cancel_requested && !isRunTerminal(run.status) && (
@@ -79,8 +79,8 @@ function Tiles({ run }: { run: Run }) {
       <StatTile label="First-pass clean (r1)" value={graded ? fmtPct(c.first_pass_clean / graded) : '—'} n={graded} ci={fpCi} apparatus={app} />
       <StatTile label="Disqualified" value={fmtInt(c.disqualified)} n={graded} apparatus="tamper or malformed oracle — excluded, not counted" tone={c.disqualified ? 'amber' : undefined} />
       <StatTile label="Errors" value={fmtInt(c.errors)} n={graded} apparatus="harness/sandbox errors — fail closed" tone={c.errors ? 'red' : undefined} />
-      <StatTile label="Ledger rows" value={fmtInt(c.rows)} n={c.rows} apparatus="one row per attempt (trial r1, r2 …)" />
-      <StatTile label="Cost" value={fmtUsd(run.cost_usd)} n={graded} apparatus="builder-reported USD, summed" />
+      <StatTile label="Ledger rows" value={fmtInt(c.rows)} n={c.rows} apparatus="one row per attempt (trial r1, r2 …)" data-testid="tile-rows" />
+      <StatTile label="Cost" value={fmtUsd(run.cost_usd)} n={graded} apparatus="builder-reported USD, summed" data-testid="tile-cost" />
     </div>
   )
 }

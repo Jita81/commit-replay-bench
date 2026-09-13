@@ -17,6 +17,13 @@ with nothing but the standard library and :mod:`crb.core`.
 
     >>> from crb.builders import get_builder
     >>> b = get_builder("openai_agent", model="gpt-oss-120b", provider="cerebras")
+
+Test-only
+---------
+* ``fixture_gold`` — replays the commit's own source (an instrument check for the
+  hermetic walkthrough / CI). Registered ONLY when ``CRB_ENABLE_FIXTURE_BUILDER=1``
+  is set in the process environment; never in production. See
+  :mod:`crb.builders.fixture_gold`.
 """
 
 from __future__ import annotations
@@ -49,6 +56,7 @@ from crb.builders.budget import (
 )
 from crb.builders.claude_code import ClaudeCodeBuilder
 from crb.builders.editblock import EditBlockBuilder
+from crb.builders.fixture_gold import FixtureGoldBuilder, fixture_builder_enabled
 from crb.builders.openai_agent import OpenAIAgentBuilder
 
 _REGISTRY: dict[str, Callable[..., Builder]] = {
@@ -56,6 +64,11 @@ _REGISTRY: dict[str, Callable[..., Builder]] = {
     "openai_agent": OpenAIAgentBuilder,
     "claude_code": ClaudeCodeBuilder,
 }
+
+# The test-only fixture builder is registered by an explicit environment switch and
+# nothing else: without ``CRB_ENABLE_FIXTURE_BUILDER=1`` the name does not exist.
+if fixture_builder_enabled():
+    _REGISTRY[FixtureGoldBuilder.name] = FixtureGoldBuilder
 
 
 def builder_names() -> tuple[str, ...]:

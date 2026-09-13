@@ -11,6 +11,10 @@
 #   test-postgres  the store suite (tests/test_store_*.py) against a real PostgreSQL 16 service
 #   container      docker buildx build of deploy/Dockerfile (no push), image smoke, helm lint,
 #                  compose config — always runs (~2–4 min) and is blocking
+#   walkthrough    the full-browser walkthrough (ui/e2e/walkthrough) against a LIVE stack that
+#                  scripts/walkthrough.sh boots in a temp dir — tier 1: hermetic, no network,
+#                  no model (fixture repo over file://, test-only fixture_gold builder); the
+#                  Playwright report + traces are uploaded on failure
 #
 # Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
 
@@ -297,3 +301,55 @@ jobs:
           printf 'POSTGRES_PASSWORD=ci\nCRB_SECRET_KEY=ci\n' > deploy/.env
           docker compose -f deploy/docker-compose.yml config --quiet
           rm -f deploy/.env
+
+  walkthrough:
+    name: walkthrough (browser, live stack, tier 1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install crb (server + dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[server,dev]' --python .venv/bin/python
+      - name: Install the UI + Playwright Chromium (with system deps)
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund --legacy-peer-deps
+          npx playwright install --with-deps chromium
+      - name: Build the UI bundle the API serves
+        working-directory: ui
+        run: npm run build
+      - name: Configure git identity for the fixture repository
+        run: |
+          git config --global user.email "ci@crb.invalid"
+          git config --global user.name "crb ci"
+          git config --global init.defaultBranch main
+      - name: Walkthrough — boot a fresh stack, drive it through the browser, tear it down
+        # Hermetic: no network (file:// fixture, pinned interpreter), no model (fixture_gold),
+        # a temp CRB_HOME + SQLite on a free port. The report is pointed into ui/ for upload.
+        env:
+          CI: "1"
+          CRB_E2E_REPORT_DIR: ${{ github.workspace }}/ui/playwright-report-walkthrough
+          CRB_E2E_OUTPUT_DIR: ${{ github.workspace }}/ui/test-results-walkthrough
+        run: scripts/walkthrough.sh
+      - name: Upload the Playwright report + traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: walkthrough-playwright-report
+          path: |
+            ui/playwright-report-walkthrough
+            ui/test-results-walkthrough
+          if-no-files-found: ignore
+          retention-days: 14

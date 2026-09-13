@@ -168,19 +168,27 @@ export function SettingsPage() {
                   <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                     <div>
                       <dt className="label">Sandbox mode</dt>
-                      <dd className="font-mono">{s.sandbox_mode || '—'}</dd>
+                      <dd className="font-mono" data-testid="settings-sandbox-mode">
+                        {s.sandbox_mode || '—'}
+                      </dd>
                     </div>
                     <div>
                       <dt className="label">Ledger backend</dt>
-                      <dd className="font-mono">{s.ledger_backend || '—'}</dd>
+                      <dd className="font-mono" data-testid="settings-ledger-backend">
+                        {s.ledger_backend || '—'}
+                      </dd>
                     </div>
                     <div>
                       <dt className="label">Apparatus</dt>
-                      <dd className="font-mono">{s.apparatus_version || '—'}</dd>
+                      <dd className="font-mono" data-testid="settings-apparatus">
+                        {s.apparatus_version || '—'}
+                      </dd>
                     </div>
                     <div>
                       <dt className="label">Policy</dt>
-                      <dd className="font-mono">{s.policy_version || '—'}</dd>
+                      <dd className="font-mono" data-testid="settings-policy">
+                        {s.policy_version || '—'}
+                      </dd>
                     </div>
                     <div>
                       <dt className="label">OIDC</dt>
@@ -192,7 +200,7 @@ export function SettingsPage() {
                     {s.builders.length === 0 ? (
                       <p className="text-sm text-on-surface-muted">No builders registered.</p>
                     ) : (
-                      <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
+                      <ul className="m-0 flex list-none flex-wrap gap-2 p-0" data-testid="settings-builders">
                         {s.builders.map((b) => (
                           <li key={b.name}>
                             <Pill tone={b.configured ? 'green' : 'muted'} glyph={b.configured ? '✓' : '–'} size="xs" label={`${b.name}: ${b.configured ? 'configured' : 'not configured'}`}>
