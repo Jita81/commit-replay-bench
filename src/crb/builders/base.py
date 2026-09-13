@@ -685,12 +685,39 @@ _SHELLS: frozenset[str] = frozenset({"sh", "bash", "zsh", "dash", "fish", "ksh"}
 
 def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
     """Replace every ``$( … )``, backtick and ``( … )`` sub-shell with a placeholder and
-    return the inner commands for recursive checking. ``None`` when unbalanced."""
+    return the inner commands for recursive checking. ``None`` when unbalanced.
+
+    Quoting is honoured the way ``sh`` does: inside single quotes nothing is special;
+    inside double quotes only ``$( … )`` and backticks open a substitution, a bare
+    ``(`` is literal (``grep "preRun(ctx"`` is an ordinary search, not a sub-shell);
+    a backslash escapes the next character outside single quotes. Treating quoted
+    parentheses as sub-shells refused an honest build on spf13/cobra."""
     inners: list[str] = []
     out: list[str] = []
     i, n = 0, len(command)
+    quote = ""  # "", "'" or '"'
     while i < n:
         ch = command[i]
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            out.append(command[i : i + 2])
+            i += 2
+            continue
+        if ch == "'" and not quote:
+            quote = "'"
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '"':
+            quote = "" if quote == '"' else '"'
+            out.append(ch)
+            i += 1
+            continue
         if ch == "`":
             j = command.find("`", i + 1)
             if j < 0:
@@ -699,24 +726,52 @@ def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
             out.append("__SUBST__")
             i = j + 1
             continue
-        if ch == "(" or (ch == "$" and command.startswith("$(", i)):
-            start = i + 2 if ch == "$" else i + 1
-            depth, j = 1, start
-            while j < n and depth:
-                if command[j] == "(":
-                    depth += 1
-                elif command[j] == ")":
-                    depth -= 1
-                j += 1
-            if depth:
+        is_dollar = ch == "$" and command.startswith("$(", i)
+        if is_dollar or (ch == "(" and not quote):
+            start = i + 2 if is_dollar else i + 1
+            end = _matching_paren(command, start)
+            if end < 0:
                 return None, inners
-            inners.append(command[start : j - 1])
+            inners.append(command[start:end])
             out.append("__SUBST__")
-            i = j
+            i = end + 1
             continue
         out.append(ch)
         i += 1
+    if quote:
+        return None, inners
     return "".join(out), inners
+
+
+def _matching_paren(command: str, start: int) -> int:
+    """Index of the ``)`` closing the group opened just before ``start``; ``-1`` when
+    unbalanced. Quoted text and backslash-escaped characters inside the group do not
+    count toward nesting (``$(grep "a(b" f)`` closes at the final ``)``)."""
+    depth, j, n = 1, start, len(command)
+    quote = ""
+    while j < n:
+        ch = command[j]
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+        elif ch == "\\":
+            j += 1
+        elif ch == "'":
+            quote = "'"
+        elif ch == '"':
+            quote = "" if quote == '"' else '"'
+        elif not quote and ch == "(":
+            depth += 1
+        elif not quote and ch == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+        elif quote == '"' and ch == "(" and j > 0 and command[j - 1] == "$":
+            depth += 1  # $( … ) inside double quotes still nests
+        elif quote == '"' and ch == ")" and depth > 1:
+            depth -= 1
+        j += 1
+    return -1
 
 
 class GitArchaeologyGuard:

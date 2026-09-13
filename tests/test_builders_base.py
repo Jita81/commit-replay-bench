@@ -389,3 +389,25 @@ def test_archaeology_guard_checks_substitutions_recursively() -> None:
     assert "stash" in g.check_shell("git stash && npm test; git stash pop")
     assert "network" in g.check_shell("npx standard lib/request.js")
     assert g.check_shell("echo $(pwd").startswith("archaeology:")
+
+
+def test_archaeology_guard_honours_shell_quoting() -> None:
+    """Parentheses inside quotes are literal text, not sub-shells — a grep pattern
+    like ``"preRun(ctx"`` refused an honest spf13/cobra build (2026-09-13). Only
+    ``$( … )`` and backticks open a substitution inside double quotes; nothing does
+    inside single quotes."""
+    from crb.builders.base import GitArchaeologyGuard
+
+    g = GitArchaeologyGuard()
+    assert (
+        g.check_shell(
+            r'grep -n "func (c \*Command) Context\|c.ctx\b\|preRun(ctx" command.go | head -30'
+        )
+        == ""
+    )
+    assert g.check_shell("grep 'preRun(ctx' command.go") == ""
+    assert g.check_shell('echo "a(b"') == ""
+    assert g.check_shell('echo $(grep "a(b" f)') == ""
+    assert "git show" in g.check_shell('cat "$(git show HEAD)"')
+    assert "git diff" in g.check_shell('echo "`git diff HEAD~1`"')
+    assert g.check_shell("echo 'unterminated").startswith("archaeology:")
