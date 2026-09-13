@@ -14,18 +14,32 @@ Two scopes matter to the grader:
   resolved from the repo's ``belt_scope`` policy.
 
 Runners never decide verdicts. They report what the toolchain said.
+
+Environment setup
+-----------------
+Before a repository can be probed its test dependencies must exist somewhere the
+runner can reach: a virtualenv, ``node_modules``, a warm module cache. That is
+the **one network-permitted phase** of the whole instrument, and it is explicit:
+:meth:`BaseRunner.setup` runs it (every command is ``Command(..., network=True)``
+so a sandboxing executor can tell it apart), records every step as a
+:class:`SetupStep` with a redacted tail, and :meth:`BaseRunner.environment_ready`
+answers — without network — whether the environment is usable now. Setup is a
+*host* phase: a sandbox image must ship its own toolchain and dependencies, so
+under a docker executor ``setup`` refuses rather than pretending.
 """
 
 from __future__ import annotations
 
 import os
 import re
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from crb.core.execution import Command, ExecResult, Executor
+from crb.core.execution import Command, ExecResult, Executor, LocalExecutor
+from crb.core.redact import redact_and_cap
 from crb.core.spec import BELT_AFFECTED_DIRS, BELT_BARE, BELT_TARGET_ONLY, RepoConfig
 
 #: Sentinel: "run the toolchain's default discovery" (the census ``BARE`` scope).
@@ -33,6 +47,20 @@ BARE: tuple[str, ...] = ()
 
 #: Cap on the raw output tail we keep (evidence packs are redacted + capped).
 TAIL_LINES = 40
+
+#: Per-step wall clock for dependency installation when the caller passes none.
+DEFAULT_SETUP_TIMEOUT_S = 1800
+
+#: Wall clock for the cheap, offline "is the environment ready?" probes.
+READY_CHECK_TIMEOUT_S = 300
+
+#: Cap on the redacted tail one setup step keeps.
+SETUP_TAIL_CHARS = 4000
+
+SETUP_NOTHING = "nothing to set up"
+SETUP_SANDBOX_REFUSED = (
+    "setup runs on the host; a sandbox image must ship the toolchain and dependencies"
+)
 
 
 @dataclass(frozen=True)
@@ -68,6 +96,156 @@ def tail_of(text: str, n: int = TAIL_LINES) -> str:
     return "\n".join(lines[-n:])
 
 
+# ---------------------------------------------------------------------------
+# Environment setup records
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SetupStep:
+    """One command of the setup phase, as it ran. ``tail`` is redacted and capped
+    at construction so a step can never carry a secret into an event or a run."""
+
+    argv: tuple[str, ...]
+    rc: int
+    tail: str = ""
+    duration_s: float = 0.0
+    timed_out: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "argv", tuple(str(a) for a in self.argv))
+        object.__setattr__(self, "tail", redact_and_cap(self.tail, max_chars=SETUP_TAIL_CHARS))
+
+    @property
+    def ok(self) -> bool:
+        return self.rc == 0 and not self.timed_out
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "argv": list(self.argv),
+            "rc": self.rc,
+            "tail": self.tail,
+            "duration_s": round(self.duration_s, 3),
+            "timed_out": self.timed_out,
+        }
+
+
+@dataclass(frozen=True)
+class SetupResult:
+    """What the setup phase did and whether the environment is usable afterwards.
+
+    ``ok`` means *ready now*: the step that closed the phase exited 0 and the
+    runner's own readiness probe passed. Every step that ran is kept — a failed
+    primary install followed by a successful fallback is ``ok`` with both on
+    record. A step that failed leaves its redacted tail in ``steps`` and ``note``
+    says which; nothing here is a verdict about any commit.
+    """
+
+    ok: bool
+    steps: tuple[SetupStep, ...] = ()
+    note: str = ""
+    duration_s: float = 0.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "steps", tuple(self.steps))
+
+    @property
+    def last_tail(self) -> str:
+        """The tail of the last step that ran (what an operator reads on failure)."""
+        return self.steps[-1].tail if self.steps else ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "steps": [s.to_dict() for s in self.steps],
+            "note": self.note,
+            "duration_s": round(self.duration_s, 3),
+        }
+
+
+class SetupSession:
+    """Runs setup commands through an executor and keeps the record.
+
+    ``run`` executes one :class:`~crb.core.execution.Command` (forced
+    ``network=True`` — this is the network phase by definition) and appends its
+    :class:`SetupStep`; ``result`` closes the session. ``on_step`` lets a caller
+    stream steps as they finish (the worker turns them into ``setup.step`` events).
+    """
+
+    def __init__(
+        self, executor: Executor, *, on_step: Callable[[SetupStep], None] | None = None
+    ) -> None:
+        self._executor = executor
+        self._on_step = on_step
+        self.steps: list[SetupStep] = []
+        self._started = time.monotonic()
+
+    def run(self, cmd: Command) -> SetupStep:
+        net = cmd if cmd.network else _with_network(cmd)
+        started = time.monotonic()
+        try:
+            res = self._executor.run(net)
+        except OSError as exc:
+            # a missing toolchain binary is a failed step, not a crash: rc 127 as a shell would
+            step = SetupStep(
+                net.argv, 127, f"{type(exc).__name__}: {exc}", time.monotonic() - started
+            )
+        else:
+            step = SetupStep(
+                net.argv, res.returncode, tail_of(res.combined), res.duration_s, res.timed_out
+            )
+        self.steps.append(step)
+        if self._on_step is not None:
+            self._on_step(step)
+        return step
+
+    @property
+    def all_ok(self) -> bool:
+        return all(s.ok for s in self.steps)
+
+    def result(self, ok: bool, note: str) -> SetupResult:
+        return SetupResult(ok, tuple(self.steps), note, time.monotonic() - self._started)
+
+
+def _with_network(cmd: Command) -> Command:
+    return Command(
+        cmd.argv,
+        cmd.root,
+        cwd_rel=cmd.cwd_rel,
+        env=cmd.env,
+        timeout=cmd.timeout,
+        writable_paths=cmd.writable_paths,
+        network=True,
+    )
+
+
+def host_check(argv: Sequence[str], root: Path, *, env: dict[str, str] | None = None) -> bool:
+    """Run an offline readiness probe on the host; ``True`` iff it exits 0.
+
+    A missing binary, a launch error or a timeout reads as *not ready* — never as
+    ready. The probe must be one the test command itself would perform (resolve
+    the build offline), so "ready" means exactly "the tests can run now".
+    """
+    try:
+        res = LocalExecutor().run(
+            Command(tuple(argv), root, env=env or {}, timeout=READY_CHECK_TIMEOUT_S)
+        )
+    except (OSError, ValueError):
+        return False
+    return res.ok
+
+
+def failed_step_note(steps: Sequence[SetupStep]) -> str:
+    """``"step N failed (rc=…): <argv>"`` for the step that stopped the phase — the
+    LAST one — or ``""`` when it passed. An earlier failure followed by more steps
+    was recovered (a ``pip_fallback`` after a failed primary) and is not the stop."""
+    if not steps or steps[-1].ok:
+        return ""
+    last = steps[-1]
+    how = "timed out" if last.timed_out else f"rc={last.rc}"
+    return f"step {len(steps)} failed ({how}): {' '.join(last.argv)}"
+
+
 class TestRunner(Protocol):
     name: str
     config: RepoConfig
@@ -90,16 +268,34 @@ class TestRunner(Protocol):
 
     def is_valid_oracle(self, root: Path, test_file: str) -> bool: ...
 
+    def setup(
+        self,
+        executor: Executor,
+        root: Path,
+        *,
+        env_dir: Path,
+        timeout: int,
+        on_step: Callable[[SetupStep], None] | None = None,
+    ) -> SetupResult: ...
+
+    def environment_ready(self, root: Path, env_dir: Path) -> bool: ...
+
 
 class BaseRunner:
-    """Shared plumbing. Subclasses implement ``target_scope``, ``command``, ``parse``."""
+    """Shared plumbing. Subclasses implement ``target_scope``, ``command``, ``parse``.
+
+    ``env_dir`` is where a runner keeps state that must not live in the clone (the
+    Python virtualenv). The worker and the CLI bind it after construction; a
+    runner without one behaves exactly as before (``runner_opts`` / host tools).
+    """
 
     name = "base"
     default_timeout = 900
 
-    def __init__(self, config: RepoConfig) -> None:
+    def __init__(self, config: RepoConfig, *, env_dir: Path | None = None) -> None:
         self.config = config
         self.opts: dict[str, Any] = dict(config.runner_opts)
+        self.env_dir: Path | None = Path(env_dir) if env_dir is not None else None
 
     # --- scopes ------------------------------------------------------------------
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
@@ -163,6 +359,61 @@ class BaseRunner:
 
     def describe(self) -> dict[str, Any]:
         return {"runner": self.name}
+
+    # --- environment setup (the one network phase) ----------------------------
+    def setup(
+        self,
+        executor: Executor,
+        root: Path,
+        *,
+        env_dir: Path,
+        timeout: int,
+        on_step: Callable[[SetupStep], None] | None = None,
+    ) -> SetupResult:
+        """Install the repository's test dependencies so :meth:`run` can work offline.
+
+        Default: nothing to do (``ok=True``). Language runners override this and
+        record every command they ran; ``timeout`` is the per-step wall clock
+        (``0`` → ``runner_opts.setup_timeout`` or :data:`DEFAULT_SETUP_TIMEOUT_S`);
+        ``on_step`` sees each :class:`SetupStep` as it finishes.
+        """
+        return SetupResult(True, (), SETUP_NOTHING, 0.0)
+
+    def environment_ready(self, root: Path, env_dir: Path) -> bool:
+        """``True`` iff the test command could run now without the network.
+
+        Answered on the host with the toolchain's own offline resolution (cheap next
+        to a test run; never a download). Runners with no environment to prepare
+        are always ready.
+        """
+        return True
+
+    def setup_timeout(self, timeout: int) -> int:
+        return int(timeout or self.opts.get("setup_timeout", DEFAULT_SETUP_TIMEOUT_S))
+
+    @staticmethod
+    def sandbox_refusal(executor: Executor) -> SetupResult | None:
+        """Setup is a host phase: under a sandbox it fails closed with the reason."""
+        if executor.name == "docker":
+            return SetupResult(False, (), SETUP_SANDBOX_REFUSED, 0.0)
+        return None
+
+    def finish_setup(self, session: SetupSession, root: Path, env_dir: Path) -> SetupResult:
+        """Close a session: ok iff the step that stopped the phase passed AND the
+        environment reads ready. Runners stop at the first unrecovered failure, so
+        the last step is decisive; an earlier failure means a fallback recovered it."""
+        steps = session.steps
+        if steps and not steps[-1].ok:
+            return session.result(False, failed_step_note(steps))
+        if not self.environment_ready(root, env_dir):
+            return session.result(False, "steps succeeded but the environment is not ready")
+        recovered = [i for i, s in enumerate(steps, 1) if not s.ok]
+        note = (
+            "ready"
+            if not recovered
+            else ("ready (step " + ", ".join(map(str, recovered)) + " failed; fallback succeeded)")
+        )
+        return session.result(True, note)
 
 
 _FAIL_LINE = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.M)

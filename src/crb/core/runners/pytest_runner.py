@@ -1,31 +1,125 @@
-"""pytest runner (Python)."""
+"""pytest runner (Python).
+
+Interpreter resolution (:meth:`PytestRunner.python_for`), most explicit first:
+
+1. ``runner_opts.python`` — the operator's interpreter, used as given;
+2. ``<env_dir>/venv/bin/python`` — the virtualenv :meth:`PytestRunner.setup` built;
+3. the interpreter running crb (hermetic tests and dev boxes; never *ready*).
+
+Setup mirrors the census recipe: a venv under ``env_dir`` (``uv venv`` when uv is
+on PATH, else ``python -m venv``), one install of ``runner_opts.pip`` (a list of
+pip arguments; ``pip_fallback`` on failure), then ``pip uninstall`` of
+``runner_opts.uninstall`` — the repository's *own* distribution — so the
+worktree's source on ``PYTHONPATH`` is what the tests import, not a stale wheel.
+Without ``pip`` the default is an editable install of the repository with its
+test extra (the first of :data:`TEST_EXTRAS` that ``pyproject.toml`` actually
+declares; installers exit 0 on an unknown extra, so nothing is guessed), falling
+back to a plain ``-e .``, followed by ``pytest``.
+
+``environment_ready`` is strict on purpose: only ``runner_opts.python`` or the
+setup venv can be ready. The interpreter running crb is the last resort for
+``command()`` (hermetic tests, dev boxes) but never *counts* as the repository's
+environment — it does not carry the repository's dependencies.
+"""
 
 from __future__ import annotations
 
+import os
 import re
+import shlex
+import shutil
 import sys
-from collections.abc import Sequence
+import tomllib
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from crb.core.execution import Command, ExecResult, Executor
-from crb.core.runners.base import BaseRunner, TestRun, parse_pytest_failures, tail_of
+from crb.core.runners.base import (
+    BaseRunner,
+    SetupResult,
+    SetupSession,
+    SetupStep,
+    TestRun,
+    host_check,
+    parse_pytest_failures,
+    tail_of,
+)
 
 # A real pytest oracle defines test functions/classes. A source module that merely
 # happens to be named test_*.py does NOT — using it as an oracle lets source edits
 # read as tamper and runs a non-test file as the target (malformed-oracle class).
 _PYTEST_DEF_RE = re.compile(r"(?m)^\s*(?:async\s+)?def\s+test|^\s*class\s+Test")
 
+#: Extras tried, in order, for the default editable install.
+TEST_EXTRAS: tuple[str, ...] = ("test", "tests", "dev", "testing")
+
+#: Files whose presence means ``pip install -e .`` has something to build.
+_PROJECT_FILES: tuple[str, ...] = ("pyproject.toml", "setup.py", "setup.cfg")
+
+_SETUP_ENV: dict[str, str] = {
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+    "PIP_NO_INPUT": "1",
+    "UV_NO_PROGRESS": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+}
+
+
+def venv_python(env_dir: Path) -> Path:
+    """The interpreter of the virtualenv :meth:`PytestRunner.setup` builds under ``env_dir``."""
+    venv = Path(env_dir) / "venv"
+    return venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def split_pip_args(items: Sequence[object]) -> list[str]:
+    """``["-e .[test]", "pytest"]`` and ``["-e", ".", "pytest"]`` both → argv tokens."""
+    out: list[str] = []
+    for item in items:
+        out.extend(shlex.split(str(item)))
+    return out
+
+
+def declared_extras(root: Path) -> frozenset[str]:
+    """The ``[project.optional-dependencies]`` names ``pyproject.toml`` declares."""
+    p = Path(root) / "pyproject.toml"
+    try:
+        data = tomllib.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    project = data.get("project")
+    extras = project.get("optional-dependencies") if isinstance(project, dict) else None
+    return frozenset(str(k) for k in extras) if isinstance(extras, dict) else frozenset()
+
 
 class PytestRunner(BaseRunner):
     name = "pytest"
     default_timeout = 900
 
+    # --- interpreter -------------------------------------------------------------
+    def configured_python(self, root: Path, env_dir: Path | None) -> str | None:
+        """The interpreter that carries the repository's dependencies, or ``None``:
+        ``runner_opts.python`` if set, else the setup venv if it exists. A relative
+        ``runner_opts.python`` with a directory part is resolved against ``root``."""
+        explicit = self.opts.get("python")
+        if explicit:
+            p = Path(str(explicit))
+            if not p.is_absolute() and len(p.parts) > 1:
+                return str(Path(root) / p)
+            return str(explicit)
+        if env_dir is not None:
+            vp = venv_python(env_dir)
+            if vp.exists():
+                return str(vp)
+        return None
+
+    def python_for(self, root: Path, env_dir: Path | None) -> str:
+        """The interpreter the tests run with (see the module docstring for the order)."""
+        return self.configured_python(root, env_dir) or sys.executable
+
+    # --- execution ---------------------------------------------------------------
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
-        host_default = self.opts.get("python") or (
-            sys.executable if executor.name != "docker" else None
-        )
+        host_default = self.python_for(root, self.env_dir) if executor.name != "docker" else None
         python = executor.tool("python", host_default)
         argv = [
             python,
@@ -71,3 +165,91 @@ class PytestRunner(BaseRunner):
         except OSError:
             return False
         return _PYTEST_DEF_RE.search(text) is not None
+
+    # --- environment -------------------------------------------------------------
+    def environment_ready(self, root: Path, env_dir: Path) -> bool:
+        """The configured interpreter exists and imports pytest. The crb interpreter
+        itself never counts: it does not carry the repository's dependencies."""
+        python = self.configured_python(root, env_dir)
+        if python is None:
+            return False
+        return host_check([python, "-c", "import pytest"], root)
+
+    def setup(
+        self,
+        executor: Executor,
+        root: Path,
+        *,
+        env_dir: Path,
+        timeout: int,
+        on_step: Callable[[SetupStep], None] | None = None,
+    ) -> SetupResult:
+        refusal = self.sandbox_refusal(executor)
+        if refusal is not None:
+            return refusal
+        root, env_dir = Path(root), Path(env_dir)
+        t = self.setup_timeout(timeout)
+        session = SetupSession(executor, on_step=on_step)
+        explicit = self.opts.get("python")
+        if explicit:
+            # The operator chose the interpreter: verify it, never install into it.
+            if self.environment_ready(root, env_dir):
+                return session.result(True, f"using runner_opts.python={explicit}")
+            return session.result(
+                False,
+                f"runner_opts.python={explicit} cannot import pytest; install the repository's "
+                "test dependencies there, or unset it so setup can build a venv",
+            )
+        python = venv_python(env_dir)
+        uv = shutil.which("uv") if executor.name == "local" else None
+
+        def pip(*args: str) -> Command:
+            argv = (
+                [uv, "pip", "install", "-q", "--python", str(python), *args]
+                if uv
+                else [str(python), "-m", "pip", "install", "-q", *args]
+            )
+            return Command(tuple(argv), root, env=_SETUP_ENV, timeout=t, network=True)
+
+        # 1. the virtualenv (idempotent: an existing one is kept)
+        if not python.exists():
+            env_dir.mkdir(parents=True, exist_ok=True)
+            base = sys.executable
+            argv = (
+                [uv, "venv", "-q", str(python.parents[1]), "--python", base]
+                if uv
+                else [base, "-m", "venv", str(python.parents[1])]
+            )
+            if not session.run(Command(tuple(argv), root, env=_SETUP_ENV, timeout=t)).ok:
+                return session.result(False, "virtualenv creation failed")
+            if not python.exists():
+                return session.result(False, f"virtualenv created but {python} is missing")
+        # 2. the install: runner_opts.pip (+ pip_fallback), else the editable default
+        primary = split_pip_args(list(self.opts.get("pip") or []))
+        if primary:
+            step = session.run(pip(*primary))
+            fallback = split_pip_args(list(self.opts.get("pip_fallback") or []))
+            if not step.ok and fallback:
+                step = session.run(pip(*fallback))
+            if not step.ok:
+                return self.finish_setup(session, root, env_dir)
+        else:
+            if any((root / f).exists() for f in _PROJECT_FILES):
+                extra = next((e for e in TEST_EXTRAS if e in declared_extras(root)), "")
+                step = session.run(pip("-e", f".[{extra}]" if extra else "."))
+                if not step.ok and extra:
+                    step = session.run(pip("-e", "."))
+                if not step.ok:
+                    return self.finish_setup(session, root, env_dir)
+            if not session.run(pip("pytest")).ok:
+                return self.finish_setup(session, root, env_dir)
+        # 3. the census pattern: the repo's own distribution must not shadow the worktree
+        uninstall = [str(p) for p in (self.opts.get("uninstall") or [])]
+        if uninstall:
+            argv = (
+                [uv, "pip", "uninstall", "-q", "--python", str(python), *uninstall]
+                if uv
+                else [str(python), "-m", "pip", "uninstall", "-y", "-q", *uninstall]
+            )
+            session.run(Command(tuple(argv), root, env=_SETUP_ENV, timeout=t))
+        return self.finish_setup(session, root, env_dir)

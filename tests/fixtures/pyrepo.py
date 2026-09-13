@@ -28,6 +28,13 @@ Two opt-in extra commits exist for the miner's negative paths:
   passes at the parent (must be skipped: "not RED");
 * :meth:`PyRepo.add_bad_gold_commit` — RED at the parent, gold turns the target
   GREEN but breaks ``add`` (``gold_clean=False``).
+
+One opt-in commit exists for the environment-setup tests:
+
+* :meth:`PyRepo.add_pyproject_commit` — a minimal ``pyproject.toml`` (hatchling,
+  ``src/calc`` layout, a ``[test]`` extra) so ``pip install -e .`` has something to
+  build. It is NOT part of the default history: the core suite pins the initial
+  commit's file list.
 """
 
 from __future__ import annotations
@@ -125,6 +132,25 @@ def test_multiply():
 """
 
 README_SRC = "# calc\n\nA tiny calculator used as a test fixture.\n"
+
+PYPROJECT = "pyproject.toml"
+DIST_NAME = "calc"
+PYPROJECT_SRC = """[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "calc"
+version = "0.1.0"
+description = "fixture distribution for the environment-setup tests"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/calc"]
+"""
 
 #: The ``add`` test ids as the pytest runner reports them (what a regression breaks).
 TEST_CALC_IDS = (f"{TEST_CALC}::test_add", f"{TEST_CALC}::test_add_negative")
@@ -246,6 +272,11 @@ class PyRepo:
         )
         _write(self.path, TEST_MULTIPLY, TEST_MULTIPLY_SRC)
         return _commit(self.path, "feat: add multiply (breaks add)")
+
+    def add_pyproject_commit(self) -> str:
+        """A minimal packaging file so ``pip install -e .`` (the setup phase) works."""
+        _write(self.path, PYPROJECT, PYPROJECT_SRC)
+        return _commit(self.path, "build: add pyproject.toml")
 
 
 def build(root: Path) -> PyRepo:

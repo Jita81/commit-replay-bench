@@ -32,8 +32,9 @@ from crb.core.spec import POOL_HARD, POOL_STANDARD, RUNNERS, SIZE_TIER_NAMES
 PAGE_DEFAULT = 50
 PAGE_MAX = 500
 
-#: Run kinds a client may create. ``probe`` is also reachable via ``POST /repos/{name}/probe``.
-RUN_KINDS: tuple[str, ...] = ("mine", "replay", "blind", "oracle", "controls", "probe")
+#: Run kinds a client may create. ``probe`` is also reachable via ``POST /repos/{name}/probe``;
+#: ``setup`` is the environment phase (dependency install — the only network phase).
+RUN_KINDS: tuple[str, ...] = ("setup", "mine", "replay", "blind", "oracle", "controls", "probe")
 #: Kinds that need a builder (they produce graded attempts).
 BUILD_KINDS: frozenset[str] = frozenset({"replay", "blind"})
 RUN_STATUSES: tuple[str, ...] = ("queued", "running", "succeeded", "failed", "cancelled")

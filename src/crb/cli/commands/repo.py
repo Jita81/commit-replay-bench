@@ -1,8 +1,17 @@
-"""``crb repo`` — register repositories, prove their toolchain, import census configs."""
+"""``crb repo`` — register repositories, set up their environment, prove their
+toolchain, import census configs.
+
+``crb repo setup`` is the one network phase: it installs the repository's test
+dependencies through the runner (a venv under ``<workdir>/envs/<name>`` for
+Python, ``node_modules`` in the clone, warm module caches for Go / Maven /
+Cargo) and records every step. ``crb repo probe`` runs it first whenever the
+environment is not ready.
+"""
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +19,7 @@ from crb.cli.commands import (
     EXIT_NEGATIVE,
     EXIT_OK,
     CliError,
+    Workdir,
     add_common,
     add_executor,
     build_executor,
@@ -21,7 +31,7 @@ from crb.cli.commands import (
 )
 from crb.core.git import GitRepo
 from crb.core.legacy import import_repo_configs
-from crb.core.runners import get_runner
+from crb.core.runners import BaseRunner, SetupResult, get_runner
 from crb.core.spec import (
     BELT_AFFECTED_DIRS,
     BELT_BARE,
@@ -78,7 +88,19 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     add_common(a)
     a.set_defaults(func=cmd_add)
 
-    pr = rs.add_parser("probe", help="run the config's probe scope to prove the toolchain")
+    su = rs.add_parser(
+        "setup",
+        help="install the repo's test dependencies (the only network phase; env under <workdir>/envs/<name>)",
+    )
+    su.add_argument("name")
+    add_executor(su)
+    add_common(su)
+    su.set_defaults(func=cmd_setup)
+
+    pr = rs.add_parser(
+        "probe",
+        help="run the config's probe scope to prove the toolchain (runs setup first if not ready)",
+    )
     pr.add_argument("name")
     add_executor(pr)
     add_common(pr)
@@ -142,13 +164,106 @@ def cmd_add(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# ---------------------------------------------------------------------------
+# environment (setup)
+# ---------------------------------------------------------------------------
+
+
+def env_dir_of(wd: Workdir, name: str) -> Path:
+    """The repo's environment directory: what its config file records, else the
+    default ``<workdir>/envs/<name>``."""
+    try:
+        d = json.loads(wd.repo_file(name).read_text(encoding="utf-8"))
+        recorded = str(d.get("env_dir") or "")
+    except (OSError, ValueError):
+        recorded = ""
+    return Path(recorded) if recorded else wd.root / "envs" / name
+
+
+def record_env_dir(wd: Workdir, name: str, env_dir: Path) -> None:
+    """Store ``env_dir`` alongside the config (``RepoConfig.from_dict`` ignores it)."""
+    f = wd.repo_file(name)
+    d = json.loads(f.read_text(encoding="utf-8"))
+    d["env_dir"] = str(env_dir)
+    f.write_text(json.dumps(d, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def bound_runner(config: RepoConfig, env_dir: Path) -> BaseRunner:
+    """The repo's runner with ``env_dir`` bound, so a pytest runner without
+    ``runner_opts.python`` runs on the venv ``crb repo setup`` built. Every command
+    that runs the repo's tests should build its runner here."""
+    runner = get_runner(config)
+    runner.env_dir = env_dir
+    return runner
+
+
+def _setup_lines(name: str, result: SetupResult) -> list[str]:
+    lines = [
+        f"{name}: setup -> {'READY' if result.ok else 'FAILED'} ({result.note}; "
+        f"{len(result.steps)} step(s), {result.duration_s:.1f}s)"
+    ]
+    for i, step in enumerate(result.steps, 1):
+        how = "timed out" if step.timed_out else f"rc={step.rc}"
+        lines.append(f"  [{i}] {how} {' '.join(step.argv)}")
+        if not step.ok and step.tail:
+            lines.extend("      " + t for t in step.tail.splitlines()[-12:])
+    return lines
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    wd = workdir_of(args)
+    config, clone = wd.require_clone(args.name)
+    env_dir = env_dir_of(wd, args.name)
+    runner = bound_runner(config, env_dir)
+    executor = build_executor(args.executor, config)
+    result = runner.setup(executor, clone, env_dir=env_dir, timeout=args.timeout)
+    record_env_dir(wd, args.name, env_dir)
+    out: dict[str, Any] = {
+        "repo": config.name,
+        "runner": runner.name,
+        "executor": executor.describe(),
+        "env_dir": str(env_dir),
+        "ready": runner.environment_ready(clone, env_dir),
+        **result.to_dict(),
+    }
+    if args.json:
+        print_json(out)
+    else:
+        print_lines(_setup_lines(config.name, result))
+    return EXIT_OK if result.ok else EXIT_NEGATIVE
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     wd = workdir_of(args)
     config, clone = wd.require_clone(args.name)
     if not config.probe:
         raise CliError(f"repo {args.name!r} has no probe scope configured (--probe on `repo add`)")
-    runner = get_runner(config)
+    env_dir = env_dir_of(wd, args.name)
+    runner = bound_runner(config, env_dir)
     executor = build_executor(args.executor, config)
+    setup: SetupResult | None = None
+    if executor.name != "docker" and not runner.environment_ready(clone, env_dir):
+        setup = runner.setup(executor, clone, env_dir=env_dir, timeout=args.timeout)
+        record_env_dir(wd, args.name, env_dir)
+        if not setup.ok:
+            out_fail: dict[str, Any] = {
+                "repo": config.name,
+                "probe": config.probe,
+                "runner": runner.name,
+                "executor": executor.describe(),
+                "green": False,
+                "setup": setup.to_dict(),
+            }
+            if args.json:
+                print_json(out_fail)
+            else:
+                print_lines(
+                    [
+                        *_setup_lines(config.name, setup),
+                        f"{config.name}: probe not run (setup failed)",
+                    ]
+                )
+            return EXIT_NEGATIVE
     run = runner.run(executor, clone, (config.probe,), timeout=args.timeout)
     out = {
         "repo": config.name,
@@ -158,12 +273,15 @@ def cmd_probe(args: argparse.Namespace) -> int:
         "green": run.green,
         **run.to_dict(),
     }
+    if setup is not None:
+        out["setup"] = setup.to_dict()
     if args.json:
         print_json(out)
     else:
         status = "GREEN" if run.green else "RED"
         print_lines(
-            [
+            (_setup_lines(config.name, setup) if setup is not None else [])
+            + [
                 f"{config.name}: probe {config.probe} -> {status} (rc={run.returncode}, "
                 f"failing={len(run.failing)}, timed_out={run.timed_out}, "
                 f"{run.duration_s:.1f}s)"

@@ -5,6 +5,8 @@ from __future__ import annotations
 from crb.core.runners.base import (
     BARE,
     BaseRunner,
+    SetupResult,
+    SetupStep,
     TestRun,
     TestRunner,
     parse_pytest_failures,
@@ -51,6 +53,8 @@ __all__ = [
     "MochaRunner",
     "NodeTestRunner",
     "PytestRunner",
+    "SetupResult",
+    "SetupStep",
     "TestRun",
     "TestRunner",
     "VitestRunner",
