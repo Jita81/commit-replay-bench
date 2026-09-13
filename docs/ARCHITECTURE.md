@@ -152,6 +152,7 @@ flowchart TB
         ledger["ledger<br/>GradeRow (invariants), JsonlLedger, verify_chain, CellKey, cell_stats"]
         stats["stats<br/>wilson_interval, mean, stddev, two_proportion_z"]
         routing["routing<br/>RoutingPolicy, route() → RouteDecision"]
+        run["run<br/>RunSpec, BuildFn (injected builder), run_task/run → RunSummary; one ledger row per attempt (r1, r2 …)"]
     end
     spec --> mine
     git --> ws --> mine
@@ -164,7 +165,17 @@ flowchart TB
     stats --> ledger --> routing
     version --> evidence
     version --> ledger
+    ws --> run
+    grade --> run
+    evidence --> run
+    ledger --> run
 ```
+
+`crb.core.run` is the stdlib orchestrator (prep → build → grade → evidence pack → ledger,
+task by task). The builder is injected as a plain callable (`BuildFn`) so `crb.builders`
+adapts any SDK to it without the core importing one. Every *attempt* is its own ledger row
+(`trial = r1, r2, …`), so first-pass accuracy (`r1` rows only) and solve-rate-under-budget
+(any clean row per task) are both derivable and never conflated.
 
 Planned P2 additions to `crb.core`: `oracle/` (mutation strength, adequacy gate, negative
 controls, sealed corpus), `forecast` (capability map, cost/latency Pareto, readiness

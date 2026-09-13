@@ -154,7 +154,7 @@ flowchart TB
         O[StepEvent · sinks · Prometheus · JSON logs + redaction]:::l2
     end
     subgraph L1["core  (crb.core) — STDLIB ONLY"]
-        C[spec · git · execution · runners · workspace · mine · grade · evidence · ledger · stats · routing · redact]:::l1
+        C[spec · git · execution · runners · workspace · mine · grade · evidence · ledger · stats · routing · redact · run]:::l1
     end
     L5 --> L4 --> L3 --> L2 --> L1
     classDef l1 fill:#e8f1fb,stroke:#3b6ea5,color:#0b2545
@@ -168,8 +168,11 @@ The run pipeline, with the module that owns each stage:
 
 ```mermaid
 flowchart LR
-    M["mine<br/>(core.mine)"] --> P["prep<br/>(core.workspace)"] --> R["RED check + baseline + gold<br/>(core.mine)"] --> B["build<br/>(builders.*)"] --> G["grade — four belts<br/>(core.grade)"] --> L["ledger + evidence pack<br/>(core.evidence, core.ledger)"] --> RT["route<br/>(core.routing)"]
+    M["mine<br/>(core.mine)"] --> P["prep<br/>(core.workspace)"] --> R["RED check + baseline + gold<br/>(core.mine)"] --> B["build<br/>(builders.* via core.run BuildFn)"] --> G["grade — four belts<br/>(core.grade)"] --> L["ledger + evidence pack<br/>(core.evidence, core.ledger)"] --> RT["route<br/>(core.routing)"]
 ```
+
+`core.run` orchestrates prep → build → grade → evidence → ledger per task, one ledger row
+per attempt, with the builder injected as a callable.
 
 Full description, C4 diagrams, sequence diagrams and the data model:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
