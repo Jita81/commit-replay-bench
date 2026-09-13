@@ -247,11 +247,20 @@ class TestSettingsView:
             assert "s" * 40 not in dumped
             assert ROOT_PW not in dumped
             assert "oidc-secret-value-123" not in dumped
-            assert body["oidc"]["client_secret_configured"] is True
-            assert body["oidc"]["enabled"] is True
-            assert body["oidc"]["role_map"] == {"g": "operator"}
-            assert body["bootstrap_admin"]["password_configured"] is True
+            # the UI shape (ui/src/api/types.ts `Settings`) …
+            assert body["oidc_enabled"] is True
             assert body["retention"] == {"transcripts_days": 7}
-            assert body["sandbox"]["executor"] == "local"
-            assert body["database"] == {"dialect": "sqlite"}
-            assert body["secret_key_configured"] is True
+            assert body["sandbox_mode"] == "local"
+            assert body["ledger_backend"] == "sqlite"
+            assert body["apparatus_version"] and body["policy_version"]
+            assert {b["name"] for b in body["builders"]} >= {"anthropic", "openai", "azure_openai"}
+            assert all(isinstance(b["configured"], bool) for b in body["builders"])
+            # … plus the full redacted settings under `raw`
+            raw = body["raw"]
+            assert raw["oidc"]["client_secret_configured"] is True
+            assert raw["oidc"]["enabled"] is True
+            assert raw["oidc"]["role_map"] == {"g": "operator"}
+            assert raw["bootstrap_admin"]["password_configured"] is True
+            assert raw["sandbox"]["executor"] == "local"
+            assert raw["database"] == {"dialect": "sqlite"}
+            assert raw["secret_key_configured"] is True

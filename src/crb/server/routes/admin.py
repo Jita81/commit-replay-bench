@@ -13,6 +13,9 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
+from crb.core.routing import POLICY_VERSION
+from crb.core.version import APPARATUS_VERSION
+from crb.observability.probes import probe_builders
 from crb.server.auth import AdminDep, count_active_admins, create_local_user, validate_role
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep
 from crb.server.settings import MIN_PASSWORD_LENGTH, ROLE_LADDER
@@ -111,8 +114,24 @@ def set_role(user_id: str, body: RoleChange, admin: AdminDep, db: DbDep) -> User
 
 @router.get("/settings", responses={401: _ERR, 403: _ERR}, summary="Non-secret settings")
 def get_settings_view(admin: AdminDep, settings: SettingsDep) -> dict[str, Any]:
+    """The UI's ``Settings`` shape (see ``ui/src/api/types.ts``) plus the full redacted
+    settings under ``raw``. Secrets are reported only as configured yes/no."""
     del admin
-    return settings.redacted_dict()
+    raw = settings.redacted_dict()
+    probe = probe_builders()
+    builders = [
+        {"name": name, "configured": bool(flag)} for name, flag in sorted(probe.data.items())
+    ]
+    return {
+        "builders": builders,
+        "sandbox_mode": str(raw.get("sandbox", {}).get("executor", "")),
+        "retention": dict(raw.get("retention", {})),
+        "oidc_enabled": bool(raw.get("oidc", {}).get("enabled", False)),
+        "ledger_backend": str(raw.get("database", {}).get("dialect", "")),
+        "apparatus_version": APPARATUS_VERSION,
+        "policy_version": POLICY_VERSION,
+        "raw": raw,
+    }
 
 
 __all__ = ["router"]
