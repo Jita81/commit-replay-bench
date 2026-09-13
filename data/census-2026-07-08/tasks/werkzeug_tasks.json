@@ -1,0 +1,2093 @@
+{
+ "ff1b12a6629b37f5d8372b9e53f02de9d1322e19": {
+  "task": "ff1b12a6629b37f5d8372b9e53f02de9d1322e19",
+  "target_tests": [
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/http.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-30T09:25:53-07:00",
+  "subject": "use base64 instead of hex",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8c129d383efff024263218bb7fb1bdfac9591e42": {
+  "task": "8c129d383efff024263218bb7fb1bdfac9591e42",
+  "target_tests": [
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/debug/__init__.py",
+   "src/werkzeug/http.py",
+   "src/werkzeug/wrappers/response.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-26T14:27:30-07:00",
+  "subject": "use sha3-256 instead of sha-1",
+  "src_churn": 38,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8e9105fbafd3b3695e7b2f1fcbd09adcd97bd351": {
+  "task": "8e9105fbafd3b3695e7b2f1fcbd09adcd97bd351",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/range.py",
+   "src/werkzeug/sansio/request.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-23T13:28:11-07:00",
+  "subject": "if-range discards weak etag",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f88164a271dd3e86a3241389ddc5c53eca4b9e4a": {
+  "task": "f88164a271dd3e86a3241389ddc5c53eca4b9e4a",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/converters.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-30T20:44:51+02:00",
+  "subject": "Prevent scientific notation being used for floats",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "deab88f61fa57d37d19f83ea438d4bdebb5a743c": {
+  "task": "deab88f61fa57d37d19f83ea438d4bdebb5a743c",
+  "target_tests": [
+   "tests/sansio/test_utils.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_utils.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-02T08:00:58-07:00",
+  "subject": "relax get_host strictness",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7294d72c0f48467789a5f4bc7d0b3fff2e0f4322": {
+  "task": "7294d72c0f48467789a5f4bc7d0b3fff2e0f4322",
+  "target_tests": [
+   "tests/test_exceptions.py",
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_exceptions.py",
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/exceptions.py",
+   "src/werkzeug/http.py",
+   "src/werkzeug/sansio/response.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-24T13:03:33-07:00",
+  "subject": "deprecate `HTTP_STATUS_CODES`",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "23142a3cb5d1b5ba8e9914980934477e0abdc30e": {
+  "task": "23142a3cb5d1b5ba8e9914980934477e0abdc30e",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/matcher.py",
+   "src/werkzeug/routing/rules.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-23T17:59:07-07:00",
+  "subject": "merge any number of slashes",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b913d68db5898c8f3def3c09a653aaf95abe38e5": {
+  "task": "b913d68db5898c8f3def3c09a653aaf95abe38e5",
+  "target_tests": [
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/wrappers/response.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-12T20:12:39-08:00",
+  "subject": "always set accept-ranges header",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d3d3df56c98ba84111a15118d38e8dbfba71c3fd": {
+  "task": "d3d3df56c98ba84111a15118d38e8dbfba71c3fd",
+  "target_tests": [
+   "tests/sansio/test_utils.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_utils.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/request.py",
+   "src/werkzeug/sansio/utils.py",
+   "src/werkzeug/wsgi.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-23T19:01:08-08:00",
+  "subject": "validate host characters",
+  "src_churn": 154,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "051fd66352cf8b3f0797249858068dedaead6d39": {
+  "task": "051fd66352cf8b3f0797249858068dedaead6d39",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/auth.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-20T13:43:06+01:00",
+  "subject": "fix trailing whitespace in WWW-Authenticate bearer",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "795f4eaf6ef1fdc2fd1d7114c61ad384ede4322c": {
+  "task": "795f4eaf6ef1fdc2fd1d7114c61ad384ede4322c",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/http.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-20T19:52:20-07:00",
+  "subject": "improve list quote handling (#3128)",
+  "src_churn": 72,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "de546be7144cd6d12d088393c2d1975f5ab23700": {
+  "task": "de546be7144cd6d12d088393c2d1975f5ab23700",
+  "target_tests": [
+   "tests/sansio/test_utils.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_utils.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/request.py",
+   "src/werkzeug/sansio/utils.py",
+   "src/werkzeug/wsgi.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-23T19:01:08-08:00",
+  "subject": "validate host characters",
+  "src_churn": 154,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f54fe98026253e70fbbcd35a6b52fb67cfff1c03": {
+  "task": "f54fe98026253e70fbbcd35a6b52fb67cfff1c03",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/werkzeug/security.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-18T14:49:45-08:00",
+  "subject": "safe_join prevents Windows special device names in multi-segment paths",
+  "src_churn": 43,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "664deb6a58c8ff6041ce00344c0156b5d6e696d7": {
+  "task": "664deb6a58c8ff6041ce00344c0156b5d6e696d7",
+  "target_tests": [
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/wrappers/response.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-12T20:12:39-08:00",
+  "subject": "always set accept-ranges header",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f96520c7df662064aa9754b3544783b0ca573f71": {
+  "task": "f96520c7df662064aa9754b3544783b0ca573f71",
+  "target_tests": [
+   "tests/sansio/test_request.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_request.py"
+  ],
+  "src_files": [
+   "src/werkzeug/http.py",
+   "src/werkzeug/sansio/request.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-25T13:17:38Z",
+  "subject": "add Sec-Fetch-Site, Mode, User, and Dest headers",
+  "src_churn": 106,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "08cf07f9accc3f6005a03947f7466dff64a56801": {
+  "task": "08cf07f9accc3f6005a03947f7466dff64a56801",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/exceptions.py",
+   "src/werkzeug/routing/matcher.py",
+   "src/werkzeug/routing/rules.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-12T15:07:31-08:00",
+  "subject": "consider methods for duplicate rule check",
+  "src_churn": 47,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9bca0b8eab3bdca5cd67a9a736988ac94eb7fa4f": {
+  "task": "9bca0b8eab3bdca5cd67a9a736988ac94eb7fa4f",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/exceptions.py",
+   "src/werkzeug/routing/matcher.py",
+   "src/werkzeug/routing/rules.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-04-18T16:57:42+01:00",
+  "subject": "error on dupcliate rules",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d4a60922ebd3cf11add3d20f636fb03781efdcb3": {
+  "task": "d4a60922ebd3cf11add3d20f636fb03781efdcb3",
+  "target_tests": [
+   "tests/test_send_file.py",
+   "tests/test_test.py",
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_send_file.py",
+   "tests/test_test.py",
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/werkzeug/test.py",
+   "src/werkzeug/wrappers/request.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-05T09:10:19-08:00",
+  "subject": "EnvironBuilder context manager",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6335b7211dfd173f8ba208c9e6fa62c170ba23b9": {
+  "task": "6335b7211dfd173f8ba208c9e6fa62c170ba23b9",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/map.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-12T21:07:10-08:00",
+  "subject": "validate trusted_hosts during routing",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a6a7dd14457e97185b23d45411c3314d003e67d3": {
+  "task": "a6a7dd14457e97185b23d45411c3314d003e67d3",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/map.py",
+   "src/werkzeug/routing/rules.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-03T08:33:06-08:00",
+  "subject": "improve subdomain and host matching",
+  "src_churn": 249,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "285af2c465d0737e77f33bab6d29775fcd53b667": {
+  "task": "285af2c465d0737e77f33bab6d29775fcd53b667",
+  "target_tests": [
+   "tests/test_test.py",
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_test.py",
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/werkzeug/utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-24T14:08:21-08:00",
+  "subject": "redirect defaults to 303",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "37797aba260022c871718e0908b472727d366d09": {
+  "task": "37797aba260022c871718e0908b472727d366d09",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/werkzeug/security.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-04T14:03:55-08:00",
+  "subject": "`safe_join` prevents windows special device names with compound extensions",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "1049dd6b2a363e1ef302b4161c340fb8582f627a": {
+  "task": "1049dd6b2a363e1ef302b4161c340fb8582f627a",
+  "target_tests": [
+   "tests/sansio/test_multipart.py",
+   "tests/test_formparser.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_multipart.py",
+   "tests/test_formparser.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/multipart.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-23T21:41:44Z",
+  "subject": "Correct parsing up to a potential partial boundary",
+  "src_churn": 58,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fa0f4f2710b8eaffef7f2b3fbc58fc3ca55247fb": {
+  "task": "fa0f4f2710b8eaffef7f2b3fbc58fc3ca55247fb",
+  "target_tests": [
+   "tests/test_debug.py"
+  ],
+  "test_files": [
+   "tests/test_debug.py"
+  ],
+  "src_files": [
+   "src/werkzeug/debug/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-09T15:27:55+05:30",
+  "subject": "initialize _pin",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9bdec46fe4955f085348ffc666b9edafff83aee2": {
+  "task": "9bdec46fe4955f085348ffc666b9edafff83aee2",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/werkzeug/security.py",
+   "src/werkzeug/utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-27T10:37:38-08:00",
+  "subject": "safe_join prevents windows special device names",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "60ea32c88ee1fc97559872fac55708af9c147a05": {
+  "task": "60ea32c88ee1fc97559872fac55708af9c147a05",
+  "target_tests": [
+   "tests/test_debug.py"
+  ],
+  "test_files": [
+   "tests/test_debug.py"
+  ],
+  "src_files": [
+   "src/werkzeug/debug/tbtools.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-26T22:32:37-08:00",
+  "subject": "skip rendering missing source",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "77bde3337286c405280bef1870442be7f235393c": {
+  "task": "77bde3337286c405280bef1870442be7f235393c",
+  "target_tests": [
+   "tests/sansio/test_multipart.py",
+   "tests/test_formparser.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_multipart.py",
+   "tests/test_formparser.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/multipart.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-13T22:41:55+01:00",
+  "subject": "handle chunk across \\r\\n ending",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d99f72d12698d86e7ebcb894f3c6c729e2b6c067": {
+  "task": "d99f72d12698d86e7ebcb894f3c6c729e2b6c067",
+  "target_tests": [
+   "tests/sansio/test_utils.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_utils.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-07T08:01:56-08:00",
+  "subject": "wrap IPv6 SERVER_NAME in []",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "598bb1de78678107404493e56d68003910e1dbea": {
+  "task": "598bb1de78678107404493e56d68003910e1dbea",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/headers.py",
+   "src/werkzeug/datastructures/structures.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-06T11:49:36-08:00",
+  "subject": "restrict containers accepted by multi",
+  "src_churn": 56,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "afc4ea7b5e969d501194d8acdc88025f877a5510": {
+  "task": "afc4ea7b5e969d501194d8acdc88025f877a5510",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/headers.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-01T08:21:24-07:00",
+  "subject": "fix str(request.headers)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b0f361ce69038a55f7ca8cfb6262ddc5ffe1eeea": {
+  "task": "b0f361ce69038a55f7ca8cfb6262ddc5ffe1eeea",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/cache_control.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-31T09:38:01-07:00",
+  "subject": "more cache-control cleanup",
+  "src_churn": 55,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e3a50c9ac130658e15bc8e8a4555a58379006cba": {
+  "task": "e3a50c9ac130658e15bc8e8a4555a58379006cba",
+  "target_tests": [
+   "tests/test_datastructures.py",
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py",
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/cache_control.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-30T16:53:22-07:00",
+  "subject": "more cache-control cleanup",
+  "src_churn": 189,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b65b587aa12ec40df1eecb4c6aadaf8de8931187": {
+  "task": "b65b587aa12ec40df1eecb4c6aadaf8de8931187",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/headers.py",
+   "src/werkzeug/datastructures/mixins.py",
+   "src/werkzeug/datastructures/structures.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-29T19:20:33-07:00",
+  "subject": "implement or and ior operators",
+  "src_churn": 77,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "3720e3e84d7de619356e0b5fddb8b342d81d975d": {
+  "task": "3720e3e84d7de619356e0b5fddb8b342d81d975d",
+  "target_tests": [
+   "tests/test_datastructures.py",
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py",
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/__init__.py",
+   "src/werkzeug/datastructures/structures.py",
+   "src/werkzeug/sansio/request.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-27T18:39:40-07:00",
+  "subject": "deprecate OrderedMultiDict",
+  "src_churn": 96,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "763609ae21a1d8d649ca19f30c61257fbee670c1": {
+  "task": "763609ae21a1d8d649ca19f30c61257fbee670c1",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/werkzeug/security.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-27T16:46:22-07:00",
+  "subject": "increase pbkdf2 iterations",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "14c5d990215dc90fa92132ee7dc56efa2c0f67c2": {
+  "task": "14c5d990215dc90fa92132ee7dc56efa2c0f67c2",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/cache_control.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-09T15:25:56+03:00",
+  "subject": "Add support for RFC5861 Cache-Control headers",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "437cf6fccb10a313c6c620e2da7b58729aa853b9": {
+  "task": "437cf6fccb10a313c6c620e2da7b58729aa853b9",
+  "target_tests": [
+   "tests/test_exceptions.py"
+  ],
+  "test_files": [
+   "tests/test_exceptions.py"
+  ],
+  "src_files": [
+   "src/werkzeug/exceptions.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-16T23:27:58+05:30",
+  "subject": "add 421 Misdirected Request exception",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "87cc78a25f782f8c59fbde786840a00cf0d09b3d": {
+  "task": "87cc78a25f782f8c59fbde786840a00cf0d09b3d",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/werkzeug/security.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-25T09:56:15-07:00",
+  "subject": "catch special absolute path on Windows Python < 3.11",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8760275afb72bd10b57d92cb4d52abf759b2f3a7": {
+  "task": "8760275afb72bd10b57d92cb4d52abf759b2f3a7",
+  "target_tests": [
+   "tests/test_formparser.py"
+  ],
+  "test_files": [
+   "tests/test_formparser.py"
+  ],
+  "src_files": [
+   "src/werkzeug/formparser.py",
+   "src/werkzeug/sansio/multipart.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-25T06:46:50-07:00",
+  "subject": "apply max_form_memory_size another level up in the parser",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1688968101c3341136bd8420ac7b77b6286c7409": {
+  "task": "1688968101c3341136bd8420ac7b77b6286c7409",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/http.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-10T23:00:41+02:00",
+  "subject": "ignore invalid authorization parameters",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7326de64ea7d1ba783bb372144d59e7433113b68": {
+  "task": "7326de64ea7d1ba783bb372144d59e7433113b68",
+  "target_tests": [
+   "tests/live_apps/run.py",
+   "tests/test_serving.py"
+  ],
+  "test_files": [
+   "tests/live_apps/run.py",
+   "tests/test_serving.py"
+  ],
+  "src_files": [
+   "src/werkzeug/serving.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-26T13:52:40+02:00",
+  "subject": "fix logging addresses with ipv6 scope",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cfe71ee9d53d612c39801e32a1258c6eb1e52f75": {
+  "task": "cfe71ee9d53d612c39801e32a1258c6eb1e52f75",
+  "target_tests": [
+   "tests/test_serving.py"
+  ],
+  "test_files": [
+   "tests/test_serving.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_reloader.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-05T11:25:45+02:00",
+  "subject": "filter watchdog events",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3a893d27b1a1b7da7a8ec52c297ba163371ddf71": {
+  "task": "3a893d27b1a1b7da7a8ec52c297ba163371ddf71",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/http.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-08-20T21:30:45-07:00",
+  "subject": "improve parse_options_header performance",
+  "src_churn": 65,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a2f29de1255de4c737dbb541476991550c1a1eee": {
+  "task": "a2f29de1255de4c737dbb541476991550c1a1eee",
+  "target_tests": [
+   "tests/test_formparser.py"
+  ],
+  "test_files": [
+   "tests/test_formparser.py"
+  ],
+  "src_files": [
+   "src/werkzeug/formparser.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-08-20T10:58:30-07:00",
+  "subject": "restore invalid bytes behavior for form parser",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b28001e06f71126d32ec095721282c7da647c3c6": {
+  "task": "b28001e06f71126d32ec095721282c7da647c3c6",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/cache_control.py",
+   "src/werkzeug/utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-04-19T11:35:10+02:00",
+  "subject": "fix cache control issues",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "97fb2f722297ae4e12e36dab024e0acf8477b3c8": {
+  "task": "97fb2f722297ae4e12e36dab024e0acf8477b3c8",
+  "target_tests": [
+   "tests/test_urls.py",
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_urls.py",
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/urls.py",
+   "src/werkzeug/wrappers/response.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-05T08:55:42-07:00",
+  "subject": "remove _invalid_iri_to_uri workaround",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "57413980f4efa74d997d328782c0efd946c8f81b": {
+  "task": "57413980f4efa74d997d328782c0efd946c8f81b",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/rules.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-09T22:14:44Z",
+  "subject": "Raise an error if the converter arguments cannot be parsed",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "564397967adee74f4212d7bbab83da47ce0bb190": {
+  "task": "564397967adee74f4212d7bbab83da47ce0bb190",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/http.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-27T21:01:01Z",
+  "subject": "Support Cookie CHIPS",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0b472374af1ab91000ea244a0da44d49c04c7cce": {
+  "task": "0b472374af1ab91000ea244a0da44d49c04c7cce",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/map.py",
+   "src/werkzeug/routing/matcher.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-03T16:38:25Z",
+  "subject": "Fix issue with repeated-slash requests redirecting",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f516c4005c7c4510b61ae07969450771b929809d": {
+  "task": "f516c4005c7c4510b61ae07969450771b929809d",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/structures.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-01-26T00:27:29+01:00",
+  "subject": "Handle TypeError in TypeConversionDict",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7ab3823fb620d29bcfeeff7499dd9a64ad90f360": {
+  "task": "7ab3823fb620d29bcfeeff7499dd9a64ad90f360",
+  "target_tests": [
+   "tests/test_test.py"
+  ],
+  "test_files": [
+   "tests/test_test.py"
+  ],
+  "src_files": [
+   "src/werkzeug/test.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-01-08T15:32:22+05:30",
+  "subject": "Fix: Use `issubclass` instead of `isinstance`",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4820d8c487e5db9f43645c31c4123fce5ac5ad32": {
+  "task": "4820d8c487e5db9f43645c31c4123fce5ac5ad32",
+  "target_tests": [
+   "tests/middleware/test_profiler.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_profiler.py"
+  ],
+  "src_files": [
+   "src/werkzeug/middleware/profiler.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-30T16:23:51-07:00",
+  "subject": "Provide elapsed and timestamp info to filename_format",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9a21003d45d336d5173396c4223872061015a524": {
+  "task": "9a21003d45d336d5173396c4223872061015a524",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/werkzeug/security.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-14T12:54:14-07:00",
+  "subject": "use scrypt as default",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1058daa00a7142fda26096854835b37da8bfca50": {
+  "task": "1058daa00a7142fda26096854835b37da8bfca50",
+  "target_tests": [
+   "tests/test_wsgi.py"
+  ],
+  "test_files": [
+   "tests/test_wsgi.py"
+  ],
+  "src_files": [
+   "src/werkzeug/wsgi.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-14T09:58:54-07:00",
+  "subject": "remove make_chunk_iter",
+  "src_churn": 224,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4756a636c69dc63329ee03b6b42156f391b8bbf2": {
+  "task": "4756a636c69dc63329ee03b6b42156f391b8bbf2",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/werkzeug/security.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-14T09:42:23-07:00",
+  "subject": "remove old password hash methods",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0266f51cc341bc17e0b9ed61314db5a5344274b9": {
+  "task": "0266f51cc341bc17e0b9ed61314db5a5344274b9",
+  "target_tests": [
+   "tests/test_urls.py"
+  ],
+  "test_files": [
+   "tests/test_urls.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_internal.py",
+   "src/werkzeug/test.py",
+   "src/werkzeug/urls.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-14T08:55:12-07:00",
+  "subject": "remove urllib.parse copy",
+  "src_churn": 1270,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "88f4ed649cf340f401c4225a418fb78aeec92e6f": {
+  "task": "88f4ed649cf340f401c4225a418fb78aeec92e6f",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_internal.py",
+   "src/werkzeug/http.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-20T18:08:42+02:00",
+  "subject": "qvalue parsing accepts float without decimal",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a3a313a3a65d6404592aa2508a50f133e3d16e7c": {
+  "task": "a3a313a3a65d6404592aa2508a50f133e3d16e7c",
+  "target_tests": [
+   "tests/test_test.py"
+  ],
+  "test_files": [
+   "tests/test_test.py"
+  ],
+  "src_files": [
+   "src/werkzeug/test.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-12T13:57:34+01:00",
+  "subject": "Fix empty stream file uploads when testing",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "19fc3ecdce09f8585d49f73d29d3864b690429c1": {
+  "task": "19fc3ecdce09f8585d49f73d29d3864b690429c1",
+  "target_tests": [
+   "tests/sansio/test_multipart.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_multipart.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/multipart.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-12T09:55:37+01:00",
+  "subject": "Account for the data_start position if a boundary is found",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "89ce5e5a4c59bc9d51d360fd5c205b344ecf06c8": {
+  "task": "89ce5e5a4c59bc9d51d360fd5c205b344ecf06c8",
+  "target_tests": [
+   "tests/sansio/test_multipart.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_multipart.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/multipart.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-10T14:33:27+02:00",
+  "subject": "Prevent Addition of Extra Newline in Binary File Uploads",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "dc9e73b34bcc505ad20fd7d73d5b8582c7d24bb7": {
+  "task": "dc9e73b34bcc505ad20fd7d73d5b8582c7d24bb7",
+  "target_tests": [
+   "tests/test_urls.py"
+  ],
+  "test_files": [
+   "tests/test_urls.py"
+  ],
+  "src_files": [
+   "src/werkzeug/urls.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-27T01:03:02+09:00",
+  "subject": "passing bytes to iri_to_uri shows deprecation warning",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "23593ae58d1146d646fd766b88c690fc5286176f": {
+  "task": "23593ae58d1146d646fd766b88c690fc5286176f",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/map.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-06T11:19:53-07:00",
+  "subject": "Map.bind ignores port for IDNA",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c52fa3770e732e06121dae8a2d1a0679056380d4": {
+  "task": "c52fa3770e732e06121dae8a2d1a0679056380d4",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/auth.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-02T20:51:06Z",
+  "subject": "Fix handling of invalid base64 values",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a1f41f13f1ac8473db9af8a61c20b73f97c3e2dc": {
+  "task": "a1f41f13f1ac8473db9af8a61c20b73f97c3e2dc",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/auth.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-31T15:17:21-07:00",
+  "subject": "address bugbear findings",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "68227737cbdb39663a6f203decd2bf869987ca80": {
+  "task": "68227737cbdb39663a6f203decd2bf869987ca80",
+  "target_tests": [
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/werkzeug/urls.py",
+   "src/werkzeug/utils.py",
+   "src/werkzeug/wrappers/response.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-06T07:53:57-07:00",
+  "subject": "preserve invalid itms-services url scheme",
+  "src_churn": 34,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4321c5b0c940e42c50d2abd1edd4318f0727d1be": {
+  "task": "4321c5b0c940e42c50d2abd1edd4318f0727d1be",
+  "target_tests": [
+   "tests/test_formparser.py"
+  ],
+  "test_files": [
+   "tests/test_formparser.py"
+  ],
+  "src_files": [
+   "src/werkzeug/formparser.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-05T12:32:29+02:00",
+  "subject": "Do not apply max_form_parts to non-multipart data",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3a4c8d0844bddfb4b3a3989bd1bc573ed55fea18": {
+  "task": "3a4c8d0844bddfb4b3a3989bd1bc573ed55fea18",
+  "target_tests": [
+   "tests/test_urls.py",
+   "tests/test_wsgi.py"
+  ],
+  "test_files": [
+   "tests/test_urls.py",
+   "tests/test_wsgi.py"
+  ],
+  "src_files": [
+   "src/werkzeug/urls.py",
+   "src/werkzeug/wsgi.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-03T10:01:30-07:00",
+  "subject": "Remove uses of warnings.catch_warnings (#2690) (#2692)",
+  "src_churn": 68,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2051469a2be722121369b416a5c14435c9e82f90": {
+  "task": "2051469a2be722121369b416a5c14435c9e82f90",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/auth.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-01T12:35:06-07:00",
+  "subject": "WWWAuthenticate.from_header handles base64 padding in token",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "282061cb41d680b98ef99e67afc5d757616251dc": {
+  "task": "282061cb41d680b98ef99e67afc5d757616251dc",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/auth.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-01T11:05:41-07:00",
+  "subject": "Authorization.from_header handles base64 padding in token",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9004c05320763e902927af9d98c1e4a1c651e776": {
+  "task": "9004c05320763e902927af9d98c1e4a1c651e776",
+  "target_tests": [
+   "tests/test_test.py",
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_test.py",
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/http.py",
+   "src/werkzeug/sansio/response.py",
+   "src/werkzeug/test.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-01T07:07:43-07:00",
+  "subject": "cookie path=/ default",
+  "src_churn": 38,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "18616d24dc4cce4973fbb6a55bcc5396c5add311": {
+  "task": "18616d24dc4cce4973fbb6a55bcc5396c5add311",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/http.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-28T09:16:44-07:00",
+  "subject": "cookie path=/ default",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "eee8ce05c3c34ace2ffa3d2640009d94074f37eb": {
+  "task": "eee8ce05c3c34ace2ffa3d2640009d94074f37eb",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/auth.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-26T13:00:21-07:00",
+  "subject": "Authorization and WWWAuthenticate __eq__",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0822143862a157b34073d212c74467dd28caaaad": {
+  "task": "0822143862a157b34073d212c74467dd28caaaad",
+  "target_tests": [
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/http.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-26T11:56:18-07:00",
+  "subject": "allow more characters in unquoted cookie values",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d0f040a65bfc39c52930f0ea0ca0a9d465bc5043": {
+  "task": "d0f040a65bfc39c52930f0ea0ca0a9d465bc5043",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/urls.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-26T10:53:50-07:00",
+  "subject": "quote plus in urls",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "dfb6465703dad7d03e7ab81a020dbd3ac32c9fbd": {
+  "task": "dfb6465703dad7d03e7ab81a020dbd3ac32c9fbd",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/werkzeug/security.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-25T09:37:51-06:00",
+  "subject": "support scrypt",
+  "src_churn": 136,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "deacedcc618edae34d5ad9f6b06c3fb4f5538828": {
+  "task": "deacedcc618edae34d5ad9f6b06c3fb4f5538828",
+  "target_tests": [
+   "tests/test_internal.py"
+  ],
+  "test_files": [
+   "tests/test_internal.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_internal.py",
+   "src/werkzeug/testapp.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-19T15:10:20-07:00",
+  "subject": "remove unneeded data",
+  "src_churn": 206,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "eb363e4fad9ebc333cb69fc83ae45b3a46fe82ce": {
+  "task": "eb363e4fad9ebc333cb69fc83ae45b3a46fe82ce",
+  "target_tests": [
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/response.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-11T15:38:26-07:00",
+  "subject": "no path by default",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c81896d994c3746e5f985c795c0ed3fb9531e9e0": {
+  "task": "c81896d994c3746e5f985c795c0ed3fb9531e9e0",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/headers.py",
+   "src/werkzeug/datastructures/structures.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-05T11:35:59-07:00",
+  "subject": "deprecate bytes in headers",
+  "src_churn": 151,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "082e0e5b9c01fa3178ac0153413f082616f10914": {
+  "task": "082e0e5b9c01fa3178ac0153413f082616f10914",
+  "target_tests": [
+   "tests/sansio/test_multipart.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_multipart.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/multipart.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-09T12:32:16+01:00",
+  "subject": "Correctly implement multipart parsing for empty fields",
+  "src_churn": 70,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f78174827c725a8ab297b338d44d98f95a666347": {
+  "task": "f78174827c725a8ab297b338d44d98f95a666347",
+  "target_tests": [
+   "tests/test_test.py"
+  ],
+  "test_files": [
+   "tests/test_test.py"
+  ],
+  "src_files": [
+   "src/werkzeug/test.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-03T11:29:42-07:00",
+  "subject": "refactor test client cookie implementation",
+  "src_churn": 417,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "da9d4724fc8695c4ea82a9f9c2e22230ed490bd9": {
+  "task": "da9d4724fc8695c4ea82a9f9c2e22230ed490bd9",
+  "target_tests": [
+   "tests/test_internal.py"
+  ],
+  "test_files": [
+   "tests/test_internal.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_internal.py",
+   "src/werkzeug/debug/__init__.py",
+   "src/werkzeug/http.py",
+   "src/werkzeug/middleware/shared_data.py",
+   "src/werkzeug/serving.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-04-30T06:23:34-07:00",
+  "subject": "parse plain int in a few more inputs",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "51926a7a8804eb0aae6dc7a127d5ce5ec8de5296": {
+  "task": "51926a7a8804eb0aae6dc7a127d5ce5ec8de5296",
+  "target_tests": [
+   "tests/sansio/test_request.py",
+   "tests/test_datastructures.py",
+   "tests/test_debug.py",
+   "tests/test_security.py",
+   "tests/test_serving.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_request.py",
+   "tests/test_datastructures.py",
+   "tests/test_debug.py",
+   "tests/test_security.py",
+   "tests/test_serving.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_reloader.py",
+   "src/werkzeug/datastructures/cache_control.py",
+   "src/werkzeug/debug/tbtools.py",
+   "src/werkzeug/middleware/shared_data.py",
+   "src/werkzeug/routing/matcher.py",
+   "src/werkzeug/serving.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-02-03T20:44:40-08:00",
+  "subject": "drop python 3.9",
+  "src_churn": 85,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6290332384920e85ad413653ceec64e110141a25": {
+  "task": "6290332384920e85ad413653ceec64e110141a25",
+  "target_tests": [
+   "tests/sansio/test_request.py",
+   "tests/test_http.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_request.py",
+   "tests/test_http.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_internal.py",
+   "src/werkzeug/datastructures/file_storage.py",
+   "src/werkzeug/formparser.py",
+   "src/werkzeug/http.py",
+   "src/werkzeug/sansio/utils.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-06-07T12:05:25-07:00",
+  "subject": "fail on Python's extended int/float syntax",
+  "src_churn": 55,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a6d96ca1dc78ebd6702bbb11c97987682c9f702d": {
+  "task": "a6d96ca1dc78ebd6702bbb11c97987682c9f702d",
+  "target_tests": [
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/request.py",
+   "src/werkzeug/sansio/response.py",
+   "src/werkzeug/test.py",
+   "src/werkzeug/wrappers/request.py",
+   "src/werkzeug/wrappers/response.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-04-11T07:40:15-07:00",
+  "subject": "deprecate request and response charset",
+  "src_churn": 240,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6d4de9e0ff5cfa12741e409db5bca190152ad8b8": {
+  "task": "6d4de9e0ff5cfa12741e409db5bca190152ad8b8",
+  "target_tests": [
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/formparser.py",
+   "src/werkzeug/sansio/request.py",
+   "src/werkzeug/urls.py",
+   "src/werkzeug/wrappers/request.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-04-07T14:02:58-07:00",
+  "subject": "remove request.url_charset",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "72e49272b8bda157b8fe61145f78e514fc9689e2": {
+  "task": "72e49272b8bda157b8fe61145f78e514fc9689e2",
+  "target_tests": [
+   "tests/middleware/test_dispatcher.py",
+   "tests/test_internal.py",
+   "tests/test_wsgi.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_dispatcher.py",
+   "tests/test_internal.py",
+   "tests/test_wsgi.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/map.py",
+   "src/werkzeug/sansio/multipart.py",
+   "src/werkzeug/sansio/request.py",
+   "src/werkzeug/sansio/response.py",
+   "src/werkzeug/wrappers/response.py",
+   "src/werkzeug/wsgi.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-04-03T14:39:17-07:00",
+  "subject": "remove uses of _to_str and _to_bytes",
+  "src_churn": 113,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cf0102d6443e936f95b21b69e3deb65028d6fe3b": {
+  "task": "cf0102d6443e936f95b21b69e3deb65028d6fe3b",
+  "target_tests": [
+   "tests/test_http.py",
+   "tests/test_test.py"
+  ],
+  "test_files": [
+   "tests/test_http.py",
+   "tests/test_test.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_internal.py",
+   "src/werkzeug/http.py",
+   "src/werkzeug/sansio/http.py",
+   "src/werkzeug/sansio/response.py",
+   "src/werkzeug/test.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-03-21T12:46:11-07:00",
+  "subject": "refactor parse_cookie and dump_cookie",
+  "src_churn": 379,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4f7048e7a31752142f18eefeccd49acc42a89e31": {
+  "task": "4f7048e7a31752142f18eefeccd49acc42a89e31",
+  "target_tests": [
+   "tests/test_formparser.py",
+   "tests/test_wsgi.py"
+  ],
+  "test_files": [
+   "tests/test_formparser.py",
+   "tests/test_wsgi.py"
+  ],
+  "src_files": [
+   "src/werkzeug/formparser.py",
+   "src/werkzeug/sansio/request.py",
+   "src/werkzeug/sansio/utils.py",
+   "src/werkzeug/serving.py",
+   "src/werkzeug/wrappers/request.py",
+   "src/werkzeug/wsgi.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-03-14T08:18:55-07:00",
+  "subject": "check max_content_length consistently",
+  "src_churn": 572,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0bdf9bac15e2079abce098f9d105c4e207886319": {
+  "task": "0bdf9bac15e2079abce098f9d105c4e207886319",
+  "target_tests": [
+   "tests/test_exceptions.py",
+   "tests/test_http.py",
+   "tests/test_test.py",
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_exceptions.py",
+   "tests/test_http.py",
+   "tests/test_test.py",
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures/auth_headers.py",
+   "src/werkzeug/http.py",
+   "src/werkzeug/sansio/request.py",
+   "src/werkzeug/sansio/response.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-03-10T05:52:49-08:00",
+  "subject": "refactor Authorization and WWWAuthenticate",
+  "src_churn": 755,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "aa2a0c5418750ac6858064fffdf51c040c5c9fe3": {
+  "task": "aa2a0c5418750ac6858064fffdf51c040c5c9fe3",
+  "target_tests": [
+   "tests/test_send_file.py",
+   "tests/test_urls.py"
+  ],
+  "test_files": [
+   "tests/test_send_file.py",
+   "tests/test_urls.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_urls.py",
+   "src/werkzeug/middleware/http_proxy.py",
+   "src/werkzeug/routing/converters.py",
+   "src/werkzeug/routing/map.py",
+   "src/werkzeug/routing/rules.py",
+   "src/werkzeug/sansio/utils.py",
+   "src/werkzeug/urls.py",
+   "src/werkzeug/utils.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-02-27T08:20:13-08:00",
+  "subject": "link to reference for each use of safe chars during quote",
+  "src_churn": 100,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "04e89bd73873eb64914cd13c0588748abbc9252b": {
+  "task": "04e89bd73873eb64914cd13c0588748abbc9252b",
+  "target_tests": [
+   "tests/test_debug.py",
+   "tests/test_exceptions.py"
+  ],
+  "test_files": [
+   "tests/test_debug.py",
+   "tests/test_exceptions.py"
+  ],
+  "src_files": [
+   "src/werkzeug/debug/console.py",
+   "src/werkzeug/debug/repr.py",
+   "src/werkzeug/debug/tbtools.py",
+   "src/werkzeug/exceptions.py",
+   "src/werkzeug/testapp.py",
+   "src/werkzeug/utils.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-07-04T11:33:28-07:00",
+  "subject": "use markupsafe for escaping values",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5a7c0dec029d296a5e8131c8db51ce19e28c0c58": {
+  "task": "5a7c0dec029d296a5e8131c8db51ce19e28c0c58",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing/__init__.py",
+   "src/werkzeug/routing/converters.py",
+   "src/werkzeug/routing/map.py",
+   "src/werkzeug/routing/matcher.py",
+   "src/werkzeug/routing/rules.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-06-20T16:59:01+01:00",
+  "subject": "Add a State Machine Matcher for the routing",
+  "src_churn": 516,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "88125beebc6463e571cef3ca84eccfad0c818ae3": {
+  "task": "88125beebc6463e571cef3ca84eccfad0c818ae3",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "src/werkzeug/routing.py",
+   "src/werkzeug/routing/__init__.py",
+   "src/werkzeug/routing/converters.py",
+   "src/werkzeug/routing/exceptions.py",
+   "src/werkzeug/routing/map.py",
+   "src/werkzeug/routing/rules.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-06-10T17:24:25+01:00",
+  "subject": "Refactor the routing code into multiple files",
+  "src_churn": 4728,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1094fbfc646f35c31b059201370e46794b2aaf11": {
+  "task": "1094fbfc646f35c31b059201370e46794b2aaf11",
+  "target_tests": [
+   "tests/test_exceptions.py",
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_exceptions.py",
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_internal.py",
+   "src/werkzeug/debug/tbtools.py",
+   "src/werkzeug/exceptions.py",
+   "src/werkzeug/testapp.py",
+   "src/werkzeug/utils.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-04-19T21:53:49+02:00",
+  "subject": "use <!doctype html> and lang=en consistently",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "70a61859d2ab0d628aeb6189b94d0fce45345373": {
+  "task": "70a61859d2ab0d628aeb6189b94d0fce45345373",
+  "target_tests": [
+   "tests/test_debug.py"
+  ],
+  "test_files": [
+   "tests/test_debug.py"
+  ],
+  "src_files": [
+   "src/werkzeug/debug/__init__.py",
+   "src/werkzeug/debug/console.py",
+   "src/werkzeug/debug/tbtools.py",
+   "src/werkzeug/serving.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-02-07T07:52:05-08:00",
+  "subject": "debugger uses traceback module",
+  "src_churn": 730,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "08a0ea55152503f7ee1be8f1513b56f2c9dd490b": {
+  "task": "08a0ea55152503f7ee1be8f1513b56f2c9dd490b",
+  "target_tests": [
+   "tests/test_debug.py"
+  ],
+  "test_files": [
+   "tests/test_debug.py"
+  ],
+  "src_files": [
+   "src/werkzeug/datastructures.py",
+   "src/werkzeug/local.py",
+   "src/werkzeug/routing.py",
+   "src/werkzeug/serving.py",
+   "src/werkzeug/utils.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-10-04T18:34:17-07:00",
+  "subject": "use exception chaining",
+  "src_churn": 59,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "94af9ee11ad82823b102d014d24bbbda66dc62e4": {
+  "task": "94af9ee11ad82823b102d014d24bbbda66dc62e4",
+  "target_tests": [
+   "tests/sansio/__init__.py",
+   "tests/sansio/test_utils.py",
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/sansio/__init__.py",
+   "tests/sansio/test_utils.py",
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/sansio/request.py",
+   "src/werkzeug/sansio/utils.py",
+   "src/werkzeug/wrappers/request.py",
+   "src/werkzeug/wsgi.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-02-17T22:50:06Z",
+  "subject": "Move the host and get_host functions to sans-io",
+  "src_churn": 239,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "265bad79ee60b94f509464dcaa827cfec5833bcc": {
+  "task": "265bad79ee60b94f509464dcaa827cfec5833bcc",
+  "target_tests": [
+   "tests/test_http.py",
+   "tests/test_internal.py",
+   "tests/test_send_file.py",
+   "tests/test_wrappers.py"
+  ],
+  "test_files": [
+   "tests/test_http.py",
+   "tests/test_internal.py",
+   "tests/test_send_file.py",
+   "tests/test_wrappers.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_internal.py",
+   "src/werkzeug/http.py",
+   "src/werkzeug/middleware/shared_data.py",
+   "src/werkzeug/sansio/request.py",
+   "src/werkzeug/sansio/response.py",
+   "src/werkzeug/serving.py",
+   "src/werkzeug/utils.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-02-10T18:57:36-08:00",
+  "subject": "http.parse_date returns timzeone-aware value",
+  "src_churn": 244,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cbb446fdcada7685fce936ded01b76c08dbd6eb5": {
+  "task": "cbb446fdcada7685fce936ded01b76c08dbd6eb5",
+  "target_tests": [
+   "tests/sansio/test_multipart.py",
+   "tests/test_formparser.py"
+  ],
+  "test_files": [
+   "tests/sansio/test_multipart.py",
+   "tests/test_formparser.py"
+  ],
+  "src_files": [
+   "src/werkzeug/_internal.py",
+   "src/werkzeug/formparser.py",
+   "src/werkzeug/sansio/multipart.py",
+   "src/werkzeug/test.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-01-20T16:56:06Z",
+  "subject": "Refactor the Multipart parsing into a Sans-IO layer",
+  "src_churn": 602,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5fd13860d7f649fbe592601b1dea728050daffa5": {
+  "task": "5fd13860d7f649fbe592601b1dea728050daffa5",
+  "target_tests": [
+   "tests/test_debug.py",
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_debug.py",
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/werkzeug/debug/console.py",
+   "src/werkzeug/debug/repr.py",
+   "src/werkzeug/debug/tbtools.py",
+   "src/werkzeug/exceptions.py",
+   "src/werkzeug/testapp.py",
+   "src/werkzeug/utils.py"
+  ],
+  "pool": "hard",
+  "authored": "2020-04-12T13:28:46-07:00",
+  "subject": "replace deprecated escape with html.escape",
+  "src_churn": 59,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}

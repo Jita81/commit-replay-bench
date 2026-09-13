@@ -1,0 +1,1943 @@
+{
+ "8425918f90e8c3c6e39f14e18335ecb8e4589b91": {
+  "task": "8425918f90e8c3c6e39f14e18335ecb8e4589b91",
+  "target_tests": [
+   "ExtendedMessageFormatTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/ExtendedMessageFormatTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/ExtendedMessageFormat.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-07T16:04:19+05:30",
+  "subject": "Keep ExtendedMessageFormat from rejecting a quoted format style (#1744)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.ExtendedMessageFormatTest::testQuotedLiteralAtEndOfFormatElement"
+  ],
+  "gold_clean": true
+ },
+ "dda92830127b7486fb02932e87a05891feb9cef1": {
+  "task": "dda92830127b7486fb02932e87a05891feb9cef1",
+  "target_tests": [
+   "FastDateParserTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/FastDateParserTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/FastDateParser.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-06T17:38:55+05:30",
+  "subject": "Keep FastDateParser.parse error message intact for imperial locale (#1743)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.time.FastDateParserTest::testParseErrorMessageJapaneseImperial(TriFunction)[1]",
+   "org.apache.commons.lang3.time.FastDateParserTest::testParseErrorMessageJapaneseImperial(TriFunction)[2]"
+  ],
+  "gold_clean": true
+ },
+ "d4b4d8c352d048f5dab3c85dd6ef380cfe04bdee": {
+  "task": "d4b4d8c352d048f5dab3c85dd6ef380cfe04bdee",
+  "target_tests": [
+   "FastDateParserTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/FastDateParserTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/FastDateParser.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-04T23:53:00+05:30",
+  "subject": "Keep FastDateParser numeric parse from throwing on int overflow (#1741)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.time.FastDateParserTest::testLang1359(TriFunction)[1]",
+   "org.apache.commons.lang3.time.FastDateParserTest::testLang1359(TriFunction)[2]"
+  ],
+  "gold_clean": true
+ },
+ "f015a7ed9934c5fcb73901c47420ef0005ec0af4": {
+  "task": "f015a7ed9934c5fcb73901c47420ef0005ec0af4",
+  "target_tests": [
+   "NumericEntityUnescaperTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/translate/NumericEntityUnescaperTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/translate/NumericEntityUnescaper.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-04T00:29:45+05:30",
+  "subject": "reject hex letters in NumericEntityUnescaper decimal scan (#1739)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.translate.NumericEntityUnescaperTest::testDecimalEntityFollowedByHexLetter"
+  ],
+  "gold_clean": true
+ },
+ "2011ce3ba2386669086882182dc41d76148e5489": {
+  "task": "2011ce3ba2386669086882182dc41d76148e5489",
+  "target_tests": [
+   "ExtendedMessageFormatTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/ExtendedMessageFormatTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/ExtendedMessageFormat.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-04T00:24:06+05:30",
+  "subject": "Stop ExtendedMessageFormat seekNonWs reading past the pattern end (#1740)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.ExtendedMessageFormatTest::testTruncatedFormatElementWithRegistry"
+  ],
+  "gold_clean": true
+ },
+ "3f0c0fd5cb8af9f2ae6d7f869d7e87c66985ab90": {
+  "task": "3f0c0fd5cb8af9f2ae6d7f869d7e87c66985ab90",
+  "target_tests": [
+   "DurationFormatUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/DurationFormatUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/DurationFormatUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-02T20:11:20+05:30",
+  "subject": "Keep DurationFormatUtils.lexx() from merging repeated fields split by a literal (#1738)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.time.DurationFormatUtilsTest::testRepeatedTokenSeparatedByLiteral"
+  ],
+  "gold_clean": true
+ },
+ "68ee18aa5ab14e1ec8ddd4a80fd7f43860fd874c": {
+  "task": "68ee18aa5ab14e1ec8ddd4a80fd7f43860fd874c",
+  "target_tests": [
+   "DurationFormatUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/DurationFormatUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/DurationFormatUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-01T01:55:59+05:30",
+  "subject": "[LANG-1827] Support escaped single quotes ('') in DurationFormatUtils format patterns (#1700)",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.time.DurationFormatUtilsTest::testFormatPeriod",
+   "org.apache.commons.lang3.time.DurationFormatUtilsTest::testLANG1827(String, String, long, String)[1]",
+   "org.apache.commons.lang3.time.DurationFormatUtilsTest::testLANG1827(String, String, long, String)[2]",
+   "org.apache.commons.lang3.time.DurationFormatUtilsTest::testLANG1827(String, String, long, String)[3]",
+   "org.apache.commons.lang3.time.DurationFormatUtilsTest::testLANG1827(String, String, long, String)[4]",
+   "org.apache.commons.lang3.time.DurationFormatUtilsTest::testLANG1827(String, String, long, String)[5]",
+   "org.apache.commons.lang3.time.DurationFormatUtilsTest::testLANG1827(String, String, long, String)[6]"
+  ],
+  "gold_clean": true
+ },
+ "35d652e9e26461ddbeb19aa32bc6acd012ccc641": {
+  "task": "35d652e9e26461ddbeb19aa32bc6acd012ccc641",
+  "target_tests": [
+   "StringsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/Strings.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-30T18:52:40+05:30",
+  "subject": "Fix Strings.CI.indexOf returning out-of-range index for empty search (#1737)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringsTest::testCaseInsensitiveIndexOfEmptyOutOfRange"
+  ],
+  "gold_clean": true
+ },
+ "ae85262f04df19b6307de18758cfdcc31cae733d": {
+  "task": "ae85262f04df19b6307de18758cfdcc31cae733d",
+  "target_tests": [
+   "StringUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-29T21:30:22Z",
+  "subject": "[LANG-1828] Fix OOM in StringUtils.leftPad/rightPad when size is Integer.MIN_VALUE (#1736).",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "37a2be80434f5c393e5842c52a95afb607be2eee": {
+  "task": "37a2be80434f5c393e5842c52a95afb607be2eee",
+  "target_tests": [
+   "StringUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-28T17:17:58+05:30",
+  "subject": "Handle supplementary code points in splitByCharacterType (#1734)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringUtilsTest::testSplitByCharacterType",
+   "org.apache.commons.lang3.StringUtilsTest::testSplitByCharacterTypeCamelCase"
+  ],
+  "gold_clean": true
+ },
+ "aafee70bfdfc7617ed509b54e3971441a3a5f57d": {
+  "task": "aafee70bfdfc7617ed509b54e3971441a3a5f57d",
+  "target_tests": [
+   "NumberUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/math/NumberUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/math/NumberUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-26T16:47:55+05:30",
+  "subject": "fix NumberUtils min/max varargs dropping the sign of zero (#1733)",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.math.NumberUtilsTest::testMinMaxSignedZero"
+  ],
+  "gold_clean": true
+ },
+ "64c05dc6d377516e35d8a9cc9436e890cd0e0935": {
+  "task": "64c05dc6d377516e35d8a9cc9436e890cd0e0935",
+  "target_tests": [
+   "StrBuilderTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/StrBuilderTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/StrBuilder.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-26T00:58:42+05:30",
+  "subject": "keep StrBuilder.reverse from splitting surrogate pairs (#1730)",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.StrBuilderTest::testReverseSurrogatePairs"
+  ],
+  "gold_clean": true
+ },
+ "7e29cde71c6c1673c2dd1d7f88f58416582d7158": {
+  "task": "7e29cde71c6c1673c2dd1d7f88f58416582d7158",
+  "target_tests": [
+   "StringUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-26T00:52:21+05:30",
+  "subject": "fix StringUtils.getDigits dropping supplementary digits (#1729)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringUtilsTest::testGetDigitsSupplementary"
+  ],
+  "gold_clean": true
+ },
+ "ae9c787a68a7a97aead7d2d7e02e78aed56922c9": {
+  "task": "ae9c787a68a7a97aead7d2d7e02e78aed56922c9",
+  "target_tests": [
+   "WordUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/WordUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/WordUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-26T00:48:57+05:30",
+  "subject": "Keep WordUtils.wrap from splitting a surrogate pair (#1731)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.WordUtilsTest::testWrap_StringIntStringBoolean"
+  ],
+  "gold_clean": true
+ },
+ "8d325f69d97a194659f054ba389420d3800cdd82": {
+  "task": "8d325f69d97a194659f054ba389420d3800cdd82",
+  "target_tests": [
+   "WordUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/WordUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/WordUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-26T00:42:52+05:30",
+  "subject": "Handle supplementary code points in WordUtils case methods (#1728)",
+  "src_churn": 57,
+  "size": "M",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.WordUtilsTest::testCase_SupplementaryCodePoint"
+  ],
+  "gold_clean": true
+ },
+ "6c4269eb8a2aeb722ee81a41a4a88a46c2deccf8": {
+  "task": "6c4269eb8a2aeb722ee81a41a4a88a46c2deccf8",
+  "target_tests": [
+   "WordUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/WordUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/WordUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-26T00:40:39+05:30",
+  "subject": "fix WordUtils.containsAllWords missing words across line breaks (#1732)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.WordUtilsTest::testContainsAllWordsWithNewline"
+  ],
+  "gold_clean": true
+ },
+ "6334440d5a61fdee73c8c7dd947f7adb6fa31331": {
+  "task": "6334440d5a61fdee73c8c7dd947f7adb6fa31331",
+  "target_tests": [
+   "CharSequenceUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/CharSequenceUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/CharSequenceUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-24T17:22:42+05:30",
+  "subject": "Fold supplementary code points in CharSequenceUtils.regionMatches (#1725)",
+  "src_churn": 75,
+  "size": "M",
+  "baseline_failing": [
+   "org.apache.commons.lang3.CharSequenceUtilsTest::testRegionMatchesSupplementaryCaseFold"
+  ],
+  "gold_clean": true
+ },
+ "aae7f0e61c51040dbdc7556f9eca5786eb9f63bd": {
+  "task": "aae7f0e61c51040dbdc7556f9eca5786eb9f63bd",
+  "target_tests": [
+   "MethodUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/reflect/MethodUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/reflect/MethodUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-24T00:05:33+05:30",
+  "subject": "fix getMatchingMethod false ambiguity for boxed primitive args (#1727)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.reflect.MethodUtilsTest::testGetMatchingMethod"
+  ],
+  "gold_clean": true
+ },
+ "243d3fe492900d6338e619b1050f83d8052e8bdb": {
+  "task": "243d3fe492900d6338e619b1050f83d8052e8bdb",
+  "target_tests": [
+   "UnicodeEscaperTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/translate/UnicodeEscaperTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/translate/UnicodeEscaper.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-23T20:15:18+05:30",
+  "subject": "Emit surrogate pair for supplementary code points in UnicodeEscaper (#1726)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.translate.UnicodeEscaperTest::testSupplementary"
+  ],
+  "gold_clean": true
+ },
+ "68fc73ce56557c45decc1a37fa94c00a4f0d7b8f": {
+  "task": "68fc73ce56557c45decc1a37fa94c00a4f0d7b8f",
+  "target_tests": [
+   "StringUtilsIsTest",
+   "StringUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsIsTest.java",
+   "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-23T16:13:16+05:30",
+  "subject": "Classify supplementary code points in StringUtils is* predicates (#1724)",
+  "src_churn": 60,
+  "size": "M",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringUtilsIsTest::testIsAlphaSpaceSupplementary",
+   "org.apache.commons.lang3.StringUtilsIsTest::testIsAlphaSupplementary",
+   "org.apache.commons.lang3.StringUtilsIsTest::testIsAlphanumericSpaceSupplementary",
+   "org.apache.commons.lang3.StringUtilsIsTest::testIsAlphanumericSupplementary",
+   "org.apache.commons.lang3.StringUtilsIsTest::testIsNumericSpaceSupplementary",
+   "org.apache.commons.lang3.StringUtilsIsTest::testIsNumericSupplementary",
+   "org.apache.commons.lang3.StringUtilsTest::testIsAllLowerCaseSupplementary",
+   "org.apache.commons.lang3.StringUtilsTest::testIsAllUpperCaseSupplementary",
+   "org.apache.commons.lang3.StringUtilsTest::testIsMixedCaseSupplementary"
+  ],
+  "gold_clean": true
+ },
+ "581ce79c4d39571ac98db3e32b0d813540684324": {
+  "task": "581ce79c4d39571ac98db3e32b0d813540684324",
+  "target_tests": [
+   "StringsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/Strings.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-21T11:47:57Z",
+  "subject": "[LANG-1824] Fix Strings.replace overflow on large replacements (#1716).",
+  "src_churn": 62,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "13d93944ff76c6ca3e140d15478111b18acad0e6": {
+  "task": "13d93944ff76c6ca3e140d15478111b18acad0e6",
+  "target_tests": [
+   "StringsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/Strings.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-21T17:03:54+05:30",
+  "subject": "[LANG-1824] Fix Strings.replace overflow on large replacements (#1716)",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6dbbbb308bb77ba9c0ddab1ae400ee2ff76026b4": {
+  "task": "6dbbbb308bb77ba9c0ddab1ae400ee2ff76026b4",
+  "target_tests": [
+   "StringEscapeUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringEscapeUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringEscapeUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-21T16:19:09+05:30",
+  "subject": "fix unescapeCsv bounds error on a single quote field (#1723)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringEscapeUtilsTest::testUnescapeCsvString"
+  ],
+  "gold_clean": true
+ },
+ "13d25e0591e640e53f1238e78f6b0e69d0fd6aea": {
+  "task": "13d25e0591e640e53f1238e78f6b0e69d0fd6aea",
+  "target_tests": [
+   "DurationFormatUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/DurationFormatUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/DurationFormatUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-20T22:34:34+05:30",
+  "subject": "Fix int overflow in DurationFormatUtils.formatPeriod (#1720)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.time.DurationFormatUtilsTest::testFormatPeriodLargeFunnelledValue"
+  ],
+  "gold_clean": true
+ },
+ "6bef246b2f10699a56a3010bbc6fa11d241430c6": {
+  "task": "6bef246b2f10699a56a3010bbc6fa11d241430c6",
+  "target_tests": [
+   "WordUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/WordUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/WordUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-20T22:33:24+05:30",
+  "subject": "keep initials from splitting a supplementary code point (#1722)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.WordUtilsTest::testInitials_SupplementaryCodePoint"
+  ],
+  "gold_clean": true
+ },
+ "75d85a807d7b66da432a822de6fc75c48134decf": {
+  "task": "75d85a807d7b66da432a822de6fc75c48134decf",
+  "target_tests": [
+   "StringUtilsAbbreviateTest",
+   "StringUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsAbbreviateTest.java",
+   "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-20T22:28:57+05:30",
+  "subject": "Keep abbreviate and truncate off surrogate pair boundaries (#1719)",
+  "src_churn": 43,
+  "size": "M",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringUtilsAbbreviateTest::testAbbreviateSurrogatePair",
+   "org.apache.commons.lang3.StringUtilsTest::testTruncate_StringIntInt_surrogatePair"
+  ],
+  "gold_clean": true
+ },
+ "4e1f3eef1f16de28c83d67040b7a5e554b81fcdf": {
+  "task": "4e1f3eef1f16de28c83d67040b7a5e554b81fcdf",
+  "target_tests": [
+   "UnicodeUnescaperTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/translate/UnicodeUnescaperTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/translate/UnicodeUnescaper.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-20T16:56:28+05:30",
+  "subject": "reject sign characters in UnicodeUnescaper hex values (#1721)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.translate.UnicodeUnescaperTest::testSignedValue"
+  ],
+  "gold_clean": true
+ },
+ "3e50a7f9cf103357d781483d41ec9c9386e69e9d": {
+  "task": "3e50a7f9cf103357d781483d41ec9c9386e69e9d",
+  "target_tests": [
+   "ArrayUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/ArrayUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/ArrayUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-20T16:30:37+05:30",
+  "subject": "Find NaN in ArrayUtils.lastIndexOf for double and float arrays (#1718)",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.ArrayUtilsTest::testLastIndexOfDoubleNaN",
+   "org.apache.commons.lang3.ArrayUtilsTest::testLastIndexOfFloatNaN"
+  ],
+  "gold_clean": true
+ },
+ "a0ffef035d6a0e7803da8405ebceacb011efbaa0": {
+  "task": "a0ffef035d6a0e7803da8405ebceacb011efbaa0",
+  "target_tests": [
+   "FractionTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/math/FractionTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/math/Fraction.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-19T17:34:28+05:30",
+  "subject": "fix silent int overflow in Fraction.getFraction(double) (#1717)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.math.FractionTest::testFactory_double"
+  ],
+  "gold_clean": true
+ },
+ "eedd91729833cedcb31b0fd8116869c71e57ac74": {
+  "task": "eedd91729833cedcb31b0fd8116869c71e57ac74",
+  "target_tests": [
+   "ObjectUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/ObjectUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/ObjectUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-18T21:28:28+05:30",
+  "subject": "count duplicate values in ObjectUtils.median (#1715)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.ObjectUtilsTest::testComparatorMedian",
+   "org.apache.commons.lang3.ObjectUtilsTest::testMedian"
+  ],
+  "gold_clean": true
+ },
+ "ddf5625d50a4c2fbe9346f12a26fc60e68af894e": {
+  "task": "ddf5625d50a4c2fbe9346f12a26fc60e68af894e",
+  "target_tests": [
+   "BitFieldTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/BitFieldTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/BitField.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-18T18:25:34+05:30",
+  "subject": "Fix int mask sign extension in BitField long methods (#1711)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.BitFieldTest::testIntMaskHighBitOnLongHolder"
+  ],
+  "gold_clean": true
+ },
+ "53172785c29bb450479c5ba2c198102a5aa9a753": {
+  "task": "53172785c29bb450479c5ba2c198102a5aa9a753",
+  "target_tests": [
+   "StringUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-18T00:34:40+05:30",
+  "subject": "fix indexOfDifference splitting a surrogate pair (#1713)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringUtilsTest::testDifferenceAt_StringArray",
+   "org.apache.commons.lang3.StringUtilsTest::testDifferenceAt_StringString",
+   "org.apache.commons.lang3.StringUtilsTest::testDifference_StringString",
+   "org.apache.commons.lang3.StringUtilsTest::testGetCommonPrefix_StringArray"
+  ],
+  "gold_clean": true
+ },
+ "fbae26f0819b795b38b4a251021c3086751f69f4": {
+  "task": "fbae26f0819b795b38b4a251021c3086751f69f4",
+  "target_tests": [
+   "StringUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-18T00:28:41+05:30",
+  "subject": "Drop trailing empty token from splitByWholeSeparator (#1710)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringUtilsTest::testSplitByWholeStringDropsTrailingEmpty(String, String, String)[1]",
+   "org.apache.commons.lang3.StringUtilsTest::testSplitByWholeStringDropsTrailingEmpty(String, String, String)[2]",
+   "org.apache.commons.lang3.StringUtilsTest::testSplitByWholeStringDropsTrailingEmpty(String, String, String)[3]"
+  ],
+  "gold_clean": true
+ },
+ "46d9a80e548f792c5ee1a9e63f82a84256bf18a4": {
+  "task": "46d9a80e548f792c5ee1a9e63f82a84256bf18a4",
+  "target_tests": [
+   "FractionTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/math/FractionTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/math/Fraction.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-18T00:22:58+05:30",
+  "subject": "Fix spurious overflow in Fraction.add/subtract for coprime denominators (#1709)",
+  "src_churn": 44,
+  "size": "M",
+  "baseline_failing": [
+   "org.apache.commons.lang3.math.FractionTest::testAdd",
+   "org.apache.commons.lang3.math.FractionTest::testSubtract"
+  ],
+  "gold_clean": true
+ },
+ "18063c1f6d935d60d0e7341d68434ab4c88a34ee": {
+  "task": "18063c1f6d935d60d0e7341d68434ab4c88a34ee",
+  "target_tests": [
+   "NumberUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/math/NumberUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/math/NumberUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-18T00:15:13+05:30",
+  "subject": "strip L suffix for oversized hex literals in createNumber (#1712)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.math.NumberUtilsTest::testCreateNumber"
+  ],
+  "gold_clean": true
+ },
+ "8e0dd9df142dd25fdb0de1d7b34937980c08c03f": {
+  "task": "8e0dd9df142dd25fdb0de1d7b34937980c08c03f",
+  "target_tests": [
+   "StringUtilsSubstringTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsSubstringTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-15T17:34:24+05:30",
+  "subject": "fix substringAfter(Last) for supplementary code points (#1707)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringUtilsSubstringTest::testSubstringAfterLast_StringInt",
+   "org.apache.commons.lang3.StringUtilsSubstringTest::testSubstringAfter_StringInt"
+  ],
+  "gold_clean": true
+ },
+ "86ed42da5c1ac09888dfe2481aaa06df13fb1a68": {
+  "task": "86ed42da5c1ac09888dfe2481aaa06df13fb1a68",
+  "target_tests": [
+   "RandomStringUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/RandomStringUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/RandomStringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-15T17:27:39+05:30",
+  "subject": "Fix RandomStringUtils.random() false rejection of letters and digits (#1703)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.RandomStringUtilsTest::testLettersAndDigitsOverDigitOnlyRange",
+   "org.apache.commons.lang3.RandomStringUtilsTest::testLettersAndDigitsOverEmptyAsciiRange"
+  ],
+  "gold_clean": true
+ },
+ "060ab31e517d856292e97428345821b5b289249a": {
+  "task": "060ab31e517d856292e97428345821b5b289249a",
+  "target_tests": [
+   "NumberUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/math/NumberUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/math/NumberUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-13T17:17:41+05:30",
+  "subject": "reject doubled leading sign in createBigInteger (#1702)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.math.NumberUtilsTest::testCreateBigInteger",
+   "org.apache.commons.lang3.math.NumberUtilsTest::testIsCreatable"
+  ],
+  "gold_clean": true
+ },
+ "d927bfc848c409af2050d1c32b3e7cf1daed304e": {
+  "task": "d927bfc848c409af2050d1c32b3e7cf1daed304e",
+  "target_tests": [
+   "ExtendedMessageFormatTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/ExtendedMessageFormatTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/ExtendedMessageFormat.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-11T22:50:06-04:00",
+  "subject": "Throw IllegalArgumentException for trailing whitespace in (#1701)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.ExtendedMessageFormatTest::testArgumentIndexTrailingWhitespaceAtEnd"
+  ],
+  "gold_clean": true
+ },
+ "2240c1f93e5f96b12a83ec8615c29dfac46258e9": {
+  "task": "2240c1f93e5f96b12a83ec8615c29dfac46258e9",
+  "target_tests": [
+   "StrBuilderTest",
+   "StringUtilsSubstringTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsSubstringTest.java",
+   "src/test/java/org/apache/commons/lang3/text/StrBuilderTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java",
+   "src/main/java/org/apache/commons/lang3/text/StrBuilder.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-11T04:09:34+05:30",
+  "subject": "Fix int overflow in StringUtils.midString() length handling (#1699)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringUtilsSubstringTest::testMid_String",
+   "org.apache.commons.lang3.text.StrBuilderTest::testMidString"
+  ],
+  "gold_clean": true
+ },
+ "2c3748412e5a4f4f167ac4f15c8fe0a093ea5e2b": {
+  "task": "2c3748412e5a4f4f167ac4f15c8fe0a093ea5e2b",
+  "target_tests": [
+   "StringsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/Strings.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-10T02:00:39+05:30",
+  "subject": "drop redundant lowercase in case-insensitive Strings.replace (#1697)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringsTest::testCaseInsensitiveReplaceLengthChangingLowerCase"
+  ],
+  "gold_clean": true
+ },
+ "81804c19c0f67d2cd1abef3220da0a741872679a": {
+  "task": "81804c19c0f67d2cd1abef3220da0a741872679a",
+  "target_tests": [
+   "EventListenerSupportReadObjectTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/event/EventListenerSupportReadObjectTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/event/EventListenerSupport.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-08T17:00:22-04:00",
+  "subject": "EventListenerSupport.readObject(ObjectInputStream) should validate constructor invariants (#1695).",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.event.EventListenerSupportReadObjectTest::testReadObjectNullListenerArrayRejected"
+  ],
+  "gold_clean": true
+ },
+ "bcf09d227765e788e09344ef5173b6c2e8fb4870": {
+  "task": "bcf09d227765e788e09344ef5173b6c2e8fb4870",
+  "target_tests": [
+   "FluentBitSetReadObjectTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/util/FluentBitSetReadObjectTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/util/FluentBitSet.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-08T16:33:13-04:00",
+  "subject": "FluentBitSet.readObject(ObjectInputStream) should validate the same (#1694)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.util.FluentBitSetReadObjectTest::testNullBitSetRejectedByObjectInputStream",
+   "org.apache.commons.lang3.util.FluentBitSetReadObjectTest::testNullBitSetRejectedBySerializationUtils"
+  ],
+  "gold_clean": true
+ },
+ "764b42f876be88b595e8e7deb5dce37566df9efa": {
+  "task": "764b42f876be88b595e8e7deb5dce37566df9efa",
+  "target_tests": [
+   "CharRangeReadObjectTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/CharRangeReadObjectTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/CharRange.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-09T01:31:51+05:30",
+  "subject": "re-assert CharRange start <= end invariant in readObject (#1693)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.CharRangeReadObjectTest::testForgedInvertedRangeIsRejected"
+  ],
+  "gold_clean": true
+ },
+ "80bf07c61721520ef12679fc394ac5584c1e9536": {
+  "task": "80bf07c61721520ef12679fc394ac5584c1e9536",
+  "target_tests": [
+   "LookupTranslatorTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/translate/LookupTranslatorTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/translate/LookupTranslator.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-07T16:58:24+05:30",
+  "subject": "fix lookup translator code point count for supplementary keys (#1691)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.translate.LookupTranslatorTest::testSupplementaryKey"
+  ],
+  "gold_clean": true
+ },
+ "5b87be5e67f393cf62a11dbc8ffcbec56cdde12b": {
+  "task": "5b87be5e67f393cf62a11dbc8ffcbec56cdde12b",
+  "target_tests": [
+   "StringUtilsEqualsIndexOfTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsEqualsIndexOfTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-06T21:42:32+05:30",
+  "subject": "fix indexOfAny matching an unpaired trailing high surrogate (#1687)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringUtilsEqualsIndexOfTest::testIndexOfAny_StringCharArrayWithSupplementaryChars"
+  ],
+  "gold_clean": true
+ },
+ "0924f91d57d8932084c44fa7a957318a57b7aa40": {
+  "task": "0924f91d57d8932084c44fa7a957318a57b7aa40",
+  "target_tests": [
+   "FastDateParserReadObjectTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/FastDateParserReadObjectTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/Range.java",
+   "src/main/java/org/apache/commons/lang3/SerializationUtils.java",
+   "src/main/java/org/apache/commons/lang3/time/FastDateParser.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-06T09:53:58-04:00",
+  "subject": "FastDateParser.readObject(ObjectInputStream) now validates the same (#1692)",
+  "src_churn": 170,
+  "size": "L",
+  "baseline_failing": [
+   "org.apache.commons.lang3.time.FastDateParserReadObjectTest::testNullPatternRejected",
+   "org.apache.commons.lang3.time.FastDateParserReadObjectTest::testNullTimeZoneRejected"
+  ],
+  "gold_clean": true
+ },
+ "6e02b0a4d22f376a9414ff0a73f00ad9ef265241": {
+  "task": "6e02b0a4d22f376a9414ff0a73f00ad9ef265241",
+  "target_tests": [
+   "InstantsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/InstantsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/Instants.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-05T13:41:37-04:00",
+  "subject": "Add and use Instants.toInstant(Instant[, Instant]) (#1690)",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "0cd12b10588b09895a370198d87303c8774205af": {
+  "task": "0cd12b10588b09895a370198d87303c8774205af",
+  "target_tests": [
+   "StringUtilsTrimTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsTrimTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-04T08:47:02-04:00",
+  "subject": "Rename new method and make it handle the DEL control character. (#1689)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a9ae10e31066a183050b356ecf667b23ace21a61": {
+  "task": "a9ae10e31066a183050b356ecf667b23ace21a61",
+  "target_tests": [
+   "FractionReadObjectTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/math/FractionReadObjectTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/math/Fraction.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-03T13:44:18-04:00",
+  "subject": "Fraction.readObject does not re-assert denominator != 0 (#1688)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.math.FractionReadObjectTest::testForgedZeroDenominatorDividesByZero"
+  ],
+  "gold_clean": true
+ },
+ "fc67697ebe7d8c4a6ad5b9344e3216522ec83113": {
+  "task": "fc67697ebe7d8c4a6ad5b9344e3216522ec83113",
+  "target_tests": [
+   "RangeReadObjectTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/RangeReadObjectTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/Range.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-03T09:05:25-04:00",
+  "subject": "Range.readObject() does not re-assert the comparator/ordering invariant. (#1686)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.RangeReadObjectTest::testForgedReversedComparatorBreaksContains"
+  ],
+  "gold_clean": true
+ },
+ "9abd79314b19676c54eab02d441cfb3051bb2d8c": {
+  "task": "9abd79314b19676c54eab02d441cfb3051bb2d8c",
+  "target_tests": [
+   "CharUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/CharUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-03T07:29:57-04:00",
+  "subject": "Add CharUtils isHex(int), isAsciiNumeric(int), isOctal(int). (#1685)",
+  "src_churn": 62,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bda0680763ad90264b9cca8233bb3369c03f4e13": {
+  "task": "bda0680763ad90264b9cca8233bb3369c03f4e13",
+  "target_tests": [
+   "InstantsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/InstantsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/Instants.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-03T07:26:28-04:00",
+  "subject": "Add Instants.toMillisSince(Instant) (#1683)",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bdd674f7c64dbc2c8ff043ee995fcd9f6f59a13b": {
+  "task": "bdd674f7c64dbc2c8ff043ee995fcd9f6f59a13b",
+  "target_tests": [
+   "StringUtilsEqualsIndexOfTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsEqualsIndexOfTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/CharSequenceUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-03T05:18:33+05:30",
+  "subject": "fix CharSequenceUtils.lastIndexOf for supplementary code points (#1684)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.StringUtilsEqualsIndexOfTest::testLastIndexOf_char"
+  ],
+  "gold_clean": true
+ },
+ "bd7ffdf5b27004908f10345f3048d4790291fbe0": {
+  "task": "bd7ffdf5b27004908f10345f3048d4790291fbe0",
+  "target_tests": [
+   "StringUtilsTrimTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringUtilsTrimTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/StringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-29T06:13:12-04:00",
+  "subject": "Add StringUtils.trimControl(String) (#1681)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "531e2a2cf1c1e56708859ad2579a5e5760140714": {
+  "task": "531e2a2cf1c1e56708859ad2579a5e5760140714",
+  "target_tests": [
+   "InstantsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/InstantsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/Instants.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-29T06:12:50-04:00",
+  "subject": "Add Instants.toEpochMillis(Instant) (#1680)",
+  "src_churn": 56,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d95e17f1c173a6259886e577cf5acc914ec44c2d": {
+  "task": "d95e17f1c173a6259886e577cf5acc914ec44c2d",
+  "target_tests": [
+   "DurationUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/DurationUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/DurationUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-29T06:12:22-04:00",
+  "subject": "Add DurationUtils.toMillisLong(Duration) (#1679)",
+  "src_churn": 34,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9bcc0d0bf84f6278a000eaf39af0e9780be9046c": {
+  "task": "9bcc0d0bf84f6278a000eaf39af0e9780be9046c",
+  "target_tests": [
+   "RandomStringUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/RandomStringUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/RandomStringUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-27T16:01:23-04:00",
+  "subject": "[LANG-1801] RandomStringUtils.random() does not strictly validate (#1682)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.RandomStringUtilsTest::testExceptionsRandom"
+  ],
+  "gold_clean": true
+ },
+ "28c2fcbb73e2247ec1a3846e4e55f0ed4986b9c9": {
+  "task": "28c2fcbb73e2247ec1a3846e4e55f0ed4986b9c9",
+  "target_tests": [
+   "RangeReadObjectTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/RangeReadObjectTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/Range.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T18:20:04-04:00",
+  "subject": "Range.readObject() does not null-check comparator, minimum, or maximum. (#1675)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.RangeReadObjectTest::testComparatorNullViaForgedStream",
+   "org.apache.commons.lang3.RangeReadObjectTest::testMaximumNullViaForgedStream",
+   "org.apache.commons.lang3.RangeReadObjectTest::testMinimumNullViaForgedStream"
+  ],
+  "gold_clean": true
+ },
+ "2c0b8483606efbfbaccf600e3bc31fe10533e004": {
+  "task": "2c0b8483606efbfbaccf600e3bc31fe10533e004",
+  "target_tests": [
+   "FastTimeZoneTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/FastTimeZoneTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/FastTimeZone.java",
+   "src/main/java/org/apache/commons/lang3/time/GmtTimeZone.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T17:48:02-04:00",
+  "subject": "FastTimeZone.getGmtTimeZone() Javadoc promises null on no-match; regex always matches. (#1674)",
+  "src_churn": 42,
+  "size": "M",
+  "baseline_failing": [
+   "org.apache.commons.lang3.time.FastTimeZoneTest::testJavadocReflectsLenientBehavior"
+  ],
+  "gold_clean": true
+ },
+ "14deed1bff705a46c485733451f462f549ac528d": {
+  "task": "14deed1bff705a46c485733451f462f549ac528d",
+  "target_tests": [
+   "NumericEntityEscaperTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/translate/NumericEntityEscaperTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/translate/NumericEntityUnescaper.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T15:35:31-04:00",
+  "subject": "NumericEntityUnescaper.translate() for entity values out of range passed (#1673)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.translate.NumericEntityEscaperTest::testNumericEntityOverflow"
+  ],
+  "gold_clean": true
+ },
+ "ef39bc92712d47c100af3b243a8bfcd84a45f116": {
+  "task": "ef39bc92712d47c100af3b243a8bfcd84a45f116",
+  "target_tests": [
+   "StrBuilderClearTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/StrBuilderClearTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/StrBuilder.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T13:14:58-04:00",
+  "subject": "StrBuilder.replaceImpl shrink-branch leaves residual chars in buffer (#1672)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.StrBuilderClearTest::testReplaceImplLeavesResidue"
+  ],
+  "gold_clean": true
+ },
+ "f3e64b3b0e67d7faa0f10b698e08207f972a15b1": {
+  "task": "f3e64b3b0e67d7faa0f10b698e08207f972a15b1",
+  "target_tests": [
+   "ArrayFillTest",
+   "StrBuilderClearTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/ArrayFillTest.java",
+   "src/test/java/org/apache/commons/lang3/text/StrBuilderClearTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+   "src/main/java/org/apache/commons/lang3/text/StrBuilder.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T12:07:24-04:00",
+  "subject": "StrBuilder.setLength(int) shrink-branch leaves residual chars in buffer tail (#1671)",
+  "src_churn": 87,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "28f46460d63b4c7806a2b9cce382b2b79ba6fd50": {
+  "task": "28f46460d63b4c7806a2b9cce382b2b79ba6fd50",
+  "target_tests": [
+   "ClassUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/ClassUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/ClassUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T09:32:23-04:00",
+  "subject": "ClassUtils.toCleanName(String) resolves malformed array suffixes instead (#1670)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.ClassUtilsTest::testGetClassStringMalformedMiddleJunkRejected",
+   "org.apache.commons.lang3.ClassUtilsTest::testGetClassStringMalformedUnpairedBracketsRejected"
+  ],
+  "gold_clean": true
+ },
+ "7db3e126dd480698eb523e72e8dc4e5ed7e7a5c7": {
+  "task": "7db3e126dd480698eb523e72e8dc4e5ed7e7a5c7",
+  "target_tests": [
+   "ArrayFillTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/ArrayFillTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T09:06:06-04:00",
+  "subject": "Add ArrayFill.clear(char[]|byte[]) (#1667)",
+  "src_churn": 74,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8e2d1bed8623e0f5b281504d151476689f21690a": {
+  "task": "8e2d1bed8623e0f5b281504d151476689f21690a",
+  "target_tests": [
+   "CompareToBuilderTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/builder/CompareToBuilderTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/builder/AbstractReflection.java",
+   "src/main/java/org/apache/commons/lang3/builder/CompareToBuilder.java",
+   "src/main/java/org/apache/commons/lang3/builder/EqualsBuilder.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T09:01:39-04:00",
+  "subject": "CompareToBuilder lacks cycle guard on Object[] recursion. (#1669)",
+  "src_churn": 148,
+  "size": "L",
+  "baseline_failing": [
+   "org.apache.commons.lang3.builder.CompareToBuilderTest::testCycleMutuallyReferentialObjectArrays",
+   "org.apache.commons.lang3.builder.CompareToBuilderTest::testCycleTwoDistinctSelfReferentialObjectArrays"
+  ],
+  "gold_clean": true
+ },
+ "344df301589744f0a4dc0f4eea91e078b2f97443": {
+  "task": "344df301589744f0a4dc0f4eea91e078b2f97443",
+  "target_tests": [
+   "ImmutableTimeZoneTest",
+   "TimeZonesGmtTest",
+   "TimeZonesTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/ImmutableTimeZoneTest.java",
+   "src/test/java/org/apache/commons/lang3/time/TimeZonesGmtTest.java",
+   "src/test/java/org/apache/commons/lang3/time/TimeZonesTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/ImmutableTimeZone.java",
+   "src/main/java/org/apache/commons/lang3/time/TimeZones.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-21T07:23:18-04:00",
+  "subject": "TimeZones.GMT is a mutable public static final field, setRawOffset() and setID() (#1666)",
+  "src_churn": 160,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c79a10240bd7ddcb956c3f6853f956e0251fb745": {
+  "task": "c79a10240bd7ddcb956c3f6853f956e0251fb745",
+  "target_tests": [
+   "ClassUtilsGetShortClassNameTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/ClassUtilsGetShortClassNameTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/ClassUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-20T06:36:48-04:00",
+  "subject": "ClassUtils.getShortClassName(String) can throw NoClassDefFoundError on malformed inner classes (#1665)",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [
+   "org.apache.commons.lang3.ClassUtilsGetShortClassNameTest::testGetShortClassNameOnInnerClassWithMissingOuter(Path)"
+  ],
+  "gold_clean": true
+ },
+ "b11591895eed00e9f6e0bcb19178dedbaab4a971": {
+  "task": "b11591895eed00e9f6e0bcb19178dedbaab4a971",
+  "target_tests": [
+   "FormattableUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/text/FormattableUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/text/FormattableUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-18T20:09:50-04:00",
+  "subject": "FormattableUtils.append re-parses literal output as format string (#1661)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.text.FormattableUtilsTest::testPercentLiteral",
+   "org.apache.commons.lang3.text.FormattableUtilsTest::testPercentLiteralX2"
+  ],
+  "gold_clean": true
+ },
+ "526a03a8701f85e422786f0a4d1fadd3f0c249c1": {
+  "task": "526a03a8701f85e422786f0a4d1fadd3f0c249c1",
+  "target_tests": [
+   "DateUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/time/DateUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/time/DateUtils.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-18T12:38:16-04:00",
+  "subject": "DateUtils.parseDateWithLeniency(String, Locale, String[], boolean) doesn't reset its time zone (#1660)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.time.DateUtilsTest::testFailedTimeZonePatternDoesNotPoisonNextPatternInstant"
+  ],
+  "gold_clean": true
+ },
+ "9b95001e9801399c62794aadacf198c787d960a9": {
+  "task": "9b95001e9801399c62794aadacf198c787d960a9",
+  "target_tests": [
+   "AbstractBuilderTest",
+   "CompareToBuilderTest",
+   "DiffBuilderTest",
+   "EqualsBuilderNoForceTest",
+   "EqualsBuilderReflectJreImplementationTest",
+   "EqualsBuilderTest",
+   "StopWatchTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/builder/AbstractBuilderTest.java",
+   "src/test/java/org/apache/commons/lang3/builder/CompareToBuilderTest.java",
+   "src/test/java/org/apache/commons/lang3/builder/DiffBuilderTest.java",
+   "src/test/java/org/apache/commons/lang3/builder/EqualsBuilderNoForceTest.java",
+   "src/test/java/org/apache/commons/lang3/builder/EqualsBuilderReflectJreImplementationTest.java",
+   "src/test/java/org/apache/commons/lang3/builder/EqualsBuilderTest.java",
+   "src/test/java/org/apache/commons/lang3/time/StopWatchTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/builder/AbstractReflection.java",
+   "src/main/java/org/apache/commons/lang3/builder/CompareToBuilder.java",
+   "src/main/java/org/apache/commons/lang3/builder/EqualsBuilder.java",
+   "src/main/java/org/apache/commons/lang3/builder/HashCodeBuilder.java",
+   "src/main/java/org/apache/commons/lang3/builder/ReflectionToStringBuilder.java",
+   "src/main/java/org/apache/commons/lang3/builder/ToStringBuilder.java"
+  ],
+  "pool": "hard",
+  "authored": "2026-05-17T07:14:51-04:00",
+  "subject": "[LANG-1825] EqualsBuilder.reflectionAppend tries to set visibility on (#1647)",
+  "src_churn": 117,
+  "size": "M",
+  "baseline_failing": [
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testCyclicalObjectReferences",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testObjectRecursive",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testObjectRecursiveCycle",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testObjectRecursiveCycleSelfreference",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testObjectRecursiveGenericInteger",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testObjectRecursiveGenericString",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testReflectionAppend",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testReflectionEquals",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testReflectionEqualsExcludeFields",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testReflectionHierarchyEquals",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testReflectionOnCustomArrayList",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testReflectionOnCustomHashMap",
+   "org.apache.commons.lang3.builder.EqualsBuilderNoForceTest::testToEqualsExclude"
+  ],
+  "gold_clean": true
+ },
+ "177911e47146db0df2e35839d6bd03ad1315916c": {
+  "task": "177911e47146db0df2e35839d6bd03ad1315916c",
+  "target_tests": [
+   "ObjectUtilsTest",
+   "Objects"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/ObjectUtilsTest.java",
+   "src/test/java/org/apache/commons/lang3/function/Objects.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/ObjectUtils.java",
+   "src/main/java/org/apache/commons/lang3/builder/Diff.java",
+   "src/main/java/org/apache/commons/lang3/reflect/TypeUtils.java",
+   "src/main/java/org/apache/commons/lang3/text/FormattableUtils.java",
+   "src/main/java/org/apache/commons/lang3/time/DurationUtils.java"
+  ],
+  "pool": "hard",
+  "authored": "2025-05-28T16:19:39-04:00",
+  "subject": "Add ObjectUtils.getIfNull(Object, Object) and deprecate defaultIfNull(Object, Object)",
+  "src_churn": 40,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6941f81cd321a61217a687c0077fcd0d0a3044a2": {
+  "task": "6941f81cd321a61217a687c0077fcd0d0a3044a2",
+  "target_tests": [
+   "StringsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StringsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/CharSequenceUtils.java",
+   "src/main/java/org/apache/commons/lang3/StringUtils.java",
+   "src/main/java/org/apache/commons/lang3/Strings.java",
+   "src/main/java/org/apache/commons/lang3/builder/ToStringStyle.java",
+   "src/main/java/org/apache/commons/lang3/exception/DefaultExceptionContext.java",
+   "src/main/java/org/apache/commons/lang3/text/StrBuilder.java"
+  ],
+  "pool": "hard",
+  "authored": "2024-09-21T10:35:43-04:00",
+  "subject": "Add Strings and refactor StringUtils",
+  "src_churn": 1485,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "87730a647481d13e68e227513999c275b7844864": {
+  "task": "87730a647481d13e68e227513999c275b7844864",
+  "target_tests": [
+   "DateUtilsRoundingTest",
+   "ExceptionUtilsTest",
+   "ExtendedMessageFormatTest",
+   "FastDateFormatTest",
+   "FastDateFormat_PrinterTest",
+   "FastDateParserTest",
+   "FastDatePrinterTest",
+   "LocaleUtilsTest",
+   "StringUtilsValueOfTest",
+   "ToStringStyleTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/LocaleUtilsTest.java",
+   "src/test/java/org/apache/commons/lang3/StringUtilsValueOfTest.java",
+   "src/test/java/org/apache/commons/lang3/builder/ToStringStyleTest.java",
+   "src/test/java/org/apache/commons/lang3/exception/ExceptionUtilsTest.java",
+   "src/test/java/org/apache/commons/lang3/text/ExtendedMessageFormatTest.java",
+   "src/test/java/org/apache/commons/lang3/time/DateUtilsRoundingTest.java",
+   "src/test/java/org/apache/commons/lang3/time/FastDateFormatTest.java",
+   "src/test/java/org/apache/commons/lang3/time/FastDateFormat_PrinterTest.java",
+   "src/test/java/org/apache/commons/lang3/time/FastDateParserTest.java",
+   "src/test/java/org/apache/commons/lang3/time/FastDatePrinterTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/builder/HashCodeBuilder.java",
+   "src/main/java/org/apache/commons/lang3/builder/ToStringStyle.java",
+   "src/main/java/org/apache/commons/lang3/concurrent/BasicThreadFactory.java",
+   "src/main/java/org/apache/commons/lang3/time/FastDatePrinter.java"
+  ],
+  "pool": "hard",
+  "authored": "2024-01-20T10:52:48-05:00",
+  "subject": "Normalize end of comments",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "org.apache.commons.lang3.time.FastDateParserTest::testParses"
+  ],
+  "gold_clean": false
+ },
+ "02132ee97bf0d57c85aa45bb64d6eb8dfbe0cf5e": {
+  "task": "02132ee97bf0d57c85aa45bb64d6eb8dfbe0cf5e",
+  "target_tests": [
+   "AbstractConcurrentInitializerTest",
+   "AtomicInitializerTest",
+   "AtomicSafeInitializerTest",
+   "BackgroundInitializerTest",
+   "ConstantInitializerTest",
+   "MultiBackgroundInitializerTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/concurrent/AbstractConcurrentInitializerTest.java",
+   "src/test/java/org/apache/commons/lang3/concurrent/AtomicInitializerTest.java",
+   "src/test/java/org/apache/commons/lang3/concurrent/AtomicSafeInitializerTest.java",
+   "src/test/java/org/apache/commons/lang3/concurrent/BackgroundInitializerTest.java",
+   "src/test/java/org/apache/commons/lang3/concurrent/ConstantInitializerTest.java",
+   "src/test/java/org/apache/commons/lang3/concurrent/MultiBackgroundInitializerTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/concurrent/AbstractConcurrentInitializer.java",
+   "src/main/java/org/apache/commons/lang3/concurrent/AtomicInitializer.java",
+   "src/main/java/org/apache/commons/lang3/concurrent/AtomicSafeInitializer.java",
+   "src/main/java/org/apache/commons/lang3/concurrent/BackgroundInitializer.java",
+   "src/main/java/org/apache/commons/lang3/concurrent/ConstantInitializer.java",
+   "src/main/java/org/apache/commons/lang3/concurrent/MultiBackgroundInitializer.java"
+  ],
+  "pool": "hard",
+  "authored": "2023-10-14T13:00:56+01:00",
+  "subject": "Add method ConcurrentInitializer#isInitialized() (#1120)",
+  "src_churn": 94,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "95a0e2b09bc4a3a363e5ab1c853d002fb74ad7af": {
+  "task": "95a0e2b09bc4a3a363e5ab1c853d002fb74ad7af",
+  "target_tests": [
+   "StrLookupTest",
+   "SystemPropertiesTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/SystemPropertiesTest.java",
+   "src/test/java/org/apache/commons/lang3/text/StrLookupTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/ArchUtils.java",
+   "src/main/java/org/apache/commons/lang3/SystemProperties.java",
+   "src/main/java/org/apache/commons/lang3/SystemUtils.java",
+   "src/main/java/org/apache/commons/lang3/text/StrLookup.java"
+  ],
+  "pool": "hard",
+  "authored": "2023-02-11T09:49:41-05:00",
+  "subject": "Refactor system property access into a new SystemProperties class",
+  "src_churn": 1296,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "57ddce119516f451168f4489f55f399fd9309b53": {
+  "task": "57ddce119516f451168f4489f55f399fd9309b53",
+  "target_tests": [
+   "DoubleRangeTest",
+   "IntegerRangeTest",
+   "LongRangeTest",
+   "RangeTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/DoubleRangeTest.java",
+   "src/test/java/org/apache/commons/lang3/IntegerRangeTest.java",
+   "src/test/java/org/apache/commons/lang3/LongRangeTest.java",
+   "src/test/java/org/apache/commons/lang3/RangeTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/DoubleRange.java",
+   "src/main/java/org/apache/commons/lang3/IntegerRange.java",
+   "src/main/java/org/apache/commons/lang3/LongRange.java",
+   "src/main/java/org/apache/commons/lang3/NumberRange.java",
+   "src/main/java/org/apache/commons/lang3/Range.java",
+   "src/main/java/org/apache/commons/lang3/time/DurationUtils.java"
+  ],
+  "pool": "hard",
+  "authored": "2022-10-17T08:08:59-04:00",
+  "subject": "Add NumberRange, DoubleRange, IntegerRange, LongRange.",
+  "src_churn": 385,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ae2ba9dfb95e3587129400871e1cc01381219e0e": {
+  "task": "ae2ba9dfb95e3587129400871e1cc01381219e0e",
+  "target_tests": [
+   "ImmutablePairTest",
+   "ImmutableTripleTest",
+   "MutablePairTest",
+   "MutableTripleTest",
+   "PairTest",
+   "TripleTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/tuple/ImmutablePairTest.java",
+   "src/test/java/org/apache/commons/lang3/tuple/ImmutableTripleTest.java",
+   "src/test/java/org/apache/commons/lang3/tuple/MutablePairTest.java",
+   "src/test/java/org/apache/commons/lang3/tuple/MutableTripleTest.java",
+   "src/test/java/org/apache/commons/lang3/tuple/PairTest.java",
+   "src/test/java/org/apache/commons/lang3/tuple/TripleTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/tuple/ImmutablePair.java",
+   "src/main/java/org/apache/commons/lang3/tuple/ImmutableTriple.java",
+   "src/main/java/org/apache/commons/lang3/tuple/MutablePair.java",
+   "src/main/java/org/apache/commons/lang3/tuple/MutableTriple.java",
+   "src/main/java/org/apache/commons/lang3/tuple/Pair.java",
+   "src/main/java/org/apache/commons/lang3/tuple/Triple.java"
+  ],
+  "pool": "hard",
+  "authored": "2021-12-08T08:23:02-05:00",
+  "subject": "Add constructors that require non-null inputs in org.apache.commons.lang3.tuple.",
+  "src_churn": 122,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "62d7aacb4f3eb318045496f115a7171f0bc2c6c1": {
+  "task": "62d7aacb4f3eb318045496f115a7171f0bc2c6c1",
+  "target_tests": [
+   "ObjectUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/ObjectUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/AnnotationUtils.java",
+   "src/main/java/org/apache/commons/lang3/ObjectUtils.java",
+   "src/main/java/org/apache/commons/lang3/builder/CompareToBuilder.java",
+   "src/main/java/org/apache/commons/lang3/builder/DiffBuilder.java",
+   "src/main/java/org/apache/commons/lang3/builder/HashCodeBuilder.java",
+   "src/main/java/org/apache/commons/lang3/builder/ToStringStyle.java"
+  ],
+  "pool": "hard",
+  "authored": "2021-10-17T15:55:17+02:00",
+  "subject": "LANG-1659 - Method to check if an object it's an array. (#754)",
+  "src_churn": 42,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5afd54ce6754de7963563ce755ff3cbeb5d5aed3": {
+  "task": "5afd54ce6754de7963563ce755ff3cbeb5d5aed3",
+  "target_tests": [
+   "UncheckedExceptionTest",
+   "UncheckedExecutionExceptionTest",
+   "UncheckedFutureTest",
+   "UncheckedInterruptedExceptionTest",
+   "UncheckedTimeoutExceptionTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/concurrent/UncheckedExecutionExceptionTest.java",
+   "src/test/java/org/apache/commons/lang3/concurrent/UncheckedFutureTest.java",
+   "src/test/java/org/apache/commons/lang3/concurrent/UncheckedTimeoutExceptionTest.java",
+   "src/test/java/org/apache/commons/lang3/exception/UncheckedExceptionTest.java",
+   "src/test/java/org/apache/commons/lang3/exception/UncheckedInterruptedExceptionTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/concurrent/UncheckedExecutionException.java",
+   "src/main/java/org/apache/commons/lang3/concurrent/UncheckedFuture.java",
+   "src/main/java/org/apache/commons/lang3/concurrent/UncheckedFutureImpl.java",
+   "src/main/java/org/apache/commons/lang3/concurrent/UncheckedTimeoutException.java",
+   "src/main/java/org/apache/commons/lang3/exception/UncheckedException.java",
+   "src/main/java/org/apache/commons/lang3/exception/UncheckedInterruptedException.java"
+  ],
+  "pool": "hard",
+  "authored": "2021-08-29T13:51:56-04:00",
+  "subject": "Add UncheckedFuture.",
+  "src_churn": 334,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "27101b4739dd443c35b8ffb287a5b004188d1703": {
+  "task": "27101b4739dd443c35b8ffb287a5b004188d1703",
+  "target_tests": [
+   "ArrayUtilsTest",
+   "ClassUtilsTest",
+   "ObjectUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/ArrayUtilsTest.java",
+   "src/test/java/org/apache/commons/lang3/ClassUtilsTest.java",
+   "src/test/java/org/apache/commons/lang3/ObjectUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/ArrayUtils.java",
+   "src/main/java/org/apache/commons/lang3/ClassUtils.java",
+   "src/main/java/org/apache/commons/lang3/ObjectUtils.java",
+   "src/main/java/org/apache/commons/lang3/event/EventListenerSupport.java"
+  ],
+  "pool": "hard",
+  "authored": "2021-05-25T09:57:29-04:00",
+  "subject": "Add and use APIs to avoid compiler warnings and use of @SuppressWarnings.",
+  "src_churn": 159,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c9e825e823e30c5b1e3ddc9de5e8fd0094d52ee5": {
+  "task": "c9e825e823e30c5b1e3ddc9de5e8fd0094d52ee5",
+  "target_tests": [
+   "LocaleUtilsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/LocaleUtilsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/LocaleUtils.java",
+   "src/main/java/org/apache/commons/lang3/StringUtils.java",
+   "src/main/java/org/apache/commons/lang3/text/ExtendedMessageFormat.java",
+   "src/main/java/org/apache/commons/lang3/time/DateUtils.java",
+   "src/main/java/org/apache/commons/lang3/time/FastDateParser.java",
+   "src/main/java/org/apache/commons/lang3/time/FastDatePrinter.java",
+   "src/main/java/org/apache/commons/lang3/time/FormatCache.java"
+  ],
+  "pool": "hard",
+  "authored": "2020-12-21T12:56:19-05:00",
+  "subject": "Add and use LocaleUtils.toLocale(Locale) to avoid NPEs and use the default locale when an input locale is null.",
+  "src_churn": 72,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "268d4936d4136ce35af688617bbd6874b0854f4c": {
+  "task": "268d4936d4136ce35af688617bbd6874b0854f4c",
+  "target_tests": [
+   "FailableFunctionsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/function/FailableFunctionsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/function/FailableBiPredicate.java",
+   "src/main/java/org/apache/commons/lang3/function/FailableDoublePredicate.java",
+   "src/main/java/org/apache/commons/lang3/function/FailableIntPredicate.java",
+   "src/main/java/org/apache/commons/lang3/function/FailableLongPredicate.java",
+   "src/main/java/org/apache/commons/lang3/function/FailablePredicate.java"
+  ],
+  "pool": "hard",
+  "authored": "2020-06-25T10:52:37-04:00",
+  "subject": "[LANG-1568] Predicate or.",
+  "src_churn": 60,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "180d948d7f0cf73fd9a657ecbcb382b2e9b22cb7": {
+  "task": "180d948d7f0cf73fd9a657ecbcb382b2e9b22cb7",
+  "target_tests": [
+   "FailableFunctionsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/function/FailableFunctionsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/function/FailableBiPredicate.java",
+   "src/main/java/org/apache/commons/lang3/function/FailableDoublePredicate.java",
+   "src/main/java/org/apache/commons/lang3/function/FailableIntPredicate.java",
+   "src/main/java/org/apache/commons/lang3/function/FailableLongPredicate.java",
+   "src/main/java/org/apache/commons/lang3/function/FailablePredicate.java"
+  ],
+  "pool": "hard",
+  "authored": "2020-06-25T10:42:13-04:00",
+  "subject": "[LANG-1568] Predicate add.",
+  "src_churn": 68,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8fcefb4f98856998d857e90f73bb88af043ef3b8": {
+  "task": "8fcefb4f98856998d857e90f73bb88af043ef3b8",
+  "target_tests": [
+   "StreamsTest"
+  ],
+  "test_files": [
+   "src/test/java/org/apache/commons/lang3/StreamsTest.java",
+   "src/test/java/org/apache/commons/lang3/stream/StreamsTest.java"
+  ],
+  "src_files": [
+   "src/main/java/org/apache/commons/lang3/Functions.java",
+   "src/main/java/org/apache/commons/lang3/Streams.java",
+   "src/main/java/org/apache/commons/lang3/concurrent/Locks.java",
+   "src/main/java/org/apache/commons/lang3/function/Failable.java",
+   "src/main/java/org/apache/commons/lang3/stream/Streams.java"
+  ],
+  "pool": "hard",
+  "authored": "2020-06-17T17:37:14-04:00",
+  "subject": "Centralize stream code in our own 'stream' package as a parallel to the JRE's java.util.stream package.",
+  "src_churn": 506,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": true
+ }
+}

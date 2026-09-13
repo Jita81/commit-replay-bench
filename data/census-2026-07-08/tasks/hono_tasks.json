@@ -1,0 +1,2262 @@
+{
+ "24547a6ed5e175f9326063efb657540162287973": {
+  "task": "24547a6ed5e175f9326063efb657540162287973",
+  "target_tests": [
+   "runtime-tests/lambda-edge/index.test.ts",
+   "src/adapter/lambda-edge/handler.test.ts"
+  ],
+  "test_files": [
+   "runtime-tests/lambda-edge/index.test.ts",
+   "src/adapter/lambda-edge/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/lambda-edge/handler.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-07T18:41:34+09:00",
+  "subject": "fix(lambda-edge): resolve the handler with the value passed to the callback (#5094)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f9992096de71151b8271f1cd7f45986bdd5f2b7f": {
+  "task": "f9992096de71151b8271f1cd7f45986bdd5f2b7f",
+  "target_tests": [
+   "src/client/client.test.ts"
+  ],
+  "test_files": [
+   "src/client/client.test.ts"
+  ],
+  "src_files": [
+   "src/client/client.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-07T18:10:45+09:00",
+  "subject": "fix(client): merge function headers with per-request headers (#5092)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "45b081b9b90244a03444f9781d7777cbe620e6b4": {
+  "task": "45b081b9b90244a03444f9781d7777cbe620e6b4",
+  "target_tests": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/handler.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-04T16:32:28-07:00",
+  "subject": "fix(aws-lambda): detect V2 events by request context, not rawPath alone (#5033)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "872997d2836dad3849817b6270d857d92f3dee85": {
+  "task": "872997d2836dad3849817b6270d857d92f3dee85",
+  "target_tests": [
+   "src/adapter/bun/websocket.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/bun/websocket.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/bun/websocket.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-04T18:21:12+09:00",
+  "subject": "fix(bun): report the requested subprotocol on WSContext.protocol (#5059)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b20d4225c9aa9e615717ca74e437852cc9fd5b94": {
+  "task": "b20d4225c9aa9e615717ca74e437852cc9fd5b94",
+  "target_tests": [
+   "src/utils/body.test.ts",
+   "src/utils/buffer.test.ts",
+   "src/validator/validator.test.ts"
+  ],
+  "test_files": [
+   "src/utils/body.test.ts",
+   "src/utils/buffer.test.ts",
+   "src/validator/validator.test.ts"
+  ],
+  "src_files": [
+   "src/utils/body.ts",
+   "src/utils/buffer.ts",
+   "src/validator/validator.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-01T18:42:27+09:00",
+  "subject": "fix(utils/body,validator): normalize Content-Type media type for case-insensitive matching (#5067)",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "03a9416a13a681028011e23841ba89d1dd6c9a62": {
+  "task": "03a9416a13a681028011e23841ba89d1dd6c9a62",
+  "target_tests": [
+   "src/middleware/serve-static/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/serve-static/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/serve-static/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-30T16:18:37+09:00",
+  "subject": "fix(serve-static): treat empty string content as found (#5062)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "aa921770d09bc35970362d5a2630a878f6d982fd": {
+  "task": "aa921770d09bc35970362d5a2630a878f6d982fd",
+  "target_tests": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/handler.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-23T11:45:11+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "751ba41ba26dff20351a13964c07627ddcf382b6": {
+  "task": "751ba41ba26dff20351a13964c07627ddcf382b6",
+  "target_tests": [
+   "src/middleware/serve-static/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/serve-static/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/serve-static/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-09T12:25:56+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f0b094db8474696344d98e5665a4ac2a6d5f346e": {
+  "task": "f0b094db8474696344d98e5665a4ac2a6d5f346e",
+  "target_tests": [
+   "src/middleware/cors/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/cors/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/cors/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-09T12:24:24+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fa5f9bfcc25d65e08af85211cc2e5ecd0e0ea24b": {
+  "task": "fa5f9bfcc25d65e08af85211cc2e5ecd0e0ea24b",
+  "target_tests": [
+   "src/adapter/aws-lambda/handler.test.ts",
+   "src/adapter/lambda-edge/handler.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/aws-lambda/handler.test.ts",
+   "src/adapter/lambda-edge/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/handler.ts",
+   "src/adapter/lambda-edge/handler.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-09T12:20:31+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "3892a6c2b54f974505de41013fcac88a71908e3d": {
+  "task": "3892a6c2b54f974505de41013fcac88a71908e3d",
+  "target_tests": [
+   "src/adapter/lambda-edge/handler.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/lambda-edge/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/lambda-edge/handler.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-09T12:18:49+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7ae7cbae5d0ed8a40e8b9cc353e13175b9d7e3e1": {
+  "task": "7ae7cbae5d0ed8a40e8b9cc353e13175b9d7e3e1",
+  "target_tests": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/handler.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-09T12:10:11+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c78932d745cdf6284ae131a156479ac930da0262": {
+  "task": "c78932d745cdf6284ae131a156479ac930da0262",
+  "target_tests": [
+   "src/utils/ipaddr.test.ts"
+  ],
+  "test_files": [
+   "src/utils/ipaddr.test.ts"
+  ],
+  "src_files": [
+   "src/utils/ipaddr.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-03T17:51:33-04:00",
+  "subject": "fix(utils/ipaddr): render the unspecified address binary as \"::\" (#4998)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d22ff9c6fec1b256bd72a3bcf95d73f2fd798f18": {
+  "task": "d22ff9c6fec1b256bd72a3bcf95d73f2fd798f18",
+  "target_tests": [
+   "src/utils/ipaddr.test.ts"
+  ],
+  "test_files": [
+   "src/utils/ipaddr.test.ts"
+  ],
+  "src_files": [
+   "src/utils/ipaddr.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-02T05:55:12+01:00",
+  "subject": "fix(utils/ipaddr): expand \"::\" to eight zero groups (#4973)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "413d3cbd0e364608e122f5501d0c60ed3d2c2963": {
+  "task": "413d3cbd0e364608e122f5501d0c60ed3d2c2963",
+  "target_tests": [
+   "src/middleware/bearer-auth/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/bearer-auth/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/bearer-auth/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-01T06:59:07+06:00",
+  "subject": "fix(bearer-auth): mention verifyToken in missing-options error message (#4987)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bcd290a64c0b392fd06d2bd1f256c5dc9835e4a4": {
+  "task": "bcd290a64c0b392fd06d2bd1f256c5dc9835e4a4",
+  "target_tests": [
+   "src/utils/ipaddr.test.ts"
+  ],
+  "test_files": [
+   "src/utils/ipaddr.test.ts"
+  ],
+  "src_files": [
+   "src/utils/ipaddr.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-25T10:56:00+09:00",
+  "subject": "fix(utils/ipaddr): do not compress a single 0 group to `::` (#4971)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c968177d9c11ddc7c7cca57c384497f11a6d60ae": {
+  "task": "c968177d9c11ddc7c7cca57c384497f11a6d60ae",
+  "target_tests": [
+   "src/middleware/compress/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/compress/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/compress/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-25T10:50:42+09:00",
+  "subject": "feat(compress): add contentTypeFilter option and `COMPRESSIBLE_CONTENT_TYPE_REGEX` re-export (#4961)",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "82dad6297c90c33c41bf48b4530509a21588ad06": {
+  "task": "82dad6297c90c33c41bf48b4530509a21588ad06",
+  "target_tests": [
+   "src/utils/filepath.test.ts"
+  ],
+  "test_files": [
+   "src/utils/filepath.test.ts"
+  ],
+  "src_files": [
+   "src/utils/filepath.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T09:42:00+01:00",
+  "subject": "fix(serve-static): normalize all backslashes in file paths, not just the first (#4962)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7e0555d14c72d4204347ac9afaae32ba5c013ab9": {
+  "task": "7e0555d14c72d4204347ac9afaae32ba5c013ab9",
+  "target_tests": [
+   "src/adapter/deno/websocket.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/deno/websocket.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/deno/websocket.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-22T14:39:52+05:30",
+  "subject": "fix(deno): echo negotiated WebSocket subprotocol in upgrade response (#4955)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f0ed2465913f2a89ebdf65cc54d6254915fc3ff6": {
+  "task": "f0ed2465913f2a89ebdf65cc54d6254915fc3ff6",
+  "target_tests": [
+   "src/middleware/compress/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/compress/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/compress/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-22T02:05:23-07:00",
+  "subject": "fix(compress): respect Accept-Encoding when encoding option is set (#4951)",
+  "src_churn": 30,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a192df0844724aeaf5cbc6f1ea2f8425d3f8a86a": {
+  "task": "a192df0844724aeaf5cbc6f1ea2f8425d3f8a86a",
+  "target_tests": [
+   "src/utils/mime.test.ts"
+  ],
+  "test_files": [
+   "src/utils/mime.test.ts"
+  ],
+  "src_files": [
+   "src/utils/mime.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-22T06:01:10-03:00",
+  "subject": "fix(mime): specify charset parameter per MIME type instead of mechanical detection (#4912)",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6cbb025ff87fca1a3d00d0ccca0eaf3a6385c3f1": {
+  "task": "6cbb025ff87fca1a3d00d0ccca0eaf3a6385c3f1",
+  "target_tests": [
+   "src/hono.test.ts"
+  ],
+  "test_files": [
+   "src/hono.test.ts"
+  ],
+  "src_files": [
+   "src/hono-base.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-19T20:35:10+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "app.mount() With encoded paths Should strip a decoded non-ASCII mount prefix"
+  ],
+  "gold_clean": true
+ },
+ "c831020fb1fa2e929d222f6c84e1abfe013e512b": {
+  "task": "c831020fb1fa2e929d222f6c84e1abfe013e512b",
+  "target_tests": [
+   "src/middleware/ip-restriction/index.test.ts",
+   "src/utils/ipaddr.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/ip-restriction/index.test.ts",
+   "src/utils/ipaddr.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/ip-restriction/index.ts",
+   "src/utils/ipaddr.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-19T20:33:11+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 313,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "905aedbc20661e0e2fa378783a7ec44a5c3df43d": {
+  "task": "905aedbc20661e0e2fa378783a7ec44a5c3df43d",
+  "target_tests": [
+   "src/utils/cookie.test.ts"
+  ],
+  "test_files": [
+   "src/utils/cookie.test.ts"
+  ],
+  "src_files": [
+   "src/utils/cookie.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-19T20:31:14+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5463db2735476959b8af67756f4e513f4fe19115": {
+  "task": "5463db2735476959b8af67756f4e513f4fe19115",
+  "target_tests": [
+   "src/middleware/jwk/index.test.ts",
+   "src/middleware/jwt/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/jwk/index.test.ts",
+   "src/middleware/jwt/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/jwk/jwk.ts",
+   "src/middleware/jwt/jwt.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-19T20:29:23+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "dcabbece347817ef7193439c39d28546b8ac3a85": {
+  "task": "dcabbece347817ef7193439c39d28546b8ac3a85",
+  "target_tests": [
+   "src/helper/route/index.test.ts",
+   "src/hono.test.ts"
+  ],
+  "test_files": [
+   "src/helper/route/index.test.ts",
+   "src/hono.test.ts"
+  ],
+  "src_files": [
+   "src/hono-base.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-19T19:35:33+09:00",
+  "subject": "fix(route): preserve the base path of the mounted route() app (#4942)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "Routing Nested route - basePath of the mounted routes Should accumulate basePath through nested route() calls",
+   "Routing Nested route - basePath of the mounted routes Should merge the basePath of a subApp created with basePath()"
+  ],
+  "gold_clean": true
+ },
+ "54f2f0cfdae64055ea58ab0372f854c35a780290": {
+  "task": "54f2f0cfdae64055ea58ab0372f854c35a780290",
+  "target_tests": [
+   "src/request.test.ts"
+  ],
+  "test_files": [
+   "src/request.test.ts"
+  ],
+  "src_files": [
+   "src/request.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-16T18:50:03+09:00",
+  "subject": "feat(request): add `bytes()` (#4921)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e59db594fbd22dd29e398846f9fb1e0447efefda": {
+  "task": "e59db594fbd22dd29e398846f9fb1e0447efefda",
+  "target_tests": [
+   "src/middleware/cache/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/cache/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/cache/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-16T18:46:27+09:00",
+  "subject": "feat(cache): key cache entries by configured vary headers (#4915)",
+  "src_churn": 82,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ff7522fdccef4a55f6aa326ece705c0cd7cd8031": {
+  "task": "ff7522fdccef4a55f6aa326ece705c0cd7cd8031",
+  "target_tests": [
+   "src/utils/cookie.test.ts"
+  ],
+  "test_files": [
+   "src/utils/cookie.test.ts"
+  ],
+  "src_files": [
+   "src/utils/cookie.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-16T18:17:36+09:00",
+  "subject": "fix(cookie): return the first cookie when there are multiple cookies with the same name (#4922)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a5bd9ebead279ed9d0239ecbd854f629edfc0e57": {
+  "task": "a5bd9ebead279ed9d0239ecbd854f629edfc0e57",
+  "target_tests": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "test_files": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "src_files": [
+   "src/utils/jwt/jwt.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-06T20:29:17+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "58d3d3ad5656e007ed99da1b73865975952de5e9": {
+  "task": "58d3d3ad5656e007ed99da1b73865975952de5e9",
+  "target_tests": [
+   "src/jsx/utils.test.ts"
+  ],
+  "test_files": [
+   "src/jsx/utils.test.ts"
+  ],
+  "src_files": [
+   "src/jsx/utils.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-06T20:26:49+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 123,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "568c2ecc1dd556894fad4dfa4a7ba499db6dba9c": {
+  "task": "568c2ecc1dd556894fad4dfa4a7ba499db6dba9c",
+  "target_tests": [
+   "src/middleware/cache/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/cache/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/cache/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-06T20:24:27+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "db05b96d7a4de569ba9e965052b0593663b164fc": {
+  "task": "db05b96d7a4de569ba9e965052b0593663b164fc",
+  "target_tests": [
+   "src/middleware/body-limit/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/body-limit/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/body-limit/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-30T18:05:27+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 68,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "614b834551378bffff70c810b2295495bc6e4d55": {
+  "task": "614b834551378bffff70c810b2295495bc6e4d55",
+  "target_tests": [
+   "src/jsx/utils.test.ts"
+  ],
+  "test_files": [
+   "src/jsx/utils.test.ts"
+  ],
+  "src_files": [
+   "src/jsx/base.ts",
+   "src/jsx/utils.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-30T17:03:12+08:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 54,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "027e3dfca9d58bbd6b2e11adef724d26bb4f4123": {
+  "task": "027e3dfca9d58bbd6b2e11adef724d26bb4f4123",
+  "target_tests": [
+   "src/middleware/method-override/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/method-override/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/method-override/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-26T02:37:20+03:00",
+  "subject": "fix(method-override): handle Content-Type with charset parameter (#4894)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "18fe604c8cefc2628240651b1af219692e1918c1": {
+  "task": "18fe604c8cefc2628240651b1af219692e1918c1",
+  "target_tests": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "test_files": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "src_files": [
+   "src/utils/jwt/jws.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-23T14:01:43+07:00",
+  "subject": "fix(jwt): support single-line PEM keys (#4889)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fa2c74fe5c3ce996d025d9d97bf5670c207bb82e": {
+  "task": "fa2c74fe5c3ce996d025d9d97bf5670c207bb82e",
+  "target_tests": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/handler.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-15T15:08:45+09:00",
+  "subject": "fix(aws-lambda): handle invalid header names in request processing (#4883)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "faa6c46a1aa3a8b792b29e20fc93bcd6d2a4d720": {
+  "task": "faa6c46a1aa3a8b792b29e20fc93bcd6d2a4d720",
+  "target_tests": [
+   "src/middleware/cache/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/cache/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/cache/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-15T14:24:23+09:00",
+  "subject": "feat(cache): add `onCacheNotAvailable` option (#4876)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f23e97b7f300bcb8571ae864010b8f7cdb5d0d5d": {
+  "task": "f23e97b7f300bcb8571ae864010b8f7cdb5d0d5d",
+  "target_tests": [
+   "src/middleware/trailing-slash/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/trailing-slash/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/trailing-slash/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-15T14:22:10+09:00",
+  "subject": "feat(trailing-slash): add `skip` option (#4862)",
+  "src_churn": 25,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "cc067c85592415cb1880ad3c61ed923472452ec0": {
+  "task": "cc067c85592415cb1880ad3c61ed923472452ec0",
+  "target_tests": [
+   "src/utils/cookie.test.ts"
+  ],
+  "test_files": [
+   "src/utils/cookie.test.ts"
+  ],
+  "src_files": [
+   "src/utils/cookie.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-07T13:10:14+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a586cd72e3f6122792e631ecf1817e5cabb803ec": {
+  "task": "a586cd72e3f6122792e631ecf1817e5cabb803ec",
+  "target_tests": [
+   "src/utils/cookie.test.ts"
+  ],
+  "test_files": [
+   "src/utils/cookie.test.ts"
+  ],
+  "src_files": [
+   "src/utils/cookie.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-07T13:07:50+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "48fa2233bc092f650119f42df043050737cabf39": {
+  "task": "48fa2233bc092f650119f42df043050737cabf39",
+  "target_tests": [
+   "src/middleware/ip-restriction/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/ip-restriction/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/ip-restriction/index.ts",
+   "src/utils/ipaddr.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-07T13:05:55+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 72,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b470278920fffcfd6d76002755d6db53db827679": {
+  "task": "b470278920fffcfd6d76002755d6db53db827679",
+  "target_tests": [
+   "src/helper/ssg/utils.test.ts"
+  ],
+  "test_files": [
+   "src/helper/ssg/utils.test.ts"
+  ],
+  "src_files": [
+   "src/helper/ssg/ssg.ts",
+   "src/helper/ssg/utils.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-07T13:02:17+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 39,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9aff14bd727f8b0435c963363fd803260e7b8e3c": {
+  "task": "9aff14bd727f8b0435c963363fd803260e7b8e3c",
+  "target_tests": [
+   "src/middleware/serve-static/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/serve-static/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/serve-static/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-07T12:59:00+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "0bce36bf368ca4c1749285aeed537cba36b551bf": {
+  "task": "0bce36bf368ca4c1749285aeed537cba36b551bf",
+  "target_tests": [
+   "src/middleware/compress/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/compress/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/compress/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-31T17:17:44+09:00",
+  "subject": "fix(compress): convert strong ETag to weak ETag when compressing (#4848)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "66fe9feec2bf0dc7bb2b8bcdcb5a380d527e8ae2": {
+  "task": "66fe9feec2bf0dc7bb2b8bcdcb5a380d527e8ae2",
+  "target_tests": [
+   "src/middleware/cors/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/cors/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/cors/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-23T06:35:34-04:00",
+  "subject": "fix(cors): reflect request origin when credentials is true with wildcard (#4813)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8bd9dddce20eefe94da7ef9602afc603a8df0f91": {
+  "task": "8bd9dddce20eefe94da7ef9602afc603a8df0f91",
+  "target_tests": [
+   "src/request.test.ts"
+  ],
+  "test_files": [
+   "src/request.test.ts"
+  ],
+  "src_files": [
+   "src/request.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-21T20:02:50+09:00",
+  "subject": "fix(request): remove `parseBody` from bodyCache to prevent TypeError (#4807)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "0c0bf8d789949d69d4e5bea244c468d2c7d9986b": {
+  "task": "0c0bf8d789949d69d4e5bea244c468d2c7d9986b",
+  "target_tests": [
+   "src/middleware/bearer-auth/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/bearer-auth/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/bearer-auth/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-13T09:04:55+09:00",
+  "subject": "fix(bearer-auth): escape regex metacharacters in bearer auth prefix option (#4750)",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "488ea6ab3e601d89fc57438db7275734af14a3b3": {
+  "task": "488ea6ab3e601d89fc57438db7275734af14a3b3",
+  "target_tests": [
+   "src/utils/mime.test.ts"
+  ],
+  "test_files": [
+   "src/utils/mime.test.ts"
+  ],
+  "src_files": [
+   "src/utils/mime.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-11T18:36:58-05:00",
+  "subject": "fix(utils/mime): Normalize input extension to lowercase before MIME check (#4800)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ef902257e0beacbb83d2a9549b3b83e03514a6fe": {
+  "task": "ef902257e0beacbb83d2a9549b3b83e03514a6fe",
+  "target_tests": [
+   "src/utils/body.test.ts"
+  ],
+  "test_files": [
+   "src/utils/body.test.ts"
+  ],
+  "src_files": [
+   "src/utils/body.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-10T20:58:38+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "53b66aeac5a503860af902013a1f89ba49ec9641": {
+  "task": "53b66aeac5a503860af902013a1f89ba49ec9641",
+  "target_tests": [
+   "src/adapter/lambda-edge/handler.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/lambda-edge/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/lambda-edge/handler.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-10T12:03:46+09:00",
+  "subject": "fix(lambda-edge): avoid callback handler deprecation on NODEJS_24_X (#4782)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "50869562980628b2984f73e064bb80691e5286bc": {
+  "task": "50869562980628b2984f73e064bb80691e5286bc",
+  "target_tests": [
+   "src/utils/accept.test.ts"
+  ],
+  "test_files": [
+   "src/utils/accept.test.ts"
+  ],
+  "src_files": [
+   "src/utils/accept.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-06T17:30:06+09:00",
+  "subject": "fix(accept): replace regex split to mitigate ReDoS (#4758)",
+  "src_churn": 262,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8c4d7f3d2feea19c726bcaf3b7d01b62215eae8b": {
+  "task": "8c4d7f3d2feea19c726bcaf3b7d01b62215eae8b",
+  "target_tests": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "test_files": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "src_files": [
+   "src/utils/jwt/jwt.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-04T16:45:19+09:00",
+  "subject": "fix(jwt): validate token format in decode and decodeHeader functions (#4752)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "44ae0c8cc4d5ab2bed529127a4ac72e1483ad073": {
+  "task": "44ae0c8cc4d5ab2bed529127a4ac72e1483ad073",
+  "target_tests": [
+   "src/utils/cookie.test.ts"
+  ],
+  "test_files": [
+   "src/utils/cookie.test.ts"
+  ],
+  "src_files": [
+   "src/utils/cookie.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-03T19:17:16+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6a0607a929d888893f0c91d92dce2fcfdb3662a3": {
+  "task": "6a0607a929d888893f0c91d92dce2fcfdb3662a3",
+  "target_tests": [
+   "src/middleware/serve-static/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/serve-static/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/serve-static/index.ts",
+   "src/utils/url.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-03T19:01:04+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bda46ac1147eb16d3c4c6f7e9f89b9b22a953298": {
+  "task": "bda46ac1147eb16d3c4c6f7e9f89b9b22a953298",
+  "target_tests": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "test_files": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "src_files": [
+   "src/utils/jwt/jwt.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-26T21:57:20+09:00",
+  "subject": "fix(jwt): prevent memory leak by avoiding mutation of options object (#4759)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e4602ad11a2879eeb4f06d5114d21e0565c114a9": {
+  "task": "e4602ad11a2879eeb4f06d5114d21e0565c114a9",
+  "target_tests": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "test_files": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "src_files": [
+   "src/utils/jwt/jwt.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-24T16:21:31+09:00",
+  "subject": "fix(jwt): use `Math.floor` instead of bitwise OR for safe timestamp (#4754)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "4bb70fafbc4819b2e3ef64a0c5fb4ba55e315bba": {
+  "task": "4bb70fafbc4819b2e3ef64a0c5fb4ba55e315bba",
+  "target_tests": [
+   "src/validator/validator.test.ts"
+  ],
+  "test_files": [
+   "src/validator/validator.test.ts"
+  ],
+  "src_files": [
+   "src/validator/validator.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-24T16:07:53+09:00",
+  "subject": "fix(validator): prevent type diff bug in form data parsing (#4753)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "41adbf56e252c04611f8972364ac0887ae07a4c7": {
+  "task": "41adbf56e252c04611f8972364ac0887ae07a4c7",
+  "target_tests": [
+   "src/adapter/aws-lambda/conninfo.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/aws-lambda/conninfo.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/conninfo.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-23T16:12:44+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "02346c6d945a10c98f54ae51622e8c7afbe3bad4": {
+  "task": "02346c6d945a10c98f54ae51622e8c7afbe3bad4",
+  "target_tests": [
+   "src/middleware/language/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/language/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/language/language.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-19T19:31:19+09:00",
+  "subject": "feat(language): add progressive locale code truncation to normalizeLanguage (#4717)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "034223f1bf8db3c98e4bf2d11d597c94362729d7": {
+  "task": "034223f1bf8db3c98e4bf2d11d597c94362729d7",
+  "target_tests": [
+   "src/middleware/trailing-slash/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/trailing-slash/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/trailing-slash/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-19T19:25:21+09:00",
+  "subject": "feat(trailing-slash): add `alwaysRedirect` option to support wildcard routes (#4658)",
+  "src_churn": 70,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bf37828d6df56618bb90649c65c1c4deb2f9bcd6": {
+  "task": "bf37828d6df56618bb90649c65c1c4deb2f9bcd6",
+  "target_tests": [
+   "src/middleware/basic-auth/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/basic-auth/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/basic-auth/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-19T18:20:20+08:00",
+  "subject": "feat(basic-auth): add context key and callback options (#4645)",
+  "src_churn": 25,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9524923b485145148d6395b7531f3f504dc85933": {
+  "task": "9524923b485145148d6395b7531f3f504dc85933",
+  "target_tests": [
+   "src/client/client.test.ts",
+   "src/client/types.test.ts"
+  ],
+  "test_files": [
+   "src/client/client.test.ts",
+   "src/client/types.test.ts"
+  ],
+  "src_files": [
+   "src/client/client.ts",
+   "src/client/types.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-19T12:18:25+02:00",
+  "subject": "feat(client): $path (#4636)",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "67ac19a99ff2d3a70f9c4df03b1e41bdbe090298": {
+  "task": "67ac19a99ff2d3a70f9c4df03b1e41bdbe090298",
+  "target_tests": [
+   "src/client/client.test.ts"
+  ],
+  "test_files": [
+   "src/client/client.test.ts"
+  ],
+  "src_files": [
+   "src/client/client.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-19T17:11:05+08:00",
+  "subject": "fix(client): skip undefined values in form data serialization (#4732)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "0c1d4c76cf6b2aace8bbef745d375c2cc176d99f": {
+  "task": "0c1d4c76cf6b2aace8bbef745d375c2cc176d99f",
+  "target_tests": [
+   "src/utils/url.test.ts"
+  ],
+  "test_files": [
+   "src/utils/url.test.ts"
+  ],
+  "src_files": [
+   "src/utils/url.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-08T21:50:31+09:00",
+  "subject": "fix(url): ignore fragment identifiers in getPath() (#4627)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "3aa2f9ae0957b4466a6d84978aba36f1e5677f25": {
+  "task": "3aa2f9ae0957b4466a6d84978aba36f1e5677f25",
+  "target_tests": [
+   "src/middleware/bearer-auth/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/bearer-auth/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/bearer-auth/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-06T15:50:31+09:00",
+  "subject": "fix(bearer-auth): make auth-scheme case-insensitive (#4659)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "edbf6eea8e6c26a3937518d4ed91d8666edeec37": {
+  "task": "edbf6eea8e6c26a3937518d4ed91d8666edeec37",
+  "target_tests": [
+   "src/utils/ipaddr.test.ts"
+  ],
+  "test_files": [
+   "src/utils/ipaddr.test.ts"
+  ],
+  "src_files": [
+   "src/utils/ipaddr.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-27T18:47:18+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "12c511745b3f1e7a3f863a23ce5f921c7fa805d1": {
+  "task": "12c511745b3f1e7a3f863a23ce5f921c7fa805d1",
+  "target_tests": [
+   "src/middleware/cache/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/cache/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/cache/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-27T10:45:33+01:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "cc0aa7ae327ed84cc391d29086dec2a3e44e7a1f": {
+  "task": "cc0aa7ae327ed84cc391d29086dec2a3e44e7a1f",
+  "target_tests": [
+   "src/middleware/jwt/index.test.ts",
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/jwt/index.test.ts",
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/jwt/jwt.ts",
+   "src/utils/jwt/jwt.ts",
+   "src/utils/jwt/types.ts"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-13T10:40:55+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 44,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b6941299124960dd30ab3081dc9474747a8618e6": {
+  "task": "b6941299124960dd30ab3081dc9474747a8618e6",
+  "target_tests": [
+   "src/client/client.test.ts"
+  ],
+  "test_files": [
+   "src/client/client.test.ts"
+  ],
+  "src_files": [
+   "src/client/client.ts",
+   "src/client/types.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-13T09:12:06+01:00",
+  "subject": "feat(client): add buildSearchParams option to customize query serialization (#4535)",
+  "src_churn": 38,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d94f4a44e7b48473a5a235f38aa9a055de6c4d64": {
+  "task": "d94f4a44e7b48473a5a235f38aa9a055de6c4d64",
+  "target_tests": [
+   "src/middleware/context-storage/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/context-storage/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/context-storage/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-13T13:33:37+05:30",
+  "subject": "feat(context-storage): Add optional tryGetContext helper to context-storage middleware (#4539)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "61f473ba1ff92bb404b80d2a4f7eae9416dc9a3c": {
+  "task": "61f473ba1ff92bb404b80d2a4f7eae9416dc9a3c",
+  "target_tests": [
+   "src/middleware/pretty-json/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/pretty-json/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/pretty-json/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-13T08:59:56+01:00",
+  "subject": "feat(pretty-json): support force option (#4531)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "44bb7bb08ab0c6f52e27e59fc2680713b577f72b": {
+  "task": "44bb7bb08ab0c6f52e27e59fc2680713b577f72b",
+  "target_tests": [
+   "src/middleware/timing/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/timing/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/timing/index.ts",
+   "src/middleware/timing/timing.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-13T08:57:15+01:00",
+  "subject": "feat(timing): add wrapTime to simplify usage (#4519)",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d2e7440d85dec3385c32e10402e9d73b6a0bbc7e": {
+  "task": "d2e7440d85dec3385c32e10402e9d73b6a0bbc7e",
+  "target_tests": [
+   "src/middleware/csrf/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/csrf/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/csrf/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-09T17:22:51+09:00",
+  "subject": "feat(csrf): Support async `IsAllowedSecFetchSiteHandler` (#4559)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "489afe6b792e4ab052b503aaa1faae46e2c53112": {
+  "task": "489afe6b792e4ab052b503aaa1faae46e2c53112",
+  "target_tests": [
+   "src/middleware/csrf/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/csrf/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/csrf/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-09T17:11:27+09:00",
+  "subject": "feat(csrf): Support async `IsAllowedOriginHandler` (#4558)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c059695c10e89cf5891d093f407ee9fc5ed123fd": {
+  "task": "c059695c10e89cf5891d093f407ee9fc5ed123fd",
+  "target_tests": [
+   "src/router/common.case.test.ts"
+  ],
+  "test_files": [
+   "src/router/common.case.test.ts"
+  ],
+  "src_files": [
+   "src/router/linear-router/router.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-09T08:52:44+01:00",
+  "subject": "fix(linear-router): incorrect path matching (#4567)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7d6d04ea4b0d0ecbe4240fad5ad5878925c5814a": {
+  "task": "7d6d04ea4b0d0ecbe4240fad5ad5878925c5814a",
+  "target_tests": [
+   "src/adapter/bun/conninfo.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/bun/conninfo.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/bun/conninfo.ts",
+   "src/adapter/bun/server.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-26T04:33:47-06:00",
+  "subject": "fix(adapter/bun): fix TypeError: null is not an object (#4429) (#4538)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "96d2a89c57a20b4c3ef5acbe16c880c71c0df60a": {
+  "task": "96d2a89c57a20b4c3ef5acbe16c880c71c0df60a",
+  "target_tests": [
+   "src/middleware/bearer-auth/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/bearer-auth/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/bearer-auth/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-14T20:00:28+05:30",
+  "subject": "feat: Improve auth middlewares (#4485)",
+  "src_churn": 70,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "cea3fb09a1d6a6659142555b123cdf80c340f39d": {
+  "task": "cea3fb09a1d6a6659142555b123cdf80c340f39d",
+  "target_tests": [
+   "runtime-tests/lambda/index.test.ts",
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "test_files": [
+   "runtime-tests/lambda/index.test.ts",
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/handler.ts",
+   "src/adapter/aws-lambda/types.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-14T13:46:30Z",
+  "subject": "feat(aws-lambda): handle AWS Lattice events (#4451)",
+  "src_churn": 147,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "df851842a446549a6beb7f35db95cfac9a730cf6": {
+  "task": "df851842a446549a6beb7f35db95cfac9a730cf6",
+  "target_tests": [
+   "src/middleware/cache/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/cache/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/cache/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-11T21:10:17+09:00",
+  "subject": "fix(middleware/cache): skip caching when `Vary: *` is present (#4504)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fa8eef707990e80a593fa32c2f67713a2ecd2e9b": {
+  "task": "fa8eef707990e80a593fa32c2f67713a2ecd2e9b",
+  "target_tests": [
+   "src/utils/url.test.ts"
+  ],
+  "test_files": [
+   "src/utils/url.test.ts"
+  ],
+  "src_files": [
+   "src/utils/url.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-07T20:29:50+08:00",
+  "subject": "fix(utils/url): make _getQueryParam search behind question mark (#4507)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d9b8b4b73b4f997994f2764013207365fe711282": {
+  "task": "d9b8b4b73b4f997994f2764013207365fe711282",
+  "target_tests": [
+   "src/middleware/cors/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/cors/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/cors/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-25T01:48:22+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "52161170e83298fc3d13312bfceba3992916bfa2": {
+  "task": "52161170e83298fc3d13312bfceba3992916bfa2",
+  "target_tests": [
+   "src/middleware/request-id/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/request-id/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/request-id/request-id.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-24T14:17:58+09:00",
+  "subject": "fix(request-id): validation accepts `=` (#4478)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "253ec2857a083595e52a446694923645084e9ecd": {
+  "task": "253ec2857a083595e52a446694923645084e9ecd",
+  "target_tests": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/handler.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-23T06:31:35+02:00",
+  "subject": "fix(aws-lambda): serve microsoft office files as binary in lambda handler (#4469)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "45ba3bf9e3dff8e4bd85d6b47d4b71c8d6c66bef": {
+  "task": "45ba3bf9e3dff8e4bd85d6b47d4b71c8d6c66bef",
+  "target_tests": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "test_files": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "src_files": [
+   "src/utils/jwt/jwt.ts",
+   "src/utils/jwt/types.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-22T08:33:11+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 56,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9ae98c9416dabf6ee3ca0f9d279df0310ce9fcb4": {
+  "task": "9ae98c9416dabf6ee3ca0f9d279df0310ce9fcb4",
+  "target_tests": [
+   "src/helper/proxy/index.test.ts"
+  ],
+  "test_files": [
+   "src/helper/proxy/index.test.ts"
+  ],
+  "src_files": [
+   "src/helper/proxy/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-17T06:37:17+09:00",
+  "subject": "fix(proxy): Correct hop-by-hop header handling per RFC 9110 (#4459)",
+  "src_churn": 61,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "12806614b92ef39e830b3f33456a02de0016701c": {
+  "task": "12806614b92ef39e830b3f33456a02de0016701c",
+  "target_tests": [
+   "src/request.test.ts",
+   "src/validator/validator.test.ts"
+  ],
+  "test_files": [
+   "src/request.test.ts",
+   "src/validator/validator.test.ts"
+  ],
+  "src_files": [
+   "src/request.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-16T03:04:57+02:00",
+  "subject": "feat(request): add cloneRawRequest utility for request cloning (#4382)",
+  "src_churn": 68,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ff715fca4bd50d6bf16ee8149f79a7394543604d": {
+  "task": "ff715fca4bd50d6bf16ee8149f79a7394543604d",
+  "target_tests": [
+   "src/router/reg-exp-router/prepared-router.test.ts"
+  ],
+  "test_files": [
+   "src/router/reg-exp-router/prepared-router.test.ts"
+  ],
+  "src_files": [
+   "src/router/reg-exp-router/prepared-router.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-13T10:11:28+09:00",
+  "subject": "refactor:  internal structure of `PreparedRegExpRouter` for optimization and added tests (#4456)",
+  "src_churn": 107,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "38f756dd92e95729ae9f167e5a3eec655b15ea67": {
+  "task": "38f756dd92e95729ae9f167e5a3eec655b15ea67",
+  "target_tests": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/aws-lambda/handler.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/handler.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-05T17:25:55+09:00",
+  "subject": "fix(aws-lambda): sanitize non-ASCII header values to prevent ByteString errors (#4437)",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "81bda2e169ba26810c8044980f1cfea66912d720": {
+  "task": "81bda2e169ba26810c8044980f1cfea66912d720",
+  "target_tests": [
+   "src/helper/route/index.test.ts"
+  ],
+  "test_files": [
+   "src/helper/route/index.test.ts"
+  ],
+  "src_files": [
+   "src/helper/route/index.ts"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-24T11:10:49+09:00",
+  "subject": "feat(helper/route): enable to get route path at specific index (#4423)",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fab3b13639339cbd5ba1166a5b23d9ac30c5f64f": {
+  "task": "fab3b13639339cbd5ba1166a5b23d9ac30c5f64f",
+  "target_tests": [
+   "src/jsx/context-isolation.test.ts"
+  ],
+  "test_files": [
+   "src/jsx/context-isolation.test.ts"
+  ],
+  "src_files": [
+   "src/jsx/base.ts",
+   "src/jsx/components.ts",
+   "src/jsx/context.ts",
+   "src/jsx/streaming.ts"
+  ],
+  "pool": "hard",
+  "authored": "2026-06-23T11:15:58+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 369,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "66daa2edef8965544c04fcad82c596ab2acdb5ee": {
+  "task": "66daa2edef8965544c04fcad82c596ab2acdb5ee",
+  "target_tests": [
+   "src/jsx/utils.test.ts"
+  ],
+  "test_files": [
+   "src/jsx/utils.test.ts"
+  ],
+  "src_files": [
+   "src/jsx/base.ts",
+   "src/jsx/dom/render.ts",
+   "src/jsx/jsx-runtime.ts",
+   "src/jsx/utils.ts"
+  ],
+  "pool": "hard",
+  "authored": "2026-04-15T15:11:06+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 73,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "16321afd47e1bf8f48d06d9d8a2eae6b607c73ef": {
+  "task": "16321afd47e1bf8f48d06d9d8a2eae6b607c73ef",
+  "target_tests": [
+   "src/adapter/aws-lambda/conninfo.test.ts",
+   "src/adapter/cloudflare-pages/conninfo.test.ts",
+   "src/adapter/netlify/conninfo.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/aws-lambda/conninfo.test.ts",
+   "src/adapter/cloudflare-pages/conninfo.test.ts",
+   "src/adapter/netlify/conninfo.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/conninfo.ts",
+   "src/adapter/aws-lambda/index.ts",
+   "src/adapter/cloudflare-pages/conninfo.ts",
+   "src/adapter/cloudflare-pages/index.ts",
+   "src/adapter/netlify/conninfo.ts",
+   "src/adapter/netlify/mod.ts"
+  ],
+  "pool": "hard",
+  "authored": "2026-02-19T13:22:25+03:00",
+  "subject": "feat(adapter): add getConnInfo for AWS Lambda, Cloudflare Pages, and Netlify (#4649)",
+  "src_churn": 158,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "190f6e28e2ca85ce3d1f2f54db1310f5f3eab134": {
+  "task": "190f6e28e2ca85ce3d1f2f54db1310f5f3eab134",
+  "target_tests": [
+   "src/middleware/jwk/index.test.ts",
+   "src/utils/jwt/jwa.test.ts",
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/jwk/index.test.ts",
+   "src/utils/jwt/jwa.test.ts",
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/jwk/jwk.ts",
+   "src/utils/jwt/jwa.ts",
+   "src/utils/jwt/jwt.ts",
+   "src/utils/jwt/types.ts"
+  ],
+  "pool": "hard",
+  "authored": "2026-01-13T11:12:37+09:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 67,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "53f87ddd8d30f3ac445bd524cfa0b8c084df3738": {
+  "task": "53f87ddd8d30f3ac445bd524cfa0b8c084df3738",
+  "target_tests": [
+   "src/router/reg-exp-router/prepared-router.test.ts"
+  ],
+  "test_files": [
+   "src/router/reg-exp-router/prepared-router.test.ts"
+  ],
+  "src_files": [
+   "src/router/reg-exp-router/index.ts",
+   "src/router/reg-exp-router/matcher.ts",
+   "src/router/reg-exp-router/prepared-router.ts",
+   "src/router/reg-exp-router/router.ts"
+  ],
+  "pool": "hard",
+  "authored": "2025-10-11T20:24:06+09:00",
+  "subject": "feat(reg-exp-router): Introduced PreparedRegExpRouter (#1796)",
+  "src_churn": 214,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "083906656a3824263c83c6049d6bab63898a4f1e": {
+  "task": "083906656a3824263c83c6049d6bab63898a4f1e",
+  "target_tests": [
+   "src/middleware/jwk/index.test.ts",
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/jwk/index.test.ts",
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/jwk/jwk.ts",
+   "src/middleware/jwt/index.ts",
+   "src/middleware/jwt/jwt.ts",
+   "src/utils/jwt/index.ts",
+   "src/utils/jwt/jwt.ts"
+  ],
+  "pool": "hard",
+  "authored": "2025-08-07T14:35:50+03:00",
+  "subject": "feat(jwt): Exposing utility function `verifyWithJwks` for external use (#4302)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "1196f14b94e589e2ac44fa7f1c8785d70c1cf83e": {
+  "task": "1196f14b94e589e2ac44fa7f1c8785d70c1cf83e",
+  "target_tests": [
+   "src/adapter/cloudflare-workers/serve-static.test.ts",
+   "src/middleware/serve-static/index.test.ts",
+   "src/middleware/serve-static/path.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/cloudflare-workers/serve-static.test.ts",
+   "src/middleware/serve-static/index.test.ts",
+   "src/middleware/serve-static/path.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/bun/serve-static.ts",
+   "src/adapter/deno/serve-static.ts",
+   "src/middleware/serve-static/index.ts",
+   "src/middleware/serve-static/path.ts"
+  ],
+  "pool": "hard",
+  "authored": "2025-08-07T20:18:38+09:00",
+  "subject": "feat(serve-static): use `join` to correct path resolution (#4291)",
+  "src_churn": 138,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "cf0e01ee9ecdfcaea6828dc060426d10d64a54f7": {
+  "task": "cf0e01ee9ecdfcaea6828dc060426d10d64a54f7",
+  "target_tests": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "test_files": [
+   "src/utils/jwt/jwt.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/jwk/jwk.ts",
+   "src/middleware/jwt/jwt.ts",
+   "src/utils/jwt/jwt.ts",
+   "src/utils/jwt/types.ts"
+  ],
+  "pool": "hard",
+  "authored": "2025-08-06T17:39:24-07:00",
+  "subject": "feat(jwt): added validation for the issuer (`iss`) claim (#4253)",
+  "src_churn": 94,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d2737abfb4a4e2b23f4a4ecf05f23bc38fd2daa6": {
+  "task": "d2737abfb4a4e2b23f4a4ecf05f23bc38fd2daa6",
+  "target_tests": [
+   "src/helper/route/index.test.ts",
+   "src/request.test.ts"
+  ],
+  "test_files": [
+   "src/helper/route/index.test.ts",
+   "src/request.test.ts"
+  ],
+  "src_files": [
+   "src/helper/route/index.ts",
+   "src/hono-base.ts",
+   "src/request.ts",
+   "src/request/constants.ts",
+   "src/types.ts"
+  ],
+  "pool": "hard",
+  "authored": "2025-06-16T14:14:22+09:00",
+  "subject": "feat: introduce Route Helper (#4204)",
+  "src_churn": 146,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6837649cd104b1886e6cb6653bf26d0700c4c3e6": {
+  "task": "6837649cd104b1886e6cb6653bf26d0700c4c3e6",
+  "target_tests": [
+   "src/middleware/jwk/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/jwk/index.test.ts"
+  ],
+  "src_files": [
+   "src/middleware/jwk/index.ts",
+   "src/middleware/jwk/jwk.ts",
+   "src/middleware/request-id/index.ts",
+   "src/utils/jwt/index.ts",
+   "src/utils/jwt/jws.ts",
+   "src/utils/jwt/jwt.ts",
+   "src/utils/jwt/types.ts"
+  ],
+  "pool": "hard",
+  "authored": "2025-02-06T15:16:29+02:00",
+  "subject": "feat(hono/jwk): JWK Auth Middleware (#3826)",
+  "src_churn": 245,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "fa92596817183a261ff8c8191304ffa9163815fa": {
+  "task": "fa92596817183a261ff8c8191304ffa9163815fa",
+  "target_tests": [
+   "src/helper/accepts/accepts.test.ts",
+   "src/middleware/language/index.test.ts",
+   "src/utils/accept.test.ts"
+  ],
+  "test_files": [
+   "src/helper/accepts/accepts.test.ts",
+   "src/middleware/language/index.test.ts",
+   "src/utils/accept.test.ts"
+  ],
+  "src_files": [
+   "src/helper/accepts/accepts.ts",
+   "src/middleware/language/index.ts",
+   "src/middleware/language/language.ts",
+   "src/utils/accept.ts"
+  ],
+  "pool": "hard",
+  "authored": "2025-02-06T14:10:36+01:00",
+  "subject": "feat: add language detector middleware and helpers (#3787)",
+  "src_churn": 413,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "baa231e5ccc4907a5a644fe64fa7ec5795d36baf": {
+  "task": "baa231e5ccc4907a5a644fe64fa7ec5795d36baf",
+  "target_tests": [
+   "runtime-tests/lambda/index.test.ts",
+   "src/adapter/aws-lambda/handler.test.ts",
+   "src/adapter/lambda-edge/handler.test.ts",
+   "src/context.test.ts",
+   "src/middleware/basic-auth/index.test.ts",
+   "src/middleware/bearer-auth/index.test.ts",
+   "src/utils/mime.test.ts",
+   "src/validator/validator.test.ts"
+  ],
+  "test_files": [
+   "runtime-tests/lambda/index.test.ts",
+   "src/adapter/aws-lambda/handler.test.ts",
+   "src/adapter/lambda-edge/handler.test.ts",
+   "src/context.test.ts",
+   "src/middleware/basic-auth/index.test.ts",
+   "src/middleware/bearer-auth/index.test.ts",
+   "src/utils/mime.test.ts",
+   "src/validator/validator.test.ts"
+  ],
+  "src_files": [
+   "src/context.ts",
+   "src/middleware/basic-auth/index.ts",
+   "src/middleware/bearer-auth/index.ts",
+   "src/utils/mime.ts"
+  ],
+  "pool": "hard",
+  "authored": "2024-12-14T16:40:57+09:00",
+  "subject": "fix: Remove `charset` parameter from MIME type of `application/json` (#3743)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "234b083777d34fb1efadbe8f504148e2e533428f": {
+  "task": "234b083777d34fb1efadbe8f504148e2e533428f",
+  "target_tests": [
+   "src/adapter/bun/websocket.test.ts",
+   "src/adapter/cloudflare-workers/websocket.test.ts",
+   "src/adapter/deno/websocket.test.ts",
+   "src/helper/websocket/index.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/bun/websocket.test.ts",
+   "src/adapter/cloudflare-workers/websocket.test.ts",
+   "src/adapter/deno/websocket.test.ts",
+   "src/helper/websocket/index.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/bun/websocket.ts",
+   "src/adapter/cloudflare-workers/websocket.ts",
+   "src/adapter/deno/websocket.ts",
+   "src/helper/websocket/index.ts"
+  ],
+  "pool": "hard",
+  "authored": "2024-10-25T16:09:36+09:00",
+  "subject": "feat(ws): Make WebSocket adapter more changeable (#3531)",
+  "src_churn": 250,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "246a06aa1d35aa206dcf11186b3aa90badb2de72": {
+  "task": "246a06aa1d35aa206dcf11186b3aa90badb2de72",
+  "target_tests": [
+   "src/middleware/serve-static/index.test.ts"
+  ],
+  "test_files": [
+   "src/middleware/serve-static/index.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/bun/serve-static.ts",
+   "src/adapter/deno/serve-static.ts",
+   "src/middleware/serve-static/index.ts",
+   "src/utils/filepath.ts"
+  ],
+  "pool": "hard",
+  "authored": "2024-09-24T12:23:35+09:00",
+  "subject": "feat(serve-static): support absolute root (#3420)",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "afa44e970755e443cba134ebdb5548ba1e7c7ca5": {
+  "task": "afa44e970755e443cba134ebdb5548ba1e7c7ca5",
+  "target_tests": [
+   "src/adapter/bun/conninfo.test.ts",
+   "src/adapter/cloudflare-workers/conninfo.test.ts",
+   "src/adapter/deno/conninfo.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/bun/conninfo.test.ts",
+   "src/adapter/cloudflare-workers/conninfo.test.ts",
+   "src/adapter/deno/conninfo.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/bun/conninfo.ts",
+   "src/adapter/cloudflare-workers/conninfo.ts",
+   "src/adapter/deno/conninfo.ts",
+   "src/helper/conninfo/types.ts"
+  ],
+  "pool": "hard",
+  "authored": "2024-06-27T11:23:36+09:00",
+  "subject": "feat(adaptor): Remove `unknown` from AddressType (#2958)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ad04fbff1c46c3f4c78191c8956657cdcab6f7f5": {
+  "task": "ad04fbff1c46c3f4c78191c8956657cdcab6f7f5",
+  "target_tests": [
+   "src/jsx/utils.test.ts"
+  ],
+  "test_files": [
+   "src/jsx/utils.test.ts"
+  ],
+  "src_files": [
+   "src/jsx/base.ts",
+   "src/jsx/dom/jsx-dev-runtime.ts",
+   "src/jsx/dom/render.ts",
+   "src/jsx/utils.ts"
+  ],
+  "pool": "hard",
+  "authored": "2024-06-11T10:08:39+09:00",
+  "subject": "refactor(jsx): reduce code size and improve maintainability (#2956)",
+  "src_churn": 51,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ec3648d0c32ec05ccf259cde2869d95e055b8a5b": {
+  "task": "ec3648d0c32ec05ccf259cde2869d95e055b8a5b",
+  "target_tests": [
+   "runtime_tests/lambda/index.test.ts"
+  ],
+  "test_files": [
+   "runtime_tests/lambda/index.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/aws-lambda/custom-context.ts",
+   "src/adapter/aws-lambda/handler.ts",
+   "src/adapter/aws-lambda/index.ts",
+   "src/adapter/aws-lambda/types.ts"
+  ],
+  "pool": "hard",
+  "authored": "2024-06-03T00:16:07+09:00",
+  "subject": "refactor(aws-lambda): merge custom-context into types  (#2889)",
+  "src_churn": 184,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a8a5fb97caeb820b069dabb32327e859357d79a8": {
+  "task": "a8a5fb97caeb820b069dabb32327e859357d79a8",
+  "target_tests": [
+   "src/adapter/bun/conninfo.test.ts",
+   "src/adapter/cloudflare-workers/conninfo.test.ts",
+   "src/adapter/deno/conninfo.test.ts"
+  ],
+  "test_files": [
+   "src/adapter/bun/conninfo.test.ts",
+   "src/adapter/cloudflare-workers/conninfo.test.ts",
+   "src/adapter/deno/conninfo.test.ts"
+  ],
+  "src_files": [
+   "src/adapter/bun/conninfo.ts",
+   "src/adapter/bun/index.ts",
+   "src/adapter/cloudflare-workers/conninfo.ts",
+   "src/adapter/deno/conninfo.ts",
+   "src/adapter/deno/index.ts",
+   "src/helper/conninfo/index.ts"
+  ],
+  "pool": "hard",
+  "authored": "2024-05-23T05:39:18+09:00",
+  "subject": "feat: Introduce ConnInfo helper/adapter (#2595)",
+  "src_churn": 110,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "2b2dacc2e1625734144e8ba295bf8b869024ea82": {
+  "task": "2b2dacc2e1625734144e8ba295bf8b869024ea82",
+  "target_tests": [
+   "src/client/client.test.ts",
+   "src/helper/factory/index.test.ts",
+   "src/types.test.ts",
+   "src/validator/validator.test.ts"
+  ],
+  "test_files": [
+   "src/client/client.test.ts",
+   "src/helper/factory/index.test.ts",
+   "src/types.test.ts",
+   "src/validator/validator.test.ts"
+  ],
+  "src_files": [
+   "src/client/types.ts",
+   "src/context.ts",
+   "src/types.ts",
+   "src/utils/types.ts"
+  ],
+  "pool": "hard",
+  "authored": "2024-05-02T23:28:15+07:00",
+  "subject": "feat(types): improve response types flow (#2581)",
+  "src_churn": 98,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f60ab8b93e7fcecbfd754394ad9f61407a4b5ac4": {
+  "task": "f60ab8b93e7fcecbfd754394ad9f61407a4b5ac4",
+  "target_tests": [
+   "src/router/common.case.test.ts",
+   "src/router/trie-router/node.test.ts"
+  ],
+  "test_files": [
+   "src/router/common.case.test.ts",
+   "src/router/trie-router/node.test.ts"
+  ],
+  "src_files": [
+   "src/router/linear-router/router.ts",
+   "src/router/pattern-router/router.ts",
+   "src/router/reg-exp-router/node.ts",
+   "src/router/reg-exp-router/router.ts",
+   "src/router/trie-router/node.ts"
+  ],
+  "pool": "hard",
+  "authored": "2024-03-18T16:44:10-04:00",
+  "subject": "fix(router): wildcard paths when using js reserved words (like constructor and __proto__) (#2357)",
+  "src_churn": 50,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ }
+}

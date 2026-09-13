@@ -13,7 +13,17 @@ import os
 import sys
 from collections.abc import Sequence
 
-from crb.cli.commands import EXIT_ERROR, CliError, config, grade, ledger, mine, repo, route
+from crb.cli.commands import (
+    EXIT_ERROR,
+    CliError,
+    config,
+    grade,
+    ledger,
+    mine,
+    repo,
+    route,
+    service,
+)
 from crb.core.execution import SandboxUnavailable
 from crb.core.git import GitError
 from crb.core.grade import FalseQ1Violation
@@ -42,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     ledger.register(sub)
     route.register(sub)
     config.register(sub)
+    service.register(sub)
     return parser
 
 

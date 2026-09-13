@@ -1,0 +1,2665 @@
+{
+ "e82db2ca3a22c9614c1987392c9cfaa8c6ce99ad": {
+  "task": "e82db2ca3a22c9614c1987392c9cfaa8c6ce99ad",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/test_blueprints.py",
+   "tests/test_cli.py",
+   "tests/test_views.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/test_blueprints.py",
+   "tests/test_cli.py",
+   "tests/test_views.py"
+  ],
+  "src_files": [
+   "src/flask/sansio/app.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-12T13:03:03-08:00",
+  "subject": "fix provide_automatic_options override",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_basic.py::test_provide_automatic_options_attr_enable",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_views.py::test_view_provide_automatic_options_attr_enable"
+  ],
+  "gold_clean": false
+ },
+ "6a64969009bf1898bd302e6a9633f71942523f7f": {
+  "task": "6a64969009bf1898bd302e6a9633f71942523f7f",
+  "target_tests": [
+   "tests/test_reqctx.py",
+   "tests/test_subclassing.py"
+  ],
+  "test_files": [
+   "tests/test_reqctx.py",
+   "tests/test_subclassing.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/ctx.py",
+   "src/flask/templating.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-19T16:58:48-07:00",
+  "subject": "pass context through dispatch methods",
+  "src_churn": 223,
+  "size": "L",
+  "baseline_failing": [
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_environ_for_valid_idna_completes",
+   "tests/test_subclassing.py::test_suppressed_exception_logging"
+  ],
+  "gold_clean": false
+ },
+ "daf1510a4bda652ac2cfca03ec5567b03ddf8bf1": {
+  "task": "daf1510a4bda652ac2cfca03ec5567b03ddf8bf1",
+  "target_tests": [
+   "tests/test_blueprints.py",
+   "tests/test_templating.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py",
+   "tests/test_templating.py"
+  ],
+  "src_files": [
+   "src/flask/sansio/app.py",
+   "src/flask/sansio/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-05-17T12:17:18+08:00",
+  "subject": "use template_filter without parens",
+  "src_churn": 125,
+  "size": "L",
+  "baseline_failing": [
+   "tests/test_blueprints.py::test_template_filter",
+   "tests/test_blueprints.py::test_template_global",
+   "tests/test_blueprints.py::test_template_test",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_templating.py::test_add_template_global",
+   "tests/test_templating.py::test_template_filter",
+   "tests/test_templating.py::test_template_test"
+  ],
+  "gold_clean": true
+ },
+ "9822a0351574790cb66c652fcc396ad7aa2b09d8": {
+  "task": "9822a0351574790cb66c652fcc396ad7aa2b09d8",
+  "target_tests": [
+   "tests/test_helpers.py"
+  ],
+  "test_files": [
+   "tests/test_helpers.py"
+  ],
+  "src_files": [
+   "src/flask/helpers.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-19T08:18:55-07:00",
+  "subject": "refactor stream_with_context for async views",
+  "src_churn": 71,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_cli.py::test_get_version",
+   "tests/test_helpers.py::TestStreaming::test_async_view",
+   "tests/test_helpers.py::test_open_resource_exceptions[x]",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": true
+ },
+ "53b8f08218796d95764c5252bccd8a50a173a6fb": {
+  "task": "53b8f08218796d95764c5252bccd8a50a173a6fb",
+  "target_tests": [
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/flask/testing.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-18T09:41:03-07:00",
+  "subject": "push preserved contexts in correct order",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_testing.py::test_redirect_session"
+  ],
+  "gold_clean": true
+ },
+ "fb54159861708558b5f5658ebdc14709d984361c": {
+  "task": "fb54159861708558b5f5658ebdc14709d984361c",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/sessions.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-03-10T16:34:12Z",
+  "subject": "secret key rotation: fix key list ordering",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_basic.py::test_session_secret_key_fallbacks",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": true
+ },
+ "4f7156f2c3271613b34d04040b502b9d7ae35eb9": {
+  "task": "4f7156f2c3271613b34d04040b502b9d7ae35eb9",
+  "target_tests": [
+   "tests/test_request.py"
+  ],
+  "test_files": [
+   "tests/test_request.py"
+  ],
+  "src_files": [
+   "src/flask/app.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-12T20:32:53-08:00",
+  "subject": "configure and check trusted_hosts",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_request.py::test_trusted_hosts_config"
+  ],
+  "gold_clean": true
+ },
+ "4995a775df21a206b529403bc30d71795a994fd4": {
+  "task": "4995a775df21a206b529403bc30d71795a994fd4",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/app.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-10T20:13:05-08:00",
+  "subject": "fix subdomain_matching=False behavior",
+  "src_churn": 42,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_basic.py::test_server_name_matching[False-False-default-default-default]",
+   "tests/test_basic.py::test_server_name_matching[False-True-default-abc-default]",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": true
+ },
+ "e13373f838ab34027c5a80e16a6cb8262d41eab7": {
+  "task": "e13373f838ab34027c5a80e16a6cb8262d41eab7",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/type_check/typing_app_decorators.py",
+   "tests/type_check/typing_error_handler.py",
+   "tests/type_check/typing_route.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/type_check/typing_app_decorators.py",
+   "tests/type_check/typing_error_handler.py",
+   "tests/type_check/typing_route.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/sessions.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-08T08:09:01-08:00",
+  "subject": "enable secret key rotation",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_basic.py::test_session_secret_key_fallbacks",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": true
+ },
+ "2c3160304278d323da8485057770926d1b582579": {
+  "task": "2c3160304278d323da8485057770926d1b582579",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-07T11:27:51-08:00",
+  "subject": "update env file precedence",
+  "src_churn": 110,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": false
+ },
+ "9efc1ebeeb431769897798cdf8de2c67dcbbc9c0": {
+  "task": "9efc1ebeeb431769897798cdf8de2c67dcbbc9c0",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/sessions.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-09T19:55:22-06:00",
+  "subject": "add SESSION_COOKIE_PARTITIONED config",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_basic.py::test_session_using_session_settings",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": true
+ },
+ "c7a53888a1a514619b0611fd8b7928592f4ed612": {
+  "task": "c7a53888a1a514619b0611fd8b7928592f4ed612",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/test_request.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/test_request.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/wrappers.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-01T13:13:05-07:00",
+  "subject": "add config and docs for limits",
+  "src_churn": 97,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_request.py::test_limit_config"
+  ],
+  "gold_clean": true
+ },
+ "28d5a4d71824ff5823ae310e3fd014b48b33d583": {
+  "task": "28d5a4d71824ff5823ae310e3fd014b48b33d583",
+  "target_tests": [
+   "tests/test_helpers.py"
+  ],
+  "test_files": [
+   "tests/test_helpers.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-07-10T14:37:32Z",
+  "subject": "add encoding parameter to open_resource",
+  "src_churn": 99,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_helpers.py::test_open_resource_with_encoding[utf-16-le]",
+   "tests/test_helpers.py::test_open_resource_with_encoding[utf-8]",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": true
+ },
+ "1af8f95785b85d0937153ee63d504c0b51934d80": {
+  "task": "1af8f95785b85d0937153ee63d504c0b51934d80",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-01-26T10:08:55+08:00",
+  "subject": "fix super call in list comprehension",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": false
+ },
+ "438edcdf01c392619449a6bdbb18f6cf72ef7bb9": {
+  "task": "438edcdf01c392619449a6bdbb18f6cf72ef7bb9",
+  "target_tests": [
+   "tests/test_helpers.py"
+  ],
+  "test_files": [
+   "tests/test_helpers.py"
+  ],
+  "src_files": [
+   "src/flask/app.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-24T16:16:55+01:00",
+  "subject": "Allow self as an argument to url_for",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_helpers.py::TestUrlFor::test_url_for_with_self",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": true
+ },
+ "9f9550247a2798b9dcc28081c15e266442f4e28a": {
+  "task": "9f9550247a2798b9dcc28081c15e266442f4e28a",
+  "target_tests": [
+   "tests/test_cli.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py",
+   "src/flask/testing.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-21T09:39:10-07:00",
+  "subject": "bump werkzeug 2.3.7",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_async.py::test_async_before_after_request",
+   "tests/test_async.py::test_async_error_handler[/bp/error]",
+   "tests/test_async.py::test_async_error_handler[/error]",
+   "tests/test_async.py::test_async_route[/]",
+   "tests/test_async.py::test_async_route[/bp/]",
+   "tests/test_async.py::test_async_route[/home]",
+   "tests/test_async.py::test_async_route[/methodview]",
+   "tests/test_async.py::test_async_route[/view]",
+   "tests/test_basic.py::test_extended_flashing",
+   "tests/test_basic.py::test_provide_automatic_options_attr",
+   "tests/test_basic.py::test_response_type_errors",
+   "tests/test_basic.py::test_server_name_subdomain",
+   "tests/test_basic.py::test_session_cookie_setting",
+   "tests/test_basic.py::test_static_folder_with_ending_slash",
+   "tests/test_basic.py::test_static_folder_with_pathlib_path",
+   "tests/test_basic.py::test_static_route_with_host_matching",
+   "tests/test_basic.py::test_static_url_empty_path",
+   "tests/test_basic.py::test_static_url_empty_path_default",
+   "tests/test_basic.py::test_static_url_path",
+   "tests/test_basic.py::test_static_url_path_with_ending_slash",
+   "tests/test_basic.py::test_subdomain_basic_support",
+   "tests/test_basic.py::test_subdomain_matching",
+   "tests/test_basic.py::test_subdomain_matching_other_name[False]",
+   "tests/test_basic.py::test_subdomain_matching_other_name[True]",
+   "tests/test_basic.py::test_subdomain_matching_with_ports",
+   "tests/test_blueprints.py::test_templates_and_static",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_regression.py::test_aborting",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_normal_environ_completes",
+   "tests/test_reqctx.py::test_session_dynamic_cookie_name",
+   "tests/test_reqctx.py::test_session_error_pops_context",
+   "tests/test_session_interface.py::test_open_session_with_endpoint",
+   "tests/test_signals.py::test_before_render_template",
+   "tests/test_signals.py::test_flash_signal",
+   "tests/test_signals.py::test_request_exception_signal",
+   "tests/test_signals.py::test_request_signals",
+   "tests/test_subclassing.py::test_suppressed_exception_logging",
+   "tests/test_templating.py::test_template_loader_debugging",
+   "tests/test_testing.py::test_blueprint_with_subdomain",
+   "tests/test_testing.py::test_session_transaction_needs_cookies",
+   "tests/test_testing.py::test_session_transactions_no_null_sessions",
+   "tests/test_testing.py::test_subdomain",
+   "tests/test_user_error_handler.py::test_default_error_handler",
+   "tests/test_user_error_handler.py::test_error_handler_blueprint",
+   "tests/test_user_error_handler.py::test_error_handler_http_subclass",
+   "tests/test_user_error_handler.py::test_error_handler_subclass",
+   "tests/test_views.py::test_basic_view",
+   "tests/test_views.py::test_endpoint_override",
+   "tests/test_views.py::test_method_based_view",
+   "tests/test_views.py::test_view_patching",
+   "tests/test_views.py::test_view_provide_automatic_options_attr"
+  ],
+  "gold_clean": false
+ },
+ "5bb30270d2e68d8d9278ac6f5abf67049acba662": {
+  "task": "5bb30270d2e68d8d9278ac6f5abf67049acba662",
+  "target_tests": [
+   "tests/test_cli.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py",
+   "src/flask/testing.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-21T09:39:10-07:00",
+  "subject": "bump werkzeug 2.3.7",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_async.py::test_async_before_after_request",
+   "tests/test_async.py::test_async_error_handler[/bp/error]",
+   "tests/test_async.py::test_async_error_handler[/error]",
+   "tests/test_async.py::test_async_route[/]",
+   "tests/test_async.py::test_async_route[/bp/]",
+   "tests/test_async.py::test_async_route[/home]",
+   "tests/test_async.py::test_async_route[/methodview]",
+   "tests/test_async.py::test_async_route[/view]",
+   "tests/test_basic.py::test_extended_flashing",
+   "tests/test_basic.py::test_provide_automatic_options_attr",
+   "tests/test_basic.py::test_response_type_errors",
+   "tests/test_basic.py::test_server_name_subdomain",
+   "tests/test_basic.py::test_session_cookie_setting",
+   "tests/test_basic.py::test_static_folder_with_ending_slash",
+   "tests/test_basic.py::test_static_folder_with_pathlib_path",
+   "tests/test_basic.py::test_static_route_with_host_matching",
+   "tests/test_basic.py::test_static_url_empty_path",
+   "tests/test_basic.py::test_static_url_empty_path_default",
+   "tests/test_basic.py::test_static_url_path",
+   "tests/test_basic.py::test_static_url_path_with_ending_slash",
+   "tests/test_basic.py::test_subdomain_basic_support",
+   "tests/test_basic.py::test_subdomain_matching",
+   "tests/test_basic.py::test_subdomain_matching_other_name[False]",
+   "tests/test_basic.py::test_subdomain_matching_other_name[True]",
+   "tests/test_basic.py::test_subdomain_matching_with_ports",
+   "tests/test_blueprints.py::test_templates_and_static",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_regression.py::test_aborting",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_normal_environ_completes",
+   "tests/test_reqctx.py::test_session_dynamic_cookie_name",
+   "tests/test_reqctx.py::test_session_error_pops_context",
+   "tests/test_session_interface.py::test_open_session_with_endpoint",
+   "tests/test_signals.py::test_before_render_template",
+   "tests/test_signals.py::test_flash_signal",
+   "tests/test_signals.py::test_request_exception_signal",
+   "tests/test_signals.py::test_request_signals",
+   "tests/test_subclassing.py::test_suppressed_exception_logging",
+   "tests/test_templating.py::test_template_loader_debugging",
+   "tests/test_testing.py::test_blueprint_with_subdomain",
+   "tests/test_testing.py::test_session_transaction_needs_cookies",
+   "tests/test_testing.py::test_session_transactions_no_null_sessions",
+   "tests/test_testing.py::test_subdomain",
+   "tests/test_user_error_handler.py::test_default_error_handler",
+   "tests/test_user_error_handler.py::test_error_handler_blueprint",
+   "tests/test_user_error_handler.py::test_error_handler_http_subclass",
+   "tests/test_user_error_handler.py::test_error_handler_subclass",
+   "tests/test_views.py::test_basic_view",
+   "tests/test_views.py::test_endpoint_override",
+   "tests/test_views.py::test_method_based_view",
+   "tests/test_views.py::test_view_patching",
+   "tests/test_views.py::test_view_provide_automatic_options_attr"
+  ],
+  "gold_clean": false
+ },
+ "8646edca6f47e2cd57464081b3911218d4734f8d": {
+  "task": "8646edca6f47e2cd57464081b3911218d4734f8d",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/sessions.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-01T08:01:32-07:00",
+  "subject": "set `Vary: Cookie` header consistently for session",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_async.py::test_async_before_after_request",
+   "tests/test_async.py::test_async_error_handler[/bp/error]",
+   "tests/test_async.py::test_async_error_handler[/error]",
+   "tests/test_async.py::test_async_route[/]",
+   "tests/test_async.py::test_async_route[/bp/]",
+   "tests/test_async.py::test_async_route[/home]",
+   "tests/test_async.py::test_async_route[/methodview]",
+   "tests/test_async.py::test_async_route[/view]",
+   "tests/test_basic.py::test_provide_automatic_options_attr",
+   "tests/test_basic.py::test_response_type_errors",
+   "tests/test_basic.py::test_server_name_subdomain",
+   "tests/test_basic.py::test_static_folder_with_ending_slash",
+   "tests/test_basic.py::test_static_route_with_host_matching",
+   "tests/test_basic.py::test_static_url_path",
+   "tests/test_basic.py::test_static_url_path_with_ending_slash",
+   "tests/test_basic.py::test_subdomain_basic_support",
+   "tests/test_basic.py::test_subdomain_matching",
+   "tests/test_basic.py::test_subdomain_matching_other_name[False]",
+   "tests/test_basic.py::test_subdomain_matching_other_name[True]",
+   "tests/test_basic.py::test_subdomain_matching_with_ports",
+   "tests/test_blueprints.py::test_templates_and_static",
+   "tests/test_cli.py::test_appgroup_app_context",
+   "tests/test_cli.py::test_cli_name",
+   "tests/test_cli.py::test_find_best_app",
+   "tests/test_cli.py::test_flaskgroup_app_context",
+   "tests/test_cli.py::test_flaskgroup_debug[False]",
+   "tests/test_cli.py::test_flaskgroup_debug[True]",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_locate_app[cliapp.app-None-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.app-testapp-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-None-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app()-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app2(\"foo\",",
+   "tests/test_cli.py::test_locate_app_raises[cliapp.app-notanapp]",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_cli.py::test_scriptinfo",
+   "tests/test_cli.py::test_with_appcontext",
+   "tests/test_helpers.py::TestNoImports::test_name_with_import_error",
+   "tests/test_instance_config.py::test_egg_installed_paths",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_normal_environ_completes",
+   "tests/test_reqctx.py::test_session_dynamic_cookie_name",
+   "tests/test_reqctx.py::test_session_error_pops_context",
+   "tests/test_session_interface.py::test_open_session_with_endpoint",
+   "tests/test_signals.py::test_before_render_template",
+   "tests/test_signals.py::test_request_exception_signal",
+   "tests/test_signals.py::test_request_signals",
+   "tests/test_subclassing.py::test_suppressed_exception_logging",
+   "tests/test_templating.py::test_template_loader_debugging",
+   "tests/test_testing.py::test_blueprint_with_subdomain",
+   "tests/test_testing.py::test_session_transactions_no_null_sessions",
+   "tests/test_testing.py::test_subdomain",
+   "tests/test_user_error_handler.py::test_default_error_handler",
+   "tests/test_views.py::test_view_provide_automatic_options_attr"
+  ],
+  "gold_clean": false
+ },
+ "8705dd39c4fa563ea0fe0bf84c85da8fcc98b88d": {
+  "task": "8705dd39c4fa563ea0fe0bf84c85da8fcc98b88d",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/sessions.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-01T08:01:32-07:00",
+  "subject": "set `Vary: Cookie` header consistently for session",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_async.py::test_async_before_after_request",
+   "tests/test_async.py::test_async_error_handler[/bp/error]",
+   "tests/test_async.py::test_async_error_handler[/error]",
+   "tests/test_async.py::test_async_route[/]",
+   "tests/test_async.py::test_async_route[/bp/]",
+   "tests/test_async.py::test_async_route[/home]",
+   "tests/test_async.py::test_async_route[/methodview]",
+   "tests/test_async.py::test_async_route[/view]",
+   "tests/test_basic.py::test_provide_automatic_options_attr",
+   "tests/test_basic.py::test_response_type_errors",
+   "tests/test_basic.py::test_server_name_subdomain",
+   "tests/test_basic.py::test_static_folder_with_ending_slash",
+   "tests/test_basic.py::test_static_route_with_host_matching",
+   "tests/test_basic.py::test_static_url_path",
+   "tests/test_basic.py::test_static_url_path_with_ending_slash",
+   "tests/test_basic.py::test_subdomain_basic_support",
+   "tests/test_basic.py::test_subdomain_matching",
+   "tests/test_basic.py::test_subdomain_matching_other_name[False]",
+   "tests/test_basic.py::test_subdomain_matching_other_name[True]",
+   "tests/test_basic.py::test_subdomain_matching_with_ports",
+   "tests/test_blueprints.py::test_templates_and_static",
+   "tests/test_cli.py::test_appgroup_app_context",
+   "tests/test_cli.py::test_cli_name",
+   "tests/test_cli.py::test_find_best_app",
+   "tests/test_cli.py::test_flaskgroup_app_context",
+   "tests/test_cli.py::test_flaskgroup_debug[False]",
+   "tests/test_cli.py::test_flaskgroup_debug[True]",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_locate_app[cliapp.app-None-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.app-testapp-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-None-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app()-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app2(\"foo\",",
+   "tests/test_cli.py::test_locate_app_raises[cliapp.app-notanapp]",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_cli.py::test_scriptinfo",
+   "tests/test_cli.py::test_with_appcontext",
+   "tests/test_helpers.py::TestNoImports::test_name_with_import_error",
+   "tests/test_instance_config.py::test_egg_installed_paths",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_normal_environ_completes",
+   "tests/test_reqctx.py::test_session_dynamic_cookie_name",
+   "tests/test_reqctx.py::test_session_error_pops_context",
+   "tests/test_session_interface.py::test_open_session_with_endpoint",
+   "tests/test_signals.py::test_before_render_template",
+   "tests/test_signals.py::test_request_exception_signal",
+   "tests/test_signals.py::test_request_signals",
+   "tests/test_subclassing.py::test_suppressed_exception_logging",
+   "tests/test_templating.py::test_template_loader_debugging",
+   "tests/test_testing.py::test_blueprint_with_subdomain",
+   "tests/test_testing.py::test_session_transactions_no_null_sessions",
+   "tests/test_testing.py::test_subdomain",
+   "tests/test_user_error_handler.py::test_default_error_handler",
+   "tests/test_views.py::test_view_provide_automatic_options_attr"
+  ],
+  "gold_clean": false
+ },
+ "2e8fe7b2f2b541a60c90c625446647b22c5cacc2": {
+  "task": "2e8fe7b2f2b541a60c90c625446647b22c5cacc2",
+  "target_tests": [
+   "tests/typing/typing_route.py"
+  ],
+  "test_files": [
+   "tests/typing/typing_route.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/helpers.py",
+   "src/flask/sessions.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-20T11:07:30-07:00",
+  "subject": "drop support for python 3.7",
+  "src_churn": 25,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_async.py::test_async_before_after_request",
+   "tests/test_async.py::test_async_error_handler[/bp/error]",
+   "tests/test_async.py::test_async_error_handler[/error]",
+   "tests/test_async.py::test_async_route[/]",
+   "tests/test_async.py::test_async_route[/bp/]",
+   "tests/test_async.py::test_async_route[/home]",
+   "tests/test_async.py::test_async_route[/methodview]",
+   "tests/test_async.py::test_async_route[/view]",
+   "tests/test_basic.py::test_provide_automatic_options_attr",
+   "tests/test_basic.py::test_response_type_errors",
+   "tests/test_basic.py::test_server_name_subdomain",
+   "tests/test_basic.py::test_static_folder_with_ending_slash",
+   "tests/test_basic.py::test_static_route_with_host_matching",
+   "tests/test_basic.py::test_static_url_path",
+   "tests/test_basic.py::test_static_url_path_with_ending_slash",
+   "tests/test_basic.py::test_subdomain_basic_support",
+   "tests/test_basic.py::test_subdomain_matching",
+   "tests/test_basic.py::test_subdomain_matching_other_name[False]",
+   "tests/test_basic.py::test_subdomain_matching_other_name[True]",
+   "tests/test_basic.py::test_subdomain_matching_with_ports",
+   "tests/test_blueprints.py::test_templates_and_static",
+   "tests/test_cli.py::test_appgroup_app_context",
+   "tests/test_cli.py::test_cli_name",
+   "tests/test_cli.py::test_find_best_app",
+   "tests/test_cli.py::test_flaskgroup_app_context",
+   "tests/test_cli.py::test_flaskgroup_debug[False]",
+   "tests/test_cli.py::test_flaskgroup_debug[True]",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_locate_app[cliapp.app-None-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.app-testapp-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-None-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app()-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app2(\"foo\",",
+   "tests/test_cli.py::test_locate_app_raises[cliapp.app-notanapp]",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_cli.py::test_scriptinfo",
+   "tests/test_cli.py::test_with_appcontext",
+   "tests/test_helpers.py::TestNoImports::test_name_with_import_error",
+   "tests/test_instance_config.py::test_egg_installed_paths",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_normal_environ_completes",
+   "tests/test_reqctx.py::test_session_dynamic_cookie_name",
+   "tests/test_reqctx.py::test_session_error_pops_context",
+   "tests/test_session_interface.py::test_open_session_with_endpoint",
+   "tests/test_signals.py::test_before_render_template",
+   "tests/test_signals.py::test_request_exception_signal",
+   "tests/test_signals.py::test_request_signals",
+   "tests/test_subclassing.py::test_suppressed_exception_logging",
+   "tests/test_templating.py::test_template_loader_debugging",
+   "tests/test_testing.py::test_blueprint_with_subdomain",
+   "tests/test_testing.py::test_session_transactions_no_null_sessions",
+   "tests/test_testing.py::test_subdomain",
+   "tests/test_user_error_handler.py::test_default_error_handler",
+   "tests/test_views.py::test_view_provide_automatic_options_attr"
+  ],
+  "gold_clean": false
+ },
+ "84c007d34f7f0b8737310fe4d67be12c463e0130": {
+  "task": "84c007d34f7f0b8737310fe4d67be12c463e0130",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-14T09:34:26-07:00",
+  "subject": "show subdomain or host in routes output",
+  "src_churn": 65,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_async.py::test_async_before_after_request",
+   "tests/test_async.py::test_async_error_handler[/bp/error]",
+   "tests/test_async.py::test_async_error_handler[/error]",
+   "tests/test_async.py::test_async_route[/]",
+   "tests/test_async.py::test_async_route[/bp/]",
+   "tests/test_async.py::test_async_route[/home]",
+   "tests/test_async.py::test_async_route[/methodview]",
+   "tests/test_async.py::test_async_route[/view]",
+   "tests/test_basic.py::test_provide_automatic_options_attr",
+   "tests/test_basic.py::test_response_type_errors",
+   "tests/test_basic.py::test_server_name_subdomain",
+   "tests/test_basic.py::test_static_folder_with_ending_slash",
+   "tests/test_basic.py::test_static_route_with_host_matching",
+   "tests/test_basic.py::test_static_url_path",
+   "tests/test_basic.py::test_static_url_path_with_ending_slash",
+   "tests/test_basic.py::test_subdomain_basic_support",
+   "tests/test_basic.py::test_subdomain_matching",
+   "tests/test_basic.py::test_subdomain_matching_other_name[False]",
+   "tests/test_basic.py::test_subdomain_matching_other_name[True]",
+   "tests/test_basic.py::test_subdomain_matching_with_ports",
+   "tests/test_blueprints.py::test_templates_and_static",
+   "tests/test_cli.py::TestRoutes::test_host",
+   "tests/test_cli.py::TestRoutes::test_subdomain",
+   "tests/test_cli.py::test_appgroup_app_context",
+   "tests/test_cli.py::test_cli_name",
+   "tests/test_cli.py::test_find_best_app",
+   "tests/test_cli.py::test_flaskgroup_app_context",
+   "tests/test_cli.py::test_flaskgroup_debug[False]",
+   "tests/test_cli.py::test_flaskgroup_debug[True]",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_locate_app[cliapp.app-None-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.app-testapp-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-None-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app()-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app2(\"foo\",",
+   "tests/test_cli.py::test_locate_app_raises[cliapp.app-notanapp]",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_cli.py::test_scriptinfo",
+   "tests/test_cli.py::test_with_appcontext",
+   "tests/test_helpers.py::TestNoImports::test_name_with_import_error",
+   "tests/test_instance_config.py::test_egg_installed_paths",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_normal_environ_completes",
+   "tests/test_reqctx.py::test_session_dynamic_cookie_name",
+   "tests/test_reqctx.py::test_session_error_pops_context",
+   "tests/test_session_interface.py::test_open_session_with_endpoint",
+   "tests/test_signals.py::test_before_render_template",
+   "tests/test_signals.py::test_request_exception_signal",
+   "tests/test_signals.py::test_request_signals",
+   "tests/test_subclassing.py::test_suppressed_exception_logging",
+   "tests/test_templating.py::test_template_loader_debugging",
+   "tests/test_testing.py::test_blueprint_with_subdomain",
+   "tests/test_testing.py::test_session_transactions_no_null_sessions",
+   "tests/test_testing.py::test_subdomain",
+   "tests/test_user_error_handler.py::test_default_error_handler",
+   "tests/test_views.py::test_view_provide_automatic_options_attr"
+  ],
+  "gold_clean": false
+ },
+ "9cb1a7a52d7927071e2b737d52f902f006969e82": {
+  "task": "9cb1a7a52d7927071e2b737d52f902f006969e82",
+  "target_tests": [
+   "tests/test_signals.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_signals.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/flask/__init__.py",
+   "src/flask/signals.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-13T07:34:14-07:00",
+  "subject": "blinker is required, signals are always available",
+  "src_churn": 71,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_async.py::test_async_before_after_request",
+   "tests/test_async.py::test_async_error_handler[/bp/error]",
+   "tests/test_async.py::test_async_error_handler[/error]",
+   "tests/test_async.py::test_async_route[/]",
+   "tests/test_async.py::test_async_route[/bp/]",
+   "tests/test_async.py::test_async_route[/home]",
+   "tests/test_async.py::test_async_route[/methodview]",
+   "tests/test_async.py::test_async_route[/view]",
+   "tests/test_basic.py::test_provide_automatic_options_attr",
+   "tests/test_basic.py::test_response_type_errors",
+   "tests/test_basic.py::test_server_name_subdomain",
+   "tests/test_basic.py::test_static_folder_with_ending_slash",
+   "tests/test_basic.py::test_static_route_with_host_matching",
+   "tests/test_basic.py::test_static_url_path",
+   "tests/test_basic.py::test_static_url_path_with_ending_slash",
+   "tests/test_basic.py::test_subdomain_basic_support",
+   "tests/test_basic.py::test_subdomain_matching",
+   "tests/test_basic.py::test_subdomain_matching_other_name[False]",
+   "tests/test_basic.py::test_subdomain_matching_other_name[True]",
+   "tests/test_basic.py::test_subdomain_matching_with_ports",
+   "tests/test_blueprints.py::test_templates_and_static",
+   "tests/test_cli.py::test_appgroup_app_context",
+   "tests/test_cli.py::test_cli_name",
+   "tests/test_cli.py::test_find_best_app",
+   "tests/test_cli.py::test_flaskgroup_app_context",
+   "tests/test_cli.py::test_flaskgroup_debug[False]",
+   "tests/test_cli.py::test_flaskgroup_debug[True]",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_locate_app[cliapp.app-None-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.app-testapp-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-None-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app()-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app2(\"foo\",",
+   "tests/test_cli.py::test_locate_app_raises[cliapp.app-notanapp]",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_cli.py::test_scriptinfo",
+   "tests/test_cli.py::test_with_appcontext",
+   "tests/test_helpers.py::TestNoImports::test_name_with_import_error",
+   "tests/test_instance_config.py::test_egg_installed_paths",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_normal_environ_completes",
+   "tests/test_reqctx.py::test_session_dynamic_cookie_name",
+   "tests/test_reqctx.py::test_session_error_pops_context",
+   "tests/test_session_interface.py::test_open_session_with_endpoint",
+   "tests/test_signals.py::test_before_render_template",
+   "tests/test_signals.py::test_request_exception_signal",
+   "tests/test_signals.py::test_request_signals",
+   "tests/test_subclassing.py::test_suppressed_exception_logging",
+   "tests/test_templating.py::test_template_loader_debugging",
+   "tests/test_testing.py::test_blueprint_with_subdomain",
+   "tests/test_testing.py::test_session_transactions_no_null_sessions",
+   "tests/test_testing.py::test_subdomain",
+   "tests/test_user_error_handler.py::test_default_error_handler",
+   "tests/test_views.py::test_view_provide_automatic_options_attr"
+  ],
+  "gold_clean": false
+ },
+ "c24f8c8199f8ceda7a7cfb5e91773eba595f5b67": {
+  "task": "c24f8c8199f8ceda7a7cfb5e91773eba595f5b67",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/helpers.py",
+   "src/flask/sessions.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-12T12:38:22-07:00",
+  "subject": "no cookie domain by default",
+  "src_churn": 71,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_async.py::test_async_before_after_request",
+   "tests/test_async.py::test_async_error_handler[/bp/error]",
+   "tests/test_async.py::test_async_error_handler[/error]",
+   "tests/test_async.py::test_async_route[/]",
+   "tests/test_async.py::test_async_route[/bp/]",
+   "tests/test_async.py::test_async_route[/home]",
+   "tests/test_async.py::test_async_route[/methodview]",
+   "tests/test_async.py::test_async_route[/view]",
+   "tests/test_basic.py::test_provide_automatic_options_attr",
+   "tests/test_basic.py::test_response_type_errors",
+   "tests/test_basic.py::test_server_name_subdomain",
+   "tests/test_basic.py::test_static_folder_with_ending_slash",
+   "tests/test_basic.py::test_static_route_with_host_matching",
+   "tests/test_basic.py::test_static_url_path",
+   "tests/test_basic.py::test_static_url_path_with_ending_slash",
+   "tests/test_basic.py::test_subdomain_basic_support",
+   "tests/test_basic.py::test_subdomain_matching",
+   "tests/test_basic.py::test_subdomain_matching_other_name[False]",
+   "tests/test_basic.py::test_subdomain_matching_other_name[True]",
+   "tests/test_basic.py::test_subdomain_matching_with_ports",
+   "tests/test_blueprints.py::test_templates_and_static",
+   "tests/test_cli.py::test_appgroup_app_context",
+   "tests/test_cli.py::test_cli_name",
+   "tests/test_cli.py::test_find_best_app",
+   "tests/test_cli.py::test_flaskgroup_app_context",
+   "tests/test_cli.py::test_flaskgroup_debug[False]",
+   "tests/test_cli.py::test_flaskgroup_debug[True]",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_locate_app[cliapp.app-None-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.app-testapp-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-None-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app()-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app2(\"foo\",",
+   "tests/test_cli.py::test_locate_app_raises[cliapp.app-notanapp]",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_cli.py::test_scriptinfo",
+   "tests/test_cli.py::test_with_appcontext",
+   "tests/test_helpers.py::TestNoImports::test_name_with_import_error",
+   "tests/test_instance_config.py::test_egg_installed_paths",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_normal_environ_completes",
+   "tests/test_reqctx.py::test_session_dynamic_cookie_name",
+   "tests/test_reqctx.py::test_session_error_pops_context",
+   "tests/test_session_interface.py::test_open_session_with_endpoint",
+   "tests/test_signals.py::test_before_render_template",
+   "tests/test_signals.py::test_request_exception_signal",
+   "tests/test_signals.py::test_request_signals",
+   "tests/test_subclassing.py::test_suppressed_exception_logging",
+   "tests/test_templating.py::test_template_loader_debugging",
+   "tests/test_testing.py::test_blueprint_with_subdomain",
+   "tests/test_testing.py::test_session_transactions_no_null_sessions",
+   "tests/test_testing.py::test_subdomain",
+   "tests/test_user_error_handler.py::test_default_error_handler",
+   "tests/test_views.py::test_view_provide_automatic_options_attr"
+  ],
+  "gold_clean": false
+ },
+ "04c21387dbc454fb59cae9c9bb21a13358cb5a34": {
+  "task": "04c21387dbc454fb59cae9c9bb21a13358cb5a34",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/test_json.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/test_json.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/flask/testing.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-12T10:33:52-07:00",
+  "subject": "update test cookie handling for Werkzeug 2.3",
+  "src_churn": 70,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_async.py::test_async_before_after_request",
+   "tests/test_async.py::test_async_error_handler[/bp/error]",
+   "tests/test_async.py::test_async_error_handler[/error]",
+   "tests/test_async.py::test_async_route[/]",
+   "tests/test_async.py::test_async_route[/bp/]",
+   "tests/test_async.py::test_async_route[/home]",
+   "tests/test_async.py::test_async_route[/methodview]",
+   "tests/test_async.py::test_async_route[/view]",
+   "tests/test_basic.py::test_provide_automatic_options_attr",
+   "tests/test_basic.py::test_response_type_errors",
+   "tests/test_basic.py::test_server_name_subdomain",
+   "tests/test_basic.py::test_static_folder_with_ending_slash",
+   "tests/test_basic.py::test_static_route_with_host_matching",
+   "tests/test_basic.py::test_static_url_path",
+   "tests/test_basic.py::test_static_url_path_with_ending_slash",
+   "tests/test_basic.py::test_subdomain_basic_support",
+   "tests/test_basic.py::test_subdomain_matching",
+   "tests/test_basic.py::test_subdomain_matching_other_name[False]",
+   "tests/test_basic.py::test_subdomain_matching_other_name[True]",
+   "tests/test_basic.py::test_subdomain_matching_with_ports",
+   "tests/test_blueprints.py::test_templates_and_static",
+   "tests/test_cli.py::test_appgroup_app_context",
+   "tests/test_cli.py::test_cli_name",
+   "tests/test_cli.py::test_find_best_app",
+   "tests/test_cli.py::test_flaskgroup_app_context",
+   "tests/test_cli.py::test_flaskgroup_debug[False]",
+   "tests/test_cli.py::test_flaskgroup_debug[True]",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_locate_app[cliapp.app-None-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.app-testapp-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-None-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app()-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app2(\"foo\",",
+   "tests/test_cli.py::test_locate_app_raises[cliapp.app-notanapp]",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_cli.py::test_scriptinfo",
+   "tests/test_cli.py::test_with_appcontext",
+   "tests/test_helpers.py::TestNoImports::test_name_with_import_error",
+   "tests/test_instance_config.py::test_egg_installed_paths",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_normal_environ_completes",
+   "tests/test_reqctx.py::test_session_dynamic_cookie_name",
+   "tests/test_reqctx.py::test_session_error_pops_context",
+   "tests/test_session_interface.py::test_open_session_with_endpoint",
+   "tests/test_signals.py::test_before_render_template",
+   "tests/test_signals.py::test_request_exception_signal",
+   "tests/test_signals.py::test_request_signals",
+   "tests/test_subclassing.py::test_suppressed_exception_logging",
+   "tests/test_templating.py::test_template_loader_debugging",
+   "tests/test_testing.py::test_blueprint_with_subdomain",
+   "tests/test_testing.py::test_session_transactions_no_null_sessions",
+   "tests/test_testing.py::test_subdomain",
+   "tests/test_user_error_handler.py::test_default_error_handler",
+   "tests/test_views.py::test_view_provide_automatic_options_attr"
+  ],
+  "gold_clean": false
+ },
+ "b8b410014d85f9861acc87c5f21c9a55a42d09c9": {
+  "task": "b8b410014d85f9861acc87c5f21c9a55a42d09c9",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-03-04T21:09:34+03:00",
+  "subject": "require a non-empty name for blueprints",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_async.py::test_async_before_after_request",
+   "tests/test_async.py::test_async_error_handler[/bp/error]",
+   "tests/test_async.py::test_async_error_handler[/error]",
+   "tests/test_async.py::test_async_route[/]",
+   "tests/test_async.py::test_async_route[/bp/]",
+   "tests/test_async.py::test_async_route[/home]",
+   "tests/test_async.py::test_async_route[/methodview]",
+   "tests/test_async.py::test_async_route[/view]",
+   "tests/test_basic.py::test_provide_automatic_options_attr",
+   "tests/test_basic.py::test_response_type_errors",
+   "tests/test_basic.py::test_server_name_subdomain",
+   "tests/test_basic.py::test_static_folder_with_ending_slash",
+   "tests/test_basic.py::test_static_route_with_host_matching",
+   "tests/test_basic.py::test_static_url_path",
+   "tests/test_basic.py::test_static_url_path_with_ending_slash",
+   "tests/test_basic.py::test_subdomain_basic_support",
+   "tests/test_basic.py::test_subdomain_matching",
+   "tests/test_basic.py::test_subdomain_matching_other_name[False]",
+   "tests/test_basic.py::test_subdomain_matching_other_name[True]",
+   "tests/test_basic.py::test_subdomain_matching_with_ports",
+   "tests/test_blueprints.py::test_templates_and_static",
+   "tests/test_cli.py::test_appgroup_app_context",
+   "tests/test_cli.py::test_cli_name",
+   "tests/test_cli.py::test_find_best_app",
+   "tests/test_cli.py::test_flaskgroup_app_context",
+   "tests/test_cli.py::test_flaskgroup_debug[False]",
+   "tests/test_cli.py::test_flaskgroup_debug[True]",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_cli.py::test_help_echo_exception",
+   "tests/test_cli.py::test_help_echo_loading_error",
+   "tests/test_cli.py::test_locate_app[cliapp.app-None-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.app-testapp-testapp]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-None-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app()-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app-app]",
+   "tests/test_cli.py::test_locate_app[cliapp.factory-create_app2(\"foo\",",
+   "tests/test_cli.py::test_locate_app_raises[cliapp.app-notanapp]",
+   "tests/test_cli.py::test_no_command_echo_loading_error",
+   "tests/test_cli.py::test_scriptinfo",
+   "tests/test_cli.py::test_with_appcontext",
+   "tests/test_helpers.py::TestNoImports::test_name_with_import_error",
+   "tests/test_instance_config.py::test_egg_installed_paths",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request",
+   "tests/test_reqctx.py::test_normal_environ_completes",
+   "tests/test_reqctx.py::test_session_dynamic_cookie_name",
+   "tests/test_reqctx.py::test_session_error_pops_context",
+   "tests/test_session_interface.py::test_open_session_with_endpoint",
+   "tests/test_signals.py::test_before_render_template",
+   "tests/test_signals.py::test_request_exception_signal",
+   "tests/test_signals.py::test_request_signals",
+   "tests/test_subclassing.py::test_suppressed_exception_logging",
+   "tests/test_templating.py::test_template_loader_debugging",
+   "tests/test_testing.py::test_blueprint_with_subdomain",
+   "tests/test_testing.py::test_session_transactions_no_null_sessions",
+   "tests/test_testing.py::test_subdomain",
+   "tests/test_user_error_handler.py::test_default_error_handler",
+   "tests/test_views.py::test_view_provide_automatic_options_attr"
+  ],
+  "gold_clean": false
+ },
+ "b10b6d4af1127fdfb0a74221af0c020ced71fece": {
+  "task": "b10b6d4af1127fdfb0a74221af0c020ced71fece",
+  "target_tests": [
+   "tests/test_config.py"
+  ],
+  "test_files": [
+   "tests/test_config.py"
+  ],
+  "src_files": [
+   "src/flask/config.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-22T14:40:49+01:00",
+  "subject": "add text parameter to config.from_file",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2a33c1785412075c09f9f55b3e25f2bc995ca461": {
+  "task": "2a33c1785412075c09f9f55b3e25f2bc995ca461",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/app.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-23T09:28:42-08:00",
+  "subject": "deprecate got_first_request property",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9c02f07f9bb4c88207c2a6860742c452c35d2948": {
+  "task": "9c02f07f9bb4c88207c2a6860742c452c35d2948",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/test_json_tag.py",
+   "tests/test_templating.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/test_json_tag.py",
+   "tests/test_templating.py"
+  ],
+  "src_files": [
+   "src/flask/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-23T08:55:01-08:00",
+  "subject": "deprecate markupsafe exports",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cabda5935322d75e7aedb3ee6d59fb7ab62bd674": {
+  "task": "cabda5935322d75e7aedb3ee6d59fb7ab62bd674",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-04T16:45:20Z",
+  "subject": "Ensure that blueprint subdomains suffix-chain",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d7b6c1f6703df405c69da45e7e0ba3d1aed512ce": {
+  "task": "d7b6c1f6703df405c69da45e7e0ba3d1aed512ce",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-31T12:49:16+04:00",
+  "subject": "Fix subdomain inheritance for nested blueprints.",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ef95998d79eed3b8350d8db825e3d98f25c179f2": {
+  "task": "ef95998d79eed3b8350d8db825e3d98f25c179f2",
+  "target_tests": [
+   "tests/test_helpers.py"
+  ],
+  "test_files": [
+   "tests/test_helpers.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/cli.py",
+   "src/flask/helpers.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-01T15:11:21-07:00",
+  "subject": "deprecate FLASK_ENV",
+  "src_churn": 166,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5d8e35653fca0d7ee01519d556c7851089de82ea": {
+  "task": "5d8e35653fca0d7ee01519d556c7851089de82ea",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-01T09:13:01-07:00",
+  "subject": "refactor lazy loading",
+  "src_churn": 108,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4bf7415a9692b0c1a69cd50a17c1cbda4a75931b": {
+  "task": "4bf7415a9692b0c1a69cd50a17c1cbda4a75931b",
+  "target_tests": [
+   "tests/typing/typing_route.py"
+  ],
+  "test_files": [
+   "tests/typing/typing_route.py"
+  ],
+  "src_files": [
+   "src/flask/typing.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-07-14T11:22:22+02:00",
+  "subject": "allow TypedDict as a response value",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "60b845ebabeb77e401186f4b83de21d3f9c6a9d7": {
+  "task": "60b845ebabeb77e401186f4b83de21d3f9c6a9d7",
+  "target_tests": [
+   "tests/typing/typing_route.py"
+  ],
+  "test_files": [
+   "tests/typing/typing_route.py"
+  ],
+  "src_files": [
+   "src/flask/typing.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-07-02T21:40:20-07:00",
+  "subject": "update typing tests for json",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ca2bfbb0ac66fbbeeedbf6bbe317bee45cb23d29": {
+  "task": "ca2bfbb0ac66fbbeeedbf6bbe317bee45cb23d29",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/typing.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-07-02T10:39:18+08:00",
+  "subject": "Support returning list as JSON",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5544d09477af3221d988ec18b086930c2d9e67cd": {
+  "task": "5544d09477af3221d988ec18b086930c2d9e67cd",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-29T21:11:58-07:00",
+  "subject": "re-add flag to skip unguarded app.run from CLI",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "46433e9807a1c960d6b2bb0e125cf16a90167d97": {
+  "task": "46433e9807a1c960d6b2bb0e125cf16a90167d97",
+  "target_tests": [
+   "tests/test_templating.py"
+  ],
+  "test_files": [
+   "tests/test_templating.py"
+  ],
+  "src_files": [
+   "src/flask/__init__.py",
+   "src/flask/templating.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-09T09:21:48+01:00",
+  "subject": "add generate_template and generate_template_string functions",
+  "src_churn": 60,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "762382e436062183b1e1fa6f3bda594090a452e7": {
+  "task": "762382e436062183b1e1fa6f3bda594090a452e7",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/typing/typing_route.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/typing/typing_route.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/typing.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-09T09:30:21+01:00",
+  "subject": "view functions can return generators as responses directly",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ed42e9292811a95f2a68e06a9ae50cb5872216a3": {
+  "task": "ed42e9292811a95f2a68e06a9ae50cb5872216a3",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/sessions.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-17T10:38:17-04:00",
+  "subject": "session expiration datetime is UTC timezone-aware",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c9e000b9cea2e117218d460874d86301fbb43c43": {
+  "task": "c9e000b9cea2e117218d460874d86301fbb43c43",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-17T11:14:22-07:00",
+  "subject": "with_appcontext lasts for the lifetime of the click context",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "aa801c431ad1f979bce3ea1afbd88e7796ebfd7e": {
+  "task": "aa801c431ad1f979bce3ea1afbd88e7796ebfd7e",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-15T14:07:00-07:00",
+  "subject": "FlaskGroup can be nested",
+  "src_churn": 30,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6e23239567efde1c2e272db87c53444d6c22a1bb": {
+  "task": "6e23239567efde1c2e272db87c53444d6c22a1bb",
+  "target_tests": [
+   "tests/test_views.py"
+  ],
+  "test_files": [
+   "tests/test_views.py"
+  ],
+  "src_files": [
+   "src/flask/views.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-06T11:04:04-07:00",
+  "subject": "add View.init_every_request attribute",
+  "src_churn": 54,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "96c97dec095f204b8a557c5ea804afdd329e3c43": {
+  "task": "96c97dec095f204b8a557c5ea804afdd329e3c43",
+  "target_tests": [
+   "tests/test_async.py",
+   "tests/test_basic.py",
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_async.py",
+   "tests/test_basic.py",
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-06T10:00:21-07:00",
+  "subject": "deprecate before_first_request",
+  "src_churn": 58,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3ba37d2afe6511c3f3153248f7342174bea5b131": {
+  "task": "3ba37d2afe6511c3f3153248f7342174bea5b131",
+  "target_tests": [
+   "tests/test_instance_config.py"
+  ],
+  "test_files": [
+   "tests/test_instance_config.py"
+  ],
+  "src_files": [
+   "src/flask/scaffold.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-06T08:24:05-07:00",
+  "subject": "fix uninstalled package tests under tox",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "88bcf78439b66b5fcba9f4d3a1c56307f98dbf1d": {
+  "task": "88bcf78439b66b5fcba9f4d3a1c56307f98dbf1d",
+  "target_tests": [
+   "tests/test_instance_config.py"
+  ],
+  "test_files": [
+   "tests/test_instance_config.py"
+  ],
+  "src_files": [
+   "src/flask/scaffold.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-05-26T21:12:36+02:00",
+  "subject": "instance_path for namespace packages uses path closest to submodule",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3351a8677e5bd1e1b8cfe2860b73b3422cde4f31": {
+  "task": "3351a8677e5bd1e1b8cfe2860b73b3422cde4f31",
+  "target_tests": [
+   "tests/typing/typing_error_handler.py"
+  ],
+  "test_files": [
+   "tests/typing/typing_error_handler.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py",
+   "src/flask/scaffold.py",
+   "src/flask/typing.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-05T15:44:28-07:00",
+  "subject": "add errorhandler type check tests",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1232d698600e11dcb83bb5dc349ca785eae02d2f": {
+  "task": "1232d698600e11dcb83bb5dc349ca785eae02d2f",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-05-23T09:46:20-07:00",
+  "subject": "inline conditional imports for cli behaviors",
+  "src_churn": 53,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "39f93632964ecabfcb9c1980e2add922098aad80": {
+  "task": "39f93632964ecabfcb9c1980e2add922098aad80",
+  "target_tests": [
+   "tests/test_helpers.py"
+  ],
+  "test_files": [
+   "tests/test_helpers.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/helpers.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-05-14T12:43:38-07:00",
+  "subject": "finish moving url_for to app",
+  "src_churn": 333,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "eb5dd9f5ef255c578cbbe13c1cb4dd11389d5519": {
+  "task": "eb5dd9f5ef255c578cbbe13c1cb4dd11389d5519",
+  "target_tests": [
+   "tests/test_helpers.py"
+  ],
+  "test_files": [
+   "tests/test_helpers.py"
+  ],
+  "src_files": [
+   "src/flask/__init__.py",
+   "src/flask/app.py",
+   "src/flask/helpers.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-05-02T10:16:12-06:00",
+  "subject": "add aborter object to app",
+  "src_churn": 59,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "fdab801fbbd9de5adbdb3320ca4a1cb116c892f5": {
+  "task": "fdab801fbbd9de5adbdb3320ca4a1cb116c892f5",
+  "target_tests": [
+   "tests/test_helpers.py"
+  ],
+  "test_files": [
+   "tests/test_helpers.py"
+  ],
+  "src_files": [
+   "src/flask/__init__.py",
+   "src/flask/app.py",
+   "src/flask/helpers.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-05-02T12:44:15-04:00",
+  "subject": "add redirect method to app",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1e5dd430223369d13ea94ffffe22bca53a98e730": {
+  "task": "1e5dd430223369d13ea94ffffe22bca53a98e730",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/test_user_error_handler.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/test_user_error_handler.py"
+  ],
+  "src_files": [
+   "src/flask/scaffold.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-04-29T01:49:23+08:00",
+  "subject": "refactor error checks in register_error_handler",
+  "src_churn": 43,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5050a18a0057df4cda6f6b00483d12d29cb59239": {
+  "task": "5050a18a0057df4cda6f6b00483d12d29cb59239",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-04-18T08:52:01-04:00",
+  "subject": "evaluate --cert before --key",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4eb5e9455b2a8f15f3dc5065a47f8e43ac47e539": {
+  "task": "4eb5e9455b2a8f15f3dc5065a47f8e43ac47e539",
+  "target_tests": [
+   "tests/test_config.py"
+  ],
+  "test_files": [
+   "tests/test_config.py"
+  ],
+  "src_files": [
+   "src/flask/config.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-25T11:00:32-07:00",
+  "subject": "more from_prefixed_env features",
+  "src_churn": 84,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "08a283af5efc999d4f1e29275317a5c0c05c6f7b": {
+  "task": "08a283af5efc999d4f1e29275317a5c0c05c6f7b",
+  "target_tests": [
+   "tests/test_config.py"
+  ],
+  "test_files": [
+   "tests/test_config.py"
+  ],
+  "src_files": [
+   "src/flask/config.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-08T21:40:48Z",
+  "subject": "Allow loading of environment variables into the config",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "81c7ff7f8db09b5d609a09722785f70ec6f7af68": {
+  "task": "81c7ff7f8db09b5d609a09722785f70ec6f7af68",
+  "target_tests": [
+   "tests/test_regression.py"
+  ],
+  "test_files": [
+   "tests/test_regression.py"
+  ],
+  "src_files": [
+   "src/flask/wrappers.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-25T11:48:26-07:00",
+  "subject": "update tests for relative redirects",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c9a1f7ad6545c9cc27c41c385f1d4cd9c7cf1a98": {
+  "task": "c9a1f7ad6545c9cc27c41c385f1d4cd9c7cf1a98",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/debughelpers.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-23T08:25:22-07:00",
+  "subject": "don't intercept 307/308 routing redirects",
+  "src_churn": 51,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "48f2afbf900560af061d50c73e4d3f9422ce4dbe": {
+  "task": "48f2afbf900560af061d50c73e4d3f9422ce4dbe",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-11-12T09:37:13-08:00",
+  "subject": "same blueprint cannot be registered with same name",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e21e003f62b57c35e1832c0bf14e9cd27f4e5bea": {
+  "task": "e21e003f62b57c35e1832c0bf14e9cd27f4e5bea",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-11-12T06:46:54-08:00",
+  "subject": "remove deprecated script_info factory arg",
+  "src_churn": 70,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e609dddd604bd8c808145973d91dcb8bb56a9906": {
+  "task": "e609dddd604bd8c808145973d91dcb8bb56a9906",
+  "target_tests": [
+   "tests/test_async.py",
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_async.py",
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/json/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-11-11T16:11:43-08:00",
+  "subject": "drop Python 3.6",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "166a2a6207027bff07fdfc5590ce04f9b37e9e8f": {
+  "task": "166a2a6207027bff07fdfc5590ce04f9b37e9e8f",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/app.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-08-10T00:23:57+02:00",
+  "subject": "Fix callback order for nested blueprints",
+  "src_churn": 48,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9f0da9b770abfe3376ca0bbb09c535b42071feeb": {
+  "task": "9f0da9b770abfe3376ca0bbb09c535b42071feeb",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-25T11:39:13+09:00",
+  "subject": "cli loader handles kwargs in app factory",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "aa6dd09c2cab5eb15a45d73b5ade24b7b4131c5a": {
+  "task": "aa6dd09c2cab5eb15a45d73b5ade24b7b4131c5a",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-23T05:06:03+05:30",
+  "subject": "correctly handle raising deferred errors in cli lazy loading",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "892ae955093cc3b7925230ff7bc346a6afb14f5d": {
+  "task": "892ae955093cc3b7925230ff7bc346a6afb14f5d",
+  "target_tests": [
+   "tests/test_json.py"
+  ],
+  "test_files": [
+   "tests/test_json.py"
+  ],
+  "src_files": [
+   "src/flask/json/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-19T17:27:56+05:30",
+  "subject": "jsonify encodes decimal to str",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a44c7228600044f530856a33c7da147c528644ff": {
+  "task": "a44c7228600044f530856a33c7da147c528644ff",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-05T16:08:51+01:00",
+  "subject": "Fix registering a blueprint twice with differing names",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "270eb2df2a1606383f50ff079a32240966b43fbc": {
+  "task": "270eb2df2a1606383f50ff079a32240966b43fbc",
+  "target_tests": [
+   "tests/test_async.py"
+  ],
+  "test_files": [
+   "tests/test_async.py"
+  ],
+  "src_files": [
+   "src/flask/views.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-28T00:01:48+01:00",
+  "subject": "Support View and MethodView instances with async handlers",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3257b7574e7f010686a617197e0fb4596986f7f7": {
+  "task": "3257b7574e7f010686a617197e0fb4596986f7f7",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-21T15:02:05+01:00",
+  "subject": "Fix blueprint renaming",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "714b0a467acab54091d8aeb73403d808abfbcf5b": {
+  "task": "714b0a467acab54091d8aeb73403d808abfbcf5b",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-21T15:01:32+01:00",
+  "subject": "Fix blueprint self registration",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9409be6e34e153bfdb0aac2c9eb7f60110109172": {
+  "task": "9409be6e34e153bfdb0aac2c9eb7f60110109172",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-20T13:08:28-07:00",
+  "subject": "warn when registering same blueprint with same name",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c2920e2bd98cdb3dcccc2868c25b695d4780c620": {
+  "task": "c2920e2bd98cdb3dcccc2868c25b695d4780c620",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-18T13:37:11+01:00",
+  "subject": "Bugfix allow blueprints to be registered with a different name",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "99afbb277d25d3b052e00b9a8da216054d51d62a": {
+  "task": "99afbb277d25d3b052e00b9a8da216054d51d62a",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-18T13:06:21+01:00",
+  "subject": "Fix blueprint nested url_prefix",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6fbdeb80c76b8a698ab366d21ccd786731b17361": {
+  "task": "6fbdeb80c76b8a698ab366d21ccd786731b17361",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-16T19:32:29+01:00",
+  "subject": "Fix nested blueprint url_prefix",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a7b02b3a07ae292ce376df2459eae3ffb4c06d52": {
+  "task": "a7b02b3a07ae292ce376df2459eae3ffb4c06d52",
+  "target_tests": [
+   "tests/test_converters.py",
+   "tests/test_session_interface.py"
+  ],
+  "test_files": [
+   "tests/test_converters.py",
+   "tests/test_session_interface.py"
+  ],
+  "src_files": [
+   "src/flask/ctx.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-14T08:11:09-07:00",
+  "subject": "converters have access to session",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3ace642ef32eae3fa096bef85a87545eba3f53fc": {
+  "task": "3ace642ef32eae3fa096bef85a87545eba3f53fc",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/__init__.py",
+   "src/flask/helpers.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-13T20:19:02-04:00",
+  "subject": "Use compat fspath instead of os.fspath When 7ba35c4 was cherry-picked it introduced the usage of os.fspath which is not supported on Python <3.6",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e93704fbfd5f40e48f8fe9034b6b0fe420d28fb3": {
+  "task": "e93704fbfd5f40e48f8fe9034b6b0fe420d28fb3",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-13T18:26:24+08:00",
+  "subject": "fix url_prefix argument when nesting blueprints",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7c5261407dae61679c268b44c63d73909c3fe652": {
+  "task": "7c5261407dae61679c268b44c63d73909c3fe652",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-13T14:31:50-07:00",
+  "subject": "blueprint name may not contain a dot",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2889da67cb15ac6d5d882781d54014286d9ae010": {
+  "task": "2889da67cb15ac6d5d882781d54014286d9ae010",
+  "target_tests": [
+   "tests/test_async.py"
+  ],
+  "test_files": [
+   "tests/test_async.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/helpers.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-03T10:59:28+01:00",
+  "subject": "Remove the async helper method",
+  "src_churn": 58,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "26a6cc0f94dd25390e2b2d7462bb4a414a862b16": {
+  "task": "26a6cc0f94dd25390e2b2d7462bb4a414a862b16",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-04-24T20:01:09+02:00",
+  "subject": "Allow using Click 7 with a DeprecationWarning",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5c6a0f0c121297362b4c78e4240dd8445b9d9f12": {
+  "task": "5c6a0f0c121297362b4c78e4240dd8445b9d9f12",
+  "target_tests": [
+   "tests/test_async.py"
+  ],
+  "test_files": [
+   "tests/test_async.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/helpers.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-04-16T12:34:51+01:00",
+  "subject": "Fix wrapped view function comparison",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f92e820b4bf357e9792d08ce398802715a63eafe": {
+  "task": "f92e820b4bf357e9792d08ce398802715a63eafe",
+  "target_tests": [
+   "tests/test_blueprints.py"
+  ],
+  "test_files": [
+   "tests/test_blueprints.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/blueprints.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-02-24T21:18:12Z",
+  "subject": "Nested blueprints",
+  "src_churn": 135,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c6c6408c3fb96245a2e2afc4b754cdf065fdad47": {
+  "task": "c6c6408c3fb96245a2e2afc4b754cdf065fdad47",
+  "target_tests": [
+   "tests/test_async.py"
+  ],
+  "test_files": [
+   "tests/test_async.py"
+  ],
+  "src_files": [
+   "src/flask/helpers.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-02-10T21:14:58Z",
+  "subject": "Raise a runtime error if run_async is called without real ContextVars",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c17f379390731543eea33a570a47bd4ef76a54fa": {
+  "task": "c17f379390731543eea33a570a47bd4ef76a54fa",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/ctx.py",
+   "src/flask/sessions.py",
+   "src/flask/templating.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-02-18T19:02:54-08:00",
+  "subject": "request context tracks session access",
+  "src_churn": 67,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_basic.py::test_session_accessed",
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": true
+ },
+ "52df9eed45d0b19c588662ed8492d8fbaa0e7098": {
+  "task": "52df9eed45d0b19c588662ed8492d8fbaa0e7098",
+  "target_tests": [
+   "tests/test_cli.py"
+  ],
+  "test_files": [
+   "tests/test_cli.py"
+  ],
+  "src_files": [
+   "src/flask/cli.py",
+   "src/flask/json/provider.py",
+   "src/flask/sansio/app.py",
+   "src/flask/typing.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-05-13T08:31:54-07:00",
+  "subject": "drop end of life python versions",
+  "src_churn": 74,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_cli.py::test_get_version",
+   "tests/test_reqctx.py::test_bad_environ_raises_bad_request"
+  ],
+  "gold_clean": false
+ },
+ "6650764e9719402de2aaa6f321bdec587699c6b2": {
+  "task": "6650764e9719402de2aaa6f321bdec587699c6b2",
+  "target_tests": [
+   "tests/conftest.py",
+   "tests/test_async.py",
+   "tests/test_basic.py",
+   "tests/test_blueprints.py",
+   "tests/test_helpers.py"
+  ],
+  "test_files": [
+   "tests/conftest.py",
+   "tests/test_async.py",
+   "tests/test_basic.py",
+   "tests/test_blueprints.py",
+   "tests/test_helpers.py"
+  ],
+  "src_files": [
+   "src/flask/__init__.py",
+   "src/flask/app.py",
+   "src/flask/blueprints.py",
+   "src/flask/globals.py",
+   "src/flask/helpers.py",
+   "src/flask/json/__init__.py",
+   "src/flask/json/provider.py",
+   "src/flask/scaffold.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-02-23T08:35:16-08:00",
+  "subject": "remove previously deprecated code",
+  "src_churn": 853,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d178653b5f7a5ee2ba15e215ce60caeeb9ed82e1": {
+  "task": "d178653b5f7a5ee2ba15e215ce60caeeb9ed82e1",
+  "target_tests": [
+   "tests/typing/typing_app_decorators.py"
+  ],
+  "test_files": [
+   "tests/typing/typing_app_decorators.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/blueprints.py",
+   "src/flask/ctx.py",
+   "src/flask/helpers.py",
+   "src/flask/testing.py",
+   "src/flask/wrappers.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-11-25T07:39:54-08:00",
+  "subject": "update requirements",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "bfdd37110c67ebeb42061fb43cf684b05291241f": {
+  "task": "bfdd37110c67ebeb42061fb43cf684b05291241f",
+  "target_tests": [
+   "tests/test_config.py",
+   "tests/test_templating.py"
+  ],
+  "test_files": [
+   "tests/test_config.py",
+   "tests/test_templating.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/helpers.py",
+   "src/flask/scaffold.py",
+   "src/flask/sessions.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-08-01T16:53:15-07:00",
+  "subject": "deprecate config attributes",
+  "src_churn": 188,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "69f9845ef2da3051d74d4dade3e88ccf5b2ee3de": {
+  "task": "69f9845ef2da3051d74d4dade3e88ccf5b2ee3de",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/test_json.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/test_json.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/blueprints.py",
+   "src/flask/ctx.py",
+   "src/flask/json/__init__.py",
+   "src/flask/json/provider.py",
+   "src/flask/scaffold.py",
+   "src/flask/testing.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-07-13T07:41:43-07:00",
+  "subject": "add json provider interface",
+  "src_churn": 762,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "91044c4d769efa7f20455e1b70457a7da95c26d8": {
+  "task": "91044c4d769efa7f20455e1b70457a7da95c26d8",
+  "target_tests": [
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/ctx.py",
+   "src/flask/globals.py",
+   "src/flask/helpers.py",
+   "src/flask/templating.py",
+   "src/flask/testing.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-07-09T13:41:35+01:00",
+  "subject": "Change _cv_req -> _cv_request",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "82c2e0366ce6b74a3786a64631ce58b85b3a7d4e": {
+  "task": "82c2e0366ce6b74a3786a64631ce58b85b3a7d4e",
+  "target_tests": [
+   "tests/conftest.py",
+   "tests/test_appctx.py",
+   "tests/test_basic.py",
+   "tests/test_reqctx.py",
+   "tests/test_session_interface.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/conftest.py",
+   "tests/test_appctx.py",
+   "tests/test_basic.py",
+   "tests/test_reqctx.py",
+   "tests/test_session_interface.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/cli.py",
+   "src/flask/ctx.py",
+   "src/flask/debughelpers.py",
+   "src/flask/helpers.py",
+   "src/flask/templating.py",
+   "src/flask/testing.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-07-05T06:33:03-07:00",
+  "subject": "remove uses of LocalStack",
+  "src_churn": 151,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9b44bf2818d8e3cde422ad7f43fb33dfc6737289": {
+  "task": "9b44bf2818d8e3cde422ad7f43fb33dfc6737289",
+  "target_tests": [
+   "tests/typing/typing_route.py"
+  ],
+  "test_files": [
+   "tests/typing/typing_route.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/blueprints.py",
+   "src/flask/scaffold.py",
+   "src/flask/typing.py",
+   "src/flask/views.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-07-06T22:05:20+01:00",
+  "subject": "Improve decorator typing (#4676)",
+  "src_churn": 194,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "84c722044ad03f7f5384f5314c8350b3a13d8dfa": {
+  "task": "84c722044ad03f7f5384f5314c8350b3a13d8dfa",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/test_signals.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/test_signals.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/ctx.py",
+   "src/flask/scaffold.py",
+   "src/flask/testing.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-06-29T21:02:44-07:00",
+  "subject": "new debug/test preserve context implementation",
+  "src_churn": 142,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "81be290ec8889c157c84bc7ce857f883396c5daf": {
+  "task": "81be290ec8889c157c84bc7ce857f883396c5daf",
+  "target_tests": [
+   "tests/typing/typing_route.py"
+  ],
+  "test_files": [
+   "tests/typing/typing_route.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/blueprints.py",
+   "src/flask/scaffold.py",
+   "src/flask/typing.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-06-03T12:54:54-07:00",
+  "subject": "view function is actually type checked",
+  "src_churn": 61,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7f87f3dd93baf45d5f69f02a2dcf4493dfc4a1be": {
+  "task": "7f87f3dd93baf45d5f69f02a2dcf4493dfc4a1be",
+  "target_tests": [
+   "tests/test_async.py"
+  ],
+  "test_files": [
+   "tests/test_async.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/blueprints.py",
+   "src/flask/helpers.py",
+   "src/flask/scaffold.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-05-02T20:49:46+01:00",
+  "subject": "Simplify the async handling code",
+  "src_churn": 102,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "00f5a3e55ca3b6dd4e98044ab76f055dc74997ac": {
+  "task": "00f5a3e55ca3b6dd4e98044ab76f055dc74997ac",
+  "target_tests": [
+   "tests/test_async.py"
+  ],
+  "test_files": [
+   "tests/test_async.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/blueprints.py",
+   "src/flask/helpers.py",
+   "src/flask/scaffold.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-03-24T20:47:55Z",
+  "subject": "Alter ensure_sync implementation to support extensions",
+  "src_churn": 94,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1263d3bd142e4964da123f4e59088aa2968ec7e5": {
+  "task": "1263d3bd142e4964da123f4e59088aa2968ec7e5",
+  "target_tests": [
+   "tests/test_deprecations.py",
+   "tests/test_logging.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_deprecations.py",
+   "tests/test_logging.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/flask/__init__.py",
+   "src/flask/_compat.py",
+   "src/flask/app.py",
+   "src/flask/config.py",
+   "src/flask/logging.py",
+   "src/flask/testing.py"
+  ],
+  "pool": "hard",
+  "authored": "2020-04-03T17:34:32-07:00",
+  "subject": "remove deprecated code",
+  "src_churn": 167,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "53c893b646252d610e877eb9385e9e250a1ae5e1": {
+  "task": "53c893b646252d610e877eb9385e9e250a1ae5e1",
+  "target_tests": [
+   "tests/test_basic.py",
+   "tests/test_config.py",
+   "tests/test_instance_config.py",
+   "tests/test_templating.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py",
+   "tests/test_config.py",
+   "tests/test_instance_config.py",
+   "tests/test_templating.py"
+  ],
+  "src_files": [
+   "src/flask/app.py",
+   "src/flask/cli.py",
+   "src/flask/ctx.py",
+   "src/flask/helpers.py",
+   "src/flask/testing.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-06-01T09:22:20-07:00",
+  "subject": "fix string concats left over by black",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}

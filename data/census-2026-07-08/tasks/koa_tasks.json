@@ -1,0 +1,1138 @@
+{
+ "480a4f064a4e8edb9e09be39355b3228ae4f4f9e": {
+  "task": "480a4f064a4e8edb9e09be39355b3228ae4f4f9e",
+  "target_tests": [
+   "__tests__/application/response.test.js"
+  ],
+  "test_files": [
+   "__tests__/application/response.test.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2026-05-25T14:29:47+08:00",
+  "subject": "fix: response content-type value amount as one with testcase (#1899)",
+  "baseline_failing": [
+   "should default export koa",
+   "should match exports own property names",
+   "should not assign multiple content-type for response header"
+  ],
+  "src_churn": 3,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "3f3ac48904229f807939d13ab49fdf8262a7aa08": {
+  "task": "3f3ac48904229f807939d13ab49fdf8262a7aa08",
+  "target_tests": [
+   "__tests__/request/length.test.js"
+  ],
+  "test_files": [
+   "__tests__/request/length.test.js"
+  ],
+  "src_files": [
+   "lib/request.js"
+  ],
+  "authored": "2026-05-21T12:48:07+05:30",
+  "subject": "fix: request.length overflows on Content-Length > 2GB (#1961)",
+  "baseline_failing": [
+   "should default export koa",
+   "should handle Content-Length > 2GB (2147483648)",
+   "should handle very large Content-Length (10GB)",
+   "should match exports own property names",
+   "should return undefined for non-numeric strings"
+  ],
+  "src_churn": 3,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "2503a1fb14ff3dbed9b55ea1cd6419be739ff150": {
+  "task": "2503a1fb14ff3dbed9b55ea1cd6419be739ff150",
+  "target_tests": [
+   "__tests__/application/currentContext.test.js"
+  ],
+  "test_files": [
+   "__tests__/application/currentContext.test.js"
+  ],
+  "src_files": [
+   "lib/application.js"
+  ],
+  "authored": "2026-03-28T13:37:53+08:00",
+  "subject": "feat: defer AsyncLocalStorage creation for v8 startup snapshots (#1946)",
+  "baseline_failing": [
+   "should default export koa",
+   "should defer AsyncLocalStorage creation when building snapshot",
+   "should defer with custom AsyncLocalStorage when building snapshot",
+   "should match exports own property names",
+   "should work normally after deserialization"
+  ],
+  "src_churn": 17,
+  "size": "S",
+  "gold_clean": true
+ },
+ "55ab9bab044ead4e82c70a30a4f9dc0fc9c1b6df": {
+  "task": "55ab9bab044ead4e82c70a30a4f9dc0fc9c1b6df",
+  "target_tests": [
+   "__tests__/request/host.test.js",
+   "__tests__/request/hostname.test.js"
+  ],
+  "test_files": [
+   "__tests__/request/host.test.js",
+   "__tests__/request/hostname.test.js"
+  ],
+  "src_files": [
+   "lib/request.js"
+  ],
+  "authored": "2026-02-25T21:24:26+08:00",
+  "subject": "Merge commit from fork",
+  "baseline_failing": [
+   "should correctly parse @ in :authority on HTTP/2",
+   "should correctly parse @ in X-Forwarded-Host when proxy is trusted",
+   "should correctly parse host from user@host format",
+   "should correctly parse host from userinfo@host format",
+   "should correctly parse host with port from userinfo@host:port format",
+   "should correctly parse hostname from user@host format",
+   "should correctly parse hostname from userinfo@host format",
+   "should correctly parse hostname with port from userinfo@host:port format",
+   "should default export koa",
+   "should match exports own property names",
+   "should return empty string for invalid host with @"
+  ],
+  "src_churn": 12,
+  "size": "S",
+  "gold_clean": true
+ },
+ "863c2118f0fcc802678bb12b9dd1ec80a9be4001": {
+  "task": "863c2118f0fcc802678bb12b9dd1ec80a9be4001",
+  "target_tests": [
+   "__tests__/response/body.test.js"
+  ],
+  "test_files": [
+   "__tests__/response/body.test.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2025-10-26T21:23:33-07:00",
+  "subject": "fix: only original value destroy if the new value is not a stream (#1914)",
+  "baseline_failing": [
+   "should NOT cleanup original stream when replaced by new stream (to support wrapping middleware)",
+   "should default export koa",
+   "should handle four sequential stream replacements",
+   "should handle multiple sequential stream replacements",
+   "should match exports own property names",
+   "should support wrapping stream middleware (like koa-compress)"
+  ],
+  "src_churn": 5,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "27df3b6e0055c5d9ca9b40cad084f2a7f6e54d9c": {
+  "task": "27df3b6e0055c5d9ca9b40cad084f2a7f6e54d9c",
+  "target_tests": [
+   "__tests__/response/body.test.js"
+  ],
+  "test_files": [
+   "__tests__/response/body.test.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2025-10-23T22:51:42-07:00",
+  "subject": "fix: adds steam clean up (#1910)",
+  "baseline_failing": [
+   "should cleanup original stream when replaced by new stream",
+   "should cleanup stream when replaced by buffer",
+   "should cleanup stream when replaced by object",
+   "should cleanup stream when replaced by string",
+   "should default export koa",
+   "should handle four sequential stream replacements",
+   "should handle multiple sequential stream replacements",
+   "should match exports own property names",
+   "should not throw unhandled errors when replacing failing stream"
+  ],
+  "src_churn": 25,
+  "size": "S",
+  "gold_clean": true
+ },
+ "769fd75cc6b30d72493b370b5a3ae2332ca03c5b": {
+  "task": "769fd75cc6b30d72493b370b5a3ae2332ca03c5b",
+  "target_tests": [
+   "__tests__/response/back.test.js"
+  ],
+  "test_files": [
+   "__tests__/response/back.test.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2025-10-18T22:20:14+08:00",
+  "subject": "fix: normalize referer before redirect (#1908)",
+  "baseline_failing": [
+   "should default export koa",
+   "should fix Trailing Double-Slash security issue",
+   "should match exports own property names"
+  ],
+  "src_churn": 6,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "83128eb6cc210fa6f5519f93afb5606ffc3ffa5e": {
+  "task": "83128eb6cc210fa6f5519f93afb5606ffc3ffa5e",
+  "target_tests": [
+   "__tests__/response/attachment.test.js"
+  ],
+  "test_files": [
+   "__tests__/response/attachment.test.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2025-09-16T17:52:31-07:00",
+  "subject": "fix: fixes response.attachment behavior leads to Content-Type Sniffing (#1904)",
+  "baseline_failing": [
+   "should NOT override Content-Type when already set",
+   "should default export koa",
+   "should match exports own property names",
+   "should preserve safe Content-Type for SVG files"
+  ],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": true
+ },
+ "422c551c63d00f24e2bbbdf492f262a5935bb1f0": {
+  "task": "422c551c63d00f24e2bbbdf492f262a5935bb1f0",
+  "target_tests": [
+   "__tests__/response/back.test.js"
+  ],
+  "test_files": [
+   "__tests__/response/back.test.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2025-07-27T15:25:47+08:00",
+  "subject": "Merge commit from fork",
+  "baseline_failing": [
+   "should default export koa",
+   "should match exports own property names",
+   "should redirect to root if the same origin referrer is not present"
+  ],
+  "src_churn": 20,
+  "size": "S",
+  "gold_clean": true
+ },
+ "f7b9a1835f4614e3cb6e6e42f6c1dbbeff462e2d": {
+  "task": "f7b9a1835f4614e3cb6e6e42f6c1dbbeff462e2d",
+  "target_tests": [
+   "__tests__/application/currentContext.test.js"
+  ],
+  "test_files": [
+   "__tests__/application/currentContext.test.js"
+  ],
+  "src_files": [
+   "lib/application.js"
+  ],
+  "authored": "2025-04-27T18:10:38-07:00",
+  "subject": "feat: add custom asyncLocalStorage support",
+  "baseline_failing": [
+   "CommonJS exports default property",
+   "CommonJS exports default property referencing self",
+   "__tests__/application/compose.test.js",
+   "__tests__/application/context.test.js",
+   "__tests__/application/currentContext.test.js",
+   "__tests__/application/index.test.js",
+   "__tests__/application/inspect.test.js",
+   "__tests__/application/onerror.test.js",
+   "__tests__/application/request.test.js",
+   "__tests__/application/respond.test.js",
+   "__tests__/application/response.test.js",
+   "__tests__/application/toJSON.test.js",
+   "__tests__/application/use.test.js",
+   "__tests__/context/assert.test.js",
+   "__tests__/context/cookies.test.js",
+   "__tests__/context/inspect.test.js",
+   "__tests__/context/onerror.test.js",
+   "__tests__/context/state.test.js",
+   "__tests__/context/throw.test.js",
+   "__tests__/context/toJSON.test.js",
+   "__tests__/request/accept.test.js",
+   "__tests__/request/accepts.test.js",
+   "__tests__/request/acceptsCharsets.test.js",
+   "__tests__/request/acceptsEncodings.test.js",
+   "__tests__/request/acceptsLanguages.test.js",
+   "__tests__/request/charset.test.js",
+   "__tests__/request/fresh.test.js",
+   "__tests__/request/get.test.js",
+   "__tests__/request/header.test.js",
+   "__tests__/request/headers.test.js",
+   "__tests__/request/host.test.js",
+   "__tests__/request/hostname.test.js",
+   "__tests__/request/href.test.js",
+   "__tests__/request/idempotent.test.js",
+   "__tests__/request/inspect.test.js",
+   "__tests__/request/ip.test.js",
+   "__tests__/request/ips.test.js",
+   "__tests__/request/is.test.js",
+   "__tests__/request/length.test.js",
+   "__tests__/request/origin.test.js",
+   "__tests__/request/path.test.js",
+   "__tests__/request/protocol.test.js",
+   "__tests__/request/query.test.js",
+   "__tests__/request/querystring.test.js",
+   "__tests__/request/search.test.js",
+   "__tests__/request/secure.test.js",
+   "__tests__/request/stale.test.js",
+   "__tests__/request/subdomains.test.js",
+   "__tests__/request/type.test.js",
+   "__tests__/request/whatwg-url.test.js",
+   "__tests__/response/append.test.js",
+   "__tests__/response/attachment.test.js",
+   "__tests__/response/back.test.js",
+   "__tests__/response/body.test.js",
+   "__tests__/response/etag.test.js",
+   "__tests__/response/flushHeaders.test.js",
+   "__tests__/response/get.test.js",
+   "__tests__/response/has.test.js",
+   "__tests__/response/header.test.js",
+   "__tests__/response/headers.test.js",
+   "__tests__/response/inspect.test.js",
+   "__tests__/response/is.test.js",
+   "__tests__/response/last-modified.test.js",
+   "__tests__/response/length.test.js",
+   "__tests__/response/message.test.js",
+   "__tests__/response/redirect.test.js",
+   "__tests__/response/remove.test.js",
+   "__tests__/response/set.test.js",
+   "__tests__/response/socket.test.js",
+   "__tests__/response/status.test.js",
+   "__tests__/response/type.test.js",
+   "__tests__/response/vary.test.js",
+   "__tests__/response/writable.test.js",
+   "should default export koa",
+   "should match exports own property names"
+  ],
+  "src_churn": 10,
+  "size": "S",
+  "gold_clean": false
+ },
+ "d601d7ba5220d01bb707a93e0a5574d00cc358ee": {
+  "task": "d601d7ba5220d01bb707a93e0a5574d00cc358ee",
+  "target_tests": [
+   "__tests__/response/redirect.test.js"
+  ],
+  "test_files": [
+   "__tests__/response/redirect.test.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2025-04-27T16:50:35-07:00",
+  "subject": "breaking: remove redirect(back) for v3",
+  "baseline_failing": [
+   "CommonJS exports default property",
+   "CommonJS exports default property referencing self",
+   "__tests__/application/compose.test.js",
+   "__tests__/application/context.test.js",
+   "__tests__/application/currentContext.test.js",
+   "__tests__/application/index.test.js",
+   "__tests__/application/inspect.test.js",
+   "__tests__/application/onerror.test.js",
+   "__tests__/application/request.test.js",
+   "__tests__/application/respond.test.js",
+   "__tests__/application/response.test.js",
+   "__tests__/application/toJSON.test.js",
+   "__tests__/application/use.test.js",
+   "__tests__/context/assert.test.js",
+   "__tests__/context/cookies.test.js",
+   "__tests__/context/inspect.test.js",
+   "__tests__/context/onerror.test.js",
+   "__tests__/context/state.test.js",
+   "__tests__/context/throw.test.js",
+   "__tests__/context/toJSON.test.js",
+   "__tests__/request/accept.test.js",
+   "__tests__/request/accepts.test.js",
+   "__tests__/request/acceptsCharsets.test.js",
+   "__tests__/request/acceptsEncodings.test.js",
+   "__tests__/request/acceptsLanguages.test.js",
+   "__tests__/request/charset.test.js",
+   "__tests__/request/fresh.test.js",
+   "__tests__/request/get.test.js",
+   "__tests__/request/header.test.js",
+   "__tests__/request/headers.test.js",
+   "__tests__/request/host.test.js",
+   "__tests__/request/hostname.test.js",
+   "__tests__/request/href.test.js",
+   "__tests__/request/idempotent.test.js",
+   "__tests__/request/inspect.test.js",
+   "__tests__/request/ip.test.js",
+   "__tests__/request/ips.test.js",
+   "__tests__/request/is.test.js",
+   "__tests__/request/length.test.js",
+   "__tests__/request/origin.test.js",
+   "__tests__/request/path.test.js",
+   "__tests__/request/protocol.test.js",
+   "__tests__/request/query.test.js",
+   "__tests__/request/querystring.test.js",
+   "__tests__/request/search.test.js",
+   "__tests__/request/secure.test.js",
+   "__tests__/request/stale.test.js",
+   "__tests__/request/subdomains.test.js",
+   "__tests__/request/type.test.js",
+   "__tests__/request/whatwg-url.test.js",
+   "__tests__/response/append.test.js",
+   "__tests__/response/attachment.test.js",
+   "__tests__/response/back.test.js",
+   "__tests__/response/body.test.js",
+   "__tests__/response/etag.test.js",
+   "__tests__/response/flushHeaders.test.js",
+   "__tests__/response/get.test.js",
+   "__tests__/response/has.test.js",
+   "__tests__/response/header.test.js",
+   "__tests__/response/headers.test.js",
+   "__tests__/response/inspect.test.js",
+   "__tests__/response/is.test.js",
+   "__tests__/response/last-modified.test.js",
+   "__tests__/response/length.test.js",
+   "__tests__/response/message.test.js",
+   "__tests__/response/redirect.test.js",
+   "__tests__/response/remove.test.js",
+   "__tests__/response/set.test.js",
+   "__tests__/response/socket.test.js",
+   "__tests__/response/status.test.js",
+   "__tests__/response/type.test.js",
+   "__tests__/response/vary.test.js",
+   "__tests__/response/writable.test.js",
+   "should default export koa",
+   "should match exports own property names"
+  ],
+  "src_churn": 15,
+  "size": "S",
+  "gold_clean": false
+ },
+ "ff25eb4a7f2392df46481fe86355161067687312": {
+  "task": "ff25eb4a7f2392df46481fe86355161067687312",
+  "target_tests": [
+   "__tests__/response/redirect.test.js"
+  ],
+  "test_files": [
+   "__tests__/response/redirect.test.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2025-04-06T14:35:16-07:00",
+  "subject": "fix: don't render redirect values in anchor ref",
+  "baseline_failing": [
+   "CommonJS exports default property",
+   "CommonJS exports default property referencing self",
+   "__tests__/application/compose.test.js",
+   "__tests__/application/context.test.js",
+   "__tests__/application/currentContext.test.js",
+   "__tests__/application/index.test.js",
+   "__tests__/application/inspect.test.js",
+   "__tests__/application/onerror.test.js",
+   "__tests__/application/request.test.js",
+   "__tests__/application/respond.test.js",
+   "__tests__/application/response.test.js",
+   "__tests__/application/toJSON.test.js",
+   "__tests__/application/use.test.js",
+   "__tests__/context/assert.test.js",
+   "__tests__/context/cookies.test.js",
+   "__tests__/context/inspect.test.js",
+   "__tests__/context/onerror.test.js",
+   "__tests__/context/state.test.js",
+   "__tests__/context/throw.test.js",
+   "__tests__/context/toJSON.test.js",
+   "__tests__/request/accept.test.js",
+   "__tests__/request/accepts.test.js",
+   "__tests__/request/acceptsCharsets.test.js",
+   "__tests__/request/acceptsEncodings.test.js",
+   "__tests__/request/acceptsLanguages.test.js",
+   "__tests__/request/charset.test.js",
+   "__tests__/request/fresh.test.js",
+   "__tests__/request/get.test.js",
+   "__tests__/request/header.test.js",
+   "__tests__/request/headers.test.js",
+   "__tests__/request/host.test.js",
+   "__tests__/request/hostname.test.js",
+   "__tests__/request/href.test.js",
+   "__tests__/request/idempotent.test.js",
+   "__tests__/request/inspect.test.js",
+   "__tests__/request/ip.test.js",
+   "__tests__/request/ips.test.js",
+   "__tests__/request/is.test.js",
+   "__tests__/request/length.test.js",
+   "__tests__/request/origin.test.js",
+   "__tests__/request/path.test.js",
+   "__tests__/request/protocol.test.js",
+   "__tests__/request/query.test.js",
+   "__tests__/request/querystring.test.js",
+   "__tests__/request/search.test.js",
+   "__tests__/request/secure.test.js",
+   "__tests__/request/stale.test.js",
+   "__tests__/request/subdomains.test.js",
+   "__tests__/request/type.test.js",
+   "__tests__/request/whatwg-url.test.js",
+   "__tests__/response/append.test.js",
+   "__tests__/response/attachment.test.js",
+   "__tests__/response/back.test.js",
+   "__tests__/response/body.test.js",
+   "__tests__/response/etag.test.js",
+   "__tests__/response/flushHeaders.test.js",
+   "__tests__/response/get.test.js",
+   "__tests__/response/has.test.js",
+   "__tests__/response/header.test.js",
+   "__tests__/response/headers.test.js",
+   "__tests__/response/inspect.test.js",
+   "__tests__/response/is.test.js",
+   "__tests__/response/last-modified.test.js",
+   "__tests__/response/length.test.js",
+   "__tests__/response/message.test.js",
+   "__tests__/response/redirect.test.js",
+   "__tests__/response/remove.test.js",
+   "__tests__/response/set.test.js",
+   "__tests__/response/socket.test.js",
+   "__tests__/response/status.test.js",
+   "__tests__/response/type.test.js",
+   "__tests__/response/vary.test.js",
+   "__tests__/response/writable.test.js",
+   "should default export koa",
+   "should match exports own property names"
+  ],
+  "src_churn": 2,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "0486b65ef9c93d0ef2dd84377d05c84c1b89b78b": {
+  "task": "0486b65ef9c93d0ef2dd84377d05c84c1b89b78b",
+  "target_tests": [
+   "__tests__/response/body.test.js"
+  ],
+  "test_files": [
+   "__tests__/response/body.test.js"
+  ],
+  "src_files": [
+   "lib/application.js",
+   "lib/is-stream.js",
+   "lib/response.js"
+  ],
+  "authored": "2024-08-13T23:18:54+03:00",
+  "subject": "feat: support custom streams",
+  "baseline_failing": [
+   "CommonJS exports default property",
+   "CommonJS exports default property referencing self",
+   "__tests__/application/compose.test.js",
+   "__tests__/application/context.test.js",
+   "__tests__/application/currentContext.test.js",
+   "__tests__/application/index.test.js",
+   "__tests__/application/inspect.test.js",
+   "__tests__/application/onerror.test.js",
+   "__tests__/application/request.test.js",
+   "__tests__/application/respond.test.js",
+   "__tests__/application/response.test.js",
+   "__tests__/application/toJSON.test.js",
+   "__tests__/application/use.test.js",
+   "__tests__/context/assert.test.js",
+   "__tests__/context/cookies.test.js",
+   "__tests__/context/inspect.test.js",
+   "__tests__/context/onerror.test.js",
+   "__tests__/context/state.test.js",
+   "__tests__/context/throw.test.js",
+   "__tests__/context/toJSON.test.js",
+   "__tests__/request/accept.test.js",
+   "__tests__/request/accepts.test.js",
+   "__tests__/request/acceptsCharsets.test.js",
+   "__tests__/request/acceptsEncodings.test.js",
+   "__tests__/request/acceptsLanguages.test.js",
+   "__tests__/request/charset.test.js",
+   "__tests__/request/fresh.test.js",
+   "__tests__/request/get.test.js",
+   "__tests__/request/header.test.js",
+   "__tests__/request/headers.test.js",
+   "__tests__/request/host.test.js",
+   "__tests__/request/hostname.test.js",
+   "__tests__/request/href.test.js",
+   "__tests__/request/idempotent.test.js",
+   "__tests__/request/inspect.test.js",
+   "__tests__/request/ip.test.js",
+   "__tests__/request/ips.test.js",
+   "__tests__/request/is.test.js",
+   "__tests__/request/length.test.js",
+   "__tests__/request/origin.test.js",
+   "__tests__/request/path.test.js",
+   "__tests__/request/protocol.test.js",
+   "__tests__/request/query.test.js",
+   "__tests__/request/querystring.test.js",
+   "__tests__/request/search.test.js",
+   "__tests__/request/secure.test.js",
+   "__tests__/request/stale.test.js",
+   "__tests__/request/subdomains.test.js",
+   "__tests__/request/type.test.js",
+   "__tests__/request/whatwg-url.test.js",
+   "__tests__/response/append.test.js",
+   "__tests__/response/attachment.test.js",
+   "__tests__/response/back.test.js",
+   "__tests__/response/body.test.js",
+   "__tests__/response/etag.test.js",
+   "__tests__/response/flushHeaders.test.js",
+   "__tests__/response/get.test.js",
+   "__tests__/response/has.test.js",
+   "__tests__/response/header.test.js",
+   "__tests__/response/headers.test.js",
+   "__tests__/response/inspect.test.js",
+   "__tests__/response/is.test.js",
+   "__tests__/response/last-modified.test.js",
+   "__tests__/response/length.test.js",
+   "__tests__/response/message.test.js",
+   "__tests__/response/redirect.test.js",
+   "__tests__/response/remove.test.js",
+   "__tests__/response/set.test.js",
+   "__tests__/response/socket.test.js",
+   "__tests__/response/status.test.js",
+   "__tests__/response/type.test.js",
+   "__tests__/response/vary.test.js",
+   "__tests__/response/writable.test.js",
+   "should default export koa",
+   "should match exports own property names"
+  ],
+  "src_churn": 27,
+  "size": "S",
+  "gold_clean": false
+ },
+ "c5ad22e8bb66d6bfb5417e62f431567cdfd10a30": {
+  "task": "c5ad22e8bb66d6bfb5417e62f431567cdfd10a30",
+  "target_tests": [
+   "__tests__/request/origin.test.js"
+  ],
+  "test_files": [
+   "__tests__/request/origin.test.js"
+  ],
+  "src_files": [
+   "lib/request.js"
+  ],
+  "authored": "2025-03-21T00:26:27-07:00",
+  "subject": "breaking: req.origin should display the origin header if it exists, not the current hostname closes #1008",
+  "baseline_failing": [
+   "CommonJS exports default property",
+   "CommonJS exports default property referencing self",
+   "__tests__/application/compose.test.js",
+   "__tests__/application/context.test.js",
+   "__tests__/application/currentContext.test.js",
+   "__tests__/application/index.test.js",
+   "__tests__/application/inspect.test.js",
+   "__tests__/application/onerror.test.js",
+   "__tests__/application/request.test.js",
+   "__tests__/application/respond.test.js",
+   "__tests__/application/response.test.js",
+   "__tests__/application/toJSON.test.js",
+   "__tests__/application/use.test.js",
+   "__tests__/context/assert.test.js",
+   "__tests__/context/cookies.test.js",
+   "__tests__/context/inspect.test.js",
+   "__tests__/context/onerror.test.js",
+   "__tests__/context/state.test.js",
+   "__tests__/context/throw.test.js",
+   "__tests__/context/toJSON.test.js",
+   "__tests__/request/accept.test.js",
+   "__tests__/request/accepts.test.js",
+   "__tests__/request/acceptsCharsets.test.js",
+   "__tests__/request/acceptsEncodings.test.js",
+   "__tests__/request/acceptsLanguages.test.js",
+   "__tests__/request/charset.test.js",
+   "__tests__/request/fresh.test.js",
+   "__tests__/request/get.test.js",
+   "__tests__/request/header.test.js",
+   "__tests__/request/headers.test.js",
+   "__tests__/request/host.test.js",
+   "__tests__/request/hostname.test.js",
+   "__tests__/request/href.test.js",
+   "__tests__/request/idempotent.test.js",
+   "__tests__/request/inspect.test.js",
+   "__tests__/request/ip.test.js",
+   "__tests__/request/ips.test.js",
+   "__tests__/request/is.test.js",
+   "__tests__/request/length.test.js",
+   "__tests__/request/origin.test.js",
+   "__tests__/request/path.test.js",
+   "__tests__/request/protocol.test.js",
+   "__tests__/request/query.test.js",
+   "__tests__/request/querystring.test.js",
+   "__tests__/request/search.test.js",
+   "__tests__/request/secure.test.js",
+   "__tests__/request/stale.test.js",
+   "__tests__/request/subdomains.test.js",
+   "__tests__/request/type.test.js",
+   "__tests__/request/whatwg-url.test.js",
+   "__tests__/response/append.test.js",
+   "__tests__/response/attachment.test.js",
+   "__tests__/response/back.test.js",
+   "__tests__/response/body.test.js",
+   "__tests__/response/etag.test.js",
+   "__tests__/response/flushHeaders.test.js",
+   "__tests__/response/get.test.js",
+   "__tests__/response/has.test.js",
+   "__tests__/response/header.test.js",
+   "__tests__/response/headers.test.js",
+   "__tests__/response/inspect.test.js",
+   "__tests__/response/is.test.js",
+   "__tests__/response/last-modified.test.js",
+   "__tests__/response/length.test.js",
+   "__tests__/response/message.test.js",
+   "__tests__/response/redirect.test.js",
+   "__tests__/response/remove.test.js",
+   "__tests__/response/set.test.js",
+   "__tests__/response/socket.test.js",
+   "__tests__/response/status.test.js",
+   "__tests__/response/type.test.js",
+   "__tests__/response/vary.test.js",
+   "__tests__/response/writable.test.js",
+   "should default export koa",
+   "should match exports own property names"
+  ],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "40d5d3303b33a153842c9f476e949f1d2a83c07b": {
+  "task": "40d5d3303b33a153842c9f476e949f1d2a83c07b",
+  "target_tests": [
+   "__tests__/response/type.test.js"
+  ],
+  "test_files": [
+   "__tests__/response/type.test.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2025-03-21T00:17:13-07:00",
+  "subject": "breaking: .body=<json> should not overwrite type if type already json",
+  "baseline_failing": [
+   "CommonJS exports default property",
+   "CommonJS exports default property referencing self",
+   "__tests__/application/compose.test.js",
+   "__tests__/application/context.test.js",
+   "__tests__/application/currentContext.test.js",
+   "__tests__/application/index.test.js",
+   "__tests__/application/inspect.test.js",
+   "__tests__/application/onerror.test.js",
+   "__tests__/application/request.test.js",
+   "__tests__/application/respond.test.js",
+   "__tests__/application/response.test.js",
+   "__tests__/application/toJSON.test.js",
+   "__tests__/application/use.test.js",
+   "__tests__/context/assert.test.js",
+   "__tests__/context/cookies.test.js",
+   "__tests__/context/inspect.test.js",
+   "__tests__/context/onerror.test.js",
+   "__tests__/context/state.test.js",
+   "__tests__/context/throw.test.js",
+   "__tests__/context/toJSON.test.js",
+   "__tests__/request/accept.test.js",
+   "__tests__/request/accepts.test.js",
+   "__tests__/request/acceptsCharsets.test.js",
+   "__tests__/request/acceptsEncodings.test.js",
+   "__tests__/request/acceptsLanguages.test.js",
+   "__tests__/request/charset.test.js",
+   "__tests__/request/fresh.test.js",
+   "__tests__/request/get.test.js",
+   "__tests__/request/header.test.js",
+   "__tests__/request/headers.test.js",
+   "__tests__/request/host.test.js",
+   "__tests__/request/hostname.test.js",
+   "__tests__/request/href.test.js",
+   "__tests__/request/idempotent.test.js",
+   "__tests__/request/inspect.test.js",
+   "__tests__/request/ip.test.js",
+   "__tests__/request/ips.test.js",
+   "__tests__/request/is.test.js",
+   "__tests__/request/length.test.js",
+   "__tests__/request/origin.test.js",
+   "__tests__/request/path.test.js",
+   "__tests__/request/protocol.test.js",
+   "__tests__/request/query.test.js",
+   "__tests__/request/querystring.test.js",
+   "__tests__/request/search.test.js",
+   "__tests__/request/secure.test.js",
+   "__tests__/request/stale.test.js",
+   "__tests__/request/subdomains.test.js",
+   "__tests__/request/type.test.js",
+   "__tests__/request/whatwg-url.test.js",
+   "__tests__/response/append.test.js",
+   "__tests__/response/attachment.test.js",
+   "__tests__/response/back.test.js",
+   "__tests__/response/body.test.js",
+   "__tests__/response/etag.test.js",
+   "__tests__/response/flushHeaders.test.js",
+   "__tests__/response/get.test.js",
+   "__tests__/response/has.test.js",
+   "__tests__/response/header.test.js",
+   "__tests__/response/headers.test.js",
+   "__tests__/response/inspect.test.js",
+   "__tests__/response/is.test.js",
+   "__tests__/response/last-modified.test.js",
+   "__tests__/response/length.test.js",
+   "__tests__/response/message.test.js",
+   "__tests__/response/redirect.test.js",
+   "__tests__/response/remove.test.js",
+   "__tests__/response/set.test.js",
+   "__tests__/response/socket.test.js",
+   "__tests__/response/status.test.js",
+   "__tests__/response/type.test.js",
+   "__tests__/response/vary.test.js",
+   "__tests__/response/writable.test.js",
+   "should default export koa",
+   "should match exports own property names"
+  ],
+  "src_churn": 2,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "9ce4536d9e7073d6f9cca0d5fcb5ea83a35d6496": {
+  "task": "9ce4536d9e7073d6f9cca0d5fcb5ea83a35d6496",
+  "target_tests": [
+   "__tests__/application/respond.test.js",
+   "__tests__/context/onerror.test.js"
+  ],
+  "test_files": [
+   "__tests__/application/respond.test.js",
+   "__tests__/context/onerror.test.js"
+  ],
+  "src_files": [
+   "lib/context.js"
+  ],
+  "authored": "2025-03-18T18:31:00-07:00",
+  "subject": "breaking: remove special ENOENT support (#1861)",
+  "baseline_failing": [
+   "CommonJS exports default property",
+   "CommonJS exports default property referencing self",
+   "__tests__/application/compose.test.js",
+   "__tests__/application/context.test.js",
+   "__tests__/application/currentContext.test.js",
+   "__tests__/application/index.test.js",
+   "__tests__/application/inspect.test.js",
+   "__tests__/application/onerror.test.js",
+   "__tests__/application/request.test.js",
+   "__tests__/application/respond.test.js",
+   "__tests__/application/response.test.js",
+   "__tests__/application/toJSON.test.js",
+   "__tests__/application/use.test.js",
+   "__tests__/context/assert.test.js",
+   "__tests__/context/cookies.test.js",
+   "__tests__/context/inspect.test.js",
+   "__tests__/context/onerror.test.js",
+   "__tests__/context/state.test.js",
+   "__tests__/context/throw.test.js",
+   "__tests__/context/toJSON.test.js",
+   "__tests__/request/accept.test.js",
+   "__tests__/request/accepts.test.js",
+   "__tests__/request/acceptsCharsets.test.js",
+   "__tests__/request/acceptsEncodings.test.js",
+   "__tests__/request/acceptsLanguages.test.js",
+   "__tests__/request/charset.test.js",
+   "__tests__/request/fresh.test.js",
+   "__tests__/request/get.test.js",
+   "__tests__/request/header.test.js",
+   "__tests__/request/headers.test.js",
+   "__tests__/request/host.test.js",
+   "__tests__/request/hostname.test.js",
+   "__tests__/request/href.test.js",
+   "__tests__/request/idempotent.test.js",
+   "__tests__/request/inspect.test.js",
+   "__tests__/request/ip.test.js",
+   "__tests__/request/ips.test.js",
+   "__tests__/request/is.test.js",
+   "__tests__/request/length.test.js",
+   "__tests__/request/origin.test.js",
+   "__tests__/request/path.test.js",
+   "__tests__/request/protocol.test.js",
+   "__tests__/request/query.test.js",
+   "__tests__/request/querystring.test.js",
+   "__tests__/request/search.test.js",
+   "__tests__/request/secure.test.js",
+   "__tests__/request/stale.test.js",
+   "__tests__/request/subdomains.test.js",
+   "__tests__/request/type.test.js",
+   "__tests__/request/whatwg-url.test.js",
+   "__tests__/response/append.test.js",
+   "__tests__/response/attachment.test.js",
+   "__tests__/response/back.test.js",
+   "__tests__/response/body.test.js",
+   "__tests__/response/etag.test.js",
+   "__tests__/response/flushHeaders.test.js",
+   "__tests__/response/get.test.js",
+   "__tests__/response/has.test.js",
+   "__tests__/response/header.test.js",
+   "__tests__/response/headers.test.js",
+   "__tests__/response/inspect.test.js",
+   "__tests__/response/is.test.js",
+   "__tests__/response/last-modified.test.js",
+   "__tests__/response/length.test.js",
+   "__tests__/response/message.test.js",
+   "__tests__/response/redirect.test.js",
+   "__tests__/response/remove.test.js",
+   "__tests__/response/set.test.js",
+   "__tests__/response/socket.test.js",
+   "__tests__/response/status.test.js",
+   "__tests__/response/type.test.js",
+   "__tests__/response/vary.test.js",
+   "__tests__/response/writable.test.js",
+   "should default export koa",
+   "should match exports own property names"
+  ],
+  "src_churn": 3,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "af0547d5f6330466c4e6c4c5034cea3f4cba6a74": {
+  "task": "af0547d5f6330466c4e6c4c5034cea3f4cba6a74",
+  "target_tests": [
+   "__tests__/context/toJSON.test.js",
+   "__tests__/response/body.test.js",
+   "__tests__/response/header.test.js",
+   "__tests__/response/inspect.test.js",
+   "__tests__/response/set.test.js"
+  ],
+  "test_files": [
+   "__tests__/context/toJSON.test.js",
+   "__tests__/response/body.test.js",
+   "__tests__/response/header.test.js",
+   "__tests__/response/inspect.test.js",
+   "__tests__/response/set.test.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2025-03-17T21:43:21-07:00",
+  "subject": "don't coerce header value to string on set #1394 (#1859)",
+  "baseline_failing": [
+   "CommonJS exports default property",
+   "CommonJS exports default property referencing self",
+   "__tests__/application/compose.test.js",
+   "__tests__/application/context.test.js",
+   "__tests__/application/currentContext.test.js",
+   "__tests__/application/index.test.js",
+   "__tests__/application/inspect.test.js",
+   "__tests__/application/onerror.test.js",
+   "__tests__/application/request.test.js",
+   "__tests__/application/respond.test.js",
+   "__tests__/application/response.test.js",
+   "__tests__/application/toJSON.test.js",
+   "__tests__/application/use.test.js",
+   "__tests__/context/assert.test.js",
+   "__tests__/context/cookies.test.js",
+   "__tests__/context/inspect.test.js",
+   "__tests__/context/onerror.test.js",
+   "__tests__/context/state.test.js",
+   "__tests__/context/throw.test.js",
+   "__tests__/context/toJSON.test.js",
+   "__tests__/request/accept.test.js",
+   "__tests__/request/accepts.test.js",
+   "__tests__/request/acceptsCharsets.test.js",
+   "__tests__/request/acceptsEncodings.test.js",
+   "__tests__/request/acceptsLanguages.test.js",
+   "__tests__/request/charset.test.js",
+   "__tests__/request/fresh.test.js",
+   "__tests__/request/get.test.js",
+   "__tests__/request/header.test.js",
+   "__tests__/request/headers.test.js",
+   "__tests__/request/host.test.js",
+   "__tests__/request/hostname.test.js",
+   "__tests__/request/href.test.js",
+   "__tests__/request/idempotent.test.js",
+   "__tests__/request/inspect.test.js",
+   "__tests__/request/ip.test.js",
+   "__tests__/request/ips.test.js",
+   "__tests__/request/is.test.js",
+   "__tests__/request/length.test.js",
+   "__tests__/request/origin.test.js",
+   "__tests__/request/path.test.js",
+   "__tests__/request/protocol.test.js",
+   "__tests__/request/query.test.js",
+   "__tests__/request/querystring.test.js",
+   "__tests__/request/search.test.js",
+   "__tests__/request/secure.test.js",
+   "__tests__/request/stale.test.js",
+   "__tests__/request/subdomains.test.js",
+   "__tests__/request/type.test.js",
+   "__tests__/request/whatwg-url.test.js",
+   "__tests__/response/append.test.js",
+   "__tests__/response/attachment.test.js",
+   "__tests__/response/back.test.js",
+   "__tests__/response/body.test.js",
+   "__tests__/response/etag.test.js",
+   "__tests__/response/flushHeaders.test.js",
+   "__tests__/response/get.test.js",
+   "__tests__/response/has.test.js",
+   "__tests__/response/header.test.js",
+   "__tests__/response/headers.test.js",
+   "__tests__/response/inspect.test.js",
+   "__tests__/response/is.test.js",
+   "__tests__/response/last-modified.test.js",
+   "__tests__/response/length.test.js",
+   "__tests__/response/message.test.js",
+   "__tests__/response/redirect.test.js",
+   "__tests__/response/remove.test.js",
+   "__tests__/response/set.test.js",
+   "__tests__/response/socket.test.js",
+   "__tests__/response/status.test.js",
+   "__tests__/response/type.test.js",
+   "__tests__/response/vary.test.js",
+   "__tests__/response/writable.test.js",
+   "should default export koa",
+   "should match exports own property names"
+  ],
+  "src_churn": 14,
+  "size": "S",
+  "gold_clean": false
+ },
+ "f9f7714e9528cb02f61ae7d8c8da09b502f88d69": {
+  "task": "f9f7714e9528cb02f61ae7d8c8da09b502f88d69",
+  "target_tests": [
+   "__tests__/response/back.js"
+  ],
+  "test_files": [
+   "__tests__/response/back.js"
+  ],
+  "src_files": [
+   "lib/context.js",
+   "lib/response.js"
+  ],
+  "authored": "2024-10-21T01:41:19+02:00",
+  "subject": "response.redirect: extract special-cased back, fixes #904 (#1115)",
+  "baseline_failing": [],
+  "src_churn": 26,
+  "size": "S",
+  "gold_clean": false
+ },
+ "0d9f062aa840c54b5c20911dab6ce62128d3b089": {
+  "task": "0d9f062aa840c54b5c20911dab6ce62128d3b089",
+  "target_tests": [
+   "__tests__/application/respond.js"
+  ],
+  "test_files": [
+   "__tests__/application/respond.js"
+  ],
+  "src_files": [
+   "lib/context.js",
+   "lib/response.js"
+  ],
+  "authored": "2024-08-31T11:04:26-07:00",
+  "subject": ":arrow_up: statuses@2.0.1",
+  "baseline_failing": [],
+  "src_churn": 8,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "7cf1462d346b97d009a9fa1726e1d066bb45c88f": {
+  "task": "7cf1462d346b97d009a9fa1726e1d066bb45c88f",
+  "target_tests": [
+   "__tests__/lib/search-params.js"
+  ],
+  "test_files": [
+   "__tests__/lib/search-params.js"
+  ],
+  "src_files": [
+   "lib/request.js",
+   "lib/search-params.js"
+  ],
+  "authored": "2024-08-31T05:50:02+01:00",
+  "subject": "Feat: Replace node querystring with URLSearchParams (#1828)",
+  "baseline_failing": [],
+  "src_churn": 41,
+  "size": "M",
+  "gold_clean": false
+ },
+ "8d5beb329d0851a9e2eb00ed08d3996ebde53994": {
+  "task": "8d5beb329d0851a9e2eb00ed08d3996ebde53994",
+  "target_tests": [
+   "__tests__/application/respond.js",
+   "__tests__/response/body.js"
+  ],
+  "test_files": [
+   "__tests__/application/respond.js",
+   "__tests__/response/body.js"
+  ],
+  "src_files": [
+   "lib/application.js",
+   "lib/response.js"
+  ],
+  "authored": "2024-06-28T15:45:36+01:00",
+  "subject": "feat: add support web WHATWG (#1830)",
+  "baseline_failing": [],
+  "src_churn": 36,
+  "size": "S",
+  "gold_clean": false
+ },
+ "b89e19a27509c96d27af722f9951e0d72cb41eb5": {
+  "task": "b89e19a27509c96d27af722f9951e0d72cb41eb5",
+  "target_tests": [
+   "__tests__/application/respond.js"
+  ],
+  "test_files": [
+   "__tests__/application/respond.js"
+  ],
+  "src_files": [
+   "lib/application.js"
+  ],
+  "authored": "2024-05-30T09:02:33+08:00",
+  "subject": "fix: improve body null check (#1814)",
+  "baseline_failing": [],
+  "src_churn": 2,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "5bc0b4651620fec05213e9b758113f92cbf659dc": {
+  "task": "5bc0b4651620fec05213e9b758113f92cbf659dc",
+  "target_tests": [
+   "__tests__/application/index.js"
+  ],
+  "test_files": [
+   "__tests__/application/index.js"
+  ],
+  "src_files": [
+   "lib/application.js"
+  ],
+  "authored": "2024-05-29T20:59:19-04:00",
+  "subject": "fix: remove unused async local storage middleware (#1817)",
+  "baseline_failing": [],
+  "src_churn": 9,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "185e701a8a1a1277d7df976a0598b7a27ebc789e": {
+  "task": "185e701a8a1a1277d7df976a0598b7a27ebc789e",
+  "target_tests": [
+   "__tests__/response/redirect.js"
+  ],
+  "test_files": [
+   "__tests__/response/redirect.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2024-03-21T16:23:36+08:00",
+  "subject": "fix: handle upper case protocol like HTTP or HTTPS (#1805)",
+  "baseline_failing": [],
+  "src_churn": 2,
+  "size": "XS",
+  "gold_clean": false
+ },
+ "435534aa08afd7749b121664f5ab2b54421b276e": {
+  "task": "435534aa08afd7749b121664f5ab2b54421b276e",
+  "target_tests": [
+   "__tests__/response/redirect.js"
+  ],
+  "test_files": [
+   "__tests__/response/redirect.js"
+  ],
+  "src_files": [
+   "lib/response.js"
+  ],
+  "authored": "2024-03-15T15:19:01+08:00",
+  "subject": "fix: formatting redirect url on http(s) protocol url (#1804)",
+  "baseline_failing": [],
+  "src_churn": 4,
+  "size": "XS",
+  "gold_clean": false
+ }
+}

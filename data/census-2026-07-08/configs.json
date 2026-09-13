@@ -1,0 +1,552 @@
+{
+ "drf": {
+  "lang": "py",
+  "url": "https://github.com/encode/django-rest-framework",
+  "layer": "Python \u00b7 HTTP API framework",
+  "pythonpath_suffix": "",
+  "pip": [
+   "django",
+   "pytest",
+   "-r",
+   "requirements/requirements-testing.txt"
+  ],
+  "pip_fallback": [
+   "django",
+   "pytest",
+   "pytest-django",
+   "pytest-cov",
+   "dj-database-url",
+   "importlib-metadata"
+  ],
+  "uninstall": [
+   "djangorestframework"
+  ],
+  "src_prefix": "rest_framework/",
+  "test_prefix": "tests/",
+  "ext": ".py",
+  "belt_scope": [
+   "tests/"
+  ],
+  "probe": "tests/test_status.py",
+  "target_valid": 90,
+  "log_n": 6000,
+  "max_candidates": 2500,
+  "hard_target": 30
+ },
+ "celery": {
+  "lang": "py",
+  "url": "https://github.com/celery/celery",
+  "layer": "Python \u00b7 async / task queue",
+  "pythonpath_suffix": "",
+  "pip": [
+   "celery",
+   "pytest",
+   "-r",
+   "requirements/test.txt"
+  ],
+  "pip_fallback": [
+   "celery",
+   "pytest",
+   "pytest-timeout",
+   "pytest-subtests",
+   "case",
+   "moto",
+   "boto3",
+   "msgpack",
+   "PyYAML"
+  ],
+  "uninstall": [
+   "celery"
+  ],
+  "src_prefix": "celery/",
+  "test_prefix": "t/unit/",
+  "ext": ".py",
+  "belt_scope": [
+   "t/unit/"
+  ],
+  "probe": "t/unit/utils/test_text.py",
+  "target_valid": 120,
+  "log_n": 8000,
+  "max_candidates": 3000,
+  "hard_target": 30
+ },
+ "sqlalchemy": {
+  "lang": "py",
+  "url": "https://github.com/sqlalchemy/sqlalchemy",
+  "layer": "Python \u00b7 ORM / data access",
+  "pythonpath_suffix": "/lib",
+  "pip": [
+   "sqlalchemy",
+   "pytest",
+   "greenlet",
+   "typing-extensions"
+  ],
+  "pip_fallback": [
+   "sqlalchemy",
+   "pytest",
+   "greenlet",
+   "typing-extensions"
+  ],
+  "uninstall": [
+   "sqlalchemy"
+  ],
+  "src_prefix": "lib/sqlalchemy/",
+  "test_prefix": "test/",
+  "ext": ".py",
+  "belt_scope": "AFFECTED_DIRS",
+  "probe": "test/base/test_utils.py",
+  "target_valid": 220,
+  "log_n": 15000,
+  "max_candidates": 5000,
+  "hard_target": 60
+ },
+ "gin": {
+  "lang": "go",
+  "url": "https://github.com/gin-gonic/gin",
+  "layer": "Go \u00b7 web framework",
+  "src_prefix": "",
+  "test_prefix": "",
+  "ext": ".go",
+  "belt_scope": [
+   "./..."
+  ],
+  "probe": "./render/...",
+  "target_valid": 90,
+  "log_n": 6000,
+  "max_candidates": 2500,
+  "hard_target": 30
+ },
+ "express": {
+  "lang": "js",
+  "url": "https://github.com/expressjs/express",
+  "layer": "JavaScript \u00b7 web (Node)",
+  "src_prefix": "lib/",
+  "test_prefix": "test/",
+  "ext": ".js",
+  "belt_scope": [
+   "test/",
+   "test/acceptance/"
+  ],
+  "probe": "test/res.send.js",
+  "target_valid": 40,
+  "log_n": 1500,
+  "max_candidates": 600,
+  "hard_target": 0
+ },
+ "koa": {
+  "lang": "js",
+  "js_tool": "node",
+  "url": "https://github.com/koajs/koa",
+  "layer": "JavaScript \u00b7 middleware framework (Node)",
+  "src_prefix": "lib/",
+  "test_prefix": "__tests__/",
+  "ext": ".js",
+  "belt_scope": [
+   "BARE"
+  ],
+  "probe": "__tests__/application/index.test.js",
+  "target_valid": 25,
+  "log_n": 2500,
+  "max_candidates": 900,
+  "hard_target": 8
+ },
+ "petclinic": {
+  "lang": "jvm",
+  "url": "https://github.com/spring-projects/spring-petclinic",
+  "layer": "JVM \u00b7 web + service + JPA",
+  "src_prefix": "src/main/java/",
+  "test_prefix": "src/test/java/",
+  "ext": ".java",
+  "belt_scope": "TARGET_ONLY",
+  "probe": "OwnerControllerTests",
+  "target_valid": 25,
+  "log_n": 3000,
+  "max_candidates": 300,
+  "hard_target": 0
+ },
+ "flask": {
+  "lang": "py",
+  "url": "https://github.com/pallets/flask",
+  "layer": "Python \u00b7 web app framework",
+  "pythonpath_suffix": "/src",
+  "pip": [
+   "flask",
+   "pytest",
+   "asgiref",
+   "greenlet"
+  ],
+  "pip_fallback": [
+   "flask",
+   "pytest"
+  ],
+  "uninstall": [
+   "flask"
+  ],
+  "src_prefix": "src/flask/",
+  "test_prefix": "tests/",
+  "ext": ".py",
+  "belt_scope": [
+   "tests/"
+  ],
+  "probe": "AUTO:tests/test_config.py",
+  "target_valid": 80,
+  "hard_target": 20,
+  "log_n": 4000,
+  "max_candidates": 1500
+ },
+ "werkzeug": {
+  "lang": "py",
+  "url": "https://github.com/pallets/werkzeug",
+  "layer": "Python \u00b7 WSGI toolkit",
+  "pythonpath_suffix": "/src",
+  "pip": [
+   "werkzeug",
+   "pytest",
+   "cryptography",
+   "watchdog",
+   "ephemeral-port-reserve"
+  ],
+  "pip_fallback": [
+   "werkzeug",
+   "pytest"
+  ],
+  "uninstall": [
+   "werkzeug"
+  ],
+  "src_prefix": "src/werkzeug/",
+  "test_prefix": "tests/",
+  "ext": ".py",
+  "belt_scope": [
+   "tests/"
+  ],
+  "probe": "AUTO:tests/test_utils.py",
+  "target_valid": 80,
+  "hard_target": 20,
+  "log_n": 5000,
+  "max_candidates": 2000
+ },
+ "starlette": {
+  "lang": "py",
+  "url": "https://github.com/encode/starlette",
+  "layer": "Python \u00b7 ASGI framework",
+  "pythonpath_suffix": "",
+  "pip": [
+   "starlette",
+   "pytest",
+   "httpx",
+   "anyio",
+   "trio",
+   "python-multipart",
+   "itsdangerous",
+   "pyyaml",
+   "jinja2"
+  ],
+  "pip_fallback": [
+   "starlette",
+   "pytest",
+   "httpx"
+  ],
+  "uninstall": [
+   "starlette"
+  ],
+  "src_prefix": "starlette/",
+  "test_prefix": "tests/",
+  "ext": ".py",
+  "belt_scope": [
+   "tests/"
+  ],
+  "probe": "AUTO:tests/test_responses.py",
+  "target_valid": 60,
+  "hard_target": 15,
+  "log_n": 3000,
+  "max_candidates": 1200
+ },
+ "httpx": {
+  "lang": "py",
+  "url": "https://github.com/encode/httpx",
+  "layer": "Python \u00b7 HTTP client",
+  "pythonpath_suffix": "",
+  "pip": [
+   "httpx",
+   "pytest",
+   "trio",
+   "uvicorn",
+   "chardet",
+   "brotli",
+   "zstandard",
+   "socksio",
+   "trustme"
+  ],
+  "pip_fallback": [
+   "httpx",
+   "pytest",
+   "trio",
+   "trustme",
+   "uvicorn"
+  ],
+  "uninstall": [
+   "httpx"
+  ],
+  "src_prefix": "httpx/",
+  "test_prefix": "tests/",
+  "ext": ".py",
+  "belt_scope": [
+   "tests/"
+  ],
+  "probe": "AUTO:tests/models/test_queryparams.py",
+  "target_valid": 50,
+  "hard_target": 12,
+  "log_n": 2500,
+  "max_candidates": 1000
+ },
+ "click": {
+  "lang": "py",
+  "url": "https://github.com/pallets/click",
+  "layer": "Python \u00b7 CLI framework",
+  "pythonpath_suffix": "/src",
+  "pip": [
+   "click",
+   "pytest"
+  ],
+  "pip_fallback": [
+   "click",
+   "pytest"
+  ],
+  "uninstall": [
+   "click"
+  ],
+  "src_prefix": "src/click/",
+  "test_prefix": "tests/",
+  "ext": ".py",
+  "belt_scope": [
+   "tests/"
+  ],
+  "probe": "AUTO:tests/test_basic.py",
+  "target_valid": 40,
+  "hard_target": 10,
+  "log_n": 3000,
+  "max_candidates": 1200
+ },
+ "jinja2": {
+  "lang": "py",
+  "url": "https://github.com/pallets/jinja",
+  "layer": "Python \u00b7 template engine",
+  "pythonpath_suffix": "/src",
+  "pip": [
+   "jinja2",
+   "pytest",
+   "trio"
+  ],
+  "pip_fallback": [
+   "jinja2",
+   "pytest"
+  ],
+  "uninstall": [
+   "jinja2"
+  ],
+  "src_prefix": "src/jinja2/",
+  "test_prefix": "tests/",
+  "ext": ".py",
+  "belt_scope": [
+   "tests/"
+  ],
+  "probe": "AUTO:tests/test_filters.py",
+  "target_valid": 40,
+  "hard_target": 10,
+  "log_n": 3000,
+  "max_candidates": 1200
+ },
+ "pytest": {
+  "lang": "py",
+  "url": "https://github.com/pytest-dev/pytest",
+  "layer": "Python \u00b7 test framework",
+  "pythonpath_suffix": "/src",
+  "pip": [
+   "pytest",
+   "hypothesis",
+   "xmlschema",
+   "requests"
+  ],
+  "pip_fallback": [
+   "pytest"
+  ],
+  "uninstall": [],
+  "src_prefix": "src/",
+  "test_prefix": "testing/",
+  "ext": ".py",
+  "belt_scope": [
+   "testing/python/"
+  ],
+  "probe": "AUTO:testing/test_warning_types.py",
+  "target_valid": 100,
+  "hard_target": 25,
+  "log_n": 6000,
+  "max_candidates": 2500
+ },
+ "cobra": {
+  "lang": "go",
+  "url": "https://github.com/spf13/cobra",
+  "layer": "Go \u00b7 CLI framework",
+  "src_prefix": "",
+  "test_prefix": "",
+  "ext": ".go",
+  "belt_scope": [
+   "./..."
+  ],
+  "probe": "./...",
+  "target_valid": 80,
+  "hard_target": 15,
+  "log_n": 2500,
+  "max_candidates": 1000
+ },
+ "echo": {
+  "lang": "go",
+  "url": "https://github.com/labstack/echo",
+  "layer": "Go \u00b7 web framework",
+  "src_prefix": "",
+  "test_prefix": "",
+  "ext": ".go",
+  "belt_scope": [
+   "./..."
+  ],
+  "probe": "./middleware",
+  "target_valid": 80,
+  "hard_target": 20,
+  "log_n": 3000,
+  "max_candidates": 1200
+ },
+ "chi": {
+  "lang": "go",
+  "url": "https://github.com/go-chi/chi",
+  "layer": "Go \u00b7 HTTP router",
+  "src_prefix": "",
+  "test_prefix": "",
+  "ext": ".go",
+  "belt_scope": [
+   "./..."
+  ],
+  "probe": "./...",
+  "target_valid": 50,
+  "hard_target": 10,
+  "log_n": 2000,
+  "max_candidates": 800
+ },
+ "zap": {
+  "lang": "go",
+  "url": "https://github.com/uber-go/zap",
+  "layer": "Go \u00b7 structured logging",
+  "src_prefix": "",
+  "test_prefix": "",
+  "ext": ".go",
+  "belt_scope": [
+   "./..."
+  ],
+  "probe": "./buffer",
+  "target_valid": 60,
+  "hard_target": 12,
+  "log_n": 2500,
+  "max_candidates": 1000
+ },
+ "fastify": {
+  "lang": "js",
+  "js_tool": "node",
+  "url": "https://github.com/fastify/fastify",
+  "layer": "JavaScript \u00b7 web framework (Node)",
+  "src_prefix": "lib/",
+  "test_prefix": "test/",
+  "ext": ".js",
+  "belt_scope": [
+   "BARE"
+  ],
+  "probe": "AUTO:test/hooks.test.js",
+  "target_valid": 90,
+  "hard_target": 20,
+  "log_n": 4000,
+  "max_candidates": 1600
+ },
+ "axios": {
+  "lang": "js",
+  "js_tool": "vitest",
+  "url": "https://github.com/axios/axios",
+  "layer": "JavaScript \u00b7 HTTP client",
+  "src_prefix": "lib/",
+  "test_prefix": "tests/unit/",
+  "ext": ".js",
+  "belt_scope": [
+   "tests/unit/"
+  ],
+  "probe": "AUTO:tests/unit/**/*.js",
+  "target_valid": 50,
+  "hard_target": 10,
+  "log_n": 2500,
+  "max_candidates": 1000
+ },
+ "hono": {
+  "lang": "js",
+  "js_tool": "vitest",
+  "url": "https://github.com/honojs/hono",
+  "layer": "TypeScript \u00b7 web framework",
+  "src_prefix": "src/",
+  "test_prefix": "src/",
+  "ext": ".ts",
+  "test_mode": "suffix",
+  "test_suffix": ".test.ts",
+  "belt_scope": [
+   "src/hono.test.ts"
+  ],
+  "probe": "AUTO:src/utils/url.test.ts",
+  "target_valid": 90,
+  "hard_target": 20,
+  "log_n": 4000,
+  "max_candidates": 1600
+ },
+ "commons-lang": {
+  "lang": "jvm",
+  "url": "https://github.com/apache/commons-lang",
+  "layer": "JVM \u00b7 core utilities (Apache)",
+  "src_prefix": "src/main/java/",
+  "test_prefix": "src/test/java/",
+  "ext": ".java",
+  "belt_scope": "TARGET_ONLY",
+  "probe": "AUTO:src/test/java/org/apache/commons/lang3/StringUtilsTest.java",
+  "target_valid": 70,
+  "hard_target": 15,
+  "log_n": 5000,
+  "max_candidates": 2000
+ },
+ "gson": {
+  "lang": "jvm",
+  "url": "https://github.com/google/gson",
+  "layer": "JVM \u00b7 JSON serialization (Google)",
+  "src_prefix": "gson/src/main/java/",
+  "test_prefix": "gson/src/test/java/",
+  "ext": ".java",
+  "belt_scope": "TARGET_ONLY",
+  "probe": "AUTO:gson/src/test/java/com/google/gson/JsonParserTest.java",
+  "target_valid": 50,
+  "hard_target": 10,
+  "log_n": 3000,
+  "max_candidates": 1200,
+  "maven_flags": [
+   "-Denforcer.skip=true",
+   "-pl",
+   "gson"
+  ]
+ },
+ "clap": {
+  "lang": "rust",
+  "url": "https://github.com/clap-rs/clap",
+  "layer": "Rust \u00b7 CLI framework",
+  "src_prefix": "src/",
+  "test_prefix": "tests/",
+  "ext": ".rs",
+  "belt_scope": [
+   "ALL"
+  ],
+  "probe": "AUTO:tests/*.rs",
+  "target_valid": 40,
+  "hard_target": 8,
+  "log_n": 3000,
+  "max_candidates": 1200
+ }
+}

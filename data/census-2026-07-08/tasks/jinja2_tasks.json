@@ -1,0 +1,1195 @@
+{
+ "065334d1ee5b7210e1a0a93c37238c86858f2af7": {
+  "task": "065334d1ee5b7210e1a0a93c37238c86858f2af7",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/jinja2/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-03-05T10:08:48-08:00",
+  "subject": "attr filter uses env.getattr",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_security.py::TestStringFormatMap::test_attr_filter"
+  ],
+  "gold_clean": true
+ },
+ "66587ce989e5a478e0bb165371fa2b9d42b7040f": {
+  "task": "66587ce989e5a478e0bb165371fa2b9d42b7040f",
+  "target_tests": [
+   "tests/test_regression.py"
+  ],
+  "test_files": [
+   "tests/test_regression.py"
+  ],
+  "src_files": [
+   "src/jinja2/idtracking.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-05-02T15:33:58-06:00",
+  "subject": "Fix bug where set would sometimes fail within if",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_regression.py::test_load_parameter_when_set_in_all_if_branches"
+  ],
+  "gold_clean": true
+ },
+ "ee832194cd9f55f75e5a51359b709d535efe957f": {
+  "task": "ee832194cd9f55f75e5a51359b709d535efe957f",
+  "target_tests": [
+   "tests/test_core_tags.py"
+  ],
+  "test_files": [
+   "tests/test_core_tags.py"
+  ],
+  "src_files": [
+   "src/jinja2/compiler.py",
+   "src/jinja2/parser.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-05-02T12:01:08-06:00",
+  "subject": "Add support for namespaces in tuple assignment",
+  "src_churn": 53,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_core_tags.py::TestSet::test_namespace_set_tuple"
+  ],
+  "gold_clean": true
+ },
+ "d05bd3858c3f4990e91201dae058147caf317462": {
+  "task": "d05bd3858c3f4990e91201dae058147caf317462",
+  "target_tests": [
+   "tests/test_regression.py"
+  ],
+  "test_files": [
+   "tests/test_regression.py"
+  ],
+  "src_files": [
+   "src/jinja2/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-16T01:25:49+01:00",
+  "subject": "Pass context when using select",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_regression.py::TestBug::test_pass_context_with_select"
+  ],
+  "gold_clean": true
+ },
+ "0cd6948192591b2c31e3dba294ed9300813d1d44": {
+  "task": "0cd6948192591b2c31e3dba294ed9300813d1d44",
+  "target_tests": [
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/jinja2/utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-20T04:20:13+02:00",
+  "subject": "don't apply `urlize` to `@a@b`",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_utils.py::TestEscapeUrlizeTarget::test_urlize_mail_mastodon"
+  ],
+  "gold_clean": true
+ },
+ "227edfd372f174fdae1ff74972de6a532af6c76e": {
+  "task": "227edfd372f174fdae1ff74972de6a532af6c76e",
+  "target_tests": [
+   "tests/test_loader.py"
+  ],
+  "test_files": [
+   "tests/test_loader.py"
+  ],
+  "src_files": [
+   "src/jinja2/loaders.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-19T19:34:34-08:00",
+  "subject": "clean up message, add test",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_loader.py::TestFileSystemLoader::test_error_includes_paths"
+  ],
+  "gold_clean": true
+ },
+ "56a724644b1ad9cb03745c10cca732715cdc79e9": {
+  "task": "56a724644b1ad9cb03745c10cca732715cdc79e9",
+  "target_tests": [
+   "tests/test_compile.py"
+  ],
+  "test_files": [
+   "tests/test_compile.py"
+  ],
+  "src_files": [
+   "src/jinja2/compiler.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-26T14:32:36+02:00",
+  "subject": "fix f-string syntax error in code generation",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_compile.py::test_undefined_import_curly_name"
+  ],
+  "gold_clean": true
+ },
+ "91a972f5808973cd441f4dc06873b2f8378f30c7": {
+  "task": "91a972f5808973cd441f4dc06873b2f8378f30c7",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/jinja2/sandbox.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-23T15:09:10-07:00",
+  "subject": "sandbox indirect calls to str.format",
+  "src_churn": 81,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_security.py::TestStringFormatMap::test_indirect_call"
+  ],
+  "gold_clean": true
+ },
+ "b5120582706b9e997cfd3277b02a32fd35b1c9d4": {
+  "task": "b5120582706b9e997cfd3277b02a32fd35b1c9d4",
+  "target_tests": [
+   "tests/test_security.py"
+  ],
+  "test_files": [
+   "tests/test_security.py"
+  ],
+  "src_files": [
+   "src/jinja2/sandbox.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-04T13:17:07-07:00",
+  "subject": "sandbox disallows `clear` and `pop` on mutable sequence",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_security.py::TestSandbox::test_immutable_environment"
+  ],
+  "gold_clean": true
+ },
+ "7232b8246200155226adb672db8b3ef305cf29da": {
+  "task": "7232b8246200155226adb672db8b3ef305cf29da",
+  "target_tests": [
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/jinja2/utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-01T15:18:27-07:00",
+  "subject": "Fix pickle/copy support for the `missing` singleton",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_utils.py::test_copy_missing",
+   "tests/test_utils.py::test_pickle_missing[0]",
+   "tests/test_utils.py::test_pickle_missing[1]",
+   "tests/test_utils.py::test_pickle_missing[2]",
+   "tests/test_utils.py::test_pickle_missing[3]",
+   "tests/test_utils.py::test_pickle_missing[4]",
+   "tests/test_utils.py::test_pickle_missing[5]"
+  ],
+  "gold_clean": true
+ },
+ "d4fb0e8c401a8596be0e67622174b5ad35daeec2": {
+  "task": "d4fb0e8c401a8596be0e67622174b5ad35daeec2",
+  "target_tests": [
+   "tests/test_api.py",
+   "tests/test_runtime.py"
+  ],
+  "test_files": [
+   "tests/test_api.py",
+   "tests/test_runtime.py"
+  ],
+  "src_files": [
+   "src/jinja2/runtime.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-01T12:20:19-07:00",
+  "subject": "preserve `__slots__` on Undefined classes",
+  "src_churn": 30,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_runtime.py::test_undefined_copy[ChainableUndefined]",
+   "tests/test_runtime.py::test_undefined_copy[DebugUndefined]",
+   "tests/test_runtime.py::test_undefined_copy[StrictUndefined]",
+   "tests/test_runtime.py::test_undefined_copy[Undefined]",
+   "tests/test_runtime.py::test_undefined_deepcopy[ChainableUndefined]",
+   "tests/test_runtime.py::test_undefined_deepcopy[DebugUndefined]",
+   "tests/test_runtime.py::test_undefined_deepcopy[StrictUndefined]",
+   "tests/test_runtime.py::test_undefined_deepcopy[Undefined]",
+   "tests/test_runtime.py::test_undefined_pickle[ChainableUndefined]",
+   "tests/test_runtime.py::test_undefined_pickle[DebugUndefined]",
+   "tests/test_runtime.py::test_undefined_pickle[StrictUndefined]",
+   "tests/test_runtime.py::test_undefined_pickle[Undefined]"
+  ],
+  "gold_clean": true
+ },
+ "4936e4d48207c449f7713392e1ae83a1407aec1d": {
+  "task": "4936e4d48207c449f7713392e1ae83a1407aec1d",
+  "target_tests": [
+   "tests/test_compile.py"
+  ],
+  "test_files": [
+   "tests/test_compile.py"
+  ],
+  "src_files": [
+   "src/jinja2/compiler.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-03T22:16:33+01:00",
+  "subject": "make tuple unpacking deterministic in compiler",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_compile.py::test_block_set_vars_unpacking_deterministic",
+   "tests/test_compile.py::test_loop_set_vars_unpacking_deterministic",
+   "tests/test_compile.py::test_top_level_set_vars_unpacking_deterministic"
+  ],
+  "gold_clean": true
+ },
+ "2eb4542cbab101910d220229a8f09c94f76c19d1": {
+  "task": "2eb4542cbab101910d220229a8f09c94f76c19d1",
+  "target_tests": [
+   "tests/test_filters.py"
+  ],
+  "test_files": [
+   "tests/test_filters.py"
+  ],
+  "src_files": [
+   "src/jinja2/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-20T11:02:20-04:00",
+  "subject": "int filter handles OverflowError to handle scientific notation",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_filters.py::TestFilter::test_int[1e10000-0]"
+  ],
+  "gold_clean": true
+ },
+ "76af7110ead6083e75072f9e76242c9ce79b76ed": {
+  "task": "76af7110ead6083e75072f9e76242c9ce79b76ed",
+  "target_tests": [
+   "tests/test_async_filters.py"
+  ],
+  "test_files": [
+   "tests/test_async_filters.py"
+  ],
+  "src_files": [
+   "src/jinja2/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-23T09:46:29+01:00",
+  "subject": "make unique filter async-aware",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_async_filters.py::test_unique_with_async_gen"
+  ],
+  "gold_clean": true
+ },
+ "d3a0b1a4abac05a071f542aa83edea4551c88fa3": {
+  "task": "d3a0b1a4abac05a071f542aa83edea4551c88fa3",
+  "target_tests": [
+   "tests/test_nativetypes.py"
+  ],
+  "test_files": [
+   "tests/test_nativetypes.py"
+  ],
+  "src_files": [
+   "src/jinja2/runtime.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-09T10:12:27+02:00",
+  "subject": "use env.concat when calling block reference",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_nativetypes.py::test_block"
+  ],
+  "gold_clean": true
+ },
+ "1655128cfc0e8b598d5b3f361a3983f82098276b": {
+  "task": "1655128cfc0e8b598d5b3f361a3983f82098276b",
+  "target_tests": [
+   "tests/test_async.py",
+   "tests/test_async_filters.py"
+  ],
+  "test_files": [
+   "tests/test_async.py",
+   "tests/test_async_filters.py"
+  ],
+  "src_files": [
+   "src/jinja2/async_utils.py",
+   "src/jinja2/compiler.py",
+   "src/jinja2/environment.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-11T23:01:12+01:00",
+  "subject": "test on trio, fix all missing aclose related warnings (#1960)",
+  "src_churn": 81,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_async.py::TestAsyncForLoop::test_loop_errors[trio]",
+   "tests/test_async.py::test_async_extend[trio]",
+   "tests/test_async.py::test_basic_generate_async[trio]",
+   "tests/test_async.py::test_blocks_generate_async[trio]",
+   "tests/test_async.py::test_include_generate_async[trio]",
+   "tests/test_async_filters.py::test_custom_async_iteratable_filter[trio-<lambda>0]",
+   "tests/test_async_filters.py::test_custom_async_iteratable_filter[trio-<lambda>1]",
+   "tests/test_async_filters.py::test_first[trio-<lambda>0]",
+   "tests/test_async_filters.py::test_first[trio-<lambda>1]"
+  ],
+  "gold_clean": true
+ },
+ "d655030770081e2dfe46f90e27620472a502289d": {
+  "task": "d655030770081e2dfe46f90e27620472a502289d",
+  "target_tests": [
+   "tests/test_filters.py"
+  ],
+  "test_files": [
+   "tests/test_filters.py"
+  ],
+  "src_files": [
+   "src/jinja2/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-05-02T09:14:00-07:00",
+  "subject": "disallow invalid characters in keys to xmlattr filter",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[",
+   "tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[/]",
+   "tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[=]",
+   "tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[>]",
+   "tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[\\n]",
+   "tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[\\t]",
+   "tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[\\x0c]"
+  ],
+  "gold_clean": true
+ },
+ "19a55db3b411343309f2faaffaedbb089e841895": {
+  "task": "19a55db3b411343309f2faaffaedbb089e841895",
+  "target_tests": [
+   "tests/test_ext.py"
+  ],
+  "test_files": [
+   "tests/test_ext.py"
+  ],
+  "src_files": [
+   "src/jinja2/ext.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-12-15T16:24:32+02:00",
+  "subject": "Make nested-trans-block exceptions nicer",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_ext.py::TestInternationalization::test_nested_trans_error",
+   "tests/test_ext.py::TestInternationalization::test_trans_block_error"
+  ],
+  "gold_clean": true
+ },
+ "7dd3680e6eea0d77fde024763657aa4d884ddb23": {
+  "task": "7dd3680e6eea0d77fde024763657aa4d884ddb23",
+  "target_tests": [
+   "tests/test_filters.py"
+  ],
+  "test_files": [
+   "tests/test_filters.py"
+  ],
+  "src_files": [
+   "src/jinja2/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-10-26T12:08:53+01:00",
+  "subject": "xmlattr filter disallows keys with spaces",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_filters.py::TestFilter::test_xmlattr_key_with_spaces"
+  ],
+  "gold_clean": true
+ },
+ "051df10c7b95b735ee53eeb1e9c8de1eb48ead14": {
+  "task": "051df10c7b95b735ee53eeb1e9c8de1eb48ead14",
+  "target_tests": [
+   "tests/test_inheritance.py"
+  ],
+  "test_files": [
+   "tests/test_inheritance.py"
+  ],
+  "src_files": [
+   "src/jinja2/parser.py"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-01T10:42:27-07:00",
+  "subject": "fix check for empty required block (#1858)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_inheritance.py::TestInheritance::test_invalid_required"
+  ],
+  "gold_clean": true
+ },
+ "e690f7c5962aea8de43cd09689dcca12bcf29014": {
+  "task": "e690f7c5962aea8de43cd09689dcca12bcf29014",
+  "target_tests": [
+   "tests/test_async_filters.py",
+   "tests/test_filters.py"
+  ],
+  "test_files": [
+   "tests/test_async_filters.py",
+   "tests/test_filters.py"
+  ],
+  "src_files": [
+   "src/jinja2/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-14T18:57:28+03:00",
+  "subject": "add case_sensitive parameter groupby filter",
+  "src_churn": 50,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_async_filters.py::test_groupby_case[False-a:",
+   "tests/test_async_filters.py::test_groupby_case[True-A:",
+   "tests/test_filters.py::TestFilter::test_groupby_case[False-a:",
+   "tests/test_filters.py::TestFilter::test_groupby_case[True-A:"
+  ],
+  "gold_clean": true
+ },
+ "a150ff749a0347c41e8e353c2ce2063e8f84ab42": {
+  "task": "a150ff749a0347c41e8e353c2ce2063e8f84ab42",
+  "target_tests": [
+   "tests/test_async.py"
+  ],
+  "test_files": [
+   "tests/test_async.py"
+  ],
+  "src_files": [
+   "src/jinja2/compiler.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-07T09:14:21-08:00",
+  "subject": "add parens around auto_await for filters and calls",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_async.py::test_getitem_after_call",
+   "tests/test_async.py::test_getitem_after_filter"
+  ],
+  "gold_clean": true
+ },
+ "1c036cac2fe61486e3bb1cc27474bf3e09ee0cd4": {
+  "task": "1c036cac2fe61486e3bb1cc27474bf3e09ee0cd4",
+  "target_tests": [
+   "tests/test_filters.py"
+  ],
+  "test_files": [
+   "tests/test_filters.py"
+  ],
+  "src_files": [
+   "src/jinja2/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-01-01T22:19:24+01:00",
+  "subject": "add items filter",
+  "src_churn": 31,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_filters.py::TestFilter::test_items",
+   "tests/test_filters.py::TestFilter::test_items_undefined"
+  ],
+  "gold_clean": true
+ },
+ "ac3ac6c965462935f2d1c041ed9e28c1926bdfcc": {
+  "task": "ac3ac6c965462935f2d1c041ed9e28c1926bdfcc",
+  "target_tests": [
+   "tests/test_pickle.py"
+  ],
+  "test_files": [
+   "tests/test_pickle.py"
+  ],
+  "src_files": [
+   "src/jinja2/async_utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-03T12:41:35-08:00",
+  "subject": "async_variant filters are pickleable",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_pickle.py::test_environment"
+  ],
+  "gold_clean": true
+ },
+ "b6f50df85b7b26f7e79d26b455db9b55d2a21d0c": {
+  "task": "b6f50df85b7b26f7e79d26b455db9b55d2a21d0c",
+  "target_tests": [
+   "tests/test_ext.py"
+  ],
+  "test_files": [
+   "tests/test_ext.py"
+  ],
+  "src_files": [
+   "src/jinja2/ext.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-12-26T11:29:39-07:00",
+  "subject": "specify context for translation block",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_ext.py::TestNewstyleInternationalization::test_context_block",
+   "tests/test_ext.py::TestNewstyleInternationalization::test_context_plural_block"
+  ],
+  "gold_clean": true
+ },
+ "eec0db8642b25691867890f14fc6c9ca04c8a8c9": {
+  "task": "eec0db8642b25691867890f14fc6c9ca04c8a8c9",
+  "target_tests": [
+   "tests/test_loader.py"
+  ],
+  "test_files": [
+   "tests/test_loader.py"
+  ],
+  "src_files": [
+   "src/jinja2/loaders.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-11-09T12:14:48-08:00",
+  "subject": "PackageLoader works with single module file",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9b96b4817a61d7f114de088cfe729a4625c820bc": {
+  "task": "9b96b4817a61d7f114de088cfe729a4625c820bc",
+  "target_tests": [
+   "tests/test_nodes.py"
+  ],
+  "test_files": [
+   "tests/test_nodes.py"
+  ],
+  "src_files": [
+   "src/jinja2/nodes.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-10-27T20:35:20+02:00",
+  "subject": "Use object.__hash__ for Node.__hash__",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_nodes.py::test_template_hash"
+  ],
+  "gold_clean": true
+ },
+ "bb0db82b91e2842e900fd731acb9de7fab1d72ce": {
+  "task": "bb0db82b91e2842e900fd731acb9de7fab1d72ce",
+  "target_tests": [
+   "tests/test_nativetypes.py"
+  ],
+  "test_files": [
+   "tests/test_nativetypes.py"
+  ],
+  "src_files": [
+   "src/jinja2/nativetypes.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-11-09T17:15:31+01:00",
+  "subject": "native: keep same behavior on Python 3.10",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_nativetypes.py::test_leading_spaces"
+  ],
+  "gold_clean": true
+ },
+ "89310770585ed0fb8d10c46cf8d6f447bb807467": {
+  "task": "89310770585ed0fb8d10c46cf8d6f447bb807467",
+  "target_tests": [
+   "tests/test_loader.py"
+  ],
+  "test_files": [
+   "tests/test_loader.py"
+  ],
+  "src_files": [
+   "src/jinja2/loaders.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-10-04T17:39:39-07:00",
+  "subject": "omit curdir from PackageLoader root path",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_debug.py::TestDebug::test_runtime_error",
+   "tests/test_loader.py::test_package_zip_omit_curdir[./]",
+   "tests/test_loader.py::test_package_zip_omit_curdir[.]",
+   "tests/test_loader.py::test_package_zip_omit_curdir[]"
+  ],
+  "gold_clean": true
+ },
+ "baff54fe1d7b74c9fa8adb9d1324a77b8a2640ad": {
+  "task": "baff54fe1d7b74c9fa8adb9d1324a77b8a2640ad",
+  "target_tests": [
+   "tests/test_async.py",
+   "tests/test_imports.py"
+  ],
+  "test_files": [
+   "tests/test_async.py",
+   "tests/test_imports.py"
+  ],
+  "src_files": [
+   "src/jinja2/compiler.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-09-18T16:24:10+01:00",
+  "subject": "imported macros can access template globals in async mode",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_async.py::TestAsyncImports::test_from_import_with_globals",
+   "tests/test_async.py::TestAsyncImports::test_import_with_globals",
+   "tests/test_async.py::TestAsyncImports::test_import_with_globals_override",
+   "tests/test_debug.py::TestDebug::test_runtime_error"
+  ],
+  "gold_clean": true
+ },
+ "d5f49f5cc135f1a78704dba7db8212be2388b50e": {
+  "task": "d5f49f5cc135f1a78704dba7db8212be2388b50e",
+  "target_tests": [
+   "tests/test_api.py"
+  ],
+  "test_files": [
+   "tests/test_api.py"
+  ],
+  "src_files": [
+   "src/jinja2/runtime.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-26T11:54:58+02:00",
+  "subject": "Fixes #1448: Revert Undefined.__contains__ to 2.x behaviour",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_api.py::TestUndefined::test_default_undefined",
+   "tests/test_debug.py::TestDebug::test_runtime_error"
+  ],
+  "gold_clean": true
+ },
+ "4c703ec44dc74b25ba4f1fb7b87bf9106313ffcf": {
+  "task": "4c703ec44dc74b25ba4f1fb7b87bf9106313ffcf",
+  "target_tests": [
+   "tests/test_compile.py"
+  ],
+  "test_files": [
+   "tests/test_compile.py"
+  ],
+  "src_files": [
+   "src/jinja2/compiler.py",
+   "src/jinja2/idtracking.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-26T17:09:33+09:00",
+  "subject": "make compile_templates deterministic",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_compile.py::test_filters_deterministic",
+   "tests/test_compile.py::test_import_as_with_context_deterministic",
+   "tests/test_debug.py::TestDebug::test_runtime_error"
+  ],
+  "gold_clean": true
+ },
+ "f3bc9c6a915badd3871eb1bc5aae5421d2f6496d": {
+  "task": "f3bc9c6a915badd3871eb1bc5aae5421d2f6496d",
+  "target_tests": [
+   "tests/test_regression.py"
+  ],
+  "test_files": [
+   "tests/test_regression.py"
+  ],
+  "src_files": [
+   "src/jinja2/compiler.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-21T13:56:58-04:00",
+  "subject": "clear assignments in loops at end of iteration",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_debug.py::TestDebug::test_runtime_error",
+   "tests/test_regression.py::TestBug::test_nested_loop_scoping"
+  ],
+  "gold_clean": true
+ },
+ "7d0b7accff32e0ce9889fb8b81320917451b8454": {
+  "task": "7d0b7accff32e0ce9889fb8b81320917451b8454",
+  "target_tests": [
+   "tests/test_async.py"
+  ],
+  "test_files": [
+   "tests/test_async.py"
+  ],
+  "src_files": [
+   "src/jinja2/environment.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-18T13:22:46-07:00",
+  "subject": "use asyncio.run",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_async.py::TestAsyncForLoop::test_awaitable_property_slicing",
+   "tests/test_async.py::TestAsyncForLoop::test_bare_async",
+   "tests/test_async.py::TestAsyncForLoop::test_call_in_loop",
+   "tests/test_async.py::TestAsyncForLoop::test_changed",
+   "tests/test_async.py::TestAsyncForLoop::test_context_vars[<lambda>0]",
+   "tests/test_async.py::TestAsyncForLoop::test_context_vars[<lambda>1]",
+   "tests/test_async.py::TestAsyncForLoop::test_context_vars[auto_aiter]",
+   "tests/test_async.py::TestAsyncForLoop::test_context_vars[iter]",
+   "tests/test_async.py::TestAsyncForLoop::test_context_vars[reversed]",
+   "tests/test_async.py::TestAsyncForLoop::test_cycling",
+   "tests/test_async.py::TestAsyncForLoop::test_else",
+   "tests/test_async.py::TestAsyncForLoop::test_empty_blocks",
+   "tests/test_async.py::TestAsyncForLoop::test_lookaround",
+   "tests/test_async.py::TestAsyncForLoop::test_loop_errors",
+   "tests/test_async.py::TestAsyncForLoop::test_loop_filter",
+   "tests/test_async.py::TestAsyncForLoop::test_looploop",
+   "tests/test_async.py::TestAsyncForLoop::test_noniter",
+   "tests/test_async.py::TestAsyncForLoop::test_nonrecursive_loop_filter",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive_depth",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive_depth0",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive_empty_loop_iter",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive_lookaround",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive_loop_filter",
+   "tests/test_async.py::TestAsyncForLoop::test_reversed_bug",
+   "tests/test_async.py::TestAsyncForLoop::test_scope",
+   "tests/test_async.py::TestAsyncForLoop::test_scoped_loop_var",
+   "tests/test_async.py::TestAsyncForLoop::test_scoped_special_var",
+   "tests/test_async.py::TestAsyncForLoop::test_scoping_bug",
+   "tests/test_async.py::TestAsyncForLoop::test_simple",
+   "tests/test_async.py::TestAsyncForLoop::test_unpacking",
+   "tests/test_async.py::TestAsyncForLoop::test_varlen",
+   "tests/test_async.py::TestAsyncImports::test_context_imports",
+   "tests/test_async.py::TestAsyncIncludes::test_choice_includes",
+   "tests/test_async.py::TestAsyncIncludes::test_context_include",
+   "tests/test_async.py::TestAsyncIncludes::test_include_ignoring_missing",
+   "tests/test_async.py::TestAsyncIncludes::test_unoptimized_scopes",
+   "tests/test_async.py::TestAsyncIncludes::test_unoptimized_scopes_autoescape",
+   "tests/test_async.py::test_async_generate",
+   "tests/test_async.py::test_async_iteration_in_templates",
+   "tests/test_async.py::test_async_iteration_in_templates_extended",
+   "tests/test_async.py::test_await_on_calls_normal_render",
+   "tests/test_async_filters.py::test_attribute_map[<lambda>0]",
+   "tests/test_async_filters.py::test_attribute_map[<lambda>1]",
+   "tests/test_async_filters.py::test_bool_reject[<lambda>0]",
+   "tests/test_async_filters.py::test_bool_reject[<lambda>1]",
+   "tests/test_async_filters.py::test_bool_select[<lambda>0]",
+   "tests/test_async_filters.py::test_bool_select[<lambda>1]",
+   "tests/test_async_filters.py::test_custom_async_filter",
+   "tests/test_async_filters.py::test_custom_async_iteratable_filter[<lambda>0]",
+   "tests/test_async_filters.py::test_custom_async_iteratable_filter[<lambda>1]",
+   "tests/test_async_filters.py::test_empty_map",
+   "tests/test_async_filters.py::test_first[<lambda>0]",
+   "tests/test_async_filters.py::test_first[<lambda>1]",
+   "tests/test_async_filters.py::test_groupby[<lambda>0]",
+   "tests/test_async_filters.py::test_groupby[<lambda>1]",
+   "tests/test_async_filters.py::test_groupby_multidot[<lambda>0]",
+   "tests/test_async_filters.py::test_groupby_multidot[<lambda>1]",
+   "tests/test_async_filters.py::test_groupby_tuple_index[<lambda>0]",
+   "tests/test_async_filters.py::test_groupby_tuple_index[<lambda>1]",
+   "tests/test_async_filters.py::test_join_attribute[<lambda>0]",
+   "tests/test_async_filters.py::test_join_attribute[<lambda>1]",
+   "tests/test_async_filters.py::test_join_env_int[<lambda>0]",
+   "tests/test_async_filters.py::test_join_env_int[<lambda>1]",
+   "tests/test_async_filters.py::test_join_string_list[<lambda>0]",
+   "tests/test_async_filters.py::test_join_string_list[<lambda>1]",
+   "tests/test_async_filters.py::test_map_sum",
+   "tests/test_async_filters.py::test_simple_map[<lambda>0]",
+   "tests/test_async_filters.py::test_simple_map[<lambda>1]",
+   "tests/test_async_filters.py::test_simple_reject[<lambda>0]",
+   "tests/test_async_filters.py::test_simple_reject[<lambda>1]",
+   "tests/test_async_filters.py::test_simple_select[<lambda>0]",
+   "tests/test_async_filters.py::test_simple_select[<lambda>1]",
+   "tests/test_async_filters.py::test_simple_select_attr[<lambda>0]",
+   "tests/test_async_filters.py::test_simple_select_attr[<lambda>1]",
+   "tests/test_async_filters.py::test_slice[<lambda>0]",
+   "tests/test_async_filters.py::test_slice[<lambda>1]",
+   "tests/test_async_filters.py::test_sum[<lambda>0]",
+   "tests/test_async_filters.py::test_sum[<lambda>1]",
+   "tests/test_async_filters.py::test_sum_attributes[<lambda>0]",
+   "tests/test_async_filters.py::test_sum_attributes[<lambda>1]",
+   "tests/test_async_filters.py::test_sum_attributes_nested",
+   "tests/test_async_filters.py::test_sum_attributes_tuple",
+   "tests/test_debug.py::TestDebug::test_runtime_error"
+  ],
+  "gold_clean": true
+ },
+ "912e59d51f2ed4c2f47ec1e6dcb9f7b706619073": {
+  "task": "912e59d51f2ed4c2f47ec1e6dcb9f7b706619073",
+  "target_tests": [
+   "tests/test_regression.py"
+  ],
+  "test_files": [
+   "tests/test_regression.py"
+  ],
+  "src_files": [
+   "src/jinja2/runtime.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-04-11T23:53:59-07:00",
+  "subject": "deprecate legacy resolve mode",
+  "src_churn": 116,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_async.py::TestAsyncForLoop::test_awaitable_property_slicing",
+   "tests/test_async.py::TestAsyncForLoop::test_bare_async",
+   "tests/test_async.py::TestAsyncForLoop::test_call_in_loop",
+   "tests/test_async.py::TestAsyncForLoop::test_changed",
+   "tests/test_async.py::TestAsyncForLoop::test_context_vars[<lambda>0]",
+   "tests/test_async.py::TestAsyncForLoop::test_context_vars[<lambda>1]",
+   "tests/test_async.py::TestAsyncForLoop::test_context_vars[auto_aiter]",
+   "tests/test_async.py::TestAsyncForLoop::test_context_vars[iter]",
+   "tests/test_async.py::TestAsyncForLoop::test_context_vars[reversed]",
+   "tests/test_async.py::TestAsyncForLoop::test_cycling",
+   "tests/test_async.py::TestAsyncForLoop::test_else",
+   "tests/test_async.py::TestAsyncForLoop::test_empty_blocks",
+   "tests/test_async.py::TestAsyncForLoop::test_lookaround",
+   "tests/test_async.py::TestAsyncForLoop::test_loop_errors",
+   "tests/test_async.py::TestAsyncForLoop::test_loop_filter",
+   "tests/test_async.py::TestAsyncForLoop::test_looploop",
+   "tests/test_async.py::TestAsyncForLoop::test_noniter",
+   "tests/test_async.py::TestAsyncForLoop::test_nonrecursive_loop_filter",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive_depth",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive_depth0",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive_empty_loop_iter",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive_lookaround",
+   "tests/test_async.py::TestAsyncForLoop::test_recursive_loop_filter",
+   "tests/test_async.py::TestAsyncForLoop::test_reversed_bug",
+   "tests/test_async.py::TestAsyncForLoop::test_scope",
+   "tests/test_async.py::TestAsyncForLoop::test_scoped_loop_var",
+   "tests/test_async.py::TestAsyncForLoop::test_scoped_special_var",
+   "tests/test_async.py::TestAsyncForLoop::test_scoping_bug",
+   "tests/test_async.py::TestAsyncForLoop::test_simple",
+   "tests/test_async.py::TestAsyncForLoop::test_unpacking",
+   "tests/test_async.py::TestAsyncForLoop::test_varlen",
+   "tests/test_async.py::TestAsyncImports::test_context_imports",
+   "tests/test_async.py::TestAsyncImports::test_exports",
+   "tests/test_async.py::TestAsyncIncludes::test_choice_includes",
+   "tests/test_async.py::TestAsyncIncludes::test_context_include",
+   "tests/test_async.py::TestAsyncIncludes::test_include_ignoring_missing",
+   "tests/test_async.py::TestAsyncIncludes::test_unoptimized_scopes",
+   "tests/test_async.py::TestAsyncIncludes::test_unoptimized_scopes_autoescape",
+   "tests/test_async.py::test_async_blocks",
+   "tests/test_async.py::test_async_generate",
+   "tests/test_async.py::test_async_iteration_in_templates",
+   "tests/test_async.py::test_async_iteration_in_templates_extended",
+   "tests/test_async.py::test_await_and_macros",
+   "tests/test_async.py::test_await_on_calls",
+   "tests/test_async.py::test_await_on_calls_normal_render",
+   "tests/test_async.py::test_basic_async",
+   "tests/test_async.py::test_chainable_undefined_aiter",
+   "tests/test_async.py::test_namespace_awaitable",
+   "tests/test_async.py::test_native_async",
+   "tests/test_async.py::test_native_list_async",
+   "tests/test_async_filters.py::test_attribute_map[<lambda>0]",
+   "tests/test_async_filters.py::test_attribute_map[<lambda>1]",
+   "tests/test_async_filters.py::test_bool_reject[<lambda>0]",
+   "tests/test_async_filters.py::test_bool_reject[<lambda>1]",
+   "tests/test_async_filters.py::test_bool_select[<lambda>0]",
+   "tests/test_async_filters.py::test_bool_select[<lambda>1]",
+   "tests/test_async_filters.py::test_custom_async_filter",
+   "tests/test_async_filters.py::test_custom_async_iteratable_filter[<lambda>0]",
+   "tests/test_async_filters.py::test_custom_async_iteratable_filter[<lambda>1]",
+   "tests/test_async_filters.py::test_empty_map",
+   "tests/test_async_filters.py::test_first[<lambda>0]",
+   "tests/test_async_filters.py::test_first[<lambda>1]",
+   "tests/test_async_filters.py::test_groupby[<lambda>0]",
+   "tests/test_async_filters.py::test_groupby[<lambda>1]",
+   "tests/test_async_filters.py::test_groupby_multidot[<lambda>0]",
+   "tests/test_async_filters.py::test_groupby_multidot[<lambda>1]",
+   "tests/test_async_filters.py::test_groupby_tuple_index[<lambda>0]",
+   "tests/test_async_filters.py::test_groupby_tuple_index[<lambda>1]",
+   "tests/test_async_filters.py::test_join_attribute[<lambda>0]",
+   "tests/test_async_filters.py::test_join_attribute[<lambda>1]",
+   "tests/test_async_filters.py::test_join_env_int[<lambda>0]",
+   "tests/test_async_filters.py::test_join_env_int[<lambda>1]",
+   "tests/test_async_filters.py::test_join_string_list[<lambda>0]",
+   "tests/test_async_filters.py::test_join_string_list[<lambda>1]",
+   "tests/test_async_filters.py::test_map_sum",
+   "tests/test_async_filters.py::test_simple_map[<lambda>0]",
+   "tests/test_async_filters.py::test_simple_map[<lambda>1]",
+   "tests/test_async_filters.py::test_simple_reject[<lambda>0]",
+   "tests/test_async_filters.py::test_simple_reject[<lambda>1]",
+   "tests/test_async_filters.py::test_simple_select[<lambda>0]",
+   "tests/test_async_filters.py::test_simple_select[<lambda>1]",
+   "tests/test_async_filters.py::test_simple_select_attr[<lambda>0]",
+   "tests/test_async_filters.py::test_simple_select_attr[<lambda>1]",
+   "tests/test_async_filters.py::test_slice[<lambda>0]",
+   "tests/test_async_filters.py::test_slice[<lambda>1]",
+   "tests/test_async_filters.py::test_sum[<lambda>0]",
+   "tests/test_async_filters.py::test_sum[<lambda>1]",
+   "tests/test_async_filters.py::test_sum_attributes[<lambda>0]",
+   "tests/test_async_filters.py::test_sum_attributes[<lambda>1]",
+   "tests/test_async_filters.py::test_sum_attributes_nested",
+   "tests/test_async_filters.py::test_sum_attributes_tuple",
+   "tests/test_debug.py::TestDebug::test_runtime_error",
+   "tests/test_regression.py::TestBug::test_legacy_custom_context"
+  ],
+  "gold_clean": true
+ },
+ "34fbec9a726113381a27c30d2363aae676b9086a": {
+  "task": "34fbec9a726113381a27c30d2363aae676b9086a",
+  "target_tests": [
+   "tests/test_filters.py"
+  ],
+  "test_files": [
+   "tests/test_filters.py"
+  ],
+  "src_files": [
+   "src/jinja2/asyncfilters.py",
+   "src/jinja2/filters.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-02-23T14:34:36+08:00",
+  "subject": "add default parameter to groupby",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9dae67bcc8dbc389e0ceef12f1fa04352ef75b8e": {
+  "task": "9dae67bcc8dbc389e0ceef12f1fa04352ef75b8e",
+  "target_tests": [
+   "tests/test_regression.py"
+  ],
+  "test_files": [
+   "tests/test_regression.py"
+  ],
+  "src_files": [
+   "src/jinja2/lexer.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-03-09T14:19:58+01:00",
+  "subject": "Split lines in lexer only by \\r\\n, \\r and \\n",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3642ae7fef491222fb81fa3c0ae01bffca25fa41": {
+  "task": "3642ae7fef491222fb81fa3c0ae01bffca25fa41",
+  "target_tests": [
+   "tests/test_async.py"
+  ],
+  "test_files": [
+   "tests/test_async.py"
+  ],
+  "src_files": [
+   "src/jinja2/nativetypes.py"
+  ],
+  "pool": "standard",
+  "authored": "2021-03-02T23:12:30+01:00",
+  "subject": "NativeEnvironment supports async mode",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3242428c52852718abe3929481a2446c9e43482f": {
+  "task": "3242428c52852718abe3929481a2446c9e43482f",
+  "target_tests": [
+   "tests/test_async.py"
+  ],
+  "test_files": [
+   "tests/test_async.py"
+  ],
+  "src_files": [
+   "src/jinja2/runtime.py"
+  ],
+  "pool": "standard",
+  "authored": "2020-09-23T18:34:58+08:00",
+  "subject": "add Undefined.__aiter__",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "609bcb08312a844e88ff3239a0810c1ad36460d3": {
+  "task": "609bcb08312a844e88ff3239a0810c1ad36460d3",
+  "target_tests": [
+   "tests/test_api.py"
+  ],
+  "test_files": [
+   "tests/test_api.py"
+  ],
+  "src_files": [
+   "src/jinja2/runtime.py"
+  ],
+  "pool": "standard",
+  "authored": "2020-05-09T13:04:28-07:00",
+  "subject": "Undefined.__contains__ raises UndefinedError",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2903565262e6c8971e612a2717feb430e284e4ac": {
+  "task": "2903565262e6c8971e612a2717feb430e284e4ac",
+  "target_tests": [
+   "tests/test_nativetypes.py"
+  ],
+  "test_files": [
+   "tests/test_nativetypes.py"
+  ],
+  "src_files": [
+   "src/jinja2/compiler.py",
+   "src/jinja2/environment.py",
+   "src/jinja2/nativetypes.py",
+   "src/jinja2/runtime.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-10-13T16:56:48+02:00",
+  "subject": "support native types in macros",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_nativetypes.py::test_macro"
+  ],
+  "gold_clean": true
+ },
+ "6c733602ac1b2d68d9b39acb7b1d96faae6a7717": {
+  "task": "6c733602ac1b2d68d9b39acb7b1d96faae6a7717",
+  "target_tests": [
+   "tests/test_filters.py",
+   "tests/test_tests.py"
+  ],
+  "test_files": [
+   "tests/test_filters.py",
+   "tests/test_tests.py"
+  ],
+  "src_files": [
+   "src/jinja2/compiler.py",
+   "src/jinja2/environment.py",
+   "src/jinja2/nodes.py",
+   "src/jinja2/tests.py"
+  ],
+  "pool": "hard",
+  "authored": "2021-04-04T17:20:23-07:00",
+  "subject": "add 'is filter' and 'is test' tests",
+  "src_churn": 308,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "50ae5b6ac7e5962d525deac5bb3ae6fd9c2c2ae0": {
+  "task": "50ae5b6ac7e5962d525deac5bb3ae6fd9c2c2ae0",
+  "target_tests": [
+   "tests/test_api.py",
+   "tests/test_asyncfilters.py",
+   "tests/test_ext.py"
+  ],
+  "test_files": [
+   "tests/test_api.py",
+   "tests/test_asyncfilters.py",
+   "tests/test_ext.py"
+  ],
+  "src_files": [
+   "src/jinja2/compiler.py",
+   "src/jinja2/environment.py",
+   "src/jinja2/ext.py",
+   "src/jinja2/filters.py",
+   "src/jinja2/nativetypes.py",
+   "src/jinja2/nodes.py",
+   "src/jinja2/runtime.py",
+   "src/jinja2/sandbox.py"
+  ],
+  "pool": "hard",
+  "authored": "2020-06-26T15:22:21+01:00",
+  "subject": "Setup mypy * Add missing type hints (these are intended as an initial set of type hints, to be added upon and improved later) * Setup MyPy to run as a Github Ac",
+  "src_churn": 67,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cc792d8c918b44c3c6815cced07b0a334a2fed42": {
+  "task": "cc792d8c918b44c3c6815cced07b0a334a2fed42",
+  "target_tests": [
+   "tests/test_imports.py"
+  ],
+  "test_files": [
+   "tests/test_imports.py"
+  ],
+  "src_files": [
+   "src/jinja2/asyncsupport.py",
+   "src/jinja2/compiler.py",
+   "src/jinja2/environment.py",
+   "src/jinja2/runtime.py"
+  ],
+  "pool": "hard",
+  "authored": "2020-06-22T09:54:08-04:00",
+  "subject": "imported templates can see the current globals",
+  "src_churn": 34,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b0015c72d5acbf93b9d99a1ce6167889338db85b": {
+  "task": "b0015c72d5acbf93b9d99a1ce6167889338db85b",
+  "target_tests": [
+   "tests/test_loader.py",
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_loader.py",
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/jinja2/asyncsupport.py",
+   "src/jinja2/environment.py",
+   "src/jinja2/exceptions.py",
+   "src/jinja2/filters.py",
+   "src/jinja2/sandbox.py",
+   "src/jinja2/utils.py"
+  ],
+  "pool": "hard",
+  "authored": "2020-01-27T14:28:14-08:00",
+  "subject": "remove deprecated code",
+  "src_churn": 127,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}
