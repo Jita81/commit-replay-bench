@@ -31,11 +31,11 @@ from crb.cli.commands import (
     print_lines,
     workdir_of,
 )
+from crb.cli.commands import repo as repo_cmd
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, MODES, GradeResult, grade
 from crb.core.ledger import GradeRow, JsonlLedger, grade_row_from_result
-from crb.core.runners import get_runner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 
@@ -162,7 +162,7 @@ def cmd_grade(args: argparse.Namespace) -> int:
     config, clone, task = _load(args)
     repo = GitRepo(clone)
     ws = _worktree_for(repo, task, Path(args.worktree).expanduser().resolve())
-    runner = get_runner(config)
+    runner = repo_cmd.bound_runner(config, repo_cmd.env_dir_of(wd, args.name))
     executor = build_executor(args.executor, config)
     on_event = event_printer(sys.stderr) if args.events else None
 
