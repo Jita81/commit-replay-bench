@@ -128,6 +128,7 @@ skip_covered = true
 # ---------------------------------------------------------------------------
 [tool.importlinter]
 root_package = "crb"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "crb.core is standard-library only"
@@ -142,10 +143,11 @@ forbidden_modules = [
 [[tool.importlinter.contracts]]
 name = "layers depend downward only"
 type = "layers"
+# Parenthesised layers are optional: packages land phase by phase (cli/server/factory/store).
 layers = [
-  "crb.cli | crb.server",
-  "crb.factory",
-  "crb.store",
-  "crb.builders | crb.observability",
+  "(crb.cli) | (crb.server)",
+  "(crb.factory)",
+  "(crb.store)",
+  "(crb.builders) | crb.observability",
   "crb.core",
 ]
