@@ -22,6 +22,12 @@ The engine is deliberately small and mechanical:
 * :mod:`crb.core.stats`     — Wilson intervals and friends.
 * :mod:`crb.core.routing`   — the ONE published routing rule.
 * :mod:`crb.core.oracle`    — oracle adequacy: mutation strength, negative controls.
+* :mod:`crb.core.run`       — the run orchestrator (prep → build → grade → ledger).
+* :mod:`crb.core.capability`— capability map, change profile, trusted autonomy coverage.
+* :mod:`crb.core.forecast`  — ex-ante build forecast and readiness punch-list.
+* :mod:`crb.core.signoff`   — human attestations (refused at write on false-Q1).
+* :mod:`crb.core.federated` — abstract-cell export (allowlist, k-anonymity). Export only.
+* :mod:`crb.core.legacy`    — importers for the census and Athena ledgers.
 """
 
 from crb.core.version import APPARATUS_VERSION, __version__

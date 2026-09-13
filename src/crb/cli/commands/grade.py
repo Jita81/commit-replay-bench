@@ -34,10 +34,9 @@ from crb.cli.commands import (
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, MODES, GradeResult, grade
-from crb.core.ledger import BELT_SET_V4, PROCESS_REPLAY, GradeRow, JsonlLedger
+from crb.core.ledger import GradeRow, JsonlLedger, grade_row_from_result
 from crb.core.runners import get_runner
 from crb.core.spec import RepoConfig, TaskSpec
-from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace
 
 
@@ -145,46 +144,16 @@ def row_from_result(
     trial: str,
     actor: str,
 ) -> GradeRow:
-    """Reduce a :class:`GradeResult` + its pack hash to the ledger row.
-
-    The row's ``clean`` is the result's ``clean``; the write-time invariant in
-    :class:`GradeRow` re-checks it against the belts, so a disagreement between
-    the grader and the ledger is impossible to persist.
-    """
-    return GradeRow(
-        repo=result.repo,
-        task_id=result.task_id,
-        clean=result.clean,
-        tests_unmodified=result.belts.tests_unmodified,
-        target_green=result.belts.target_green,
-        no_new_failures=result.belts.no_new_failures,
-        source_changed=result.belts.source_changed,
-        capability_class=task.capability_class,
-        size=task.size,
-        language=task.language or config.language.value,
-        pool=task.pool,
-        mode=result.mode,
-        process_step=PROCESS_REPLAY,
-        builder=builder.name,
-        model=builder.model,
-        provider=builder.provider,
+    """Thin wrapper over :func:`crb.core.ledger.grade_row_from_result` (the ONE mapping)."""
+    return grade_row_from_result(
+        result,
+        task,
+        pack_hash=pack_hash,
+        builder=builder,
         run_id=run_id,
         trial=trial,
         actor=actor,
-        disqualified=result.disqualified,
-        dq_reason=result.dq_reason,
-        error=result.error,
-        new_failures_count=len(result.new_failures),
-        attempts=builder.attempts,
-        cost_usd=builder.cost_usd,
-        tokens_in=builder.tokens_in,
-        tokens_out=builder.tokens_out,
-        latency_s=builder.latency_s,
-        gold_clean=task.gold_clean,
-        evidence_pack_hash=pack_hash,
-        apparatus_version=APPARATUS_VERSION,
-        belt_set=BELT_SET_V4,
-        provenance="measured",
+        language=task.language or config.language.value,
     )
 
 

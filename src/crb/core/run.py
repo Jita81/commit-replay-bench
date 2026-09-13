@@ -28,7 +28,7 @@ from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED, MODES, GradeResult, grade
-from crb.core.ledger import BELT_SET_V4, PROCESS_REPLAY, GradeRow, JsonlLedger
+from crb.core.ledger import PROCESS_REPLAY, GradeRow, JsonlLedger, grade_row_from_result
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
@@ -148,41 +148,17 @@ def row_from(
     attempt: BuildAttempt,
     trial: str,
 ) -> GradeRow:
-    b = attempt.builder
-    return GradeRow(
-        repo=task.repo,
-        task_id=task.task_id,
-        clean=result.clean,
-        tests_unmodified=result.belts.tests_unmodified,
-        target_green=result.belts.target_green,
-        no_new_failures=result.belts.no_new_failures,
-        source_changed=result.belts.source_changed,
-        capability_class=task.capability_class,
-        size=task.size,
-        language=task.language or spec.config.language.value,
-        pool=task.pool,
-        mode=spec.mode,
-        process_step=spec.process_step,
-        builder=b.name,
-        model=b.model,
-        provider=b.provider,
+    return grade_row_from_result(
+        result,
+        task,
+        pack_hash=pack.pack_hash,
+        builder=attempt.builder,
         run_id=spec.run_id,
         trial=trial,
         actor=spec.actor,
-        disqualified=result.disqualified,
-        dq_reason=result.dq_reason,
-        error=result.error or attempt.error,
-        new_failures_count=len(result.new_failures),
-        attempts=b.attempts,
-        cost_usd=b.cost_usd,
-        tokens_in=b.tokens_in,
-        tokens_out=b.tokens_out,
-        latency_s=b.latency_s,
-        gold_clean=task.gold_clean,
-        evidence_pack_hash=pack.pack_hash,
-        belt_set=BELT_SET_V4,
-        provenance="measured",
-        labels={"rung": trial, **{k: str(v) for k, v in task.labels.items()}},
+        process_step=spec.process_step,
+        language=task.language or spec.config.language.value,
+        error=attempt.error,
     )
 
 
