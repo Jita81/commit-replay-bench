@@ -295,6 +295,8 @@ class RepoConfig:
     runner_opts:
         Runner-specific options (``python``, ``pythonpath_suffix``, ``maven_flags``,
         ``mocha_require``, ``node_modules``…). Free-form but validated by the runner.
+    path:
+        Local clone path (host). Optional in the config; the CLI and server fill it.
     sandbox_image:
         Container image for the sandboxed executor (toolchain + deps).
     mining:
@@ -305,6 +307,7 @@ class RepoConfig:
     name: str
     language: Language
     runner: str = ""
+    path: str = ""
     src_prefix: str = ""
     test_prefix: str = ""
     ext: str = ""
@@ -421,6 +424,7 @@ class RepoConfig:
             name=name,
             language=lang,
             runner=runner,
+            path=str(d.get("path", "")),
             src_prefix=str(d.get("src_prefix", "")),
             test_prefix=str(d.get("test_prefix", "")),
             ext=str(d.get("ext", "")),

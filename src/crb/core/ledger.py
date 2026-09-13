@@ -30,8 +30,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
-from crb.core.grade import BELT_NAMES, FalseQ1Violation
+from crb.core.evidence import BuilderRef, canonical_json, sha256_text, utc_now_iso
+from crb.core.grade import BELT_NAMES, FalseQ1Violation, GradeResult
+from crb.core.spec import TaskSpec
 from crb.core.stats import Interval, mean, wilson_interval
 from crb.core.version import APPARATUS_VERSION
 
@@ -212,6 +213,65 @@ class GradeRow:
     def from_dict(cls, d: Mapping[str, Any]) -> GradeRow:
         known = {k: d[k] for k in cls.__dataclass_fields__ if k in d}
         return cls(**known)
+
+
+def grade_row_from_result(
+    result: GradeResult,
+    task: TaskSpec,
+    *,
+    pack_hash: str,
+    builder: BuilderRef | None = None,
+    run_id: str = "",
+    trial: str = "r1",
+    actor: str = "",
+    process_step: str = PROCESS_REPLAY,
+    language: str = "",
+    labels: Mapping[str, str] | None = None,
+    error: str = "",
+) -> GradeRow:
+    """Reduce a :class:`GradeResult` + its evidence-pack hash to the ledger row.
+
+    The row's ``clean`` is the result's ``clean``; :class:`GradeRow` re-checks it
+    against the belts at construction, so a disagreement between the grader and
+    the ledger cannot be persisted. Shared by the CLI, the run orchestrator and
+    the server so there is exactly ONE mapping.
+    """
+    b = builder or BuilderRef(mode=result.mode)
+    return GradeRow(
+        repo=result.repo or task.repo,
+        task_id=result.task_id,
+        clean=result.clean,
+        tests_unmodified=result.belts.tests_unmodified,
+        target_green=result.belts.target_green,
+        no_new_failures=result.belts.no_new_failures,
+        source_changed=result.belts.source_changed,
+        capability_class=task.capability_class,
+        size=task.size,
+        language=language or task.language,
+        pool=task.pool,
+        mode=result.mode,
+        process_step=process_step,
+        builder=b.name,
+        model=b.model,
+        provider=b.provider,
+        run_id=run_id,
+        trial=trial,
+        actor=actor,
+        disqualified=result.disqualified,
+        dq_reason=result.dq_reason,
+        error=result.error or error,
+        new_failures_count=len(result.new_failures),
+        attempts=b.attempts,
+        cost_usd=b.cost_usd,
+        tokens_in=b.tokens_in,
+        tokens_out=b.tokens_out,
+        latency_s=b.latency_s,
+        gold_clean=task.gold_clean,
+        evidence_pack_hash=pack_hash,
+        belt_set=BELT_SET_V4,
+        provenance="measured",
+        labels={"rung": trial, **{k: str(v) for k, v in task.labels.items()}, **dict(labels or {})},
+    )
 
 
 # ---------------------------------------------------------------------------
