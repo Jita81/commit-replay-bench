@@ -45,62 +45,62 @@ in parallel, so changes here are changes to both.
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/repos` | viewer | list with probe status, task counts, last run |
-| POST | `/repos` | operator | `{name, language, clone_path|url, runner?, src_prefix?, test_prefix?, ext?, belt_scope?, probe?, runner_opts?, sandbox_image?, mining?}` → repo |
-| GET | `/repos/{name}` | viewer | repo + config |
-| PUT | `/repos/{name}` | operator | update config (history kept in events) |
-| POST | `/repos/{name}/probe` | operator | enqueues a `probe` run; returns run |
-| GET | `/repos/{name}/profile` | viewer | change profile (class × size histogram) |
+| GET | `/repos` | viewer | page of `{name, language, runner, url, clone_path, probe: {status, run_id, checked, detail}, task_counts: {total, standard, hard, gold_clean, gold_failed, unchecked}, last_run: {id, kind, status, finished} \| null, created, updated}`; `probe.status` is `ok\|degraded\|down` once probed, `not_probed` before, or the probe run's own status while queued/running |
+| POST | `/repos` | operator | `{name, language, clone_path|url, runner?, src_prefix?, test_prefix?, ext?, test_mode?, test_suffix?, belt_scope?, probe?, layer?, runner_opts?, sandbox_image?, mining?}` → 201 repo detail; config validated by `RepoConfig.from_dict` (422 `validation_error`), 409 `already_exists`; recorded as a `system/repo.created` event |
+| GET | `/repos/{name}` | viewer | list item + `config` (`RepoConfig.to_dict()`) + `profile_computed_at` |
+| PUT | `/repos/{name}` | operator | partial config update (same fields as POST minus `name`); the REDACTED field diff is appended as a `system/repo.updated` event (trace `sha256("repo:<name>")[:32]`) |
+| POST | `/repos/{name}/probe` | operator | enqueues a `probe` run → 201 run; 503 `queue_unavailable` when no job queue is installed |
+| GET | `/repos/{name}/profile` | viewer | change profile `{repo, ref, n_commits, examined, skipped, classes, sizes, cells: [{capability_class, size, count, share}], class_totals, size_totals, computed_at}`; cached on the repo, `?refresh=true` recomputes, `?log_n=` bounds the walk; 409 `no_clone_path` / `clone_unavailable` / `profile_failed` |
 
 ## Runs
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/runs` | viewer | filters `repo`, `kind`, `status` |
-| POST | `/runs` | operator | `{repo, kind: mine|replay|blind|oracle|controls, mode?, builder?, model?, provider?, ladder?, task_ids?, limit?, pool?, executor?, timeout?}` → run (status `queued`) |
-| GET | `/runs/{id}` | viewer | run + counts + progress |
-| POST | `/runs/{id}/cancel` | operator | sets `cancel_requested`; worker stops between tasks |
-| GET | `/runs/{id}/tasks` | viewer | per-task outcome table (task, trials, clean, belts, cost, latency, pack hashes) |
-| GET | `/runs/{id}/events` | viewer | **SSE** stream of StepEvents (`event: step`, `data: {...}`); `?after=<seq>` resumes; ends with `event: done` when the run is terminal |
-| GET | `/runs/{id}/events/log` | viewer | paginated events (non-streaming) |
+| GET | `/runs` | viewer | page, newest first; filters `repo`, `kind`, `status` |
+| POST | `/runs` | operator | `{repo, kind: mine|replay|blind|oracle|controls|probe, mode?, builder?, model?, provider?, ladder?, task_ids?, limit?, pool?, executor?, timeout?}` → 201 run (status `queued`). `ladder` is a list of rung labels (`r1`, `r2` … or `builder:model[:provider]`), one attempt per rung, default `["r1"]`; `kind: blind` implies `mode: blind`; `replay`/`blind` need a `builder`. 404 unknown repo, 422 on any invalid field, 503 `queue_unavailable` |
+| GET | `/runs/{id}` | viewer | `{id, repo, kind, status, mode, builder, model, provider, ladder, executor, timeout, pool, limit, task_ids, actor, created, started, finished, cancel_requested, error, cost_usd, apparatus_version, apparatus, worker_id, heartbeat, counts: {tasks, clean, disqualified, errors, first_pass_clean, rows, duration_s, stopped_reason}, progress: {done, total, current_task_id}}`; `counts` are the worker's `RunSummary`, re-derived from the run's ledger rows when the worker has written none; `cost_usd` is the sum of the run's rows |
+| POST | `/runs/{id}/cancel` | operator | sets `cancel_requested`; worker stops between tasks; 409 `run_terminal` once finished |
+| GET | `/runs/{id}/tasks` | viewer | page of `{task_id, capability_class, size, pool, language, trials, clean, first_pass_clean, disqualified, error, belts: {tests_unmodified, target_green, no_new_failures, source_changed}, cost_usd, latency_s, pack_hashes[], row_ids[]}` — one row per task, attempts collapsed (`belts` = the clean attempt's, else the last) |
+| GET | `/runs/{id}/events` | viewer | **SSE** (`text/event-stream`): replays stored StepEvents with `seq > after` (`event: step`, `id: <seq>`, `data: {...}`), then polls the events table every 1 s; `: keepalive` comment every 15 s while idle; ends with `event: done` `{run_id, status, last_seq}` once the run is terminal |
+| GET | `/runs/{id}/events/log` | viewer | page of StepEvents (`StepEvent.to_dict()`), oldest first |
 
 ## Tasks / grades / evidence
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/repos/{name}/tasks` | viewer | mined TaskSpecs (pool, size, class, gold status) |
-| GET | `/tasks/{repo}/{task_id}` | viewer | spec + all grade rows for it |
-| GET | `/grades` | viewer | ledger rows; filters `repo, run_id, task_id, clean, mode, builder, model, capability_class, size, language` |
+| GET | `/repos/{name}/tasks` | viewer | page of `TaskSpec.to_dict()`, newest first; filters `pool, size, capability_class, gold_clean` |
+| GET | `/tasks/{repo}/{task_id}` | viewer | `{spec, grades}` — the spec + every grade row for it in chain order |
+| GET | `/grades` | viewer | ledger rows AS STORED (`GradeRow.to_dict()` + `seq`), chain order; filters `repo, run_id, task_id, clean, mode, builder, model, provider, capability_class, size, language, pool, process_step, belt_set, disqualified`. Served column-by-column so a row that bypassed the write path stays visible to an auditor |
 | GET | `/grades/{row_id}` | viewer | one row |
-| GET | `/evidence/{pack_hash}` | viewer | the evidence pack (redacted body) + `verified: bool` |
+| GET | `/evidence/{pack_hash}` | viewer | `{pack, verified, pack_hash, schema, repo, task_id, run_id, created}` — `verified` = the recomputed canonical hash equals the key (native packs via `verify_pack`; imported packs hashed whole) |
 
 ## Capability, routing, forecast, sign-off
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/capability-map?repo=&by=class,size[,language][,model]` | viewer | cells with `n, clean, point, ci_low, ci_high, false_q1, cost_usd_mean, latency_s_mean, oracle_strength_mean, route, reason, verification_tier, apparatus_versions`; absent cells `NOT_YET_MEASURED`; `summary.trusted_autonomy_coverage` |
-| GET | `/routes?repo=` | viewer | route decisions per cell with reasons and the policy in force |
-| GET | `/forecast/build?repo=&mix=class:size:count,...` | viewer | cost μ/σ, minutes, deliver/human/calibrate counts, buildable P, unmeasured |
-| GET | `/forecast/readiness?repo=` | viewer | ok + gaps punch-list |
-| GET | `/signoffs?repo=` | viewer | active attestations |
-| POST | `/signoffs` | approver | `{repo, cell, note}` → 201, or **409 false_q1_refused** |
-| POST | `/signoffs/{id}/revoke` | approver | appends a revocation |
+| GET | `/capability-map?repo=&by=class,size[,language][,model][,builder][,provider][,step]` | viewer | `{repo, by, classes, sizes, languages, models, cells[], summary, policy}`. Only MEASURED cells are listed — an unmeasured cell is absent (the UI renders absence as `NOT_YET_MEASURED`), never zero-filled. Each cell: the 7 key fields (`*` where not projected), `label, n, clean, disqualified, errors, rows, repos, point, ci_low, ci_high, sigma, false_q1, cost_usd_mean, latency_s_mean, cost_known, latency_known, oracle_strength_mean, route, reason, verification_tier, apparatus_versions, belt_set, belt_sets`. Active sign-offs are overlaid at read time (a cell whose CURRENT false-Q1 > 0 is never lifted). `summary`: `{trusted_autonomy_coverage, earned_coverage, profile_commits, total_cells, measured_cells, deliver_cells, cells_by_route, n_total, rows, false_q1_total, apparatus_versions, signoffs_applied}` — coverage is `null` until the repo has a change profile. A false-Q1 row anywhere in the repo's ledger → **409 false_q1_refused** (the map is never computed over untrusted rows) |
+| GET | `/routes?repo=[&by=]` | viewer | `{repo, by, policy, decisions: [RouteDecision.to_dict() + label, verification_tier, apparatus_versions]}` per full cell (default) or per projection |
+| GET | `/forecast/build?repo=&mix=class:size:count,...` | viewer | `{repo, mix, cost_usd_mean, cost_usd_std, minutes, deliver, human, calibrate, buildable_p, buildable_p_stddev, unmeasured, components, measured_components, coverage, costed_components, timed_components, units_by_route, expected_clean_units, single_rep_band, per_component, policy_version}`; `size` may be empty (`class::count`) for a class-level key; `buildable_p` = expected per-unit clean probability over measured units (`p_clean_mean`); unmeasured components are listed and priced at nothing |
+| GET | `/forecast/readiness?repo=[&mix=]` | viewer | `{repo, ok, gaps, mix, mix_source: mix\|profile, total, measured, coverage, min_reps_seen, earned_units, buildable_units, buildable_frac, false_q1_total, thresholds, policy_version}`; without `mix` the repo's change profile is the mix (409 `no_profile` when there is none) |
+| GET | `/signoffs?repo=[&include_revoked=true]` | viewer | page of `{id, repo, cell, tier, note, approver, created, revoked, revoked_by, revoked_at, active, current_false_q1, evidence: {n, point, ci_low, ci_high, false_q1, apparatus_versions}, prev_hash, row_hash}`; active attestations by default; `active` re-checks the cell's CURRENT false-Q1 (a later violation auto-invalidates) |
+| POST | `/signoffs` | approver | `{repo, cell: {capability_class, size?, language?, builder?, model?, provider?, process_step?}, note?, tier?: human-verified\|ab-confirmed}` → 201, or **409 false_q1_refused** when the cell has any false-Q1 row (counted over the STORED belts, so a row that bypassed the ledger is caught) or no measured evidence; the refusal is itself recorded as a `system/signoff.refused` event. Rows are append-only and hash-chained (`prev_hash` = previous sign-off's `row_hash`; `row_hash` over the canonical row); the evidence the approver saw is stamped into the row |
+| POST | `/signoffs/{id}/revoke` | approver | `{note?}` → the attestation with `revoked: true`; appends a revocation row (409 `already_revoked`) |
 
 ## Ledger
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/ledger/verify` | viewer | `{rows, ok, false_q1_total, broken_at?}` |
-| GET | `/ledger/export?format=jsonl|csv&repo=` | viewer | streaming download; JSONL rows verify standalone |
-| GET | `/ledger/export/abstract` | operator | abstract cells only (federated export, k-anonymous) |
-| POST | `/ledger/import` | admin | multipart JSONL (crb rows or census rows) → count |
+| GET | `/ledger/verify` | viewer | `{rows, ok, false_q1_total, chain_ok, broken_at, detail, clean_without_pack, verified_at}` — never raises: walks the chain recomputing every `row_hash` from the stored columns, counts false-Q1 over the stored belts; `broken_at` is the first bad `seq` (or `null`) |
+| GET | `/ledger/export?format=jsonl|csv&repo=` | viewer | streaming download of the stored rows verbatim (chain fields included); an unfiltered JSONL export verifies standalone with `verify_chain`; a `repo`-filtered one is a subsequence (each row's own hash verifies, the links do not); CSV has a header row (`GradeRow` field order, `labels` as JSON) |
+| GET | `/ledger/export/abstract` | operator | JSONL of abstract cells only (`ABSTRACT_ALLOWLIST` fields — no repo, no ids, no timestamps); 409 if the ledger holds a false-Q1 row |
+| POST | `/ledger/import` | admin | multipart `file` of crb JSONL rows → `{imported, skipped, read, rows, source_chain_ok}`; rows are re-chained here with the source hash kept in `labels.source_row_hash`; duplicates (by `row_id` / pack hash) are skipped; a false-Q1 row → 409; census rows (`bench.py` verdicts) → 422 `census_import_unsupported` pointing at `crb ledger import-census` (they need their task files and configs) |
 
 ## Oracle adequacy
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/oracle/{repo}` | viewer | per-task and per-cell oracle strength, gate classification |
-| GET | `/oracle/{repo}/controls` | viewer | latest negative-controls report |
+| GET | `/oracle/{repo}` | viewer | `{repo, policy: AdequacyPolicy, tasks: [{task_id, capability_class, size, strength, band, mutants, killed, errors, gate, run_id, scored_at, note}], cells: [{capability_class, size, n, tasks, strength_mean, strength_min, band, gate}], apparatus_versions, runs}` — aggregated from `oracle.score` events (latest per task wins); `band` ∈ strong|adequate|weak|unscoreable, `gate` = what a CLEAN grade on that oracle licenses (auto_ship|human_review); unscoreable oracles are never averaged in |
+| GET | `/oracle/{repo}/controls` | viewer | latest `controls.report` event payload (`ControlsReport.to_dict()` + `run_id`, `reported_at`) or **404 `not_measured`** |
 
 ## Factory (phase P6)
 
@@ -110,6 +110,9 @@ in parallel, so changes here are changes to both.
 | GET | `/factory/{repo}/tasks` | viewer | DoR gaps, RED proof, build, PR, review verdict |
 | POST | `/factory/{repo}/tasks/{id}/signoff-gap` | approver | sign a structural gap |
 | GET | `/factory/{repo}/evidence` | viewer | factory evidence packs |
+
+Until P6 lands every factory path answers **501 `not_implemented`** with
+`detail: {"phase": "P6", "path": …}` (role gates already apply: 401/403 come first).
 
 ## Admin
 
@@ -123,5 +126,35 @@ in parallel, so changes here are changes to both.
 
 ```
 event: step
+id: 12
 data: {"event_id":"…","seq":12,"timestamp":"…","trace_id":"<run_id>","stage":"grade","action":"grade.belt","status":"ok","task_id":"…","payload":{"belt":"target_green","value":true}}
+
+: keepalive
+
+event: done
+data: {"run_id":"<run_id>","status":"succeeded","last_seq":12}
 ```
+
+`id:` is the event's `seq`, so a browser `EventSource` resumes on its own after a drop;
+`?after=<seq>` does the same for any client.
+
+## Contract notes (server ↔ UI)
+
+`ui/src/api/types.ts` is the UI's reading of this document; where the two differed the
+UI's shape was adopted (2026-09-13, W2-B):
+
+- `/repos` items carry `probe`, `task_counts` and `last_run` objects (not flat columns).
+- `/runs/{id}` carries `counts` (`RunSummary.to_dict()` fields) and `progress` with
+  `current_task_id`; `started`/`finished`/`heartbeat` are `null` when unset.
+- `/runs/{id}/tasks` rows carry `belts` as an object and `pack_hashes` / `row_ids` lists.
+- `/evidence/{hash}` is `{pack, verified, …}` (the pack is not inlined next to `verified`).
+- `/capability-map` `summary.trusted_autonomy_coverage` is a number OR `null` (no profile
+  → no coverage claim). The UI's `fmtPct` renders `null` as a dash.
+- `/signoffs` items carry `approver` (the verifier's principal id) and `evidence` (the
+  snapshot stamped at write time).
+- `/oracle/{repo}` uses `strength` / `strength_mean` / `mutants` / `killed` / `gate`.
+- `ladder` in `POST /runs` is a list of rung labels (`r1`, `r2` …), as the core's run
+  orchestrator defines it; `builder:model[:provider]` triples are accepted as labels too.
+- `GET /settings` (admin, W2-A) still returns `Settings.redacted_dict()`; the UI's
+  `{builders, sandbox_mode, retention, oidc_enabled, ledger_backend, apparatus_version,
+  policy_version}` reading is NOT yet served — see the W2-B report.

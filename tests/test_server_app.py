@@ -157,7 +157,20 @@ class TestFactory:
         with TestClient(app) as c:
             assert c.get(f"{API_PREFIX}/version").status_code == 404
         mounted = register_routers(app)
-        assert mounted == ["admin", "auth", "system"]
+        assert mounted == [  # core (W2-A) + domain (W2-B), sorted — the seam mounts every module
+            "admin",
+            "auth",
+            "capability",
+            "factory",
+            "forecast",
+            "grades",
+            "ledger",
+            "oracle",
+            "repos",
+            "runs",
+            "signoffs",
+            "system",
+        ]
         with TestClient(app) as c:
             assert c.get(f"{API_PREFIX}/version").status_code == 200
 
