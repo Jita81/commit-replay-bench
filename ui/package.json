@@ -1,0 +1,44 @@
+{
+  "name": "crb-ui",
+  "private": true,
+  "version": "2.0.0",
+  "description": "Commit Replay Bench — observability front end",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.97.0",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "react-router": "7.14.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.11.2",
+    "@playwright/test": "1.59.1",
+    "@tailwindcss/vite": "4.2.2",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "24.12.2",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.1",
+    "jsdom": "25.0.1",
+    "tailwindcss": "4.2.2",
+    "typescript": "6.0.2",
+    "vite": "8.0.8",
+    "vitest": "4.1.5"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
