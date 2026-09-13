@@ -5,7 +5,10 @@ the harder question the belts cannot: *is the green worth anything?*
 
 * :mod:`~crb.core.oracle.mutation`      — plant deterministic faults in the changed
   lines; ``oracle_strength = killed / total`` (a RED baseline or a harness error is
-  never a number).
+  never a number; a toolchain-rejected mutant is ``uncompilable`` and excluded).
+* :mod:`~crb.core.oracle.mutators_text` — the token-level mutator family for Go,
+  JavaScript/TypeScript, Java/Kotlin and Rust (Python keeps the AST family); the
+  provenance stamp names which family scored a row.
 * :mod:`~crb.core.oracle.adequacy`      — the routing consequence: a clean grade
   licenses auto-delivery only on a strong oracle; weak/unscoreable → human review.
   Its floor is the same number as ``RoutingPolicy.min_oracle_strength``.
@@ -67,10 +70,13 @@ from crb.core.oracle.mutation import (
     Mutator,
     PythonAstMutator,
     aggregate_by_cell,
+    compile_failure,
     generate_mutants,
+    mutator_family,
     mutator_for,
     score_task,
 )
+from crb.core.oracle.mutators_text import TextLineMutator
 from crb.core.oracle.sealed_corpus import (
     CorpusManifests,
     SplitFractions,
@@ -120,14 +126,17 @@ __all__ = [
     "PythonAstMutator",
     "SplitFractions",
     "TamperGuard",
+    "TextLineMutator",
     "adequacy_verdict",
     "aggregate_by_cell",
     "build_manifests",
     "classify_oracle",
+    "compile_failure",
     "controls_for_task",
     "generate_mutants",
     "licenses_autoship",
     "manifest_hash",
+    "mutator_family",
     "mutator_for",
     "routing_decision",
     "run_controls",
