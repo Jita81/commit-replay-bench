@@ -130,7 +130,11 @@ CLI_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 #: What the CLI needs on top of the base passthrough to FIND its login in ``cli`` mode.
 #: Measured on claude 2.1.132 / macOS: the keychain entry is keyed by ``$USER`` — with
 #: ``HOME`` + ``PATH`` alone the CLI reports "Not logged in"; adding ``USER`` finds it.
-_CLI_ENV_PASSTHROUGH: tuple[str, ...] = ("USER", "LOGNAME", CLI_CONFIG_DIR_ENV)
+#: A long-lived subscription token minted by ``claude setup-token`` — the headless way to
+#: use a claude.ai login on a machine (or in a worker process) where the interactive
+#: keychain token cannot be refreshed. Forwarded in ``cli`` mode only, never logged.
+CLI_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"  # noqa: S105 — an env var NAME, not a secret
+_CLI_ENV_PASSTHROUGH: tuple[str, ...] = ("USER", "LOGNAME", CLI_CONFIG_DIR_ENV, CLI_OAUTH_TOKEN_ENV)
 #: ``cli`` mode: load the operator's user settings only — never the target repository's
 #: ``.claude/settings.json`` (hooks, permission rules) nor its ``.claude/settings.local.json``.
 CLI_SETTING_SOURCES = "user"
@@ -678,8 +682,9 @@ class ClaudeCodeBuilder:
         and forwarded. ``cli``: the key is neither required nor forwarded — the
         CLI's own login is the only credential, so a run can never silently bill
         a key the operator meant for production; ``USER``/``LOGNAME`` (the keychain
-        account the login is stored under) and ``CLAUDE_CONFIG_DIR`` (a relocated
-        login) are forwarded when set. Nothing else from the shell leaks in.
+        account the login is stored under), ``CLAUDE_CONFIG_DIR`` (a relocated
+        login) and ``CLAUDE_CODE_OAUTH_TOKEN`` (a ``claude setup-token`` token for
+        headless use) are forwarded when set. Nothing else from the shell leaks in.
         """
         env = {k: v for k, v in os.environ.items() if k in _ENV_PASSTHROUGH}
         if auth == AUTH_CLI:
