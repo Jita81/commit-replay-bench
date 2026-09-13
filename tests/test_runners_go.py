@@ -216,15 +216,6 @@ def test_belt_scope_policies(config: RepoConfig):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "DEFECT (src/crb/core/runners/go_runner.py): GoRunner inherits BaseRunner.belt_scope, "
-        "so AFFECTED_DIRS yields 'calc/' — go interprets that as an import path "
-        "('package calc is not in std'), not './calc'. Fix: override belt_scope to return "
-        "self.target_scope(test_files) for AFFECTED_DIRS."
-    ),
-)
 def test_belt_scope_affected_dirs_is_addressable(trial, task, executor):
     r = get_runner(gorepo.config(BELT_AFFECTED_DIRS))
     scope = r.belt_scope(task.target_tests, task.test_files)

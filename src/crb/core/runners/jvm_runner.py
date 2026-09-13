@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import shutil
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from pathlib import Path
 
 from crb.core.execution import Command, ExecResult, Executor
 from crb.core.runners.base import BaseRunner, TestRun, tail_of
+from crb.core.spec import BELT_AFFECTED_DIRS
 
 
 class MavenRunner(BaseRunner):
@@ -18,6 +20,29 @@ class MavenRunner(BaseRunner):
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
         # src/test/java/com/x/FooTest.java -> FooTest (surefire -Dtest=)
         return tuple(sorted({os.path.basename(f).rsplit(".", 1)[0] for f in test_files}))
+
+    def belt_scope(self, target_tests: Sequence[str], test_files: Sequence[str]) -> tuple[str, ...]:
+        # `-Dtest=src/test/java/ex/` matches NO class and, with failIfNoTests=false,
+        # exits 0 having run nothing — a silent false-green belt. AFFECTED_DIRS must
+        # therefore be expressed as surefire package globs: "ex/**/*".
+        if self.config.belt_scope == BELT_AFFECTED_DIRS:
+            tp = self.config.test_prefix
+            globs = set()
+            for tf in test_files:
+                d = os.path.dirname(tf)
+                pkg = d[len(tp) :] if tp and d.startswith(tp) else d
+                globs.add((pkg.strip("/") + "/**/*") if pkg.strip("/") else "**/*")
+            return tuple(sorted(globs))
+        return super().belt_scope(target_tests, test_files)
+
+    def run(
+        self, executor: Executor, root: Path, scope: Sequence[str], *, timeout: int = 0
+    ) -> TestRun:
+        # surefire never clears its reports; a narrower run after a wider failing run
+        # would otherwise inherit the previous run's failures at parse time.
+        for reports in root.rglob("target/surefire-reports"):
+            shutil.rmtree(reports, ignore_errors=True)
+        return super().run(executor, root, scope, timeout=timeout)
 
     def _writable(self) -> tuple[str, ...]:
         # every module's target/ plus the root's; derived from src_prefix when modular

@@ -236,7 +236,6 @@ def test_belt_scope_policies(config: RepoConfig):
     )
 
 
-@pytest.mark.xfail(strict=True, reason=_AFFECTED_DIRS_DEFECT)
 def test_belt_scope_affected_dirs_actually_runs_the_directory(trial, task, executor):
     r = get_runner(jvmrepo.config(BELT_AFFECTED_DIRS))
     scope = r.belt_scope(task.target_tests, task.test_files)
@@ -279,7 +278,6 @@ def test_parse_attributes_failures_from_surefire_xml(trial, task, runner, execut
     assert green.green
 
 
-@pytest.mark.xfail(strict=True, reason=_STALE_REPORTS_DEFECT)
 def test_parse_ignores_reports_from_a_previous_run(trial, task, runner, executor):
     trial.overlay_sources(task.src_files)
     _write_calc(trial, broken=True)

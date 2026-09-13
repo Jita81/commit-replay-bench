@@ -197,7 +197,6 @@ def test_grade_regression_fails_belt3(trial, task, config, runner, executor):
     assert res.belt_run is not None and res.belt_run.red
 
 
-@pytest.mark.xfail(strict=True, reason=_QUIET_FORMAT_DEFECT)
 def test_grade_regression_names_the_broken_tests(trial, task, config, runner, executor):
     trial.overlay_sources(task.src_files)
     _break_add(trial)
@@ -268,7 +267,6 @@ def test_parse_red_run_fails_closed_without_ids(trial, task, runner, executor):
     assert "FAILED" in run.tail
 
 
-@pytest.mark.xfail(strict=True, reason=_QUIET_FORMAT_DEFECT)
 def test_parse_attributes_unit_test_failure(trial, task, runner, executor):
     trial.overlay_sources(task.src_files)
     _break_add(trial)
@@ -277,7 +275,6 @@ def test_parse_attributes_unit_test_failure(trial, task, runner, executor):
     assert run.parse_error == ""
 
 
-@pytest.mark.xfail(strict=True, reason=_FAIL_FAST_DEFECT)
 def test_parse_reports_every_failing_binary(trial, task, runner, executor):
     trial.overlay_sources(task.src_files)
     _break_add(trial)

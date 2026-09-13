@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -22,7 +23,10 @@ class PytestRunner(BaseRunner):
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
-        python = executor.tool("python", self.opts.get("python"))
+        host_default = self.opts.get("python") or (
+            sys.executable if executor.name != "docker" else None
+        )
+        python = executor.tool("python", host_default)
         argv = [
             python,
             "-m",

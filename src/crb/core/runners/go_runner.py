@@ -9,6 +9,7 @@ from pathlib import Path
 
 from crb.core.execution import Command, ExecResult, Executor
 from crb.core.runners.base import BaseRunner, TestRun, tail_of
+from crb.core.spec import BELT_AFFECTED_DIRS
 
 
 class GoRunner(BaseRunner):
@@ -21,6 +22,13 @@ class GoRunner(BaseRunner):
             d = os.path.dirname(f)
             pkgs.add("./" + d if d else "./")
         return tuple(sorted(pkgs))
+
+    def belt_scope(self, target_tests: Sequence[str], test_files: Sequence[str]) -> tuple[str, ...]:
+        # A bare directory ("calc/") is read by `go test` as an import path, not a
+        # package pattern; AFFECTED_DIRS therefore means the target packages themselves.
+        if self.config.belt_scope == BELT_AFFECTED_DIRS:
+            return self.target_scope(test_files)
+        return super().belt_scope(target_tests, test_files)
 
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int

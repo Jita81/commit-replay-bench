@@ -9,7 +9,7 @@ from pathlib import Path
 from crb.core.execution import Command, ExecResult, Executor
 from crb.core.runners.base import BaseRunner, TestRun, tail_of
 
-_FAILED = re.compile(r"^test (\S+) \.\.\. FAILED", re.M)
+_FAILED = re.compile(r"^(?:test )?(\S+) (?:\.\.\.|---) FAILED$", re.M)
 
 
 class CargoRunner(BaseRunner):
@@ -33,10 +33,14 @@ class CargoRunner(BaseRunner):
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
         cargo = executor.tool("cargo", self.opts.get("cargo"))
+        # No --quiet: the quiet harness prints "name --- FAILED", the verbose one
+        # "test name ... FAILED"; we parse both but keep the stable verbose format.
+        # --no-fail-fast: cargo stops at the first failing test BINARY otherwise, which
+        # truncates belt 3's failing set (a false "no new failures").
         argv = [
             cargo,
             "test",
-            "--quiet",
+            "--no-fail-fast",
             "--offline" if self.opts.get("offline", True) else "--locked",
         ]
         for t in scope:
