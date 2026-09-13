@@ -4,7 +4,11 @@ A :class:`Worker` polls the :class:`~crb.store.jobs.JobQueue`, claims one run at
 a time and executes it by ``kind``:
 
 =========== ====================================================================
-``probe``   run the repo's known-green probe scope; write ``repos.probe_status``
+``setup``   the environment phase — install the repo's test dependencies under
+            ``<home>/envs/<repo>`` via the runner's ``setup`` (the ONLY network
+            phase); ``counts_json`` is the :class:`~crb.core.runners.SetupResult`
+``probe``   run the repo's known-green probe scope; write ``repos.probe_status``;
+            runs ``setup`` first when the environment is not ready (``setup.auto``)
 ``mine``    :func:`crb.core.mine.mine` → upsert ``tasks`` rows (RED / baseline / gold)
 ``replay``  :func:`crb.core.run.run` in *sighted* mode over the ladder → grade rows,
             evidence packs (file + DB), events
@@ -85,7 +89,7 @@ from crb.core.redact import redact_and_cap
 from crb.core.run import RunSpec, RunSummary
 from crb.core.run import run as core_run
 from crb.core.runners import get_runner
-from crb.core.runners.base import BARE, BaseRunner
+from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
 from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION
@@ -101,6 +105,7 @@ from crb.store.jobs import (
     KIND_ORACLE,
     KIND_PROBE,
     KIND_REPLAY,
+    KIND_SETUP,
     STATUS_CANCELLED,
     STATUS_FAILED,
     STATUS_SUCCEEDED,
@@ -127,6 +132,7 @@ _STAGE_FOR_PREFIX: dict[str, str] = {
     "controls": "oracle",
     "run": "system",
     "probe": "system",
+    "setup": "prep",
 }
 
 
@@ -335,6 +341,7 @@ class Worker:
         self.ledger = DbLedger(self.factory)
         self.worker_id = settings.worker_id
         self._handlers: dict[str, Handler] = {
+            KIND_SETUP: self._run_setup,
             KIND_PROBE: self._run_probe,
             KIND_MINE: self._run_mine,
             KIND_REPLAY: lambda ctx: self._run_replay(ctx, mode=MODE_SIGHTED),
@@ -361,6 +368,11 @@ class Worker:
 
     def transcripts_dir(self, run_id: str) -> Path:
         return self.home / "transcripts" / run_id
+
+    def env_dir(self, repo: str) -> Path:
+        """Where a repo's runner keeps environment state that must not live in the
+        clone (the Python venv): ``<home>/envs/<repo>``."""
+        return self.home / "envs" / repo
 
     # --- loop -----------------------------------------------------------------
     def run_once(self) -> Run | None:
@@ -492,8 +504,11 @@ class Worker:
                 s.commit()
 
     def _runner(self, ctx: RunContext) -> BaseRunner:
+        """The run's runner, bound to the repo's ``env_dir`` so a pytest runner
+        without ``runner_opts.python`` resolves the interpreter setup built."""
         if ctx._runner is None:
             ctx._runner = get_runner(ctx.config)
+            ctx._runner.env_dir = self.env_dir(ctx.run.repo)
         return ctx._runner
 
     def _executor(self, ctx: RunContext) -> Executor:
@@ -584,10 +599,87 @@ class Worker:
             )
 
     # --- kinds ---------------------------------------------------------------------
+    def _setup(self, ctx: RunContext) -> SetupResult:
+        """Run the runner's setup for the run's repo, streaming ``setup.step`` events.
+
+        Every step is emitted as it finishes (its tail is already redacted by the
+        core) and the interim ``counts`` carry the steps so far, so a run that
+        dies mid-install still shows what ran.
+        """
+        runner = self._runner(ctx)
+        executor = self._executor(ctx)
+        env_dir = self.env_dir(ctx.run.repo)
+        steps: list[SetupStep] = []
+
+        def on_step(step: SetupStep) -> None:
+            steps.append(step)
+            how = "timed out" if step.timed_out else f"rc={step.rc}"
+            ctx.emit(
+                "prep",
+                "setup.step",
+                status=StepStatus.OK if step.ok else StepStatus.ERROR,
+                error="" if step.ok else f"step {len(steps)} failed ({how})",
+                n=len(steps),
+                duration_ms=int(step.duration_s * 1000),
+                **step.to_dict(),
+            )
+            ctx.counts["steps"] = [s.to_dict() for s in steps]
+            self._progress(ctx, len(steps), len(steps))
+
+        ctx.emit(
+            "prep",
+            "setup.start",
+            env_dir=str(env_dir),
+            path=str(ctx.git.path),
+            runner=runner.name,
+        )
+        result = runner.setup(
+            executor, ctx.git.path, env_dir=env_dir, timeout=ctx.timeout, on_step=on_step
+        )
+        ctx.emit(
+            "prep",
+            "setup.done",
+            status=StepStatus.OK if result.ok else StepStatus.ERROR,
+            error="" if result.ok else result.note,
+            duration_ms=int(result.duration_s * 1000),
+            ok=result.ok,
+            note=result.note,
+            steps=len(result.steps),
+        )
+        return result
+
+    def _run_setup(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
+        self._stamp(ctx, env_dir=str(self.env_dir(ctx.run.repo)))
+        result = self._setup(ctx)
+        counts: dict[str, Any] = {**result.to_dict(), "env_dir": str(self.env_dir(ctx.run.repo))}
+        ctx.counts.clear()
+        ctx.counts.update(counts)
+        self._progress(ctx, len(result.steps), len(result.steps))
+        if result.ok:
+            return STATUS_SUCCEEDED, counts, ""
+        error = f"setup failed: {result.note}"
+        if result.last_tail:
+            error += "\n" + result.last_tail
+        return STATUS_FAILED, counts, redact_and_cap(error, max_chars=1000)
+
     def _run_probe(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
         runner = self._runner(ctx)
         executor = self._executor(ctx)
         self._stamp(ctx)
+        env_dir = self.env_dir(ctx.run.repo)
+        # The environment phase runs itself when needed. A sandbox image is its own
+        # environment, so the host-side readiness question does not apply there.
+        if executor.name != "docker" and not runner.environment_ready(ctx.git.path, env_dir):
+            ctx.emit("prep", "setup.auto", reason="environment not ready", env_dir=str(env_dir))
+            setup = self._setup(ctx)
+            ctx.counts.pop("steps", None)  # interim progress only; the record is below
+            ctx.counts["setup"] = setup.to_dict()
+            if not setup.ok:
+                why = f"setup failed: {setup.note}"
+                detail = why + ("\n" + setup.last_tail if setup.last_tail else "")
+                self._set_probe(ctx.run.repo, PROBE_FAILED, detail)
+                ctx.emit("system", "probe.done", status=StepStatus.ERROR, error=why, green=False)
+                return STATUS_FAILED, dict(ctx.counts), redact_and_cap(detail, max_chars=1000)
         scope: tuple[str, ...] = tuple(ctx.config.probe.split()) if ctx.config.probe else BARE
         ctx.emit("system", "probe.start", scope=list(scope), path=str(ctx.git.path))
         try:
@@ -615,6 +707,8 @@ class Worker:
             "duration_s": round(result.duration_s, 3),
             "scope": list(scope),
         }
+        if "setup" in ctx.counts:
+            counts["setup"] = ctx.counts["setup"]
         ctx.counts.update(counts)
         ctx.emit(
             "system",

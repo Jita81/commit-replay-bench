@@ -21,6 +21,8 @@ from crb.core.evidence import verify_pack
 from crb.core.execution import SandboxUnavailable
 from crb.core.ledger import verify_chain
 from crb.core.oracle import controls as nc
+from crb.core.runners.base import SetupResult, SetupStep
+from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from crb.observability.events import JsonlSink, StepStatus
@@ -418,6 +420,193 @@ def test_probe_failure_is_recorded(tmp_path: Path, pyrepo: pr.PyRepo) -> None:
     repo = h.repo_row()
     assert repo.probe_status == "failed" and repo.probe_detail
     assert done.counts_json["green"] is False
+
+
+# --- setup (the environment phase) -------------------------------------------------------------
+
+
+class ScriptedSetupRunner(PytestRunner):
+    """A pytest runner whose environment phase is scripted: ``ready`` answers
+    ``environment_ready`` (consumed left to right, last value sticks) and ``outcome``
+    is what ``setup`` returns after streaming its steps through ``on_step``."""
+
+    ready: ClassVar[list[bool]] = [True]
+    outcome: ClassVar[SetupResult] = SetupResult(True, (), "scripted", 0.0)
+    calls: ClassVar[list[dict[str, Any]]] = []
+
+    def environment_ready(self, root: Path, env_dir: Path) -> bool:
+        cls = type(self)
+        if len(cls.ready) > 1:
+            return cls.ready.pop(0)
+        return cls.ready[0]
+
+    def setup(
+        self,
+        executor: Any,
+        root: Path,
+        *,
+        env_dir: Path,
+        timeout: int,
+        on_step: Callable[[SetupStep], None] | None = None,
+    ) -> SetupResult:
+        type(self).calls.append(
+            {"executor": executor.name, "root": Path(root), "env_dir": env_dir, "timeout": timeout}
+        )
+        for step in type(self).outcome.steps:
+            if on_step is not None:
+                on_step(step)
+        return type(self).outcome
+
+
+@pytest.fixture
+def scripted(monkeypatch: pytest.MonkeyPatch) -> type[ScriptedSetupRunner]:
+    ScriptedSetupRunner.ready = [True]
+    ScriptedSetupRunner.outcome = SetupResult(True, (), "scripted", 0.0)
+    ScriptedSetupRunner.calls = []
+    monkeypatch.setattr(worker_mod, "get_runner", lambda config: ScriptedSetupRunner(config))
+    return ScriptedSetupRunner
+
+
+_STEPS = (
+    SetupStep(("uv", "venv", "/envs/pyrepo/venv"), 0, "", 0.2),
+    SetupStep(
+        ("uv", "pip", "install", "-e", ".[test]"),
+        0,
+        "Resolved 3 packages\nAuthorization: Bearer abcdefghijklmnop123456",
+        1.5,
+    ),
+)
+
+
+def test_setup_run_records_the_result_and_streams_steps(
+    h: Harness, scripted: type[ScriptedSetupRunner]
+) -> None:
+    scripted.outcome = SetupResult(True, _STEPS, "ready", 1.7)
+    run = h.enqueue("setup")
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    env_dir = h.home / "envs" / pr.REPO_NAME
+    # counts_json IS the SetupResult (+ where the env lives)
+    assert done.counts_json == {**scripted.outcome.to_dict(), "env_dir": str(env_dir)}
+    assert (done.progress_done, done.progress_total) == (2, 2)
+    assert (
+        done.apparatus_json["env_dir"] == str(env_dir) and done.apparatus_json["runner"] == "pytest"
+    )
+    # the runner was handed the clone and the repo's env_dir, on the run's executor
+    (call,) = scripted.calls
+    assert call == {"executor": "local", "root": h.pyrepo.path, "env_dir": env_dir, "timeout": 0}
+    # events: start, one per step (redacted tail), done — all in the prep stage
+    ev = h.events(run.id)
+    actions = [e.action for e in ev]
+    assert actions.count("setup.step") == 2 and "setup.start" in actions and "setup.done" in actions
+    steps = [e for e in ev if e.action == "setup.step"]
+    assert [e.payload["n"] for e in steps] == [1, 2] and all(e.stage == "prep" for e in steps)
+    assert steps[1].payload["argv"] == ["uv", "pip", "install", "-e", ".[test]"]
+    assert "[REDACTED]" in steps[1].payload["tail"] and "abcdefghijklmnop123456" not in str(
+        steps[1].payload
+    )
+    assert all(e.status is StepStatus.OK for e in steps)
+    fin = next(e for e in ev if e.action == "setup.done")
+    assert (
+        fin.payload["ok"] is True and fin.payload["steps"] == 2 and fin.payload["note"] == "ready"
+    )
+    # setup never touches the probe verdict
+    assert h.repo_row().probe_status == "unknown"
+
+
+def test_setup_run_failure_carries_the_last_tail(
+    h: Harness, scripted: type[ScriptedSetupRunner]
+) -> None:
+    failed = SetupStep(("uv", "pip", "install", "-r", "req.txt"), 1, "ERROR: no such file", 0.3)
+    scripted.outcome = SetupResult(False, (_STEPS[0], failed), "step 2 failed (rc=1): …", 0.5)
+    done = h.run_one() if h.enqueue("setup") else None
+    assert done is not None and done.status == STATUS_FAILED
+    assert (
+        done.error.startswith("setup failed: step 2 failed") and "ERROR: no such file" in done.error
+    )
+    assert done.counts_json["ok"] is False and len(done.counts_json["steps"]) == 2
+    ev = h.events(done.id)
+    bad = [e for e in ev if e.action == "setup.step" and e.status is StepStatus.ERROR]
+    assert (
+        len(bad) == 1
+        and bad[0].payload["rc"] == 1
+        and bad[0].error_message == "step 2 failed (rc=1)"
+    )
+    assert next(e for e in ev if e.action == "setup.done").status is StepStatus.ERROR
+    assert h.repo_row().probe_status == "unknown"
+
+
+def test_probe_runs_setup_first_when_the_environment_is_not_ready(
+    h: Harness, scripted: type[ScriptedSetupRunner]
+) -> None:
+    scripted.ready = [False, True]  # not ready before setup, ready after
+    scripted.outcome = SetupResult(True, _STEPS, "ready", 1.7)
+    run = h.enqueue("probe")
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert done.counts_json["green"] is True
+    assert done.counts_json["setup"] == scripted.outcome.to_dict()
+    assert (
+        len(scripted.calls) == 1 and scripted.calls[0]["env_dir"] == h.home / "envs" / pr.REPO_NAME
+    )
+    actions = [e.action for e in h.events(run.id)]
+    auto = actions.index("setup.auto")
+    assert (
+        auto
+        < actions.index("setup.step")
+        < actions.index("setup.done")
+        < actions.index("probe.start")
+    )
+    assert h.repo_row().probe_status == "ok"
+    # ready from the start → no auto setup
+    scripted.calls = []
+    scripted.ready = [True]
+    h.enqueue("probe")
+    again = h.run_one()
+    assert again.status == STATUS_SUCCEEDED and scripted.calls == []
+    assert "setup.auto" not in [e.action for e in h.events(again.id)]
+    assert "setup" not in again.counts_json
+
+
+def test_probe_fails_closed_when_auto_setup_fails(
+    h: Harness, scripted: type[ScriptedSetupRunner]
+) -> None:
+    scripted.ready = [False]
+    failed = SetupStep(("npm", "ci"), 1, "npm ERR! network unreachable", 2.0)
+    scripted.outcome = SetupResult(False, (failed,), "step 1 failed (rc=1): npm ci", 2.0)
+    run = h.enqueue("probe")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert (
+        done.error.startswith("setup failed: step 1 failed") and "network unreachable" in done.error
+    )
+    assert done.counts_json["setup"]["ok"] is False and "green" not in done.counts_json
+    repo = h.repo_row()
+    assert repo.probe_status == "failed" and repo.probe_detail.startswith("setup failed")
+    actions = [e.action for e in h.events(run.id)]
+    assert "setup.auto" in actions and "probe.start" not in actions
+    probe_done = next(e for e in h.events(run.id) if e.action == "probe.done")
+    assert probe_done.status is StepStatus.ERROR and probe_done.payload["green"] is False
+
+
+def test_runners_are_bound_to_the_repo_env_dir(
+    h: Harness, scripted: type[ScriptedSetupRunner]
+) -> None:
+    """Every kind resolves its runner through the worker, which binds env_dir so a
+    pytest runner without runner_opts.python would pick up the setup venv."""
+    seen: list[Path | None] = []
+    original = worker_mod.Worker._runner
+
+    def spy(self: Worker, ctx: worker_mod.RunContext) -> Any:
+        runner = original(self, ctx)
+        seen.append(runner.env_dir)
+        return runner
+
+    h.worker._runner = spy.__get__(h.worker, Worker)  # type: ignore[method-assign]
+    for kind in ("probe", "mine", "replay", "oracle", "controls"):
+        h.enqueue(kind, params_json={"max_candidates": 3} if kind == "mine" else {})
+        assert h.run_one().status == STATUS_SUCCEEDED
+    assert seen and all(p == h.home / "envs" / pr.REPO_NAME for p in seen)
 
 
 # --- fail-closed sandbox --------------------------------------------------------------------

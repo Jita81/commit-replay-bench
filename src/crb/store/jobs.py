@@ -62,6 +62,7 @@ STATUSES: tuple[str, ...] = (
 TERMINAL_STATUSES: frozenset[str] = frozenset({STATUS_SUCCEEDED, STATUS_FAILED, STATUS_CANCELLED})
 ACTIVE_STATUSES: frozenset[str] = frozenset({STATUS_QUEUED, STATUS_RUNNING})
 
+KIND_SETUP = "setup"
 KIND_PROBE = "probe"
 KIND_MINE = "mine"
 KIND_REPLAY = "replay"
@@ -69,6 +70,7 @@ KIND_BLIND = "blind"
 KIND_ORACLE = "oracle"
 KIND_CONTROLS = "controls"
 RUN_KINDS: tuple[str, ...] = (
+    KIND_SETUP,
     KIND_PROBE,
     KIND_MINE,
     KIND_REPLAY,
@@ -422,6 +424,7 @@ __all__ = [
     "KIND_ORACLE",
     "KIND_PROBE",
     "KIND_REPLAY",
+    "KIND_SETUP",
     "RECLAIMS_KEY",
     "RUN_KINDS",
     "STATUSES",

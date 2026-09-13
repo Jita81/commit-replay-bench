@@ -3,18 +3,47 @@
 All four resolve tools from the repo's ``node_modules/.bin`` (or the image's
 PATH under docker). The worktree needs a resolvable ``node_modules``; the
 workspace layer symlinks the main clone's (local) or the image ships it (docker).
+
+Setup therefore installs into the *clone* (``npm ci`` when a lockfile is
+committed, ``npm install`` otherwise) and every worktree inherits it through
+that symlink. ``env_dir`` is unused: ``node_modules`` has to sit next to
+``package.json`` for Node's resolver to find it.
 """
 
 from __future__ import annotations
 
 import json
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from crb.core.execution import Command, ExecResult, Executor
-from crb.core.runners.base import BARE, BaseRunner, TestRun, tail_of
+from crb.core.runners.base import (
+    BARE,
+    BaseRunner,
+    SetupResult,
+    SetupSession,
+    SetupStep,
+    TestRun,
+    tail_of,
+)
+
+_NPM_FLAGS: tuple[str, ...] = ("--no-audit", "--no-fund", "--loglevel=error")
+
+
+def declares_dependencies(root: Path) -> bool:
+    """Whether ``package.json`` names anything to install."""
+    try:
+        data = json.loads((Path(root) / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    return any(
+        isinstance(data.get(k), dict) and data[k]
+        for k in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
+    )
 
 
 def _json_after_first_brace(text: str) -> dict[str, Any] | None:
@@ -35,6 +64,45 @@ def _list(d: Mapping[str, Any], key: str) -> list[dict[str, Any]]:
 
 class _NodeBase(BaseRunner):
     default_timeout = 420
+
+    # --- environment -------------------------------------------------------------
+    def environment_ready(self, root: Path, env_dir: Path) -> bool:
+        """``node_modules/.bin`` exists — or ``package.json`` declares nothing to
+        install (a dependency-free ``node --test`` repo is ready as it stands)."""
+        nm = Path(root) / "node_modules"
+        if (nm / ".bin").is_dir():
+            return True
+        return (Path(root) / "package.json").is_file() and not declares_dependencies(root)
+
+    def setup(
+        self,
+        executor: Executor,
+        root: Path,
+        *,
+        env_dir: Path,
+        timeout: int,
+        on_step: Callable[[SetupStep], None] | None = None,
+    ) -> SetupResult:
+        refusal = self.sandbox_refusal(executor)
+        if refusal is not None:
+            return refusal
+        root = Path(root)
+        session = SetupSession(executor, on_step=on_step)
+        if not (root / "package.json").is_file():
+            return session.result(False, "no package.json: nothing npm could install")
+        npm = executor.tool("npm", self.opts.get("npm"))
+        verb = "ci" if (root / "package-lock.json").is_file() else "install"
+        session.run(
+            Command(
+                (npm, verb, *_NPM_FLAGS),
+                root,
+                env={"NODE_ENV": "development", "npm_config_update_notifier": "false"},
+                timeout=self.setup_timeout(timeout),
+                writable_paths=("node_modules",),
+                network=True,
+            )
+        )
+        return self.finish_setup(session, root, Path(env_dir))
 
     def _bin(self, root: Path, executor: Executor, tool: str) -> str:
         if executor.name == "docker":

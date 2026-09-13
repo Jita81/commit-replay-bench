@@ -113,6 +113,7 @@ markers = [
   "toolchain(name): needs a language toolchain on PATH (go, node, mvn, cargo)",
   "live: needs live model credentials (skipped in CI)",
   "slow: long-running end-to-end test",
+  "network: needs outbound network access (the dependency-install phase)",
 ]
 
 [tool.coverage.run]

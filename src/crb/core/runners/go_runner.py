@@ -1,20 +1,71 @@
-"""``go test -json`` runner."""
+"""``go test -json`` runner.
+
+Setup is ``go mod download`` (the module cache under ``$GOMODCACHE``; the
+host's, since the cache is keyed by module path + version and shared safely).
+Ready means ``go list ./...`` resolves with ``GOPROXY=off`` — the exact question
+"can the test command build without the network".
+"""
 
 from __future__ import annotations
 
 import json
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from crb.core.execution import Command, ExecResult, Executor
-from crb.core.runners.base import BaseRunner, TestRun, tail_of
+from crb.core.runners.base import (
+    BaseRunner,
+    SetupResult,
+    SetupSession,
+    SetupStep,
+    TestRun,
+    host_check,
+    tail_of,
+)
 from crb.core.spec import BELT_AFFECTED_DIRS
+
+_GO_BASE_ENV: dict[str, str] = {"GOFLAGS": "-mod=mod", "GOTOOLCHAIN": "local"}
 
 
 class GoRunner(BaseRunner):
     name = "go"
     default_timeout = 600
+
+    # --- environment -------------------------------------------------------------
+    def _go(self, executor: Executor) -> str:
+        return executor.tool("go", self.opts.get("go"))
+
+    def environment_ready(self, root: Path, env_dir: Path) -> bool:
+        go = str(self.opts.get("go") or "go")
+        return host_check([go, "list", "./..."], Path(root), env={**_GO_BASE_ENV, "GOPROXY": "off"})
+
+    def setup(
+        self,
+        executor: Executor,
+        root: Path,
+        *,
+        env_dir: Path,
+        timeout: int,
+        on_step: Callable[[SetupStep], None] | None = None,
+    ) -> SetupResult:
+        refusal = self.sandbox_refusal(executor)
+        if refusal is not None:
+            return refusal
+        root = Path(root)
+        session = SetupSession(executor, on_step=on_step)
+        if not (root / "go.mod").is_file():
+            return session.result(False, "no go.mod: not a Go module")
+        session.run(
+            Command(
+                (self._go(executor), "mod", "download"),
+                root,
+                env=dict(_GO_BASE_ENV),
+                timeout=self.setup_timeout(timeout),
+                network=True,
+            )
+        )
+        return self.finish_setup(session, root, Path(env_dir))
 
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
         pkgs = set()
@@ -33,7 +84,7 @@ class GoRunner(BaseRunner):
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
-        go = executor.tool("go", self.opts.get("go"))
+        go = self._go(executor)
         pkgs = list(scope) or ["./..."]
         env = {
             "GOFLAGS": "-count=1 -mod=mod",
