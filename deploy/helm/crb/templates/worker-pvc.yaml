@@ -1,0 +1,22 @@
+{{- if and .Values.worker.enabled (eq .Values.worker.workDir.type "pvc") }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "crb.fullname" . }}-work
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+  annotations:
+    # Keep clones/worktrees across `helm uninstall`; delete the PVC explicitly.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.worker.workDir.accessMode }}
+  {{- with .Values.worker.workDir.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.worker.workDir.size }}
+{{- end }}
