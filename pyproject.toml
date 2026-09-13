@@ -147,7 +147,8 @@ name = "layers depend downward only"
 type = "layers"
 # Parenthesised layers are optional: packages land phase by phase (cli/server/factory/store).
 layers = [
-  "(crb.cli) | (crb.server)",
+  "(crb.cli)",
+  "(crb.server)",
   "(crb.factory)",
   "(crb.store)",
   "(crb.builders) | crb.observability",

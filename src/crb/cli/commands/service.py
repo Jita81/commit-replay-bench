@@ -57,7 +57,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def cmd_worker(args: argparse.Namespace) -> int:
     try:
-        import crb.server.worker_main as worker_main_mod  # type: ignore[import-untyped]  # W2-C
+        import crb.server.worker_main as worker_main_mod
     except ImportError as e:
         raise CliError(f"{_SERVER_HINT} ({e})") from e
     argv: list[str] = []

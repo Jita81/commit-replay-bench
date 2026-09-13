@@ -227,7 +227,7 @@ def grade_row_from_result(
     process_step: str = PROCESS_REPLAY,
     language: str = "",
     labels: Mapping[str, str] | None = None,
-    error: str = "",
+    builder_error: str = "",
 ) -> GradeRow:
     """Reduce a :class:`GradeResult` + its evidence-pack hash to the ledger row.
 
@@ -235,6 +235,11 @@ def grade_row_from_result(
     against the belts at construction, so a disagreement between the grader and
     the ledger cannot be persisted. Shared by the CLI, the run orchestrator and
     the server so there is exactly ONE mapping.
+
+    ``builder_error`` is the builder's *own* infrastructure trouble (model error,
+    budget stop). It never changes the verdict — the belts are the truth about
+    the worktree — but it is recorded on the row (``labels['builder_error']``) so
+    cost and reliability views can see it.
     """
     b = builder or BuilderRef(mode=result.mode)
     return GradeRow(
@@ -259,7 +264,7 @@ def grade_row_from_result(
         actor=actor,
         disqualified=result.disqualified,
         dq_reason=result.dq_reason,
-        error=result.error or error,
+        error=result.error,
         new_failures_count=len(result.new_failures),
         attempts=b.attempts,
         cost_usd=b.cost_usd,
@@ -270,7 +275,12 @@ def grade_row_from_result(
         evidence_pack_hash=pack_hash,
         belt_set=BELT_SET_V4,
         provenance="measured",
-        labels={"rung": trial, **{k: str(v) for k, v in task.labels.items()}, **dict(labels or {})},
+        labels={
+            "rung": trial,
+            **{k: str(v) for k, v in task.labels.items()},
+            **({"builder_error": builder_error[:300]} if builder_error else {}),
+            **dict(labels or {}),
+        },
     )
 
 

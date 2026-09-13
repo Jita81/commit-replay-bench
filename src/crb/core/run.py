@@ -158,7 +158,7 @@ def row_from(
         actor=spec.actor,
         process_step=spec.process_step,
         language=task.language or spec.config.language.value,
-        error=attempt.error,
+        builder_error=attempt.error,
     )
 
 
