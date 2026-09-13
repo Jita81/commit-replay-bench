@@ -369,3 +369,23 @@ def test_registry_names_and_unknown() -> None:
     assert c.name == "claude_code" and c.model == "claude-sonnet-5" and c.provider == "anthropic"
     o = builder_for_rung(base.Rung("openai_agent", "gpt-oss-120b", "cerebras"))
     assert o.provider == "cerebras"
+
+
+def test_archaeology_guard_checks_substitutions_recursively() -> None:
+    """$(pwd) / $(find …) are ordinary developer shell (koajs/koa builds were
+    disqualified for them); only an inner violation is refused."""
+    from crb.builders.base import GitArchaeologyGuard
+
+    g = GitArchaeologyGuard()
+    assert (
+        g.check_shell(
+            'NODE_PATH=$(pwd)/node_modules node --test $(find __tests__ -name "*.test.js")'
+        )
+        == ""
+    )
+    assert g.check_shell("echo `pwd`") == ""
+    assert g.check_shell("(cd lib && node --test)") == ""
+    assert "git log" in g.check_shell("echo $(git log -1)")
+    assert "stash" in g.check_shell("git stash && npm test; git stash pop")
+    assert "network" in g.check_shell("npx standard lib/request.js")
+    assert g.check_shell("echo $(pwd").startswith("archaeology:")

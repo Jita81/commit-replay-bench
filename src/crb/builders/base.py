@@ -683,6 +683,42 @@ _WRAPPERS: frozenset[str] = frozenset({"env", "sudo", "nohup", "time", "command"
 _SHELLS: frozenset[str] = frozenset({"sh", "bash", "zsh", "dash", "fish", "ksh"})
 
 
+def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
+    """Replace every ``$( … )``, backtick and ``( … )`` sub-shell with a placeholder and
+    return the inner commands for recursive checking. ``None`` when unbalanced."""
+    inners: list[str] = []
+    out: list[str] = []
+    i, n = 0, len(command)
+    while i < n:
+        ch = command[i]
+        if ch == "`":
+            j = command.find("`", i + 1)
+            if j < 0:
+                return None, inners
+            inners.append(command[i + 1 : j])
+            out.append("__SUBST__")
+            i = j + 1
+            continue
+        if ch == "(" or (ch == "$" and command.startswith("$(", i)):
+            start = i + 2 if ch == "$" else i + 1
+            depth, j = 1, start
+            while j < n and depth:
+                if command[j] == "(":
+                    depth += 1
+                elif command[j] == ")":
+                    depth -= 1
+                j += 1
+            if depth:
+                return None, inners
+            inners.append(command[start : j - 1])
+            out.append("__SUBST__")
+            i = j
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out), inners
+
+
 class GitArchaeologyGuard:
     """Refuse commands that recover the real patch or leave the sandbox.
 
@@ -727,11 +763,23 @@ class GitArchaeologyGuard:
                 )
         return ""
 
-    def check_shell(self, command: str) -> str:
+    def check_shell(self, command: str, *, _depth: int = 0) -> str:
         """Split a shell command line on ``&&`` ``||`` ``;`` ``|`` ``&`` and check every
-        segment. Sub-shells and command substitution (``(``, ``$(``, backticks) are
-        refused outright: they can hide anything."""
-        lex = shlex.shlex(command, posix=True, punctuation_chars=True)
+        segment. Sub-shells and command substitutions (``$( … )``, backticks,
+        ``( … )``) are checked RECURSIVELY — ``$(pwd)`` and ``$(find …)`` are ordinary
+        developer shell, refusing them wholesale disqualified honest builds on
+        koajs/koa — and refused only if the inner command violates (or nests
+        deeper than the parser will follow)."""
+        if _depth > 4:
+            return "archaeology: command substitution nested too deep to check"
+        flat, inners = _hoist_substitutions(command)
+        if flat is None:
+            return "archaeology: could not parse the command safely (unbalanced substitution)"
+        for inner in inners:
+            r = self.check_shell(inner, _depth=_depth + 1)
+            if r:
+                return r
+        lex = shlex.shlex(flat, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
         try:
             tokens = list(lex)
@@ -742,8 +790,8 @@ class GitArchaeologyGuard:
             if tok in {"&&", "||", ";", ";;", "|", "&", "|&"}:
                 segments.append([])
                 continue
-            if tok in {"(", ")", "`", "$"} or tok.startswith(("$(", "`")):
-                return "archaeology: sub-shells / command substitution are not allowed"
+            if tok in {"(", ")", "`", "$"}:
+                return "archaeology: could not parse the command safely (stray sub-shell token)"
             if tok.startswith(("<", ">")):
                 continue  # redirections
             segments[-1].append(tok)
