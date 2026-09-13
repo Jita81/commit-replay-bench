@@ -191,6 +191,55 @@ Every graded task produces an **evidence pack** (redacted; no raw diff, no trans
 default) and a **ledger row** that carries the pack's hash. A row cannot be `clean` without
 a pack.
 
+### 3.1 Oracle adequacy — mutation scoring
+
+false-Q1 = 0 says a clean grade always had a GREEN oracle. It does not say the green was
+worth anything: a suite that never exercises the branch a patch changed passes a wrong
+patch too. An **oracle run** (`POST /runs {kind: "oracle"}`, or the run dialog) measures
+that directly, with no model: at the GOLD state of each task it plants small deterministic
+faults ("mutants") on the commit's changed lines and re-runs the task's target tests.
+
+| Outcome | Meaning | Counted in `oracle_strength = killed / total`? |
+|---|---|---|
+| `killed` | the target tests went RED with the fault present (a timeout counts — the fault was observable) | numerator and denominator |
+| `escaped` | the target tests stayed GREEN — a **proven blind spot**; its diff is in the report | denominator only |
+| `uncompilable` | the toolchain rejected the mutant before any test could see it (a build failure with no test id attributed) | **no** — excluded from both |
+| `error` | the harness itself failed on that mutant | **no** — excluded from both |
+
+A task is **unscoreable** (`oracle_strength = null`, never averaged in) when its gold
+state is RED on its own target tests, when no mutant can be generated on the changed
+region, when no mutator exists for the language, or when no mutant reached a verdict.
+The adequacy gate ([`crb.core.oracle.adequacy`](../src/crb/core/oracle/adequacy.py))
+turns the number into a routing consequence: a CLEAN grade licenses auto-delivery only
+when its oracle is `strong` (≥ 0.80 — the same constant as the routing rule's
+`min_oracle_strength`); `adequate` (≥ 0.50), `weak` and `unscoreable` route to a human
+even on green.
+
+**Two mutator families, one taxonomy.** Every `oracle.score` event carries a
+`provenance` stamp — `mutator`, `mutator_family` and `operator_set_hash` — naming the
+instrument that produced the number:
+
+| Language | Family | Instrument | What it sees |
+|---|---|---|---|
+| `python` | `ast` | `PythonAstMutator` — seven AST operators (`cmp_flip`, `arith_flip`, `bool_flip`, `negate_cond`, `off_by_one`, `return_none`, `swap_branches`) | the changed lines **and the full span of every function they touch**; every mutant is compile-checked before it counts |
+| `go`, `javascript` (+TS), `jvm` (Java/Kotlin), `rust` | `text` | `TextLineMutator` — the same first five operators at the token level, plus `return_value` and `delete_stmt` ([ADR-0009](adr/0009-text-level-mutators.md)) | **exactly** the changed lines; strings, chars, templates, regexes and comments are never touched; it does not reason about types, so a mutant that fails to type-check is excluded as `uncompilable` by the toolchain, never counted as a kill |
+
+Read the numbers accordingly: a strength is comparable **within one language and one
+family** (the hash pins the operator table). Do not compare a Go cell's 0.6 with a Python
+cell's 0.6 — the instruments differ, and the stamp says so. A high `uncompilable` count
+on a cell is not a defect in the oracle; it means the language's compiler is doing part
+of the oracle's job (a deleted declaration in Go or Java never reaches a test). For
+JavaScript there is no compile step, so a deleted declaration is a *runtime* fault the
+tests can observe — the same operator measures something slightly different there, which
+is exactly why the family and language travel with the number.
+
+Every mutant is generated deterministically (candidates sorted on line, column, operator
+rank and description; two runs are byte-identical; `max_mutants` — default 20 — truncates
+a stable prefix), the file under mutation is restored byte-exact after every mutant (and
+verified by hash), and test files are never mutated. The blind-spot catalogue — every
+escaped mutant with its diff — is the prevention artifact: each entry names a missing
+assertion.
+
 ## 4. Read the capability map
 
 `crb ledger stats` (CLI) and the Capability Map screen (P5) show, per cell

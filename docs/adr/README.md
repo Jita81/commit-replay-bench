@@ -18,6 +18,7 @@ and be recorded here.
 | [0006](0006-zero-raw-retention-and-evidence-packs.md) | Zero raw retention by default; evidence packs | Accepted | 2026-09-13 |
 | [0007](0007-abstract-cell-export-only.md) | Cross-organisation learning: abstract cell export only | Accepted | 2026-09-13 |
 | [0008](0008-stdlib-core-and-downward-layers.md) | Standard-library core and downward-only layers | Accepted | 2026-09-13 |
+| [0009](0009-text-level-mutators.md) | Text-level mutators for the non-Python languages (`uncompilable` excluded; family stamped) | Accepted | 2026-09-13 |
 
 ## Format
 

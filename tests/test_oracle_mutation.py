@@ -296,8 +296,10 @@ def test_no_mutants_region_is_not_scoreable(gold_ws, task, harness):
 
 
 def test_no_mutator_for_language_is_not_scoreable(gold_ws, task, harness):
-    assert ms.mutator_for("go") is None
-    score = _score(gold_ws, task.with_(language="go"), harness, MUT_ALL_LINES)
+    # go/javascript/jvm/rust now have the text mutator (W3-D); an UNREGISTERED language
+    # is still honestly not scoreable — never silently scored with the Python mutator.
+    assert ms.mutator_for("cobol") is None
+    score = _score(gold_ws, task.with_(language="cobol"), harness, MUT_ALL_LINES)
     assert score.oracle_strength is None and "no mutator" in score.note
 
 

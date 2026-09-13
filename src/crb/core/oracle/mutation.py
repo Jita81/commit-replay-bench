@@ -20,9 +20,12 @@ Honesty properties (all correct-by-construction, none advisory)
 * **No randomness anywhere.** Candidates are collected in AST source order and sorted
   on ``(line, col, operator-rank, description)``; two runs on the same input are
   byte-identical. ``max_mutants`` truncates a stable PREFIX.
-* **Every mutant compiles.** A syntactically broken mutant would be "killed" by a
-  collection error, dishonestly inflating strength; non-compiling candidates are
-  dropped before they are counted.
+* **Every mutant compiles — or is excluded.** A syntactically broken mutant would be
+  "killed" by a collection error, dishonestly inflating strength. The Python AST
+  mutator drops non-compiling candidates before they are counted; the text mutators
+  cannot see types, so a mutant the TOOLCHAIN rejects (a build failure with no test
+  id attributed — the runner's ``parse_error`` on a non-zero exit) is recorded as
+  ``uncompilable`` and excluded from the denominator, never counted as a kill.
 * **Mutants never touch the oracle.** A test file among the mutation targets is
   refused outright (mutating the oracle is self-grading), and the untouched test
   bytes are what belt 1 checks anyway.
@@ -35,15 +38,21 @@ Honesty properties (all correct-by-construction, none advisory)
   recorded as ``timed_out`` so a reader can recompute without it.
 * **The file under mutation is restored byte-exact** — after every mutant and again
   in a ``finally`` — and the restore is verified by hash. Each version is written
-  with a distinct integer mtime so a stale ``.pyc`` can never grade the wrong bytes.
+  with a distinct integer mtime that is also newer than wall-clock, so neither a
+  stale ``.pyc`` (equality-checked) nor an mtime-ordered build cache (Maven, cargo)
+  can ever grade the wrong bytes.
 
 Measurement-only: nothing here touches a verdict. The number it produces is what
 :mod:`crb.core.oracle.adequacy` turns into a routing consequence, and what
 ``GradeRow.oracle_strength`` carries into the ledger.
 
-Language support is a small protocol (:class:`Mutator`): the Python AST mutator is
-the only implementation today; adding a language means adding a mutator, not
-touching the scorer.
+Language support is a small protocol (:class:`~crb.core.oracle.mutant.Mutator`):
+Python uses the AST mutator here (``family="ast"``); Go, JavaScript/TypeScript,
+Java/Kotlin and Rust use the token-level
+:class:`~crb.core.oracle.mutators_text.TextLineMutator` (``family="text"``). The
+provenance stamp records the family and the operator-set hash, so a strength is
+comparable only within a language and an instrument. Adding a language means adding
+a mutator, not touching the scorer.
 """
 
 from __future__ import annotations
@@ -53,13 +62,16 @@ import copy
 import difflib
 import os
 import re
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from crb.core.evidence import canonical_json, sha256_text
 from crb.core.execution import Executor, SandboxUnavailable
+from crb.core.oracle.mutant import DEFAULT_MAX_MUTANTS, Mutant, Mutator
+from crb.core.oracle.mutators_text import MUTATOR_FAMILY_TEXT, text_mutators
 from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner, TestRun
 from crb.core.spec import RepoConfig, TaskSpec
@@ -68,7 +80,7 @@ from crb.core.workspace import Workspace, sha256_bytes
 
 MUTATION_SCHEMA = "crb.oracle_strength.v1"
 MUTATION_VERSION = "mutation.v1"
-DEFAULT_MAX_MUTANTS = 20
+MUTATOR_FAMILY_AST = "ast"
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
@@ -196,46 +208,8 @@ def changed_lines_for(ws: Workspace, path: str) -> set[int]:
 
 
 # ---------------------------------------------------------------------------
-# the mutator protocol + the Python AST mutator
+# the Python AST mutator (the Mutant / Mutator contract lives in crb.core.oracle.mutant)
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Mutant:
-    """One candidate fault. ``mutant_id`` is stable across runs (``m01_cmp_flip_L4``)."""
-
-    mutant_id: str
-    op: str
-    line: int
-    col: int
-    description: str
-    mutated_source: str
-    path: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "mutant_id": self.mutant_id,
-            "op": self.op,
-            "line": self.line,
-            "col": self.col,
-            "description": self.description,
-            "path": self.path,
-        }
-
-
-class Mutator(Protocol):
-    """A per-language mutant generator. Pure: text in, mutants out, no I/O."""
-
-    language: str
-    operators: tuple[str, ...]
-
-    def accepts(self, path: str) -> bool: ...
-
-    def generate(
-        self, source: str, changed_lines: Set[int], *, max_mutants: int, path: str
-    ) -> list[Mutant]: ...
-
-    def describe(self) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -336,6 +310,7 @@ class PythonAstMutator:
     """The seven-operator Python mutator. Deterministic, bounded, compile-checked."""
 
     language = "python"
+    family = MUTATOR_FAMILY_AST
     operators = PYTHON_OPERATORS
     suffixes: tuple[str, ...] = (".py",)
 
@@ -392,6 +367,7 @@ class PythonAstMutator:
         return {
             "language": self.language,
             "mutator": type(self).__name__,
+            "family": self.family,
             "version": MUTATION_VERSION,
             "operators": [{"op": op, "rank": _OP_RANK[op]} for op in self.operators],
             "cmp_flips": sorted(desc for _, desc in _CMP_FLIPS.values()),
@@ -399,15 +375,25 @@ class PythonAstMutator:
         }
 
 
-_MUTATORS: dict[str, Mutator] = {"python": PythonAstMutator()}
+#: language value → mutator. Python: the AST family; go / javascript / jvm / rust: the
+#: text family. An unregistered language is not scoreable (never silently Python).
+_MUTATORS: dict[str, Mutator] = {"python": PythonAstMutator(), **text_mutators()}
+MUTATOR_FAMILIES: tuple[str, ...] = (MUTATOR_FAMILY_AST, MUTATOR_FAMILY_TEXT)
 
 
 def mutator_for(language: str) -> Mutator | None:
-    """The registered mutator for a language value (``"python"``), or ``None``."""
+    """The registered mutator for a language value (``"python"``, ``"go"``, …), or ``None``."""
     return _MUTATORS.get(language.strip().lower())
 
 
+def mutator_family(mutator: Mutator) -> str:
+    """Which family scored a row — what the mutator DECLARES in ``describe()``."""
+    return str(mutator.describe().get("family", "") or "")
+
+
 def operator_set_hash(mutator: Mutator) -> str:
+    """Hash of everything the mutator says it is: language, family, version, operator
+    table (and, for the text family, the substitution tables and language profile)."""
     return sha256_text(canonical_json(mutator.describe()))
 
 
@@ -431,11 +417,27 @@ def generate_mutants(
 OUTCOME_KILLED = "killed"
 OUTCOME_ESCAPED = "escaped"
 OUTCOME_ERROR = "error"
+OUTCOME_UNCOMPILABLE = "uncompilable"
+
+
+def compile_failure(run: TestRun) -> bool:
+    """A MUTANT run the toolchain rejected before any test could observe the fault.
+
+    The runner contract fails closed on an *unattributed* failure — a non-zero exit
+    with no failing test id parsed (a compile/build error, a crashed binary, a reporter
+    with nothing to report) is stamped ``parse_error``. On the GOLD baseline that is
+    "not scoreable"; on a mutant it means the oracle never got to see the fault, so
+    the mutant is ``uncompilable``: in neither the numerator nor the denominator. A
+    timeout is never a compile failure (the tests ran and did not pass — a kill).
+    """
+    return not run.timed_out and run.returncode != 0 and not run.failing and bool(run.parse_error)
 
 
 @dataclass(frozen=True)
 class MutantOutcome:
-    """One mutant's fate. ``killed`` is ``None`` for a harness error (excluded)."""
+    """One mutant's fate. ``killed`` is ``None`` when the mutant was not graded: a
+    harness error (``error``) or a toolchain rejection (``uncompilable``) — both are
+    excluded from the denominator and told apart by ``uncompilable``."""
 
     mutant_id: str
     op: str
@@ -448,9 +450,16 @@ class MutantOutcome:
     returncode: int | None = None
     tail: str = ""
     error: str = ""
+    uncompilable: bool = False
+
+    def __post_init__(self) -> None:
+        if self.uncompilable and self.killed is not None:
+            raise ValueError("an uncompilable mutant cannot also be killed/escaped")
 
     @property
     def status(self) -> str:
+        if self.uncompilable:
+            return OUTCOME_UNCOMPILABLE
         if self.killed is None:
             return OUTCOME_ERROR
         return OUTCOME_KILLED if self.killed else OUTCOME_ESCAPED
@@ -469,6 +478,7 @@ class MutantOutcome:
             "returncode": self.returncode,
             "tail": self.tail,
             "error": self.error,
+            "uncompilable": self.uncompilable,
         }
 
 
@@ -480,6 +490,7 @@ class MutationProvenance:
     mutation_version: str = MUTATION_VERSION
     language: str = ""
     mutator: str = ""
+    mutator_family: str = ""  # "ast" | "text" — strengths compare only within one
     operator_set_hash: str = ""
     max_mutants: int = DEFAULT_MAX_MUTANTS
     runner: str = ""
@@ -494,6 +505,7 @@ class MutationProvenance:
             "mutation_version": self.mutation_version,
             "language": self.language,
             "mutator": self.mutator,
+            "mutator_family": self.mutator_family,
             "operator_set_hash": self.operator_set_hash,
             "max_mutants": self.max_mutants,
             "runner": self.runner,
@@ -507,8 +519,9 @@ class CommitOracleScore:
 
     ``oracle_strength = killed / total`` over the mutants that ran to a verdict;
     ``None`` when not scoreable (RED baseline, no mutants, no mutator, harness error
-    on the baseline). ``errors`` counts mutants excluded for harness errors — they
-    are in neither numerator nor denominator.
+    on the baseline). ``errors`` counts mutants excluded for harness errors and
+    ``uncompilable`` those the toolchain rejected — both are in neither numerator
+    nor denominator.
     """
 
     task_id: str
@@ -524,6 +537,7 @@ class CommitOracleScore:
     note: str = ""
     baseline: TestRun | None = None
     provenance: MutationProvenance = field(default_factory=MutationProvenance)
+    uncompilable: int = 0
 
     def __post_init__(self) -> None:
         if self.oracle_strength is not None and self.total == 0:
@@ -557,6 +571,7 @@ class CommitOracleScore:
             "killed": self.killed,
             "escaped": self.total - self.killed,
             "errors": self.errors,
+            "uncompilable": self.uncompilable,
             "oracle_strength": self.oracle_strength,
             "note": self.note,
             "outcomes": [o.to_dict() for o in self.outcomes],
@@ -570,15 +585,31 @@ class MutationRestoreError(RuntimeError):
 
 
 def _write_version(path: Path, content: bytes, mtime: int) -> None:
-    """Write one source version with a DISTINCT integer mtime.
+    """Write one source version with a DISTINCT, STRICTLY NEWER integer mtime.
 
-    ``.pyc`` caches validate on (int-second mtime, size); a mutant/restore of the same
-    size written within the same second could silently execute the PREVIOUS version's
-    bytecode — a false kill/escape vector. Distinct mtimes per version make cache
-    confusion impossible (correct-by-construction, not advisory).
+    Two cache families must never grade the wrong bytes:
+
+    * ``.pyc`` caches validate on (int-second mtime, size) — EQUALITY: a mutant/restore
+      of the same size written within the same second could silently execute the
+      PREVIOUS version's bytecode. Distinct mtimes per version make that impossible.
+    * mtime-ORDERED build caches (Maven's stale-source check, cargo's fingerprints):
+      a source whose mtime is OLDER than the artefact compiled from the previous
+      version reads as "up to date", is not recompiled, and the tests run against the
+      previous version's code — a false escape (or a false kill) vector. Every version
+      is therefore stamped newer than wall-clock (:func:`_next_tick`), hence newer than
+      any artefact that exists when it is written. Go keys its cache on content; node
+      has none; both are unaffected.
+
+    Correct-by-construction, not advisory: the scorer never asks a toolchain to clean.
     """
     path.write_bytes(content)
     os.utime(path, (mtime, mtime))
+
+
+def _next_tick(tick: int) -> int:
+    """The next version's mtime: strictly after the previous one AND strictly after
+    now, so it is newer than anything a build compiled before this write."""
+    return max(tick + 1, int(time.time()) + 1)
 
 
 def _unified_diff(original: str, mutated: str, src_path: str) -> str:
@@ -650,6 +681,7 @@ def score_task(
     prov = MutationProvenance(
         language=mut.language,
         mutator=type(mut).__name__,
+        mutator_family=mutator_family(mut),
         operator_set_hash=operator_set_hash(mut),
         max_mutants=max_mutants,
         runner=runner.name,
@@ -718,13 +750,12 @@ def score_task(
     # --- run each mutant against the TARGET tests only; restore after each ------
     outcomes: list[MutantOutcome] = []
     files = {rel: ws.root / rel for rel in originals}
-    base_mtime = max(int(p.stat().st_mtime) for p in files.values())
-    tick = base_mtime
+    tick = max(int(p.stat().st_mtime) for p in files.values())
     try:
         for m in mutants:
             original_text = originals[m.path].decode("utf-8")
             diff = _unified_diff(original_text, m.mutated_source, m.path)
-            tick += 1
+            tick = _next_tick(tick)
             _write_version(files[m.path], m.mutated_source.encode("utf-8"), tick)
             try:
                 run = runner.run(executor, ws.root, task.target_tests, timeout=timeout)
@@ -746,8 +777,34 @@ def score_task(
                 )
                 continue
             finally:
-                tick += 1
+                tick = _next_tick(tick)
                 _write_version(files[m.path], originals[m.path], tick)
+            if compile_failure(run):
+                # the toolchain rejected the mutant before a test could see it:
+                # excluded from the denominator, never a kill
+                outcomes.append(
+                    MutantOutcome(
+                        m.mutant_id,
+                        m.op,
+                        m.line,
+                        m.description,
+                        None,
+                        diff,
+                        m.path,
+                        returncode=run.returncode,
+                        tail=redact_and_cap(run.tail, max_chars=600),
+                        error=redact_and_cap(run.parse_error, max_chars=200),
+                        uncompilable=True,
+                    )
+                )
+                _emit(
+                    on_event,
+                    "oracle.mutation.uncompilable",
+                    task=task.task_id,
+                    mutant=m.mutant_id,
+                    returncode=run.returncode,
+                )
+                continue
             killed = not run.green  # RED (incl. timeout) = the fault was observable
             outcomes.append(
                 MutantOutcome(
@@ -772,18 +829,26 @@ def score_task(
                 timed_out=run.timed_out,
             )
     finally:
-        tick += 1
+        tick = _next_tick(tick)
         for rel, raw in originals.items():
             _write_version(files[rel], raw, tick)
             if sha256_bytes(files[rel].read_bytes()) != sha256_bytes(raw):
                 raise MutationRestoreError(f"{rel} did not restore byte-exact after mutation")
 
     graded = [o for o in outcomes if o.killed is not None]
-    errors = len(outcomes) - len(graded)
+    uncompilable_n = sum(1 for o in outcomes if o.uncompilable)
+    errors = len(outcomes) - len(graded) - uncompilable_n
     killed_n = sum(1 for o in graded if o.killed)
     total = len(graded)
     strength = round(killed_n / total, 4) if total else None
-    note = "" if total else f"every mutant hit a harness error ({errors}) — not scoreable"
+    note = (
+        ""
+        if total
+        else (
+            f"no mutant reached a verdict (uncompilable={uncompilable_n}, harness "
+            f"errors={errors}) — not scoreable"
+        )
+    )
     _emit(
         on_event,
         "oracle.mutation.scored",
@@ -791,6 +856,7 @@ def score_task(
         total=total,
         killed=killed_n,
         errors=errors,
+        uncompilable=uncompilable_n,
         oracle_strength=strength,
     )
     return CommitOracleScore(
@@ -801,6 +867,7 @@ def score_task(
         errors=errors,
         note=note,
         baseline=baseline,
+        uncompilable=uncompilable_n,
         **base,
     )
 
@@ -821,13 +888,15 @@ def aggregate_by_cell(scores: Iterable[CommitOracleScore]) -> dict[str, dict[str
         if not s.scoreable:
             continue
         cell = cells.setdefault(
-            s.cell, {"tasks": 0, "mutants": 0, "killed": 0, "escaped": 0, "errors": 0}
+            s.cell,
+            {"tasks": 0, "mutants": 0, "killed": 0, "escaped": 0, "errors": 0, "uncompilable": 0},
         )
         cell["tasks"] += 1
         cell["mutants"] += s.total
         cell["killed"] += s.killed
         cell["escaped"] += s.total - s.killed
         cell["errors"] += s.errors
+        cell["uncompilable"] += s.uncompilable
     for cell in cells.values():
         cell["oracle_strength"] = round(cell["killed"] / cell["mutants"], 4)
     return dict(sorted(cells.items()))
@@ -852,6 +921,7 @@ def to_report(scores: Sequence[CommitOracleScore]) -> dict[str, Any]:
                 "killed": s.killed,
                 "escaped": s.total - s.killed,
                 "errors": s.errors,
+                "uncompilable": s.uncompilable,
                 "oracle_strength": s.oracle_strength,
                 "note": s.note,
                 "escaped_mutants": [
@@ -877,6 +947,7 @@ def to_report(scores: Sequence[CommitOracleScore]) -> dict[str, Any]:
             "killed": killed,
             "escaped": mutants - killed,
             "errors": sum(s.errors for s in scores),
+            "uncompilable": sum(s.uncompilable for s in scores),
             "oracle_strength": round(killed / mutants, 4) if mutants else None,
         },
     }
@@ -892,7 +963,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "",
         f"Tasks: {s['tasks']} ({s['scoreable']} scoreable, {s['unscoreable']} not) — "
         f"mutants: {s['mutants']}, killed: {s['killed']}, escaped: {s['escaped']}, "
-        f"errors: {s['errors']}, oracle_strength: {strength}",
+        f"errors: {s['errors']}, uncompilable: {s.get('uncompilable', 0)}, "
+        f"oracle_strength: {strength}",
         "",
         "## Per task",
         "",
@@ -944,3 +1016,39 @@ def oracle_strength_stamp(score: CommitOracleScore) -> str:
         f"oracle_strength={score.oracle_strength:.2f} killed={score.killed}/{score.total} "
         f"escaped={score.total - score.killed} task={score.task_id[:12]}"
     )
+
+
+# The mutant contract (crb.core.oracle.mutant) is re-exported: this module stays the
+# scorer's public face.
+__all__ = [
+    "DEFAULT_MAX_MUTANTS",
+    "MUTATION_SCHEMA",
+    "MUTATION_VERSION",
+    "MUTATOR_FAMILIES",
+    "MUTATOR_FAMILY_AST",
+    "OUTCOME_ERROR",
+    "OUTCOME_ESCAPED",
+    "OUTCOME_KILLED",
+    "OUTCOME_UNCOMPILABLE",
+    "PYTHON_OPERATORS",
+    "CommitOracleScore",
+    "Mutant",
+    "MutantOutcome",
+    "MutationProvenance",
+    "MutationRestoreError",
+    "Mutator",
+    "PythonAstMutator",
+    "aggregate_by_cell",
+    "changed_lines_for",
+    "changed_lines_from_diff",
+    "compile_failure",
+    "eligible_lines",
+    "generate_mutants",
+    "mutator_family",
+    "mutator_for",
+    "operator_set_hash",
+    "oracle_strength_stamp",
+    "render_markdown",
+    "score_task",
+    "to_report",
+]
