@@ -65,7 +65,7 @@ from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, GradeResult, grade
 from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner
-from crb.core.spec import RepoConfig, TaskSpec
+from crb.core.spec import BELT_TARGET_ONLY, RepoConfig, TaskSpec
 from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace
 
@@ -840,12 +840,29 @@ def controls_for_task(
                     VERDICT_VIOLATION,
                     f"unexpected outcome {observed}: {result.note or result.error}",
                 )
+        elif name == REGRESSION and observed == OBS_RED:
+            # The poison broke the TARGET itself (a transitive import the selector could
+            # not see): belt 2 caught it, so nothing was credited — but belt 3 was never
+            # exercised. That is "not constructible" on this task, not an instrument bug.
+            verdict = VERDICT_NOT_CONSTRUCTIBLE
+            note = "poison broke the target itself (transitive import) — belt 3 not exercised"
         else:
             verdict = VERDICT_OK if observed in EXPECTED[name] else VERDICT_VIOLATION
             note = guard.tamper_note
             if verdict == VERDICT_VIOLATION:
                 detail = result.error or result.dq_reason or result.note
                 note = f"{note + '; ' if note else ''}observed={observed} {detail}".strip()
+                if (
+                    name == REGRESSION
+                    and observed == OBS_CLEAN
+                    and config.belt_scope == BELT_TARGET_ONLY
+                ):
+                    note = (
+                        "belt_scope=TARGET_ONLY: belt 3 re-runs only the target tests, so a "
+                        "regression outside them is invisible — widen belt_scope "
+                        "(AFFECTED_DIRS or explicit scopes) before trusting this repo's cells; "
+                        + note
+                    )
         if apply_note:
             note = f"{note}; {apply_note}" if note else apply_note
         rows.append(row(name, observed, verdict, note, grade_result=result, started=started))

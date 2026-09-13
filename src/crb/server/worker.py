@@ -1068,7 +1068,7 @@ class Worker:
                 STATUS_FAILED,
                 counts,
                 f"negative-controls gate FAILED: {len(report.violations)} violation(s) "
-                "(an instrument bug, never a model result)",
+                "(an instrument or belt-scope defect, never a model result)",
             )
         return STATUS_SUCCEEDED, counts, ""
 

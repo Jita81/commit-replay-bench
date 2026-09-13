@@ -454,3 +454,16 @@ def test_module_name_for_honours_pythonpath_suffix():
     )
     assert nc.module_name_for("src/pkg/mod.py", src_cfg) == "pkg.mod"
     assert nc.module_name_for("other/mod.py", src_cfg) == "other.mod"
+
+
+def test_regression_control_on_target_only_belt_names_the_config_weakness() -> None:
+    """With belt_scope=TARGET_ONLY belt 3 re-runs only the target tests, so the regression
+    control's poisoned neighbour is invisible: that is a VIOLATION (the gate fails, the
+    cells cannot be trusted) whose note tells the operator to widen the belt — measured on
+    pallets/click during the walkthrough."""
+    from crb.core.oracle import controls as c
+
+    assert c.REGRESSION in c.EXPECTED and c.OBS_REGRESSED in c.EXPECTED[c.REGRESSION]
+    # OBS_RED on the regression control is 'not constructible' (poison broke the target),
+    # never a violation: the grader credited nothing.
+    assert c.OBS_RED not in c.EXPECTED[c.REGRESSION]
