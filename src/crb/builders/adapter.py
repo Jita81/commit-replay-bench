@@ -205,6 +205,8 @@ def attempt_error(outcome: BuildOutcome) -> str:
         return redact_and_cap("protocol violation: " + "; ".join(found), max_chars=500)
     if outcome.stop_reason == STOP_MODEL_ERROR:
         detail = "; ".join(outcome.errors) or "builder reported a model error"
+        if detail.startswith(f"{STOP_MODEL_ERROR}:"):
+            return redact_and_cap(detail, max_chars=500)
         return redact_and_cap(f"{STOP_MODEL_ERROR}: {detail}", max_chars=500)
     return ""
 

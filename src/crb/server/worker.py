@@ -780,6 +780,12 @@ class Worker:
             return STATUS_CANCELLED, counts, ""
         if summary.stopped_reason:
             return STATUS_FAILED, counts, summary.stopped_reason
+        if summary.tasks and summary.errors >= summary.rows:
+            # Every attempt failed on infrastructure (no credential, provider 402, sandbox…):
+            # the rows are honest (never clean) but the run did not measure anything, so it
+            # must not read as a success. The first error is surfaced as the run's error.
+            first = next((r.error for r in self.ledger.rows(run_id=spec.run_id) if r.error), "")
+            return STATUS_FAILED, counts, f"all {summary.rows} attempt(s) errored: {first}"[:1000]
         return STATUS_SUCCEEDED, counts, ""
 
     def _ledger_health(self) -> None:

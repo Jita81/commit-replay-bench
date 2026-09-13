@@ -704,3 +704,41 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     )
     s2 = worker_main.settings_from_args(args, env)
     assert s2.home == tmp_path / "flag" and s2.executor == "local" and s2.kinds == ("mine", "probe")
+
+
+def test_run_where_every_attempt_errors_is_failed_not_succeeded(h: Harness) -> None:
+    """A provider 402 / missing credential on every task must not read as a success:
+    the rows stay honest (never clean) and the run is `failed` with the first error."""
+    from crb.builders.base import STOP_MODEL_ERROR, BuildOutcome
+
+    class _Broken:
+        name, model, provider = "broken", "m", "p"
+
+        def __init__(self, **cfg: Any) -> None:
+            pass
+
+        def build(self, workspace: Any, brief: Any, budget: Any, *, on_event: Any = None) -> Any:
+            return BuildOutcome(
+                builder="broken",
+                model="m",
+                provider="p",
+                mode=brief.mode,
+                done=False,
+                summary="",
+                stop_reason=STOP_MODEL_ERROR,
+                errors=("model_error: 402 payment required",),
+                budget=budget,
+            )
+
+        def describe(self) -> dict[str, Any]:
+            return {"builder": "broken"}
+
+    builders_pkg._REGISTRY["broken"] = _Broken
+    run = h.enqueue("replay", ladder_json=["broken:m@p"])
+    done = h.run_one()
+    assert done.id == run.id
+    assert done.status == "failed"
+    assert "attempt(s) errored" in done.error and "402" in done.error
+    assert done.counts_json["errors"] == done.counts_json["rows"] == 1
+    (row,) = h.worker.ledger.rows(run_id=run.id)
+    assert row.clean is False and "402" in row.error
