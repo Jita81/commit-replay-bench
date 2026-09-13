@@ -1,0 +1,706 @@
+"""The worker end to end on a temp SQLite database and the ``pyrepo`` fixture: every
+run kind, cancellation between tasks, fail-closed sandbox, stale-claim resume, the
+``--once`` entrypoint and the polling loop. No docker, no network, no model."""
+
+from __future__ import annotations
+
+import json
+import threading
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, ClassVar
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
+
+import crb.builders as builders_pkg
+from crb.builders.base import STOP_DONE, STOP_MAX_TURNS, Budget, BuildBrief, BuildOutcome
+from crb.core.evidence import verify_pack
+from crb.core.execution import SandboxUnavailable
+from crb.core.ledger import verify_chain
+from crb.core.oracle import controls as nc
+from crb.core.spec import TaskSpec
+from crb.core.workspace import Workspace
+from crb.observability.events import JsonlSink, StepStatus
+from crb.server import worker as worker_mod
+from crb.server import worker_main
+from crb.server.worker import Worker, WorkerSettings, docker_settings_for, stage_for
+from crb.store import init_db, make_engine, make_session_factory
+from crb.store.events import DbEventSink, read_events
+from crb.store.jobs import (
+    STATUS_CANCELLED,
+    STATUS_FAILED,
+    STATUS_QUEUED,
+    STATUS_RUNNING,
+    STATUS_SUCCEEDED,
+    JobQueue,
+)
+from crb.store.models import Repo, Run, Task
+from fixtures import pyrepo as pr
+
+# --- a scripted builder ----------------------------------------------------------------
+
+
+class FakeBuilder:
+    """``behaviour``: ``gold`` applies the human patch, ``noop`` does nothing.
+    ``hook`` (a test-set callable) runs on every build — used to cancel mid-run."""
+
+    name = "fake"
+    briefs: ClassVar[list[BuildBrief]] = []
+    hook: ClassVar[Callable[[Workspace, BuildBrief], None] | None] = None
+
+    def __init__(
+        self, *, model: str, provider: str = "", behaviour: str = "gold", **_: Any
+    ) -> None:
+        self.model = model
+        self.provider = provider
+        self.behaviour = behaviour
+
+    def describe(self) -> dict[str, Any]:
+        return {"builder": self.name, "model": self.model}
+
+    def build(
+        self, workspace: Workspace, brief: BuildBrief, budget: Budget, **_: Any
+    ) -> BuildOutcome:
+        FakeBuilder.briefs.append(brief)
+        if FakeBuilder.hook is not None:
+            FakeBuilder.hook(workspace, brief)
+        base = {
+            "builder": self.name,
+            "model": self.model,
+            "provider": self.provider,
+            "mode": brief.mode,
+        }
+        if self.behaviour == "gold":
+            pr.apply_gold(workspace)
+            return BuildOutcome(
+                **base,
+                done=True,
+                stop_reason=STOP_DONE,
+                tokens_in=10,
+                tokens_out=5,
+                cost_usd=0.01,
+                latency_s=0.1,
+                budget=budget,
+            )
+        return BuildOutcome(**base, done=False, stop_reason=STOP_MAX_TURNS, turns=1, budget=budget)
+
+
+@pytest.fixture(autouse=True)
+def _register(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(builders_pkg._REGISTRY, "fake", FakeBuilder)
+    FakeBuilder.briefs = []
+    FakeBuilder.hook = None
+
+
+# --- harness -----------------------------------------------------------------------------
+
+
+class Harness:
+    def __init__(self, tmp_path: Path, pyrepo: pr.PyRepo) -> None:
+        self.home = tmp_path / "home"
+        self.url = f"sqlite:///{self.home / 'crb.db'}"
+        self.pyrepo = pyrepo
+        engine = make_engine(self.url)
+        init_db(engine)
+        self.factory: sessionmaker[Session] = make_session_factory(engine)
+        self.queue = JobQueue(self.factory)
+        self.settings = WorkerSettings(
+            database_url=self.url,
+            home=self.home,
+            worker_id="w-test",
+            poll_s=0.05,
+            heartbeat_s=0.05,
+            stale_after_s=5.0,
+        )
+        self.worker = Worker(self.settings, engine=engine)
+
+    def add_repo(self, **overrides: Any) -> None:
+        cfg = self.pyrepo.config.to_dict()
+        cfg.update(overrides)
+        with self.factory() as s:
+            s.add(
+                Repo(
+                    name=pr.REPO_NAME,
+                    language="python",
+                    runner="pytest",
+                    clone_path=str(self.pyrepo.path),
+                    config_json=cfg,
+                )
+            )
+            s.commit()
+
+    def add_task(self, task: TaskSpec) -> None:
+        with self.factory() as s:
+            s.merge(
+                Task(
+                    repo=task.repo,
+                    task_id=task.task_id,
+                    pool=task.pool,
+                    size=task.size,
+                    capability_class=task.capability_class,
+                    language=task.language,
+                    authored=task.authored,
+                    subject=task.subject,
+                    red_checked=task.red_checked,
+                    gold_clean=task.gold_clean,
+                    spec_json=task.to_dict(),
+                )
+            )
+            s.commit()
+
+    def enqueue(self, kind: str, **fields: Any) -> Run:
+        base: dict[str, Any] = {"repo": pr.REPO_NAME, "kind": kind, "actor": "tester"}
+        if kind in {"replay", "blind"} and "ladder_json" not in fields and "builder" not in fields:
+            base["ladder_json"] = ["fake:m@p"]
+        base.update(fields)
+        return self.queue.enqueue(Run(**base))
+
+    def run_one(self) -> Run:
+        run = self.worker.run_once()
+        assert run is not None
+        return run
+
+    def events(self, run_id: str) -> list[Any]:
+        return read_events(self.factory, run_id, limit=5000)
+
+    def tasks(self) -> list[Task]:
+        with self.factory() as s:
+            return list(s.execute(select(Task).order_by(Task.task_id)).scalars().all())
+
+    def repo_row(self) -> Repo:
+        with self.factory() as s:
+            row = s.get(Repo, pr.REPO_NAME)
+            assert row is not None
+            return row
+
+
+@pytest.fixture
+def h(tmp_path: Path, pyrepo: pr.PyRepo) -> Harness:
+    harness = Harness(tmp_path, pyrepo)
+    harness.add_repo()
+    harness.add_task(pyrepo.feat_task())
+    return harness
+
+
+# --- replay ---------------------------------------------------------------------------------
+
+
+def test_replay_run_end_to_end(h: Harness) -> None:
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.id == run.id and done.status == STATUS_SUCCEEDED, done.error
+    assert done.worker_id == "w-test" and done.finished and done.heartbeat == ""
+    assert (done.progress_done, done.progress_total) == (1, 1)
+    # counts_json IS the RunSummary
+    assert done.counts_json == {
+        "run_id": run.id,
+        "tasks": 1,
+        "clean": 1,
+        "disqualified": 0,
+        "errors": 0,
+        "first_pass_clean": 1,
+        "rows": 1,
+        "duration_s": done.counts_json["duration_s"],
+        "stopped_reason": "",
+        "total": 1,
+    }
+    assert done.apparatus_json["runner"] == "pytest" and done.apparatus_json["executor"] == {
+        "executor": "local"
+    }
+    assert done.apparatus_json["extra"]["worker"] == "w-test"
+    # ledger: one clean row for this run, chain verified, pack stored + verified
+    rows = list(h.worker.ledger.rows(run_id=run.id))
+    assert len(rows) == 1 and rows[0].clean and rows[0].mode == "sighted"
+    assert rows[0].builder == "fake" and rows[0].model == "m" and rows[0].provider == "p"
+    assert rows[0].actor == "tester" and rows[0].trial == "r1" and rows[0].cost_usd == 0.01
+    assert verify_chain(rows) == 1 and h.worker.ledger.verify() == 1
+    pack = h.worker.ledger.get_pack(rows[0].evidence_pack_hash)
+    assert pack is not None and verify_pack(pack) and pack["run_id"] == run.id
+    assert (h.home / "evidence" / f"{rows[0].evidence_pack_hash}.json").exists()
+    # events: seq-ordered from 1, claimed first, finished last, belts in between, DB == JSONL
+    ev = h.events(run.id)
+    assert [e.seq for e in ev] == list(range(1, len(ev) + 1))
+    actions = [e.action for e in ev]
+    assert actions[0] == "run.claimed" and actions[-1] == "run.finished"
+    assert "run.start" in actions and "run.done" in actions
+    assert actions.count("grade.belt") == 4 and "ledger.append" in actions
+    assert "build.start" in actions and "build.done" in actions
+    belt = next(e for e in ev if e.action == "grade.belt")
+    assert belt.stage == "grade" and belt.task_id == h.pyrepo.feat_sha and belt.repo == pr.REPO_NAME
+    assert all(e.trace_id == run.id and e.actor == "tester" for e in ev)
+    fin = ev[-1]
+    assert fin.stage == "system" and fin.payload["final_status"] == STATUS_SUCCEEDED
+    jsonl = list(JsonlSink(h.home / "events" / f"{run.id}.jsonl").read())
+    assert [e.to_dict() for e in jsonl] == [e.to_dict() for e in ev]
+    # the brief was sighted and never carried the source paths
+    (brief,) = FakeBuilder.briefs
+    assert (
+        brief.sighted
+        and brief.test_files == (pr.TEST_SUBTRACT,)
+        and pr.SRC not in brief.task_text()
+    )
+    assert brief.message.startswith("feat: add subtract")
+
+
+def test_blind_run(h: Harness) -> None:
+    run = h.enqueue("blind")
+    assert run.mode == "blind"
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED and done.counts_json["clean"] == 1
+    (row,) = h.worker.ledger.rows(run_id=run.id)
+    assert row.mode == "blind" and row.clean
+    (brief,) = FakeBuilder.briefs
+    assert brief.blind and brief.test_files == () and brief.test_command == ""
+
+
+def test_replay_not_clean_and_ladder_climb(h: Harness) -> None:
+    run = h.enqueue(
+        "replay", ladder_json=["fake:m0", "fake:m1"], params_json={"budget": {"max_turns": 2}}
+    )
+    # rung 0 is a noop (config via builder_overrides is not exposed; use two registered behaviours)
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(
+        behaviour="noop" if cfg["model"] == "m0" else "gold", **cfg
+    )
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED
+    c = done.counts_json
+    assert (c["tasks"], c["clean"], c["rows"], c["first_pass_clean"]) == (1, 1, 2, 0)
+    rows = list(h.worker.ledger.rows(run_id=run.id))
+    assert [(r.trial, r.model, r.clean) for r in rows] == [("r1", "m0", False), ("r2", "m1", True)]
+    assert rows[0].labels["rung"] == "r1"
+    assert done.apparatus_json["extra"]["budget"]["max_turns"] == 2
+
+
+def test_ladder_from_builder_columns_and_task_ids(h: Harness) -> None:
+    run = h.enqueue(
+        "replay",
+        builder="fake",
+        model="mm",
+        provider="pp",
+        params_json={"task_ids": [h.pyrepo.feat_sha, "deadbeefcafe"]},
+    )
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED and done.counts_json["tasks"] == 1
+    (row,) = h.worker.ledger.rows(run_id=run.id)
+    assert (row.builder, row.model, row.provider) == ("fake", "mm", "pp")
+    skip = [e for e in h.events(run.id) if e.action == "run.skip"]
+    assert (
+        skip
+        and skip[0].payload["task_ids"] == ["deadbeefcafe"]
+        and skip[0].status is StepStatus.SKIPPED
+    )
+
+
+def test_replay_without_ladder_fails_closed(h: Harness) -> None:
+    h.enqueue("replay", ladder_json=[])
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and "needs a ladder" in done.error
+    assert done.counts_json == {"tasks": 0, "total": 1, "rows": 0, "clean": 0}
+    err = [e for e in h.events(done.id) if e.action == "run.error"]
+    assert err and err[0].status is StepStatus.ERROR and err[0].error_code == "ValueError"
+
+
+def test_gold_dirty_tasks_are_excluded_by_default(h: Harness) -> None:
+    dirty = h.pyrepo.feat_task(gold_clean=False, gold_note="bad")
+    h.add_task(dirty)  # overwrites the feat task as gold-dirty
+    h.enqueue("replay")
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED and done.counts_json["tasks"] == 0
+    assert done.counts_json["total"] == 0 and FakeBuilder.briefs == []
+
+
+def test_cancel_between_tasks_keeps_partial_counts(h: Harness) -> None:
+    green_sha = h.pyrepo.add_green_commit()
+    second = h.pyrepo.feat_task(
+        task_id=green_sha,
+        subject="second",
+        test_files=[pr.TEST_CALC],
+        target_tests=[pr.TEST_CALC],
+        baseline_failing=[],
+        authored=h.pyrepo.repo.author_date(green_sha),
+    )
+    h.add_task(second)
+    run = h.enqueue("replay")
+
+    def cancel_during_first_build(_ws: Workspace, _brief: BuildBrief) -> None:
+        got = h.queue.request_cancel(run.id)
+        assert got is not None and got.status == STATUS_RUNNING and got.cancel_requested
+        time.sleep(0.12)  # let the heartbeat thread tick at least once while running
+
+    FakeBuilder.hook = cancel_during_first_build
+    done = h.run_one()
+    assert done.status == STATUS_CANCELLED and done.error == ""
+    assert done.counts_json["tasks"] == 1 and done.counts_json["rows"] == 1
+    assert done.counts_json["stopped_reason"] == "cancelled" and done.counts_json["total"] == 2
+    assert len(FakeBuilder.briefs) == 1  # the second task was never built
+    assert len(list(h.worker.ledger.rows(run_id=run.id))) == 1
+    actions = [e.action for e in h.events(run.id)]
+    assert "run.cancel_requested" in actions and actions[-1] == "run.finished"
+    assert h.events(run.id)[-1].payload["final_status"] == STATUS_CANCELLED
+
+
+def test_cancel_requested_before_start_is_honoured(h: Harness) -> None:
+    run = h.enqueue("replay")
+    # claimed by a worker that then died before executing; cancel arrives; reclaim → our worker
+    with h.factory() as s:
+        row = s.get(Run, run.id)
+        assert row is not None
+        row.cancel_requested = True
+        s.commit()
+    assert h.worker.run_once() is None  # the claim finalises the cancel; nothing to execute
+    assert h.queue.get(run.id).status == STATUS_CANCELLED  # type: ignore[union-attr]
+    assert FakeBuilder.briefs == []
+
+
+# --- mine --------------------------------------------------------------------------------------
+
+
+def test_mine_run_upserts_tasks(h: Harness) -> None:
+    # start from an empty task table so the miner has work to do
+    with h.factory() as s:
+        for t in s.execute(select(Task)).scalars().all():
+            s.delete(t)
+        s.commit()
+    run = h.enqueue("mine", params_json={"target": 5, "max_candidates": 10})
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    c = done.counts_json
+    assert c["found"] == 1 and c["gold_clean"] == 1 and c["gold_dirty"] == 0 and c["examined"] >= 1
+    assert c["known"] == 0 and c["pool"] == "standard"
+    (task,) = h.tasks()
+    assert task.task_id == h.pyrepo.feat_sha and task.gold_clean is True and task.red_checked
+    spec = TaskSpec.from_dict(task.spec_json)
+    assert spec.test_files == (pr.TEST_SUBTRACT,) and spec.baseline_failing == (pr.TEST_SUBTRACT,)
+    assert (done.progress_done, done.progress_total) == (1, 5)
+    actions = [e.action for e in h.events(run.id)]
+    assert "mine.candidate" in actions and "mine.red" in actions and "mine.gold" in actions
+    assert "mine.task" in actions and "mine.done" in actions
+    mine_ev = next(e for e in h.events(run.id) if e.action == "mine.red")
+    assert mine_ev.stage == "mine" and mine_ev.task_id == h.pyrepo.feat_sha
+    # a second mine run knows the task and finds nothing new; a bad-gold commit is kept but flagged
+    h.pyrepo.add_bad_gold_commit()
+    h.enqueue("mine", params_json={"target": 5})
+    again = h.run_one()
+    assert again.status == STATUS_SUCCEEDED
+    assert again.counts_json["known"] == 1 and again.counts_json["gold_dirty"] == 1
+    assert {t.gold_clean for t in h.tasks()} == {True, False}
+
+
+def test_mine_rejects_unknown_pool(h: Harness) -> None:
+    h.enqueue("mine", params_json={"pool": "impossible"})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and "pool must be" in done.error
+
+
+# --- probe -------------------------------------------------------------------------------------
+
+
+def test_probe_run_sets_status(h: Harness) -> None:
+    h.enqueue("probe")  # config.probe is empty → the runner's default discovery (green at HEAD)
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert done.counts_json["green"] is True and done.counts_json["scope"] == []
+    repo = h.repo_row()
+    assert repo.probe_status == "ok"
+    actions = [e.action for e in h.events(done.id)]
+    assert "probe.start" in actions and "probe.done" in actions and "run.executor" in actions
+
+
+def test_probe_failure_is_recorded(tmp_path: Path, pyrepo: pr.PyRepo) -> None:
+    h = Harness(tmp_path, pyrepo)
+    h.add_repo(probe="tests/does_not_exist.py")
+    h.enqueue("probe")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and done.error.startswith("probe not green")
+    repo = h.repo_row()
+    assert repo.probe_status == "failed" and repo.probe_detail
+    assert done.counts_json["green"] is False
+
+
+# --- fail-closed sandbox --------------------------------------------------------------------
+
+
+def test_docker_unavailable_fails_closed(h: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(kind: str, *, docker: Any = None) -> Any:
+        raise SandboxUnavailable("docker daemon not reachable")
+
+    monkeypatch.setattr(worker_mod, "make_executor", refuse)
+    run = h.enqueue("replay", params_json={"executor": "docker", "image": "crb/py:1"})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error == "sandbox unavailable: docker daemon not reachable"
+    assert done.counts_json["total"] == 1 and done.counts_json["tasks"] == 0  # preserved
+    assert list(h.worker.ledger.rows(run_id=run.id)) == [] and FakeBuilder.briefs == []
+    err = [e for e in h.events(run.id) if e.action == "run.error"]
+    assert err and err[0].error_code == "SandboxUnavailable"
+    # a probe under an unavailable sandbox marks the repo as not probed OK
+    h.enqueue("probe", params_json={"executor": "docker", "image": "crb/py:1"})
+    probe = h.run_one()
+    assert probe.status == STATUS_FAILED and probe.error.startswith("sandbox unavailable")
+    assert h.repo_row().probe_status == "failed"
+
+
+def test_docker_without_any_image_fails_closed(h: Harness) -> None:
+    """No --image, no params.image, no sandbox_image → DockerSettings refuses."""
+    h.enqueue("replay", params_json={"executor": "docker"})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and done.error.startswith("sandbox unavailable")
+
+
+def test_docker_settings_resolution(h: Harness) -> None:
+    from crb.core.execution import DockerSettings
+
+    cfg = h.pyrepo.config
+    base = DockerSettings(image="base:1", memory="4g")
+    assert docker_settings_for(cfg, base, {}) is base
+    over = docker_settings_for(cfg, base, {"image": "other:2"})
+    assert over.image == "other:2" and over.memory == "4g"
+    repo_cfg = cfg.__class__(
+        **{**cfg.to_dict(), "language": cfg.language, "sandbox_image": "repo:3"}
+    )
+    assert docker_settings_for(repo_cfg, None, {}).image == "repo:3"
+    with pytest.raises(SandboxUnavailable):
+        docker_settings_for(cfg, None, {})
+
+
+# --- oracle / controls -----------------------------------------------------------------------
+
+
+def test_oracle_run_scores_and_records_events(h: Harness) -> None:
+    run = h.enqueue("oracle", params_json={"max_mutants": 10})
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    c = done.counts_json
+    assert c["tasks"] == 1 and c["scoreable"] == 1 and c["mutants"] >= 1
+    assert c["oracle_strength"] is not None and c["oracle_strength_mean"] is not None
+    assert c["cells"] and next(iter(c["cells"])) == "bug.fix/XS"
+    scores = [e for e in h.events(run.id) if e.action == "oracle.score"]
+    assert len(scores) == 1
+    ev = scores[0]
+    assert ev.stage == "oracle" and ev.task_id == h.pyrepo.feat_sha
+    assert ev.payload["total"] == c["mutants"] and ev.payload["killed"] == c["killed"]
+    assert ev.payload["schema"] == "crb.oracle_strength.v1" and "provenance" in ev.payload
+    assert any(e.action == "oracle.mutation.scored" for e in h.events(run.id))
+    assert done.apparatus_json["max_mutants"] == 10
+
+
+def test_controls_run_records_report(h: Harness) -> None:
+    run = h.enqueue("controls")
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    c = done.counts_json
+    assert c["tasks"] == 1 and c["rows"] == len(nc.CONTROLS) and c["passed"] is True
+    assert c["violations"] == 0 and c["complete"] is True
+    (report,) = [e for e in h.events(run.id) if e.action == "controls.report"]
+    assert report.stage == "oracle" and report.payload["schema"] == nc.CONTROLS_SCHEMA
+    assert [r["control"] for r in report.payload["rows"]] == list(nc.CONTROLS)
+    assert report.payload["apparatus"]["worker"] == "w-test"
+
+
+def test_controls_violation_fails_the_gate(h: Harness) -> None:
+    """A task whose declared gold cannot satisfy its test → GOLD control VIOLATION."""
+    bad = h.pyrepo.add_bad_gold_commit()
+    bad_task = h.pyrepo.feat_task(
+        task_id=bad,
+        subject="bad",
+        test_files=[pr.TEST_MULTIPLY],
+        target_tests=[pr.TEST_MULTIPLY],
+        baseline_failing=[pr.TEST_MULTIPLY],
+        authored=h.pyrepo.repo.author_date(bad),
+        gold_clean=True,
+    )
+    h.add_task(bad_task)
+    h.enqueue("controls", params_json={"task_ids": [bad], "controls": [nc.GOLD, nc.NOOP]})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and "gate FAILED" in done.error
+    assert done.counts_json["violations"] == 1 and done.counts_json["passed"] is False
+
+
+# --- worker mechanics --------------------------------------------------------------------------
+
+
+def test_unknown_repo_and_kind_fail_cleanly(tmp_path: Path, pyrepo: pr.PyRepo) -> None:
+    h = Harness(tmp_path, pyrepo)
+    with h.factory() as s:
+        s.add(
+            Repo(
+                name="ghost",
+                language="python",
+                runner="pytest",
+                clone_path=str(tmp_path / "nope"),
+                config_json={},
+            )
+        )
+        s.commit()
+    h.queue.enqueue(Run(repo="ghost", kind="probe"))
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and "not a git repository" in done.error
+    with h.factory() as s:
+        s.add(
+            Run(
+                id="k1",
+                repo="ghost",
+                kind="factory",
+                status=STATUS_QUEUED,
+                created="2020-01-01T00:00:00+00:00",
+            )
+        )
+        s.commit()
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and "unknown run kind" in done.error
+
+
+def test_stale_claim_is_reclaimed_and_event_seq_resumes(h: Harness) -> None:
+    run = h.enqueue("replay")
+    # a previous worker claimed it, wrote three events, then died silently
+    dead = h.queue.claim_next("w-dead")
+    assert dead is not None
+    sink = DbEventSink(h.factory)
+    from crb.observability.events import Emitter
+
+    em = Emitter(sink, trace_id=run.id)
+    for _ in range(3):
+        em.emit("system", "old.event")
+    with h.factory() as s:
+        row = s.get(Run, run.id)
+        assert row is not None
+        row.heartbeat = "2020-01-01T00:00:00+00:00"
+        s.commit()
+    done = h.run_one()  # reclaim → claim → execute
+    assert done.status == STATUS_SUCCEEDED and done.worker_id == "w-test"
+    assert done.counts_json["reclaims"] == 1 and done.counts_json["clean"] == 1
+    ev = h.events(run.id)
+    seqs = [e.seq for e in ev]
+    assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)  # strictly increasing, no dupes
+    actions = [e.action for e in ev]
+    assert actions[:3] == ["old.event"] * 3 and actions[3] == "run.reclaimed"
+    assert actions[4] == "run.claimed" and actions[-1] == "run.finished"
+    assert ev[3].payload["previous_worker"] == "w-dead"
+
+
+def test_heartbeat_thread_refreshes_liveness(h: Harness) -> None:
+    seen: list[str] = []
+    run = h.enqueue("replay")
+
+    def observe(_ws: Workspace, _brief: BuildBrief) -> None:
+        before = h.queue.get(run.id).heartbeat  # type: ignore[union-attr]
+        time.sleep(1.2)  # heartbeat_s = 0.05 → many ticks; stamps are second-precision
+        after = h.queue.get(run.id).heartbeat  # type: ignore[union-attr]
+        seen.extend([before, after])
+
+    FakeBuilder.hook = observe
+    assert h.run_one().status == STATUS_SUCCEEDED
+    assert seen[0] and seen[1] and seen[1] > seen[0]
+
+
+def test_run_forever_processes_then_stops(h: Harness) -> None:
+    stop = threading.Event()
+    t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
+    t.start()
+    run = h.enqueue("replay")
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        got = h.queue.get(run.id)
+        if got is not None and got.status == STATUS_SUCCEEDED:
+            break
+        time.sleep(0.05)
+    stop.set()
+    t.join(timeout=5)
+    assert not t.is_alive()
+    assert h.queue.get(run.id).status == STATUS_SUCCEEDED  # type: ignore[union-attr]
+
+
+def test_run_forever_survives_a_broken_iteration(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = {"n": 0}
+
+    def flaky() -> Run | None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("db hiccup")
+        return None
+
+    monkeypatch.setattr(h.worker, "run_once", flaky)
+    stop = threading.Event()
+    t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
+    t.start()
+    time.sleep(0.3)
+    stop.set()
+    t.join(timeout=5)
+    assert calls["n"] >= 2
+
+
+def test_stage_routing_and_settings_validation() -> None:
+    assert stage_for("grade.belt") == "grade" and stage_for("builder.build.attempt") == "build"
+    assert stage_for("mine.red") == "mine" and stage_for("controls.done") == "oracle"
+    assert stage_for("run.start") == "system" and stage_for("whatever") == "system"
+    with pytest.raises(ValueError):
+        WorkerSettings(poll_s=0)
+    s = WorkerSettings(home="~/x", kinds=["replay"])  # type: ignore[arg-type]
+    assert s.worker_id and s.kinds == ("replay",) and "~" not in str(s.home)
+
+
+# --- entrypoint ---------------------------------------------------------------------------------
+
+
+def test_once_main(h: Harness, capsys: pytest.CaptureFixture[str]) -> None:
+    run = h.enqueue("replay")
+    argv = [
+        "--database-url",
+        h.url,
+        "--home",
+        str(h.home),
+        "--worker-id",
+        "w-cli",
+        "--once",
+        "--log-format",
+        "text",
+    ]
+    assert worker_main.main(argv) == worker_main.EXIT_OK
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert (
+        out["run_id"] == run.id
+        and out["status"] == STATUS_SUCCEEDED
+        and out["counts"]["clean"] == 1
+    )
+    assert h.queue.get(run.id).worker_id == "w-cli"  # type: ignore[union-attr]
+    # nothing left: idle exit code
+    assert worker_main.main(argv) == worker_main.EXIT_IDLE
+    idle = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert idle == {"status": "idle", "worker_id": "w-cli"}
+
+
+def test_main_rejects_bad_kinds_and_bad_db(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        worker_main.main(["--kinds", "replay,bogus", "--once"])
+    assert exc.value.code == 2
+    rc = worker_main.main(
+        ["--database-url", "postgresql+psycopg://nope:1/x", "--home", str(tmp_path), "--once"]
+    )
+    assert rc == worker_main.EXIT_ERROR
+    assert "error" in json.loads(capsys.readouterr().err.strip().splitlines()[-1])
+
+
+def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
+    parser = worker_main.build_parser()
+    args = parser.parse_args(["--once"])
+    env = {
+        "CRB_HOME": str(tmp_path / "h"),
+        "CRB_EXECUTOR": "docker",
+        "CRB_SANDBOX_IMAGE": "img:1",
+        "CRB_WORKER_ID": "env-w",
+    }
+    s = worker_main.settings_from_args(args, env)
+    assert s.home == tmp_path / "h" and s.executor == "docker"
+    assert s.docker is not None and s.docker.image == "img:1" and s.worker_id == "env-w"
+    args = parser.parse_args(
+        ["--home", str(tmp_path / "flag"), "--executor", "local", "--kinds", "mine, probe"]
+    )
+    s2 = worker_main.settings_from_args(args, env)
+    assert s2.home == tmp_path / "flag" and s2.executor == "local" and s2.kinds == ("mine", "probe")
