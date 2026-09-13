@@ -26,6 +26,13 @@ Honesty properties
 * A protocol violation (tamper / archaeology / network) is surfaced as an
   ``error`` so the ledger can never credit that attempt ``clean`` (the ledger
   refuses a clean row with an error), independently of belt 1.
+* **An attempt with an error yields no admissible patch.** Before the grader
+  runs, :func:`discard_source_edits` restores the worktree's non-test files to
+  the parent, so an errored attempt grades RED / no-source-change rather than
+  clean-with-error — a combination :func:`crb.core.ledger.grade_row_from_result`
+  currently turns into a ``FalseQ1Violation`` that would abort the whole run.
+  The error string, the builder's metered spend and the (opt-in) transcript
+  remain the record of what happened.
 * A transcript is never inlined in the attempt: with ``transcript_dir`` set the
   redacted transcript is written to a file and referenced by path.
 """
@@ -202,6 +209,30 @@ def attempt_error(outcome: BuildOutcome) -> str:
     return ""
 
 
+def discard_source_edits(ws: Workspace, config: RepoConfig, protected: Sequence[str]) -> list[str]:
+    """Restore every touched NON-test file to the parent (delete new ones).
+
+    Test files — the overlaid oracle in sighted mode, or anything the builder
+    wrote under the test layout — are left alone: belt 1 / belt 0 must see them.
+    Returns the paths discarded.
+    """
+    keep = set(protected)
+    tracked = set(ws.repo.diff_names("HEAD", cwd=ws.root))
+    discarded: list[str] = []
+    restore: list[str] = []
+    for rel in ws.touched_files():
+        if rel in keep or config.is_test(rel):
+            continue
+        if rel in tracked:
+            restore.append(rel)
+        else:
+            (ws.root / rel).unlink(missing_ok=True)
+        discarded.append(rel)
+    if restore:
+        ws.restore_from_parent(restore)
+    return discarded
+
+
 def _failed_attempt(rung_label: str, mode: str, error: str) -> BuildAttempt:
     return BuildAttempt(
         BuilderRef(name=rung_label, mode=mode), error=redact_and_cap(error, max_chars=500)
@@ -307,6 +338,19 @@ def build_fn_for(
         except Exception:
             return task.subject
 
+    def discard(ws: Workspace, task: TaskSpec, attempt: BuildAttempt) -> BuildAttempt:
+        """An errored attempt leaves no admissible patch (see module docstring)."""
+        if not attempt.error:
+            return attempt
+        try:
+            dropped = discard_source_edits(ws, config, task.test_files)
+        except Exception as exc:  # cannot even clean up: record it, grade whatever is there
+            emit(on_event, BUILDER_EVENT_PREFIX + "discard.error", error=str(exc))
+            return attempt
+        if dropped:
+            emit(on_event, BUILDER_EVENT_PREFIX + "discard", files=dropped, error=attempt.error)
+        return attempt
+
     def build(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
         rung = index.get(rung_label)
         if rung is None:
@@ -329,7 +373,7 @@ def build_fn_for(
         try:
             outcome = builder.build(ws, brief, rung_budget, on_event=builder_on_event)
         except Exception as exc:
-            return BuildAttempt(
+            failed = BuildAttempt(
                 BuilderRef(
                     name=builder.name,
                     model=builder.model,
@@ -337,16 +381,16 @@ def build_fn_for(
                     mode=mode,
                     budget=rung_budget.to_dict(),
                 ),
-                error=redact_and_cap(
-                    f"builder raised {type(exc).__name__}: {exc}", max_chars=500
-                ),
+                error=redact_and_cap(f"builder raised {type(exc).__name__}: {exc}", max_chars=500),
             )
+            return discard(ws, task, failed)
         ref = _write_transcript(tdir, task, rung, outcome) if tdir is not None else ""
-        return BuildAttempt(
+        attempt = BuildAttempt(
             outcome.builder_ref(transcript_ref=ref),
             error=attempt_error(outcome),
             transcript_ref=ref,
         )
+        return discard(ws, task, attempt)
 
     return build
 
@@ -358,6 +402,7 @@ __all__ = [
     "as_run_ledger",
     "attempt_error",
     "build_fn_for",
+    "discard_source_edits",
     "ladder_from_spec",
     "ladder_labels",
     "parse_rung_label",

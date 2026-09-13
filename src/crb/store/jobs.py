@@ -89,6 +89,12 @@ def new_run_id() -> str:
     return uuid.uuid4().hex
 
 
+def _created_now() -> str:
+    """Microsecond-precision creation stamp so claim order is genuinely FIFO (the
+    second-precision stamps elsewhere would make same-second runs tie on their id)."""
+    return _dt.datetime.now(_dt.UTC).isoformat(timespec="microseconds")
+
+
 def parse_ts(value: str) -> _dt.datetime | None:
     """ISO-8601 → aware UTC datetime; ``None`` for blank/unparseable."""
     if not value:
@@ -156,7 +162,7 @@ class JobQueue:
         run.finished = ""
         run.cancel_requested = False
         if not run.created:
-            run.created = utc_now_iso()
+            run.created = _created_now()
         for attr in ("ladder_json", "params_json", "apparatus_json", "counts_json"):
             if getattr(run, attr) is None:
                 setattr(run, attr, [] if attr == "ladder_json" else {})
@@ -343,15 +349,11 @@ class JobQueue:
 
     def is_cancel_requested(self, run_id: str) -> bool:
         with self._factory() as s:
-            v = s.execute(
-                select(Run.cancel_requested).where(Run.id == run_id)
-            ).scalar_one_or_none()
+            v = s.execute(select(Run.cancel_requested).where(Run.id == run_id)).scalar_one_or_none()
             return bool(v)
 
     # --- stale reclaim -----------------------------------------------------------
-    def reclaim_stale(
-        self, older_than_s: float, *, now: _dt.datetime | None = None
-    ) -> list[Run]:
+    def reclaim_stale(self, older_than_s: float, *, now: _dt.datetime | None = None) -> list[Run]:
         """Re-queue running runs whose heartbeat is older than ``older_than_s``.
 
         Never silent: each reclaim writes a ``system/run.reclaimed`` event carrying

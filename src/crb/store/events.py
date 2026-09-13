@@ -207,8 +207,24 @@ def append_event(
     Used for system notes no live emitter owns (a stale-run reclaim, a cancel
     request). The sequence is allocated under the write lock so it cannot
     collide with a concurrent writer. Returns the stored event, or ``None`` if
-    the write failed (logged, never raised).
+    the write failed (logged, never raised). A malformed event (unknown stage)
+    raises ``ValueError`` — that is a programming error, not an I/O failure.
     """
+    # Validation (stage, redaction) happens here, OUTSIDE the guard: a malformed
+    # event is a programming error and must surface; only I/O is swallowed below.
+    template = StepEvent(
+        trace_id=trace_id,
+        stage=stage,
+        action=action,
+        status=status,
+        step_id=task_id,
+        actor=actor,
+        repo=repo,
+        task_id=task_id,
+        error_code=error_code,
+        error_message=error,
+        payload=dict(payload or {}),
+    )
     try:
         with factory() as s:
             _lock(s)
@@ -221,20 +237,7 @@ def append_event(
                 )
                 + 1
             )
-            ev = StepEvent(
-                trace_id=trace_id,
-                stage=stage,
-                action=action,
-                status=status,
-                step_id=task_id,
-                actor=actor,
-                repo=repo,
-                task_id=task_id,
-                error_code=error_code,
-                error_message=error,
-                payload=dict(payload or {}),
-                seq=nxt,
-            )
+            ev = StepEvent.from_dict({**template.to_dict(), "seq": nxt})
             s.add(_to_model(ev))
             s.commit()
             return ev
