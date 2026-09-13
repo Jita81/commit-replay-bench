@@ -468,8 +468,12 @@ def test_usage_falls_back_to_summed_messages_and_priced_cost(tmp_path: Path) -> 
         ),
     ]
     _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-opus-5")
-    assert out.tokens_in == 3000 and out.tokens_out == 300 and out.turns == 2
-    expected = (3000 - 500) * 5e-6 + 300 * 25e-6 + 500 * 0.5e-6  # opus 5 list prices
+    # The API's `input_tokens` EXCLUDES cache reads (measured live: 50 input vs a 60k
+    # session), so tokens_in is the TOTAL prompt (input + cache reads) and
+    # tokens_cached the cached subset: 1000 + 2000 + 500 cached = 3500.
+    assert out.tokens_in == 3500 and out.tokens_cached == 500
+    assert out.tokens_out == 300 and out.turns == 2
+    expected = (3500 - 500) * 5e-6 + 300 * 25e-6 + 500 * 0.5e-6  # opus 5 list prices
     assert out.cost_usd == pytest.approx(expected) and out.cost_known
     assert not out.done and out.summary == "no change" and out.stop_reason == base.STOP_DONE
     ws.remove()

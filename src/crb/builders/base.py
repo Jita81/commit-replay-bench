@@ -392,6 +392,7 @@ class BuildOutcome:
     tool_calls: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
+    tokens_cached: int = 0
     cost_usd: float = 0.0
     latency_s: float = 0.0
     attempts: int = 1
@@ -435,6 +436,7 @@ class BuildOutcome:
             turns=self.turns,
             tokens_in=self.tokens_in,
             tokens_out=self.tokens_out,
+            tokens_cached=self.tokens_cached,
             cost_usd=self.cost_usd,
             latency_s=self.latency_s,
             transcript_ref=transcript_ref,
@@ -453,6 +455,7 @@ class BuildOutcome:
             "tool_calls": self.tool_calls,
             "tokens_in": self.tokens_in,
             "tokens_out": self.tokens_out,
+            "tokens_cached": self.tokens_cached,
             "cost_usd": round(self.cost_usd, 6),
             "cost_known": self.cost_known,
             "latency_s": round(self.latency_s, 3),

@@ -466,7 +466,11 @@ class StreamStats:
     def _usage(self, usage: Any) -> None:
         if not isinstance(usage, dict):
             return
-        self.tokens_in += int(usage.get("input_tokens", 0) or 0)
+        # cache CREATION is real input (billed at a premium); cache READS are recorded
+        # separately so "tokens in" is never a misleading 50 for a 60k-token session.
+        self.tokens_in += int(usage.get("input_tokens", 0) or 0) + int(
+            usage.get("cache_creation_input_tokens", 0) or 0
+        )
         self.tokens_out += int(usage.get("output_tokens", 0) or 0)
         self.cached_in += int(usage.get("cache_read_input_tokens", 0) or 0)
 
@@ -504,7 +508,8 @@ class StreamStats:
         usage = r.get("usage")
         if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
             return (
-                int(usage.get("input_tokens", 0) or 0),
+                int(usage.get("input_tokens", 0) or 0)
+                + int(usage.get("cache_creation_input_tokens", 0) or 0),
                 int(usage.get("output_tokens", 0) or 0),
                 int(usage.get("cache_read_input_tokens", 0) or 0),
             )
@@ -729,7 +734,8 @@ class ClaudeCodeBuilder:
                 errors.append("tamper: test files modified: " + ", ".join(tampered[:10]))
             errors.extend(stats.violations)
             tin, tout, cached = stats.totals()
-            meter.add(tin, tout, cached_in=cached, cost_usd=stats.reported_cost())
+            # tokens_in is TOTAL input (cache reads included, as CostMeter expects); cached is the subset
+            meter.add(tin + cached, tout, cached_in=cached, cost_usd=stats.reported_cost())
             return BuildOutcome(
                 builder=self.name,
                 model=self.model,
@@ -741,6 +747,7 @@ class ClaudeCodeBuilder:
                 tool_calls=stats.tool_uses,
                 tokens_in=meter.tokens_in,
                 tokens_out=meter.tokens_out,
+                tokens_cached=meter.cached_in,
                 cost_usd=meter.cost_usd,
                 cost_known=meter.cost_known,
                 latency_s=time.monotonic() - started,

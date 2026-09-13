@@ -82,6 +82,7 @@ class BuilderRef:
     turns: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
+    tokens_cached: int = 0  # prompt-cache reads (Anthropic); not billed as input
     cost_usd: float = 0.0
     latency_s: float = 0.0
     transcript_ref: str = ""
@@ -101,6 +102,7 @@ class BuilderRef:
             "turns": self.turns,
             "tokens_in": self.tokens_in,
             "tokens_out": self.tokens_out,
+            "tokens_cached": self.tokens_cached,
             "cost_usd": round(self.cost_usd, 6),
             "latency_s": round(self.latency_s, 3),
             "transcript_ref": self.transcript_ref,
