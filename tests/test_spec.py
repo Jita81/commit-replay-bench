@@ -708,3 +708,24 @@ def test_task_spec_with_() -> None:
     assert t2.task_id == t.task_id
     with pytest.raises(ValueError):
         t.with_(size="huge")
+
+
+def test_ext_and_test_suffix_accept_alternatives() -> None:
+    """TypeScript repos mix .ts/.tsx; design systems co-locate *.unit.test.mjs and
+    *.jsdom.test.mjs next to sources — both are '|'-separated alternatives."""
+    from crb.core.spec import Language, RepoConfig
+
+    cfg = RepoConfig(
+        name="ds",
+        language=Language.JAVASCRIPT,
+        runner="jest",
+        src_prefix="src/",
+        ext=".ts|.tsx",
+        test_mode="suffix",
+        test_suffix=".test.ts|.test.tsx",
+    )
+    assert cfg.is_test("src/a/__tests__/A.test.tsx") and cfg.is_test("src/__tests__/i.test.ts")
+    assert not cfg.is_test("src/a/A.puppeteer.test.mjs")
+    assert cfg.is_src("src/a/A.tsx") and cfg.is_src("src/index.ts")
+    assert not cfg.is_src("src/a/__tests__/A.test.tsx")
+    assert cfg.language_files(["src/a.ts", "src/b.tsx", "README.md"]) == ["src/a.ts", "src/b.tsx"]

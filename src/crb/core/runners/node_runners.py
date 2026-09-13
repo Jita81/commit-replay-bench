@@ -110,6 +110,11 @@ class _NodeBase(BaseRunner):
         local = root / "node_modules" / ".bin" / tool
         return str(local) if local.exists() else executor.tool(tool)
 
+    def _extra(self) -> list[str]:
+        """``runner_opts.extra_args`` — e.g. jest ``--selectProjects`` to exclude a
+        browser-driven project from the belt."""
+        return [str(a) for a in (self.opts.get("extra_args") or [])]
+
     def _env(self, root: Path, executor: Executor) -> dict[str, str]:
         nm = "/work/node_modules" if executor.name == "docker" else str(root / "node_modules")
         env = {"NODE_PATH": nm, "NODE_ENV": "test"}
@@ -167,7 +172,14 @@ class VitestRunner(_NodeBase):
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
         vitest = self._bin(root, executor, "vitest")
-        argv = [vitest, "run", "--reporter=json", "--coverage.enabled=false", *scope]
+        argv = [
+            vitest,
+            "run",
+            "--reporter=json",
+            "--coverage.enabled=false",
+            *self._extra(),
+            *scope,
+        ]
         return Command(tuple(argv), root, env=self._env(root, executor), timeout=timeout)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
@@ -200,7 +212,7 @@ class JestRunner(_NodeBase):
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
         jest = self._bin(root, executor, "jest")
-        argv = [jest, "--json", "--silent", "--ci", *scope]
+        argv = [jest, "--json", "--silent", "--ci", *self._extra(), *scope]
         return Command(tuple(argv), root, env=self._env(root, executor), timeout=timeout)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
@@ -237,7 +249,7 @@ class MochaRunner(_NodeBase):
         req = self.opts.get("mocha_require")
         if req:
             argv += ["--require", str(req)]
-        argv += ["--reporter", "json", "--check-leaks", *scope]
+        argv += ["--reporter", "json", "--check-leaks", *self._extra(), *scope]
         return Command(tuple(argv), root, env=self._env(root, executor), timeout=timeout)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:

@@ -348,12 +348,29 @@ class RepoConfig:
         object.__setattr__(self, "mining", dict(self.mining))
 
     # --- source / test discrimination (exact for the configured layout) -------
+    @property
+    def exts(self) -> tuple[str, ...]:
+        """``ext`` may list alternatives separated by ``|`` (e.g. ``.ts|.tsx``)."""
+        return tuple(e for e in self.ext.split("|") if e)
+
+    @property
+    def test_suffixes(self) -> tuple[str, ...]:
+        """``test_suffix`` may list alternatives separated by ``|``
+        (e.g. ``.unit.test.mjs|.jsdom.test.mjs``)."""
+        return tuple(x for x in self.test_suffix.split("|") if x)
+
+    def has_ext(self, rel: str) -> bool:
+        return rel.endswith(self.exts)
+
+    def has_test_suffix(self, rel: str) -> bool:
+        return bool(self.test_suffixes) and rel.endswith(self.test_suffixes)
+
     def is_test(self, rel: str) -> bool:
         if self.test_mode == "suffix":
-            return rel.endswith(self.test_suffix)
+            return self.has_test_suffix(rel)
         if self.language is Language.RUST:
             return rel.startswith("tests/") and rel.endswith(".rs")
-        if not rel.endswith(self.ext):
+        if not self.has_ext(rel):
             return False
         if self.language is Language.GO:
             return rel.endswith("_test.go")
@@ -365,8 +382,8 @@ class RepoConfig:
     def is_src(self, rel: str) -> bool:
         if self.test_mode == "suffix":
             return (
-                rel.endswith(self.ext)
-                and not rel.endswith(self.test_suffix)
+                self.has_ext(rel)
+                and not self.has_test_suffix(rel)
                 and rel.startswith(self.src_prefix)
             )
         if self.language is Language.RUST:
@@ -376,7 +393,7 @@ class RepoConfig:
             sp = self.src_prefix
             mod = sp[: sp.find("src/main/")] if "src/main/" in sp else ""
             return rel.startswith(mod + "src/main/")
-        if not rel.endswith(self.ext):
+        if not self.has_ext(rel):
             return False
         if self.language is Language.GO:
             return not rel.endswith("_test.go")
@@ -389,7 +406,7 @@ class RepoConfig:
         files = list(files)
         if self.language is Language.JVM:
             return files
-        return [f for f in files if f.endswith(self.ext)]
+        return [f for f in files if self.has_ext(f)]
 
     # --- serialisation ----------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
