@@ -571,7 +571,9 @@ class Worker:
         docker: DockerSettings | None = None
         if kind == "docker":
             docker = docker_settings_for(ctx.config, self.settings.docker, ctx.params)
-        ctx._executor = make_executor(kind, docker=docker)
+        # The cancel token: a requested cancel kills the running test process (local) or
+        # container (docker) instead of waiting for the wall-clock timeout.
+        ctx._executor = make_executor(kind, docker=docker, cancel=lambda: self._cancelled(ctx))
         ctx.emit("system", "run.executor", **ctx._executor.describe())
         return ctx._executor
 
@@ -778,7 +780,8 @@ class Worker:
         pool = str(p.get("pool") or POOL_STANDARD)
         if pool not in {POOL_STANDARD, POOL_HARD}:
             raise ValueError(f"pool must be {POOL_STANDARD!r} or {POOL_HARD!r}")
-        target = int(p.get("target") or 0)
+        # `limit` is the API/UI's generic bound (POST /runs.limit); `target` is the CLI's name.
+        target = int(p.get("target") or p.get("limit") or 0)
         max_candidates = int(p.get("max_candidates") or 0)
         gold = bool(p.get("gold", True))
         ref = str(p.get("ref") or "HEAD")

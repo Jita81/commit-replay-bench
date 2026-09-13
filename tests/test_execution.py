@@ -415,3 +415,20 @@ def test_local_executor_closes_stdin_so_input_fails_fast(tmp_path: Path) -> None
     r = LocalExecutor().run(cmd)
     assert not r.timed_out and r.duration_s < 5
     assert "read" in r.stdout  # readline() returns '' at EOF instantly
+
+
+def test_local_executor_cancel_kills_the_running_command(tmp_path: Path) -> None:
+    """A cancel token that flips to True kills the child (process group) promptly:
+    rc=130, cancelled=True, well before the wall-clock timeout."""
+    import threading
+    import time
+
+    from crb.core.execution import Command, LocalExecutor
+
+    flag = threading.Event()
+    threading.Timer(1.5, flag.set).start()
+    ex = LocalExecutor(cancel=flag.is_set)
+    t0 = time.monotonic()
+    r = ex.run(Command((sys.executable, "-c", "import time; time.sleep(60)"), tmp_path, timeout=60))
+    assert r.cancelled and r.returncode == 130 and not r.timed_out and not r.ok
+    assert time.monotonic() - t0 < 10

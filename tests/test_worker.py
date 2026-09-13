@@ -613,7 +613,7 @@ def test_runners_are_bound_to_the_repo_env_dir(
 
 
 def test_docker_unavailable_fails_closed(h: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(kind: str, *, docker: Any = None) -> Any:
+    def refuse(kind: str, *, docker: Any = None, **_kw: Any) -> Any:
         raise SandboxUnavailable("docker daemon not reachable")
 
     monkeypatch.setattr(worker_mod, "make_executor", refuse)

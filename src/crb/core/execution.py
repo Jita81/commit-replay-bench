@@ -24,7 +24,9 @@ import os
 import shutil
 import signal
 import subprocess
+import threading
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,6 +59,11 @@ _HOST_ENV_PASSTHROUGH: tuple[str, ...] = (
 
 DEFAULT_TIMEOUT_S = 900
 
+#: ``cancel()`` → True means "stop now": the executor kills the running command and
+#: returns ``rc=130, cancelled=True``. Polled every ``_CANCEL_POLL_S``.
+CancelFn = Callable[[], bool]
+_CANCEL_POLL_S = 1.0
+
 
 class SandboxUnavailable(RuntimeError):
     """Docker isolation was requested but cannot be provided safely. FAIL CLOSED."""
@@ -69,10 +76,11 @@ class ExecResult:
     stderr: str
     timed_out: bool = False
     duration_s: float = 0.0
+    cancelled: bool = False
 
     @property
     def ok(self) -> bool:
-        return self.returncode == 0 and not self.timed_out
+        return self.returncode == 0 and not self.timed_out and not self.cancelled
 
     @property
     def combined(self) -> str:
@@ -133,8 +141,11 @@ class LocalExecutor:
 
     name = "local"
 
-    def __init__(self, *, base_env: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self, *, base_env: Mapping[str, str] | None = None, cancel: CancelFn | None = None
+    ) -> None:
         self._base_env = dict(base_env) if base_env is not None else self._host_base_env()
+        self._cancel = cancel
 
     @staticmethod
     def _host_base_env() -> dict[str, str]:
@@ -167,15 +178,41 @@ class LocalExecutor:
             text=True,
             start_new_session=True,
         )
-        try:
-            out, err = proc.communicate(timeout=cmd.timeout)
-            rc = proc.returncode
-            timed_out = False
-        except subprocess.TimeoutExpired:
-            self._kill_group(proc)
-            out, err = proc.communicate()
-            rc, timed_out = 124, True
-        return ExecResult(rc, out or "", err or "", timed_out, time.monotonic() - started)
+        timed_out = cancelled = False
+        deadline = started + cmd.timeout
+        # Read pipes on a helper thread so a chatty child never blocks on a full pipe
+        # while we poll for the deadline and the cancel token.
+        box: dict[str, str] = {}
+
+        def _drain() -> None:
+            o, e = proc.communicate()
+            box["out"], box["err"] = o or "", e or ""
+
+        t = threading.Thread(target=_drain, daemon=True)
+        t.start()
+        while t.is_alive():
+            t.join(_CANCEL_POLL_S)
+            if not t.is_alive():
+                break
+            if self._cancel is not None and self._cancel():
+                cancelled = True
+                self._kill_group(proc)
+                t.join()
+                break
+            if time.monotonic() >= deadline:
+                timed_out = True
+                self._kill_group(proc)
+                t.join()
+                break
+        rc = 130 if cancelled else 124 if timed_out else int(proc.returncode or 0)
+        return ExecResult(
+            rc,
+            box.get("out", ""),
+            box.get("err", ""),
+            timed_out,
+            time.monotonic() - started,
+            cancelled,
+        )
 
     @staticmethod
     def _kill_group(proc: subprocess.Popen[str]) -> None:
@@ -230,9 +267,11 @@ class DockerExecutor:
         *,
         runner: Runner | None = None,
         verify_daemon: bool = True,
+        cancel: CancelFn | None = None,
     ) -> None:
         self.settings = settings
         self._runner: Runner = runner or subprocess.run
+        self._cancel = cancel
         resolved = settings.docker_binary or shutil.which("docker")
         if not resolved:
             raise SandboxUnavailable(
@@ -315,9 +354,60 @@ class DockerExecutor:
         argv += list(cmd.argv)
         return argv
 
+    def _run_cancellable(self, argv: list[str], cmd: Command, started: float) -> ExecResult:
+        name = f"crb-{uuid.uuid4().hex[:12]}"
+        argv = [*argv[:3], "--name", name, *argv[3:]]  # docker run --rm --name …
+        proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        box: dict[str, str] = {}
+
+        def _drain() -> None:
+            o, e = proc.communicate()
+            box["out"], box["err"] = o or "", e or ""
+
+        t = threading.Thread(target=_drain, daemon=True)
+        t.start()
+        timed_out = cancelled = False
+        deadline = started + cmd.timeout
+        while t.is_alive():
+            t.join(_CANCEL_POLL_S)
+            if not t.is_alive():
+                break
+            if self._cancel is not None and self._cancel():
+                cancelled = True
+            elif time.monotonic() >= deadline:
+                timed_out = True
+            else:
+                continue
+            subprocess.run(
+                [self.docker, "kill", name], capture_output=True, check=False, timeout=30
+            )
+            t.join(30)
+            break
+        if proc.returncode == 125 and not cancelled:
+            raise SandboxUnavailable(
+                f"docker failed to launch the container (exit 125): {box.get('err', '')[:400]}"
+            )
+        rc = 130 if cancelled else 124 if timed_out else int(proc.returncode or 0)
+        return ExecResult(
+            rc,
+            box.get("out", ""),
+            box.get("err", ""),
+            timed_out,
+            time.monotonic() - started,
+            cancelled,
+        )
+
     def run(self, cmd: Command) -> ExecResult:
         argv = self.build_argv(cmd)
         started = time.monotonic()
+        if self._cancel is not None and self._runner is subprocess.run:
+            return self._run_cancellable(argv, cmd, started)
         try:
             r = self._runner(argv, capture_output=True, text=True, timeout=cmd.timeout, check=False)
         except subprocess.TimeoutExpired:
@@ -336,15 +426,17 @@ class DockerExecutor:
         )
 
 
-def make_executor(kind: str, *, docker: DockerSettings | None = None) -> Executor:
+def make_executor(
+    kind: str, *, docker: DockerSettings | None = None, cancel: CancelFn | None = None
+) -> Executor:
     """``kind`` ∈ {"local", "docker"}. Docker without settings fails closed."""
     k = (kind or "local").strip().lower()
     if k in {"", "local", "none", "host"}:
-        return LocalExecutor()
+        return LocalExecutor(cancel=cancel)
     if k == "docker":
         if docker is None:
             raise SandboxUnavailable("executor 'docker' requires DockerSettings (image)")
-        return DockerExecutor(docker)
+        return DockerExecutor(docker, cancel=cancel)
     raise ValueError(f"unknown executor kind {kind!r}")
 
 
