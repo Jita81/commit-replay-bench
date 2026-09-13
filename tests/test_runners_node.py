@@ -146,10 +146,16 @@ def test_qualify_red_at_parent_baseline_captured_gold_clean(task: TaskSpec, tool
         # so the parent baseline records it (and belt 3 is relative to that).
         assert task.baseline_failing == (noderepo.test_sub(tool),)
         assert "baseline_parse_error" not in task.labels
+    elif tool in {"jest", "vitest"}:
+        # jest / vitest: the suite that failed to load is attributed to its file
+        # (`suite:<path>`), so the baseline records it and belt 3 is relative to it.
+        assert len(task.baseline_failing) == 1
+        assert task.baseline_failing[0].startswith("suite:")
+        assert task.baseline_failing[0].endswith(noderepo.test_sub(tool))
+        assert "baseline_parse_error" not in task.labels
     else:
-        # vitest / jest report a suite that failed to load with no test ids
-        # (→ "unattributed"); mocha prints the load error instead of its JSON
-        # (→ "mocha json missing"). Either way: empty baseline + parse error recorded.
+        # mocha prints the load error instead of its JSON (→ "mocha json missing"):
+        # empty baseline + parse error recorded.
         assert task.baseline_failing == ()
         assert task.labels.get("baseline_parse_error")
 
@@ -275,5 +281,9 @@ def test_parse_load_failure_fails_closed(trial, runner, executor, tool):
         assert run.failing == frozenset()
         assert run.parse_error == "mocha json missing"
     else:
-        assert run.failing == frozenset()
-        assert run.parse_error.startswith("unattributed failure")
+        # jest / vitest: a suite that fails to LOAD is attributed to the file (never an
+        # "unattributed failure"), so belt 3 can see a broken import as a real failure.
+        assert run.parse_error == ""
+        assert len(run.failing) == 1
+        (fid,) = run.failing
+        assert fid.startswith("suite:") and fid.endswith(noderepo.test_sub(tool))

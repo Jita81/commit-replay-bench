@@ -92,11 +92,15 @@ class _NodeBase(BaseRunner):
             return session.result(False, "no package.json: nothing npm could install")
         npm = executor.tool("npm", self.opts.get("npm"))
         verb = "ci" if (root / "package-lock.json").is_file() else "install"
+        # runner_opts.env (e.g. a PATH that puts the repo's required node@24 first) applies to
+        # setup too — `npm` is a node script, so an engine-strict repo fails otherwise.
+        env = {"NODE_ENV": "development", "npm_config_update_notifier": "false"}
+        env.update({str(k): str(v) for k, v in dict(self.opts.get("env", {})).items()})
         session.run(
             Command(
                 (npm, verb, *_NPM_FLAGS),
                 root,
-                env={"NODE_ENV": "development", "npm_config_update_notifier": "false"},
+                env=env,
                 timeout=self.setup_timeout(timeout),
                 writable_paths=("node_modules",),
                 network=True,
@@ -194,9 +198,13 @@ class VitestRunner(_NodeBase):
             )
         failing: set[str] = set()
         for tr in _list(data, "testResults"):
+            had_assertion_failure = False
             for a in _list(tr, "assertionResults"):
                 if a.get("status") == "failed":
+                    had_assertion_failure = True
                     failing.add(str(a.get("fullName") or a.get("title") or ""))
+            if tr.get("status") == "failed" and not had_assertion_failure:
+                failing.add(f"suite:{tr.get('name', '')}")
         return TestRun(
             result.returncode,
             frozenset(failing),
@@ -212,7 +220,11 @@ class JestRunner(_NodeBase):
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
         jest = self._bin(root, executor, "jest")
-        argv = [jest, "--json", "--silent", "--ci", *self._extra(), *scope]
+        # `--` ends option parsing: without it a variadic option in extra_args
+        # (jest --selectProjects A B) swallows the path patterns and EVERY suite runs.
+        argv = [jest, "--json", "--silent", "--ci", *self._extra()]
+        if scope:
+            argv += ["--", *scope]
         return Command(tuple(argv), root, env=self._env(root, executor), timeout=timeout)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
@@ -227,9 +239,15 @@ class JestRunner(_NodeBase):
             )
         failing: set[str] = set()
         for tr in _list(data, "testResults"):
+            had_assertion_failure = False
             for a in _list(tr, "testResults") or _list(tr, "assertionResults"):
                 if a.get("status") == "failed":
+                    had_assertion_failure = True
                     failing.add(str(a.get("fullName") or a.get("title") or ""))
+            if tr.get("status") == "failed" and not had_assertion_failure:
+                # a suite that failed to LOAD (import/syntax error) is a failure attributable
+                # to the file — never an "unattributed" rc≠0 (measured on nhsuk-frontend)
+                failing.add(f"suite:{tr.get('name', '')}")
         return TestRun(
             result.returncode,
             frozenset(failing),
