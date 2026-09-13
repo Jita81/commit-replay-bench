@@ -62,8 +62,23 @@ def _list(d: Mapping[str, Any], key: str) -> list[dict[str, Any]]:
     return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
 
 
+def snapshot_to_test(path: str) -> str:
+    """``a/__tests__/__snapshots__/X.test.tsx.snap`` → ``a/__tests__/X.test.tsx``.
+
+    A commit that only updates a snapshot still has an executable oracle — the
+    test that owns the snapshot — so the target scope names the test, not the
+    ``.snap`` (which jest/vitest would not match as a test path)."""
+    if path.endswith(".snap") and "__snapshots__/" in path:
+        head, _, tail = path.rpartition("__snapshots__/")
+        return head + tail[: -len(".snap")]
+    return path
+
+
 class _NodeBase(BaseRunner):
     default_timeout = 420
+
+    def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
+        return tuple(sorted({snapshot_to_test(f) for f in test_files}))
 
     # --- environment -------------------------------------------------------------
     def environment_ready(self, root: Path, env_dir: Path) -> bool:

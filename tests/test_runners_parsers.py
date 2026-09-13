@@ -500,3 +500,15 @@ def test_cargo_target_scope() -> None:
         "builder",
         "foo",
     )
+
+
+def test_snapshot_paths_map_to_their_owning_test() -> None:
+    """A snapshot-only commit (NHSDigital/nhsuk-react-components #253) still has an
+    executable oracle: the test that owns the snapshot."""
+    from crb.core.runners.node_runners import snapshot_to_test
+
+    assert (
+        snapshot_to_test("src/a/__tests__/__snapshots__/Radios.test.tsx.snap")
+        == "src/a/__tests__/Radios.test.tsx"
+    )
+    assert snapshot_to_test("src/a/__tests__/Radios.test.tsx") == "src/a/__tests__/Radios.test.tsx"
