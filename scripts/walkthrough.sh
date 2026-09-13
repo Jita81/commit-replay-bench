@@ -117,8 +117,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # --- 1. the UI bundle -----------------------------------------------------------------
-if [[ ! -f "$UI/dist/index.html" ]]; then
-  echo "walkthrough: ui/dist missing — building the UI" >&2
+# Always rebuild: a stale dist (older than any source file) silently tests the wrong UI —
+# the walkthrough specs rely on data-testids that only a current build carries.
+newest_src="$(find "$UI/src" "$UI/index.html" "$UI/public" -type f -newer "$UI/dist/index.html" 2>/dev/null | head -1 || true)"
+if [[ ! -f "$UI/dist/index.html" || -n "$newest_src" || "${CRB_E2E_REBUILD_UI:-0}" == "1" ]]; then
+  echo "walkthrough: building the UI (dist missing or stale)" >&2
   (cd "$UI" && npm run build >"$WORK/ui-build.log" 2>&1) || { cat "$WORK/ui-build.log" >&2; exit 2; }
 fi
 
