@@ -236,10 +236,11 @@ def grade_row_from_result(
     the ledger cannot be persisted. Shared by the CLI, the run orchestrator and
     the server so there is exactly ONE mapping.
 
-    ``builder_error`` is the builder's *own* infrastructure trouble (model error,
-    budget stop). It never changes the verdict — the belts are the truth about
-    the worktree — but it is recorded on the row (``labels['builder_error']``) so
-    cost and reliability views can see it.
+    ``builder_error`` is the builder's *own* trouble (model error, budget stop,
+    guard violation). It never changes the verdict — the belts are the truth
+    about the worktree — so on a clean row it is recorded only as
+    ``labels['builder_error']``; on a non-clean row it also fills ``error`` so
+    the reason is visible where operators look first.
     """
     b = builder or BuilderRef(mode=result.mode)
     return GradeRow(
@@ -264,7 +265,7 @@ def grade_row_from_result(
         actor=actor,
         disqualified=result.disqualified,
         dq_reason=result.dq_reason,
-        error=result.error,
+        error=result.error or ("" if result.clean else builder_error),
         new_failures_count=len(result.new_failures),
         attempts=b.attempts,
         cost_usd=b.cost_usd,

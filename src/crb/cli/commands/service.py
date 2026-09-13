@@ -78,8 +78,7 @@ def cmd_worker(args: argparse.Namespace) -> int:
 
 def cmd_migrate(args: argparse.Namespace) -> int:
     try:
-        import crb.store.migrate as migrate_mod  # type: ignore[import-untyped]  # W2-E
-
+        import crb.store.migrate as migrate_mod
         from crb.store.db import database_url
     except ImportError as e:
         raise CliError(f"{_SERVER_HINT} ({e})") from e
