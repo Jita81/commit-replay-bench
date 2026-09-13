@@ -220,6 +220,10 @@ def system_rules(budget: Budget) -> str:
         "package-registry downloads, no web lookups of the project's history or PRs. Solving by "
         "finding the real commit's diff anywhere is a DISQUALIFYING protocol violation. Solve from "
         "the local code and the failing tests only.\n"
+        "- The test environment is ALREADY PROVISIONED: NEVER install or upgrade packages (no "
+        "pip/uv/npm/yarn/pnpm install, go get, cargo add, mvn dependency:*). If the tests cannot "
+        "import the package, run them EXACTLY with the test command in the task — it sets the "
+        "interpreter and PYTHONPATH/NODE_PATH for this worktree.\n"
         f"Budget: roughly {budget.max_tool_calls} tool calls. If green early, stop early.\n"
         "Finish by reporting done=true only if the target test command exits 0."
     )

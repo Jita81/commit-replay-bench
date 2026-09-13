@@ -273,7 +273,12 @@ def sighted_test_command(
         cmd = runner.command(root, tuple(target_tests), executor=executor, timeout=timeout)
     except Exception:
         return ""
-    return " ".join(shlex.quote(a) for a in cmd.argv)
+    # The runner's environment (PYTHONPATH, GOFLAGS, NODE_PATH …) is part of the command:
+    # without it a builder sees ImportErrors and reaches for `pip install`, which the
+    # no-network rule then refuses — measured on pallets/click (5/5 attempts errored).
+    env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in sorted(cmd.env.items()))
+    argv = " ".join(shlex.quote(a) for a in cmd.argv)
+    return f"{env_prefix} {argv}".strip()
 
 
 # ---------------------------------------------------------------------------

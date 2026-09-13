@@ -66,6 +66,7 @@ DEFAULT_RULES = """RULES (violations disqualify the run):
 - Work only inside the worktree you were given.
 - Do not use git to look at other commits or history to recover the real change: no git log, git show, git reflog, git stash, git bisect, git checkout/switch of another revision, no git diff against another revision.
 - NEVER consult external sources for this change: no fetching the upstream repository, no package-registry downloads, no web lookups of the project's history or PRs. Solving by finding the real commit's diff anywhere is a DISQUALIFYING protocol violation. Solve from the local code (and, when they are present, the failing tests) only.
+- The test environment is ALREADY PROVISIONED. NEVER install or upgrade packages (no pip/uv/npm/yarn/pnpm install, go get, cargo add, mvn dependency:*): if the tests cannot import the package, run them EXACTLY with the test command you were given — it sets the interpreter and PYTHONPATH/NODE_PATH for this worktree.
 - Keep the change minimal and idiomatic to the codebase; do not break neighbouring behaviour."""
 
 
