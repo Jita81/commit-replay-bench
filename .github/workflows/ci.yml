@@ -1,0 +1,208 @@
+# CI gates for crb. Every job is a gate; none may be weakened without an ADR
+# (see docs/CONTRIBUTING.md "never weaken a gate").
+#
+# Jobs:
+#   lint      ruff check + ruff format --check
+#   types     mypy --strict over src/crb
+#   layers    import-linter: crb.core is stdlib-only; layers depend downward only
+#   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
+#   security  gitleaks (secrets in history) + pip-audit on the resolved environment
+#   sbom      CycloneDX SBOM of the resolved environment, uploaded as an artifact
+#
+# Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
+
+name: ci
+
+on:
+  push:
+    branches: [main, "reboot/**"]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  UV_SYSTEM_PYTHON: "0"
+
+jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install (dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[dev]' --python .venv/bin/python
+      - name: ruff check
+        run: .venv/bin/ruff check src tests
+      - name: ruff format --check
+        run: .venv/bin/ruff format --check src tests
+
+  types:
+    name: types (mypy --strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install (dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[dev]' --python .venv/bin/python
+      - name: mypy
+        run: .venv/bin/mypy
+
+  layers:
+    name: layers (import-linter)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install (dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[dev]' --python .venv/bin/python
+      - name: lint-imports (crb.core stdlib-only; layers downward only)
+        run: .venv/bin/lint-imports
+
+  test:
+    name: test (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # fixture replays and mining tests walk git history
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install (dev extras)
+        run: |
+          uv venv -q .venv --python ${{ matrix.python }}
+          uv pip install -q -e '.[dev]' --python .venv/bin/python
+      - name: Configure git identity for fixture repositories
+        run: |
+          git config --global user.email "ci@crb.invalid"
+          git config --global user.name "crb ci"
+          git config --global init.defaultBranch main
+      - name: pytest (coverage >= 70)
+        run: >-
+          .venv/bin/pytest -q
+          --cov=crb --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml
+          --cov-fail-under=70
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-py${{ matrix.python }}
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+  security:
+    name: security (gitleaks + pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks scans the full history
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Required only for organisation-owned repositories; harmless when unset.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install the resolved DEPENDENCY environment (every extra; not the project itself)
+        # The project is deliberately not installed: it is not on an index, and an
+        # un-auditable distribution would trip --strict. We audit what crb depends on.
+        run: |
+          uv venv -q .audit --python 3.12
+          uv pip install -q -r pyproject.toml \
+            --extra openai --extra claude --extra server --extra postgres --extra dev \
+            --python .audit/bin/python
+          uv pip install -q pip pip-audit --python .audit/bin/python
+      - name: Record the resolved environment
+        run: |
+          uv pip freeze --python .audit/bin/python > resolved-requirements.txt
+          wc -l resolved-requirements.txt
+      - name: pip-audit (resolved environment, strict)
+        run: >-
+          .audit/bin/pip-audit
+          --strict
+          --desc on
+          --progress-spinner off
+      - name: Upload resolved requirements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolved-requirements
+          path: resolved-requirements.txt
+          retention-days: 30
+
+  sbom:
+    name: sbom (CycloneDX)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install the resolved environment (every extra) + cyclonedx-bom
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[openai,claude,server,postgres,dev]' --python .venv/bin/python
+          uv pip install -q cyclonedx-bom --python .venv/bin/python
+      - name: Generate SBOM (CycloneDX JSON of the environment; root component from pyproject)
+        run: >-
+          .venv/bin/cyclonedx-py environment
+          --pyproject pyproject.toml
+          --output-format JSON
+          --output-file sbom.cdx.json
+          .venv/bin/python
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 90
