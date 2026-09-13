@@ -274,7 +274,9 @@ def test_argv_is_headless_restricted_and_uses_skill_model_ids(tmp_path: Path) ->
     prompt = argv[2]
     assert "tests/test_calc.py" in prompt and "pytest tests/test_calc.py" in prompt
     assert "pkg/calc.py" not in prompt  # never the src_files
-    assert cc.DEFAULT_MODEL == "claude-opus-5"
+    assert cc.DEFAULT_MODEL == "claude-sonnet-5"  # the census's measured path
+    assert cc.ClaudeCodeBuilder().model == "claude-sonnet-5"
+    assert cc.ClaudeCodeBuilder(model="claude-opus-5").model == "claude-opus-5"
     with pytest.warns(UserWarning, match="not in the known id table"):
         cc.ClaudeCodeBuilder(model="sonnet")
 
@@ -296,13 +298,141 @@ def test_env_is_minimal_and_key_only_from_env(monkeypatch: pytest.MonkeyPatch) -
 
 
 # ---------------------------------------------------------------------------
+# auth modes: api_key (production, --bare) vs cli (operator login, no --bare)
+# ---------------------------------------------------------------------------
+
+
+def test_auth_api_key_mode_is_the_default_and_bare(tmp_path: Path) -> None:
+    fx = make_fixture(tmp_path)
+    brief = base.BuildBrief.from_task(fx.task, config=fx.config, test_command="pytest")
+    b = cc.ClaudeCodeBuilder()
+    assert b.auth == cc.AUTH_API_KEY and b.bare is True and b.tools == cc.BARE_TOOLS
+    argv = b.argv(brief, base.Budget(), tmp_path / "wt")
+    assert "--bare" in argv and "--setting-sources" not in argv
+    assert b.describe()["auth"] == "api_key" and b.describe()["bare"] is True
+    # an explicit bare=False under api_key is still allowed (full tools, key auth)
+    full = cc.ClaudeCodeBuilder(bare=False)
+    assert full.auth == cc.AUTH_API_KEY and full.bare is False and full.tools == cc.FULL_TOOLS
+
+
+def test_auth_cli_mode_argv_drops_bare_and_restricts_setting_sources(tmp_path: Path) -> None:
+    fx = make_fixture(tmp_path)
+    brief = base.BuildBrief.from_task(fx.task, config=fx.config, test_command="pytest")
+    b = cc.ClaudeCodeBuilder(auth="cli", model="claude-sonnet-5")
+    assert b.auth == cc.AUTH_CLI and b.bare is False and b.tools == cc.FULL_TOOLS
+    budget = base.Budget(max_turns=7, max_tool_calls=25, max_cost_usd=0.5)
+    argv = b.argv(brief, budget, tmp_path / "wt", binary="claude")
+    assert "--bare" not in argv
+    assert argv[argv.index("--setting-sources") + 1] == "user"
+    # everything else that isolates the run is unchanged
+    assert argv[argv.index("--permission-mode") + 1] == "dontAsk"
+    assert argv[argv.index("--tools") + 1] == "Read,Edit,Write,Glob,Grep,Bash"
+    assert argv[argv.index("--allowedTools") + 1] == "Read,Edit,Write,Glob,Grep,Bash"
+    deny = argv[argv.index("--disallowedTools") + 1]
+    assert "Bash(git log:*)" in deny and "WebFetch" in deny and "Bash(curl:*)" in deny
+    assert "--no-session-persistence" in argv and "--disable-slash-commands" in argv
+    assert argv[argv.index("--max-budget-usd") + 1] == "0.5000"
+    assert b.describe() == {
+        "builder": "claude_code",
+        "model": "claude-sonnet-5",
+        "provider": "anthropic",
+        "process": "claude -p stream-json, tools=Read,Edit,Write,Glob,Grep,Bash",
+        "effort": "default",
+        "bare": False,
+        "auth": "cli",
+    }
+
+
+def test_auth_cli_mode_env_needs_no_key_and_never_forwards_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/Users/op/.claude-eval")
+    monkeypatch.setenv("USER", "op")
+    monkeypatch.setenv("LOGNAME", "op")
+    env = cc.ClaudeCodeBuilder.env("cli")
+    assert "ANTHROPIC_API_KEY" not in env  # set in the shell by the autouse fixture: not forwarded
+    assert env["CLAUDE_CONFIG_DIR"] == "/Users/op/.claude-eval" and "HOME" in env
+    # the keychain entry is keyed by the user: without USER the CLI says "Not logged in"
+    assert env["USER"] == "op" and env["LOGNAME"] == "op"
+    assert "SOME_OTHER_SECRET" not in env and env["CI"] == "1"
+    # api_key mode never forwards the login-locating variables (the key is the credential)
+    assert "USER" not in cc.ClaudeCodeBuilder.env("api_key")
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+    env = cc.ClaudeCodeBuilder.env("cli")  # no key: not an error in cli mode
+    assert "ANTHROPIC_API_KEY" not in env and "CLAUDE_CONFIG_DIR" not in env
+    with pytest.raises(PermissionError, match="auth='api_key'"):
+        cc.ClaudeCodeBuilder.env("api_key")
+
+
+def test_auth_cli_build_without_a_key_runs_and_grades(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    spawn = FakeSpawn(GOOD_RUN, side_effect=_fix_calc)
+    fx, ws, out = _setup(tmp_path, spawn, auth="cli")
+    assert out.stop_reason == base.STOP_DONE and out.done and not out.errors, out.errors
+    assert "--bare" not in spawn.argv and "ANTHROPIC_API_KEY" not in spawn.env
+    res = grade(
+        ws, fx.task, config=fx.config, runner=get_runner(fx.config), executor=LocalExecutor()
+    )
+    assert res.clean
+    ws.remove()
+
+
+def test_auth_cli_auth_failure_hint_names_the_login(tmp_path: Path) -> None:
+    lines = [
+        ev_init(),
+        json.dumps({"type": "system", "subtype": "api_retry", "error_status": 401}),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), auth="cli")
+    assert out.stop_reason == base.STOP_MODEL_ERROR
+    assert any("claude login" in e for e in out.errors) and not any(
+        "ANTHROPIC_API_KEY" in e for e in out.errors
+    )
+    ws.remove()
+
+
+def test_auth_mode_validation() -> None:
+    with pytest.raises(ValueError, match="auth must be one of"):
+        cc.ClaudeCodeBuilder(auth="oauth")
+    with pytest.raises(ValueError, match="cannot combine"):
+        cc.ClaudeCodeBuilder(auth="cli", bare=True)
+    # builder_config from the API arrives as JSON: a list for extra_args must work
+    b = cc.ClaudeCodeBuilder(auth="cli", extra_args=["--x", "1"])
+    assert b.extra_args == ("--x", "1")
+
+
+def test_worker_environment_defaults_for_auth_and_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``CRB_CLAUDE_CODE_AUTH`` / ``CRB_CLAUDE_CODE_MODEL`` fill what the rung and the
+    builder_config leave unset; an explicit value always wins; a bad env value is an error
+    that names its source."""
+    monkeypatch.delenv(cc.AUTH_ENV, raising=False)
+    monkeypatch.delenv(cc.MODEL_ENV, raising=False)
+    b = cc.ClaudeCodeBuilder()
+    assert (b.auth, b.model, b.bare) == ("api_key", "claude-sonnet-5", True)
+    monkeypatch.setenv(cc.AUTH_ENV, "cli")
+    monkeypatch.setenv(cc.MODEL_ENV, "claude-opus-5")
+    b = cc.ClaudeCodeBuilder()
+    assert (b.auth, b.model, b.bare) == ("cli", "claude-opus-5", False)
+    # explicit (rung model / builder_config auth) beats the environment
+    b = cc.ClaudeCodeBuilder(model="claude-sonnet-5", auth="api_key")
+    assert (b.auth, b.model, b.bare) == ("api_key", "claude-sonnet-5", True)
+    monkeypatch.setenv(cc.AUTH_ENV, "keychain")
+    with pytest.raises(ValueError, match=f"'keychain' \\(from {cc.AUTH_ENV}\\)"):
+        cc.ClaudeCodeBuilder()
+    monkeypatch.setenv(cc.AUTH_ENV, "  ")  # blank = unset
+    assert cc.ClaudeCodeBuilder().auth == "api_key"
+
+
+# ---------------------------------------------------------------------------
 # Stream parsing + end-to-end
 # ---------------------------------------------------------------------------
 
 
 def test_good_run_parses_stream_and_grades_clean(tmp_path: Path) -> None:
     spawn = FakeSpawn(GOOD_RUN, side_effect=_fix_calc)
-    fx, ws, out = _setup(tmp_path, spawn, keep_transcript=True)
+    fx, ws, out = _setup(tmp_path, spawn, keep_transcript=True, model="claude-opus-5")
     assert spawn.cwd == ws.root and spawn.timeout_s == 300
     assert (
         spawn.env["ANTHROPIC_API_KEY"].startswith("sk-ant") and "SOME_OTHER_SECRET" not in spawn.env
@@ -337,9 +467,9 @@ def test_usage_falls_back_to_summed_messages_and_priced_cost(tmp_path: Path) -> 
             num_turns=0, cost=None, tin=0, tout=0, result='{"done": false, "summary": "no change"}'
         ),
     ]
-    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines))
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-opus-5")
     assert out.tokens_in == 3000 and out.tokens_out == 300 and out.turns == 2
-    expected = (3000 - 500) * 5e-6 + 300 * 25e-6 + 500 * 0.5e-6
+    expected = (3000 - 500) * 5e-6 + 300 * 25e-6 + 500 * 0.5e-6  # opus 5 list prices
     assert out.cost_usd == pytest.approx(expected) and out.cost_known
     assert not out.done and out.summary == "no change" and out.stop_reason == base.STOP_DONE
     ws.remove()
@@ -539,4 +669,52 @@ def test_live_claude_code(tmp_path: Path) -> None:
         ws, fx.task, config=fx.config, runner=get_runner(fx.config), executor=LocalExecutor()
     )
     assert res.belts.tests_unmodified is True
+    ws.remove()
+
+
+def _cli_logged_in() -> bool:
+    """``claude auth status`` under the adapter's own cli-mode environment."""
+    import subprocess
+
+    if not shutil.which("claude"):
+        return False
+    try:
+        p = subprocess.run(
+            ["claude", "auth", "status"],
+            env=cc.ClaudeCodeBuilder.env("cli"),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        return bool(json.loads(p.stdout).get("loggedIn"))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
+@pytest.mark.live
+def test_live_claude_code_cli_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The operator's own ``claude login`` drives a real build (no API key in the child).
+
+    Opt-in (``CRB_LIVE_CLAUDE_CLI=1``): it spends the operator's subscription and a
+    stale login fails it honestly (``401`` → ``model_error``), which must not break
+    the default suite on a developer machine."""
+    if os.environ.get("CRB_LIVE_CLAUDE_CLI") != "1":
+        pytest.skip("set CRB_LIVE_CLAUDE_CLI=1 to run the cli-auth live test")
+    if not _cli_logged_in():
+        pytest.skip("claude CLI not on PATH or not logged in (run `claude login`)")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    fx = make_fixture(tmp_path)
+    ws = fx.workspace(tmp_path / "wt")
+    brief = base.BuildBrief.from_task(
+        fx.task, config=fx.config, test_command=f"{sys.executable} -m pytest tests/test_calc.py -q"
+    )
+    out = cc.ClaudeCodeBuilder(auth="cli").build(
+        ws, brief, base.Budget(max_turns=12, max_tool_calls=25, max_cost_usd=0.50, wall_clock_s=300)
+    )
+    assert out.stop_reason != base.STOP_MODEL_ERROR, out.errors
+    session = out.extra["session"]
+    assert session.get("apiKeySource") in (None, "none")  # the login, not a key
+    assert session.get("model") == cc.DEFAULT_MODEL
+    assert not out.violated
     ws.remove()

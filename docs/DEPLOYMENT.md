@@ -63,7 +63,10 @@ server and never appear in logs or `/settings`.
 | `CRB_RETENTION__TRANSCRIPTS_DAYS` | | 0 = keep no builder transcripts (default) |
 | `CRB_OPENAI_BASE_URL`, `CRB_OPENAI_KEY_ENV` + the named key var | builder | OpenAI-compatible endpoint (vLLM, Cerebras, …) |
 | `CRB_AZURE_ENDPOINT`, `CRB_AZURE_DEPLOYMENT`, `CRB_AZURE_API_VERSION`, `CRB_AZURE_KEY_ENV` + `AZURE_OPENAI_API_KEY` | builder | Azure OpenAI in-tenant (setting the endpoint selects Azure) |
-| `ANTHROPIC_API_KEY` | builder | Claude Code builder (optional) |
+| `ANTHROPIC_API_KEY` | builder | Claude Code builder in its production `api_key` auth mode (`claude -p --bare`) |
+| `CRB_CLAUDE_CODE_AUTH` | builder | default auth mode for `claude_code` rungs when the run's `builder_config` does not set `auth`: `api_key` (default) or `cli` — **developer/evaluation only**: the worker's user's own `claude login` (subscription) is the credential, `--bare` is dropped and the target repository's `CLAUDE.md` is auto-discovered (see SECURITY.md) |
+| `CRB_CLAUDE_CODE_MODEL` | api, builder | default model for a `claude_code` run created without one (`claude-sonnet-5` when unset; read by the API at run creation and by the adapter at instantiation) |
+| `CRB_ALLOW_LOCAL_CLONE` | api, worker | `1` lets URL registrations use `file://` sources — **test and developer machines only**; never set it on a server |
 | `DOCKER_HOST` | worker | set by Helm for the `dind`/`hostSocket` sandbox modes |
 
 ## 3. Kubernetes (Helm)

@@ -1,0 +1,203 @@
+"""W3-B route contracts: ``POST /runs`` ``builder_config`` (stored under
+``params.builder_config``, served on the run, identity/credential keys refused) and
+``POST /repos`` URL policy for URL-only registrations (cloned by the worker later, so an
+uncloneable source is refused at registration)."""
+
+from __future__ import annotations
+
+import os
+import sys
+import types
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from crb.store.models import Run
+from fixtures.server_seed import ALPHA, Env, envelope, login, make_env
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in list(os.environ):
+        if key.startswith("CRB_"):
+            monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture
+def env(tmp_path: Path) -> Iterator[Env]:
+    with make_env(tmp_path) as e:
+        login(e.client, "operator")
+        yield e
+
+
+@pytest.fixture
+def jobs(monkeypatch: pytest.MonkeyPatch) -> list[Run]:
+    calls: list[Run] = []
+
+    def enqueue(factory: Any, run: Run) -> Run:
+        calls.append(run)
+        with factory() as s:
+            s.add(run)
+            s.commit()
+        return run
+
+    mod = types.ModuleType("crb.store.jobs")
+    mod.enqueue = enqueue  # type: ignore[attr-defined]
+    mod.request_cancel = lambda factory, run_id: True  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "crb.store.jobs", mod)
+    return calls
+
+
+# --- POST /runs builder_config ---------------------------------------------------------------
+
+
+class TestBuilderConfig:
+    def test_stored_under_params_and_served(self, env: Env, jobs: list[Run]) -> None:
+        cfg = {"auth": "cli", "effort": "high", "extra_args": ["--x"], "keep_transcript": True}
+        r = env.post(
+            "/runs",
+            json={"repo": ALPHA, "kind": "replay", "builder": "claude_code", "builder_config": cfg},
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["builder_config"] == cfg
+        (run,) = jobs
+        assert run.params_json["builder_config"] == cfg
+        assert env.get(f"/runs/{run.id}").json()["builder_config"] == cfg
+
+    def test_absent_or_empty_means_no_params_key(self, env: Env, jobs: list[Run]) -> None:
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "replay", "builder": "b"})
+        assert r.status_code == 201 and r.json()["builder_config"] == {}
+        r = env.post(
+            "/runs", json={"repo": ALPHA, "kind": "replay", "builder": "b", "builder_config": {}}
+        )
+        assert r.status_code == 201 and r.json()["builder_config"] == {}
+        assert all("builder_config" not in run.params_json for run in jobs)
+        # seeded runs (written before the field existed) serve an empty object, never null
+        seeded = env.get("/runs").json()["items"]
+        assert seeded and all(isinstance(item["builder_config"], dict) for item in seeded)
+
+    @pytest.mark.parametrize(
+        ("cfg", "why"),
+        [
+            ({"model": "other"}, "recorded identity"),
+            ({"provider": "other"}, "recorded identity"),
+            ({"api_key": "sk-x"}, "credentials"),
+            ({"anthropic_api_key": "x"}, "credentials"),
+            ({"access_token": "x"}, "credentials"),
+            ({"password": "x"}, "credentials"),
+            ({"Effort": "high"}, "not a builder keyword"),
+            ({"bad-key": 1}, "not a builder keyword"),
+            ({"": 1}, "not a builder keyword"),
+            ({f"k{i}": i for i in range(33)}, "more than 32 keys"),
+            ({"big": "x" * 9000}, "exceeds 8192 bytes"),
+        ],
+    )
+    def test_refused_keys_422(
+        self, env: Env, jobs: list[Run], cfg: dict[str, Any], why: str
+    ) -> None:
+        r = env.post(
+            "/runs", json={"repo": ALPHA, "kind": "replay", "builder": "b", "builder_config": cfg}
+        )
+        assert r.status_code == 422, r.text
+        e = envelope(r)
+        assert e["code"] == "validation_error"
+        assert why in str(e["detail"]) or why in e["message"]
+        assert jobs == []
+
+    def test_non_object_422(self, env: Env, jobs: list[Run]) -> None:
+        r = env.post(
+            "/runs",
+            json={"repo": ALPHA, "kind": "replay", "builder": "b", "builder_config": ["auth"]},
+        )
+        assert r.status_code == 422 and jobs == []
+
+
+# --- POST /repos url policy ------------------------------------------------------------------
+
+
+class TestRepoUrlPolicy:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://github.com/encode/httpx.git",
+            "https://github.com/encode/httpx",
+            "ssh://git@github.com/encode/httpx.git",
+            "git@github.com:encode/httpx.git",
+        ],
+    )
+    def test_url_only_accepts_https_and_ssh(self, env: Env, url: str) -> None:
+        r = env.post("/repos", json={"name": "httpx", "language": "python", "url": f" {url} "})
+        assert r.status_code == 201, r.text
+        assert r.json()["url"] == url and r.json()["clone_path"] == ""
+
+    @pytest.mark.parametrize(
+        ("url", "why"),
+        [
+            ("file:///srv/repos/httpx", "scheme 'file'"),
+            ("http://github.com/encode/httpx.git", "scheme 'http'"),
+            ("git://github.com/encode/httpx.git", "scheme 'git'"),
+            ("/srv/repos/httpx", "not a git URL"),
+            ("https://github.com/", "no repository path"),
+        ],
+    )
+    def test_url_only_refuses_uncloneable_sources(self, env: Env, url: str, why: str) -> None:
+        r = env.post("/repos", json={"name": "httpx", "language": "python", "url": url})
+        assert r.status_code == 422, r.text
+        e = envelope(r)
+        assert e["code"] == "validation_error" and why in str(e["detail"])
+        assert env.get("/repos/httpx").status_code == 404
+
+    def test_url_is_informational_with_a_clone_path(self, env: Env) -> None:
+        """An existing clone plus a browse URL (no .git, http, whatever): nothing to clone,
+        so nothing to police."""
+        r = env.post(
+            "/repos",
+            json={
+                "name": "local",
+                "language": "python",
+                "clone_path": "/srv/repos/local",
+                "url": "http://intranet/projects/local",
+            },
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["url"] == "http://intranet/projects/local"
+
+    def test_refusal_never_echoes_credentials(self, env: Env) -> None:
+        r = env.post(
+            "/repos",
+            json={"name": "x", "language": "python", "url": "http://alice:s3cretT0ken@host/x"},
+        )
+        assert r.status_code == 422 and "s3cretT0ken" not in r.text
+
+
+# --- POST /runs model default for claude_code ---------------------------------------------
+
+
+class TestClaudeCodeModelDefault:
+    def test_claude_code_without_a_model_gets_the_default(
+        self, env: Env, jobs: list[Run], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("CRB_CLAUDE_CODE_MODEL", raising=False)
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "replay", "builder": "claude_code"})
+        assert r.status_code == 201, r.text
+        assert r.json()["model"] == "claude-sonnet-5" and jobs[-1].model == "claude-sonnet-5"
+        monkeypatch.setenv("CRB_CLAUDE_CODE_MODEL", "claude-opus-5")
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", "builder": "claude_code"})
+        assert r.status_code == 201 and r.json()["model"] == "claude-opus-5"
+        # an explicit model always wins; other builders get no default
+        r = env.post(
+            "/runs",
+            json={
+                "repo": ALPHA,
+                "kind": "replay",
+                "builder": "claude_code",
+                "model": "claude-opus-5",
+            },
+        )
+        assert r.json()["model"] == "claude-opus-5"
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "replay", "builder": "editblock"})
+        assert r.status_code == 201 and r.json()["model"] == ""
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "mine"})
+        assert r.status_code == 201 and r.json()["model"] == ""

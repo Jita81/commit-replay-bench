@@ -12,6 +12,37 @@ exactly ``Read/Edit/Bash`` (:data:`BARE_TOOLS`); ``bare=False`` restores the
 full ``Read/Edit/Write/Glob/Grep/Bash`` set at the cost of that isolation.
 ``--no-session-persistence`` keeps transcripts off disk.
 
+Authentication modes (``auth=``)
+--------------------------------
+``api_key`` (default, production)
+    ``--bare``; ``ANTHROPIC_API_KEY`` is required and is the only credential; the
+    isolation above holds in full.
+``cli`` (developer / evaluation only — never production)
+    No ``--bare``; the key is NOT required and NOT forwarded: the CLI authenticates
+    with the **operator's own login** (``claude login``: OAuth profile in the macOS
+    keychain / ``~/.claude/.credentials.json``), so spend and identity are the
+    operator's subscription, not a service account's. Selected per run with
+    ``builder_config: {"auth": "cli"}`` or per worker with ``CRB_CLAUDE_CODE_AUTH=cli``.
+
+    Still isolated (checked against claude 2.1.132 ``--help``): the tool set
+    (``--tools``/``--allowedTools``), ``--permission-mode dontAsk``, the deny rules
+    (``--disallowedTools``), slash commands (``--disable-slash-commands``), the
+    target repository's ``.claude/settings.json`` / ``settings.local.json`` — its
+    hooks and permission rules — via ``--setting-sources user`` (the CLI's own
+    switch: only the operator's *user* settings load), the minimal child
+    environment (``PATH HOME LANG LC_ALL TMPDIR TERM TZ`` plus ``USER``/``LOGNAME``
+    and ``CLAUDE_CONFIG_DIR``, nothing else), ``--no-session-persistence``, and
+    every post-hoc guard (test tamper, git archaeology, network) — the grader
+    decides regardless.
+
+    NOT isolated: the target repository's ``CLAUDE.md`` files ARE auto-discovered
+    (``--bare`` is the only switch that skips them; ``--setting-sources`` governs
+    settings files, not memory files — a prompt-injection surface, mitigated only
+    by the rules above and the grader); the operator's ``~/.claude/CLAUDE.md`` and
+    user settings (user-level hooks included) load; the keychain is read; plugins
+    and LSP that user settings enable are not disabled. The mode is recorded in
+    ``describe()``, on ``build.start`` and in the run's apparatus.
+
 The system prompt is the census ``wf_wave.js`` contract: no test edits, no git
 archaeology, no network, ~25 tool-call budget, ``{done, summary}`` structured
 output. The same :class:`TestFileGuard` is applied **post hoc** (diff the
@@ -20,8 +51,9 @@ anyway) and every Bash command seen in the transcript is checked by
 :class:`GitArchaeologyGuard` (a violation is recorded fail-closed even if the
 CLI's deny rule refused it).
 
-Model ids come from the ``claude-api`` skill (never guessed): ``claude-opus-5``
-(default), ``claude-sonnet-5``, ``claude-haiku-4-5``, ``claude-opus-4-8``.
+Model ids come from the ``claude-api`` skill (never guessed): ``claude-sonnet-5``
+(default — the census's measured path), ``claude-opus-5``, ``claude-haiku-4-5``,
+``claude-opus-4-8``; ``CRB_CLAUDE_CODE_MODEL`` moves the default.
 Transport is injected (``spawn``) so tests replay canned stream-json lines.
 
 Note: the skill's Claude *API* surface (Messages/Tool Runner) is deliberately
@@ -62,7 +94,9 @@ from crb.builders.budget import CostMeter, price_for
 from crb.core.redact import redact_and_cap
 from crb.core.workspace import Workspace
 
-DEFAULT_MODEL = "claude-opus-5"
+#: The census's measured path (quality-floor essay): Sonnet 5 through the agentic CLI.
+#: ``claude-opus-5`` is selectable per rung; ``CRB_CLAUDE_CODE_MODEL`` changes the default.
+DEFAULT_MODEL = "claude-sonnet-5"
 #: From the claude-api skill's model table (cached 2026-06-24). Aliases like
 #: ``sonnet``/``opus`` are accepted by the CLI but warned about: an alias moves.
 KNOWN_MODELS: frozenset[str] = frozenset(
@@ -77,6 +111,29 @@ KNOWN_MODELS: frozenset[str] = frozenset(
     }
 )
 API_KEY_ENV = "ANTHROPIC_API_KEY"
+
+#: ``auth`` modes. ``api_key`` is production (``--bare``, key required); ``cli`` relies on
+#: the operator's own CLI login (developer / evaluation only — see the module docstring).
+AUTH_API_KEY = "api_key"
+AUTH_CLI = "cli"
+AUTH_MODES: tuple[str, ...] = (AUTH_API_KEY, AUTH_CLI)
+#: Worker-environment defaults, used only when the rung / ``builder_config`` leaves the
+#: field unset: ``CRB_CLAUDE_CODE_AUTH`` (``api_key`` | ``cli``) and ``CRB_CLAUDE_CODE_MODEL``.
+#: A run's ladder always names its model (a rung cannot be model-less), so the model
+#: default applies to direct instantiation (``get_builder("claude_code")``) and to the UI's
+#: suggested value; the auth default applies to every run that does not say otherwise.
+AUTH_ENV = "CRB_CLAUDE_CODE_AUTH"
+MODEL_ENV = "CRB_CLAUDE_CODE_MODEL"
+#: Where the CLI keeps its login/config when the operator relocated it; forwarded in
+#: ``cli`` mode only (``HOME`` is always forwarded).
+CLI_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
+#: What the CLI needs on top of the base passthrough to FIND its login in ``cli`` mode.
+#: Measured on claude 2.1.132 / macOS: the keychain entry is keyed by ``$USER`` — with
+#: ``HOME`` + ``PATH`` alone the CLI reports "Not logged in"; adding ``USER`` finds it.
+_CLI_ENV_PASSTHROUGH: tuple[str, ...] = ("USER", "LOGNAME", CLI_CONFIG_DIR_ENV)
+#: ``cli`` mode: load the operator's user settings only — never the target repository's
+#: ``.claude/settings.json`` (hooks, permission rules) nor its ``.claude/settings.local.json``.
+CLI_SETTING_SOURCES = "user"
 
 #: Built-in tools requested. Under ``--bare`` (simple mode) the CLI exposes exactly
 #: ``Bash, Edit, Read`` whatever is requested — verified against claude 2.1.132 —
@@ -133,6 +190,17 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 
 #: Environment passed to the CLI. Nothing else from the operator's shell leaks in.
 _ENV_PASSTHROUGH: tuple[str, ...] = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TERM", "TZ")
+
+
+def default_model() -> str:
+    """The model a ``claude_code`` rung gets when none is named: ``CRB_CLAUDE_CODE_MODEL``,
+    else :data:`DEFAULT_MODEL`. Read at run creation (API) and at instantiation (adapter)."""
+    return os.environ.get(MODEL_ENV, "").strip() or DEFAULT_MODEL
+
+
+def default_auth() -> str:
+    """``CRB_CLAUDE_CODE_AUTH`` else ``api_key`` (validated by the constructor)."""
+    return os.environ.get(AUTH_ENV, "").strip() or AUTH_API_KEY
 
 
 def system_rules(budget: Budget) -> str:
@@ -499,14 +567,22 @@ class ClaudeCodeBuilder:
     def __init__(
         self,
         *,
-        model: str = DEFAULT_MODEL,
+        model: str = "",
         claude_binary: str = "",
         spawn: SpawnFn | None = None,
         effort: str = "",
-        bare: bool = True,
+        bare: bool | None = None,
+        auth: str = "",
         keep_transcript: bool = False,
-        extra_args: tuple[str, ...] = (),
+        extra_args: tuple[str, ...] | list[str] = (),
     ) -> None:
+        """``model`` / ``auth`` resolve explicit value → worker environment
+        (:data:`MODEL_ENV` / :data:`AUTH_ENV`) → :data:`DEFAULT_MODEL` / ``api_key``.
+        ``bare`` defaults to ``True`` under ``auth="api_key"`` and to ``False`` under
+        ``auth="cli"`` (``--bare`` forces API-key auth, so the two cannot combine)."""
+        model = model.strip() or default_model()
+        auth_source = "explicit" if auth else AUTH_ENV
+        auth = auth.strip() or default_auth()
         self.model = model
         if model not in KNOWN_MODELS:
             warnings.warn(
@@ -514,13 +590,25 @@ class ClaudeCodeBuilder:
                 "aliases move over time — prefer an exact id",
                 stacklevel=2,
             )
+        if auth not in AUTH_MODES:
+            raise ValueError(
+                f"claude_code: auth must be one of {AUTH_MODES}, not {auth!r} (from {auth_source})"
+            )
+        if bare is None:
+            bare = auth == AUTH_API_KEY
+        if bare and auth == AUTH_CLI:
+            raise ValueError(
+                "claude_code: auth='cli' cannot combine with bare=True (--bare makes "
+                "authentication strictly ANTHROPIC_API_KEY)"
+            )
         self.claude_binary = claude_binary
         self._spawn = spawn
         self.effort = effort
+        self.auth = auth
         self.bare = bare
         self.tools: tuple[str, ...] = BARE_TOOLS if bare else FULL_TOOLS
         self.keep_transcript = keep_transcript
-        self.extra_args = tuple(extra_args)
+        self.extra_args = tuple(str(a) for a in extra_args)
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -530,6 +618,7 @@ class ClaudeCodeBuilder:
             "process": "claude -p stream-json, tools=" + ",".join(self.tools),
             "effort": self.effort or "default",
             "bare": self.bare,
+            "auth": self.auth,
         }
 
     def _binary(self) -> str:
@@ -576,16 +665,35 @@ class ClaudeCodeBuilder:
             args += ["--effort", self.effort]
         if self.bare:
             args.append("--bare")
+        if self.auth == AUTH_CLI:
+            args += ["--setting-sources", CLI_SETTING_SOURCES]
         args += list(self.extra_args)
         return args
 
     @staticmethod
-    def env() -> dict[str, str]:
+    def env(auth: str = AUTH_API_KEY) -> dict[str, str]:
+        """The child's environment: the passthrough set plus the CLI's hygiene flags.
+
+        ``api_key``: ``ANTHROPIC_API_KEY`` is required (``PermissionError`` otherwise)
+        and forwarded. ``cli``: the key is neither required nor forwarded — the
+        CLI's own login is the only credential, so a run can never silently bill
+        a key the operator meant for production; ``USER``/``LOGNAME`` (the keychain
+        account the login is stored under) and ``CLAUDE_CONFIG_DIR`` (a relocated
+        login) are forwarded when set. Nothing else from the shell leaks in.
+        """
         env = {k: v for k, v in os.environ.items() if k in _ENV_PASSTHROUGH}
-        key = os.environ.get(API_KEY_ENV, "").strip()
-        if not key:
-            raise PermissionError(f"{API_KEY_ENV} is not set — the claude_code builder needs it")
-        env[API_KEY_ENV] = key
+        if auth == AUTH_CLI:
+            for k in _CLI_ENV_PASSTHROUGH:
+                v = os.environ.get(k, "").strip()
+                if v:
+                    env[k] = v
+        else:
+            key = os.environ.get(API_KEY_ENV, "").strip()
+            if not key:
+                raise PermissionError(
+                    f"{API_KEY_ENV} is not set — the claude_code builder needs it (auth={auth!r})"
+                )
+            env[API_KEY_ENV] = key
         env.setdefault("LANG", "C.UTF-8")
         env["NO_COLOR"] = "1"
         env["CI"] = "1"
@@ -640,14 +748,21 @@ class ClaudeCodeBuilder:
 
         try:
             binary = self._binary()
-            env = self.env()
+            env = self.env(self.auth)
         except (FileNotFoundError, PermissionError) as exc:
             errors.append(f"model_error: {exc}")
             return finish(done=False, summary="", stop=STOP_MODEL_ERROR, extra={})
 
         argv = self.argv(brief, budget, workspace.root, binary=binary)
         spawn = self._spawn or subprocess_spawn
-        emit(on_event, "build.start", builder=self.name, model=self.model, mode=brief.mode)
+        emit(
+            on_event,
+            "build.start",
+            builder=self.name,
+            model=self.model,
+            mode=brief.mode,
+            auth=self.auth,
+        )
         over_cap = False
         try:
             handle = spawn(argv, env, workspace.root, budget.wall_clock_s)
@@ -657,9 +772,13 @@ class ClaudeCodeBuilder:
                     emit(on_event, "build.event", **{k: v for k, v in ev.items() if k != "text"})
                 if stats.auth_failed:
                     # the CLI retries 401/403 ten times with backoff; auth is not transient
+                    hint = (
+                        "run `claude login` as the worker's user"
+                        if self.auth == AUTH_CLI
+                        else f"check {API_KEY_ENV}"
+                    )
                     errors.append(
-                        f"model_error: authentication failed (HTTP {stats.api_retries[-1]}) — "
-                        f"check {API_KEY_ENV}"
+                        f"model_error: authentication failed (HTTP {stats.api_retries[-1]}) — {hint}"
                     )
                     handle.kill()
                     break
@@ -709,11 +828,18 @@ class ClaudeCodeBuilder:
 
 __all__ = [
     "API_KEY_ENV",
+    "AUTH_API_KEY",
+    "AUTH_CLI",
+    "AUTH_ENV",
+    "AUTH_MODES",
     "BARE_TOOLS",
+    "CLI_CONFIG_DIR_ENV",
+    "CLI_SETTING_SOURCES",
     "DEFAULT_MODEL",
     "DENY_RULES",
     "FULL_TOOLS",
     "KNOWN_MODELS",
+    "MODEL_ENV",
     "OUTPUT_SCHEMA",
     "TOOLS",
     "ClaudeCodeBuilder",
@@ -721,6 +847,8 @@ __all__ = [
     "SpawnHandle",
     "StreamStats",
     "SubprocessHandle",
+    "default_auth",
+    "default_model",
     "subprocess_spawn",
     "system_rules",
     "task_prompt",

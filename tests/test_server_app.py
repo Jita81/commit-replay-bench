@@ -42,6 +42,9 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
         "sandbox": {"executor": "local"},
         "bootstrap_admin": {"username": "root", "password": ROOT_PW},
         "log_format": "text",
+        # hermetic: never auto-detect a built ``ui/dist`` in the cwd — its catch-all mount
+        # at startup would shadow routers a test registers after the first startup
+        "ui_dist": str(tmp_path / "no-ui-dist"),
     }
     base.update(overrides)
     return Settings(**base)

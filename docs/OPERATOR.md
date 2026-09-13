@@ -52,6 +52,23 @@ crb repo setup myrepo        # the ONLY network phase: install the test dependen
 crb repo probe myrepo        # runs setup itself first if the environment is not ready
 ```
 
+Or let crb clone a public/upstream repository for you (full history, `--no-tags`, into
+`<workdir>/repos/<name>`; `https://` and `ssh://` sources only — a local path is registered
+with `--path`, never cloned):
+
+```bash
+crb repo add httpx --url https://github.com/encode/httpx.git \
+  --language python --src-prefix httpx/ --test-prefix tests/ --probe tests/models/test_queryparams.py
+```
+
+The same happens in the UI ("Add a repository" → Git URL) and the API (`POST /repos` with
+`url` and no `clone_path`): the worker clones on the repository's first run and records
+`repo.clone.start` / `repo.clone.done` on that run's trace. Presets in the dialog
+(python-src-layout, python-flat, go, node-test, vitest, jest, mocha, maven, cargo) fill the
+layout, belt scope and runner options for well-known shapes; the probe scope is always yours.
+`CRB_ALLOW_LOCAL_CLONE=1` additionally permits `file://` sources on a test or developer
+machine — never on a server.
+
 `crb repo probe` runs the probe scope and must be green before mining; it proves the
 toolchain and the dependencies are in place. Belt scope options:
 
@@ -153,6 +170,17 @@ crb mine  myrepo --pool standard --target 25       # RED-check, baseline, gold-c
 crb grade myrepo --builder editblock --mode sighted --budget-usd 5   # P2: editblock; P3: openai_agent, claude_code
 crb ledger stats --repo myrepo
 ```
+
+**Claude Code on a developer machine.** The `claude_code` builder's production mode needs
+`ANTHROPIC_API_KEY` on the worker (`claude -p --bare`). For a local evaluation on your own
+subscription, start a run with builder config `{"auth": "cli"}` (the run dialog's "Use my
+Claude Code login (dev)" toggle) or set `CRB_CLAUDE_CODE_AUTH=cli` on the worker: the CLI
+uses the worker user's own `claude login`, no key is forwarded, and the apparatus records
+the mode. Read the SECURITY.md row first — the target repository's `CLAUDE.md` is
+auto-discovered in this mode. The default model is `claude-sonnet-5` (the census's measured
+path; `claude-opus-5` is selectable per run; `CRB_CLAUDE_CODE_MODEL` moves the default).
+If a build errors with `authentication failed (HTTP 401) — run claude login`, the stored
+login is stale: run `claude login` as the worker's user and re-queue.
 
 What you will see (events; UI live progress in P5): `mine.candidate` → `mine.red` /
 `mine.skip` → `mine.gold` → `build.*` → `grade.belt` (four per task) → `ledger.append`.

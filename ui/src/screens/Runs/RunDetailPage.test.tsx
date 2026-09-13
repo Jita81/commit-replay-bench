@@ -61,6 +61,7 @@ const RUN: Run = {
   pool: 'standard',
   limit: null,
   task_ids: [],
+  builder_config: {},
   actor: 'ada',
   created: '2026-09-13T09:00:00Z',
   started: '2026-09-13T09:01:00Z',

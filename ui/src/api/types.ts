@@ -168,6 +168,8 @@ export interface RepoSummary {
   language: Language
   runner: Runner | ''
   url: string
+  /** Empty for a URL-only registration until the worker's first run clones it (W3-B). */
+  clone_path: string
   probe: RepoProbe
   task_counts: RepoTaskCounts
   last_run: RepoLastRun | null
@@ -180,7 +182,11 @@ export interface RepoDetail extends RepoSummary {
   config: RepoConfig
 }
 
-/** `POST /repos` body (API.md). Exactly one of `clone_path` / `url`. */
+/**
+ * `POST /repos` body (API.md). One of `clone_path` / `url` is required. A URL-only
+ * registration is policy-checked at write (https/ssh only) and cloned by the worker on
+ * the repo's first run (`repo.clone.start` / `repo.clone.done` events).
+ */
 export interface RepoCreateRequest {
   name: string
   language: Language
@@ -190,8 +196,11 @@ export interface RepoCreateRequest {
   src_prefix?: string
   test_prefix?: string
   ext?: string
+  test_mode?: 'prefix' | 'suffix'
+  test_suffix?: string
   belt_scope?: BeltScope
   probe?: string
+  layer?: string
   runner_opts?: Record<string, unknown>
   sandbox_image?: string
   mining?: Partial<MiningConfig>
@@ -261,6 +270,8 @@ export interface Run {
   pool: string
   limit: number | null
   task_ids: string[]
+  /** Constructor overrides applied to every builder on the ladder (`{}` when none). */
+  builder_config: Record<string, unknown>
   actor: string
   created: string
   started: string | null
@@ -286,6 +297,12 @@ export interface RunCreateRequest {
   pool?: string
   executor?: string
   timeout?: number
+  /**
+   * Builder constructor keyword arguments applied to every rung (e.g.
+   * `{"auth": "cli", "effort": "high"}` for `claude_code`). The server refuses
+   * `model` / `provider` / `name` (the recorded identity) and credential-shaped keys.
+   */
+  builder_config?: Record<string, unknown>
 }
 
 export interface RunListParams extends PageParams {
