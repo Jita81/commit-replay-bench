@@ -94,6 +94,9 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
         role="log"
         aria-live="polite"
         aria-label="Run events"
+        // A scrollable region must be reachable by keyboard (WCAG 2.1.1; axe
+        // scrollable-region-focusable) — the rows themselves are not focusable.
+        tabIndex={0}
         onScroll={(e) => {
           const el = e.currentTarget
           setScrollTop(el.scrollTop)

@@ -10,6 +10,9 @@ const PORT = Number(process.env.CRB_UI_E2E_PORT ?? 4173)
 
 export default defineConfig({
   testDir: './e2e',
+  // The live-stack walkthrough has its own config (playwright.walkthrough.config.ts,
+  // `npm run walkthrough`); it must never run against the mocked preview server.
+  testIgnore: ['**/walkthrough/**'],
   timeout: 30_000,
   fullyParallel: true,
   retries: process.env.CI ? 1 : 0,

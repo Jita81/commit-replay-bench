@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "e2e:install": "playwright install chromium"
+    "e2e:install": "playwright install chromium",
+    "walkthrough": "playwright test --config playwright.walkthrough.config.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.97.0",
