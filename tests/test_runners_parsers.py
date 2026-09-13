@@ -238,7 +238,7 @@ def test_pytest_command_local(tmp_path: Path) -> None:
     cmd = r.command(tmp_path, ["tests/test_a.py"], executor=LocalExecutor(), timeout=30)
     assert cmd.argv[:3] == ("/venv/bin/python", "-m", "pytest")
     assert "-rfE" in cmd.argv and "-p" in cmd.argv and "no:cacheprovider" in cmd.argv
-    assert cmd.argv[-3:] == ("-o", "addopts=", "tests/test_a.py")
+    assert cmd.argv[-4:] == ("-o", "addopts=", "--continue-on-collection-errors", "tests/test_a.py")
     assert cmd.env["PYTHONPATH"] == f"{tmp_path.resolve()}/src"
     assert cmd.env["PYTHONHASHSEED"] == "0" and cmd.env["DJANGO_SETTINGS_MODULE"] == "x"
     assert cmd.writable_paths == (".pytest_scratch",) and cmd.timeout == 30

@@ -77,6 +77,8 @@ def iter_candidates(
     for sha in repo.log_shas(n, ref=ref):
         if sha in skip:
             continue
+        if not repo.run("rev-parse", "--verify", "--quiet", f"{sha}^1").ok:
+            continue  # root commit: no parent to replay from
         files = repo.changed_files(sha)
         src = [f for f in files if config.is_src(f)]
         tests = [f for f in files if config.is_test(f)]

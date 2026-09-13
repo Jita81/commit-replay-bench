@@ -53,11 +53,6 @@ def test_iter_candidates_finds_the_feat_commit_and_not_the_docs_commit(pyrepo: p
     assert feat.files == (pr.SRC, pr.TEST_SUBTRACT)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="core friction: iter_candidates yields ROOT commits (no parent → cannot be replayed; "
-    "qualify raises GitError on Workspace.create). Skip commits with no parent.",
-)
 def test_root_commit_is_not_a_candidate(pyrepo: pr.PyRepo) -> None:
     shas = [c.sha for c in m.iter_candidates(pyrepo.repo, pyrepo.config)]
     assert pyrepo.initial_sha not in shas

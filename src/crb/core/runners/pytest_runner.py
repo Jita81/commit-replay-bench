@@ -36,6 +36,7 @@ class PytestRunner(BaseRunner):
             "no:randomly",
             "-o",
             "addopts=",
+            "--continue-on-collection-errors",
             *scope,
         ]
         env = {

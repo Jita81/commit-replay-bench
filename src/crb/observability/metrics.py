@@ -36,6 +36,8 @@ class _Noop:
         pass
 
 
+registry: Any = None
+
 if _AVAILABLE:  # pragma: no cover
     registry = CollectorRegistry()
 
@@ -54,7 +56,6 @@ if _AVAILABLE:  # pragma: no cover
             buckets=(1, 5, 15, 30, 60, 120, 300, 600, 1200, 1800),
         )
 else:
-    registry = None
 
     def _counter(name: str, doc: str, labels: list[str]) -> Any:
         return _Noop()
