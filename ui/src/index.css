@@ -1,0 +1,210 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ */
+/* Commit Replay Bench — "Ledger v2" design tokens                      */
+/*                                                                     */
+/* Ported from the Athena design standard (docs/assessment/ux/design-  */
+/* systems/STANDARD.md). Document-grade, regulated-trust palette: warm */
+/* paper, ink, ONE deep-teal trust accent. Every value clears WCAG 2.1 */
+/* AA on its intended pairing; `muted` is the floor — never lighter.   */
+/*                                                                     */
+/* Theme resolution (three states):                                    */
+/*   <html data-theme="light">  explicit light                         */
+/*   <html data-theme="dark">   explicit dark                          */
+/*   (no attribute)             system: prefers-color-scheme decides   */
+/* The raw palette lives on :root; Tailwind utilities are bound to it  */
+/* through `@theme inline`, so `bg-surface` compiles to var(--paper)   */
+/* and re-themes without a class change.                               */
+/* ------------------------------------------------------------------ */
+
+:root {
+  color-scheme: light;
+  --paper: #FBFAF6;            /* app background */
+  --card: #FFFFFF;             /* surfaces */
+  --surface-high: #F3F1EA;
+  --surface-highest: #ECE9E0;
+  --ink: #1A1C1E;              /* primary text, >=12.6:1 on paper */
+  --body: #3A3D42;             /* secondary text, >=9:1 */
+  --muted: #5F646C;            /* tertiary/labels — AA floor 4.6:1 */
+  --line: #E7E2D6;             /* hairlines, table rules */
+  --trust: #0E5C5B;            /* THE accent: primary actions, active nav, links (7.4:1) */
+  --trust-soft: #E6F0EF;       /* active-nav fill, provenance chips */
+  --on-trust: #FFFFFF;
+  --ok: #1F7A43;
+  --ok-soft: #E8F3EC;
+  --warn: #9A5B0B;
+  --warn-soft: #FAF1E3;
+  --fail: #A33A2E;
+  --fail-soft: #F9ECEA;
+  --cat-blue: #1F5C8A;         /* categorical (~6.0:1 on paper) — NOT a second brand colour */
+  --cat-blue-soft: #E7EFF6;
+  --cat-violet: #5A3A8A;       /* categorical (~7.2:1 on paper) */
+  --cat-violet-soft: #EEE9F5;
+  --shadow-card: 0 1px 3px rgba(16, 23, 41, 0.05);
+}
+
+/* Dark palette — the "Mission" register. Same token names; muted stays
+   at/above 4.6:1 on the dark paper. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0F1112;
+    --card: #171A1C;
+    --surface-high: #1F2326;
+    --surface-highest: #272C30;
+    --ink: #ECE7DC;
+    --body: #CFC9BD;
+    --muted: #A39C8F;
+    --line: #2C3135;
+    --trust: #7FC4C1;
+    --trust-soft: #143433;
+    --on-trust: #0F1112;
+    --ok: #8CCBA0;
+    --ok-soft: #14301F;
+    --warn: #E2B26A;
+    --warn-soft: #3A2A0E;
+    --fail: #E39A90;
+    --fail-soft: #3D1A16;
+    --cat-blue: #8FB8DC;
+    --cat-blue-soft: #14283A;
+    --cat-violet: #BCA6DC;
+    --cat-violet-soft: #281C3A;
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0F1112;
+  --card: #171A1C;
+  --surface-high: #1F2326;
+  --surface-highest: #272C30;
+  --ink: #ECE7DC;
+  --body: #CFC9BD;
+  --muted: #A39C8F;
+  --line: #2C3135;
+  --trust: #7FC4C1;
+  --trust-soft: #143433;
+  --on-trust: #0F1112;
+  --ok: #8CCBA0;
+  --ok-soft: #14301F;
+  --warn: #E2B26A;
+  --warn-soft: #3A2A0E;
+  --fail: #E39A90;
+  --fail-soft: #3D1A16;
+  --cat-blue: #8FB8DC;
+  --cat-blue-soft: #14283A;
+  --cat-violet: #BCA6DC;
+  --cat-violet-soft: #281C3A;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* `dark:` variant follows the RESOLVED theme, not only the OS. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:not([data-theme="light"]):not([data-theme="light"] *)) {
+      @slot;
+    }
+  }
+}
+
+@theme inline {
+  --color-surface: var(--paper);
+  --color-surface-container: var(--card);
+  --color-surface-high: var(--surface-high);
+  --color-surface-highest: var(--surface-highest);
+  --color-on-surface: var(--ink);
+  --color-on-surface-body: var(--body);
+  --color-on-surface-muted: var(--muted);
+  --color-border: var(--line);
+  --color-primary: var(--trust);
+  --color-on-primary: var(--on-trust);
+  --color-primary-container: var(--trust-soft);
+  --color-status-green: var(--ok);
+  --color-status-green-soft: var(--ok-soft);
+  --color-status-amber: var(--warn);
+  --color-status-amber-soft: var(--warn-soft);
+  --color-status-red: var(--fail);
+  --color-status-red-soft: var(--fail-soft);
+  --color-status-blue: var(--cat-blue);
+  --color-status-blue-soft: var(--cat-blue-soft);
+  --color-status-violet: var(--cat-violet);
+  --color-status-violet-soft: var(--cat-violet-soft);
+
+  /* Type: serif headings are the trust signature; system sans for UI;
+     mono for SHAs, ids, refs and counts-in-tables. No web fonts (air-gap). */
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --shadow-card: var(--shadow-card);
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-pill: 20px;
+}
+
+html, body, #root { min-height: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { font-family: var(--font-serif); font-weight: 600; color: var(--ink); margin: 0; }
+h1 { font-size: 30px; line-height: 36px; }
+h2 { font-size: 20px; line-height: 28px; }
+h3 { font-size: 16px; line-height: 24px; }
+
+a { color: var(--trust); }
+
+/* 10px small-caps label — the eyebrow / table-label register. */
+.label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* Tabular numerals wherever numbers align. */
+.num { font-variant-numeric: tabular-nums; }
+
+/* 2px trust focus ring on every interactive element. */
+:focus-visible {
+  outline: 2px solid var(--trust);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Live pulse for a running run — the only animation on governance surfaces. */
+@keyframes crb-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.crb-pulse { animation: crb-pulse 1.6s ease-in-out infinite; }

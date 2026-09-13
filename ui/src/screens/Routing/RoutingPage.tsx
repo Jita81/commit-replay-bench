@@ -1,0 +1,114 @@
+import { useMemo } from 'react'
+import { useRoutes } from '../../api/hooks'
+import type { RouteDecision, RoutingPolicy } from '../../api/types'
+import { LinkButton } from '../../components/Button'
+import { Card } from '../../components/Card'
+import { CiBar } from '../../components/CiBar'
+import { DataTable, type Column } from '../../components/DataTable'
+import { EmptyState } from '../../components/EmptyState'
+import { PageHeader } from '../../components/PageHeader'
+import { QueryBoundary } from '../../components/QueryBoundary'
+import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
+import { StatTile } from '../../components/StatTile'
+import { VerdictPill } from '../../components/VerdictPill'
+import { fmtInt, fmtPct, fmtRatio } from '../../lib/format'
+import { ROUTES } from '../../api/types'
+import { routeDisplay } from '../../lib/verdict'
+
+function PolicyCard({ policy }: { policy: RoutingPolicy }) {
+  return (
+    <Card title="Policy in force" eyebrow={policy.version}>
+      <dl className="num grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-5">
+        <div>
+          <dt className="label">min n</dt>
+          <dd>{fmtInt(policy.min_n)}</dd>
+        </div>
+        <div>
+          <dt className="label">min point</dt>
+          <dd>{fmtPct(policy.min_point, 0)}</dd>
+        </div>
+        <div>
+          <dt className="label">min Wilson lower</dt>
+          <dd>{fmtPct(policy.min_ci_low, 0)}</dd>
+        </div>
+        <div>
+          <dt className="label">min oracle strength</dt>
+          <dd>{fmtRatio(policy.min_oracle_strength)}</dd>
+        </div>
+        <div>
+          <dt className="label">granularize sizes</dt>
+          <dd className="font-mono text-xs">{policy.granularize_sizes.join(', ') || '—'}</dd>
+        </div>
+      </dl>
+      <p className="mt-3 text-xs text-on-surface-muted">
+        The one rule: <em>deliver</em> iff n ≥ {policy.min_n} ∧ point ≥ {fmtPct(policy.min_point, 0)} ∧ Wilson-lower ≥ {fmtPct(policy.min_ci_low, 0)} ∧ false-Q1 = 0 ∧ (oracle strength ≥ {fmtRatio(policy.min_oracle_strength)} when measured). Any false-Q1 ⇒ <em>do not ship</em>; XL ⇒ <em>granularize</em>; weak oracle ⇒ <em>human</em>; otherwise <em>calibrate</em>.
+      </p>
+    </Card>
+  )
+}
+
+const cellLabel = (c: Record<string, string>) =>
+  [c.capability_class, c.size, c.language, c.builder, c.model, c.provider].filter(Boolean).join(' · ')
+
+export function RoutingPage() {
+  const [repo, setRepo] = useRepoParam()
+  const routes = useRoutes(repo)
+
+  const columns = useMemo<Column<RouteDecision>[]>(
+    () => [
+      { key: 'cell', header: 'Cell', mono: true, sortValue: (d) => cellLabel(d.cell), cell: (d) => cellLabel(d.cell) },
+      { key: 'route', header: 'Route', sortValue: (d) => ROUTES.indexOf(d.route), cell: (d) => <VerdictPill route={d.route} reason={d.reason} size="xs" /> },
+      { key: 'n', header: 'n', numeric: true, sortValue: (d) => d.n, cell: (d) => fmtInt(d.n) },
+      { key: 'point', header: 'Point', numeric: true, sortValue: (d) => d.point, cell: (d) => fmtPct(d.point) },
+      { key: 'ci_low', header: 'Wilson lower', numeric: true, sortValue: (d) => d.ci_low, cell: (d) => fmtPct(d.ci_low) },
+      { key: 'bar', header: 'Interval', cell: (d) => <CiBar point={d.point} low={d.ci_low} high={Math.min(1, d.point + (d.point - d.ci_low))} n={d.n} width={80} />, hideBelowMd: true },
+      { key: 'fq1', header: 'false-Q1', numeric: true, sortValue: (d) => d.false_q1, cell: (d) => <span className={d.false_q1 > 0 ? 'font-semibold text-status-red' : ''}>{d.false_q1}{d.false_q1 > 0 ? ' ✗' : ''}</span> },
+      { key: 'oracle', header: 'Oracle', numeric: true, sortValue: (d) => d.oracle_strength ?? -1, cell: (d) => fmtRatio(d.oracle_strength), hideBelowMd: true },
+      { key: 'reason', header: 'Reason', sortValue: (d) => d.reason, cell: (d) => <span className="text-xs text-on-surface-muted">{d.reason}</span> },
+      { key: 'policy', header: 'Policy', mono: true, cell: (d) => d.policy_version, hideBelowMd: true },
+    ],
+    [],
+  )
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Routing"
+        title="Routing"
+        purpose="What the factory may do with each class of change, decided by the one published rule over measured evidence. Every decision carries its reason and the policy version that produced it."
+        actions={<RepoPicker value={repo} onChange={setRepo} />}
+      />
+      <QueryBoundary query={routes} loading="Loading route decisions…" idle={<EmptyState title="Choose a repo to see its routing decisions" reason="Routes are derived from the repo's capability cells." action={<LinkButton to="/repos">Go to repos</LinkButton>} />}>
+        {(r) => {
+          const counts = new Map<string, number>()
+          for (const d of r.decisions) counts.set(d.route, (counts.get(d.route) ?? 0) + 1)
+          const total = r.decisions.length
+          return (
+            <div className="space-y-6">
+              <PolicyCard policy={r.policy} />
+              <div className="flex flex-wrap gap-3">
+                {ROUTES.map((route) => {
+                  const d = routeDisplay(route)
+                  const n = counts.get(route) ?? 0
+                  return <StatTile key={route} label={d.label} value={fmtInt(n)} n={total} apparatus={`cells routed ${route} · ${r.policy.version}`} tone={n ? d.tone : undefined} />
+                })}
+              </div>
+              <Card padded={false} title="Decisions">
+                <DataTable
+                  rows={r.decisions}
+                  columns={columns}
+                  rowKey={(d) => cellLabel(d.cell)}
+                  caption={`Route decisions for ${repo}`}
+                  initialSort={{ key: 'route', dir: 'asc' }}
+                  empty={<EmptyState title="No decisions yet" reason="A decision exists per measured cell. Run a replay to populate the ledger." action={<LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=replay`}>Start a replay run</LinkButton>} />}
+                />
+              </Card>
+            </div>
+          )
+        }}
+      </QueryBoundary>
+    </>
+  )
+}
+
+export default RoutingPage
