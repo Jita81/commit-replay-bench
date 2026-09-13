@@ -11,7 +11,8 @@ hash-chained ledger, and JSONL import/export.
   :func:`crb.core.ledger.verify_chain`.
 """
 
-from crb.store.db import Base, init_db, make_engine, make_session_factory
+from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.ledger import DbLedger
+from crb.store.models import Base
 
 __all__ = ["Base", "DbLedger", "init_db", "make_engine", "make_session_factory"]
