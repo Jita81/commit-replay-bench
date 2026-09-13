@@ -26,7 +26,6 @@ oracle it is graded against.
 from __future__ import annotations
 
 import hashlib
-import shutil
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -172,24 +171,8 @@ class RedProof:
 def worktree_at(
     repo: GitRepo, ref: str, dest: Path, *, config: RepoConfig | None = None
 ) -> Workspace:
-    """A forward-mode worktree: checked out AT ``ref`` (no commit parent).
-
-    :meth:`Workspace.create` expects a commit whose *parent* is checked out; forward
-    mode has no such commit, so this builds the same object with
-    ``sha == parent == ref`` and applies the config's post-create fixups. Nothing in
-    core changes.
-    """
-    dest = Path(dest)
-    if dest.exists():
-        repo.worktree_remove(dest)
-        shutil.rmtree(dest, ignore_errors=True)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    head = repo.rev_parse(ref)
-    repo.worktree_add(dest, head)
-    ws = Workspace(repo, dest, sha=head, parent=head)
-    if config is not None:
-        ws._post_create(config)  # the same fixups Workspace.create applies
-    return ws
+    """A forward-mode worktree checked out AT ``ref`` (see :meth:`Workspace.at_ref`)."""
+    return Workspace.at_ref(repo, ref, dest, config=config)
 
 
 def write_authored(ws: Workspace, authored: AuthoredTest) -> Path:

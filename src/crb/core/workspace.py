@@ -78,6 +78,33 @@ class Workspace:
             ws._post_create(config)
         return ws
 
+    @classmethod
+    def at_ref(
+        cls,
+        repo: GitRepo,
+        ref: str,
+        dest: Path,
+        *,
+        config: RepoConfig | None = None,
+        post_create: bool = True,
+    ) -> Workspace:
+        """A worktree checked out AT ``ref`` itself (forward mode: no commit parent).
+
+        ``sha == parent == ref`` so belt 4's "changed since HEAD" and the diff
+        helpers behave exactly as they do for a replay worktree.
+        """
+        dest = Path(dest)
+        if dest.exists():
+            repo.worktree_remove(dest)
+            shutil.rmtree(dest, ignore_errors=True)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        head = repo.rev_parse(ref)
+        repo.worktree_add(dest, head)
+        ws = cls(repo, dest, sha=head, parent=head)
+        if post_create and config is not None:
+            ws._post_create(config)
+        return ws
+
     def remove(self) -> None:
         self.repo.worktree_remove(self.root)
         shutil.rmtree(self.root, ignore_errors=True)
