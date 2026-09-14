@@ -979,3 +979,20 @@ def test_e2e_unhealthy_service_is_a_harness_error_never_a_verdict(docker_root: P
         )
     )
     assert probe.returncode != 0  # removed on the failed health wait, not left behind
+
+
+def test_services_state_dir_honours_services_dir_override(monkeypatch, tmp_path) -> None:
+    """The dev stack's CRB_HOME lives under /private/tmp, which colima cannot bind-mount;
+    CRB_SERVICES_DIR moves the staged fixtures to a mountable path (2026-09-14)."""
+    from crb.core.runners import get_runner
+    from crb.core.spec import RepoConfig
+
+    cfg = RepoConfig.from_dict(
+        "r", {"language": "python", "runner": "pytest", "path": str(tmp_path)}
+    )
+    runner = get_runner(cfg)
+    runner.env_dir = tmp_path / "env"
+    monkeypatch.delenv("CRB_SERVICES_DIR", raising=False)
+    assert runner._services_state_dir() == tmp_path / "env" / "services"
+    monkeypatch.setenv("CRB_SERVICES_DIR", str(tmp_path / "shared"))
+    assert runner._services_state_dir() == tmp_path / "shared" / "r"

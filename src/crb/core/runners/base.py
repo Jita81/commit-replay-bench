@@ -464,6 +464,16 @@ class BaseRunner:
         finally:
             self.authored = previous
 
+    def _services_state_dir(self) -> Path | None:
+        """Where service fixtures are staged for bind-mounting. ``CRB_SERVICES_DIR``
+        overrides ``<env_dir>/services`` for hosts whose container runtime cannot see
+        ``CRB_HOME`` (colima / Docker Desktop mount tables exclude ``/private/tmp`` —
+        the dev stack lives there); production keeps ``CRB_HOME`` on a shared path."""
+        override = os.environ.get("CRB_SERVICES_DIR", "").strip()
+        if override:
+            return Path(override).expanduser() / self.config.name
+        return (self.env_dir / "services") if self.env_dir is not None else None
+
     # --- services the oracle needs (runner_opts.services) --------------------------
     def has_services(self) -> bool:
         return bool(self.opts.get("services"))
@@ -511,7 +521,7 @@ class BaseRunner:
                 executor,
                 clone=clone,
                 repo=self.config.name,
-                state_dir=(self.env_dir / "services") if self.env_dir is not None else None,
+                state_dir=self._services_state_dir(),
             )
             self._services = session
         session.executor = executor
