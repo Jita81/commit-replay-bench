@@ -167,6 +167,7 @@ class TestFactory:
             "factory",
             "forecast",
             "grades",
+            "learn",
             "ledger",
             "oracle",
             "repos",
