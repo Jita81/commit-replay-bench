@@ -85,7 +85,7 @@ test.describe(`05 replay (${BUILDER})`, () => {
       if (!REAL) await expect(pill, `belt ${belt} held`).toHaveAttribute('aria-label', /: held$/)
     }
     if (!REAL) {
-      await expect(first.getByRole('img', { name: 'Clean: all four belts held' })).toBeVisible()
+      await expect(first.getByRole('img', { name: 'Clean: every recorded belt held' })).toBeVisible()
       await expect(first).toContainText('$0.00')
     }
     await expect(first.getByRole('button', { name: /^r1 [0-9a-f]{8}$/ })).toBeVisible()
@@ -135,7 +135,7 @@ test.describe(`05 replay (${BUILDER})`, () => {
     const rows = table.locator('tbody tr')
     await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(1)
     await expect(rows.first()).toContainText(BUILDER)
-    if (!REAL) await expect(rows.first().getByRole('img', { name: 'Clean' })).toBeVisible()
+    if (!REAL) await expect(rows.first().getByRole('img', { name: 'Clean', exact: true })).toBeVisible()
   })
 
   test('the Capability page: the measured cell carries n, a Wilson interval and route calibrate', async ({ page }) => {
