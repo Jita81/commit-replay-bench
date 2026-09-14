@@ -1,6 +1,8 @@
-"""``/health``, ``/metrics``, ``/version`` — unauthenticated; bind to an internal interface.
+"""``/health``, ``/health/live``, ``/metrics``, ``/version`` — unauthenticated; bind to an
+internal interface.
 
-``/health`` aggregates the observability probes with three store-level checks:
+``/health`` (the DEEP probe — readiness) aggregates the observability probes with three
+store-level checks:
 
 * ``db``          — the database answers.
 * ``append_only`` — the ledger triggers exist AND an ``UPDATE`` on ``grades`` is refused
@@ -10,15 +12,31 @@
   The same numbers refresh the ``crb_false_q1_total`` / ``crb_ledger_rows`` gauges.
 * ``worker``      — running runs whose ``heartbeat`` is older than
   ``worker_heartbeat_stale_s`` are reported as stale (``degraded``).
+* ``sandbox``     — the docker daemon answers (``docker`` executor) — **role-aware**:
+  the sandbox is the WORKER's instrument. A process whose role is ``api`` (the
+  ``serve`` container: no docker socket, by design — see ``deploy/Dockerfile``)
+  reports the probe ``skipped``, never ``degraded``/``down``: a missing socket there
+  is the intended posture, not a fault, and must not fail the API's health. The
+  role is read from ``CRB_ROLE`` (:func:`process_role`; ``api`` | ``worker`` |
+  ``all``, default ``all`` = one process does both, so everything is probed).
+
+``/health/live`` (LIVENESS) answers "this process is up and can reach its database"
+and nothing else — never the sandbox, the toolchains, the builders or the ledger.
+It is what the image ``HEALTHCHECK`` and the Helm liveness probe hit: a liveness
+probe that fails on a *dependency* (a docker socket the API is not meant to have, a
+transient builder outage) restarts a healthy process.
 
 ``status`` is ``down`` → HTTP 503 so a load balancer can act on it; ``degraded``
-still answers 200 (the instrument can measure, with caveats).
+still answers 200 (the instrument can measure, with caveats); ``skipped`` is neither
+(a probe this role does not own) and never lowers the aggregate.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, Request, Response, status
@@ -43,6 +61,36 @@ except ImportError:  # pragma: no cover
 
 router = APIRouter(tags=["system"])
 _ERR = {"model": ErrorEnvelope}
+
+#: A probe this process's role does not own — neither a pass nor a fault. Extends the
+#: ``ok | degraded | down`` vocabulary of :mod:`crb.observability.probes` (its proper
+#: home; that module is outside this change's file set — see the finish report).
+#: :func:`probes.aggregate` lowers the aggregate only for ``degraded`` / ``down``.
+SKIPPED = "skipped"
+
+#: Process roles. ``api`` = the ``serve`` container (HTTP, no docker socket); ``worker``
+#: = the queue consumer (owns the sandbox); ``all`` = one process does both.
+ROLE_API = "api"
+ROLE_WORKER = "worker"
+ROLE_ALL = "all"
+ROLES: tuple[str, ...] = (ROLE_API, ROLE_WORKER, ROLE_ALL)
+#: With no ``CRB_ROLE`` the process assumes it does everything, so EVERY probe is
+#: evaluated: an unset or unrecognised role never hides a probe (fail closed).
+DEFAULT_ROLE = ROLE_ALL
+ROLE_ENV = "CRB_ROLE"
+
+
+def process_role(environ: Mapping[str, str] | None = None) -> str:
+    """The role this process runs as, from ``CRB_ROLE`` (``api`` | ``worker`` | ``all``;
+    case-insensitive; default and fallback for anything else: ``all``).
+
+    Read here, once, rather than through :class:`Settings`: ``settings.py`` is the
+    proper home for the field (reported as a follow-up); the documented contract is
+    this function's, and the Helm chart / compose set the variable per container.
+    """
+    raw = (os.environ if environ is None else environ).get(ROLE_ENV, DEFAULT_ROLE)
+    role = str(raw or "").strip().lower()
+    return role if role in ROLES else DEFAULT_ROLE
 
 
 # --- store-level probes -------------------------------------------------------------
@@ -169,8 +217,24 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
     return ProbeResult("worker", OK, f"{len(running)} running, heartbeats fresh", data)
 
 
-def probe_sandbox(settings: Settings) -> ProbeResult:
-    if settings.sandbox.executor == "docker":
+def probe_sandbox(settings: Settings, role: str = ROLE_ALL) -> ProbeResult:
+    """The sandbox executor, as seen from a process of ``role``.
+
+    The sandbox belongs to the worker. An ``api`` process reports ``skipped``: the
+    ``serve`` container carries the docker CLIENT only and no socket — by design
+    (``deploy/Dockerfile``, ``docs/SECURITY.md``) — so probing the daemon there would
+    always read ``down`` and take the API with it. ``worker`` / ``all`` probe it.
+    """
+    executor = settings.sandbox.executor
+    if role == ROLE_API:
+        return ProbeResult(
+            "sandbox",
+            SKIPPED,
+            "not probed here: the sandbox is the worker's — this process is the API "
+            f"({ROLE_ENV}={ROLE_API})",
+            {"executor": executor, "role": role},
+        )
+    if executor == "docker":
         return probes.probe_docker(timeout=5)
     return ProbeResult(
         "sandbox",
@@ -180,29 +244,59 @@ def probe_sandbox(settings: Settings) -> ProbeResult:
     )
 
 
-def collect_health(factory: sessionmaker[Session], settings: Settings) -> dict[str, Any]:
+def _stamp(out: dict[str, Any], role: str) -> dict[str, Any]:
+    out["version"] = __version__
+    out["apparatus"] = APPARATUS_VERSION
+    out["role"] = role
+    out["checked_at"] = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    return out
+
+
+def collect_health(
+    factory: sessionmaker[Session], settings: Settings, *, role: str | None = None
+) -> dict[str, Any]:
+    """The deep probe (readiness). ``role`` defaults to :func:`process_role`."""
+    role = process_role() if role is None else role
     results = [
         probe_db(factory),
         probe_append_only(factory),
         probe_ledger(factory),
-        probe_sandbox(settings),
+        probe_sandbox(settings, role),
         probes.probe_toolchains(),
         probes.probe_builders(),
         probe_worker(factory, settings.worker_heartbeat_stale_s),
     ]
-    out = probes.aggregate(results)
-    out["version"] = __version__
-    out["apparatus"] = APPARATUS_VERSION
-    out["checked_at"] = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
-    return out
+    return _stamp(probes.aggregate(results), role)
+
+
+def collect_liveness(factory: sessionmaker[Session], *, role: str | None = None) -> dict[str, Any]:
+    """Liveness: the process is up and its database answers. Exactly ONE probe (``db``);
+    never the sandbox, the toolchains, the builders, the ledger or the worker — a
+    liveness check that fails on a dependency restarts a healthy process."""
+    role = process_role() if role is None else role
+    return _stamp(probes.aggregate([probe_db(factory)]), role)
 
 
 # --- routes -------------------------------------------------------------------------
 
 
-@router.get("/health", summary="Aggregate health (503 when any probe is down)")
+@router.get(
+    "/health",
+    summary="Deep health / readiness (503 when any probe is down; sandbox skipped for CRB_ROLE=api)",
+)
 def health(response: Response, factory: SessionFactoryDep, settings: SettingsDep) -> dict[str, Any]:
     out = collect_health(factory, settings)
+    if out["status"] == DOWN:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return out
+
+
+@router.get(
+    "/health/live",
+    summary="Liveness: process up + database reachable (503 otherwise); never probes the sandbox",
+)
+def health_live(response: Response, factory: SessionFactoryDep) -> dict[str, Any]:
+    out = collect_liveness(factory)
     if out["status"] == DOWN:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return out
@@ -234,4 +328,18 @@ def version(request: Request) -> dict[str, Any]:
     }
 
 
-__all__ = ["collect_health", "ledger_counts", "refresh_ledger_gauges", "router"]
+__all__ = [
+    "DEFAULT_ROLE",
+    "ROLES",
+    "ROLE_ALL",
+    "ROLE_API",
+    "ROLE_ENV",
+    "ROLE_WORKER",
+    "SKIPPED",
+    "collect_health",
+    "collect_liveness",
+    "ledger_counts",
+    "process_role",
+    "refresh_ledger_gauges",
+    "router",
+]
