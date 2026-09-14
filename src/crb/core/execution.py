@@ -24,10 +24,11 @@ import os
 import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -162,6 +163,11 @@ class LocalExecutor:
 
     def describe(self) -> dict[str, Any]:
         return {"executor": self.name}
+
+    @property
+    def cancel_fn(self) -> CancelFn | None:
+        """The run's cancel token, so a builder's own processes can follow it."""
+        return self._cancel
 
     def run(self, cmd: Command) -> ExecResult:
         env = dict(self._base_env)
@@ -302,6 +308,11 @@ class DockerExecutor:
         # Inside the image the toolchain is on PATH; host overrides never apply.
         return name
 
+    @property
+    def cancel_fn(self) -> CancelFn | None:
+        """The run's cancel token, so a builder's containers can follow it."""
+        return self._cancel
+
     def describe(self) -> dict[str, Any]:
         s = self.settings
         return {
@@ -403,6 +414,62 @@ class DockerExecutor:
             cancelled,
         )
 
+    def require_image(self, image: str) -> None:
+        """Fail closed unless ``image`` is present in the daemon's image store.
+
+        The worker never pulls: an absent image is a deployment fault, so it is a
+        :class:`SandboxUnavailable` (the run stops) rather than an exit-125 surprise
+        half-way through a build attempt.
+        """
+        if not image:
+            raise SandboxUnavailable("docker image name is empty")
+        try:
+            r = self._runner(
+                [self.docker, "image", "inspect", "--format", "{{.Id}}", image],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.SubprocessError) as e:
+            raise SandboxUnavailable(f"docker image probe failed for {image!r}: {e}") from e
+        if r.returncode != 0:
+            raise SandboxUnavailable(
+                f"docker image {image!r} is not present in the daemon's store (the worker never "
+                f"pulls): {(r.stderr or r.stdout).strip()[:300]}"
+            )
+
+    def stream(
+        self,
+        run_args: Sequence[str],
+        *,
+        argv: Sequence[str],
+        client_env: Mapping[str, str],
+        timeout_s: int,
+        name: str = "",
+    ) -> DockerStream:
+        """Start a long-lived ``docker run`` and stream its stdout line by line.
+
+        ``run_args`` are the ``docker run`` options (after ``--rm``; the caller owns
+        the hardening set), ``argv`` the command inside the container. ``client_env``
+        is the environment of the *docker client* process — ``--env NAME`` (no value)
+        options in ``run_args`` are resolved from it, which is how a secret reaches
+        the container without ever appearing on a command line. Deadline and the
+        executor's cancel token both end in ``docker kill <name>`` (killing the client
+        alone would leave the container running). A launch failure (exit 125 before
+        any output) is a :class:`SandboxUnavailable` — fail closed.
+        """
+        cname = name or f"crb-{uuid.uuid4().hex[:12]}"
+        full = [self.docker, "run", "--rm", "--name", cname, *run_args, *argv]
+        return DockerStream(
+            full,
+            docker=self.docker,
+            name=cname,
+            env=client_env,
+            timeout_s=timeout_s,
+            cancel=self._cancel,
+        )
+
     def run(self, cmd: Command) -> ExecResult:
         argv = self.build_argv(cmd)
         started = time.monotonic()
@@ -424,6 +491,138 @@ class DockerExecutor:
         return ExecResult(
             r.returncode, r.stdout or "", r.stderr or "", False, time.monotonic() - started
         )
+
+
+class DockerStream:
+    """A running ``docker run`` whose stdout is consumed line by line.
+
+    Invariants:
+
+    * **The container dies with the deadline or the cancel token** — via ``docker kill
+      <name>``, then the client process group. A `docker run` client killed on its own
+      leaves the container running; that is the failure this class exists to prevent.
+    * **stderr never deadlocks stdout**: it goes to a temporary file, of which the last
+      4000 characters are kept as :attr:`stderr_tail` (the caller redacts).
+    * **Exit 125 with no output is a launch failure** (bad option, missing image,
+      unusable network) and raises :class:`SandboxUnavailable` when the lines are
+      consumed — never a silent empty stream.
+    * ``timed_out`` / ``cancelled`` are set before the kill, so a reader that sees the
+      stream end can tell an honest exit from an enforced one.
+    """
+
+    def __init__(
+        self,
+        full_argv: Sequence[str],
+        *,
+        docker: str,
+        name: str,
+        env: Mapping[str, str],
+        timeout_s: int,
+        cancel: CancelFn | None = None,
+    ) -> None:
+        if timeout_s <= 0:
+            raise ValueError("timeout_s must be positive")
+        self.name = name
+        self._docker = docker
+        self._cancel = cancel
+        self._timed_out = False
+        self._cancelled = False
+        self._stderr = ""
+        self._stderr_file = tempfile.TemporaryFile(  # noqa: SIM115 — closed in lines()
+            mode="w+", encoding="utf-8", errors="replace"
+        )
+        self._proc = subprocess.Popen(
+            list(full_argv),
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=self._stderr_file,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            start_new_session=True,
+        )
+        self._watchdog = threading.Timer(timeout_s, self._on_deadline)
+        self._watchdog.daemon = True
+        self._watchdog.start()
+        self._stop_poll = threading.Event()
+        self._poller: threading.Thread | None = None
+        if cancel is not None:
+            self._poller = threading.Thread(target=self._poll_cancel, daemon=True)
+            self._poller.start()
+
+    # --- lifecycle ---------------------------------------------------------------
+    def lines(self) -> Iterator[str]:
+        assert self._proc.stdout is not None
+        saw_output = False
+        try:
+            for line in self._proc.stdout:
+                saw_output = True
+                yield line.rstrip("\n")
+        finally:
+            self._watchdog.cancel()
+            self._stop_poll.set()
+            try:  # reap the client whether it exited, was killed, or the reader stopped early
+                self._proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.kill()
+                self._proc.wait()
+            try:
+                self._stderr_file.seek(0)
+                self._stderr = self._stderr_file.read()[-4000:]
+            except (OSError, ValueError):
+                self._stderr = ""
+            finally:
+                self._stderr_file.close()
+        if self._proc.returncode == 125 and not saw_output and not self._enforced:
+            raise SandboxUnavailable(
+                f"docker failed to launch the container (exit 125): {self._stderr[-400:]}"
+            )
+
+    @property
+    def _enforced(self) -> bool:
+        return self._timed_out or self._cancelled
+
+    def _poll_cancel(self) -> None:
+        while not self._stop_poll.wait(_CANCEL_POLL_S):
+            if self._cancel is not None and self._cancel():
+                self._cancelled = True
+                self.kill()
+                return
+
+    def _on_deadline(self) -> None:
+        self._timed_out = True
+        self.kill()
+
+    def kill(self) -> None:
+        """``docker kill <name>`` first (the container is the process that matters),
+        then the client's process group. Idempotent; never raises."""
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(
+                [self._docker, "kill", self.name], capture_output=True, check=False, timeout=30
+            )
+        try:
+            os.killpg(self._proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            with contextlib.suppress(OSError):
+                self._proc.kill()
+
+    # --- state ---------------------------------------------------------------------
+    @property
+    def returncode(self) -> int | None:
+        return self._proc.returncode
+
+    @property
+    def timed_out(self) -> bool:
+        return self._timed_out
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    @property
+    def stderr_tail(self) -> str:
+        return self._stderr
 
 
 def make_executor(
@@ -453,6 +652,7 @@ __all__: Sequence[str] = (
     "Command",
     "DockerExecutor",
     "DockerSettings",
+    "DockerStream",
     "ExecResult",
     "Executor",
     "LocalExecutor",
