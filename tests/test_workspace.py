@@ -481,14 +481,17 @@ def test_skip_worktree_and_assume_unchanged_are_integrity_violations(
 def test_a_redirected_gitdir_is_an_integrity_violation(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     """The worktree's ``.git`` file is a pointer; pointed at another repository whose
     HEAD happens to be the parent, git inside the worktree answers for that repo."""
-    other = pr.build(tmp_path / "other")  # same fixture: the same shas exist there
-    assert other.initial_sha == pyrepo.initial_sha
+    other = pr.build(tmp_path / "other")
+    # give the other repo the very same parent commit (a fetch, so the sha is identical
+    # whatever the fixture's commit timestamps were) and check it out there
+    pr.git(other.path, "fetch", "-q", str(pyrepo.path), pyrepo.initial_sha)
+    pr.git(other.path, "checkout", "-q", pyrepo.initial_sha)
     with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
         (ws.root / ".git").write_text(f"gitdir: {other.path / '.git'}\n", encoding="utf-8")
-        pr.git(other.path, "checkout", "-q", other.initial_sha)
+        assert ws._head() == ws.parent  # HEAD alone would not tell the two apart
         violations = ws.enforce_integrity()
-        assert "foreign_gitdir" in [v.kind for v in violations]
-        assert (".git",) in [v.files for v in violations]
+        assert [v.kind for v in violations] == ["foreign_gitdir"]
+        assert violations[0].files == (".git",)
 
 
 def test_a_forged_index_cannot_hide_a_tracked_edit(pyrepo: pr.PyRepo, tmp_path: Path) -> None:

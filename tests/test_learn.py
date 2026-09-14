@@ -23,6 +23,7 @@ from crb.core.ledger import (
     LABEL_FAILURE_KIND,
     GradeRow,
     JsonlLedger,
+    expected_belt_sets,
 )
 from crb.core.routing import (
     REASON_CONTROLS_ESCAPES,
@@ -112,6 +113,11 @@ def _row(**kw: Any) -> GradeRow:
         "apparatus_version": "2.1",
     }
     base.update(kw)
+    # the belt set is what the stamped apparatus recorded (ledger invariant, review
+    # finding 4): 2.0–2.1 → v4, 2.2+ → v5 — unless the test names one deliberately
+    base.setdefault(
+        "belt_set", (expected_belt_sets(base["apparatus_version"], "measured") or ("v5",))[0]
+    )
     return GradeRow(**base)
 
 
@@ -915,12 +921,13 @@ class TestRemeasure:
     def test_legacy_belt_set_rows_are_stale(self, tmp_path: Path) -> None:
         r = _clean(
             task_id="1" * 40,
-            apparatus_version="v3-legacy",
+            apparatus_version="1.0-census",
             belt_set="v3-legacy",
             source_changed=None,
+            provenance="imported:census",
         )
         plan = learn.remeasure_plan([r], current_apparatus="2.1")
-        assert plan.cells[0].stale_versions == ("v3-legacy",)
+        assert plan.cells[0].stale_versions == ("1.0-census",)
 
     def test_policy_min_n(self, tmp_path: Path) -> None:
         plan = learn.remeasure_plan(

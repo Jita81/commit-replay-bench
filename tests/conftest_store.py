@@ -167,6 +167,10 @@ def grade_row(**kw: Any) -> GradeRow:
         "gold_clean": True,
     }
     base.update(kw)
+    # a belt set implies the apparatus that recorded it (ledger invariant, review finding
+    # 4): a "v4" row here stands for one written by the pre-belt-5 apparatus (2.1)
+    if "apparatus_version" not in kw and base.get("belt_set") == "v4":
+        base["apparatus_version"] = "2.1"
     return GradeRow(**base)
 
 

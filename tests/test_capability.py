@@ -57,6 +57,7 @@ def _row(
     gold_clean: bool | None = None,
     belt_set: str = "v4",
     apparatus_version: str = "2.0",
+    provenance: str = "measured",
 ) -> GradeRow:
     belts = (True, True, True, True) if clean else (True, False, True, True)
     if belt_set == "v3-legacy":
@@ -85,6 +86,7 @@ def _row(
         evidence_pack_hash=PACK if clean else "",
         belt_set=belt_set,
         apparatus_version=apparatus_version,
+        provenance=provenance,
     )
 
 
@@ -225,12 +227,14 @@ def test_gold_dirty_rows_do_not_count_in_denominator() -> None:
 
 
 def test_legacy_belt_set_reported_as_separate_apparatus() -> None:
-    rows = _rows(6, 6) + _rows(6, 6, belt_set="v3-legacy", apparatus_version="1.0")
+    rows = _rows(6, 6) + _rows(
+        6, 6, belt_set="v3-legacy", apparatus_version="1.0-census", provenance="imported:census"
+    )
     m = cap.build_capability_map(rows)
     c = m.cells[0]
     assert c.belt_sets == ("v3-legacy", "v4")
-    assert m.apparatus_versions == ("1.0", "2.0")
-    assert c.stats is not None and c.stats.apparatus_versions == ("1.0", "2.0")
+    assert m.apparatus_versions == ("1.0-census", "2.0")
+    assert c.stats is not None and c.stats.apparatus_versions == ("1.0-census", "2.0")
 
 
 def test_repos_counts_distinct_contributing_repos() -> None:
@@ -576,6 +580,7 @@ def _import_census() -> list[GradeRow]:
                 gold_clean=task.get("gold_clean"),
                 evidence_pack_hash=hashlib.sha256(line.encode()).hexdigest(),
                 belt_set="v3-legacy" if legacy else "v4",
+                apparatus_version="1.0-census",
                 provenance="imported:expansion-bench/grades.jsonl",
             )
         )
