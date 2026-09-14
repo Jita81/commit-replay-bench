@@ -8,6 +8,54 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### Independent AI review pass (2026-09-14) — findings 1, 2, 4, 5, 6, 7, 8 closed
+Every finding of `docs/reviews/signoffs/2026-09-14-fable-ai-pass.md` was reproduced with its
+recorded command before it was fixed, and each reproduction is now a regression test. Finding 3
+(`oracle_unmeasured`) is the sign-off policy v2 entry below.
+- **The grader's view is independent of the builder's git (finding 1, blocks demo).**
+  `Workspace.touched_files` enumerates from the filesystem against the parent tree
+  (`ls-tree -r <parent>` object ids vs a fresh blob hash of every file); the index, `HEAD`,
+  `info/exclude` and `core.excludesFile` are never consulted, and the only ignore rules
+  honoured for an untracked path are patterns present in a `.gitignore` tracked at the
+  parent. `Workspace.enforce_integrity` is the grader's pre-flight: `HEAD == parent`, the
+  gitdir is the harness clone's, no skip-worktree / assume-unchanged bits, and the shared
+  `info/exclude` (the *main clone's*, for a linked worktree) holds only what the harness
+  recorded at create time — foreign lines are removed and reported. `grade()` disqualifies
+  on any violation (`dq_reason: worktree integrity: …`, event `grade.tamper kind=worktree`)
+  on the CLI and `run_task` paths alike; `diff_stats` diffs against the parent by sha. The
+  three reproductions (`info/exclude`, a commit inside the worktree, `--skip-worktree`)
+  each graded `clean` on `842875b` and DQ now; a forged index entry, a self-hiding
+  `.gitignore` and symlink type changes are covered too.
+- **Lint configuration is test infrastructure (finding 2; ADR-0011 amendment).**
+  `ruff.toml`/`.ruff.toml`/`.flake8`/`.pre-commit-config.yaml`, `.eslintrc*`/
+  `eslint.config.*`/`.eslintignore`/`.prettierrc*`/`prettier.config.*`/`.prettierignore`/
+  `.editorconfig` (JS only — prettier reads it), `.golangci.*`, `rustfmt.toml`/`clippy.toml`
+  (+ dotted forms), `*checkstyle*.xml`; section-aware `pyproject.toml [tool.ruff*]`,
+  `setup.cfg`/`tox.ini` `[flake8]`, `package.json` `eslintConfig`/`prettier`/`scripts.lint`,
+  `Cargo.toml [lints]`. Touching any disqualifies under belt 1b before a test runs
+  (`[tool.ruff.lint] select = []` and a nested `pkg/ruff.toml` had turned a
+  `repo_lint_clean=False` row `CLEAN`).
+- **`belt_set` must agree with the apparatus (finding 4).** `GradeRow` refuses
+  (`LedgerIntegrityError`, at construction — so at write and on read) any belt set its
+  `apparatus_version` could not have recorded: `v3-legacy` (and a `1.0-census` `v4`) only for
+  `imported:` census rows, `2.0`–`2.1` ⇒ `v4`, `2.2+` ⇒ `v5`; a `v3-legacy` row records no
+  `source_changed`. `expected_belt_sets` is the one rule.
+- **A review is anchored to the reviewed row's pack (finding 5).** `DbReviewLedger.append`
+  resolves the row by `grade_row_hash` (`row_not_found` otherwise) and the pack by the
+  row's hash, never the record's field (`pack_hash_mismatch`); a caller's pack is only
+  accepted as a self-certifying copy of the row's. `JsonlReviewLedger.append` requires the
+  pack for a verdict (`pack_required`). `check_review_anchor` is the one rule both apply.
+- **Guard (findings 6/7).** Redirection targets (`>` `>>` `<` …), `dd of=` and
+  tee/cp/mv/install/ln targets that resolve into `.git` — through a symlink when the cwd is
+  known — are refused; `TestFileGuard` classifies by what a path resolves to (`gitlink ->
+  .git`, `t2 -> tests`); a quoted or escaped paren is text, not a stray sub-shell token
+  (`grep '('`, `find … \( … \)`). Corpus: 456 honest / 461 refused lines.
+- **Guide (finding 8).** `docs/reviews/human-review-guide.md` re-baselined: twelve files to
+  read (adds `core/workspace.py`, `core/test_infra.py`, `core/lint.py`,
+  `builders/container.py`, `core/review.py`, `core/signoff.py`), ten triggers, exercises 3b
+  and 4 now DQ, new exercises 4b/4c/6b/6c, exercise 5's four bypasses refused and the live
+  gaps named; the sign-off template's tables grow to match.
+
 ### Sign-off policy v2 — an unmeasured oracle is a refusal (`signoff-policy.v2`)
 - **`oracle_unmeasured`** (`crb.core.signoff`): a cell none of whose tasks carries a
   task-level mutation score cannot be signed off — "≥ `min_oracle_strength` when
