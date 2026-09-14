@@ -135,7 +135,9 @@ def qualify(
     with Workspace.create(repo, sha, dest, config=config) as ws:
         ws.overlay_tests(cand.test_files)
         target_scope = runner.target_scope(cand.test_files)
-        red = runner.run(executor, ws.root, target_scope, timeout=timeout)
+        red = runner.run_for(
+            executor, ws.root, target_scope, timeout=timeout, authored=repo.author_date(cand.sha)
+        )
         if red.timed_out:
             _emit(on_event, "mine.skip", sha=sha, reason="target timeout at parent")
             return MineOutcome(sha, None, "target timeout at parent", time.monotonic() - started)
@@ -144,7 +146,9 @@ def qualify(
             return MineOutcome(sha, None, "target green at parent", time.monotonic() - started)
 
         belt_scope = runner.belt_scope(target_scope, cand.test_files)
-        base = runner.run(executor, ws.root, belt_scope, timeout=timeout)
+        base = runner.run_for(
+            executor, ws.root, belt_scope, timeout=timeout, authored=repo.author_date(cand.sha)
+        )
         if base.timed_out:
             _emit(on_event, "mine.skip", sha=sha, reason="baseline timeout")
             return MineOutcome(sha, None, "baseline timeout", time.monotonic() - started)
@@ -218,7 +222,9 @@ def gold_check(
     """
     try:
         ws.overlay_sources(task.src_files)
-        tgt = runner.run(executor, ws.root, task.target_tests, timeout=timeout)
+        tgt = runner.run_for(
+            executor, ws.root, task.target_tests, timeout=timeout, authored=task.authored
+        )
         if not tgt.green:
             note = (
                 "gold target timed out"
@@ -227,7 +233,9 @@ def gold_check(
             )
             _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note, lint=None)
             return task.with_(gold_clean=False, gold_note=note)
-        belt = runner.run(executor, ws.root, task.belt_scope, timeout=timeout)
+        belt = runner.run_for(
+            executor, ws.root, task.belt_scope, timeout=timeout, authored=task.authored
+        )
         if belt.timed_out or belt.parse_error:
             note = (
                 "gold belt timed out"

@@ -297,6 +297,9 @@ def test_sandbox_unavailable_propagates(fixture_repo, fix_task, harness, scratch
         def run(self, executor, root, scope, *, timeout=0):
             raise SandboxUnavailable("no docker")
 
+        def run_for(self, executor, root, scope, *, timeout=0, authored=None):
+            return self.run(executor, root, scope, timeout=timeout)
+
     with pytest.raises(SandboxUnavailable):
         nc.controls_for_task(
             fixture_repo.git,

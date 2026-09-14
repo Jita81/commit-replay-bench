@@ -1145,7 +1145,9 @@ def _red_at_parent(
     dest = Path(scratch) / f"ctrl-{config.name}-{task.short_id}-red"
     with Workspace.create(repo, task.task_id, dest, config=config) as ws:
         ws.overlay_tests(task.test_files)
-        run = runner.run(executor, ws.root, task.target_tests, timeout=timeout)
+        run = runner.run_for(
+            executor, ws.root, task.target_tests, timeout=timeout, authored=task.authored
+        )
     if run.timed_out:
         return False, "target timed out at the parent — no usable RED oracle"
     if run.green:

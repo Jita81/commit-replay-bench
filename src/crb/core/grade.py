@@ -239,6 +239,7 @@ def _redacted(run: TestRun | None) -> TestRun | None:
         run.timed_out,
         run.duration_s,
         run.parse_error,
+        run.services,  # which service instance the oracle ran against (C15)
     )
 
 
@@ -367,7 +368,9 @@ def grade(
             )
 
         # --- belt 2: target green -------------------------------------------------
-        target_run = runner.run(executor, ws.root, task.target_tests, timeout=timeout)
+        target_run = runner.run_for(
+            executor, ws.root, task.target_tests, timeout=timeout, authored=task.authored
+        )
         belts = Belts(tests_unmodified=True, target_green=target_run.green)
         _emit(
             on_event,
@@ -387,7 +390,9 @@ def grade(
             return done(target_run=target_run, note=note)
 
         # --- belt 3: no new failures vs baseline ----------------------------------
-        belt_run = runner.run(executor, ws.root, task.belt_scope, timeout=timeout)
+        belt_run = runner.run_for(
+            executor, ws.root, task.belt_scope, timeout=timeout, authored=task.authored
+        )
         if belt_run.timed_out or belt_run.parse_error:
             no_new = False
             new: set[str] = set()

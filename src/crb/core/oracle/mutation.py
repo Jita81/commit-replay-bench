@@ -694,7 +694,9 @@ def score_task(
 
     # --- baseline: the gold state must be GREEN on its own target tests ----------
     try:
-        baseline = runner.run(executor, ws.root, task.target_tests, timeout=timeout)
+        baseline = runner.run_for(
+            executor, ws.root, task.target_tests, timeout=timeout, authored=task.authored
+        )
     except SandboxUnavailable:
         raise
     except Exception as exc:  # a harness error is never a strength number
@@ -758,7 +760,9 @@ def score_task(
             tick = _next_tick(tick)
             _write_version(files[m.path], m.mutated_source.encode("utf-8"), tick)
             try:
-                run = runner.run(executor, ws.root, task.target_tests, timeout=timeout)
+                run = runner.run_for(
+                    executor, ws.root, task.target_tests, timeout=timeout, authored=task.authored
+                )
             except SandboxUnavailable:
                 raise
             except Exception as exc:

@@ -380,6 +380,9 @@ class _StubRunner:
         self._runs = list(runs)
         self.calls = 0
 
+    def run_for(self, executor, root, scope, *, timeout=0, authored=None):
+        return self.run(executor, root, scope, timeout=timeout)
+
     def run(self, executor, root, scope, *, timeout=0):
         self.calls += 1
         item = self._runs.pop(0)
