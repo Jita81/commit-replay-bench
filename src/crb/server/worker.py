@@ -101,6 +101,7 @@ from crb.core.oracle.controls import (
     ControlRow,
     ControlsReport,
     controls_for_task,
+    transform_stamp,
 )
 from crb.core.oracle.mutation import (
     DEFAULT_MAX_MUTANTS,
@@ -1057,6 +1058,7 @@ class Worker:
             {
                 "apparatus_version": APPARATUS_VERSION,
                 "controls_version": CONTROLS_VERSION,
+                "transform": transform_stamp(ctx.config),
                 "controls": list(controls),
                 "repo": ctx.config.name,
                 "runner": runner.name,

@@ -19,6 +19,7 @@ and be recorded here.
 | [0007](0007-abstract-cell-export-only.md) | Cross-organisation learning: abstract cell export only | Accepted | 2026-09-13 |
 | [0008](0008-stdlib-core-and-downward-layers.md) | Standard-library core and downward-only layers | Accepted | 2026-09-13 |
 | [0009](0009-text-level-mutators.md) | Text-level mutators for the non-Python languages (`uncompilable` excluded; family stamped) | Accepted | 2026-09-13 |
+| [0010](0010-polyglot-negative-controls.md) | Polyglot negative controls (Go + JavaScript text transforms; env_poison escape = belt-1 gap) | Accepted | 2026-09-14 |
 
 ## Format
 
