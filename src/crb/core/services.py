@@ -845,6 +845,10 @@ class ServiceSession:
                 self._activate(spec, variant, existing, compose_argv, fixtures_dir, adopted=True)
                 return
             self._remove(spec, existing, compose_argv)
+        # another ERA of this service left running by a previous process holds the same host
+        # port: evict it before starting (a worker restart between eras otherwise fails with
+        # "port is already allocated" — mesh-client, 2026-09-14)
+        self._evict_other_variants(spec, variant, fixtures_dir)
         container = self._start(spec, variant, container_name, compose_argv, fixtures_dir)
         self._wait_healthy(spec, container, compose_argv)
         self._activate(spec, variant, container, compose_argv, fixtures_dir, adopted=False)
@@ -984,6 +988,27 @@ class ServiceSession:
             "-f",
             str(override_path),
         )
+
+    def _evict_other_variants(
+        self, spec: ServiceSpec, variant: Variant, fixtures_dir: Path | None
+    ) -> None:
+        """Remove running containers of this service whose name carries a DIFFERENT
+        variant (``crb-<repo>-<service>-<variant>…``) — they were started by an earlier
+        process for another era and share the host port."""
+        prefix = safe_name("crb", self.repo, spec.name, "")
+        res = self._docker("ps", "--filter", f"name={prefix}", "--format", "{{.Names}}")
+        if not res.ok:
+            return
+        keep = safe_name("crb", self.repo, spec.name, variant.name)
+        for name in res.stdout.split():
+            if name == keep or name.startswith(keep + "-") or name.startswith(keep + "_"):
+                continue
+            for other in spec.variants or ():
+                other_name = safe_name("crb", self.repo, spec.name, other.name)
+                if name.startswith(other_name):
+                    argv = self._compose_argv(spec, other, fixtures_dir) if spec.compose else ()
+                    self._remove(spec, name, argv)
+                    break
 
     def _find_container(self, spec: ServiceSpec, name: str, compose_argv: tuple[str, ...]) -> str:
         """The id/name of a RUNNING instance under our name, or ``""``."""

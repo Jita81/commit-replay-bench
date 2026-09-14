@@ -124,6 +124,13 @@ class FakeDocker:
         if argv[0] == "rm":
             self.running.pop(argv[-1], None)
             return ok
+        if argv[0] == "ps":
+            # `docker ps --filter name=<prefix> --format {{.Names}}` — running names only
+            flt = (
+                argv[argv.index("--filter") + 1].removeprefix("name=") if "--filter" in argv else ""
+            )
+            names = [n for n in self.running if n.startswith(flt)]
+            return ExecResult(0, "".join(n + "\n" for n in names), "", False, 0.01)
         if argv[0] == "logs":
             return ExecResult(0, self.logs, "", False, 0.01)
         if argv[0] == "build":
@@ -996,3 +1003,41 @@ def test_services_state_dir_honours_services_dir_override(monkeypatch, tmp_path)
     assert runner._services_state_dir() == tmp_path / "env" / "services"
     monkeypatch.setenv("CRB_SERVICES_DIR", str(tmp_path / "shared"))
     assert runner._services_state_dir() == tmp_path / "shared" / "r"
+
+
+def test_switching_era_evicts_the_other_variant_left_by_a_previous_process(tmp_path: Path) -> None:
+    """A worker restart between eras left the committed-certs container bound to :8701;
+    starting generated-certs failed with 'port is already allocated' (mesh-client,
+    2026-09-14). Another era's container is evicted before ours starts."""
+    docker = FakeDocker()
+    spec = parse_services(
+        {
+            "services": [
+                {
+                    "name": "svc",
+                    "image": "img:1",
+                    "ports": ["8701:443"],
+                    "health": {"url": "http://localhost:8701/health", "timeout_s": 5},
+                    "variants": [
+                        {"name": "old", "era": {"before": "2025-01-01"}},
+                        {"name": "new", "era": {"after": "2025-01-01"}},
+                    ],
+                }
+            ]
+        }
+    )[0]
+    stale = safe_name("crb", "r", "svc", "old")
+    docker.running[stale] = "img:1"  # left behind by an earlier process, not in our session
+    session = ServiceSession(
+        (spec,),
+        docker,
+        clone=tmp_path,
+        repo="r",
+        state_dir=tmp_path / "s",
+        probe=docker.probe,
+        clock=lambda: 0.0,
+        sleep=lambda _s: None,
+    )
+    session.ensure("2026-02-01T00:00:00Z")
+    assert stale not in docker.running
+    assert safe_name("crb", "r", "svc", "new") in docker.running
