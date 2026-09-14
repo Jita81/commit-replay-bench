@@ -855,3 +855,329 @@ def test_evaluate_lint_false_leaves_belt_five_unevaluated_for_the_controls(
     ws2 = _trial(repo, config, task, tmp_path / "t2")
     ws2.overlay_sources(task.src_files)
     assert _grade(ws2, task, config).belts.repo_lint_clean is False
+
+
+# ---------------------------------------------------------------------------
+# 6. tsc — belt 5 runs the type checker where the repository's CI does (ADR-0011
+#    amendment, 2026-09-14: 4 of 10 clean NHS rows failed their own `lint:types`)
+# ---------------------------------------------------------------------------
+
+_TSC_BIN = "node_modules/.bin/tsc"
+
+
+def _tsc_tool(**kw: Any) -> lint_mod.LintTool:
+    return lint_mod.LintTool(
+        "tsc",
+        ("tsc", "--build", "tsconfig.json", "--pretty", "false"),
+        lint_mod.PATHS_ALL,
+        exts=(".ts", ".tsx", ".mjs", ".js"),
+        findings_rcs=frozenset({1, 2}),
+        findings_re=lint_mod.TSC_FINDINGS_RE,
+        **kw,
+    )
+
+
+def test_tsc_evidence_follows_the_nhs_repositories(tmp_path: Path) -> None:
+    """nhsuk-frontend and nhsuk-react-components: ``"lint:types": "tsc --build
+    tsconfig.json --pretty"`` (CI: ``npm run lint:types`` / ``yarn lint``) — honoured
+    verbatim; without ``tsconfig.json`` nothing is evidenced; other scripts and a CI
+    line are the weaker forms."""
+    pkg: dict[str, Any] = {"scripts": {"lint:types": "tsc --build tsconfig.json --pretty"}}
+    assert lint_mod.tsc_evidence(tmp_path, pkg) is None  # no tsconfig.json
+    (tmp_path / "tsconfig.json").write_text('{"files": [], "references": []}')
+    assert lint_mod.tsc_evidence(tmp_path, pkg) == (
+        "tsc:lint:types",
+        ["--build", "tsconfig.json", "--pretty"],
+    )
+    # ``npx tsc …`` / ``yarn tsc …`` scripts are the same tool
+    assert lint_mod.tsc_evidence(tmp_path, {"scripts": {"lint:types": "npx tsc --noEmit"}}) == (
+        "tsc:lint:types",
+        ["--noEmit"],
+    )
+    # a chained lint:types cannot be honoured verbatim: the build form is used
+    chained = {"scripts": {"lint:types": "tsc --build && echo ok"}}
+    assert lint_mod.tsc_evidence(tmp_path, chained) == (
+        "tsc:lint:types",
+        ["--build", "tsconfig.json"],
+    )
+    # any other script invoking tsc: --build when it says so, else --noEmit -p
+    assert lint_mod.tsc_evidence(tmp_path, {"scripts": {"typecheck": "tsc --noEmit"}}) == (
+        "tsc:script:typecheck",
+        ["--noEmit", "-p", "tsconfig.json"],
+    )
+    assert lint_mod.tsc_evidence(tmp_path, {"scripts": {"build": "tsc -b"}}) == (
+        "tsc:script:build",
+        ["--build", "tsconfig.json"],
+    )
+    # ``tsc --build --clean`` (nhsuk-frontend's postclean) checks nothing: not evidence
+    assert (
+        lint_mod.tsc_evidence(tmp_path, {"scripts": {"postclean": "tsc --build --clean"}}) is None
+    )
+    # a script that merely mentions tsc in another word is not tsc
+    assert lint_mod.tsc_evidence(tmp_path, {"scripts": {"x": "tscribe run"}}) is None
+    # typescript in devDependencies + a CI line running tsc
+    dev = {"devDependencies": {"typescript": "^6.0.3"}}
+    assert lint_mod.tsc_evidence(tmp_path, dev) is None  # no CI evidence yet
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "ci.yml").write_text("steps:\n  - run: npx tsc --noEmit\n")
+    assert lint_mod.tsc_evidence(tmp_path, dev) == ("tsc:ci", ["--noEmit", "-p", "tsconfig.json"])
+
+
+def test_js_plan_appends_tsc_after_the_linters_and_never_on_koa(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "node_modules" / ".bin"
+    bin_dir.mkdir(parents=True)
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "scripts": {"lint:types": "tsc --build tsconfig.json --pretty"},
+                "devDependencies": {"typescript": "^6.0.3"},
+            }
+        )
+    )
+    (tmp_path / "tsconfig.json").write_text("{}")
+    # the evidence without the binary: nothing to run, nothing detected
+    assert lint_mod.js_plan(tmp_path, bin_dir) is None
+    (bin_dir / "tsc").write_text("")
+    plan = lint_mod.js_plan(tmp_path, bin_dir)
+    assert plan is not None and plan.detected == "tsc:lint:types"
+    (tool,) = plan.tools
+    assert tool.argv == (
+        str(bin_dir / "tsc"),
+        "--build",
+        "tsconfig.json",
+        "--pretty",
+        "--pretty",
+        "false",
+    )  # the script verbatim, then --pretty false so the findings parse (the last wins)
+    assert tool.paths == "all" and tool.findings_re == lint_mod.TSC_FINDINGS_RE
+    assert tool.findings_rcs == frozenset({1, 2})
+    assert tool.concerns(["src/a.mjs"]) and not tool.concerns(["README.md", "styles.scss"])
+    # eslint + prettier first, tsc appended
+    (tmp_path / "eslint.config.mjs").write_text("export default [];\n")
+    (tmp_path / ".prettierrc").write_text("{}")
+    (bin_dir / "eslint").write_text("")
+    (bin_dir / "prettier").write_text("")
+    plan = lint_mod.js_plan(tmp_path, bin_dir)
+    assert plan is not None and plan.detected == "eslint+prettier+tsc:lint:types"
+    assert [t.name for t in plan.tools] == ["eslint", "prettier", "tsc"]
+    # under a sandbox the image's PATH resolves it
+    plan = lint_mod.js_plan(tmp_path, None)
+    assert plan is not None and plan.tools[-1].argv[0] == "tsc"
+    # koa: standard, no tsconfig → unchanged
+    for f in ("eslint.config.mjs", ".prettierrc", "tsconfig.json"):
+        (tmp_path / f).unlink()
+    (tmp_path / "package.json").write_text(json.dumps({"scripts": {"lint": "standard"}}))
+    (bin_dir / "standard").write_text("")
+    plan = lint_mod.js_plan(tmp_path, bin_dir)
+    assert plan is not None and plan.detected == "standard"
+
+
+def test_tsc_findings_are_attributed_to_changed_files_only(tmp_path: Path) -> None:
+    """A whole-project ``tsc`` reports every error in the tree; only the ones in CHANGED
+    files are the builder's."""
+    tool = _tsc_tool()
+    out = (
+        "packages/nhsuk-frontend/src/nhsuk/components/scroll.mjs(47,12): error TS2339: "
+        "Property 'x' does not exist on type 'Y'.\n"
+        "./shared/legacy.ts(3,1): error TS7006: Parameter 'a' implicitly has an 'any' type.\n"
+        "some noise line\n"
+        f"{tmp_path}/shared/legacy.ts(9,1): error TS2322: Type 'number' is not assignable.\n"
+    )
+    changed = ["packages/nhsuk-frontend/src/nhsuk/components/scroll.mjs"]
+    assert lint_mod.attribute_findings(tool, out, tmp_path, changed) == (1, 2)
+    assert lint_mod.attribute_findings(tool, out, tmp_path, ["shared/legacy.ts"]) == (2, 1)
+    assert lint_mod.attribute_findings(tool, out, tmp_path, ["other.ts"]) == (0, 3)
+    # the run: a finding in a changed file rejects (attributed), with both counts recorded
+    ex = FakeExecutor(_res(1, out))
+    run = lint_mod.run_plan(lint_mod.LintPlan((tool,), "tsc:lint:types"), ex, tmp_path, changed)
+    assert run.ok is False and run.error == ""
+    assert run.note == "tsc rejected 1 finding(s) in changed files (2 elsewhere, not counted)"
+    (step,) = run.steps
+    assert step.verdict is False and (step.findings_changed, step.findings_other) == (1, 2)
+    assert step.files == ()  # whole-project: no file arguments
+    assert ex.commands[0].argv == tool.argv
+    # rc 2 (diagnostics present, outputs generated) is a findings code too
+    run = lint_mod.run_plan(
+        lint_mod.LintPlan((tool,), "tsc:lint:types"), FakeExecutor(_res(2, out)), tmp_path, changed
+    )
+    assert run.ok is False and run.steps[0].findings_changed == 1
+    # the round trip keeps the counts
+    again = lint_mod.LintRun.from_dict(json.loads(json.dumps(run.to_dict())))
+    assert again.steps[0].findings_changed == 1 and again.steps[0].findings_other == 2
+
+
+def test_tsc_errors_only_in_unchanged_files_are_debt_not_the_builders(tmp_path: Path) -> None:
+    tool = _tsc_tool()
+    out = "shared/legacy.ts(3,1): error TS7006: Parameter 'a' implicitly has an 'any' type.\n"
+    plan = lint_mod.LintPlan((tool,), "tsc:lint:types")
+    run = lint_mod.run_plan(plan, FakeExecutor(_res(1, out)), tmp_path, ["src/new.ts"])
+    assert run.ok is True and run.error == ""
+    assert run.note == (
+        "tsc: 1 pre-existing finding(s) in unchanged files, 0 in changed files — not "
+        "attributed to the patch"
+    )
+    (step,) = run.steps
+    assert step.verdict is True and step.rc == 1
+    assert (step.findings_changed, step.findings_other) == (0, 1)
+    # a later step still runs after an attributed-away rejection
+    ruff = lint_mod.LintTool("after", ("after",), lint_mod.PATHS_ALL)
+    ex = FakeExecutor(_res(1, out), _res(0))
+    run = lint_mod.run_plan(lint_mod.LintPlan((tool, ruff), "x"), ex, tmp_path, ["src/new.ts"])
+    assert run.ok is True and len(run.steps) == 2 and len(ex.commands) == 2
+    # a rejection that names NO file cannot be attributed: harness error, never a pass
+    run = lint_mod.run_plan(
+        plan,
+        FakeExecutor(_res(1, "error TS5083: Cannot read file 'tsconfig.dev.json'.\n")),
+        tmp_path,
+        ["src/new.ts"],
+    )
+    assert run.ok is False and "no finding attributable to a file" in run.error
+    assert run.steps[0].verdict is None
+    # a read-only sandbox mount (tsbuildinfo cannot be written) is a harness error too
+    tool_ro = _tsc_tool(unrunnable_re=r"error TS5033: Could not write file")
+    run = lint_mod.run_plan(
+        lint_mod.LintPlan((tool_ro,), "x"),
+        FakeExecutor(_res(1, "error TS5033: Could not write file 'x.tsbuildinfo': EROFS\n")),
+        tmp_path,
+        ["src/new.ts"],
+    )
+    assert run.ok is False and "not runnable" in run.error
+    # a timeout is a failure, attributed or not
+    run = lint_mod.run_plan(plan, FakeExecutor(_res(1, out, timed_out=True)), tmp_path, ["a.ts"])
+    assert run.ok is False and run.steps[0].timed_out
+    # rc 3 (invalid project) is the tool's own failure
+    run = lint_mod.run_plan(plan, FakeExecutor(_res(3, "")), tmp_path, ["a.ts"])
+    assert run.ok is False and "tool failed (rc=3)" in run.error
+    # nothing type-checkable changed: the step is skipped, the belt not evaluated
+    run = lint_mod.run_plan(plan, FakeExecutor(), tmp_path, ["README.md"])
+    assert run.ok is None and run.steps == ()
+    with pytest.raises(ValueError, match="named group 'file'"):
+        lint_mod.LintTool("x", ("x",), findings_re=r"\d+")
+
+
+def test_plan_from_config_accepts_findings_re() -> None:
+    plan = lint_mod.plan_from_config(
+        {
+            "command": ["tsc", "--noEmit", "--pretty", "false"],
+            "paths": "all",
+            "exts": [".ts"],
+            "findings_rc": [1, 2],
+            "findings_re": lint_mod.TSC_FINDINGS_RE,
+        }
+    )
+    assert plan is not None and plan.tools[0].findings_re == lint_mod.TSC_FINDINGS_RE
+    assert plan.tools[0].to_dict()["findings_re"] == lint_mod.TSC_FINDINGS_RE
+
+
+def _fake_tsc(bin_dir: Path, *, broken_files: tuple[str, ...], debt: tuple[str, ...] = ()) -> Path:
+    """A fake ``tsc`` in the NHS output shape: an error line per ``broken_files`` entry
+    that exists and per ``debt`` entry (pre-existing, always), exit 1 when any."""
+    lines = ["n=0"]
+    for f in broken_files:
+        lines.append(
+            f'[ -f "{f}" ] && grep -q "TYPE_ERROR" "{f}" && {{ echo "{f}(2,9): error TS2322: Type \'number\' is not assignable to type \'string\'."; n=1; }}'
+        )
+    for f in debt:
+        lines.append(
+            f"echo \"{f}(1,1): error TS7006: Parameter 'a' implicitly has an 'any' type.\"; n=1"
+        )
+    lines.append('[ "$n" = "1" ] && exit 1\nexit 0\n')
+    return _script(bin_dir / "tsc", "\n".join(lines))
+
+
+@pytest.mark.toolchain("node")
+@pytest.mark.skipif(not langs.has_tool("node"), reason="node not on PATH")
+def test_node_tsc_type_error_in_a_changed_file_is_a_lint_failure(tmp_path: Path) -> None:
+    """The NHS shape (``lint:types`` + ``tsconfig.json`` + ``node_modules/.bin/tsc``): a
+    patch that leaves a type error in a file it touched grades ``repo_lint_clean=False``,
+    not clean, ``failure_kind="lint"`` — the row the repository's own CI would reject."""
+    root, feat_sha = noderepo.build(tmp_path, "node", extra=noderepo.ts_extra("node"))
+    bin_dir = root / "node_modules" / ".bin"
+    _fake_tsc(bin_dir, broken_files=(noderepo.SRC_TYPES,))
+    repo, config = GitRepo(root), noderepo.config("node")
+    task = _mine(repo, config, feat_sha, tmp_path)
+    ws = _trial(repo, config, task, tmp_path / "t")
+    ws.overlay_sources(task.src_files)
+    # the builder also edited the type-checked module and got it wrong
+    (ws.root / noderepo.SRC_TYPES).write_text(
+        noderepo.TYPES_OK.replace(
+            "return `n=${n}`;", "const out: string = n; // TYPE_ERROR\n  return out;"
+        )
+    )
+    res = _grade(ws, task, config)
+    assert res.lint_run is not None and res.lint_run.detected == "tsc:lint:types"
+    assert res.lint_run.steps[0].argv[1:] == (
+        "--build",
+        "tsconfig.json",
+        "--pretty",
+        "--pretty",
+        "false",
+    )
+    assert res.belts.target_green is True and res.belts.repo_lint_clean is False
+    assert not res.clean and res.error == ""
+    assert (res.lint_run.steps[0].findings_changed, res.lint_run.steps[0].findings_other) == (1, 0)
+    assert lg.grade_row_from_result(res, task, pack_hash="c" * 64).failure_kind == "lint"
+    ws.remove()
+
+
+@pytest.mark.toolchain("node")
+@pytest.mark.skipif(not langs.has_tool("node"), reason="node not on PATH")
+def test_node_tsc_pre_existing_error_in_an_unchanged_file_is_not_attributed(tmp_path: Path) -> None:
+    """The maintainers' type debt in a file the builder never touched: belt 5 stays
+    ``True`` and the run's note records the debt — never the builder's ``lint``."""
+    root, feat_sha = noderepo.build(tmp_path, "node", extra=noderepo.ts_extra("node"))
+    bin_dir = root / "node_modules" / ".bin"
+    _fake_tsc(bin_dir, broken_files=(), debt=(noderepo.SRC_TYPES,))
+    repo, config = GitRepo(root), noderepo.config("node")
+    task = _mine(repo, config, feat_sha, tmp_path)
+    ws = _trial(repo, config, task, tmp_path / "t")
+    ws.overlay_sources(task.src_files)  # touches src/sub.js only; src/types.ts is untouched
+    res = _grade(ws, task, config)
+    assert res.lint_run is not None and res.lint_run.detected == "tsc:lint:types"
+    assert res.belts.repo_lint_clean is True and res.clean
+    assert "1 pre-existing finding(s) in unchanged files" in res.lint_run.note
+    (step,) = res.lint_run.steps
+    assert step.rc == 1 and step.verdict is True
+    assert (step.findings_changed, step.findings_other) == (0, 1)
+    ws.remove()
+
+
+@pytest.mark.toolchain("tsc")
+@pytest.mark.skipif(
+    not (langs.has_tool("node") and langs.has_tool("tsc")), reason="tsc not on PATH"
+)
+def test_real_tsc_attributes_type_errors_by_file(tmp_path: Path) -> None:
+    """The real TypeScript compiler (whatever version is on PATH): its ``file(line,col):
+    error TSnnnn`` lines parse under ``TSC_FINDINGS_RE``; a type error the builder
+    introduced rejects, the maintainers' pre-existing one does not."""
+    tsc_host = Path(shutil.which("tsc") or "")
+    extra = noderepo.ts_extra("node", lint_types=noderepo.LINT_TYPES_NOEMIT)
+    extra["src/legacy.ts"] = noderepo.TYPES_BROKEN  # the maintainers' debt, untouched
+    root, feat_sha = noderepo.build(tmp_path, "node", extra=extra)
+    bin_dir = root / "node_modules" / ".bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "tsc").symlink_to(tsc_host.resolve())
+    repo, config = GitRepo(root), noderepo.config("node")
+    task = _mine(repo, config, feat_sha, tmp_path)
+    # 1. the gold patch alone: legacy.ts's error is pre-existing → belt True, noted
+    ws = _trial(repo, config, task, tmp_path / "t1")
+    ws.overlay_sources(task.src_files)
+    res = _grade(ws, task, config)
+    assert res.lint_run is not None, res
+    assert res.lint_run.detected == "tsc:lint:types" and res.lint_run.error == ""
+    assert res.belts.repo_lint_clean is True and res.clean, res.lint_run
+    (step,) = res.lint_run.steps
+    assert step.rc in (1, 2) and (step.findings_changed, step.findings_other) == (0, 1)
+    assert "src/legacy.ts(2," in step.tail
+    ws.remove()
+    # 2. the builder breaks the module it touched → attributed, belt False, kind lint
+    ws2 = _trial(repo, config, task, tmp_path / "t2")
+    ws2.overlay_sources(task.src_files)
+    (ws2.root / noderepo.SRC_TYPES).write_text(noderepo.TYPES_BROKEN)
+    res2 = _grade(ws2, task, config)
+    assert res2.lint_run is not None and res2.belts.repo_lint_clean is False and not res2.clean
+    (step2,) = res2.lint_run.steps
+    assert (step2.findings_changed, step2.findings_other) == (1, 1)
+    assert lg.grade_row_from_result(res2, task, pack_hash="c" * 64).failure_kind == "lint"
+    ws2.remove()

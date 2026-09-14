@@ -30,6 +30,24 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   how many of the cell's tasks are scored; the clause renders as non-overridable.
 - Walkthrough 08 seeds the signable cell with an `oracle` run as well.
 
+### Belt 5 runs `tsc` where the repository's CI does (ADR-0011 amendment)
+- `crb.core.lint.tsc_evidence` / `js_plan`: a JavaScript / TypeScript repository whose
+  `package.json` `scripts["lint:types"]` (or another script, or its CI) runs `tsc` and
+  that carries `tsconfig.json` + `node_modules/.bin/tsc` gets a `tsc` step appended to
+  its belt-5 plan — the script verbatim + `--pretty false` (nhsuk-frontend and
+  nhsuk-react-components: `tsc --build tsconfig.json --pretty`). `[measured 2026-09-14]`
+  4 of 10 clean NHS rows failed the repositories' own type check; belt 5 never ran it.
+- Whole-project, attributed per file: `LintTool.findings_re` (`TSC_FINDINGS_RE`) makes
+  the rejection count only findings in CHANGED files (`LintStep.findings_changed` /
+  `findings_other`, in the pack); errors only in unchanged files are the maintainers'
+  debt — belt `True` with the counts on the run's note; a rejection naming no file is a
+  harness error, never a pass. `RepoConfig.lint.findings_re` declares the same for any
+  other whole-project tool. `lint_run.detected` records `…+tsc:lint:types`.
+- Guard corpus: the 19 refusal groups of the NHS + public measurement pinned with the
+  independent decider's verdicts (9 honest / 10 refused, provenance per line); `npx
+  standard` on koa is honest — the pre-fill's "not in node_modules/.bin" came from a
+  cwd-less check.
+
 ## [2.0.0a1] — 2026-09-14 — first releasable v2
 
 Apparatus version **2.2** (2.0 → 2.1 in Wave A, 2.1 → 2.2 in Wave B; the sections below

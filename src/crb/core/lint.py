@@ -37,6 +37,21 @@ counts against the patch exactly as the repository's CI would count it against
 the PR; a task whose maintainers' own patch fails belt 5 is not a fair lint
 observation and belongs to the gold check (see ADR-0011, follow-ups).
 
+Whole-project tools with per-file findings (``tsc``)
+----------------------------------------------------
+``tsc`` has no per-file mode once a repository uses project references, so it runs
+whole-project — and a whole-project run reports every pre-existing type error in
+the tree, not only the patch's. A tool that declares ``findings_re`` (a pattern with
+a ``file`` group over its output, e.g. tsc's ``file(line,col): error TSxxxx``) has
+its rejection ATTRIBUTED: the step counts findings in CHANGED files against
+findings elsewhere, and rejects only when a changed file is named
+(``LintStep.findings_changed`` / ``findings_other`` record both). Findings only in
+unchanged files are the maintainers' debt, recorded on the run's ``note`` and never
+the builder's. A rejection whose findings name no file at all (a global ``error
+TS5083`` and the like) cannot be attributed and is a harness error — never a pass.
+Attribution is per FILE, not per line: a pre-existing error in a file the builder
+touched still counts, exactly as the repository's CI would count it on the PR.
+
 Everything here is standard-library only and decides nothing about ``clean`` —
 :mod:`crb.core.grade` folds :attr:`LintRun.ok` into the belts.
 """
@@ -97,6 +112,12 @@ class LintTool:
     ``cargo fmt`` with rc 1 and ``'cargo-fmt' is not installed for the toolchain``
     ``[measured 2026-09-14]``, which would otherwise read as "the patch is not
     formatted". Output matching the pattern is a harness error whatever the rc.
+
+    ``findings_re`` (a pattern with a named ``file`` group, matched per output line)
+    makes a whole-project tool's rejection attributable to the CHANGED files — see
+    the module docstring. With ``paths="all"`` and ``exts`` set, the step is skipped
+    when no changed file has one of the extensions (a type checker has nothing to say
+    about a patch that touched no source it checks).
     """
 
     name: str
@@ -108,6 +129,7 @@ class LintTool:
     env: Mapping[str, str] = field(default_factory=dict)
     writable_paths: tuple[str, ...] = ()
     unrunnable_re: str = ""
+    findings_re: str = ""
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -122,6 +144,8 @@ class LintTool:
         object.__setattr__(self, "env", dict(self.env))
         object.__setattr__(self, "writable_paths", tuple(str(p) for p in self.writable_paths))
         re.compile(self.unrunnable_re)  # a bad pattern is a configuration error, not a verdict
+        if self.findings_re and "file" not in re.compile(self.findings_re).groupindex:
+            raise ValueError(f"lint tool {self.name!r}: findings_re needs a named group 'file'")
 
     def files_for(self, changed: Iterable[str]) -> tuple[str, ...]:
         """The changed files this tool is handed (``paths="changed"`` only)."""
@@ -129,6 +153,14 @@ class LintTool:
             return ()
         out = [f for f in changed if not self.exts or f.endswith(self.exts)]
         return tuple(out[:MAX_LINT_FILES])
+
+    def concerns(self, changed: Iterable[str]) -> bool:
+        """Does this step have anything to say about ``changed``? ``paths="changed"``:
+        iff it is handed a file; ``paths="all"``: unless ``exts`` is set and no changed
+        file has one of them."""
+        if self.paths == PATHS_CHANGED:
+            return bool(self.files_for(changed))
+        return not self.exts or any(f.endswith(self.exts) for f in changed)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -139,6 +171,7 @@ class LintTool:
             "findings_rcs": sorted(self.findings_rcs),
             "stdout_is_findings": self.stdout_is_findings,
             "unrunnable_re": self.unrunnable_re,
+            "findings_re": self.findings_re,
         }
 
 
@@ -183,7 +216,13 @@ class LintPlan:
 class LintStep:
     """One lint command as it ran. ``verdict`` is ``True`` (accepted), ``False``
     (rejected or timed out) or ``None`` (could not run — see ``error``). The tail
-    is redacted and capped at construction, like every other run record."""
+    is redacted and capped at construction, like every other run record.
+
+    ``findings_changed`` / ``findings_other`` are the attributed counts of a tool
+    with ``findings_re`` (findings naming a changed file / any other file); both
+    stay 0 for every other tool, so a reader can tell "no attribution" from "none
+    found" by the tool's declaration, never by the numbers.
+    """
 
     tool: str
     argv: tuple[str, ...]
@@ -194,6 +233,8 @@ class LintStep:
     timed_out: bool = False
     duration_s: float = 0.0
     error: str = ""
+    findings_changed: int = 0
+    findings_other: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "argv", tuple(str(a) for a in self.argv))
@@ -212,6 +253,8 @@ class LintStep:
             "timed_out": self.timed_out,
             "duration_s": round(self.duration_s, 3),
             "error": self.error,
+            "findings_changed": self.findings_changed,
+            "findings_other": self.findings_other,
         }
 
     @classmethod
@@ -226,6 +269,8 @@ class LintStep:
             timed_out=bool(d.get("timed_out", False)),
             duration_s=float(d.get("duration_s", 0.0)),
             error=str(d.get("error", "")),
+            findings_changed=int(d.get("findings_changed", 0) or 0),
+            findings_other=int(d.get("findings_other", 0) or 0),
         )
 
 
@@ -311,6 +356,40 @@ def _read_exit(tool: LintTool, res: ExecResult) -> tuple[bool | None, str]:
     return None, f"{tool.name}: tool failed (rc={res.returncode})"
 
 
+def _norm_path(path: str, root: Path) -> str:
+    """A finding's path as the changed-file list spells it: root-relative, POSIX,
+    no leading ``./``; an absolute path under ``root`` is made relative to it."""
+    p = path.strip().strip("'\"").replace("\\", "/")
+    if p.startswith("/"):
+        try:
+            p = Path(p).resolve().relative_to(Path(root).resolve()).as_posix()
+        except ValueError:
+            return p
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+
+def attribute_findings(
+    tool: LintTool, output: str, root: Path, changed_files: Sequence[str]
+) -> tuple[int, int]:
+    """``(in changed files, in other files)`` — how many findings of a rejecting
+    ``findings_re`` tool name a CHANGED file versus any other file. Per FILE, per
+    output line; a line the pattern does not match is not a finding."""
+    pattern = re.compile(tool.findings_re)
+    changed = {_norm_path(f, root) for f in changed_files}
+    mine = other = 0
+    for line in output.splitlines():
+        m = pattern.search(line)
+        if not m:
+            continue
+        if _norm_path(m.group("file"), root) in changed:
+            mine += 1
+        else:
+            other += 1
+    return mine, other
+
+
 def run_plan(
     plan: LintPlan,
     executor: Executor,
@@ -323,15 +402,19 @@ def run_plan(
     first step that does not accept (later steps cannot change the verdict).
 
     A launch error (``OSError``: the binary is missing on the host) is a harness
-    error, recorded as rc 127 with the exception text — never a pass.
+    error, recorded as rc 127 with the exception text — never a pass. A rejecting
+    step with ``findings_re`` is attributed (module docstring): findings only in
+    unchanged files leave the step accepted and put the counts on the run's note;
+    findings naming no file at all are a harness error.
     """
     started = time.monotonic()
     t = timeout or plan.timeout
     steps: list[LintStep] = []
+    notes: list[str] = []
     ran = 0
     for tool in plan.tools:
         files = tool.files_for(changed_files)
-        if tool.paths == PATHS_CHANGED and not files:
+        if not tool.concerns(changed_files):
             continue
         ran += 1
         argv = (*tool.argv, *files)
@@ -361,6 +444,20 @@ def run_plan(
             break
         verdict, error = _read_exit(tool, res)
         rc = _TIMEOUT_RC if res.timed_out else res.returncode
+        mine = other = 0
+        if verdict is False and not res.timed_out and tool.findings_re:
+            mine, other = attribute_findings(tool, res.combined, root, changed_files)
+            if mine == 0 and other > 0:
+                verdict = True  # the maintainers' debt in files the builder never touched
+                notes.append(
+                    f"{tool.name}: {other} pre-existing finding(s) in unchanged files, 0 in "
+                    "changed files — not attributed to the patch"
+                )
+            elif mine == 0:
+                verdict, error = (
+                    None,
+                    f"{tool.name}: rejected (rc={rc}) with no finding attributable to a file",
+                )
         step = LintStep(
             tool.name,
             argv,
@@ -371,6 +468,8 @@ def run_plan(
             res.timed_out,
             res.duration_s,
             error,
+            mine,
+            other,
         )
         steps.append(step)
         if verdict is not True:
@@ -391,15 +490,21 @@ def run_plan(
     if last.timed_out:
         return LintRun(plan.detected, tuple(steps), False, f"{last.tool} timed out", "", duration)
     if last.verdict is False:
+        what = (
+            f"{last.findings_changed} finding(s) in changed files"
+            f" ({last.findings_other} elsewhere, not counted)"
+            if last.findings_changed
+            else f"{len(last.files) or 'the'} changed file(s)"
+        )
         return LintRun(
             plan.detected,
             tuple(steps),
             False,
-            f"{last.tool} rejected {len(last.files) or 'the'} changed file(s)",
+            f"{last.tool} rejected {what}",
             "",
             duration,
         )
-    return LintRun(plan.detected, tuple(steps), True, "", "", duration)
+    return LintRun(plan.detected, tuple(steps), True, "; ".join(notes), "", duration)
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +523,8 @@ def plan_from_config(lint: Mapping[str, Any] | None) -> LintPlan | None:
          "findings_rc": [1],                  # optional: exit codes meaning "rejected"
          "stdout_is_findings": false,         # optional: gofmt -l style
          "unrunnable_re": "",                 # optional: output that means "tool missing"
+         "findings_re": "",                   # optional: per-line pattern with a `file` group
+                                              #   → rejection attributed to changed files
          "timeout": 600}                      # optional: seconds per step
 
     ``{"command": []}`` / ``{}`` / ``None`` all mean "not declared" (auto-detect applies).
@@ -443,6 +550,7 @@ def plan_from_config(lint: Mapping[str, Any] | None) -> LintPlan | None:
         findings_rcs=frozenset(int(r) for r in (lint.get("findings_rc") or (1,))),
         stdout_is_findings=bool(lint.get("stdout_is_findings", False)),
         unrunnable_re=str(lint.get("unrunnable_re") or ""),
+        findings_re=str(lint.get("findings_re") or ""),
     )
     return LintPlan((tool,), "config", int(lint.get("timeout") or DEFAULT_LINT_TIMEOUT_S))
 
@@ -604,6 +712,74 @@ _PRETTIER_CONFIGS: tuple[str, ...] = (
 )
 _JS_EXTS: tuple[str, ...] = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx")
 
+#: tsc's per-diagnostic line (``--pretty false``): ``path(line,col): error TSnnnn: …``.
+#: The path group stops at the first ``(``; tsc prints it relative to the cwd.
+TSC_FINDINGS_RE = r"^(?P<file>[^\s(][^(\n]*?)\((?P<line>\d+),(?P<col>\d+)\): error TS\d+:"
+#: tsc's exit codes that mean "diagnostics present" (1 = outputs skipped, 2 = outputs
+#: generated); 3 / 4 (invalid project, reference cycle) are the tool's own failures.
+_TSC_FINDINGS_RCS: frozenset[int] = frozenset({1, 2})
+#: A tsc that could not write where a read-only sandbox mount sits (``--build`` writes
+#: ``.tsbuildinfo``; TS5033 "Could not write file") is not a verdict about the patch.
+_TSC_UNRUNNABLE_RE = r"error TS5033: Could not write file"
+_TSC_TOKEN_RE = re.compile(r"(?:^|\s|&&|;)\s*(?:npx\s+|yarn\s+|pnpm\s+)?tsc(?=\s|$)")
+
+
+def _script_argv(script: str) -> list[str]:
+    """The argv of a ``package.json`` script verbatim (no shell operators honoured — a
+    script that chains commands is not a single tool and yields ``[]``)."""
+    if any(op in script for op in ("&&", "||", ";", "|", ">", "<", "$(", "`")):
+        return []
+    return script.split()
+
+
+def tsc_evidence(root: Path, pkg: Mapping[str, Any]) -> tuple[str, list[str]] | None:
+    """``(evidence, extra argv)`` when the repository gates on the TypeScript compiler,
+    else ``None``. Evidence, in order:
+
+    1. ``package.json scripts["lint:types"]`` invoking ``tsc`` — honoured verbatim
+       (nhsuk-frontend / nhsuk-react-components: ``"lint:types": "tsc --build
+       tsconfig.json --pretty"``, run by their CI's ``npm run lint:types`` / ``yarn
+       lint``); ``tsconfig.json`` must exist;
+    2. any other script invoking ``tsc`` (a ``typecheck``/``check-types``/``build``
+       script) — ``--build`` is honoured when the script says so, else
+       ``--noEmit -p tsconfig.json``;
+    3. ``typescript`` among the devDependencies AND a CI workflow / Makefile line that
+       runs ``tsc`` — the default argv.
+
+    The evidence string is what ``lint_run.detected`` records (``tsc:lint:types``,
+    ``tsc:script:<name>``, ``tsc:ci``)."""
+    root = Path(root)
+    if not (root / "tsconfig.json").is_file():
+        return None
+    scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
+    scripts = {str(k): str(v) for k, v in scripts.items()} if isinstance(scripts, dict) else {}
+    lint_types = scripts.get("lint:types", "")
+    if lint_types and _TSC_TOKEN_RE.search(lint_types):
+        argv = _script_argv(lint_types)
+        if argv and argv[0] in ("npx", "yarn", "pnpm"):
+            argv = argv[1:]
+        if argv and argv[0] == "tsc":
+            return "tsc:lint:types", argv[1:]
+        return "tsc:lint:types", ["--build", "tsconfig.json"]  # chained: the build form
+    for name, script in sorted(scripts.items()):
+        if name == "lint:types" or not _TSC_TOKEN_RE.search(script):
+            continue
+        if "--clean" in script:
+            continue  # ``tsc --build --clean`` (a postclean hook) checks nothing
+        build = "--build" in script.split() or "-b" in script.split()
+        return (
+            f"tsc:script:{name}",
+            ["--build", "tsconfig.json"] if build else ["--noEmit", "-p", "tsconfig.json"],
+        )
+    dev = pkg.get("devDependencies") if isinstance(pkg.get("devDependencies"), dict) else {}
+    if (
+        isinstance(dev, dict)
+        and "typescript" in dev
+        and _TSC_TOKEN_RE.search(_workflow_texts(root))
+    ):
+        return "tsc:ci", ["--noEmit", "-p", "tsconfig.json"]
+    return None
+
 
 def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
     """The repository's JavaScript lint, in this order of evidence:
@@ -613,7 +789,14 @@ def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
     2. **prettier --check** — a prettier config or ``package.json prettier`` AND the
        binary (both run when both are configured; eslint first);
     3. else **standard** — ``package.json scripts.lint`` starts with ``standard`` AND
-       ``node_modules/.bin/standard`` (koa: ``"lint": "standard"``, CI ``npm run lint``).
+       ``node_modules/.bin/standard`` (koa: ``"lint": "standard"``, CI ``npm run lint``);
+    4. then **tsc** — appended whenever :func:`tsc_evidence` finds the repository gates
+       on the type checker AND ``node_modules/.bin/tsc`` (``[measured 2026-09-14]`` 4
+       of 10 clean NHS rows failed the repositories' own ``lint:types``; belt 5 never ran
+       it). Whole-project (``paths="all"``; tsc has no per-file mode with project
+       references), ``--pretty false`` appended so the findings parse, and the
+       rejection ATTRIBUTED to the changed files by ``TSC_FINDINGS_RE`` — errors only in
+       unchanged files are pre-existing debt, recorded, never the builder's.
 
     The binary alone is NOT evidence: koa carries ``node_modules/.bin/eslint`` only
     as a transitive dependency of ``standard`` and has no ESLint config — running
@@ -660,23 +843,37 @@ def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
             )
         )
         names.append("prettier")
-    if tools:
-        return LintPlan(tuple(tools), "+".join(names))
-    scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
-    lint_script = str(scripts.get("lint", "")) if isinstance(scripts, dict) else ""
-    if lint_script.split()[:1] == ["standard"] and have("standard"):
-        return LintPlan(
-            (
+    if not tools:
+        scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
+        lint_script = str(scripts.get("lint", "")) if isinstance(scripts, dict) else ""
+        if lint_script.split()[:1] == ["standard"] and have("standard"):
+            tools.append(
                 LintTool(
                     "standard",
                     (binary("standard"),),
                     exts=_JS_EXTS,
                     findings_rcs=frozenset({1}),
-                ),
-            ),
-            "standard",
+                )
+            )
+            names.append("standard")
+    tsc = tsc_evidence(root, pkg)
+    if tsc is not None and have("tsc"):
+        evidence, extra = tsc
+        tools.append(
+            LintTool(
+                "tsc",
+                (binary("tsc"), *extra, "--pretty", "false"),
+                PATHS_ALL,
+                exts=_JS_EXTS,
+                findings_rcs=_TSC_FINDINGS_RCS,
+                unrunnable_re=_TSC_UNRUNNABLE_RE,
+                findings_re=TSC_FINDINGS_RE,
+            )
         )
-    return None
+        names.append(evidence)
+    if not tools:
+        return None
+    return LintPlan(tuple(tools), "+".join(names))
 
 
 # --- JVM: spotless / checkstyle -------------------------------------------------------
@@ -782,10 +979,12 @@ __all__ = [
     "DEFAULT_LINT_TIMEOUT_S",
     "PATHS_ALL",
     "PATHS_CHANGED",
+    "TSC_FINDINGS_RE",
     "LintPlan",
     "LintRun",
     "LintStep",
     "LintTool",
+    "attribute_findings",
     "go_plan",
     "js_plan",
     "jvm_plan",
@@ -795,5 +994,6 @@ __all__ = [
     "python_ruff_evidence",
     "run_plan",
     "rust_plan",
+    "tsc_evidence",
     "which",
 ]
