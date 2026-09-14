@@ -1006,8 +1006,29 @@ class ServiceSession:
             for other in spec.variants or ():
                 other_name = safe_name("crb", self.repo, spec.name, other.name)
                 if name.startswith(other_name):
-                    argv = self._compose_argv(spec, other, fixtures_dir) if spec.compose else ()
-                    self._remove(spec, name, argv)
+                    if spec.compose is not None:
+                        # `down` needs only the project name and the repo's compose file —
+                        # never rebuild an override here: `_compose_argv` writes the
+                        # override FILE, and writing the other era's into this era's
+                        # directory replaced the mounts `_start` was about to use
+                        self._run(
+                            Command(
+                                (
+                                    self.docker,
+                                    "compose",
+                                    "-p",
+                                    other_name,
+                                    "-f",
+                                    str(self.clone / spec.compose.file),
+                                    "down",
+                                    "--remove-orphans",
+                                ),
+                                self.clone,
+                                timeout=DOCKER_CMD_TIMEOUT_S,
+                            )
+                        )
+                    else:
+                        self._docker("rm", "-f", name)
                     break
 
     def _find_container(self, spec: ServiceSpec, name: str, compose_argv: tuple[str, ...]) -> str:
