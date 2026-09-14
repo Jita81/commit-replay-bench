@@ -146,11 +146,16 @@ class ControlsVerdict:
 
         def _int(k: str, *alts: str) -> int:
             for key in (k, *alts):
-                if key in counts and counts[key] is not None:
-                    return int(counts[key])
+                v = counts.get(key)
+                if isinstance(v, bool):
+                    return int(v)
+                if isinstance(v, int | float):
+                    return int(v)
+                if isinstance(v, list | tuple):
+                    return len(v)  # the report's ``rows`` is the row list itself
             return 0
 
-        rows = _int("rows", "n_rows")
+        rows = _int("n_rows", "rows")
         skipped = _int("skipped")
         not_constructible = _int("not_constructible")
         total = max(0, rows - skipped)

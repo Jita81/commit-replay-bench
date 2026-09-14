@@ -353,7 +353,8 @@ class GradeRow:
     def cost_known(self) -> bool:
         """Is ``cost_usd`` a measurement? See :func:`derive_cost_known`. The label
         pinned at write time is the record; older rows derive it from cost, tokens
-        and whether a builder is named."""
+        and whether a builder reported through this ledger — an imported row
+        (``provenance="imported:…"``) names a builder but never reported a cost."""
         pinned = self.labels.get(LABEL_COST_KNOWN)
         if pinned is not None:
             return pinned == "true"
@@ -361,7 +362,7 @@ class GradeRow:
             cost_usd=self.cost_usd,
             tokens_in=self.tokens_in,
             tokens_out=self.tokens_out,
-            builder_reported=bool(self.builder),
+            builder_reported=bool(self.builder) and not self.provenance.startswith("imported:"),
         )
 
     # --- keys ------------------------------------------------------------------
