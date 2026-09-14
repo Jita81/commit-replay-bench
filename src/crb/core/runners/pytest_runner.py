@@ -70,10 +70,14 @@ def venv_python(env_dir: Path) -> Path:
     return venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
-def split_pip_args(items: Sequence[object]) -> list[str]:
-    """``["-e .[test]", "pytest"]`` and ``["-e", ".", "pytest"]`` both → argv tokens."""
+def split_pip_args(items: Sequence[object] | str) -> list[str]:
+    """``["-e .[test]", "pytest"]``, ``["-e", ".", "pytest"]`` and the plain string
+    ``"-e . pytest"`` all → argv tokens. A bare string used to be iterated character by
+    character (``"pytest"`` → ``pip install p y t e s t``); OPERATOR.md always said a
+    string splits on whitespace (A12 finding, 2026-09-14)."""
+    seq: Sequence[object] = [items] if isinstance(items, str) else items
     out: list[str] = []
-    for item in items:
+    for item in seq:
         out.extend(shlex.split(str(item)))
     return out
 
@@ -225,10 +229,10 @@ class PytestRunner(BaseRunner):
             if not python.exists():
                 return session.result(False, f"virtualenv created but {python} is missing")
         # 2. the install: runner_opts.pip (+ pip_fallback), else the editable default
-        primary = split_pip_args(list(self.opts.get("pip") or []))
+        primary = split_pip_args(self.opts.get("pip") or [])
         if primary:
             step = session.run(pip(*primary))
-            fallback = split_pip_args(list(self.opts.get("pip_fallback") or []))
+            fallback = split_pip_args(self.opts.get("pip_fallback") or [])
             if not step.ok and fallback:
                 step = session.run(pip(*fallback))
             if not step.ok:

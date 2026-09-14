@@ -210,6 +210,9 @@ def test_setup_refuses_a_sandbox_executor(runner: str, language: Language, tmp_p
 
 def test_split_pip_args_and_declared_extras(tmp_path: Path) -> None:
     assert split_pip_args(["-e .[test]", "pytest"]) == ["-e", ".[test]", "pytest"]
+    # a bare string splits on whitespace, never per character (A12 finding)
+    assert split_pip_args("-e . pytest") == ["-e", ".", "pytest"]
+    assert split_pip_args("pytest") == ["pytest"]
     assert split_pip_args(["django", "-r", "requirements/test.txt"]) == [
         "django",
         "-r",
