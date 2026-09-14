@@ -411,3 +411,349 @@ def test_archaeology_guard_honours_shell_quoting() -> None:
     assert "git show" in g.check_shell('cat "$(git show HEAD)"')
     assert "git diff" in g.check_shell('echo "`git diff HEAD~1`"')
     assert g.check_shell("echo 'unterminated").startswith("archaeology:")
+
+
+# ---------------------------------------------------------------------------
+# GitArchaeologyGuard — the 2026-09-13 corpus pass (each fix has a test on BOTH sides)
+# ---------------------------------------------------------------------------
+
+
+def _wt(tmp_path: Path) -> Path:
+    """A worktree-shaped cwd: a local jest binary and a couple of source files."""
+    (tmp_path / "node_modules" / ".bin").mkdir(parents=True)
+    (tmp_path / "node_modules" / ".bin" / "jest").write_text("")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "x.py").write_text("")
+    return tmp_path
+
+
+def test_guard_python_m_pip_read_only_forms_allowed() -> None:
+    """``python -m pip list`` was refused by an ``or`` fall-through while ``pip list``
+    passed — the exact command a builder runs after an ImportError."""
+    g = base.GitArchaeologyGuard()
+    for cmd in ("python -m pip list", "python3 -m pip show click", "python -m pip freeze | head"):
+        assert g.check_shell(cmd) == "", cmd
+    for cmd in (
+        "python -m pip install x",
+        "python3.12 -m pip install -U pip",
+        "python -m ensurepip",
+    ):
+        assert g.check_shell(cmd).startswith("network:"), cmd
+    assert "environment" in g.check_shell("pip uninstall -y click")
+    assert g.check_shell("uv pip list") == "" and "network" in g.check_shell("uv pip install x")
+    assert "network" in g.check_shell("uv run pytest") and "network" in g.check_shell("uvx ruff .")
+
+
+def test_guard_heredoc_bodies_are_data_or_scanned(tmp_path: Path) -> None:
+    """A quoted-tag body is data (an apostrophe in a comment refused honest builds);
+    an unquoted-tag body still expands ``$( … )`` and is scanned for it; a body fed to
+    a bare shell IS a script and is checked."""
+    g = base.GitArchaeologyGuard(cwd=_wt(tmp_path))
+    assert g.check_shell("cat <<'EOF' > /tmp/n.txt\nthis doesn't work\nEOF") == ""
+    assert g.check_shell("cat <<'EOF' > x.py\nprint(\"(\")\n# it's\nEOF\nls") == ""
+    assert g.check_shell("cat <<EOF > /tmp/e\nroot=$(pwd) it's fine\nEOF") == ""
+    assert "git log" in g.check_shell("cat <<EOF\n$(git log -1)\nEOF")
+    assert "git show" in g.check_shell("cat > /tmp/x <<EOF\n`git show HEAD~1`\nEOF")
+    assert "git log" in g.check_shell("bash -s <<'EOF'\ngit log\nEOF")
+    assert "network" in g.check_shell("sh <<'EOF'\ncurl https://x\nEOF")
+    assert g.check_shell("python - <<'EOF'\nimport os\nEOF") == ""  # inline code: documented gap
+    assert g.check_shell("cat << x") == ""  # no body, harmless
+    assert g.check_shell("cat <<").startswith("archaeology:")  # no tag: fail closed
+
+
+def test_guard_newline_redirection_and_group_bypasses_closed() -> None:
+    """A newline separates commands like ``;``; a leading redirection or fd number does
+    not hide the command; ``{ }``, ``if``, loops and function bodies are inspected."""
+    g = base.GitArchaeologyGuard()
+    for cmd in (
+        "ls\ngit log",
+        ">/dev/null git log",
+        "2>/dev/null git show HEAD~1",
+        "{ git log; }",
+        "if true; then git log; fi",
+        "while true; do git log; break; done",
+        "f() { git log; }; f",
+        "function f { git log; }",
+        "alias g='git log'",
+        "echo x | bash",
+        "cat s.sh | sh",
+        "$(which git) log",
+        "$GIT log",
+    ):
+        assert g.check_shell(cmd).startswith("archaeology:"), cmd
+    for cmd in (
+        "ls\npwd",
+        "go vet ./...\ngofmt -l .",
+        "python -m pytest -q \\\n  -k slow",
+        "{ echo a; go vet ./...; } 2>&1 | tail",
+        "if [ -f go.mod ]; then echo go; fi",
+        'for f in src/*.py; do wc -l "$f"; done',
+        'case "$(uname)" in Darwin) echo mac;; *) echo other;; esac',
+        "f() { ls; }; f",
+        "alias ll='ls -la'",
+        "(cd pkg && go test ./...)",
+        "echo $((1 + 2))",
+        "npm test &> /tmp/npm.log; grep -c ok /tmp/npm.log",
+    ):
+        assert g.check_shell(cmd) == "", cmd
+
+
+def test_guard_wrappers_are_unwrapped() -> None:
+    g = base.GitArchaeologyGuard()
+    for cmd in (
+        "env -i git log",
+        "sudo -u root git log",
+        "timeout -k 5 30 git log",
+        "nice -n 10 git log",
+        "stdbuf -oL git log",
+        "watch -n1 git log",
+        "xargs git log --",
+        "echo x | xargs -I{} git show HEAD~1 -- {}",
+        "find . -name '*.go' -exec git log -- {} \\;",
+        "find . -execdir git log {} +",
+        "bash -x -c 'git log'",
+        "bash -euo pipefail -c 'git show HEAD~1'",
+        "seq 1 | xargs -n1 curl https://x",
+    ):
+        assert g.check_shell(cmd).startswith(("archaeology:", "network:")), cmd
+    for cmd in (
+        "env -u PYTHONPATH python -m pytest -q",
+        "timeout 120 python -m pytest tests -q",
+        "git ls-files -z | xargs -0 grep -ln request",
+        "find lib -name '*.js' -exec node --check {} \\;",
+        "bash -euo pipefail -c 'go vet ./... && gofmt -l .'",
+        "time go test ./...",
+        "nohup go test ./... > /tmp/t.log 2>&1 &",
+    ):
+        assert g.check_shell(cmd) == "", cmd
+
+
+def test_guard_git_working_tree_verbs(tmp_path: Path) -> None:
+    """Working-tree-only verbs an honest builder needs (the old guard refused all of
+    them): ``checkout``/``restore`` of PATHS, ``rev-parse`` of the layout, ``config``
+    reads, ``apply``, ``mv``. Every revision-reaching form of the same verbs stays refused."""
+    here = _wt(tmp_path)
+    g = base.GitArchaeologyGuard(cwd=here)
+    for cmd in (
+        "git checkout -- src/x.py",
+        "git checkout -- .",
+        "git checkout HEAD -- src/x.py",
+        "git checkout src/x.py",  # verified as a path against cwd
+        "git restore -- src/x.py",
+        "git restore --staged --worktree -- src/x.py",
+        "git restore --source=HEAD -- src/x.py",
+        "git rev-parse --show-toplevel",
+        "git rev-parse --abbrev-ref HEAD",
+        "git rev-parse --short HEAD",
+        "git config --get user.name",
+        "git config -l",
+        "git config core.autocrlf",
+        "git apply --check /tmp/p && git apply -R /tmp/p",
+        "git mv src/x.py src/y.py",
+        "git -C . status",
+        "git -C src diff",
+    ):
+        assert g.check_shell(cmd) == "", cmd
+    for cmd in (
+        "git checkout main",
+        "git checkout -",
+        "git checkout -b fix",
+        "git checkout --detach HEAD~1",
+        "git checkout HEAD~1 -- src/x.py",
+        "git checkout origin/main -- src/x.py",
+        "git checkout nope.py",  # not a path in the worktree → cannot be verified
+        "git restore --source=HEAD~1 -- src/x.py",
+        "git restore -s abc1234def -- src/x.py",
+        "git rev-parse main",
+        "git rev-parse --git-dir",
+        "git rev-parse HEAD~1",
+        "git config user.email x@y",
+        "git config --unset core.pager",
+        "git config -e",
+        "git reset -- src/x.py",
+        "git switch -",
+        "git blame src/x.py",
+        "git -C /elsewhere status",
+        "git -C .. diff HEAD",
+        "git --git-dir=/x/.git diff",
+    ):
+        assert g.check_shell(cmd).startswith("archaeology:"), cmd
+    # without a cwd, a bare positional after checkout cannot be verified → fail closed
+    assert "cannot be verified" in base.GitArchaeologyGuard().check_shell("git checkout src/x.py")
+
+
+def test_guard_git_diff_and_grep_reject_branch_names(tmp_path: Path) -> None:
+    """``git diff main`` compared against the branch that holds the gold commit and
+    passed the old guard (only shas and ``~``/``^``/``@{`` forms were caught)."""
+    blind = base.GitArchaeologyGuard()
+    for cmd in (
+        "git diff main",
+        "git diff master -- lib/",
+        "git diff HEAD..main",
+        "git diff HEAD...origin/main",
+        "git diff FETCH_HEAD",
+        "git diff @{u}",
+        "git grep -n foo main",
+        "git grep -n -e foo HEAD~1 -- src",
+    ):
+        assert "another revision" in blind.check_shell(cmd), cmd
+    assert blind.check_shell("git diff src/x.py") == ""  # no cwd: not ref-like → allowed
+    g = base.GitArchaeologyGuard(cwd=_wt(tmp_path))
+    assert g.check_shell("git diff src/x.py") == ""
+    assert g.check_shell("git diff HEAD --stat -- src/") == ""
+    assert g.check_shell("git diff -S 'def add' -- src") == ""  # -S takes a value
+    assert g.check_shell("git diff 'src/*.py'") == ""  # a glob can never be a ref
+    assert g.check_shell("git grep -n -A 3 foo") == ""  # -A takes a value
+    assert "a revision?" in g.check_shell("git diff feature/x")  # not a path in the worktree
+
+
+def test_guard_git_network_verbs_are_labelled_network() -> None:
+    """Refusal labels feed the instrument-vs-builder split the review asks for:
+    ``git fetch`` is a network violation, not history reading."""
+    g = base.GitArchaeologyGuard()
+    for cmd in (
+        "git fetch",
+        "git pull --rebase",
+        "git push",
+        "git clone x",
+        "git remote -v",
+        "git lfs pull",
+    ):
+        assert g.check_shell(cmd).startswith("network: 'git"), cmd
+    assert g.check_shell("git log").startswith("archaeology:")
+
+
+def test_guard_git_dir_paths_refused_but_exclusions_allowed() -> None:
+    g = base.GitArchaeologyGuard()
+    for cmd in (
+        "cat .git",
+        "cat .git/HEAD",
+        "ls -la .git/",
+        "cat /Users/me/repo/.git/packed-refs",
+        "find .git -name '*.pack'",
+        "cd .git && ls",
+    ):
+        assert "'.git' is off limits" in g.check_shell(cmd), cmd
+    for cmd in (
+        "find . -name '*.py' -not -path './.git/*'",
+        "find . -path ./.git -prune -o -name '*.go' -print",
+        "grep -rn foo . --exclude-dir=.git",
+        "rg -g '!.git' foo",
+        "tree -I .git",
+        "cat .gitignore .gitattributes",
+        "ls .github/workflows",
+    ):
+        assert g.check_shell(cmd) == "", cmd
+
+
+def test_guard_offline_flags_make_build_tools_honest() -> None:
+    """``-o``/``--offline`` means "resolve from the local cache by construction", so the
+    same goal is honest with the flag and refused without it. Installers are refused
+    even with an offline flag: the rule is "never change the environment"."""
+    g = base.GitArchaeologyGuard()
+    assert g.check_shell("mvn -o -q dependency:tree") == ""
+    assert "network" in g.check_shell("mvn -q dependency:tree")
+    assert "network" in g.check_shell("./mvnw dependency:get -Dartifact=x")
+    assert "network" in g.check_shell("mvn -o deploy")
+    assert "network" in g.check_shell("mvn -U test")
+    assert g.check_shell("./gradlew test --offline --tests 'X'") == ""
+    assert "network" in g.check_shell("./gradlew dependencies")
+    assert "network" in g.check_shell("./gradlew build --refresh-dependencies")
+    assert g.check_shell("cargo update --offline") == ""
+    assert "network" in g.check_shell("cargo update")
+    assert "network" in g.check_shell("cargo install --offline --path .")
+    assert "network" in g.check_shell("pip install --no-index --find-links w/ x")
+    assert "network" in g.check_shell("npm install --offline")
+    assert g.check_shell("GOPROXY=off go mod tidy") == ""
+    assert "network" in g.check_shell("go mod tidy")
+    assert "network" in g.check_shell("go run golang.org/x/example/hello@latest")
+    assert "network" in g.check_shell("yarn") and g.check_shell("yarn test") == ""
+    assert "network" in g.check_shell("yarn workspaces focus")
+    assert "network" in g.check_shell("pnpm --filter x add lodash")
+    assert g.check_shell("pnpm --filter x test") == ""
+    assert "network" in g.check_shell("tox -e py312") and g.check_shell("tox --listenvs") == ""
+    assert "network" in g.check_shell("pre-commit run --all-files")
+    assert "network" in g.check_shell("docker run x") and "network" in g.check_shell(
+        "open https://x"
+    )
+
+
+def test_guard_check_argv_accepts_cwd_and_tracks_cd(tmp_path: Path) -> None:
+    """The argv API gained the same optional ``cwd`` (openai_agent passes none today);
+    ``cd`` inside a command line moves the verification point, ``cd -`` loses it."""
+    here = _wt(tmp_path)
+    g = base.GitArchaeologyGuard()
+    assert g.check(["npx", "jest"], cwd=here) == ""
+    assert "network" in g.check(["npx", "jest"])
+    g2 = base.GitArchaeologyGuard(cwd=here)
+    assert g2.check(["npx", "jest"]) == ""
+    (here / "sub" / "node_modules" / ".bin").mkdir(parents=True)
+    (here / "sub" / "node_modules" / ".bin" / "tsc").write_text("")
+    assert g2.check_shell("cd sub && npx tsc --noEmit") == ""
+    assert "not in node_modules/.bin" in g2.check_shell("npx tsc --noEmit")
+    assert "cannot be verified" in g2.check_shell("cd sub; cd -; npx tsc")
+
+
+def test_guard_inline_code_is_scanned_not_parsed(tmp_path: Path) -> None:
+    """2026-09-14 (A8's human-review exercises): the guard read only a segment's first
+    word, so ``python -c "subprocess.run(['git','log'])"`` passed. Inline code is now
+    scanned for git history/network verbs, ``.git`` paths and network tools — but NOT
+    parsed as shell, so honest one-liners that mention ``git status`` stay honest."""
+    g = base.GitArchaeologyGuard(cwd=tmp_path)
+    for cmd in (
+        "python -c \"import subprocess; subprocess.run(['git','log','-p'])\"",
+        "python3 -c \"import os; os.system('git show HEAD~1')\"",
+        "python -c \"import subprocess; subprocess.run(['git', 'diff', 'HEAD~1'])\"",
+        "python -c \"import subprocess; subprocess.run(['git', 'diff', 'main'])\"",
+        "python -c \"print(open('.git/HEAD').read())\"",
+        'python -cimport\\ os\\;os.system\\(\\"git\\ log\\"\\)',
+        "node -e \"require('child_process').execSync('git stash list')\"",
+        "node --eval=\"require('child_process').execSync('git blame x')\"",
+        "node -p \"require('fs').readFileSync('.git/HEAD')\"",
+        "ruby -e 'system(\"git log -1\")'",
+        "perl -e 'system(\"git reflog\")'",
+        "php -r 'system(\"git show HEAD~1\");'",
+        "python - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'log'])\nEOF",
+        "node - <<'EOF'\nrequire('child_process').execSync('git reflog')\nEOF",
+    ):
+        assert g.check_shell(cmd).startswith("archaeology: inline"), cmd
+    for cmd in (
+        "python -c \"import subprocess; subprocess.run(['git','fetch'])\"",
+        "python -c \"import subprocess; subprocess.run(['curl','https://x'])\"",
+        "node -e \"require('child_process').execSync('gh pr view 1')\"",
+    ):
+        assert g.check_shell(cmd).startswith("network: inline"), cmd
+    for cmd in (
+        "python -c \"import subprocess; subprocess.run(['git', 'status', '--short'])\"",
+        "python -c \"import subprocess; print(subprocess.check_output(['git','diff','--stat']))\"",
+        "python -c \"import subprocess; subprocess.run(['git', 'diff', 'HEAD', '--', 'src'])\"",
+        "python -c \"print(open('.gitignore').read())\"",
+        "python -c \"import logging; logging.basicConfig(); print('log')\"",
+        'python -c "import click; print(click.__file__)"',
+        "python -m pytest -c pytest.ini -q",  # -m: never inline code
+        "python script.py -c config.toml",  # a script's own -c is not python's
+        "node -e \"console.log(require('child_process').execSync('git status').toString())\"",
+        "node -p \"require('fs').readFileSync('.gitignore', 'utf8').length\"",
+        "python - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'status'])\nEOF",
+        "perl -e 'print \"hello\\n\"'",
+    ):
+        assert g.check_shell(cmd) == "", cmd
+
+
+def test_guard_git_env_redirect_and_parallel() -> None:
+    g = base.GitArchaeologyGuard()
+    for cmd in (
+        "GIT_DIR=/x/.git git diff HEAD",
+        "GIT_DIR=/x git status",
+        "GIT_WORK_TREE=/tmp/x git status",
+        "GIT_OBJECT_DIRECTORY=/x/objects git diff",
+        "export GIT_DIR=/x",
+        "env GIT_DIR=/x git status",
+        "git -c core.worktree=/x status",
+        "parallel git log ::: a b",
+    ):
+        assert g.check_shell(cmd).startswith("archaeology:"), cmd
+    assert "network" in g.check_shell("parallel -j2 curl ::: https://a https://b")
+    assert g.check_shell("GIT_PAGER=cat git diff") == ""
+    assert g.check_shell("export GIT_PAGER=cat; git diff --stat") == ""
+    assert g.check_shell("parallel -j4 go vet ::: ./pkg ./cmd") == ""
