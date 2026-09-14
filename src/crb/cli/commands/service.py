@@ -10,9 +10,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from crb.cli.commands import EXIT_OK, CliError
+
+if TYPE_CHECKING:
+    from crb.observability.probes import ProbeResult
 
 _SERVER_HINT = "the server layer is not installed — `pip install 'commit-replay-bench[server]'`"
 
@@ -38,9 +43,16 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     migrate.add_argument("--database-url", default=None)
     migrate.set_defaults(func=cmd_migrate)
 
-    doctor = sub.add_parser("doctor", help="check toolchains, sandbox, builders, database")
+    doctor = sub.add_parser(
+        "doctor", help="check toolchains, sandbox, builders, Claude Code login, database"
+    )
     doctor.add_argument("--json", action="store_true")
     doctor.add_argument("--database-url", default=None)
+    doctor.add_argument(
+        "--verify",
+        action="store_true",
+        help="also run the Claude Code login probe (one no-tool Haiku turn; ~2 s when invalid)",
+    )
     doctor.set_defaults(func=cmd_doctor)
 
 
@@ -88,10 +100,73 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def probe_claude_code(*, verify: bool = False) -> ProbeResult:
+    """The ``claude_code`` builder's readiness for ``auth: cli``: where the login would
+    come from (``env`` | ``secrets_file`` (…xxxx) | ``keychain`` | ``none``), whether
+    ``claude`` is on PATH and its version, and — with ``verify`` — the real probe.
+
+    ``down`` when the secrets file exists but is refused (group/world readable): that
+    is a finding, not a nuisance. ``degraded`` when the CLI is missing, when neither a
+    cli-mode login nor ``ANTHROPIC_API_KEY`` is available, or when the probe does not
+    come back ``ok``. Never prints or returns a token; the fingerprint is ≤4 chars.
+    """
+    from crb.builders import claude_code as cc
+    from crb.core.secrets_file import resolve_secrets_dir
+    from crb.observability import probes
+
+    source, fp, detail = cc.auth_status()
+    version = cc.cli_version()
+    cli_present = bool(version) or bool(shutil.which("claude"))
+    data: dict[str, Any] = {
+        "auth": source,
+        "fingerprint": fp,
+        "cli": cli_present,
+        "cli_version": version,
+        "secrets_dir": str(resolve_secrets_dir()),
+        "api_key": bool(os.environ.get(cc.API_KEY_ENV, "").strip()),
+    }
+    label = {
+        cc.TOKEN_SOURCE_ENV: "env",
+        cc.TOKEN_SOURCE_SECRETS_FILE: f"secrets file (…{fp})" if fp else "secrets file",
+        cc.TOKEN_SOURCE_KEYCHAIN: "keychain",
+        cc.TOKEN_SOURCE_NONE: "none",
+        cc.VERIFY_CLI_MISSING: "unknown (no CLI)",
+        cc.VERIFY_ERROR: "REFUSED",
+    }.get(source, source)
+    parts = [f"auth: {label}"]
+    if source == cc.VERIFY_ERROR:
+        parts.append(detail)
+    parts.append(f"claude {version}" if version else "claude: not on PATH")
+    parts.append(f"secrets dir {data['secrets_dir']}")
+    if source == cc.VERIFY_ERROR:
+        status = probes.DOWN
+    elif not cli_present:
+        status = probes.DEGRADED
+    elif source in {cc.TOKEN_SOURCE_NONE, cc.VERIFY_CLI_MISSING} and not data["api_key"]:
+        status = probes.DEGRADED
+        parts.append("no cli-mode login and no ANTHROPIC_API_KEY — run `claude setup-token`")
+    else:
+        status = probes.OK
+    if verify and status != probes.DOWN:
+        check = cc.verify_login()
+        data["verify"] = check.to_dict()
+        parts.append(f"verify: {check.status} ({check.duration_s:.1f}s)")
+        if check.status != cc.VERIFY_OK:
+            status = probes.DEGRADED
+            if check.detail:
+                parts.append(check.detail)
+    return probes.ProbeResult("claude_code", status, " · ".join(parts), data)
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     from crb.observability import probes
 
-    results = [probes.probe_toolchains(), probes.probe_docker(), probes.probe_builders()]
+    results = [
+        probes.probe_toolchains(),
+        probes.probe_docker(),
+        probes.probe_builders(),
+        probe_claude_code(verify=bool(getattr(args, "verify", False))),
+    ]
     try:
         from sqlalchemy import inspect
 
@@ -130,4 +205,4 @@ def _redact_url(url: str) -> str:
     return url
 
 
-__all__: Sequence[str] = ("register",)
+__all__: Sequence[str] = ("probe_claude_code", "register")

@@ -96,6 +96,59 @@ egress.
   (`crb_csrf` cookie + `X-CSRF-Token` header) on every unsafe method. [measured]
   `tests/test_server_auth.py`
 
+#### 3.3.1 Secrets at rest — `crb.core.secrets_file`, `crb.server.secrets`
+
+The one credential the product will hold for the operator is the Claude Code login
+token (`claude setup-token`) that a `claude_code` build in `auth: cli` mode forwards to
+the CLI as `CLAUDE_CODE_OAUTH_TOKEN`. It exists so the token never has to transit a chat,
+a ticket or a shell history again (review 2026-09-13, action #9).
+
+- **Where.** One file per secret under `CRB_SECRETS_DIR` → `$CRB_HOME/secrets` →
+  `./.crb/secrets`: `claude_code_oauth_token` (the raw value) and
+  `claude_code_oauth_token.meta.json` (`set_at`, `set_by` — never the value). Directory
+  `0700`, files `0600`, owned by the API process user. Writes are atomic (`O_EXCL` temp
+  file in the same directory, fsync, rename) so a reader sees an old or a new value,
+  never a torn one. [measured] `tests/test_server_secrets.py`
+- **Owner-only or nothing.** The store refuses to *write* into a directory that has any
+  group/other permission bit or a different owner, and refuses to *read* a value file
+  with any group/other bit; it never widens or narrows permissions itself — an insecure
+  mode is a finding (`crb doctor` reports it `down`, a `cli` build fails closed with
+  `model_error: … secrets file refused`, the API answers `409 secrets_insecure`). [measured]
+- **Never in the database, never in evidence, never in a log, never in a response.** The
+  value enters through `PUT /settings/secrets/claude-code-token` (admin, CSRF) and leaves
+  only as an environment variable of the child `claude` process. Every API response —
+  the `PUT` included — is a status: `present`, a `fingerprint` of at most the **last four
+  characters**, `set_at`, `set_by`. Log lines carry the secret's *name* and that
+  fingerprint. `repr()` of the store never includes a value; the redacting log filter and
+  `crb.core.redact` (`sk-…` prefixes) are defence in depth behind that. [measured]
+  `tests/test_server_routes_admin_secrets.py`, `tests/test_builders_claude_code.py`
+- **What is logged.** `secret set` / `secret removed` with `secret`, `fingerprint`,
+  `set_by`; `secret unreadable` with the permission reason. The verify probe's stderr
+  tail is redacted and capped before it is returned.
+- **Verify is metered.** `POST …/verify` runs one no-tool Haiku turn through the
+  builder's exact environment and is limited to one call per 10 s per deployment
+  (`429 rate_limited` + `Retry-After`), so the button cannot be used to burn quota. It
+  stops at the CLI's first `401` retry event (≈2 s) rather than letting the CLI retry
+  for ~90 s. [measured]
+- **Role split.** Statuses are readable by any signed-in role (they are non-secret by
+  construction and an operator needs them to know whether an `auth: cli` run can
+  authenticate); the on-host directory path is reported to admins only; store, remove
+  and verify are admin-only. [measured]
+- **Operator-provided mounts.** `CRB_SECRETS_DIR` may point at a directory the platform
+  fills (a Secrets Store CSI / Key Vault mount): a raw value file with no `.meta.json` is
+  read like any other; the same owner-only file-mode rule applies, so mount it with a
+  `0600`/`0400` file mode for the crb user.
+- **Threat: API-host compromise = token compromise.** The token is a long-lived
+  subscription credential; anyone who can read the API process's files (or the
+  process memory during a verify) can use it. Mitigation is rotation, not encryption at
+  rest (a key on the same host adds nothing): run `claude setup-token` again, paste the
+  new value (the old file is replaced atomically), and revoke the old token from the
+  Anthropic account (`claude auth logout` / the console). Rotation is a two-minute
+  procedure in `docs/OPERATOR.md`.
+- **Scope.** `auth: cli` is a developer/evaluation mode (see 3.2 and the builder's
+  docstring); production runs use `ANTHROPIC_API_KEY` in the worker environment and never
+  read the secrets file.
+
 ### 3.4 Authentication and authorisation — `crb.server.auth`
 
 - OIDC (Entra ID or any provider): authorisation-code flow with PKCE and a signed state
@@ -149,6 +202,10 @@ subject to a retention window.
 | T5 | Prompt injection from repository content steers the builder | build | `--bare` (no repo `CLAUDE.md`/hooks); builder output untrusted; grader decides |
 | T6 | A builder loop runs unbounded / burns budget | build | 3.2 budgets |
 | T7 | Model credentials leak into a worktree, a pack or a log | everywhere | 3.3 env-only, redaction, never persisted |
+| T7a | The stored Claude Code login token is read by another user on the API host, or torn/half-written | secrets file | 3.3.1 owner-only `0700`/`0600`, refuse-on-insecure-mode (write and read), atomic rename; `crb doctor` reports the mode |
+| T7b | The stored token leaks through the API, the UI, a log or an evidence pack | API / UI / logs | 3.3.1 status-only responses (≤4-char fingerprint), password field never echoed and cleared on save, log lines carry name + fingerprint, verify output redacted |
+| T7c | The verify button is used to burn subscription quota | API | 3.3.1 one probe per 10 s per deployment, one no-tool Haiku turn, admin-only |
+| T7d | API-host compromise | secrets file | token compromise: rotate (`claude setup-token`, paste, revoke the old one) — see 3.3.1 |
 | T8 | An insider edits a past verdict | ledger | 3.5 triggers + hash chain + `/health` proof |
 | T9 | A false pass is recorded because a runner could not attribute a failure | grade | fail-closed parse rule (`unattributed failure` ⇒ belt 3 false), harness errors ⇒ not clean |
 | T10 | A green with no real change is credited (build-cache ghost) | grade | belt 4 `source_changed` |

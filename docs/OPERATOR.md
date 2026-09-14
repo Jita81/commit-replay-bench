@@ -180,7 +180,51 @@ the mode. Read the SECURITY.md row first — the target repository's `CLAUDE.md`
 auto-discovered in this mode. The default model is `claude-sonnet-5` (the census's measured
 path; `claude-opus-5` is selectable per run; `CRB_CLAUDE_CODE_MODEL` moves the default).
 If a build errors with `authentication failed (HTTP 401) — run claude login`, the stored
-login is stale: run `claude login` as the worker's user and re-queue.
+login is stale: run `claude login` as the worker's user and re-queue — or, better, supply a
+long-lived token as described next.
+
+#### 3.0.1 Supplying the Claude Code login token (`auth: cli`)
+
+A keychain login (`claude login`) only works headlessly while its access token is fresh;
+an expired one cannot be refreshed by a worker process (the CLI asks its parent to
+refresh and gets nothing), so builds fail `401`. `claude setup-token` mints a long-lived
+subscription token for exactly this case. The worker takes it from the first of these
+sources — nothing is merged, and `api_key` mode never reads any of them:
+
+| Order | Source | How to supply it | When to use it |
+|---|---|---|---|
+| 1 | `CLAUDE_CODE_OAUTH_TOKEN` in the **worker's** environment | your process manager / secret injection (compose `env_file`, a Kubernetes `Secret` env var) | a worker on a different host from the API, or a platform that already injects secrets |
+| 2 | the **secrets file** on disk: `CRB_SECRETS_DIR` → `$CRB_HOME/secrets` → `./.crb/secrets`, file `claude_code_oauth_token` | **Settings → Claude Code login** in the UI (admin): run `claude setup-token` on any machine, paste the token, **Save**, **Verify**. Or mount the file yourself (`CRB_SECRETS_DIR=/mnt/secrets`, mode `0600`, a raw value, no metadata needed) | the API and worker share `CRB_HOME` (the compose and Helm deployments do), or a Key Vault / CSI mount |
+| 3 | nothing | `claude login` as the worker's user | a developer machine where the interactive login is fresh |
+
+The file is written `0600` inside a `0700` directory owned by the API user, atomically;
+the API never returns the value (`GET /settings/secrets` reports `present`, the last
+four characters, who set it and when); an insecure mode (any group/other bit) is refused
+on write and on read — the build fails closed with `model_error: … secrets file refused`
+rather than use a credential another user could read. `docs/SECURITY.md` 3.3.1 has the
+threat model. Wherever the worker runs, `claude` must be on its `PATH`.
+
+**Check it:** `crb doctor` prints a `claude_code` line —
+`auth: env | secrets file (…xxxx) | keychain | none`, the CLI version and the secrets
+directory; `crb doctor --verify` also runs the login probe (one no-tool Haiku turn:
+`verify: ok (2.1s)` or `verify: invalid … authentication failed (HTTP 401)`). Run it on
+the **worker** host with the worker's environment — that is the resolution a build sees.
+The UI's **Verify** button runs the same probe on the **API** host with the stored token
+(at most once every 10 s).
+
+**Rotate it** (after a suspected exposure, when a person with access leaves, or on a
+schedule — the token is long-lived):
+
+1. On any machine: `claude setup-token` → copy the new value.
+2. Settings → Claude Code login → paste → **Save** (the old file is replaced atomically)
+   → **Verify** shows `ok`. Or replace the mounted file / the env var and restart the
+   worker.
+3. Revoke the old token: `claude auth logout` on the machine that minted it, or from the
+   Anthropic console. Confirm with `crb doctor` (the fingerprint changed) and, if you
+   kept the old value anywhere, `crb doctor --verify` against it must now say `invalid`.
+4. **Remove** it (Settings, or `DELETE /settings/secrets/claude-code-token`) when the
+   evaluation is over — `auth: cli` is a developer/evaluation mode; production runs use
+   `ANTHROPIC_API_KEY` on the worker and never read the file.
 
 What you will see (events; UI live progress in P5): `mine.candidate` → `mine.red` /
 `mine.skip` → `mine.gold` → `build.*` → `grade.belt` (four per task) → `ledger.append`.

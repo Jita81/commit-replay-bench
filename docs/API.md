@@ -121,6 +121,18 @@ Until P6 lands every factory path answers **501 `not_implemented`** with
 | GET/POST | `/users` | admin | list / create local user |
 | PUT | `/users/{id}/role` | admin | change role |
 | GET | `/settings` | admin | non-secret settings (builders configured: yes/no, sandbox mode, retention) |
+| GET | `/settings/secrets` | viewer | `{items: [SecretStatus], secrets_dir}` — statuses of the operator-supplied secrets, never values; `secrets_dir` (the on-host path) is `""` unless the caller is an admin |
+| PUT | `/settings/secrets/claude-code-token` | admin | body `{token}` (a `claude setup-token` value: `sk-ant-oat01-…`, 40–512 chars, `[A-Za-z0-9_-]`); stores it owner-only under `CRB_SECRETS_DIR` / `$CRB_HOME/secrets`; returns the `SecretStatus`; `422 invalid_token` on shape, `409 secrets_insecure` when the directory is group/world accessible |
+| DELETE | `/settings/secrets/claude-code-token` | admin | removes it; returns the (absent) `SecretStatus`; idempotent |
+| POST | `/settings/secrets/claude-code-token/verify` | admin | runs one no-tool Haiku turn through the `claude_code` builder's `cli` environment with the stored token; returns a `LoginCheck`; `404` when nothing is stored, `409 secrets_insecure`, `429 rate_limited` (+ `Retry-After`) more than once per 10 s |
+
+`SecretStatus = {name, present, fingerprint, set_at, set_by}` — `fingerprint` is at most the
+**last four characters** of the value (empty when absent or shorter than 12 characters);
+`set_by` is the admin's display name, empty for an operator-mounted file.
+`LoginCheck = {status: ok | invalid | cli_missing | timeout | error, detail, source: explicit |
+env | secrets_file | keychain, fingerprint, model, cli_version, duration_s, cost_usd}`;
+`detail` is redacted and capped. No response on these routes ever carries a token value
+(`tests/test_server_routes_admin_secrets.py`).
 
 ## SSE event shape
 

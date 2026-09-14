@@ -14,6 +14,7 @@ import { QueryBoundary } from '../../components/QueryBoundary'
 import { useAuth } from '../../lib/auth'
 import { fmtDate } from '../../lib/format'
 import { probeDisplay } from '../../lib/verdict'
+import { ClaudeCodeLoginCard } from './ClaudeCodeLoginCard'
 
 function HealthCard() {
   const health = useHealth()
@@ -157,8 +158,9 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Settings" title="Settings" purpose="Non-secret configuration and the instrument's health. Secrets are never returned by the API and never shown here; a builder is reported as configured or not, nothing more." />
+      <PageHeader eyebrow="Settings" title="Settings" purpose="Non-secret configuration and the instrument's health. Secrets are never returned by the API and never shown here; a builder is reported as configured or not, nothing more — the Claude Code login card reports at most the last four characters of a stored token." />
       <HealthCard />
+      <ClaudeCodeLoginCard />
       {admin ? (
         <>
           <Card title="Configuration" eyebrow="non-secret · redacted">

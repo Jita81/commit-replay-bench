@@ -1,23 +1,45 @@
-"""``/users`` and ``/settings`` — admin only.
+"""``/users``, ``/settings`` and ``/settings/secrets`` — admin only.
 
 Lockout protection: the last active admin can neither be demoted nor deactivated,
 so a deployment can never reach a state where nobody can administer it.
 Settings are served through :meth:`Settings.redacted_dict` only.
+
+Secrets (``/settings/secrets/*``) go through :mod:`crb.server.secrets`: a value is
+accepted on ``PUT`` and written owner-only to disk; every response — including the
+``PUT`` itself — is a :class:`SecretStatusOut` (presence, ≤4-char fingerprint,
+who/when), never the value. ``PUT``/``DELETE``/``verify`` are admin-only; the status
+list is readable by any signed-in role (it is non-secret by construction). ``verify``
+runs the builder's own login probe and is rate-limited to one per 10 s so it cannot
+be used to burn quota.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from fastapi import APIRouter, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
+from crb.builders.claude_code import CLI_TOKEN_SECRET, VERIFY_STATUSES
 from crb.core.routing import POLICY_VERSION
+from crb.core.secrets_file import SecretsInsecure
 from crb.core.version import APPARATUS_VERSION
 from crb.observability.probes import probe_builders
-from crb.server.auth import AdminDep, count_active_admins, create_local_user, validate_role
+from crb.server.auth import (
+    AdminDep,
+    ViewerDep,
+    count_active_admins,
+    create_local_user,
+    validate_role,
+)
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep
+from crb.server.secrets import (
+    CLAUDE_CODE_TOKEN_MAX_LEN,
+    SecretsDep,
+    VerifyLimiterDep,
+)
 from crb.server.settings import MIN_PASSWORD_LENGTH, ROLE_LADDER
 from crb.store.models import User
 
@@ -55,6 +77,46 @@ class CreateUserRequest(BaseModel):
 class RoleChange(BaseModel):
     role: str
     active: bool | None = None
+
+
+# --- secrets (request/response models live here on purpose: schemas.py is shared) ------
+
+
+class SecretStatusOut(BaseModel):
+    """What the API says about a stored secret. ``fingerprint`` is at most the last
+    four characters of the value (empty when absent); nothing else of the value."""
+
+    name: str
+    present: bool
+    fingerprint: str = Field(default="", max_length=4)
+    set_at: str = ""
+    set_by: str = ""
+
+
+class SecretsStatusList(BaseModel):
+    items: list[SecretStatusOut]
+    #: Where the files live on the API host (admins only — so they can find / mount /
+    #: rotate); ``""`` for every other role.
+    secrets_dir: str = ""
+
+
+class ClaudeCodeTokenIn(BaseModel):
+    """The pasted ``claude setup-token`` value. Validated for shape in the route."""
+
+    token: str = Field(min_length=1, max_length=CLAUDE_CODE_TOKEN_MAX_LEN)
+
+
+class LoginCheckOut(BaseModel):
+    """The verify probe's outcome (``crb.builders.claude_code.LoginCheck``)."""
+
+    status: str = Field(description="one of " + " | ".join(VERIFY_STATUSES))
+    detail: str = ""
+    source: str = ""
+    fingerprint: str = Field(default="", max_length=4)
+    model: str = ""
+    cli_version: str = ""
+    duration_s: float = 0.0
+    cost_usd: float | None = None
 
 
 @router.get("/users", response_model=UserList, responses={401: _ERR, 403: _ERR})
@@ -132,6 +194,92 @@ def get_settings_view(admin: AdminDep, settings: SettingsDep) -> dict[str, Any]:
         "policy_version": POLICY_VERSION,
         "raw": raw,
     }
+
+
+# --- /settings/secrets ---------------------------------------------------------------------
+
+_CLAUDE_TOKEN_PATH = "/settings/secrets/claude-code-token"  # noqa: S105 — a URL path
+
+
+def _status_out(status: Any) -> SecretStatusOut:
+    return SecretStatusOut(**status.to_dict())
+
+
+@router.get(
+    "/settings/secrets",
+    response_model=SecretsStatusList,
+    responses={401: _ERR},
+    summary="Statuses of the operator-supplied secrets (never values); any signed-in role",
+)
+def list_secrets(user: ViewerDep, secrets: SecretsDep) -> SecretsStatusList:
+    """Readable by every role: a status is non-secret by construction (presence, at most
+    four trailing characters, who set it when) and an operator needs it to know whether
+    an ``auth: cli`` run can authenticate. Only admins learn the directory path."""
+    return SecretsStatusList(
+        items=[_status_out(s) for s in secrets.statuses()],
+        secrets_dir=str(secrets.path) if user.role == "admin" else "",
+    )
+
+
+@router.put(
+    _CLAUDE_TOKEN_PATH,
+    response_model=SecretStatusOut,
+    responses={401: _ERR, 403: _ERR, 409: _ERR, 422: _ERR},
+    summary="Store the Claude Code login token (claude setup-token) owner-only on the API host",
+)
+def put_claude_code_token(
+    body: ClaudeCodeTokenIn, admin: AdminDep, secrets: SecretsDep
+) -> SecretStatusOut:
+    try:
+        stored = secrets.set(CLI_TOKEN_SECRET, body.token, set_by=admin.display_name or admin.id)
+    except ValueError as exc:
+        raise ApiError(422, "invalid_token", str(exc)) from None
+    except SecretsInsecure as exc:
+        raise ApiError(409, "secrets_insecure", str(exc)) from None
+    return _status_out(stored)
+
+
+@router.delete(
+    _CLAUDE_TOKEN_PATH,
+    response_model=SecretStatusOut,
+    responses={401: _ERR, 403: _ERR, 409: _ERR},
+    summary="Remove the stored Claude Code login token",
+)
+def delete_claude_code_token(admin: AdminDep, secrets: SecretsDep) -> SecretStatusOut:
+    del admin
+    try:
+        return _status_out(secrets.delete(CLI_TOKEN_SECRET))
+    except SecretsInsecure as exc:
+        raise ApiError(409, "secrets_insecure", str(exc)) from None
+
+
+@router.post(
+    _CLAUDE_TOKEN_PATH + "/verify",
+    response_model=LoginCheckOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 429: _ERR},
+    summary="Test the stored token: one no-tool Haiku turn through the builder's own environment",
+)
+def verify_claude_code_token(
+    admin: AdminDep, secrets: SecretsDep, limiter: VerifyLimiterDep
+) -> LoginCheckOut:
+    del admin
+    retry = limiter.acquire()
+    if retry is not None:
+        wait = math.ceil(retry)
+        raise ApiError(
+            429,
+            "rate_limited",
+            f"verify runs at most once every {int(limiter.min_interval_s)} s; retry in {wait} s",
+            detail={"retry_after_s": wait},
+            headers={"Retry-After": str(wait)},
+        )
+    try:
+        check = secrets.verify(CLI_TOKEN_SECRET)
+    except SecretsInsecure as exc:
+        raise ApiError(409, "secrets_insecure", str(exc)) from None
+    if check is None:
+        raise ApiError(404, "not_found", "no Claude Code token is stored — save one first")
+    return LoginCheckOut(**check.to_dict())
 
 
 __all__ = ["router"]

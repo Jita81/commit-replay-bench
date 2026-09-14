@@ -365,6 +365,274 @@ def test_auth_cli_mode_env_needs_no_key_and_never_forwards_it(
         cc.ClaudeCodeBuilder.env("api_key")
 
 
+# ---------------------------------------------------------------------------
+# cli mode: token source order  env → secrets file → nothing (the CLI's own login)
+# ---------------------------------------------------------------------------
+
+STORED = "sk-ant-oat01-" + "S" * 70 + "-FILE"
+ENV_TOKEN = "sk-ant-oat01-" + "E" * 70 + "-ENVV"
+
+
+@pytest.fixture
+def secrets_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A throwaway ``CRB_HOME`` (never the operator's) with an empty secrets dir."""
+    home = tmp_path / "crb-home"
+    monkeypatch.setenv("CRB_HOME", str(home))
+    monkeypatch.delenv("CRB_SECRETS_DIR", raising=False)
+    monkeypatch.delenv(cc.CLI_OAUTH_TOKEN_ENV, raising=False)
+    return home
+
+
+def _store(home: Path, value: str = STORED) -> None:
+    from crb.core.secrets_file import SecretsStore
+
+    SecretsStore(home / "secrets").set(cc.CLI_TOKEN_SECRET, value, set_by="test")
+
+
+def test_token_source_env_wins_over_secrets_file(
+    secrets_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _store(secrets_home)
+    monkeypatch.setenv(cc.CLI_OAUTH_TOKEN_ENV, ENV_TOKEN)
+    env = cc.ClaudeCodeBuilder.env("cli")
+    assert env[cc.CLI_OAUTH_TOKEN_ENV] == ENV_TOKEN
+    assert cc.token_source() == (cc.TOKEN_SOURCE_ENV, "")
+
+
+def test_token_source_secrets_file_when_env_is_empty(secrets_home: Path) -> None:
+    _store(secrets_home)
+    env = cc.ClaudeCodeBuilder.env("cli")
+    assert env[cc.CLI_OAUTH_TOKEN_ENV] == STORED
+    assert cc.token_source() == (cc.TOKEN_SOURCE_SECRETS_FILE, "FILE")
+    # api_key mode never reads the secrets file
+    assert cc.CLI_OAUTH_TOKEN_ENV not in cc.ClaudeCodeBuilder.env("api_key")
+
+
+def test_token_source_nothing_falls_back_to_the_cli_login(secrets_home: Path) -> None:
+    env = cc.ClaudeCodeBuilder.env("cli")
+    assert cc.CLI_OAUTH_TOKEN_ENV not in env
+    assert cc.token_source() == ("", "")
+
+
+def test_crb_secrets_dir_overrides_crb_home(
+    secrets_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from crb.core.secrets_file import SecretsStore
+
+    _store(secrets_home)  # under CRB_HOME — must be ignored once CRB_SECRETS_DIR is set
+    mount = tmp_path / "kv"
+    other = STORED[:-4] + "MNT1"
+    SecretsStore(mount).set(cc.CLI_TOKEN_SECRET, other)
+    monkeypatch.setenv("CRB_SECRETS_DIR", str(mount))
+    assert cc.ClaudeCodeBuilder.env("cli")[cc.CLI_OAUTH_TOKEN_ENV] == other
+    assert cc.token_source() == (cc.TOKEN_SOURCE_SECRETS_FILE, "MNT1")
+
+
+def test_insecure_secrets_file_fails_closed_as_permission_error(secrets_home: Path) -> None:
+    _store(secrets_home)
+    os.chmod(secrets_home / "secrets" / cc.CLI_TOKEN_SECRET, 0o644)
+    with pytest.raises(PermissionError, match="secrets file refused") as ei:
+        cc.ClaudeCodeBuilder.env("cli")
+    assert STORED not in str(ei.value)
+    with pytest.raises(PermissionError):
+        cc.token_source()
+
+
+def test_insecure_secrets_file_makes_a_cli_build_a_model_error(
+    secrets_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    _store(secrets_home)
+    os.chmod(secrets_home / "secrets" / cc.CLI_TOKEN_SECRET, 0o604)
+    fx = make_fixture(tmp_path)
+    ws = fx.workspace(tmp_path / "wt")
+    brief = base.BuildBrief.from_task(fx.task, config=fx.config, test_command="true")
+    spawn = FakeSpawn(GOOD_RUN, side_effect=_fix_calc)
+    out = cc.ClaudeCodeBuilder(auth="cli", spawn=spawn, claude_binary="/fake/claude").build(
+        ws, brief, base.Budget(max_turns=5, max_tool_calls=10, max_cost_usd=1, wall_clock_s=30)
+    )
+    assert out.stop_reason == base.STOP_MODEL_ERROR
+    assert any("secrets file refused" in e for e in out.errors)
+    assert STORED not in " ".join(out.errors)
+    assert spawn.argv == []  # never spawned
+
+
+# ---------------------------------------------------------------------------
+# verify_login / auth_status (the "test the login" probe)
+# ---------------------------------------------------------------------------
+
+
+def ev_api_retry(status: int = 401) -> str:
+    return json.dumps(
+        {
+            "type": "system",
+            "subtype": "api_retry",
+            "attempt": 1,
+            "max_retries": 10,
+            "error_status": status,
+            "error": "authentication_failed",
+        }
+    )
+
+
+def test_verify_argv_is_one_turn_no_tools_cheapest_model() -> None:
+    argv = cc.verify_argv("/x/claude")
+    assert argv[:3] == ["/x/claude", "-p", cc.VERIFY_PROMPT]
+    assert argv[argv.index("--model") + 1] == cc.VERIFY_MODEL == "claude-haiku-4-5"
+    assert argv[argv.index("--max-turns") + 1] == "1"
+    assert argv[argv.index("--tools") + 1] == ""
+    assert argv[argv.index("--setting-sources") + 1] == cc.CLI_SETTING_SOURCES
+    assert "--bare" not in argv and "--no-session-persistence" in argv
+    assert "--disable-slash-commands" in argv and "--permission-mode" in argv
+
+
+def test_verify_login_ok_uses_the_builder_env_plus_the_explicit_token(
+    secrets_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SOME_OTHER_SECRET", "must-not-leak")
+    spawn = FakeSpawn(
+        [
+            ev_init("claude-haiku-4-5"),
+            ev_assistant(text("pong"), tin=5, tout=1),
+            ev_result(num_turns=1, cost=0.0, result="pong"),
+        ]
+    )
+    check = cc.verify_login(token=STORED, binary="/x/claude", spawn=spawn, cwd=tmp_path)
+    assert check.status == cc.VERIFY_OK and check.detail == "pong"
+    assert check.source == "explicit" and check.fingerprint == "FILE"
+    assert check.model == cc.VERIFY_MODEL and check.cost_usd == 0.0
+    assert spawn.env[cc.CLI_OAUTH_TOKEN_ENV] == STORED
+    assert "SOME_OTHER_SECRET" not in spawn.env and "ANTHROPIC_API_KEY" not in spawn.env
+    assert spawn.env["CI"] == "1" and spawn.cwd == tmp_path and spawn.timeout_s == 60
+    assert spawn.argv[0] == "/x/claude"
+    d = check.to_dict()
+    assert set(d) == {
+        "status",
+        "detail",
+        "source",
+        "fingerprint",
+        "model",
+        "cli_version",
+        "duration_s",
+        "cost_usd",
+    }
+    assert STORED not in json.dumps(d) and len(d["fingerprint"]) <= 4
+
+
+def test_verify_login_invalid_kills_at_the_first_401_retry(
+    secrets_home: Path, tmp_path: Path
+) -> None:
+    lines = [ev_init(), ev_api_retry(401), ev_api_retry(401), ev_result(is_error=True)]
+    spawn = FakeSpawn(lines, returncode=1)
+    check = cc.verify_login(token=STORED, binary="/x/claude", spawn=spawn, cwd=tmp_path)
+    assert check.status == cc.VERIFY_INVALID
+    assert check.detail == "authentication failed (HTTP 401)"
+
+
+def test_verify_login_result_error_401_and_other_errors_and_timeout(
+    secrets_home: Path, tmp_path: Path
+) -> None:
+    err = json.loads(ev_result(is_error=True, result="Failed to authenticate. API Error: 401"))
+    err["api_error_status"] = 401
+    check = cc.verify_login(
+        token=STORED, binary="/x/claude", spawn=FakeSpawn([json.dumps(err)]), cwd=tmp_path
+    )
+    assert check.status == cc.VERIFY_INVALID and "401" in check.detail
+    other = FakeSpawn([ev_init(), ev_result(is_error=True, result="model not available")])
+    check = cc.verify_login(token=STORED, binary="/x/claude", spawn=other, cwd=tmp_path)
+    assert check.status == cc.VERIFY_ERROR and check.detail == "model not available"
+    hung = FakeSpawn([ev_init()], timed_out=True)
+    check = cc.verify_login(token=STORED, binary="/x/claude", spawn=hung, cwd=tmp_path)
+    assert check.status == cc.VERIFY_TIMEOUT and "60s" in check.detail
+    silent = FakeSpawn([], returncode=2, stderr="boom sk-ant-oat01-" + "Z" * 40)
+    check = cc.verify_login(token=STORED, binary="/x/claude", spawn=silent, cwd=tmp_path)
+    assert check.status == cc.VERIFY_ERROR and "exit 2" in check.detail
+    assert "Z" * 40 not in check.detail  # stderr tail is redacted
+    crashed = FakeSpawn([], raise_exc=OSError("cannot exec"))
+    check = cc.verify_login(token=STORED, binary="/x/claude", spawn=crashed, cwd=tmp_path)
+    assert check.status == cc.VERIFY_ERROR and "cannot exec" in check.detail
+
+
+def test_verify_login_without_token_probes_the_real_resolution(
+    secrets_home: Path, tmp_path: Path
+) -> None:
+    ok = [ev_init(), ev_result(num_turns=1, cost=0.0, result="pong")]
+    spawn = FakeSpawn(ok)
+    check = cc.verify_login(binary="/x/claude", spawn=spawn, cwd=tmp_path)
+    assert check.status == cc.VERIFY_OK and check.source == cc.TOKEN_SOURCE_KEYCHAIN
+    assert cc.CLI_OAUTH_TOKEN_ENV not in spawn.env
+    _store(secrets_home)
+    spawn = FakeSpawn(ok)
+    check = cc.verify_login(binary="/x/claude", spawn=spawn, cwd=tmp_path)
+    assert check.source == cc.TOKEN_SOURCE_SECRETS_FILE and check.fingerprint == "FILE"
+    assert spawn.env[cc.CLI_OAUTH_TOKEN_ENV] == STORED
+    os.chmod(secrets_home / "secrets" / cc.CLI_TOKEN_SECRET, 0o644)
+    check = cc.verify_login(binary="/x/claude", spawn=FakeSpawn(ok), cwd=tmp_path)
+    assert check.status == cc.VERIFY_ERROR and "refused" in check.detail
+
+
+def test_verify_login_cli_missing(
+    secrets_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    empty = tmp_path / "emptybin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    check = cc.verify_login(token=STORED, spawn=FakeSpawn([]), cwd=tmp_path)
+    assert check.status == cc.VERIFY_CLI_MISSING
+    assert cc.cli_version() == ""
+    assert cc.auth_status() == (cc.VERIFY_CLI_MISSING, "", "the 'claude' CLI was not found on PATH")
+
+
+FAKE_AUTH_CLI = """#!/bin/sh
+case "$1" in
+  --version) echo "9.9.9 (fake)"; exit 0;;
+  auth) echo '{{"loggedIn": {logged_in}, "authMethod": "claude.ai", "email": "op@example.org"}}'; exit 0;;
+esac
+exit 3
+"""
+
+
+@pytest.fixture
+def fake_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[bool], Path]:
+    def make(logged_in: bool) -> Path:
+        bindir = tmp_path / "fakebin"
+        bindir.mkdir(exist_ok=True)
+        script = bindir / "claude"
+        script.write_text(FAKE_AUTH_CLI.format(logged_in="true" if logged_in else "false"))
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+        return script
+
+    return make
+
+
+def test_auth_status_names_the_source(
+    secrets_home: Path, fake_cli: Callable[[bool], Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_cli(True)
+    assert cc.cli_version() == "9.9.9 (fake)"
+    assert cc.auth_status() == (
+        cc.TOKEN_SOURCE_KEYCHAIN,
+        "",
+        "CLI login (claude.ai) as op@example.org",
+    )
+    fake_cli(False)
+    src, fp, detail = cc.auth_status()
+    assert src == cc.TOKEN_SOURCE_NONE and fp == "" and "claude setup-token" in detail
+    _store(secrets_home)
+    assert cc.auth_status() == (
+        cc.TOKEN_SOURCE_SECRETS_FILE,
+        "FILE",
+        "token supplied by the secrets file",
+    )
+    monkeypatch.setenv(cc.CLI_OAUTH_TOKEN_ENV, ENV_TOKEN)
+    assert cc.auth_status() == (cc.TOKEN_SOURCE_ENV, "", "token supplied by the worker environment")
+    monkeypatch.delenv(cc.CLI_OAUTH_TOKEN_ENV)
+    os.chmod(secrets_home / "secrets" / cc.CLI_TOKEN_SECRET, 0o644)
+    src, fp, detail = cc.auth_status()
+    assert src == cc.VERIFY_ERROR and "refused" in detail and STORED not in detail
+
+
 def test_auth_cli_build_without_a_key_runs_and_grades(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
