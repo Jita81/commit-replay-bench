@@ -269,3 +269,14 @@ resolved argv is recorded on every step.
 - **Hash `repo_lint_clean` on every row (including `v4`).** Rejected: every ledger written
   before this ADR would stop verifying; ADR-0002's tamper-evidence must survive the
   apparatus growing.
+
+## Amendment 2026-09-14 (b) — the linter's VERSION is part of the repository's definition
+
+NHSDigital/mesh-client's 2024-era commits pin `ruff ^0.2.0`; the host's ruff 0.16 rejected the
+maintainers' own patches and belt 5 excluded two honest tasks. Belt 5 now installs the ruff
+version the repository pins **at the commit under test** (a `ruff-pre-commit` `rev`, a PEP 508
+specifier in `pyproject.toml` dependency lists or `requirements*.txt`, a Poetry caret/tilde
+range translated to PEP 440) into the runner's environment before planning, and the plan's
+`detected` names the version that ran (`ruff@0.2.2+ruff-format`). No pin ⇒ the environment's
+ruff, recorded as such. JS tools already come from the repository's own `node_modules`
+(lockfile-pinned); `gofmt` is the toolchain's; Rust/JVM pins are a follow-up.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import shutil
 import stat
 import sys
@@ -770,7 +772,10 @@ def test_python_gold_that_ruff_rejects_is_not_gold_clean(tmp_path: Path) -> None
     out, events = _qualify_sha(repo, config, ugly_sha, tmp_path / "mine-ugly")
     task = out.task
     assert task is not None and task.gold_clean is False
-    assert task.gold_note == "gold fails belt 5 (ruff+ruff-format): ruff rejected 1 changed file(s)"
+    assert re.fullmatch(
+        r"gold fails belt 5 \(ruff(@[\d.]+)?\+ruff-format\): ruff rejected 1 changed file\(s\)",
+        task.gold_note,
+    )
     assert [p["lint"] for k, p in events if k == "mine.gold"] == [False]
     # the gold source stays as the maintainers wrote it: `ruff check --no-fix` never edits
     assert (root / "pkg" / "mul.py").read_text().startswith("import os\n")

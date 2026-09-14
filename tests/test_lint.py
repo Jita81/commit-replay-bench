@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -158,7 +159,7 @@ def test_read_exit_is_the_one_place_an_exit_code_is_interpreted(
 def test_run_plan_verdicts_and_records(tmp_path: Path) -> None:
     plan = lint_mod.LintPlan((_RUFF,), "ruff")
     ok = lint_mod.run_plan(plan, FakeExecutor(_res(0)), tmp_path, ["a.py", "b.py", "c.md"])
-    assert ok.ok is True and ok.error == "" and ok.detected == "ruff"
+    assert ok.ok is True and ok.error == "" and ok.detected.startswith("ruff")
     assert ok.steps[0].files == ("a.py", "b.py") and ok.steps[0].verdict is True
     assert ok.steps[0].argv == ("ruff", "check", "a.py", "b.py")
 
@@ -282,7 +283,7 @@ def test_python_detection_follows_click(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\nline-length = 88\n")
     assert lint_mod.python_ruff_evidence(tmp_path) == (True, False)
     plan = lint_mod.python_plan(tmp_path, "/venv/bin/ruff")
-    assert plan is not None and plan.detected == "ruff"
+    assert plan is not None and plan.detected.startswith("ruff") and "+" not in plan.detected
     assert plan.tools[0].argv == ("/venv/bin/ruff", "check", "--no-fix")
     # click: ruff-check + ruff-format pre-commit hooks
     (tmp_path / ".pre-commit-config.yaml").write_text(
@@ -291,7 +292,7 @@ def test_python_detection_follows_click(tmp_path: Path) -> None:
     )
     assert lint_mod.python_ruff_evidence(tmp_path) == (True, True)
     plan = lint_mod.python_plan(tmp_path, "ruff")
-    assert plan is not None and plan.detected == "ruff+ruff-format"
+    assert plan is not None and re.fullmatch(r"ruff(@[\d.]+)?\+ruff-format", plan.detected)
     assert [t.name for t in plan.tools] == ["ruff", "ruff-format"]
     assert plan.tools[1].argv == ("ruff", "format", "--check")
     # a [tool.ruff.format] table alone also evidences the formatter
@@ -694,7 +695,9 @@ def test_python_ruff_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
     ws.overlay_sources(task.src_files)
     res = _grade(ws, task, config)
     assert res.clean and res.belts.repo_lint_clean is True, res.to_dict()
-    assert res.lint_run is not None and res.lint_run.detected == "ruff+ruff-format"
+    assert res.lint_run is not None and re.fullmatch(
+        r"ruff(@[\d.]+)?\+ruff-format", res.lint_run.detected
+    )
     assert [s.tool for s in res.lint_run.steps] == ["ruff", "ruff-format"]
     ws.remove()
 
@@ -1235,3 +1238,30 @@ def test_real_tsc_attributes_type_errors_by_file(tmp_path: Path) -> None:
     assert (step2.findings_changed, step2.findings_other) == (1, 1)
     assert lg.grade_row_from_result(res2, task, pack_hash="c" * 64).failure_kind == "lint"
     ws2.remove()
+
+
+def test_pinned_ruff_spec_reads_the_commit_not_the_host(tmp_path: Path) -> None:
+    """Belt 5 applies the repository's linter VERSION (mesh-client: host ruff 0.16 rejected
+    the maintainers' patches under a ``^0.2`` pin, 2026-09-14)."""
+    from crb.core.lint import _poetry_to_pep440, pinned_ruff_spec
+
+    assert pinned_ruff_spec(tmp_path) == ""
+    (tmp_path / ".pre-commit-config.yaml").write_text(
+        "repos:\n  - repo: https://github.com/astral-sh/ruff-pre-commit\n    rev: v0.4.4\n"
+        "    hooks:\n      - id: ruff\n",
+        encoding="utf-8",
+    )
+    assert pinned_ruff_spec(tmp_path) == "==0.4.4"
+    (tmp_path / ".pre-commit-config.yaml").unlink()
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0"\n[project.optional-dependencies]\n'
+        'dev = ["pytest", "ruff>=0.5,<0.6"]\n',
+        encoding="utf-8",
+    )
+    assert pinned_ruff_spec(tmp_path) == ">=0.5,<0.6"
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\nname = "x"\nversion = "0"\n[tool.poetry.dev-dependencies]\nruff = "^0.2.0"\n',
+        encoding="utf-8",
+    )
+    assert pinned_ruff_spec(tmp_path) == ">=0.2.0,<0.3.0"
+    assert _poetry_to_pep440("~1.4") == ">=1.4.0,<1.5.0" and _poetry_to_pep440("0.4.4") == "==0.4.4"

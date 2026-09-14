@@ -61,6 +61,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 import time
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
@@ -659,6 +660,97 @@ def python_ruff_evidence(root: Path) -> tuple[bool, bool]:
     return check, fmt
 
 
+_PRECOMMIT_RUFF_REPO = re.compile(
+    r"repo:\s*https://github\.com/(?:astral-sh|charliermarsh)/ruff-pre-commit\s*\n\s*rev:\s*v?([0-9][\w.]*)",
+    re.M,
+)
+_PEP508_RUFF = re.compile(r"^\s*ruff\s*(\[[^\]]*\])?\s*([=<>!~^][^;#]*)?", re.I)
+
+
+def pinned_ruff_spec(root: Path) -> str:
+    """The ruff VERSION the repository itself runs, as a pip requirement specifier
+    (``==0.4.4``, ``>=0.2.0,<0.3.0``), or ``""`` when the repository does not say.
+
+    Belt 5 must apply the repository's definition of acceptable, and that includes the
+    linter's version: NHSDigital/mesh-client pins ``ruff ^0.2.0`` and its HEAD passes
+    that; the host's ruff 0.16 rejected the maintainers' own patch and excluded two
+    honest tasks (2026-09-14). Evidence, in order: a ``ruff-pre-commit`` hook's
+    ``rev`` (exact), a PEP 508 pin anywhere in ``pyproject.toml`` dependency lists
+    (``project.dependencies``, ``optional-dependencies``, ``dependency-groups``), a
+    Poetry dev dependency (caret/tilde translated), ``requirements*.txt``."""
+    pc = root / ".pre-commit-config.yaml"
+    if pc.is_file():
+        m = _PRECOMMIT_RUFF_REPO.search(pc.read_text(encoding="utf-8", errors="replace"))
+        if m:
+            return f"=={m.group(1)}"
+    py = root / "pyproject.toml"
+    if py.is_file():
+        try:
+            data = tomllib.loads(py.read_text(encoding="utf-8"))
+        except (tomllib.TOMLDecodeError, OSError):
+            data = {}
+        specs: list[str] = []
+        project_tbl = data.get("project")
+        project: dict[str, Any] = project_tbl if isinstance(project_tbl, dict) else {}
+        opt = project.get("optional-dependencies")
+        for value in [
+            project.get("dependencies") or [],
+            *((opt or {}).values() if isinstance(opt, dict) else ()),
+        ]:
+            specs += [v for v in value if isinstance(v, str)]
+        for value in (data.get("dependency-groups") or {}).values():
+            specs += [v for v in value if isinstance(v, str)]
+        for spec in specs:
+            m = _PEP508_RUFF.match(spec)
+            if m and m.group(2):
+                return m.group(2).strip()
+        poetry = (
+            (data.get("tool") or {}).get("poetry") if isinstance(data.get("tool"), dict) else None
+        )
+        if isinstance(poetry, dict):
+            pools = [poetry.get("dev-dependencies") or {}, poetry.get("dependencies") or {}]
+            for grp in (poetry.get("group") or {}).values():
+                if isinstance(grp, dict):
+                    pools.append(grp.get("dependencies") or {})
+            for pool in pools:
+                v = pool.get("ruff") if isinstance(pool, dict) else None
+                if isinstance(v, dict):
+                    v = v.get("version")
+                if isinstance(v, str) and v.strip():
+                    return _poetry_to_pep440(v.strip())
+    for req in sorted(root.glob("requirements*.txt")):
+        for line in req.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = _PEP508_RUFF.match(line)
+            if m and m.group(2):
+                return m.group(2).strip()
+    return ""
+
+
+def _poetry_to_pep440(spec: str) -> str:
+    """Poetry's caret / tilde ranges as PEP 440: ``^0.2.0`` → ``>=0.2.0,<0.3.0``,
+    ``~0.2.1`` → ``>=0.2.1,<0.3.0``; anything already PEP 440 passes through."""
+    s = spec.replace(" ", "")
+    if s.startswith("^") or s.startswith("~"):
+        parts = s[1:].split(".")
+        nums = [int(x) if x.isdigit() else 0 for x in parts]
+        while len(nums) < 3:
+            nums.append(0)
+        lo = ".".join(str(n) for n in nums)
+        if s.startswith("^"):
+            if nums[0] > 0:
+                hi = f"{nums[0] + 1}.0.0"
+            elif nums[1] > 0:
+                hi = f"0.{nums[1] + 1}.0"
+            else:
+                hi = f"0.0.{nums[2] + 1}"
+        else:
+            hi = f"{nums[0]}.{nums[1] + 1}.0"
+        return f">={lo},<{hi}"
+    if s == "*":
+        return ""
+    return s if s[0] in "=<>!~" else f"=={s}"
+
+
 def python_plan(root: Path, ruff: str | None) -> LintPlan | None:
     """``ruff check <changed .py>`` (+ ``ruff format --check <changed .py>`` when the
     repository evidences ``ruff format``). ``ruff`` is the resolved binary (the
@@ -671,13 +763,28 @@ def python_plan(root: Path, ruff: str | None) -> LintPlan | None:
         return None
     tools: list[LintTool] = []
     names: list[str] = []
+    version = ruff_version(ruff)
+    tag = f"ruff@{version}" if version else "ruff"
     if check:
         tools.append(LintTool("ruff", (ruff, "check", "--no-fix"), exts=(".py",)))
-        names.append("ruff")
+        names.append(tag)
     if fmt:
         tools.append(LintTool("ruff-format", (ruff, "format", "--check"), exts=(".py",)))
         names.append("ruff-format")
     return LintPlan(tuple(tools), "+".join(names))
+
+
+def ruff_version(ruff: str) -> str:
+    """``ruff --version`` → ``"0.2.2"`` (``""`` when it cannot be asked). Recorded in
+    the plan's ``detected`` so a belt-5 verdict names the linter VERSION it applied."""
+    try:
+        out = subprocess.run(
+            [ruff, "--version"], capture_output=True, text=True, timeout=30, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    m = re.search(r"(\d+\.\d+\.\d+)", out.stdout or "")
+    return m.group(1) if m else ""
 
 
 # --- JavaScript / TypeScript: eslint, prettier, standard ------------------------------

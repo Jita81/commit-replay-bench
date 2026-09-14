@@ -35,7 +35,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from crb.core.execution import Command, ExecResult, Executor
-from crb.core.lint import LintPlan, python_plan
+from crb.core.lint import LintPlan, pinned_ruff_spec, python_plan
 from crb.core.runners.base import (
     BaseRunner,
     SetupResult,
@@ -46,6 +46,9 @@ from crb.core.runners.base import (
     parse_pytest_failures,
     tail_of,
 )
+
+#: (interpreter, spec) pairs already satisfied this process — one install per commit pin.
+_PINNED_RUFF_DONE: set[tuple[str, str]] = set()
 
 # A real pytest oracle defines test functions/classes. A source module that merely
 # happens to be named test_*.py does NOT — using it as an oracle lets source edits
@@ -183,10 +186,35 @@ class PytestRunner(BaseRunner):
             return executor.tool("ruff")
         python = self.configured_python(root, self.env_dir)
         if python:
+            self._ensure_pinned_ruff(root, Path(python))
             sibling = Path(python).parent / ("ruff.exe" if os.name == "nt" else "ruff")
             if sibling.exists():
                 return str(sibling)
         return shutil.which("ruff") or "ruff"
+
+    def _ensure_pinned_ruff(self, root: Path, python: Path) -> None:
+        """Install the ruff version the repository (at THIS commit) pins into the
+        environment, so belt 5 applies the maintainers' definition of acceptable — the
+        host's ruff 0.16 rejected mesh-client's own patches under a ``^0.2`` pin
+        (2026-09-14). Idempotent and offline-tolerant: a failed install leaves the
+        sibling as it is and the plan records the version that actually ran."""
+        spec = pinned_ruff_spec(root)
+        if not spec:
+            return
+        cache_key = (str(python), spec)
+        if cache_key in _PINNED_RUFF_DONE:
+            return
+        uv = shutil.which("uv")
+        argv = (
+            [uv, "pip", "install", "-q", "--python", str(python), f"ruff{spec}"]
+            if uv
+            else [str(python), "-m", "pip", "install", "-q", f"ruff{spec}"]
+        )
+        try:
+            subprocess.run(argv, capture_output=True, text=True, timeout=300, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        _PINNED_RUFF_DONE.add(cache_key)
 
     def detect_lint(self, root: Path, executor: Executor) -> LintPlan | None:
         """``ruff check`` (+ ``ruff format --check``) when the repository configures
