@@ -17,10 +17,10 @@ import { env, expect, expectLogAction, field, primary, startRun, test, waitForRu
  *  - the Ledger page's chain gate is OPEN with false-Q1 = 0 and the rows are listed;
  *  - the Capability page renders the (class × size) cell with its n, its Wilson
  *    interval and the route `calibrate` (n < 10) — never a fabricated cell;
- *  - the Sign-off page refuses to attest a thin cell: the policy gate is CLOSED on
- *    `n ≥ 10` and the Wilson lower bound, and the action stays disabled. (The server's
- *    own 409 `false_q1_refused` fires only for false-Q1 > 0 or an UNMEASURED cell —
- *    a thin measured cell is stopped by the UI's policy gate before any request.)
+ *  - the Sign-off page refuses to attest a thin cell: under `signoff-policy.v1` the
+ *    server's preview lists the failing clauses (`thin_cell`, and the controls escape
+ *    04's run found), the gate is CLOSED and the action stays disabled — 08 tells the
+ *    whole sign-off story, including a cell that clears the policy.
  *  - Export JSONL downloads a file whose rows verify with `crb ledger verify --path`.
  *
  * Tier 2 with CRB_E2E_BUILDER=claude_code (worker: CRB_CLAUDE_CODE_AUTH=cli) runs a
@@ -174,17 +174,18 @@ test.describe(`05 replay (${BUILDER})`, () => {
     await expect.poll(async () => (await select.locator('option').count()) - 1).toBeGreaterThanOrEqual(1)
     await select.selectOption({ value: `${cellClass}|${cellSize}` })
     await expect(gate).toContainText(`Attest ${cellClass} × ${cellSize}`)
-    await field(page, 'Attestation note').fill('walkthrough: attempting to sign off a thin cell')
-    // n < 10 and a wide interval: the gate is CLOSED on exactly those criteria, and the
-    // action is disabled — nothing is sent, nothing is recorded.
+    await field(page, 'Attestation statement').fill('walkthrough: attempting to sign off a thin cell')
+    // n < 10 (and 04's controls escape): the server's preview refuses, the gate is CLOSED on
+    // exactly those criteria, and the action is disabled — nothing is sent, nothing is recorded.
     await expect(gate).toHaveAttribute('data-state', 'CLOSED')
     const row = (label: string | RegExp) => gate.getByRole('listitem').filter({ hasText: label })
     await expect(row('Cell is measured')).toContainText(/✓\s*satisfied:/)
     await expect(row('false-Q1 = 0')).toContainText(/✓\s*satisfied:/)
     await expect(row('n ≥ 10')).toContainText(/✗\s*not satisfied:/)
-    await expect(row(/Wilson lower ≥/)).toContainText(/✗\s*not satisfied:/)
+    await expect(row('Route = deliver')).toContainText(/✗\s*not satisfied:/)
+    await expect(page.getByTestId('signoff-refusals').getByTestId('refusal-thin_cell')).toContainText('observed 2')
     await expect(page.getByRole('button', { name: 'Sign off' })).toBeDisabled()
-    await expect(page.getByText('Attestation recorded')).toHaveCount(0)
+    await expect(page.getByTestId('signoff-recorded')).toHaveCount(0)
     await expect(page.getByRole('table', { name: `Sign-offs for ${t.name}` })).toContainText('No attestations yet')
   })
 
