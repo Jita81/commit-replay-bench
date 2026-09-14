@@ -11,7 +11,7 @@ import pytest
 from crb.server.routes.forecast import parse_mix
 from fixtures import pyrepo as pr
 from fixtures.server_seed import ALPHA, BETA, Env, envelope, login, make_env
-from fixtures.signoff_seed import attested_body, pass_controls
+from fixtures.signoff_seed import attested_body, clear_policy
 
 
 @pytest.fixture(autouse=True)
@@ -113,10 +113,11 @@ class TestReadiness:
         assert "not earned-trusted" in gaps and "bug.fix/S (automated-pass)" in gaps
         assert d["buildable_units"] == 4 and d["buildable_frac"] == 0.8  # ≥ 80%: no gap
         # sign off the deliver cell → the earned-tier gap for it closes. Under
-        # signoff-policy.v1 that needs a clean controls gate (the seed's has an escape)
-        # and an attestation naming an accepted row of the cell.
+        # signoff-policy.v2 that needs a clean controls gate (the seed's has an escape),
+        # a measured strong oracle (the seed's is 0.58) and an attestation naming an
+        # accepted row of the cell.
         login(env.client, "approver")
-        pass_controls(env)
+        clear_policy(env)
         cell = {"capability_class": "bug.fix", "size": "S"}
         assert (
             env.post("/signoffs", json=attested_body(env, cell, note="reviewed")).status_code == 201

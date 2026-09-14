@@ -23,6 +23,7 @@ import { controlsDisplay, useCapabilityMapWithControls, type CapabilityCellSplit
 import { ControlsPill, FailureSplitPills, ModelPointLine } from '../Capability/FailureSplit'
 import {
   REFUSAL_DISPLAY,
+  SIGNOFF_POLICY_VERSION,
   fmtBound,
   isSignoffRefused,
   refusalFamily,
@@ -41,7 +42,7 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
     return [
       { label: 'Cell is measured', ok: null, detail: cellChosen ? 'evaluating…' : 'choose a measured cell' },
       { label: 'false-Q1 = 0', ok: null },
-      { label: 'Evidence meets signoff-policy.v1', ok: null },
+      { label: `Evidence meets ${SIGNOFF_POLICY_VERSION}`, ok: null },
       { label: 'Negative controls passed', ok: null },
       { label: 'Route = deliver', ok: null },
       { label: 'Accepted row read and affirmed', ok: null },
@@ -53,6 +54,7 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
   const c = preview.controls
   const cd = controlsDisplay(c)
   const oracle = ev.oracle_strength
+  const scored = ev.oracle ? `${ev.oracle.scored} of ${ev.oracle.tasks} task(s) scored` : ''
   return [
     { label: 'Cell is measured', ok: ev.measured, detail: `n = ${fmtInt(ev.n)}` },
     { label: 'false-Q1 = 0', ok: !fam.has('false_q1') && ev.false_q1 === 0, detail: `false_q1 = ${ev.false_q1}` },
@@ -62,7 +64,11 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
       ok: !fam.has('controls_unmeasured') && !fam.has('controls_failed') && !fam.has('controls_escapes') && !fam.has('controls_thin'),
       detail: c.measured ? `${cd.label} · ${c.constructible} of ${c.total} · ${c.escapes} escape(s) · run ${shortId(c.run_id)} · ${fmtDate(c.created)}` : 'never run for this repo',
     },
-    { label: `Oracle strength ≥ ${fmtRatio(p.min_oracle_strength)} (when measured)`, ok: !fam.has('oracle_weak'), detail: oracle === null ? 'unmeasured — not a bar until scored' : `strength ${fmtRatio(oracle)}` },
+    {
+      label: `Oracle strength measured and ≥ ${fmtRatio(p.min_oracle_strength)}`,
+      ok: !fam.has('oracle_unmeasured') && !fam.has('oracle_weak'),
+      detail: oracle === null ? `unmeasured — no task of this cell has a mutation score (${scored || 'none'}); run an oracle run — non-overridable` : `strength ${fmtRatio(oracle)}${scored ? ` · ${scored}` : ''}`,
+    },
     { label: 'Route = deliver', ok: !fam.has('route_not_deliver'), detail: `${preview.route.route}${preview.route.reason_code ? ` (${preview.route.reason_code})` : ''}` },
     { label: 'Accepted row read and affirmed', ok: !fam.has('attestation_missing') && attested, detail: preview.attestation ? `${shortId(preview.attestation.reviewed_row_hash)} · ${preview.attestation.subject || preview.attestation.reviewed_task_id}` : 'pick a row below and tick “I have read this accepted diff”' },
   ]
@@ -102,7 +108,7 @@ function EvidencePanel({ preview }: { preview: SignoffPreview }) {
         <StatTile label="Pass rate" value={fmtPct(ev.point)} n={ev.n} ci={ev.ci_low === null || ev.ci_high === null ? null : { low: ev.ci_low, high: ev.ci_high }} apparatus={`${fmtInt(ev.clean)} clean of ${fmtInt(ev.n)} eligible · ${apparatus}`} data-testid="signoff-tile-point" />
         <StatTile label="Wilson lower" value={fmtPct(ev.ci_low)} n={ev.n} apparatus={`the bound the routing rule reads · ≥ 80% for deliver`} data-testid="signoff-tile-ci-low" />
         <StatTile label="false-Q1" value={ev.measured ? String(ev.false_q1) : '—'} n={ev.n} apparatus="clean rows with a failed belt — must be 0" tone={ev.false_q1 > 0 ? 'red' : 'green'} data-testid="signoff-tile-false-q1" />
-        <StatTile label="Oracle strength" value={fmtRatio(ev.oracle_strength)} n={ev.n} apparatus="mean mutation kill-rate of the tasks' oracles · unmeasured = —" data-testid="signoff-tile-oracle" />
+        <StatTile label="Oracle strength" value={fmtRatio(ev.oracle_strength)} n={ev.oracle?.scored ?? ev.n} apparatus={`mean mutation kill-rate of the cell's tasks' oracles${ev.oracle ? ` · ${ev.oracle.scored} of ${ev.oracle.tasks} task(s) scored` : ''} · unmeasured is a refusal, never a pass`} data-testid="signoff-tile-oracle" />
       </div>
       <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
         <div data-testid="signoff-controls" className="space-y-1">
@@ -286,7 +292,7 @@ export function SignoffPage() {
     [can, revoke],
   )
 
-  const policyVersion = previewData?.policy.policy_version ?? 'signoff-policy.v1'
+  const policyVersion = previewData?.policy.policy_version ?? SIGNOFF_POLICY_VERSION
   const relaxed = previewData?.policy.relaxed
 
   return (
@@ -294,7 +300,7 @@ export function SignoffPage() {
       <PageHeader
         eyebrow="Sign-off"
         title="Sign-off"
-        purpose="A human attestation that a cell's evidence has been reviewed and is trusted. A sign-off is a policy decision, refused at write: false-Q1 > 0, a thin cell, a negative-controls gate that failed / never ran / let a control escape, a route other than deliver, or no attestation that you read an accepted diff — the refusal is a gate, not an error."
+        purpose="A human attestation that a cell's evidence has been reviewed and is trusted. A sign-off is a policy decision, refused at write: false-Q1 > 0, a thin cell, a negative-controls gate that failed / never ran / let a control escape, an oracle never measured on the cell's tasks or too weak, a route other than deliver, or no attestation that you read an accepted diff — the refusal is a gate, not an error."
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
 

@@ -102,7 +102,9 @@ git filter-branch	archaeology:
 # --- the shared stash stack (measured 2026-09-13: refs/stash is common to every worktree
 # --- of the clone; `stash list/show/pop` reach OTHER trials' and the operator's entries) --
 git stash	archaeology:
+# decided 2026-09-14 by fable-decider from koa/27df3b6e00 (group 9ba7d12eecdf6656): refuse — the shared stash stack; the message names the diff/checkout idiom
 git stash && npm test 2>&1 | tail -10; git stash pop	archaeology:
+# decided 2026-09-14 by fable-decider from koa/55ab9bab04 (group 6820e8cab17a1877): refuse — same policy
 git stash && node --test 2>&1 | tail -10; git stash pop	archaeology:
 git stash push -m wip	archaeology:
 git stash push -u	archaeology:
@@ -474,3 +476,23 @@ grep foo .git/HEAD	archaeology:
 grep -v x .git/config	archaeology:
 sed -n 1p .git/HEAD	archaeology:
 awk '{print}' .git/packed-refs	archaeology:
+
+# --- decided 2026-09-14 by fable-decider: the 19 refusal groups of the NHS + public measurement --
+# The refused half (10 groups) of the decider's verdicts (fable-rationale.md §4); two stash forms
+# already present are annotated in place above. Every line keeps its measured reason prefix.
+# decided 2026-09-14 by fable-decider from nhsuk-react-components/2da48ca336 (group 63a48e9b7533e9d5): refuse — git stash (the verb is present; the ledger truncated the tail at 120 chars)
+git stash && NODE_ENV=test NODE_PATH=./node_modules PATH=/opt/homebrew/opt/node@24/bin:/usr/bin:/bin:/usr/sbin:/sbin:/op	archaeology:
+# decided 2026-09-14 by fable-decider from click/1f9cd54f68 (group e3f3434b7704fbd1): refuse — the FULL form: an editable install into the SHARED provisioned venv (network + cross-trial contamination); the truncated ledger text passed only because "install" was cut off
+/srv/crb/home/envs/click/venv/bin/pip install -e . -q 2>&1 | tail -20	network:
+# decided 2026-09-14 by fable-decider from mesh-client/57376c6f5d (group 5ee3766f7dbb606f): refuse — localhost:8701 is ONE MESH sandbox shared by every concurrent trial; DELETE /admin/reset wipes another trial's mailbox mid-test
+curl -sk https://localhost:8701/health 2>&1 | head -20; curl -sk -X DELETE https://localhost:8701/admin/reset 2>&1 | head -20	network:
+# decided 2026-09-14 by fable-decider from click/f316d5cb3a (group 521bde3449254f35): refuse — the env is provisioned; the fix was the env prefix in the brief, never allowing pip
+pip install -e . -q 2>&1 | tail -20	network:
+# decided 2026-09-14 by fable-decider from click/1f9cd54f68 (group c3a2dd254dfdff23): refuse — the install half; the pytest half alone with <venv>/bin/python is honest
+pip install -e . -q 2>&1 | tail -5 && python3 -m pytest tests/test_termui.py -k pager -q 2>&1 | tail -40	network:
+# decided 2026-09-14 by fable-decider from click/1f9cd54f68 (group e730a0bfb765ebd6): refuse — "pip show click" alone is honest (and allowed); --no-deps does not change the shared-venv mutation
+pip show click 2>&1 | head; pip install -e . --no-deps 2>&1 | tail -5	network:
+# decided 2026-09-14 by fable-decider from click/f316d5cb3a (group e6fa0b4c2a76ecee): refuse — uv run syncs the project env (network unless cached) and runs the tests in a DIFFERENT env from the oracle's
+uv run pytest -q 2>&1 | tail -20	network:
+# decided 2026-09-14 by fable-decider from click/f316d5cb3a (group d87a2c950d542377): refuse — same as e6fa0b4c2a76ecee
+uv run pytest tests/test_termui.py -q 2>&1 | tail -60	network:

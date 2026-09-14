@@ -25,7 +25,7 @@ from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
 from fixtures import pyrepo as pr
 from fixtures.server_seed import ALPHA, BETA, RUN_IDS, Env, envelope, login, make_env
-from fixtures.signoff_seed import attested_body, pass_controls
+from fixtures.signoff_seed import attested_body, clear_policy
 
 CELL_KEYS = {
     "n",
@@ -428,14 +428,15 @@ class TestCapabilityMap:
 
     def test_signoff_overlay_lifts_tier(self, env: Env) -> None:
         login(env.client, "approver")
-        # under signoff-policy.v1 the seeded cell is REFUSED while the controls gate has
-        # an escape (its route is human) — the sign-off never lifts a route, so it can
-        # only be made once a clean controls run lands and the route is deliver
+        # under signoff-policy.v2 the seeded cell is REFUSED while the controls gate has
+        # an escape (its route is human) and its oracle measures weak — the sign-off never
+        # lifts a route, so it can only be made once a clean controls run and strong
+        # oracle scores land and the route is deliver
         cell = {"capability_class": "bug.fix", "size": "S"}
         r = env.post("/signoffs", json=attested_body(env, cell, note="ok"))
         assert r.status_code == 409 and envelope(r)["detail"]["code"] == "controls_escapes"
         assert _cells(env)["bug.fix|S"]["route"] == "human"
-        pass_controls(env)
+        clear_policy(env)
         r = env.post("/signoffs", json=attested_body(env, cell, note="ok"))
         assert r.status_code == 201, r.text
         cells = _cells(env)

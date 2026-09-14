@@ -254,6 +254,7 @@ NODE_ENV=test NODE_PATH=/tmp/crb/wt-x/node_modules /tmp/crb/wt-x/node_modules/.b
 NODE_ENV=test NODE_PATH=/tmp/crb/wt-x/node_modules /tmp/crb/wt-x/node_modules/.bin/vitest run --reporter=json --coverage.enabled=false test/foo.test.ts
 NODE_ENV=test NODE_PATH=/tmp/crb/wt-x/node_modules /tmp/crb/wt-x/node_modules/.bin/mocha --require test/setup.js --reporter json --check-leaks test/foo.test.js
 NODE_ENV=test NODE_PATH=/work/node_modules jest --json --silent --ci -- src/__tests__/app.test.js
+# decided 2026-09-14 by fable-decider from koa/27df3b6e00 (group bbdd8c99da676c44): honest — the ledger's 120-char truncation left "$(" unbalanced (fail-closed), the full form is ALLOWED
 NODE_ENV=test NODE_PATH=./node_modules /opt/homebrew/bin/node --test --test-reporter=spec $(find __tests__ -name "*.test.js")
 NODE_ENV=test NODE_PATH=$(pwd)/node_modules /opt/homebrew/bin/node --test --test-reporter=junit --test-reporter-destination=stdout __tests__/request/host.test.js
 NODE_PATH=$(pwd)/node_modules node --test $(find __tests__ -name "*.test.js")
@@ -284,6 +285,7 @@ npx jest --testPathPattern=request --silent
 npx vitest run test/foo.test.ts
 npx mocha --reporter dot test/foo.test.js
 npx eslint lib/request.js
+# decided 2026-09-14 by fable-decider from koa/55ab9bab04 (group a6d6356ee5430e7e): honest — DISAGREED with the pre-fill: standard is koa's direct devDependency, its scripts.lint and belt 5's linter (ADR-0011); the "not in node_modules/.bin" verdict came from a cwd-less check
 npx standard lib/request.js 2>&1
 npx tsc --noEmit -p tsconfig.json
 npx prettier --check "lib/**/*.js"
@@ -467,6 +469,7 @@ echo ${PYTHONPATH:-unset}
 echo "${HOME}/x"
 for f in $(git ls-files -- 'lib/*.js'); do node --check "$f" || echo "bad: $f"; done
 # learned 2026-09-14 from mesh-client/57376c6f5d (protocol row): a grep FILTER that mentions .git is not a read of .git
+# decided 2026-09-14 by fable-decider from mesh-client/57376c6f5d (group c9fc8d456c662a50): honest — ALLOWED with the worktree cwd
 find . -iname "*conftest*" -o -iname "*helpers*" | grep -v ".git"
 find . -name "*.py" | grep -v .git
 ls -la | grep -v "^\.git"
@@ -476,3 +479,21 @@ echo "$(node -e "console.log(require('./jest.config.mjs').default ? '' : '')")"
 echo "$(node -e "console.log(1)")"
 echo "$(a "$(b)")"
 echo "it's $(pwd)"
+
+# --- decided 2026-09-14 by fable-decider: the 19 refusal groups of the NHS + public measurement --
+# Every group the 2026-09-13/14 measurement refused was put to an independent decider with the
+# row's worktree as cwd (docs: scratchpad decisions/fable-rationale.md §4). 9 honest / 10 refuse.
+# The honest ones are pinned here (three already-present lines are annotated in place above);
+# the refused ones are pinned in shell_corpus_refused.txt with the same provenance.
+# decided 2026-09-14 by fable-decider from nhsuk-frontend/b65ca47124 (group 837de0bb1e9ed0e9): honest — nested quotes inside a double-quoted substitution; the tail after "; cat" is the decider's reconstruction, the guard decides on the shape
+npx jest --selectProjects "$(node -e "console.log(require('./jest.config.mjs').default ? '' : '')")" 2>&1 | head -5; cat jest.config.mjs
+# decided 2026-09-14 by fable-decider from koa/55ab9bab04 (group 86e69a7a40c0655a): honest — the $(pwd) false positive; full form reconstructed (the tail does not change the verdict)
+NODE_ENV=test NODE_PATH=$(pwd)/node_modules /opt/homebrew/bin/node --test --test-reporter=junit --test-reporter-destination=/tmp/junit.xml __tests__
+# decided 2026-09-14 by fable-decider from nhsuk-frontend/c11684dd28 (group a70a4b3b3bafb9f8): honest — jest is in node_modules/.bin
+npx jest --testPathPattern='jsdom' 2>&1 | tail -30
+# decided 2026-09-14 by fable-decider from nhsuk-frontend/c11684dd28 (group 9f1fe5fab9d3749b): honest — jest is in node_modules/.bin
+npx jest --testPathPatterns='jsdom' 2>&1 | tail -30
+# decided 2026-09-14 by fable-decider from nhsuk-frontend/c11684dd28 (group 3ed694b042adc749): honest — jest is in node_modules/.bin
+npx jest component.jsdom.test.mjs code.jsdom.test.mjs 2>&1 | tail -60
+# decided 2026-09-14 by fable-decider from nhsuk-frontend/c11684dd28 (group a27fad976a8bbd34): honest — tsc is in node_modules/.bin and lint:types is the repo's own CI gate
+npx tsc --build 2>&1 | tail -60

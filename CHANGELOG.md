@@ -8,7 +8,45 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
-_Nothing yet._
+### Sign-off policy v2 — an unmeasured oracle is a refusal (`signoff-policy.v2`)
+- **`oracle_unmeasured`** (`crb.core.signoff`): a cell none of whose tasks carries a
+  task-level mutation score cannot be signed off — "≥ `min_oracle_strength` when
+  measured" became "measured AND ≥". Non-overridable like `false_q1` and
+  `attestation_missing`: there is no `CRB_SIGNOFF__*` knob (`REQUIRE_ORACLE_MEASURED`
+  may only be `true`; anything else is **503 signoff_policy_invalid**), because signing an
+  unmeasured oracle is exactly the "a green suite proves correctness" claim
+  EVIDENCE-AND-CLAIMS §7 forbids. Decided 2026-09-14 by the independent decider
+  (`signoff-policy: adjust`, DL-016) from the NHS reading: oracle 0.36 with 2 of 6 tasks
+  scoreable, 4 of 10 clean rows failing their own repo's `tsc`.
+- The server measures the cell's oracle from the repo's `oracle.score` events (the latest
+  per task, the same reduction `/oracle/{repo}` serves, averaged over the cell's scored
+  tasks — `cell_oracle_strength`); the preview and the 409 detail carry
+  `evidence.oracle: {strength, scored, tasks}`; the refusal lists `observed: null` (never
+  0). The measurement feeds the two oracle clauses and the stamped
+  `oracle_strength_at_signoff`, never the route (the route stays the capability map's).
+- `policy_version` → `signoff-policy.v2`; `policy_thresholds` gains
+  `require_oracle_measured: true`. Records signed under v1 keep their stamp and verify.
+- UI: the Sign-off gate row reads "Oracle strength measured and ≥ 0.80"; the tile says
+  how many of the cell's tasks are scored; the clause renders as non-overridable.
+- Walkthrough 08 seeds the signable cell with an `oracle` run as well.
+
+### Belt 5 runs `tsc` where the repository's CI does (ADR-0011 amendment)
+- `crb.core.lint.tsc_evidence` / `js_plan`: a JavaScript / TypeScript repository whose
+  `package.json` `scripts["lint:types"]` (or another script, or its CI) runs `tsc` and
+  that carries `tsconfig.json` + `node_modules/.bin/tsc` gets a `tsc` step appended to
+  its belt-5 plan — the script verbatim + `--pretty false` (nhsuk-frontend and
+  nhsuk-react-components: `tsc --build tsconfig.json --pretty`). `[measured 2026-09-14]`
+  4 of 10 clean NHS rows failed the repositories' own type check; belt 5 never ran it.
+- Whole-project, attributed per file: `LintTool.findings_re` (`TSC_FINDINGS_RE`) makes
+  the rejection count only findings in CHANGED files (`LintStep.findings_changed` /
+  `findings_other`, in the pack); errors only in unchanged files are the maintainers'
+  debt — belt `True` with the counts on the run's note; a rejection naming no file is a
+  harness error, never a pass. `RepoConfig.lint.findings_re` declares the same for any
+  other whole-project tool. `lint_run.detected` records `…+tsc:lint:types`.
+- Guard corpus: the 19 refusal groups of the NHS + public measurement pinned with the
+  independent decider's verdicts (9 honest / 10 refused, provenance per line); `npx
+  standard` on koa is honest — the pre-fill's "not in node_modules/.bin" came from a
+  cwd-less check.
 
 ## [2.0.0a1] — 2026-09-14 — first releasable v2
 

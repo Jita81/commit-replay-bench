@@ -106,16 +106,61 @@ def add_source(tool: str, *, broken: bool = False) -> str:
     return src_module("add", "a + b + 1" if broken else "a + b", tool)
 
 
-def _package_json(tool: str) -> str:
+def _package_json(tool: str, *, scripts: Mapping[str, str] | None = None) -> str:
     pkg: dict[str, object] = {
         "name": "calcfix",
         "version": "0.1.0",
         "private": True,
-        "scripts": {"test": _TEST_SCRIPT[tool]},
+        "scripts": {"test": _TEST_SCRIPT[tool], **(scripts or {})},
     }
     if is_esm(tool):
         pkg["type"] = "module"
     return json.dumps(pkg, indent=2) + "\n"
+
+
+#: The TypeScript flavour's type-checked module (compiles clean; nothing imports it, so
+#: the ``node --test`` belts never see it — only belt 5's ``tsc`` does).
+SRC_TYPES = "src/types.ts"
+TYPES_OK = "export function describe(n: number): string {\n  return `n=${n}`;\n}\n"
+#: The same module with a type error on line 2 (a number assigned to a string).
+TYPES_BROKEN = (
+    "export function describe(n: number): string {\n  const out: string = n;\n  return out;\n}\n"
+)
+#: nhsuk-frontend / nhsuk-react-components' script, verbatim (``lint:types`` is the evidence).
+LINT_TYPES_NHS = "tsc --build tsconfig.json --pretty"
+#: The version-agnostic form the toolchain test runs under a real ``tsc``.
+LINT_TYPES_NOEMIT = "tsc --noEmit -p tsconfig.json"
+
+
+def ts_extra(
+    tool: str = "node",
+    *,
+    lint_types: str = LINT_TYPES_NHS,
+    types_source: str = TYPES_OK,
+    check_js: bool = False,
+) -> dict[str, str]:
+    """The ``extra`` that makes the fixture a TypeScript-gated repository in the NHS
+    shape: ``tsconfig.json`` (strict, ``noEmit``, ``src/**``), ``package.json`` with a
+    ``lint:types`` script, and one ``.ts`` module (``SRC_TYPES``). ``check_js`` turns on
+    ``allowJs``/``checkJs`` so the ``.js`` sources are type-checked too (nhsuk-frontend's
+    ``tsconfig.base.json`` does)."""
+    compiler: dict[str, object] = {
+        "strict": True,
+        "noEmit": True,
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "skipLibCheck": True,
+        "types": [],
+    }
+    if check_js:
+        compiler.update({"allowJs": True, "checkJs": True})
+    tsconfig = {"compilerOptions": compiler, "include": ["src/**/*"]}
+    return {
+        "package.json": _package_json(tool, scripts={"lint:types": lint_types}),
+        "tsconfig.json": json.dumps(tsconfig, indent=2) + "\n",
+        SRC_TYPES: types_source,
+    }
 
 
 def build(

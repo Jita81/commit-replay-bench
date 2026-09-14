@@ -19,7 +19,7 @@ the trial to be credited ``clean`` — the four core belts are always evaluated:
 5. ``repo_lint_clean``  — the repository's OWN formatter/linter accepts the
    changed non-test files (ADR-0011; :mod:`crb.core.lint`). Evaluated only when
    the repository configures one (``RepoConfig.lint`` or the runner's detection:
-   ``gofmt``, ``ruff``, ``eslint``/``prettier``/``standard``, ``spotless``/
+   ``gofmt``, ``ruff``, ``eslint``/``prettier``/``standard``/``tsc``, ``spotless``/
    ``checkstyle``, ``cargo fmt``/``clippy``); otherwise ``None`` — *not evaluated*,
    which is neither a pass nor a fail. ``False`` (rejected or timed out) is never
    clean; a linter that could not run is a harness error.

@@ -128,8 +128,12 @@ class _NodeBase(BaseRunner):
     def detect_lint(self, root: Path, executor: Executor) -> LintPlan | None:
         """``eslint`` then ``prettier --check`` when configured, else ``standard``
         when ``scripts.lint`` names it (koa: ``"lint": "standard"``, CI ``npm run
-        lint``). Tools resolve from ``node_modules/.bin`` (the image's PATH under
-        docker); a binary without its config is not evidence."""
+        lint``); then ``tsc`` when the repository gates on the type checker
+        (``tsconfig.json`` + ``scripts["lint:types"]`` / a ``tsc`` script / CI —
+        nhsuk-frontend, nhsuk-react-components; ADR-0011 amendment 2026-09-14), whole-
+        project with the rejection attributed to the changed files. Tools resolve from
+        ``node_modules/.bin`` (the image's PATH under docker); a binary without its
+        config is not evidence."""
         bin_dir = None if executor.name == "docker" else Path(root) / "node_modules" / ".bin"
         return js_plan(root, bin_dir)
 

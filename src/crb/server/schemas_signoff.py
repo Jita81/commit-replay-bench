@@ -1,4 +1,4 @@
-"""Request / response models for ``/signoffs`` under ``signoff-policy.v1``.
+"""Request / response models for ``/signoffs`` under ``signoff-policy.v2``.
 
 Extends the base shapes in :mod:`crb.server.schemas` (``SignoffOut``,
 ``SignoffCreateRequest``, ``SignoffEvidence``) with what the critical-friend review
@@ -7,7 +7,9 @@ asked the sign-off to carry (§5 play 06, §7 item 6): the policy in force, the 
 approver's **attestation** that they read one specific accepted row of the cell.
 ``GET /signoffs/preview`` answers with :class:`SignoffPreviewOut` — what a sign-off
 WOULD record and every refusal that would apply — so the UI can show the approver
-the bar before they try.
+the bar before they try. ``signoff-policy.v2`` adds the cell's oracle measurement
+(:class:`SignoffOracleOut`: how many of the cell's tasks carry a mutation score) and
+the non-relaxable ``require_oracle_measured`` switch on the policy.
 
 Nothing here is computed: every field is a core ``to_dict`` value re-typed so the
 OpenAPI document is honest and a drift is a diff.
@@ -83,6 +85,7 @@ class SignoffPolicyOut(BaseModel):
     max_controls_escapes: int
     min_constructible_share: float
     min_oracle_strength: float
+    require_oracle_measured: bool
     require_attestation: bool
 
 
@@ -167,9 +170,22 @@ class AcceptedRowOut(BaseModel):
     evidence_pack_hash: str
 
 
+class SignoffOracleOut(BaseModel):
+    """:meth:`crb.server.routes.signoffs.CellOracle.to_dict` — the cell's oracle as the
+    repo's task-level mutation scores measure it: ``strength`` is the mean over the
+    ``scored`` of ``tasks`` distinct tasks that have a scoreable score (``null`` =
+    unmeasured, never 0)."""
+
+    strength: float | None
+    scored: int
+    tasks: int
+
+
 class SignoffPreviewEvidence(BaseModel):
     """What the approver is shown before the button is enabled — every number with
-    its n, its interval and its apparatus (brief non-negotiable 5)."""
+    its n, its interval and its apparatus (brief non-negotiable 5). ``oracle_strength``
+    is the resolved strength the policy judged (the task-level measurement, else the
+    rows' own); ``oracle`` says how it was measured."""
 
     measured: bool
     n: int
@@ -179,6 +195,7 @@ class SignoffPreviewEvidence(BaseModel):
     ci_high: float | None
     false_q1: int
     oracle_strength: float | None
+    oracle: SignoffOracleOut
     apparatus_versions: list[str]
     belt_sets: list[str]
     model_n: int
@@ -212,6 +229,7 @@ __all__ = [
     "SignoffControlsSnapshot",
     "SignoffCreateWithAttestationRequest",
     "SignoffEvidenceWithOracle",
+    "SignoffOracleOut",
     "SignoffPolicyOut",
     "SignoffPreviewEvidence",
     "SignoffPreviewOut",

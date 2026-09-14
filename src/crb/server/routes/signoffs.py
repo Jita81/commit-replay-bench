@@ -5,7 +5,7 @@ the previous sign-off's ``row_hash``; ``row_hash`` = SHA-256 of the canonical JS
 of the row minus ``row_hash``). A revocation is a new row with ``revoke=True`` for
 the same scope; the latest row per ``(repo, scope)`` wins.
 
-A sign-off is a policy decision, refused at write (``signoff-policy.v1``,
+A sign-off is a policy decision, refused at write (``signoff-policy.v2``,
 :mod:`crb.core.signoff`). ``POST /signoffs``:
 
 1. counts the cell's **false-Q1** in SQL over the STORED belts (the same predicate
@@ -13,12 +13,17 @@ A sign-off is a policy decision, refused at write (``signoff-policy.v1``,
    **409 false_q1_refused**, first and non-overridable;
 2. reduces the cell's rows under the ONE routing rule with the repo's latest
    negative-controls verdict (:func:`crb.server.routes.oracle.latest_controls_verdict`
-   — the same helper the capability map routes under, so the two can never disagree);
+   — the same helper the capability map routes under, so the two can never disagree)
+   and measures the cell's **oracle strength** from the repo's task-level mutation
+   scores (:func:`cell_oracle_strength`: the latest ``oracle.score`` per task, the same
+   per-task reduction ``/oracle/{repo}`` serves, averaged over the cell's scored tasks;
+   ``None`` when no task of the cell has been scored);
 3. resolves the approver's **attestation** — the accepted row they name must exist in
    the ledger, belong to this cell and be ``clean`` (else **422**);
 4. applies the policy (:func:`crb.core.signoff.evaluate_signoff`): a thin cell, a
-   controls gate that failed / was never run / let a control escape / was thin, a
-   weak oracle, a route other than ``deliver``, or a missing attestation → **409
+   controls gate that failed / was never run / let a control escape / was thin, an
+   **unmeasured** oracle (``oracle_unmeasured``, never overridable since v2), a weak
+   oracle, a route other than ``deliver``, or a missing attestation → **409
    signoff_refused** with ``detail.code``, ``detail.thresholds`` and ``detail.observed``
    plus every failing clause; nothing is written and the refusal is recorded as a
    ``system/signoff.refused`` event;
@@ -36,8 +41,10 @@ forecast overlays use :func:`crb.core.signoff.apply_signoffs`, which refuses to 
 cell whose false-Q1 is now > 0. A later violation auto-invalidates the attestation.
 
 A deployment relaxes the numeric thresholds through ``CRB_SIGNOFF__*`` (see
-``docs/API.md``); a value outside the published bounds makes every sign-off answer
-**503 signoff_policy_invalid** rather than run under a bar nobody chose.
+``docs/API.md``); a value outside the published bounds — or an attempt to switch off a
+non-overridable clause — makes every sign-off answer **503 signoff_policy_invalid**
+rather than run under a bar nobody chose. A record signed under ``signoff-policy.v1``
+is served with the version it was signed under; its chain still verifies.
 """
 
 from __future__ import annotations
@@ -46,7 +53,7 @@ import json
 import os
 import uuid
 from collections.abc import Iterable, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from fastapi import APIRouter, Query, status
@@ -77,13 +84,15 @@ from crb.core.signoff import (
     SignoffRefusal,
     SignoffRefused,
     evaluate_signoff,
+    resolve_oracle_strength,
     stamp_evidence,
 )
+from crb.core.stats import mean
 from crb.observability.events import StepStatus
 from crb.server.auth import ApproverDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope
 from crb.server.routes.grades import grade_to_dict
-from crb.server.routes.oracle import latest_controls_verdict, verdict_dict
+from crb.server.routes.oracle import latest_controls_verdict, oracle_report, verdict_dict
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.schemas import Page, PageDep, SignoffCreateRequest, SignoffRevokeRequest
 from crb.server.schemas_capability import ControlsVerdictOut, FailureSplitOut
@@ -94,6 +103,7 @@ from crb.server.schemas_signoff import (
     SignoffControlsSnapshot,
     SignoffCreateWithAttestationRequest,
     SignoffEvidenceWithOracle,
+    SignoffOracleOut,
     SignoffPolicyOut,
     SignoffPreviewEvidence,
     SignoffPreviewOut,
@@ -113,7 +123,7 @@ _EV_CI_LOW = "evidence_ci_low"
 _EV_CI_HIGH = "evidence_ci_high"
 _EV_FQ1 = "evidence_false_q1"
 _EV_APPARATUS = "evidence_apparatus"
-# signoff-policy.v1 snapshot keys (absent on rows written before the policy).
+# signoff-policy.v1+ snapshot keys (absent on rows written before the policy).
 _EV_ORACLE = "evidence_oracle_strength"
 _POLICY_VERSION = "policy_version"
 _POLICY_THRESHOLDS = "policy_thresholds"
@@ -390,6 +400,43 @@ def _grade_key(g: Grade) -> CellKey:
     return CellKey(**{f: str(getattr(g, f) or "") for f in CELL_FIELDS})
 
 
+@dataclass(frozen=True)
+class CellOracle:
+    """The cell's oracle strength as the repo's oracle ledger knows it: the mean of the
+    latest task-level mutation score of every task in the cell that has a scoreable
+    one (``strength``; ``None`` = no task of the cell was ever scored — *unmeasured*,
+    never 0.0), with ``scored`` of ``tasks`` distinct tasks for the approver."""
+
+    strength: float | None
+    scored: int
+    tasks: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "strength": None if self.strength is None else round(self.strength, 4),
+            "scored": self.scored,
+            "tasks": self.tasks,
+        }
+
+
+def cell_oracle_strength(session: Session, repo: str, rows: Sequence[GradeRow]) -> CellOracle:
+    """Measure the cell's oracle from the repo's ``oracle.score`` events — the same
+    latest-per-task reduction ``GET /oracle/{repo}`` serves (:func:`oracle_report`), so
+    the Oracle page and the sign-off can never disagree about a task's strength.
+
+    The cell's tasks are the distinct ``task_id`` of its rows; a task whose latest score
+    is unscoreable (``strength: null``) counts in ``tasks`` but not in ``scored``.
+    """
+    task_ids = {r.task_id for r in rows if r.task_id}
+    if not task_ids:
+        return CellOracle(None, 0, 0)
+    by_task = {t.task_id: t.strength for t in oracle_report(session, repo).tasks}
+    strengths = [
+        s for tid in task_ids if (s := by_task.get(tid)) is not None
+    ]  # unscoreable = None, never averaged
+    return CellOracle(mean(strengths) if strengths else None, len(strengths), len(task_ids))
+
+
 def _subjects(session: Session, repo: str, task_ids: Iterable[str]) -> dict[str, str]:
     ids = sorted(set(task_ids))
     if not ids:
@@ -572,18 +619,18 @@ def _refusal_out(r: SignoffRefusal) -> SignoffRefusalOut:
 
 
 def _observed(
-    cell: CapabilityCell, controls: ControlsVerdict, policy: SignoffPolicy
+    cell: CapabilityCell, controls: ControlsVerdict, oracle: CellOracle, policy: SignoffPolicy
 ) -> dict[str, Any]:
     s = cell.stats
     d = cell.decision
+    strength = resolve_oracle_strength(cell, oracle_strength=oracle.strength)
     return {
         "n": cell.n,
         "point": None if s is None else round(s.point, 4),
         "ci_low": None if s is None else round(s.ci.low, 4),
         "false_q1": cell.false_q1,
-        "oracle_strength": None
-        if s is None or s.oracle_strength_mean is None
-        else round(s.oracle_strength_mean, 4),
+        "oracle_strength": None if strength is None else round(strength, 4),
+        "oracle": oracle.to_dict(),
         "route": cell.route,
         "reason_code": cell.reason_code,
         "controls": {
@@ -732,7 +779,7 @@ def list_signoffs(
     "/signoffs/policy",
     response_model=SignoffPolicyOut,
     responses={401: _ERR, 503: _ERR},
-    summary="The sign-off policy in force (signoff-policy.v1 defaults, or the deployment's relaxed thresholds)",
+    summary="The sign-off policy in force (signoff-policy.v2 defaults, or the deployment's relaxed thresholds)",
 )
 def signoff_policy(viewer: ViewerDep) -> SignoffPolicyOut:
     del viewer
@@ -809,6 +856,8 @@ def preview_signoff(
     rows = cell_rows(db, repo, scope)
     controls = latest_controls_verdict(db, repo)
     cell = measured_cell(rows, scope, controls)
+    oracle = cell_oracle_strength(db, repo, rows)
+    strength = resolve_oracle_strength(cell, oracle_strength=oracle.strength)
     attestation_out: AttestationOut | None = None
     if reviewed_row_hash:
         try:
@@ -820,9 +869,18 @@ def preview_signoff(
         att, subject = resolve_attestation(db, repo, scope, att_in)
         record = replace(record, attestation=att)
         attestation_out = AttestationOut(**att.to_dict(), subject=subject)
-    refusals = evaluate_signoff(record, cell, controls=controls, policy=policy, repo=repo)
+    refusals = evaluate_signoff(
+        record,
+        cell,
+        controls=controls,
+        oracle_strength=oracle.strength,
+        policy=policy,
+        repo=repo,
+    )
     stamped = (
-        stamp_evidence(record, cell, controls=controls, policy=policy)
+        stamp_evidence(
+            record, cell, controls=controls, oracle_strength=oracle.strength, policy=policy
+        )
         if cell.stats is not None
         else record
     )
@@ -839,9 +897,8 @@ def preview_signoff(
             ci_low=None if s is None else round(s.ci.low, 4),
             ci_high=None if s is None else round(s.ci.high, 4),
             false_q1=cell.false_q1,
-            oracle_strength=None
-            if s is None or s.oracle_strength_mean is None
-            else round(s.oracle_strength_mean, 4),
+            oracle_strength=None if strength is None else round(strength, 4),
+            oracle=SignoffOracleOut(**oracle.to_dict()),
             apparatus_versions=[] if s is None else list(s.apparatus_versions),
             belt_sets=list(cell.belt_sets),
             model_n=cell.model_n,
@@ -885,7 +942,7 @@ def get_signoff(signoff_id: str, viewer: ViewerDep, db: DbDep) -> SignoffWithPol
     response_model=SignoffWithPolicyOut,
     status_code=status.HTTP_201_CREATED,
     responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR, 503: _ERR},
-    summary="Attest a cell (approver) under signoff-policy.v1; 409 false_q1_refused / signoff_refused",
+    summary="Attest a cell (approver) under signoff-policy.v2; 409 false_q1_refused / signoff_refused",
 )
 def create_signoff(
     body: SignoffCreateWithAttestationRequest, approver: ApproverDep, db: DbDep
@@ -900,16 +957,25 @@ def create_signoff(
 
     # 1. The floor, over the STORED belts — catches rows that bypassed the write path.
     _floor(db, repo=body.repo, actor=approver.id, scope=scope)
-    # 2. Evidence: the cell routed under the repo's latest controls verdict.
+    # 2. Evidence: the cell routed under the repo's latest controls verdict, and its
+    #    oracle strength from the repo's task-level mutation scores.
     rows = cell_rows(db, body.repo, scope)
     controls = latest_controls_verdict(db, body.repo)
     cell = measured_cell(rows, scope, controls)
+    oracle = cell_oracle_strength(db, body.repo, rows)
     # 3. The attestation: the named row must be an accepted row of THIS cell.
     if body.attestation is not None:
         att, _subject = resolve_attestation(db, body.repo, scope, body.attestation)
         record = replace(record, attestation=att)
     # 4. The policy.
-    refusals = evaluate_signoff(record, cell, controls=controls, policy=policy, repo=body.repo)
+    refusals = evaluate_signoff(
+        record,
+        cell,
+        controls=controls,
+        oracle_strength=oracle.strength,
+        policy=policy,
+        repo=body.repo,
+    )
     if refusals:
         first = refusals[0]
         raise _refuse(
@@ -925,13 +991,15 @@ def create_signoff(
                 "observed_value": first.observed,
                 "policy_version": policy.policy_version,
                 "thresholds": policy.thresholds(),
-                "observed": _observed(cell, controls, policy),
+                "observed": _observed(cell, controls, oracle, policy),
                 "refusals": [r.to_dict() for r in refusals],
                 "false_q1": cell.false_q1,
             },
         )
     # 5. Stamp the decision and write.
-    stamped = stamp_evidence(record, cell, controls=controls, policy=policy)
+    stamped = stamp_evidence(
+        record, cell, controls=controls, oracle_strength=oracle.strength, policy=policy
+    )
     assert cell.stats is not None and stamped.attestation is not None  # by the policy
     cell_json: dict[str, str] = {
         **scope.to_dict(),
@@ -992,6 +1060,9 @@ def create_signoff(
             "route_reason_code": stamped.route_reason_code,
             "controls_verdict": stamped.controls_verdict,
             "controls_run_id": stamped.controls_run_id,
+            "oracle_strength": stamped.oracle_strength_at_signoff,
+            "oracle_scored": oracle.scored,
+            "oracle_tasks": oracle.tasks,
             "reviewed_row_hash": stamped.attestation.reviewed_row_hash,
             "row_hash": row.row_hash,
         },
@@ -1054,8 +1125,10 @@ __all__ = [
     "CODE_POLICY_INVALID",
     "CODE_REFUSED",
     "FALSE_Q1_PREDICATE",
+    "CellOracle",
     "accepted_rows",
     "cell_false_q1",
+    "cell_oracle_strength",
     "cell_rows",
     "effective_policy",
     "load_signoff_records",

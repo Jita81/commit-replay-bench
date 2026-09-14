@@ -156,22 +156,34 @@ published bar"**; until prospective and audited evidence exists it does not mean
 "autonomous delivery is safe". `calibrate` and `human` routes are product successes
 (refusals), reported with the same rigour as passes.
 
-### 6a. What a signed cell may be claimed to mean (`signoff-policy.v1`)
+### 6a. What a signed cell may be claimed to mean (`signoff-policy.v2`)
 
 A human sign-off lifts a cell's **verification tier** (`automated-pass` →
 `human-verified` / `ab-confirmed`); it never lifts its route, its point or its interval.
 Since `signoff-policy.v1` (DL-014) a sign-off is a *policy decision refused at write*
-(`crb.core.signoff`), so a signed cell licenses exactly this claim shape:
+(`crb.core.signoff`); `signoff-policy.v2` (2026-09-14, the independent decider's
+`signoff-policy: adjust`, DL-016) keeps every number and adds one clause: **the cell's oracle
+strength must be measured**, not merely "≥ 0.80 when measured". A signed cell therefore
+licenses exactly this claim shape:
 
 > "Under apparatus V, cell C of repo R (n, point, Wilson lower — all ≥ the published
 > bar: n ≥ 10, point ≥ 0.90, lower ≥ 0.80, false-Q1 = 0, route `deliver`) was signed off
-> by a named approver on date D under `signoff-policy.v1`, with the repository's
-> negative-controls gate **passed, k of N constructible, 0 escapes** (controls run X), and
-> the approver's attestation that they read accepted row H (task T)."
+> by a named approver on date D under `signoff-policy.v2`, with the repository's
+> negative-controls gate **passed, k of N constructible, 0 escapes** (controls run X),
+> the cell's oracle **measured at strength S ≥ 0.80 over k of its N tasks** (task-level
+> mutation scores), and the approver's attestation that they read accepted row H
+> (task T)."
 
 Every word of that sentence is a field of the record (`policy_version`,
-`policy_thresholds`, `route_reason_code`, `controls_*`, `attestation`), hash-chained with
-the sign-off and served back verbatim by `GET /signoffs/{id}`. What it does **not** mean:
+`policy_thresholds`, `route_reason_code`, `controls_*`, `oracle_strength_at_signoff`,
+`attestation`), hash-chained with the sign-off and served back verbatim by
+`GET /signoffs/{id}`. Why the oracle clause has no knob: a human signing a cell whose
+oracle was never scored would be attesting to a number whose *meaning* was never
+measured — precisely the "a green suite proves correctness" claim §7 forbids, dressed as
+an attestation. `[measured 2026-09-14]` the NHS reading that earned the clause: an
+oracle of 0.36 on nhsuk-frontend with 2 of 6 tasks scoreable, and 4 of 10 clean rows
+failing their own repository's type check — a weak or unmeasured oracle is where a human
+sign-off is most likely to be wrong. What the sentence does **not** mean:
 
 - that the cell is safe for autonomous delivery (§6 still applies: `deliver` is a
   high-confidence candidate under the published bar, not a safety claim);
@@ -184,10 +196,14 @@ the sign-off and served back verbatim by `GET /signoffs/{id}`. What it does **no
 A deployment may relax the numeric thresholds and the route / controls switches within
 the published bounds (`docs/API.md`, `/signoffs/policy`); a record then says so
 (`policy_thresholds` differs from the defaults, `relaxed: true` on the policy) and any
-quote of it must name the relaxed bar. Two clauses have no knob and never will: a
-false-Q1 cell cannot be signed, and a sign-off without an attestation cannot be made.
+quote of it must name the relaxed bar. Three clauses have no knob and never will: a
+false-Q1 cell cannot be signed, a cell whose oracle was never measured cannot be signed
+(`oracle_unmeasured`, since v2), and a sign-off without an attestation cannot be made.
 A record signed before the policy (`schema: crb.signoff.v1`) carries no policy snapshot
-and may only be quoted as "signed before `signoff-policy.v1`".
+and may only be quoted as "signed before `signoff-policy.v1`"; a record signed under
+`signoff-policy.v1` keeps that version stamp (its thresholds carry no
+`require_oracle_measured`) and may only be quoted as "signed under `signoff-policy.v1`
+— oracle not required to be measured".
 
 ## 7. What must never be said
 

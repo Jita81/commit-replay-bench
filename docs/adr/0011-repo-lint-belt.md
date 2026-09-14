@@ -1,6 +1,7 @@
 # ADR-0011 — Belt 5: the repository's own formatter/linter (`repo_lint_clean`)
 
-**Status:** Accepted
+**Status:** Accepted · amended 2026-09-14 (JavaScript / TypeScript: `tsc`, see
+"Amendment — the type checker")
 **Date:** 2026-09-14
 **Apparatus impact:** bumps `APPARATUS_VERSION` to `2.2`; new ledger belt set `v5`; new
 failure kind `lint`; amends ADR-0001 (belt list) and ADR-0002 rule 2 (the hashed body)
@@ -120,7 +121,7 @@ its configuration is **not** evidence. `lint_run.detected` records which default
 |---|---|---|---|---|
 | Go | `gofmt -l <changed .go>` (`gofmt`) | `go.mod` present (gofmt ships with every Go toolchain) | stdout non-empty ⇒ rejected (gofmt exits 0 and lists files); rc 2 (parse error) ⇒ rejected | **cobra** `.golangci.yml` → `formatters.enable: [gofmt, goimports]`; `Makefile fmt: test -z $(gofmt -l $(SRC))`; `.github/workflows/test.yml` job `golangci-lint` (`golangci/golangci-lint-action`) |
 | Python | `ruff check --no-fix <changed .py>` then `ruff format --check <changed .py>` when the formatter is evidenced (`ruff`, `ruff+ruff-format`) | check: `[tool.ruff]` in `pyproject.toml`, or `ruff.toml` / `.ruff.toml`, or a `ruff`/`ruff-check` pre-commit hook; format: a `ruff-format` pre-commit hook or `[tool.ruff.format]` | rc 1 ⇒ rejected; rc 2 ⇒ harness (ruff's own error). `--no-fix` because click sets `fix = true` — the linter must never edit the builder's patch | **click** `pyproject.toml [tool.ruff]` (+ `[tool.ruff.lint] select = [B, E, F, I, UP, W, ICN]`); `.pre-commit-config.yaml` hooks `ruff-check` + `ruff-format`; `.github/workflows/pre-commit.yaml` runs `pre-commit run --all-files` on every PR |
-| JavaScript / TypeScript | 1. `eslint <changed>` then `prettier --check <changed>` (`eslint`, `eslint+prettier`, `prettier`); 2. else `standard <changed>` (`standard`) | eslint: a flat or legacy ESLint config file or `package.json#eslintConfig` **and** `node_modules/.bin/eslint`; prettier: a prettier config or `package.json#prettier` **and** the binary; standard: `package.json#scripts.lint` starts with `standard` **and** the binary | rc 1 ⇒ rejected; rc 2 ⇒ harness (eslint config error) | **koa** `package.json scripts.lint = "standard"`, `.github/workflows/node.js.yml: npm run lint`. koa has **no** ESLint config — `node_modules/.bin/eslint` is present only as `standard`'s dependency; running it directly fails on "no configuration", a harness error dressed as a verdict. Hence *binary alone ≠ evidence* |
+| JavaScript / TypeScript | 1. `eslint <changed>` then `prettier --check <changed>` (`eslint`, `eslint+prettier`, `prettier`); 2. else `standard <changed>` (`standard`); 3. **then `tsc`** (amendment 2026-09-14): the repository's `lint:types` script verbatim + `--pretty false` (`tsc:lint:types`), else `tsc --build tsconfig.json` / `tsc --noEmit -p tsconfig.json` as the evidencing script says (`tsc:script:<name>`, `tsc:ci`) — whole-project (`paths="all"`, tsc has no per-file mode with project references), skipped when no changed file is `.js/.mjs/.cjs/.jsx/.ts/.mts/.cts/.tsx` | eslint: a flat or legacy ESLint config file or `package.json#eslintConfig` **and** `node_modules/.bin/eslint`; prettier: a prettier config or `package.json#prettier` **and** the binary; standard: `package.json#scripts.lint` starts with `standard` **and** the binary; tsc: `tsconfig.json` present **and** (`package.json#scripts["lint:types"]` invoking `tsc`, or any other script invoking `tsc` — `--build --clean` excluded —, or `typescript` in `devDependencies` **and** a CI workflow / Makefile line running `tsc`) **and** `node_modules/.bin/tsc` | rc 1 ⇒ rejected; rc 2 ⇒ harness (eslint config error). tsc: rc 1 / 2 (diagnostics present) ⇒ **attributed**: rejected only when a `file(line,col): error TSnnnn` line names a CHANGED file; findings only in unchanged files ⇒ accepted with the counts on the run's note (pre-existing debt); a rejection naming no file ⇒ harness; rc 3 / 4 (invalid project, reference cycle) ⇒ harness; `TS5033 Could not write file` (a read-only sandbox mount, `--build` writes `.tsbuildinfo`) ⇒ harness | **koa** `package.json scripts.lint = "standard"`, `.github/workflows/node.js.yml: npm run lint`. koa has **no** ESLint config — `node_modules/.bin/eslint` is present only as `standard`'s dependency; running it directly fails on "no configuration", a harness error dressed as a verdict. Hence *binary alone ≠ evidence*. **nhsuk-frontend** `package.json scripts["lint:types"] = "tsc --build tsconfig.json --pretty"`, `scripts.lint = "npm run lint:types && npm run lint:js && …"`, `.github/workflows/pull-request.yml` job `lint-types: npm run lint:types -- --force`, `typescript ^6.0.3`, `tsconfig.json` = references to `tsconfig.dev.json` + `packages/*/tsconfig.json` + `shared/tsconfig.json`, base `allowJs`/`checkJs`/`noEmit`/`strict`; **nhsuk-react-components** `scripts["lint:types"] = "tsc --build tsconfig.json --pretty"`, `scripts.lint = "yarn lint:types && yarn lint:js && yarn lint:prettier"`, `.github/workflows/ci.yml: yarn lint`, `typescript ^6.0.3`, references to `tsconfig.dev.json` / `tsconfig.build.json` / `tsconfig.stories.json` (read 2026-09-14 from the measurement clones) |
 | JVM (Maven) | `mvn -o -q -B [flags] spotless:check` and/or `checkstyle:check` (`spotless`, `checkstyle`, `spotless+checkstyle`), module-wide (`paths="all"`) | `pom.xml` declares `spotless-maven-plugin` / `maven-checkstyle-plugin` | rc 1 ⇒ rejected | **gson** `pom.xml`: `spotless-maven-plugin` with the `check` goal bound; **petclinic** `maven-checkstyle-plugin` (`check` at `validate`); **commons-lang** `defaultGoal` includes `checkstyle:check` |
 | Rust | `cargo fmt --check` and/or `cargo clippy --offline -- -D warnings` (`cargo-fmt`, `clippy`, `cargo-fmt+clippy`), crate-wide | fmt: `rustfmt.toml` / `.rustfmt.toml` or a CI workflow/Makefile line containing `cargo fmt`; clippy: `clippy.toml` / `.clippy.toml` or CI mentioning `clippy` | fmt rc 1 ⇒ rejected; clippy rc 101 ⇒ rejected; rustup "is not installed for the toolchain" ⇒ harness (`unrunnable_re`) | **clap** `.clippy.toml`; `.github/workflows/ci.yml` jobs `rustfmt` (`cargo fmt --check`) and `clippy` |
 
@@ -129,6 +130,71 @@ Not chosen, and why: a `pyflakes`/`pycodestyle` fallback for Python repos withou
 take file arguments predictably; `standard` is the one evidenced script and is named
 explicitly); `go vet` / `golangci-lint` by default (not shipped with the toolchain and
 slow; declare them: `{"command": ["golangci-lint", "run"], "paths": "all"}`).
+
+### Amendment 2026-09-14 — the type checker (`tsc`) is part of the JavaScript gate
+
+`[measured 2026-09-14]` The independent decider's reading of the ten retained NHS
+patches (`scratchpad/decisions/fable-rationale.md` §3) found that **4 of 10 clean rows
+fail the repository's own `tsc`** — nhsuk-frontend c11684dd28 (blind: TS2417 ×2 in the
+maintainers' own overlaid tests), b65ca47124 (TS2554), b1e02b4e81 (TS2339 at
+`scroll.mjs:47`), nhsuk-react-components 2da48ca336 (TS2322 at `DateInput.tsx:88` —
+jest passes because babel strips types). Both repositories gate PRs on `lint:types`
+(`tsc --build tsconfig.json --pretty`; nhsuk-frontend's `pull-request.yml` job
+`lint-types`, react-components' `ci.yml` → `yarn lint`). Belt 5's JS detection ran
+eslint / prettier / standard and never the type check, so "clean under 2.2" overstated
+mergeability on TypeScript / `checkJs` repositories. The decider named it the biggest
+single gap of the reading (§3 finding 2; §7 item 1).
+
+**Decision.** `crb.core.lint.tsc_evidence` + `js_plan` append a `tsc` step to the JS
+plan whenever the repository evidences the type check (table above) and the binary is
+present. Three properties the other belt-5 tools do not have:
+
+1. **Verbatim script.** `scripts["lint:types"]` is honoured as written (nhsuk:
+   `--build tsconfig.json --pretty`), with `--pretty false` appended so the diagnostics
+   are machine-readable (tsc takes the last `--pretty`; `[measured 2026-09-14]` under
+   TypeScript 6.0.2 the argv `--build tsconfig.json --pretty --pretty false` prints
+   `src/bad.ts(1,14): error TS2322: …` and exits 1; `--noEmit -p tsconfig.json --pretty
+   false` exits 2 with the same lines). A chained `lint:types` (`&&`, `;`, `|`) is not
+   one tool and falls back to `--build tsconfig.json`.
+2. **Whole-project, attributed per file.** tsc has no per-file mode once a repository
+   uses project references (both NHS repos do), so the step runs `paths="all"` and would
+   report every pre-existing type error in the tree. `LintTool.findings_re`
+   (`TSC_FINDINGS_RE`: `file(line,col): error TSnnnn`) makes the rejection
+   **attributable**: `run_plan` counts findings in CHANGED files against findings
+   elsewhere (`LintStep.findings_changed` / `findings_other`, both hashed into the pack
+   via `lint_run`) and rejects only when a changed file is named. Errors only in
+   unchanged files are the maintainers' debt: the step is accepted, the run's `note`
+   records "N pre-existing finding(s) in unchanged files, 0 in changed files — not
+   attributed to the patch", and the row stays whatever belts 1–4 say. A rejection whose
+   findings name no file (a global `TS5083 Cannot read file`) is a **harness error** —
+   never a pass. Attribution is per FILE, not per line: a pre-existing error in a file the
+   builder touched still counts against the patch, exactly as the repository's CI would
+   count it on the PR (the whole-file rule of the original decision, kept); the gold
+   check (Wave C17) is still where a gold that fails its own `tsc` is excluded.
+3. **Skipped when irrelevant.** A `paths="all"` tool with `exts` runs only when a
+   changed file has one of them (`LintTool.concerns`): a patch to `.scss` / templates
+   gets no `tsc` verdict, and the belt reads *not evaluated* for it.
+
+**What it is not.** Not a generic "diff the findings against the parent" (the
+alternative rejected below still stands for line-level attribution): the unit of
+attribution is the file, and only for tools that declare a findings pattern.
+`RepoConfig.lint` may declare `findings_re` for any other whole-project tool.
+
+**Known limits.** (a) Under the Docker sandbox the worktree is mounted read-only and
+`tsc --build` must write `.tsbuildinfo` next to each project — the write fails with
+`TS5033 Could not write file`, which `unrunnable_re` reads as a **harness error** (never
+a pass) until the operator declares the build-info locations writable or pins a
+`--noEmit` command; on the local executor (what the NHS measurement used) the files land
+in the worktree — gitignored in both NHS repos, and written after belt 4 computed the
+touched files, so they never count as a change. (b) The step is as slow as the
+repository's own `lint:types` (a full type check; nhsuk-frontend ≈ 30 s); the plan's
+`timeout` bounds it and a timeout is a `False`. (c) Rows graded before this amendment
+carry `lint_run.detected` without `tsc`; a row graded after carries `…+tsc:lint:types`
+(or `tsc:script:<name>` / `tsc:ci`). `APPARATUS_VERSION` stays `2.2`: the belt's
+definition — *the repository's own gate on the changed files* — is unchanged; its JS
+detection became complete, and the row records which tools ran. Whether that deserves
+`2.3` (the meaning of "clean" on TypeScript repos tightened) is an architect's call
+recorded here as open.
 
 Tool versions: the belt runs the ruff/eslint/prettier the repository's environment
 provides (the setup venv's `ruff`, `node_modules/.bin`); only when absent the host's, and
