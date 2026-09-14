@@ -18,8 +18,9 @@ from crb.core.ledger import BELT_SET_V3_LEGACY
 from crb.core.routing import POLICY_VERSION
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.observability import metrics
+from crb.observability.probes import ProbeResult
 from crb.server.app import API_PREFIX, create_app
-from crb.server.routes.system import ledger_counts
+from crb.server.routes.system import ledger_counts, probe_sandbox, process_role
 from crb.server.settings import Settings
 from crb.store.db import make_engine, make_session_factory
 from crb.store.models import Grade, Repo, Run
@@ -100,8 +101,9 @@ class TestHealth:
         assert {p["name"] for p in body["probes"]} == PROBE_NAMES
         for p in body["probes"]:
             assert set(p) == {"name", "status", "detail", "data"}
-            assert p["status"] in {"ok", "degraded", "down"}
+            assert p["status"] in {"ok", "degraded", "down", "skipped"}
         assert body["version"] == __version__ and body["apparatus"] == APPARATUS_VERSION
+        assert body["role"] == "all"  # no CRB_ROLE: every probe evaluated
         ao = _probe(body, "append_only")
         assert ao["status"] == "ok"
         assert ao["data"] == {"triggers": 8, "expected": 8}
@@ -174,8 +176,121 @@ class TestHealth:
 
     def test_health_needs_no_auth(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/health").status_code == 200
+        assert client.get(f"{API_PREFIX}/health/live").status_code == 200
         assert client.get(f"{API_PREFIX}/version").status_code == 200
         assert client.get(f"{API_PREFIX}/metrics").status_code == 200
+
+
+class TestRoleAwareSandboxProbe:
+    """The sandbox is the worker's instrument: an ``api`` process reports it ``skipped``
+    (never degraded/down — A11: the serve container has no docker socket by design and
+    answered 503); ``worker`` / ``all`` (the default) probe it. The role comes from
+    ``CRB_ROLE``; anything unrecognised falls back to ``all`` so no probe is hidden."""
+
+    def test_process_role_contract(self) -> None:
+        assert process_role({}) == "all"
+        assert process_role({"CRB_ROLE": "api"}) == "api"
+        assert process_role({"CRB_ROLE": " Worker "}) == "worker"
+        assert process_role({"CRB_ROLE": "all"}) == "all"
+        assert process_role({"CRB_ROLE": ""}) == "all"
+        assert process_role({"CRB_ROLE": "sidecar"}) == "all"  # unrecognised: probe everything
+        assert process_role() == "all"  # the autouse fixture cleared CRB_*
+
+    def test_api_role_skips_the_sandbox_and_is_not_degraded_by_it(
+        self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CRB_ROLE", "api")
+        # the docker executor with no daemon reachable from this process — the A11 shape
+        settings = make_settings(tmp_path, sandbox={"executor": "docker"})
+        with TestClient(create_app(settings, factory)) as c:
+            r = c.get(f"{API_PREFIX}/health")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["role"] == "api"
+            sandbox = _probe(body, "sandbox")
+            assert sandbox["status"] == "skipped"
+            assert sandbox["data"] == {"executor": "docker", "role": "api"}
+            assert "worker's" in sandbox["detail"] and "CRB_ROLE=api" in sandbox["detail"]
+            # skipped never lowers the aggregate: the other probes decide
+            others = [p["status"] for p in body["probes"] if p["name"] != "sandbox"]
+            assert body["status"] == ("degraded" if "degraded" in others else "ok")
+            assert "down" not in others
+
+    def test_worker_and_all_roles_probe_the_sandbox(
+        self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        settings = make_settings(tmp_path)  # local executor: probed → degraded (dev only)
+        for role in ("worker", "all"):
+            monkeypatch.setenv("CRB_ROLE", role)
+            with TestClient(create_app(settings, factory)) as c:
+                body = c.get(f"{API_PREFIX}/health").json()
+                assert body["role"] == role
+                sandbox = _probe(body, "sandbox")
+                assert sandbox["status"] == "degraded"
+                assert sandbox["data"] == {"executor": "local"}
+        monkeypatch.delenv("CRB_ROLE")
+        with TestClient(create_app(settings, factory)) as c:
+            body = c.get(f"{API_PREFIX}/health").json()
+            assert body["role"] == "all" and _probe(body, "sandbox")["status"] == "degraded"
+
+    def test_probe_sandbox_docker_is_role_gated_at_the_function(self, tmp_path: Path) -> None:
+        settings = make_settings(tmp_path, sandbox={"executor": "docker"})
+        assert probe_sandbox(settings, "api").status == "skipped"
+        # worker / all consult the daemon (whatever it answers here, it is not "skipped")
+        assert probe_sandbox(settings, "worker").status in {"ok", "degraded", "down"}
+        assert probe_sandbox(settings).status in {"ok", "degraded", "down"}
+
+
+class TestLiveness:
+    """``/health/live``: the process is up and its database answers — one probe, no
+    sandbox, no toolchains, no builders, no ledger. What the image HEALTHCHECK and the
+    Helm liveness probe hit, so a dependency outage never restarts a healthy process."""
+
+    def test_live_is_db_only(self, client: TestClient) -> None:
+        r = client.get(f"{API_PREFIX}/health/live")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert set(body) == {"status", "probes", "version", "apparatus", "role", "checked_at"}
+        assert body["status"] == "ok" and body["role"] == "all"
+        assert [p["name"] for p in body["probes"]] == ["db"]
+        assert _probe(body, "db")["status"] == "ok"
+        assert body["version"] == __version__ and body["apparatus"] == APPARATUS_VERSION
+        assert "no-store" in r.headers["Cache-Control"]
+
+    def test_live_never_probes_the_sandbox_even_when_it_would_be_down(
+        self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The A11 container: role unset (``all``), docker executor, no socket. The deep
+        probe reports the sandbox; liveness does not even look."""
+        monkeypatch.setattr(
+            "crb.server.routes.system.probes.probe_docker",
+            lambda timeout=10: ProbeResult("sandbox", "down", "no docker socket"),
+        )
+        settings = make_settings(tmp_path, sandbox={"executor": "docker"})
+        with TestClient(create_app(settings, factory)) as c:
+            deep = c.get(f"{API_PREFIX}/health")
+            assert deep.status_code == 503 and _probe(deep.json(), "sandbox")["status"] == "down"
+            live = c.get(f"{API_PREFIX}/health/live")
+            assert live.status_code == 200
+            assert [p["name"] for p in live.json()["probes"]] == ["db"]
+
+    def test_live_ignores_a_false_q1_ledger_but_fails_when_the_db_is_gone(
+        self, client: TestClient, factory: sessionmaker[Session], tmp_path: Path
+    ) -> None:
+        with factory() as s:
+            s.add(_grade(seq=1, target_green=False))  # a false-Q1 row: /health is down
+            s.commit()
+        assert client.get(f"{API_PREFIX}/health").status_code == 503
+        assert client.get(f"{API_PREFIX}/health/live").status_code == 200  # still alive
+        # the database gone AFTER startup (startup itself refuses a dead store): the
+        # process is up, its store is not — liveness is honestly down (503)
+        dead = make_session_factory(make_engine(f"sqlite:///{tmp_path / 'missing' / 'x.db'}"))
+        client.app.state.session_factory = dead
+        r = client.get(f"{API_PREFIX}/health/live")
+        assert r.status_code == 503
+        body = r.json()
+        assert body["status"] == "down" and _probe(body, "db")["status"] == "down"
+        assert "OperationalError" in _probe(body, "db")["detail"]
 
 
 class TestMetrics:

@@ -64,6 +64,9 @@ spec:
             {{- include "crb.envFrom" . | nindent 12 }}
           env:
             {{- include "crb.commonEnv" . | nindent 12 }}
+            # This pod owns the sandbox: its health probes evaluate the docker daemon.
+            - name: CRB_ROLE
+              value: "worker"
             - name: CRB_WORKER_ID
               valueFrom:
                 fieldRef:

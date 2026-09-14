@@ -9,9 +9,15 @@ measured, never assumed:
 2. **Baseline** — the belt scope's failing set at that same state (pre-existing
    failures are recorded, so belt 3 is baseline-relative).
 3. **GOLD** — overlaying the commit's own source turns the target GREEN with no
-   new belt failures. A task whose gold does not pass is kept but flagged
-   ``gold_clean=False`` and is excluded from capability statistics: the oracle
-   could not be satisfied by the humans' own patch, so it cannot judge a builder.
+   new belt failures, **and** the repository's own linter (belt 5, ADR-0011)
+   accepts the overlaid source files. A task whose gold does not pass is kept but
+   flagged ``gold_clean=False`` and is excluded from capability statistics: the
+   oracle could not be satisfied by the humans' own patch, so it cannot judge a
+   builder. Belt 5 on the gold is the fair correction for pre-existing lint debt:
+   the belt reproduces the repository's CI verdict on the *changed files*, so a
+   file the maintainers themselves left non-conforming would count against every
+   builder that touches it — excluding the task from the denominator is honest;
+   attributing the debt to the model is not.
 
 The miner assigns the **path class** only (:func:`~crb.core.spec.classify_commit`);
 the intent label is a separate step (:mod:`crb.core.classify`) so mining never
@@ -28,6 +34,7 @@ from typing import Any
 
 from crb.core.execution import Executor
 from crb.core.git import GitRepo
+from crb.core.lint import LintRun, run_plan
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import (
     POOL_HARD,
@@ -192,6 +199,22 @@ def gold_check(
 
     Expects ``ws`` to be at the parent with the tests already overlaid. Leaves the
     sources overlaid (callers use a fresh worktree for trials anyway).
+
+    Three facts, in order, each fail-closed: the target turns GREEN; the belt
+    scope shows no failure the baseline did not have; and belt 5 — the same lint
+    plan :func:`crb.core.grade.grade` would run on a builder's changed files
+    (``runner.lint_plan``: the declared ``RepoConfig.lint``, else the language's
+    detection, else nothing) — accepts the overlaid source files that still exist.
+    A gold that fails belt 5 is ``gold_clean=False`` with
+    ``gold_note="gold fails belt 5 (<detected>): …"`` so the maintainers' own lint
+    debt is excluded from the denominator instead of being counted against the
+    builder (ADR-0011, consequences). A linter that *cannot run* is a harness
+    error: the gold is not credited (never a pass) and the note names the
+    instrument, not the patch. No plan, or no lintable overlaid file, leaves belt 5
+    *not evaluated* — neither a pass nor a fail, and the gold verdict unchanged.
+
+    The ``mine.gold`` event carries ``lint``: ``True`` / ``False`` / ``None`` (not
+    evaluated), the same value semantics as ``GradeResult.belts.repo_lint_clean``.
     """
     try:
         ws.overlay_sources(task.src_files)
@@ -202,7 +225,7 @@ def gold_check(
                 if tgt.timed_out
                 else f"gold target not green (rc={tgt.returncode})"
             )
-            _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note)
+            _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note, lint=None)
             return task.with_(gold_clean=False, gold_note=note)
         belt = runner.run(executor, ws.root, task.belt_scope, timeout=timeout)
         if belt.timed_out or belt.parse_error:
@@ -211,17 +234,54 @@ def gold_check(
                 if belt.timed_out
                 else f"gold belt unattributed: {belt.parse_error}"
             )
-            _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note)
+            _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note, lint=None)
             return task.with_(gold_clean=False, gold_note=note)
         new = set(belt.failing) - set(task.baseline_failing)
-        clean = not new
-        note = "" if clean else f"gold introduced {len(new)} belt failure(s)"
-        _emit(on_event, "mine.gold", sha=task.task_id, clean=clean, note=note)
+        if new:
+            note = f"gold introduced {len(new)} belt failure(s)"
+            _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note, lint=None)
+            return task.with_(gold_clean=False, gold_note=note)
+        # belt 5 on the gold: the same plan a builder's patch would face, over the
+        # overlaid source files that still exist (a deletion cannot be linted).
+        lint_run = _gold_lint(ws, task, runner=runner, executor=executor)
+        lint = lint_run.ok if lint_run is not None else None
+        clean, note = _read_gold_lint(lint_run)
+        _emit(on_event, "mine.gold", sha=task.task_id, clean=clean, note=note, lint=lint)
         return task.with_(gold_clean=clean, gold_note=note)
     except Exception as exc:  # never credit a task on a harness error
         note = f"gold error: {type(exc).__name__}: {exc}"[:300]
-        _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note)
+        _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note, lint=None)
         return task.with_(gold_clean=False, gold_note=note)
+
+
+def _gold_lint(
+    ws: Workspace, task: TaskSpec, *, runner: BaseRunner, executor: Executor
+) -> LintRun | None:
+    """Run belt 5's plan on the overlaid gold sources; ``None`` when the repository
+    has no linter (the belt is then not evaluated for the gold, as for a trial)."""
+    plan = runner.lint_plan(ws.root, executor)
+    if plan is None:
+        return None
+    present = [f for f in task.src_files if ws.exists(f)]
+    # the plan's own wall clock governs (RepoConfig.lint.timeout or the lint default),
+    # exactly as in grade(): the test-run timeout is a different budget
+    return run_plan(plan, executor, ws.root, present)
+
+
+def _read_gold_lint(lint_run: LintRun | None) -> tuple[bool, str]:
+    """``(gold_clean, gold_note)`` from belt 5's record on the gold — the ONE place
+    the gold's lint verdict is read. ``None`` (no plan, or nothing to lint) leaves
+    the gold clean; a rejection or a timeout is the maintainers' own lint debt; a
+    linter that could not run is a harness error and is never a pass."""
+    if lint_run is None or lint_run.ok is None:
+        return True, ""
+    if lint_run.ok:
+        return True, ""
+    if lint_run.error:
+        note = f"gold lint could not run ({lint_run.detected}): {lint_run.error}"
+    else:
+        note = f"gold fails belt 5 ({lint_run.detected}): {lint_run.note}"
+    return False, note[:300]
 
 
 def mine(

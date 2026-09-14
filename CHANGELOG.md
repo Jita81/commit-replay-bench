@@ -8,6 +8,42 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [2.0.0a1] — 2026-09-14 — first releasable v2
+
+Apparatus version **2.2** (2.0 → 2.1 in Wave A, 2.1 → 2.2 in Wave B; the sections below
+say what each bump changed about the meaning of a verdict). Everything on `reboot/v2`
+since the reboot commit, grouped by wave and area. `pyproject.toml`,
+`crb.core.version.__version__` and the chart's `appVersion` are `2.0.0a1`; the release
+workflow refuses a `v*` tag that does not match `pyproject.toml`.
+
+### Follow-ups (Wave C17)
+- **The gold must pass belt 5 too** (ADR-0011's named residual): `crb.core.mine.gold_check`
+  runs the same lint plan `grade()` would on the overlaid gold's source files; a gold the
+  repository's own linter rejects (or that times out) is `gold_clean=False` with
+  `gold_note="gold fails belt 5 (<detected>): …"` — the maintainers' lint debt is excluded
+  from the denominator, never counted against the builder. A linter that cannot run is a
+  harness error (never a pass); no linter leaves belt 5 not evaluated. The `mine.gold`
+  event carries `lint` (`true`/`false`/`null`).
+- **`crb learn strengthen` derives the route's items from the server's exports.** A ledger
+  export is the rows alone; the per-task oracle scores are `oracle.score` events and the
+  cell's held-ness is the controls verdict. `--oracle` now takes `GET /oracle/{repo}` JSON,
+  a run's `events/log` page/JSONL (score actions only), a `to_report()` JSON or a bare
+  list; new `--controls` takes `GET /oracle/{repo}/controls` (or a `controls` run body).
+  With both, the CLI's items and ids equal the route's; `/learn/strengthen` stamps the
+  repo on every score so they can.
+- **`GET /api/v1/health/live`** — liveness: the process is up and its database answers
+  (one probe; never the sandbox). `/health` stays the deep probe and is role-aware:
+  `CRB_ROLE=api` (`api` | `worker` | `all`, default `all`) reports the sandbox `skipped`
+  instead of failing the API for a docker socket it is not meant to have. The image
+  `HEALTHCHECK` and the Helm startup/liveness probes hit `/health/live`; readiness stays
+  on `/health`; the chart sets `CRB_ROLE` per container.
+- **CI**: the `types` and `test` jobs install `.[server,postgres,dev]` (mypy under `.[dev]`
+  alone reported 95 `import-not-found`, 277 errors with the cascades).
+- **Version** `2.0.0a0 → 2.0.0a1` in `pyproject.toml`, `crb.core.version.__version__`
+  (`APPARATUS_VERSION` stays `2.2`) and `deploy/helm/crb/Chart.yaml` `appVersion`.
+
 ### Sign-off is a policy decision, refused at write (`signoff-policy.v1`, Wave B7, DL-014)
 - `crb.core.signoff.SignoffPolicy` (defaults: `n_min = 10`, route must be `deliver`, controls
   gate passed with `max_controls_escapes = 0` and `min_constructible_share = 0.5`,
@@ -56,13 +92,12 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   `lint` / `lint_evaluated` on every split; five belt pills under `v5`, four otherwise;
   "Lint run (belt 5)" in the evidence drawer.
 
-## [2.0.0a1] — 2026-09-13 — first releasable v2 (tag pending)
+### Wave A and the reboot → first-releasable work (2026-09-13)
 
-Apparatus version **2.0** (unchanged). Everything on `reboot/v2` since the reboot commit,
-76 commits, grouped by area. **The `v2.0.0a1` tag has not been cut**: cutting it requires
-bumping `pyproject.toml` *and* `crb.core.version.__version__` to `2.0.0a1` (the release
-workflow refuses a tag that does not match `pyproject.toml`), plus `appVersion` in
-`deploy/helm/crb/Chart.yaml`.
+Apparatus version **2.0** at the time these entries were written (Wave A bumped it to
+2.1 — belt 1 covers test infrastructure, routing gated on the controls verdict,
+intent-resolved change class, polyglot controls.v2; see `crb.core.version`). 76 commits,
+grouped by area.
 
 ### Release engineering
 - `release.yml` now publishes the container image on a `v*` tag: build `deploy/Dockerfile`
@@ -188,6 +223,6 @@ Apparatus version **2.0**.
 - The v1 (June 2026) implementation (`src/commit_replay_bench/*`, SEARCH/REPLACE-only
   generator, host-only pytest harness). Its last commit is tagged `v1.0.0-legacy`.
 
-[Unreleased]: https://github.com/Jita81/commit-replay-bench/compare/reboot/v2...HEAD
-[2.0.0a1]: https://github.com/Jita81/commit-replay-bench/compare/v1.0.0-legacy...reboot/v2
+[Unreleased]: https://github.com/Jita81/commit-replay-bench/compare/v2.0.0a1...HEAD
+[2.0.0a1]: https://github.com/Jita81/commit-replay-bench/compare/v1.0.0-legacy...v2.0.0a1
 [2.0.0a0]: https://github.com/Jita81/commit-replay-bench/compare/v1.0.0-legacy...v2.0.0a0

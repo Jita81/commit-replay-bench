@@ -120,10 +120,15 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 USER ${CRB_UID}:${CRB_GID}
 EXPOSE 8000
 
-# Liveness for the `serve` role. The worker role disables this in compose / uses its own
-# heartbeat in the runs table (see docs/DEPLOYMENT.md).
+# Liveness for the `serve` role: /api/v1/health/live = "the process is up and its database
+# answers" — ONE probe, never the sandbox. The deep /api/v1/health is the READINESS probe
+# (compose/Helm); as a liveness check it would restart a healthy API for a docker socket the
+# serve container is not meant to have (A11: the API answered 503 on the deep probe, with
+# nothing wrong). The worker role disables this in compose / uses its own heartbeat in the
+# runs table (see docs/DEPLOYMENT.md). Set CRB_ROLE=api on the serve container so the deep
+# probe reports the sandbox `skipped` rather than `degraded` (routes/system.py).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["python", "-c", "import os,sys,urllib.request; p=os.environ.get('CRB_BIND_PORT','8000'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/api/v1/health', timeout=4).status==200 else 1)"]
+    CMD ["python", "-c", "import os,sys,urllib.request; p=os.environ.get('CRB_BIND_PORT','8000'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/api/v1/health/live', timeout=4).status==200 else 1)"]
 
 ENTRYPOINT ["crb-entrypoint"]
 CMD ["serve"]

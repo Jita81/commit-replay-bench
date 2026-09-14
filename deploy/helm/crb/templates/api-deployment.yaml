@@ -56,19 +56,28 @@ spec:
             {{- include "crb.envFrom" . | nindent 12 }}
           env:
             {{- include "crb.commonEnv" . | nindent 12 }}
+            # This pod is the API: the sandbox is the worker's instrument, so the deep
+            # /health probe reports it `skipped` here (never degraded/down for a docker
+            # socket this pod is not meant to have). See src/crb/server/routes/system.py.
+            - name: CRB_ROLE
+              value: "api"
           ports:
             - name: http
               containerPort: 8000
               protocol: TCP
+          # Liveness = the process is up and its database answers (/health/live: one
+          # probe). Readiness = the deep probe (/health: store, ledger honesty floor,
+          # toolchains, builders, worker heartbeat). A liveness probe on the deep
+          # endpoint would restart a healthy pod for a dependency it does not own.
           startupProbe:
             httpGet:
-              path: /api/v1/health
+              path: /api/v1/health/live
               port: http
             periodSeconds: 5
             failureThreshold: 24
           livenessProbe:
             httpGet:
-              path: /api/v1/health
+              path: /api/v1/health/live
               port: http
             periodSeconds: 30
             timeoutSeconds: 5

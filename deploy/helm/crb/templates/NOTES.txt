@@ -10,7 +10,8 @@ Migrations ran as a pre-{{ if .Release.IsInstall }}install{{ else }}upgrade{{ en
 
 Check health:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "crb.fullname" . }}-api 8000:{{ .Values.service.port }}
-  curl -fsS http://127.0.0.1:8000/api/v1/health
+  curl -fsS http://127.0.0.1:8000/api/v1/health/live   # liveness: process up + database (what the pod's liveness probe hits)
+  curl -fsS http://127.0.0.1:8000/api/v1/health        # readiness: the deep probe; sandbox reads `skipped` on the API pod (CRB_ROLE=api)
 
 {{- if .Values.ingress.enabled }}
 UI / API: https://{{ .Values.ingress.host }}{{ .Values.ingress.path }}

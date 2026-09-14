@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from crb.cli.commands import CliError
 from crb.cli.main import main
 from crb.core.learn import CORPUS_HONEST_FILE, CORPUS_REFUSED_FILE
 from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND, GradeRow, JsonlLedger
@@ -335,6 +336,183 @@ def test_strengthen_reproducible_bytes(run: Run, tmp_path: Path) -> None:
         )
         assert code == 0
     assert a.read_bytes() == b.read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# strengthen: the server's exports as --oracle / --controls
+# ---------------------------------------------------------------------------
+#
+# A ledger export is the rows alone; the per-task scores (oracle.score events) and
+# the controls verdict (controls.report) live elsewhere in the store. The CLI takes
+# them in the shapes the API exports them, and reads them the way the routes do.
+
+
+def test_score_actions_mirror_the_server_routes() -> None:
+    """The CLI cannot import the server package; the two constants must not drift."""
+    pytest.importorskip("fastapi")
+    from crb.cli.commands.learn import ORACLE_SCORE_ACTIONS
+    from crb.server.routes.oracle import SCORE_ACTIONS
+
+    assert ORACLE_SCORE_ACTIONS == SCORE_ACTIONS
+
+
+def _event(action: str, task_id: str, payload: dict[str, Any], **env: Any) -> dict[str, Any]:
+    return {
+        "event_id": "e1",
+        "seq": 1,
+        "stage": "oracle" if action.startswith("oracle") else "grade",
+        "action": action,
+        "task_id": task_id,
+        "repo": "alpha",
+        "trace_id": "run-1",
+        "payload": payload,
+        **env,
+    }
+
+
+def test_load_oracle_export_accepts_every_server_shape() -> None:
+    from crb.cli.commands.learn import load_oracle_export
+
+    score = {"capability_class": "bug.fix", "size": "S", "total": 8, "killed": 4, "strength": 0.5}
+    # GET /oracle/{repo}: the top-level repo is carried onto every task's score
+    got = load_oracle_export(
+        {"repo": "alpha", "policy": {}, "tasks": [{"task_id": TASK_A, **score}]}
+    )
+    assert [(s.task_id, s.repo, s.strength, s.total, s.escaped_count) for s in got] == [
+        (TASK_A, "alpha", 0.5, 8, 4)
+    ]
+    # a GET /runs/{id}/events/log page: only score actions are scores; the envelope's
+    # task_id and repo sit beside the payload
+    page = {
+        "items": [
+            _event("run.progress", "", {"done": 1}),
+            _event("grade.belt", TASK_B, {"belt": "target_green", "value": True}),
+            _event("oracle.score", TASK_A, {**score, "oracle_strength": 0.5}),
+            _event("oracle.mutation.scored", TASK_B, {**score, "total": 0, "killed": 0}),
+        ],
+        "total": 4,
+        "limit": 50,
+        "offset": 0,
+    }
+    got = load_oracle_export(page)
+    assert [(s.task_id, s.repo, s.strength) for s in got] == [
+        (TASK_A, "alpha", 0.5),
+        (TASK_B, "alpha", None),
+    ]
+    # the same events as JSON lines (a list), and a bare list of score dicts
+    assert [s.task_id for s in load_oracle_export(page["items"])] == [TASK_A, TASK_B]
+    assert [
+        s.repo for s in load_oracle_export([{"task_id": TASK_A, "repo": "click", **score}])
+    ] == ["click"]
+    # a to_report() dict without a repo: scores keep their own (empty) repo
+    assert load_oracle_export({"tasks": [{"task_id": TASK_A, **score}]})[0].repo == ""
+    # a single score object
+    assert load_oracle_export({"task_id": TASK_A, **score})[0].task_id == TASK_A
+    # an EMPTY export is an honest empty list (no oracle run yet) …
+    assert load_oracle_export({"repo": "alpha", "tasks": []}) == []
+    assert load_oracle_export({"items": [], "total": 0, "limit": 50, "offset": 0}) == []
+    assert load_oracle_export([]) == []
+    # … but entries with no per-task score among them are the WRONG export: refused, never
+    # a silent empty list (which would read every held cell as "without scores")
+    for wrong in (
+        [1, "x", None],
+        {"n_rows": 14, "escapes": 1, "passed": True},  # the controls report
+        {"items": [_event("grade.belt", TASK_A, {"belt": "target_green", "value": True})]},
+    ):
+        with pytest.raises(CliError, match="no per-task oracle score"):
+            load_oracle_export(wrong)
+    with pytest.raises(CliError, match="--oracle must be"):
+        load_oracle_export("not a list")
+
+
+def test_load_controls_export_reads_the_report_or_a_run_body() -> None:
+    from crb.cli.commands.learn import load_controls_export
+
+    report = {
+        "schema": "crb.negative_controls.v1",
+        "n_rows": 14,
+        "escapes": 1,
+        "not_constructible": 2,
+        "skipped": 0,
+        "passed": True,
+        "run_id": "ctl-1",
+        "reported_at": "2026-09-14T00:00:00+00:00",
+        "verdict": {"state": "escaped"},
+    }
+    v = load_controls_export(report)
+    assert v.measured and v.passed and v.escapes == 1 and v.total == 14 and v.constructible == 12
+    assert v.run_id == "ctl-1" and v.created == "2026-09-14T00:00:00+00:00"
+    run_body = {
+        "id": "ctl-2",
+        "kind": "controls",
+        "finished": "2026-09-14T01:00:00+00:00",
+        "counts": {"rows": 10, "escapes": 0, "not_constructible": 0, "skipped": 0, "passed": True},
+    }
+    v2 = load_controls_export(run_body)
+    assert v2.measured and v2.escapes == 0 and v2.total == 10 and v2.run_id == "ctl-2"
+    for bad in ({"escapes": 1}, {"counts": {"rows": 3}}, [], "x"):
+        with pytest.raises(CliError, match="--controls must be"):
+            load_controls_export(bad)
+
+
+def test_strengthen_controls_flag_routes_the_cells_as_the_server_does(
+    run: Run, tmp_path: Path
+) -> None:
+    """The fixture's stale M cell (n=3) is below min_n and the S cell is oracle-weak;
+    a controls verdict with an escape holds EVERY measured cell — the S cell keeps
+    its oracle_weak reason (it fires first), and the report is echoed back."""
+    controls = tmp_path / "controls.json"
+    controls.write_text(
+        json.dumps({"n_rows": 14, "escapes": 1, "not_constructible": 0, "passed": True}),
+        encoding="utf-8",
+    )
+    _, d = _json(run, ["learn", "strengthen", "--controls", str(controls)])
+    assert d["controls"]["measured"] is True and d["controls"]["escapes"] == 1
+    assert d["cells_flagged"] == ["bug.fix|S"]
+    assert d["items"][0]["labels"]["reason_code"] == "oracle_weak"
+    # without the flag the report is honestly absent from the output
+    _, d2 = _json(run, ["learn", "strengthen"])
+    assert d2["controls"] is None
+    # a file that is not a controls report is refused, never read as "no controls"
+    bad = tmp_path / "bad.json"
+    bad.write_text("{}", encoding="utf-8")
+    code, _, err = run(["learn", "strengthen", "--controls", str(bad)])
+    assert code != 0 and "--controls must be" in err
+
+
+def test_strengthen_oracle_accepts_a_run_events_log_page(run: Run, tmp_path: Path) -> None:
+    """The oracle run's event log as `GET /runs/{id}/events/log` returns it: the
+    grade/progress events are ignored, the score's escaped mutants reach the item."""
+    page = {
+        "items": [
+            _event("run.progress", "", {"done": 1}),
+            _event(
+                "oracle.score",
+                TASK_A,
+                {
+                    "repo": "click",
+                    "src_paths": ["src/click/termui.py"],
+                    "total": 4,
+                    "killed": 2,
+                    "oracle_strength": 0.5,
+                    "escaped_mutants": [
+                        {"mutant_id": "m1", "op": "flip", "line": 10, "path": "src/click/termui.py"}
+                    ],
+                },
+                repo="click",
+            ),
+        ],
+        "total": 2,
+        "limit": 50,
+        "offset": 0,
+    }
+    p = tmp_path / "events.json"
+    p.write_text(json.dumps(page), encoding="utf-8")
+    _, d = _json(run, ["learn", "strengthen", "--oracle", str(p), "--repo", "click"])
+    assert d["cells_flagged"] == ["bug.fix|S"] and d["cells_without_scores"] == []
+    (item,) = d["items"]
+    assert item["labels"]["task_id"] == TASK_A and item["labels"]["repo"] == "click"
+    assert "src/click/termui.py:10" in item["description"]
 
 
 # ---------------------------------------------------------------------------
