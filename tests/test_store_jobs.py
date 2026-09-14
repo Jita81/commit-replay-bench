@@ -63,7 +63,16 @@ def test_enqueue_fills_defaults_and_validates(queue: JobQueue) -> None:
         _enqueue(queue, kind="factory-of-doom")
     with pytest.raises(ValueError, match="needs a repo"):
         queue.enqueue(Run(repo="", kind="replay"))
-    assert set(RUN_KINDS) == {"setup", "probe", "mine", "replay", "blind", "oracle", "controls"}
+    assert set(RUN_KINDS) == {
+        "setup",
+        "probe",
+        "mine",
+        "replay",
+        "blind",
+        "oracle",
+        "controls",
+        "label",
+    }
 
 
 def test_enqueue_forces_queued_state_even_if_caller_says_otherwise(queue: JobQueue) -> None:

@@ -16,6 +16,13 @@ a time and executes it by ``kind``:
 ``oracle``  :func:`crb.core.oracle.mutation.score_task` per task → ``oracle.score``
             events, mean strength in ``counts_json``
 ``controls`` the negative-controls gate → one ``controls.report`` event
+``label``   intent-label every task of the repo that lacks one (or ``relabel``)
+            through :func:`crb.builders.labeller.make_labeller` — the run's
+            ``builder``/``model``/``provider`` + ``builder_config`` — re-writing
+            ``tasks.spec_json`` / ``capability_class`` (the RESOLVED class) via the
+            same upsert as ``mine``; a ``label.task`` event per task; the per-class
+            summary, mean confidence and cost in ``counts_json``. Human labels are
+            never overwritten. Never touches the diff body.
 =========== ====================================================================
 
 Every step event goes through one :class:`~crb.observability.events.Emitter`
@@ -74,6 +81,8 @@ from crb.builders.adapter import (
     ladder_labels,
 )
 from crb.builders.base import Budget, EscalationLadder
+from crb.builders.labeller import make_labeller
+from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
 from crb.core.execution import DockerSettings, Executor, SandboxUnavailable, make_executor
 from crb.core.git import (
     DEFAULT_CLONE_TIMEOUT_S,
@@ -115,6 +124,7 @@ from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
     KIND_BLIND,
     KIND_CONTROLS,
+    KIND_LABEL,
     KIND_MINE,
     KIND_ORACLE,
     KIND_PROBE,
@@ -137,6 +147,7 @@ PROBE_FAILED = "failed"
 #: action prefix → StepEvent stage, for the core's plain ``on_event`` callbacks.
 _STAGE_FOR_PREFIX: dict[str, str] = {
     "mine": "mine",
+    "label": "mine",
     "prep": "prep",
     "build": "build",
     "builder": "build",
@@ -362,6 +373,7 @@ class Worker:
             KIND_BLIND: lambda ctx: self._run_replay(ctx, mode=MODE_BLIND),
             KIND_ORACLE: self._run_oracle,
             KIND_CONTROLS: self._run_controls,
+            KIND_LABEL: self._run_label,
         }
 
     # --- layout ---------------------------------------------------------------
@@ -1077,6 +1089,138 @@ class Worker:
                 f"negative-controls gate FAILED: {len(report.violations)} violation(s) "
                 "(an instrument or belt-scope defect, never a model result)",
             )
+        return STATUS_SUCCEEDED, counts, ""
+
+    # --- label -------------------------------------------------------------------
+    def _label_candidates(self, ctx: RunContext, *, relabel: bool) -> list[TaskSpec]:
+        """Every task of the repo (gold-clean or not — a class is a property of the
+        commit, not of the oracle), oldest first; ``params.task_ids`` / ``pool`` narrow
+        it. Tasks already carrying a model label are skipped unless ``relabel``; tasks
+        carrying a HUMAN label are always kept as they are (highest precedence)."""
+        p = ctx.params
+        ids = [str(i) for i in (p.get("task_ids") or [])]
+        pool = str(p.get("pool") or "")
+        with self.factory() as s:
+            q = select(Task).where(Task.repo == ctx.run.repo)
+            if ids:
+                q = q.where(Task.task_id.in_(ids))
+            if pool:
+                q = q.where(Task.pool == pool)
+            rows = s.execute(q.order_by(Task.authored, Task.task_id)).scalars().all()
+        specs = [TaskSpec.from_dict(r.spec_json) for r in rows]
+        kept: list[TaskSpec] = []
+        for t in specs:
+            if t.intent is not None and t.intent.is_human:
+                ctx.counts["kept_human"] = int(ctx.counts.get("kept_human", 0)) + 1
+                continue
+            if t.intent is not None and not relabel:
+                ctx.counts["kept_labelled"] = int(ctx.counts.get("kept_labelled", 0)) + 1
+                continue
+            kept.append(t)
+        limit = int(p.get("limit") or 0)
+        return kept[:limit] if limit > 0 else kept
+
+    def _run_label(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
+        run = ctx.run
+        p = ctx.params
+        builder = str(run.builder or p.get("builder") or "")
+        model = str(run.model or p.get("model") or "")
+        provider = str(run.provider or p.get("provider") or "")
+        if not builder:
+            raise ValueError("a label run needs a builder (and a model)")
+        relabel = bool(p.get("relabel", False))
+        labeller = make_labeller(
+            builder,
+            model=model,
+            provider=provider,
+            builder_config=dict(p.get("builder_config") or {}),
+        )
+        # No runner / executor is involved: the apparatus is the labeller itself.
+        self.queue.set_apparatus(
+            run.id,
+            {
+                "apparatus_version": APPARATUS_VERSION,
+                "worker": self.worker_id,
+                "labeller": labeller.name,
+                "min_confidence": DEFAULT_MIN_CONFIDENCE,
+                "relabel": relabel,
+                "builder_config": dict(p.get("builder_config") or {}),
+            },
+            worker_id=self.worker_id,
+        )
+        ctx.counts.update({"tasks": 0, "labelled": 0, "labeller": labeller.name})
+        tasks = self._label_candidates(ctx, relabel=relabel)
+        total = len(tasks)
+        ctx.counts["total"] = total
+        self._progress(ctx, 0, total)
+        labels = []
+        sources: dict[str, int] = {}
+        resolved: dict[str, int] = {}
+        cancelled = False
+        for i, task in enumerate(tasks):
+            if self._cancelled(ctx):
+                cancelled = True
+                break
+            ev = commit_evidence(ctx.git, task.task_id, path_class=task.path_class)
+            label = labeller.label(
+                subject=ev.subject,
+                message=ev.message,
+                diff_stats=ev.diff_stats,
+                changed_paths=ev.changed_paths,
+                path_class=ev.path_class,
+            )
+            new = task.with_(intent=label)
+            self._upsert_task(new)
+            labels.append(label)
+            sources[new.class_source] = sources.get(new.class_source, 0) + 1
+            resolved[new.capability_class] = resolved.get(new.capability_class, 0) + 1
+            ctx.emit(
+                "mine",
+                "label.task",
+                status=StepStatus.ERROR
+                if label.rationale.startswith("model_error")
+                else StepStatus.OK,
+                task_id=task.task_id,
+                path_class=new.path_class,
+                intent_class=label.intent_class,
+                confidence=label.confidence,
+                rationale=label.rationale,
+                labeller=label.labeller,
+                evidence_hash=label.evidence_hash,
+                capability_class=new.capability_class,
+                class_source=new.class_source,
+                previous_class=task.capability_class,
+                changed=new.capability_class != task.capability_class,
+                cost_usd=labeller.usage.last.get("cost_usd"),
+                latency_ms=int(float(labeller.usage.last.get("latency_s") or 0.0) * 1000),
+            )
+            ctx.counts.update({"tasks": i + 1, "labelled": len(labels)})
+            self._progress(ctx, i + 1, total)
+        counts: dict[str, Any] = {
+            "tasks": len(labels),
+            "total": total,
+            "labelled": len(labels),
+            "kept_human": int(ctx.counts.get("kept_human", 0)),
+            "kept_labelled": int(ctx.counts.get("kept_labelled", 0)),
+            "labeller": labeller.name,
+            "min_confidence": DEFAULT_MIN_CONFIDENCE,
+            "labels": label_summary(labels),
+            "resolved_sources": dict(sorted(sources.items())),
+            "resolved_classes": dict(sorted(resolved.items())),
+            "usage": labeller.usage.to_dict(),
+            "complete": not cancelled,
+        }
+        ctx.counts.clear()
+        ctx.counts.update(counts)
+        self._progress(ctx, len(labels), total)
+        if cancelled:
+            return STATUS_CANCELLED, counts, ""
+        usage = labeller.usage
+        if labels and usage.errors >= usage.calls:
+            # Every call failed on infrastructure (no credential, auth, timeout…): the
+            # labels are honest (unclassified, confidence 0) but nothing was measured.
+            first = next((x.rationale for x in labels if x.rationale), "")
+            return STATUS_FAILED, counts, f"all {len(labels)} label call(s) errored: {first}"[:1000]
         return STATUS_SUCCEEDED, counts, ""
 
 
