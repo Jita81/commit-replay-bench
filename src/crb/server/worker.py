@@ -1236,7 +1236,11 @@ class Worker:
             if t.intent is not None and t.intent.is_human:
                 ctx.counts["kept_human"] = int(ctx.counts.get("kept_human", 0)) + 1
                 continue
-            if t.intent is not None and not relabel:
+            if (
+                t.intent is not None
+                and not relabel
+                and not t.intent.rationale.startswith("model_error")  # an outage is not a label
+            ):
                 ctx.counts["kept_labelled"] = int(ctx.counts.get("kept_labelled", 0)) + 1
                 continue
             kept.append(t)
@@ -1338,6 +1342,16 @@ class Worker:
         self._progress(ctx, len(labels), total)
         if cancelled:
             return STATUS_CANCELLED, counts, ""
+        errored = sum(1 for lab in labels if lab.rationale.startswith("model_error"))
+        counts["errors"] = errored
+        if labels and errored == len(labels):
+            # every label was a model error (an outage, a dead credential): the run did not
+            # measure anything — fail it, like a replay whose every attempt errored
+            return (
+                STATUS_FAILED,
+                counts,
+                f"all {errored} label call(s) errored: {labels[0].rationale[:200]}",
+            )
         usage = labeller.usage
         if labels and usage.errors >= usage.calls:
             # Every call failed on infrastructure (no credential, auth, timeout…): the

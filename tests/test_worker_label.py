@@ -62,6 +62,14 @@ class ScriptedLabeller:
         if cls == "ERROR":
             self.usage.errors += 1
             return c.unclassified_label(self.name, reason="model_error: boom", evidence_hash=digest)
+        if cls == "LIMIT":
+            # the Claude CLI answers a usage-limit with a RESULT event, not a transport error:
+            # usage.errors stays 0 but the label is a model_error (2026-09-14, live label runs)
+            return c.unclassified_label(
+                self.name,
+                reason="model_error: success: You've hit your limit",
+                evidence_hash=digest,
+            )
         return c.parse_label_reply(
             f'{{"class": "{cls}", "confidence": {conf}, "rationale": "scripted"}}',
             labeller=self.name,
@@ -300,3 +308,24 @@ def test_label_run_cancel_between_tasks_keeps_partial_counts(
             if TaskSpec.from_dict(r.spec_json).intent is not None
         )
     assert n_labelled == 1
+
+
+def test_label_run_whose_labels_are_all_outage_text_is_failed_and_relabels_without_relabel(
+    h: Harness, scripted: dict[str, Any]
+) -> None:
+    """Three live label runs 'succeeded' with every label reading the CLI's usage-limit
+    text (usage.errors == 0). An outage is not a label: the run fails, and the next run
+    re-labels those tasks without ``relabel``."""
+    scripted["labeller"] = ScriptedLabeller([("LIMIT", 0.0)])
+    h.enqueue("label", builder="openai_agent", model="m")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert "errored" in done.error and "hit your limit" in done.error
+    assert done.counts_json["errors"] == 1
+    scripted["labeller"] = ScriptedLabeller([("feature.add", 0.9)])
+    h.enqueue("label", builder="openai_agent", model="m")  # no relabel flag
+    done2 = h.run_one()
+    assert done2.status != STATUS_FAILED
+    assert done2.counts_json["kept_labelled"] == 0 and done2.counts_json["labelled"] == 1
+    spec = TaskSpec.from_dict(_task_row(h, h.pyrepo.feat_sha).spec_json)
+    assert spec.capability_class == "feature.add" and spec.class_source != "path"
