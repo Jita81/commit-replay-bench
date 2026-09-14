@@ -7,7 +7,6 @@ import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
-import { JsonView } from '../../components/JsonView'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
@@ -16,6 +15,7 @@ import { useAuth } from '../../lib/auth'
 import { fmtDate, fmtInt, fmtPct, shortId } from '../../lib/format'
 import { probeDisplay } from '../../lib/verdict'
 import { RunNewDialog } from '../Runs/RunNewDialog'
+import { RepoConfigTab } from './RepoConfigTab'
 
 type Tab = 'overview' | 'profile' | 'tasks' | 'config'
 
@@ -209,7 +209,7 @@ export function RepoDetail() {
     { id: 'overview', label: 'Overview' },
     { id: 'profile', label: 'Change profile' },
     { id: 'tasks', label: 'Tasks' },
-    { id: 'config', label: 'Config' },
+    { id: 'config', label: 'Configuration' },
   ]
 
   return (
@@ -247,11 +247,7 @@ export function RepoDetail() {
               </Card>
             )}
             {tab === 'tasks' && <TasksTab name={name} />}
-            {tab === 'config' && (
-              <Card title="Repo config" eyebrow="layout · runner · belt scope · mining">
-                <JsonView value={r.config} initiallyOpen label="Repository configuration" />
-              </Card>
-            )}
+            {tab === 'config' && <RepoConfigTab key={r.name} repo={r} />}
           </div>
         )}
       </QueryBoundary>

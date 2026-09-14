@@ -4,7 +4,10 @@ A repo row is ``RepoConfig.to_dict()`` plus its probe state. Every config change
 is validated through :meth:`crb.core.spec.RepoConfig.from_dict` (an invalid config
 cannot be stored) and recorded as a ``system/repo.updated`` event whose payload is
 the REDACTED field diff — the audit trail for "who changed the belt scope" lives in
-the append-only events table, not in a mutable column.
+the append-only events table, not in a mutable column. ``GET /repos/{name}/events``
+serves that trail (the repo's system trace: ``repo.created`` then every
+``repo.updated``), newest first, so the UI's Configuration tab can show who changed
+what without reading the database.
 
 The change profile (:func:`crb.core.capability.profile_repo`) walks the clone's
 git history; it is cached in ``config_json["profile"]`` with a timestamp and
@@ -31,6 +34,7 @@ from crb.server.auth import OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
 from crb.server.routes.runs import (
     append_system_event,
+    event_to_dict,
     new_run,
     require_jobs,
     run_out,
@@ -51,9 +55,10 @@ from crb.server.schemas import (
     RepoUpdateRequest,
     RunCreateRequest,
     RunOut,
+    StepEventOut,
     TaskSpecOut,
 )
-from crb.store.models import Repo, Run, Task
+from crb.store.models import Event, Repo, Run, Task
 
 router = APIRouter(tags=["repos"])
 _ERR = {"model": ErrorEnvelope}
@@ -299,6 +304,41 @@ def update_repo(name: str, body: RepoUpdateRequest, operator: OperatorDep, db: D
     )
     db.commit()
     return repo_detail(db, repo)
+
+
+@router.get(
+    "/repos/{name}/events",
+    response_model=Page[StepEventOut],
+    responses={401: _ERR, 404: _ERR},
+    summary="Config audit trail: the repo's system events (repo.created, repo.updated diffs), newest first",
+)
+def list_repo_events(name: str, viewer: ViewerDep, db: DbDep, page: PageDep) -> Page[StepEventOut]:
+    """The repo's own system trace (``sha256("repo:<name>")[:32]``) as stored.
+
+    Payloads are the redacted diffs :func:`update_repo` appended — served verbatim,
+    never recomputed, so what an auditor reads is what was written at the time.
+    """
+    del viewer
+    get_repo_or_404(db, name)
+    trace = system_trace_id("repo", name)
+    total = int(
+        db.execute(select(func.count(Event.id)).where(Event.trace_id == trace)).scalar_one()
+    )
+    items = list(
+        db.execute(
+            select(Event)
+            .where(Event.trace_id == trace)
+            .order_by(Event.seq.desc(), Event.id.desc())
+            .limit(page.limit)
+            .offset(page.offset)
+        ).scalars()
+    )
+    return Page[StepEventOut](
+        items=[StepEventOut(**event_to_dict(m)) for m in items],
+        total=total,
+        limit=page.limit,
+        offset=page.offset,
+    )
 
 
 @router.post(

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RepoDetail } from '../../api/types'
@@ -123,6 +123,41 @@ describe('RepoNewDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Add repo' }))
     const body = await postedBody(calls)
     expect(body.belt_scope).toEqual(['tests/', 'tests/acceptance/'])
+  })
+
+  it('the runner select is limited to the language; a runner the new language cannot run falls back to the default', async () => {
+    const user = userEvent.setup()
+    setup()
+    const runner = screen.getByLabelText(/^Runner$/)
+    expect(within(runner).getAllByRole('option').map((o) => o.getAttribute('value'))).toEqual(['', 'pytest'])
+    await user.selectOptions(screen.getByLabelText(/^Language/), 'javascript')
+    expect(within(runner).getAllByRole('option').map((o) => o.getAttribute('value'))).toEqual(['', 'node', 'vitest', 'jest', 'mocha'])
+    await user.selectOptions(runner, 'jest')
+    await user.selectOptions(screen.getByLabelText(/^Language/), 'go')
+    expect(runner).toHaveValue('')
+    expect(within(runner).getAllByRole('option').map((o) => o.getAttribute('value'))).toEqual(['', 'go'])
+  })
+
+  it('the runner options editor shares the config form: the Form view offers the runner’s own keys and the body carries them', async () => {
+    const user = userEvent.setup()
+    const { calls } = setup()
+    await user.type(screen.getByLabelText(/^Name/), 'x')
+    await user.type(screen.getByLabelText(/^Git URL/), 'https://github.com/o/r')
+    await user.selectOptions(screen.getByLabelText(/^Language/), 'javascript')
+    await user.selectOptions(screen.getByLabelText(/^Runner$/), 'jest')
+    await user.click(screen.getByTestId('runner-opts-mode-form'))
+    expect(screen.getByLabelText(/^npm binary/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Python interpreter/)).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('runner-opt-extra_args-add'))
+    await user.type(screen.getByLabelText('Extra arguments 1'), '--selectProjects')
+    await user.click(screen.getByTestId('runner-opt-extra_args-add'))
+    expect(screen.getByRole('button', { name: 'Add repo' })).toBeDisabled() // an empty row is refused, as the runner would pass '' to jest
+    await user.type(screen.getByLabelText('Extra arguments 2'), 'unit')
+    await user.click(screen.getByTestId('runner-opts-mode-json'))
+    expect(screen.getByLabelText(/Runner options \(JSON\)/)).toHaveValue('{\n  "extra_args": [\n    "--selectProjects",\n    "unit"\n  ]\n}')
+    await user.click(screen.getByRole('button', { name: 'Add repo' }))
+    const body = await postedBody(calls)
+    expect(body).toEqual({ name: 'x', language: 'javascript', url: 'https://github.com/o/r', runner: 'jest', belt_scope: 'TARGET_ONLY', runner_opts: { extra_args: ['--selectProjects', 'unit'] } })
   })
 
   it('renders the server error envelope on a 422', async () => {

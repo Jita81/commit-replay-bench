@@ -1,12 +1,14 @@
 import { useState, type FormEvent } from 'react'
 import { useCreateRepo } from '../../api/hooks'
-import { LANGUAGES, RUNNERS, type BeltScope, type Language, type RepoCreateRequest, type Runner } from '../../api/types'
+import { LANGUAGES, type BeltScope, type Language, type RepoCreateRequest, type Runner } from '../../api/types'
 import { Button } from '../../components/Button'
 import { Dialog } from '../../components/Dialog'
-import { SelectField, TextArea, TextField } from '../../components/Field'
+import { SelectField, TextField } from '../../components/Field'
 import { ErrorState } from '../../components/ErrorState'
-import { formatJsonObject, parseJsonObject } from '../../lib/jsonObject'
 import { REPO_PRESETS, findPreset } from '../../lib/repoPresets'
+import { BELT_HELP, parseScopeList, type BeltPolicy } from './repoConfigModel'
+import { DEFAULT_RUNNER, runnersFor, validateRunnerOpts } from './runnerOpts'
+import { RunnerOptsEditor } from './RunnerOptsEditor'
 
 interface Props {
   open: boolean
@@ -15,14 +17,8 @@ interface Props {
 }
 
 type Source = 'url' | 'clone_path'
-type BeltPolicy = 'TARGET_ONLY' | 'AFFECTED_DIRS' | 'BARE' | 'LIST'
 
-const BELT_HELP: Record<BeltPolicy, string> = {
-  TARGET_ONLY: 'Regression belt runs only the target tests (weakest; while calibrating a large suite).',
-  AFFECTED_DIRS: 'Regression belt runs every test in the target tests’ directories.',
-  BARE: 'Regression belt runs the runner’s default discovery (the whole suite).',
-  LIST: 'Regression belt runs exactly these runner scopes, comma-separated.',
-}
+export { parseScopeList }
 
 /**
  * `https://…`, `ssh://…`, `user@host:path` — the server’s clone policy, mirrored for
@@ -31,13 +27,6 @@ const BELT_HELP: Record<BeltPolicy, string> = {
  * local paths and `http://` are refused here because no server ever accepts them.
  */
 const URL_RE = /^(https:\/\/[^\s/@]+\/\S+|ssh:\/\/\S+\/\S+|file:\/\/\/\S+|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^/\s]\S*)$/i
-
-export function parseScopeList(text: string): string[] {
-  return text
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
 
 /**
  * `POST /repos` — everything a `RepoConfig` carries: location (URL or an existing
@@ -60,7 +49,8 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
   const [beltList, setBeltList] = useState('')
   const [probe, setProbe] = useState('')
   const [sandboxImage, setSandboxImage] = useState('')
-  const [runnerOpts, setRunnerOpts] = useState('')
+  const [runnerOpts, setRunnerOpts] = useState<Record<string, unknown>>({})
+  const [runnerOptsJsonError, setRunnerOptsJsonError] = useState<string | undefined>(undefined)
 
   const nameOk = /^[a-z0-9][a-z0-9._-]*$/.test(name)
   const locationTrim = location.trim()
@@ -68,9 +58,16 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
     locationTrim && source === 'url' && !URL_RE.test(locationTrim)
       ? 'Use https://host/path, ssh://host/path or user@host:path (a local path is registered as a clone path, never cloned; file:// needs CRB_ALLOW_LOCAL_CLONE=1 on the server)'
       : undefined
-  const opts = parseJsonObject(runnerOpts)
+  const effectiveRunner: Runner = runner || DEFAULT_RUNNER[language]
+  const optErrors = validateRunnerOpts(effectiveRunner, runnerOpts)
+  const optsOk = !runnerOptsJsonError && Object.keys(optErrors).length === 0
   const beltListError = beltPolicy === 'LIST' && parseScopeList(beltList).length === 0 ? 'List at least one runner scope' : undefined
-  const valid = nameOk && Boolean(locationTrim) && !locationError && opts.ok && !beltListError
+  const valid = nameOk && Boolean(locationTrim) && !locationError && optsOk && !beltListError
+
+  const changeLanguage = (l: Language) => {
+    setLanguage(l)
+    if (runner && !runnersFor(l).includes(runner)) setRunner('')
+  }
 
   const applyPreset = (id: string) => {
     setPreset(id)
@@ -87,11 +84,11 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
     } else {
       setBeltPolicy(p.belt_scope)
     }
-    setRunnerOpts(formatJsonObject(p.runner_opts))
+    setRunnerOpts({ ...p.runner_opts })
   }
 
   const body = (): RepoCreateRequest | null => {
-    if (!valid || !opts.ok) return null
+    if (!valid) return null
     const req: RepoCreateRequest = { name, language }
     if (source === 'clone_path') req.clone_path = locationTrim
     else req.url = locationTrim
@@ -103,7 +100,7 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
     req.belt_scope = belt
     if (probe) req.probe = probe
     if (sandboxImage) req.sandbox_image = sandboxImage
-    if (Object.keys(opts.value).length) req.runner_opts = opts.value
+    if (Object.keys(runnerOpts).length) req.runner_opts = runnerOpts
     return req
   }
 
@@ -153,16 +150,16 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
             </option>
           ))}
         </SelectField>
-        <SelectField label="Language" required value={language} onChange={(e) => setLanguage(e.target.value as Language)}>
+        <SelectField label="Language" required value={language} onChange={(e) => changeLanguage(e.target.value as Language)}>
           {LANGUAGES.map((l) => (
             <option key={l} value={l}>
               {l}
             </option>
           ))}
         </SelectField>
-        <SelectField label="Runner" value={runner} onChange={(e) => setRunner(e.target.value as Runner | '')} hint="Default: by language">
+        <SelectField label="Runner" value={runner} onChange={(e) => setRunner(e.target.value as Runner | '')} hint={`Default: ${DEFAULT_RUNNER[language]}. Runners for ${language}: ${runnersFor(language).join(', ')}`}>
           <option value="">(default for language)</option>
-          {RUNNERS.map((r) => (
+          {runnersFor(language).map((r) => (
             <option key={r} value={r}>
               {r}
             </option>
@@ -195,16 +192,15 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
         <TextField label="Probe scope" value={probe} onChange={(e) => setProbe(e.target.value)} placeholder="tests/test_smoke.py" hint="A known-green test scope to prove the toolchain (repo-specific; never filled by a preset)" />
         <TextField label="Sandbox image" value={sandboxImage} onChange={(e) => setSandboxImage(e.target.value)} placeholder="ghcr.io/org/repo-toolchain:2026-09" hint="Container image with toolchain + deps; the docker executor fails closed without one" />
         <div className="sm:col-span-2">
-          <TextArea
-            label="Runner options (JSON)"
+          <RunnerOptsEditor
+            runner={effectiveRunner}
             value={runnerOpts}
-            onChange={(e) => setRunnerOpts(e.target.value)}
-            rows={5}
-            spellCheck={false}
-            className="font-mono text-xs"
-            placeholder={'{\n  "pythonpath_suffix": "/src",\n  "pip": ["pytest", "-r", "requirements/test.txt"]\n}'}
-            error={opts.ok ? undefined : opts.error}
-            hint="A JSON object of runner options: pip / python / pythonpath_suffix (pytest), maven_flags / java_home (maven), mocha_require (mocha), node, go, cargo… Leave empty for none."
+            onChange={setRunnerOpts}
+            errors={optErrors}
+            onJsonError={setRunnerOptsJsonError}
+            initialMode="json"
+            jsonRows={5}
+            jsonPlaceholder={'{\n  "pythonpath_suffix": "/src",\n  "pip": ["pytest", "-r", "requirements/test.txt"]\n}'}
           />
         </div>
         {create.isError && (

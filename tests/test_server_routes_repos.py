@@ -1,4 +1,4 @@
-"""``/repos`` — list/detail shapes, config validation, the audit event, probe, profile, tasks."""
+"""``/repos`` — list/detail shapes, config validation, the audit event + trail, probe, profile, tasks."""
 
 from __future__ import annotations
 
@@ -238,6 +238,72 @@ class TestUpdate:
         assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
         r = env.put("/repos/nope", json={"probe": "x"})
         assert r.status_code == 404
+
+
+class TestEvents:
+    """``GET /repos/{name}/events`` — the config audit trail as stored, newest first."""
+
+    def test_rbac(self, env: Env) -> None:
+        assert_rbac(env, "GET", f"/repos/{ALPHA}/events", min_role="viewer")
+
+    def test_404(self, env: Env) -> None:
+        assert env.get("/repos/nope/events").status_code == 404
+
+    def test_seeded_repo_has_no_trail(self, env: Env) -> None:
+        # seeded directly into the table (no POST) → an honest empty page, never a
+        # fabricated "created" row
+        body = env.get(f"/repos/{ALPHA}/events").json()
+        assert body == {"items": [], "total": 0, "limit": 50, "offset": 0}
+
+    def test_trail_is_newest_first_redacted_and_paginated(self, env: Env) -> None:
+        login(env.client, "operator")
+        r = env.post(
+            "/repos",
+            json={"name": "gamma", "language": "python", "clone_path": "/srv/gamma"},
+        )
+        assert r.status_code == 201, r.text
+        r = env.put(
+            "/repos/gamma",
+            json={
+                "belt_scope": ["tests/", "tests/acceptance/"],
+                "runner_opts": {"pip": ["https://user:hunter2-secret-token@pypi.internal/simple"]},
+            },
+        )
+        assert r.status_code == 200, r.text
+        r = env.put("/repos/gamma", json={"probe": "tests/test_smoke.py"})
+        assert r.status_code == 200, r.text
+
+        body = env.get("/repos/gamma/events").json()
+        assert body["total"] == 3 and body["limit"] == 50 and body["offset"] == 0
+        actions = [e["action"] for e in body["items"]]
+        assert actions == ["repo.updated", "repo.updated", "repo.created"]
+        assert [e["seq"] for e in body["items"]] == [3, 2, 1]
+        newest, middle, created = body["items"]
+        assert newest["stage"] == "system" and newest["repo"] == "gamma"
+        assert newest["actor"]  # the operator's id
+        assert newest["payload"]["fields"] == ["probe"]
+        assert newest["payload"]["diff"]["probe"] == {"from": "", "to": "tests/test_smoke.py"}
+        assert middle["payload"]["fields"] == ["belt_scope", "runner_opts"]
+        assert middle["payload"]["diff"]["belt_scope"] == {
+            "from": "TARGET_ONLY",
+            "to": ["tests/", "tests/acceptance/"],
+        }
+        assert "hunter2" not in str(middle["payload"])  # redacted at write, served as stored
+        assert created["payload"]["config"]["name"] == "gamma"
+        assert set(newest) >= {"event_id", "seq", "timestamp", "trace_id", "action", "payload"}
+
+        page = env.get("/repos/gamma/events?limit=1&offset=1").json()
+        assert page["total"] == 3 and len(page["items"]) == 1 and page["items"][0]["seq"] == 2
+
+        # a viewer reads the same trail
+        login(env.client, "viewer")
+        assert env.get("/repos/gamma/events").json()["total"] == 3
+
+    def test_trail_is_per_repo(self, env: Env) -> None:
+        login(env.client, "operator")
+        assert env.put(f"/repos/{ALPHA}", json={"probe": "tests/x.py"}).status_code == 200
+        assert env.get(f"/repos/{ALPHA}/events").json()["total"] == 1
+        assert env.get(f"/repos/{BETA}/events").json()["total"] == 0
 
 
 class TestProbe:
