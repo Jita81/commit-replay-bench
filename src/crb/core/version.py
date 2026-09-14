@@ -10,7 +10,7 @@ could change; bump ``__version__`` for anything else.
 
 from __future__ import annotations
 
-__version__ = "2.0.0a0"
+__version__ = "2.0.0a1"
 
 #: Semantic version of the grading apparatus. Changing belt semantics, the
 #: size-tier table, the change-class taxonomy or the routing rule MUST bump
