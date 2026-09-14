@@ -248,6 +248,22 @@ image must already contain what setup would have installed (the `node_modules` a
 setup installed in the clone is visible to the container through the read-only worktree
 mount; a host venv, module cache or `~/.m2` is not). P7 ships reference images.
 
+### 2.1a Packaging-metadata tests (`dist_info_stubs`)
+The harness imports the repository's code from the worktree on `PYTHONPATH` and uninstalls
+the repository's own distribution so a stale install can never shadow it. A test that
+asserts the *package metadata* — `importlib.metadata.version("mesh-client") != "unknown"`
+(NHSDigital/mesh-client `test_get_version`) — then fails for a reason that is neither the
+builder's nor the oracle's. Declare the identity and the harness writes a METADATA-only
+dist-info (no file records, so nothing is shadowed) after the uninstall:
+
+```json
+"runner_opts": {"uninstall": ["mesh-client"],
+                "dist_info_stubs": [{"name": "Mesh-Client", "version": "0.0.0+crb"}]}
+```
+
+The stub is a recorded setup step (`crb dist-info-stub …`) and therefore part of the
+apparatus record of every row measured under it.
+
 ### 2.2 Services the oracle needs
 
 Some test suites are only an oracle when a **service** is running next to them —

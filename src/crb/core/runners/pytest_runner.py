@@ -28,6 +28,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import tomllib
 from collections.abc import Callable, Sequence
@@ -279,4 +280,43 @@ class PytestRunner(BaseRunner):
                 else [str(python), "-m", "pip", "uninstall", "-y", "-q", *uninstall]
             )
             session.run(Command(tuple(argv), root, env=_SETUP_ENV, timeout=t))
+        # 4. metadata-only distributions: a test that asserts the package reports a real
+        #    version (`importlib.metadata.version("mesh-client") != "unknown"`) cannot pass
+        #    once the distribution is uninstalled and the code comes from the worktree on
+        #    PYTHONPATH — so the operator declares the identity and the harness writes a
+        #    dist-info with METADATA only (no RECORD of files, so nothing is shadowed).
+        #    NHSDigital/mesh-client `test_get_version`, 2026-09-14.
+        for stub in self.opts.get("dist_info_stubs") or []:
+            version = str(stub.get("version") or "0.0.0+crb")
+            written = write_dist_info_stub(python, str(stub["name"]), version)
+            session.record(
+                Command(("crb", "dist-info-stub", str(stub["name"]), version), root),
+                ExecResult(0, f"wrote {written} (METADATA only; no files shadowed)", ""),
+            )
         return self.finish_setup(session, root, env_dir)
+
+
+def write_dist_info_stub(python: Path, name: str, version: str) -> Path:
+    """Write ``<site-packages>/<name>-<version>.dist-info/{METADATA,RECORD,INSTALLER}``
+    for the interpreter ``python`` so ``importlib.metadata.version(name)`` resolves,
+    without any file entries that could shadow the worktree's package."""
+    site = subprocess.run(
+        [str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    ).stdout.strip()
+    norm = re.sub(r"[-_.]+", "_", name).lower()
+    d = Path(site) / f"{norm}-{version}.dist-info"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+        "Summary: metadata-only stub written by crb (code is imported from the worktree)\n",
+        encoding="utf-8",
+    )
+    (d / "RECORD").write_text(
+        f"{d.name}/METADATA,,\n{d.name}/RECORD,,\n{d.name}/INSTALLER,,\n", encoding="utf-8"
+    )
+    (d / "INSTALLER").write_text("crb-harness\n", encoding="utf-8")
+    return d

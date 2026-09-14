@@ -631,3 +631,33 @@ def test_setup_env_dir_is_created_for_the_venv_only(pyrepo: pr.PyRepo, tmp_path:
     r = PytestRunner(pr.default_config(runner_opts={"pythonpath_suffix": "/src"}))
     r.setup(FakeExecutor(), pyrepo.path, env_dir=env_dir, timeout=0)
     assert env_dir.is_dir() and os.access(env_dir, os.W_OK)
+
+
+def test_dist_info_stub_makes_importlib_metadata_resolve_without_shadowing(tmp_path: Path) -> None:
+    """`runner_opts.dist_info_stubs`: a METADATA-only distribution so a test asserting the
+    package reports a real version passes while the code still comes from the worktree
+    (NHSDigital/mesh-client `test_get_version`, 2026-09-14)."""
+    import subprocess
+    import sys
+
+    from crb.core.runners.pytest_runner import write_dist_info_stub
+
+    venv = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
+    python = venv / "bin" / "python"
+    d = write_dist_info_stub(python, "Mesh-Client", "0.0.0+crb")
+    assert d.name == "mesh_client-0.0.0+crb.dist-info"
+    out = subprocess.run(
+        [
+            str(python),
+            "-c",
+            "from importlib.metadata import version; print(version('mesh-client'))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert out == "0.0.0+crb"
+    # nothing importable was installed: the stub carries no package files
+    rc = subprocess.run([str(python), "-c", "import mesh_client"], capture_output=True).returncode
+    assert rc != 0
