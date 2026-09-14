@@ -201,6 +201,27 @@ def test_tampered_target_test_is_disqualified(
     ]
 
 
+def test_neighbouring_test_rewritten_is_disqualified_in_sighted_mode(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    """Belt 1c: a regression hidden by rewriting the NEIGHBOURING test to ``assert True``
+    graded clean on 2026-09-14 (human-review-guide exercise 3b) — the target stayed
+    byte-identical and belt 3 saw no failure. Any touched non-target file under the
+    test layout now disqualifies, in both modes."""
+    pr.apply_regression(trial)
+    (trial.root / pr.TEST_CALC).write_text("def test_add():\n    assert True\n", encoding="utf-8")
+    res = _grade(trial, feat_task, pyrepo, runner, executor)
+    assert res.disqualified is True and res.clean is False
+    assert res.belts.tests_unmodified is False
+    assert res.dq_reason.startswith("non-target test files modified")
+    assert pr.TEST_CALC in res.tamper_files
+    assert res.target_run is None  # nothing ran: the oracle's neighbourhood was touched
+
+
 def test_regression_patch_fails_belt_three_with_new_failures_listed(
     trial: Workspace,
     feat_task: TaskSpec,
@@ -280,14 +301,17 @@ def test_green_without_source_change_fails_belt_four(
 def test_test_only_patch_does_not_count_as_a_source_change(
     pyrepo: pr.PyRepo, runner: PytestRunner, executor: LocalExecutor, tmp_path: Path
 ) -> None:
+    """Since belt 1c (2026-09-14) a NEW file under the test layout is a touched
+    non-target test file and disqualifies before belt 4 is reached; the row is still
+    never clean and still records no source change."""
     ws = pyrepo.trial(tmp_path / "ws", overlay_tests=False)
     try:
         pr.apply_test_only(ws)
         res = _grade(ws, pyrepo.green_task(), pyrepo, runner, executor)
-        assert res.belts.source_changed is False
-        assert res.clean is False
-        assert res.changed_files == ()
-        assert res.diff is not None and res.diff.files == ()  # untracked test file: no diff
+        assert res.disqualified is True and res.clean is False
+        assert res.belts.tests_unmodified is False
+        assert res.belts.source_changed is None  # not reached
+        assert "tests/test_extra.py" in res.tamper_files
     finally:
         ws.remove()
 

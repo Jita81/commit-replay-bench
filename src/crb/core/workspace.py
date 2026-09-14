@@ -337,9 +337,26 @@ class Workspace:
         return fields
 
     def diff_stats(self, exclude: Iterable[str] = ()) -> DiffStats:
-        """Stats + hash of the full working-tree diff vs the parent (tests excluded by caller)."""
+        """Stats + hash of the full working-tree diff vs the parent (tests excluded by caller).
+
+        Untracked NEW files are part of the change: ``git diff HEAD`` alone ignores
+        them, so a patch that only adds a file carried an empty diff hash (human-review-
+        guide exercise 4, 2026-09-14). They are diffed against ``/dev/null`` via
+        ``--no-index`` and appended, in path order, so the hash is deterministic.
+        """
         ex = set(exclude)
         text = self.repo.diff_text("HEAD", cwd=self.root)
+        tracked = set(self.repo.diff_names("HEAD", cwd=self.root))
+        for rel in self.touched_files():  # hash covers the FULL diff; ``exclude`` only
+            if rel in tracked or self.harness_unchanged(rel):  # filters files/counts below
+                continue
+            p = self.root / rel
+            if not p.is_file() or p.is_symlink():
+                continue
+            r = self.repo.run("diff", "--no-index", "--", "/dev/null", rel, cwd=self.root)
+            # --no-index exits 1 when the files differ (always, against /dev/null)
+            if r.stdout:
+                text += ("" if text.endswith("\n") or not text else "\n") + r.stdout
         adds = dels = 0
         files: list[str] = []
         current: str | None = None

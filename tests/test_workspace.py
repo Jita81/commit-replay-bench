@@ -122,6 +122,27 @@ def test_diff_stats_counts_and_excludes_tests(pyrepo: pr.PyRepo, tmp_path: Path)
         assert everything.diff_sha256 == stats.diff_sha256  # hash covers the full diff
 
 
+def test_diff_stats_includes_untracked_new_files(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    """A change that only ADDS a file carried an empty diff (``git diff HEAD`` ignores
+    untracked files) — human-review-guide exercise 4, 2026-09-14. The hash must cover it,
+    and it must be deterministic across path order."""
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        (ws.root / "src" / "calc" / "extra.py").write_text("X = 1\nY = 2\n", encoding="utf-8")
+        stats = ws.diff_stats()
+        assert stats.files == ("src/calc/extra.py",)
+        assert stats.additions == 2 and stats.deletions == 0
+        assert stats.diff_sha256 != ws.diff_stats(exclude=["src/calc/extra.py"]).files  # smoke
+        empty = Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws2")
+        try:
+            assert empty.diff_stats().diff_sha256 != stats.diff_sha256
+        finally:
+            empty.remove()
+        # exclude filters files/counts but the hash still covers the full diff
+        ex = ws.diff_stats(exclude=["src/calc/extra.py"])
+        assert ex.files == () and ex.additions == 0
+        assert ex.diff_sha256 == stats.diff_sha256
+
+
 def test_diff_stats_counts_deletions(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
         (ws.root / pr.SRC).write_text('"""A tiny calculator."""\n')

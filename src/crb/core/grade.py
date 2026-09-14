@@ -264,6 +264,32 @@ def grade(
             _emit(on_event, "grade.malformed_oracle", task=task.task_id, files=bad)
             return done(disqualified=True, dq_reason=f"malformed oracle: {bad[:5]}")
 
+        # --- belt 1c (both modes): no OTHER test file in the repo's test layout touched.
+        #     A neighbouring test rewritten to `assert True` hides a regression from belt 3
+        #     while the target stays byte-identical — the human-review-guide exercise 3b
+        #     graded exactly that clean (2026-09-14). The harness's own overlays are the
+        #     task's test files and are excluded; everything else under the test layout
+        #     is the oracle's neighbourhood and is off-limits to the builder. ----------
+        infra_set = set(infra)  # infra files take the more specific belt-1b reason below
+        others = sorted(
+            f
+            for f in touched_pre
+            if f not in task.test_files
+            and f not in infra_set
+            and config.is_test(f)
+            and not ws.harness_unchanged(f)
+        )
+        if others:
+            _emit(
+                on_event, "grade.tamper", task=task.task_id, files=others[:10], kind="other_tests"
+            )
+            belts = Belts(tests_unmodified=False)
+            return done(
+                disqualified=True,
+                dq_reason=f"non-target test files modified: {others[:5]}",
+                tamper_files=tuple(sorted(set(others) | set(infra))[:50]),
+            )
+
         # --- belt 1: target tests byte-identical to the commit's own, AND no test
         #     infrastructure touched (1b above). Both must hold. ---------------------
         ok, offending = ws.tests_byte_identical(task.test_files)
