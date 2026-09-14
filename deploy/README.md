@@ -6,7 +6,7 @@ and one worker, all from one image built by `deploy/Dockerfile`. For Kubernetes 
 and the full upgrade/backup procedures see [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md).
 Operating the product once it is up is [docs/OPERATOR.md](../docs/OPERATOR.md).
 
-Contents: [1 Quickstart](#1-quickstart) · [2 TLS](#2-tls-in-front-of-the-api) ·
+Contents: [1 Quickstart](#1-quickstart) · [1.1 Released image](#11-use-the-released-image-instead-of-building) · [2 TLS](#2-tls-in-front-of-the-api) ·
 [3 Sandbox (docker socket)](#3-let-the-worker-sandbox-tests-docker-socket-opt-in) ·
 [4 Backup & restore](#4-backup-and-restore) · [5 Upgrade](#5-upgrade) ·
 [6 Air-gap](#6-air-gap-egress-only-to-the-model-endpoint) · [7 Azure OpenAI](#7-azure-openai-in-your-tenant) ·
@@ -32,6 +32,71 @@ curl -fsS http://127.0.0.1:8000/api/v1/health         # database, migrations, ap
 The API listens on `127.0.0.1:8000` **only**. Log in with the bootstrap admin (honoured only
 while the `users` table is empty), then configure OIDC and set
 `CRB_LOCAL_AUTH_ENABLED=false`.
+
+`--build` needs **BuildKit** (`deploy/Dockerfile` uses `--mount=type=cache` and the
+`# syntax=` directive). Docker Engine ≥ 23 enables it by default; on a client without the
+buildx plugin (some Homebrew / colima set-ups) `docker build` falls back to the legacy
+builder and fails at the first `RUN --mount` — install `docker-buildx` and run
+`docker buildx build --load -f deploy/Dockerfile -t crb:local .` instead. Most
+installations should not build at all: use the released image (§1.1).
+
+## 1.1 Use the released image instead of building
+
+Every `v*` tag publishes one image, built by `.github/workflows/release.yml` from the same
+`deploy/Dockerfile` that CI builds and smokes on every pull request:
+
+| Reference | Meaning |
+|---|---|
+| `ghcr.io/jita81/commit-replay-bench:<version>` | the release, e.g. `2.0.0a1` (the git tag without its `v`) |
+| `ghcr.io/jita81/commit-replay-bench:sha-<short>` | the same bytes, addressed by the 7-character commit sha |
+| `ghcr.io/jita81/commit-replay-bench@sha256:…` | the digest — **pin this** in production (`CRB_IMAGE` below, `image.digest` in Helm) |
+
+The image is `linux/amd64`, signed **keyless** with cosign (GitHub OIDC → Sigstore, recorded
+in the Rekor transparency log) and carries two SBOMs: a BuildKit SBOM/provenance attestation
+inside the image index, and a syft SPDX SBOM attached as an in-toto attestation (also
+downloadable as the `crb-image-sbom-<tag>` artifact of the release run). No long-lived
+signing key exists anywhere; the signing identity *is* the release workflow on a tag.
+
+**Verify before you run it** — this is the step a regulated deployment must not skip. The
+package is private, so log in first with a token that has `read:packages` (cosign reads
+the signature from the same registry and uses the same Docker credentials):
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
+# one command (cosign ≥ 2; jq for --sbom). --digest also asserts the tag → digest pin.
+deploy/verify-image.sh 2.0.0a1 --sbom sbom.spdx.json
+# …or the underlying commands, so you can see exactly what is accepted:
+cosign verify ghcr.io/jita81/commit-replay-bench:2.0.0a1 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/Jita81/commit-replay-bench/\.github/workflows/release\.yml@refs/tags/v'
+cosign verify-attestation --type spdxjson ghcr.io/jita81/commit-replay-bench:2.0.0a1 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/Jita81/commit-replay-bench/\.github/workflows/release\.yml@refs/tags/v' \
+  | jq -r .payload | base64 -d | jq .predicate > sbom.spdx.json
+cosign triangulate --type digest ghcr.io/jita81/commit-replay-bench:2.0.0a1   # the digest to pin
+```
+
+The identity regexp is the whole point: a signature from a fork, a branch, or a manual
+dispatch of the workflow is **rejected**, not merely warned about. Then run compose with
+the image instead of a local build:
+
+```bash
+cp deploy/.env.example deploy/.env && chmod 0600 deploy/.env && $EDITOR deploy/.env
+echo 'CRB_IMAGE=ghcr.io/jita81/commit-replay-bench@sha256:<digest you verified>' >> deploy/.env
+sudo install -d -o 10001 -g 10001 -m 0750 /srv/crb
+docker compose -f deploy/docker-compose.yml pull        # pulls CRB_IMAGE (and postgres)
+docker compose -f deploy/docker-compose.yml up -d       # no --build: the image is present, so nothing is built
+docker compose -f deploy/docker-compose.yml ps
+```
+
+`CRB_IMAGE` defaults to `crb:local` (a local build); setting it to a GHCR reference in
+`deploy/.env` makes every crb service (`migrate`, `api`, `worker`) run the verified bytes.
+Air-gapped hosts: verify and `docker pull` on a connected machine, record
+`docker image inspect ghcr.io/jita81/commit-replay-bench:2.0.0a1 --format '{{.Id}}'` (the
+image ID survives `docker save | docker load`; the registry digest does not), load it on
+the host, compare the ID, and set `CRB_IMAGE=ghcr.io/jita81/commit-replay-bench:2.0.0a1`
+(the tag — a `@sha256:` reference would make compose try to pull). Upgrades are §5 with
+`pull` in place of `build`.
 
 What each service is:
 
