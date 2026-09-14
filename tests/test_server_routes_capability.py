@@ -19,6 +19,7 @@ import pytest
 
 from crb.core.ledger import CELL_FIELDS, GradeRow
 from crb.core.routing import DEFAULT_POLICY
+from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepEvent, StepStatus
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
@@ -212,7 +213,7 @@ class TestCapabilityMap:
         assert "1 measurement control(s) graded clean" in str(c["reason"])
         assert f"(controls run {RUN_IDS['controls'][:8]})" in str(c["reason"])
         assert c["false_q1"] == 0 and c["verification_tier"] == "automated-pass"
-        assert c["apparatus_versions"] == ["2.0"] and c["belt_set"] == "v4"
+        assert c["apparatus_versions"] == [APPARATUS_VERSION] and c["belt_set"] == "v4"
         assert c["cost_usd_mean"] == pytest.approx(0.012) and c["latency_s_mean"] == 42.0
         assert c["cost_known"] is True and c["oracle_strength_mean"] is None
         # the split: 2 builder_red rows, no instrument rows → model point = all-rows point
@@ -374,7 +375,7 @@ class TestCapabilityMap:
         assert s["total_cells"] == 9  # 3 classes × 3 sizes seen
         assert s["cells_by_route"]["human"] == 1 and s["cells_by_route"]["calibrate"] == 2
         assert s["n_total"] == 50 and s["rows"] == 50 and s["false_q1_total"] == 0
-        assert s["apparatus_versions"] == ["1.0-census", "2.0"]
+        assert s["apparatus_versions"] == ["1.0-census", APPARATUS_VERSION]
         assert s["signoffs_applied"] == 0
 
     def test_summary_with_profile_has_coverage(self, tmp_path: Path) -> None:
@@ -500,7 +501,7 @@ class TestRoutes:
         assert green["point"] == 0.95 and green["ci_low"] == pytest.approx(0.835, abs=0.001)
         assert green["false_q1"] == 0 and green["policy_version"] == "routing.v1"
         assert green["verification_tier"] == "automated-pass"
-        assert green["apparatus_versions"] == ["2.0"]
+        assert green["apparatus_versions"] == [APPARATUS_VERSION]
         assert green["model_n"] == 40 and green["model_point"] == 0.95
         assert green["failure_split"]["builder_red"] == 2
         legacy = by_label["replay|test.add|XS|python|claude-code-workflow|sonnet|anthropic"]

@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import text
 
 from crb.core.ledger import GradeRow
+from crb.core.version import APPARATUS_VERSION
 from crb.store.models import Grade
 from fixtures.server_seed import ALPHA, Env, envelope, login, make_env, task_id
 
@@ -139,7 +140,7 @@ class TestEvidence:
         assert pack["pack_hash"] == row.evidence_pack_hash
         assert pack["task"]["task_id"] == row.task_id
         assert pack["grade"]["clean"] is True and pack["grade"]["target_green"] is True
-        assert pack["apparatus"]["apparatus_version"] == "2.0"
+        assert pack["apparatus"]["apparatus_version"] == APPARATUS_VERSION
         assert pack["builder"]["model"] == "gpt-oss-120b"
         assert body["repo"] == ALPHA and body["task_id"] == row.task_id
 

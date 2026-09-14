@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import select, text
 
 from crb.core.ledger import GENESIS_HASH, LedgerIntegrityError
+from crb.core.version import APPARATUS_VERSION
 from crb.server.routes.runs import system_trace_id
 from crb.server.routes.signoffs import signoff_hash, verify_signoff_rows
 from crb.store.models import Event, Grade, Signoff
@@ -116,7 +117,9 @@ class TestCreate:
         assert d["revoked"] is False and d["active"] is True and d["current_false_q1"] == 0
         assert d["evidence"]["n"] == 40 and d["evidence"]["point"] == 0.95
         assert d["evidence"]["ci_low"] == pytest.approx(0.835, abs=0.001)
-        assert d["evidence"]["false_q1"] == 0 and d["evidence"]["apparatus_versions"] == ["2.0"]
+        assert d["evidence"]["false_q1"] == 0 and d["evidence"]["apparatus_versions"] == [
+            APPARATUS_VERSION
+        ]
         assert d["prev_hash"] == GENESIS_HASH and len(d["row_hash"]) == 64
         assert d["approver"]  # the approver's principal id
         # persisted, chained, evidence snapshot covered by the hash
