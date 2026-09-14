@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
-import { useRoutes } from '../../api/hooks'
-import type { RouteDecision, RoutingPolicy } from '../../api/types'
+import type { RouteDecision } from '../../api/types'
 import { LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { CiBar } from '../../components/CiBar'
@@ -14,10 +13,14 @@ import { VerdictPill } from '../../components/VerdictPill'
 import { fmtInt, fmtPct, fmtRatio } from '../../lib/format'
 import { ROUTES } from '../../api/types'
 import { routeDisplay } from '../../lib/verdict'
+import { REASON_DISPLAY, useRoutesWithControls, type ControlsVerdict, type RouteDecisionWithControls, type RoutingPolicyWithControls } from '../Capability/contract'
+import { ControlsPill, FailureSplitPills, ModelPointLine } from '../Capability/FailureSplit'
 
-function PolicyCard({ policy }: { policy: RoutingPolicy }) {
+type Decision = RouteDecision & Partial<RouteDecisionWithControls>
+
+function PolicyCard({ policy, controls }: { policy: RoutingPolicyWithControls; controls?: ControlsVerdict }) {
   return (
-    <Card title="Policy in force" eyebrow={policy.version}>
+    <Card title="Policy in force" eyebrow={`${policy.version}${policy.controls_version ? ` + ${policy.controls_version}` : ''}`} actions={<ControlsPill verdict={controls} />}>
       <dl className="num grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-5">
         <div>
           <dt className="label">min n</dt>
@@ -39,9 +42,22 @@ function PolicyCard({ policy }: { policy: RoutingPolicy }) {
           <dt className="label">granularize sizes</dt>
           <dd className="font-mono text-xs">{policy.granularize_sizes.join(', ') || '—'}</dd>
         </div>
+        {policy.controls_version && (
+          <>
+            <div>
+              <dt className="label">min controls constructible</dt>
+              <dd>{fmtPct(policy.min_controls_share, 0)}</dd>
+            </div>
+            <div>
+              <dt className="label">max controls escapes</dt>
+              <dd>{fmtInt(policy.max_controls_escapes)}</dd>
+            </div>
+          </>
+        )}
       </dl>
-      <p className="mt-3 text-xs text-on-surface-muted">
-        The one rule: <em>deliver</em> iff n ≥ {policy.min_n} ∧ point ≥ {fmtPct(policy.min_point, 0)} ∧ Wilson-lower ≥ {fmtPct(policy.min_ci_low, 0)} ∧ false-Q1 = 0 ∧ (oracle strength ≥ {fmtRatio(policy.min_oracle_strength)} when measured). Any false-Q1 ⇒ <em>do not ship</em>; XL ⇒ <em>granularize</em>; weak oracle ⇒ <em>human</em>; otherwise <em>calibrate</em>.
+      <p className="mt-3 text-xs text-on-surface-muted" data-testid="policy-rule">
+        The one rule: <em>deliver</em> iff n ≥ {policy.min_n} ∧ point ≥ {fmtPct(policy.min_point, 0)} ∧ Wilson-lower ≥ {fmtPct(policy.min_ci_low, 0)} ∧ false-Q1 = 0 ∧ (oracle strength ≥ {fmtRatio(policy.min_oracle_strength)} when measured)
+        {policy.controls_version ? <> ∧ negative controls passed ∧ ≥ {fmtPct(policy.min_controls_share, 0)} of control rows constructible ∧ escapes ≤ {fmtInt(policy.max_controls_escapes)}</> : null}. Any false-Q1 ⇒ <em>do not ship</em>; XL ⇒ <em>granularize</em>; a FAILED controls gate, a weak oracle or an escaped control ⇒ <em>human</em>; controls unmeasured or thin ⇒ <em>calibrate</em>; otherwise <em>calibrate</em>. The all-rows point routes; the model rate on fair attempts is shown beside it, never instead of it.
       </p>
     </Card>
   )
@@ -52,14 +68,36 @@ const cellLabel = (c: Record<string, string>) =>
 
 export function RoutingPage() {
   const [repo, setRepo] = useRepoParam()
-  const routes = useRoutes(repo)
+  const routes = useRoutesWithControls(repo)
 
-  const columns = useMemo<Column<RouteDecision>[]>(
+  const columns = useMemo<Column<Decision>[]>(
     () => [
       { key: 'cell', header: 'Cell', mono: true, sortValue: (d) => cellLabel(d.cell), cell: (d) => cellLabel(d.cell) },
       { key: 'route', header: 'Route', sortValue: (d) => ROUTES.indexOf(d.route), cell: (d) => <VerdictPill route={d.route} reason={d.reason} size="xs" /> },
+      {
+        key: 'code',
+        header: 'Why',
+        mono: true,
+        sortValue: (d) => d.reason_code ?? '',
+        cell: (d) => (d.reason_code ? <code className="rounded bg-surface-high px-1 py-0.5 text-[11px]" title={REASON_DISPLAY[d.reason_code]} data-testid="reason-code">{d.reason_code}</code> : <span className="text-xs text-on-surface-muted">—</span>),
+      },
       { key: 'n', header: 'n', numeric: true, sortValue: (d) => d.n, cell: (d) => fmtInt(d.n) },
       { key: 'point', header: 'Point', numeric: true, sortValue: (d) => d.point, cell: (d) => fmtPct(d.point) },
+      {
+        key: 'model',
+        header: 'Model rate · split',
+        sortValue: (d) => d.model_point ?? -1,
+        cell: (d) =>
+          d.failure_split ? (
+            <span className="inline-flex flex-col gap-0.5">
+              <ModelPointLine modelPoint={d.model_point ?? null} modelN={d.model_n ?? 0} clean={Math.round(d.point * d.n)} size="xs" />
+              <FailureSplitPills split={d.failure_split} />
+            </span>
+          ) : (
+            <span className="text-xs text-on-surface-muted">—</span>
+          ),
+        hideBelowMd: true,
+      },
       { key: 'ci_low', header: 'Wilson lower', numeric: true, sortValue: (d) => d.ci_low, cell: (d) => fmtPct(d.ci_low) },
       { key: 'bar', header: 'Interval', cell: (d) => <CiBar point={d.point} low={d.ci_low} high={Math.min(1, d.point + (d.point - d.ci_low))} n={d.n} width={80} />, hideBelowMd: true },
       { key: 'fq1', header: 'false-Q1', numeric: true, sortValue: (d) => d.false_q1, cell: (d) => <span className={d.false_q1 > 0 ? 'font-semibold text-status-red' : ''}>{d.false_q1}{d.false_q1 > 0 ? ' ✗' : ''}</span> },
@@ -85,7 +123,7 @@ export function RoutingPage() {
           const total = r.decisions.length
           return (
             <div className="space-y-6">
-              <PolicyCard policy={r.policy} />
+              <PolicyCard policy={r.policy} controls={r.controls} />
               <div className="flex flex-wrap gap-3">
                 {ROUTES.map((route) => {
                   const d = routeDisplay(route)

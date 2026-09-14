@@ -1,8 +1,9 @@
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CapabilityCell, CapabilityMap } from '../../api/types'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import { CapabilityPage } from './CapabilityPage'
+import type { CapabilityCellSplit, CapabilityMapWithControls, ControlsVerdict } from './contract'
 
 const cell = (over: Partial<CapabilityCell>): CapabilityCell => ({
   capability_class: 'bug.fix',
@@ -99,5 +100,121 @@ describe('CapabilityPage', () => {
     expect(err.textContent).toContain('ledger is locked')
     expect(err.textContent).toContain('HTTP 503')
     expect(err.textContent).toContain('ledger_unavailable')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A2: the controls verdict pill, the failure split and model point on every cell
+// ---------------------------------------------------------------------------
+
+const VERDICT_FAILED: ControlsVerdict = {
+  measured: true,
+  passed: false,
+  complete: true,
+  constructible: 49,
+  total: 49,
+  share: 1,
+  escapes: 0,
+  run_id: 'c0ffee0000000000000000000000cafe',
+  created: '2026-09-13T12:00:00Z',
+  state: 'failed',
+}
+
+const splitCell = (over: Partial<CapabilityCellSplit>): CapabilityCellSplit => ({
+  ...cell({}),
+  n: 13,
+  clean: 8,
+  point: 0.6154,
+  ci_low: 0.355,
+  ci_high: 0.823,
+  route: 'human',
+  reason: 'controls_failed: the negative-controls gate FAILED on this repo — an instrument defect, nothing measured under it licenses autonomy (controls run c0ffee00)',
+  reason_code: 'controls_failed',
+  n_builder_red: 1,
+  n_budget: 1,
+  n_protocol: 1,
+  n_harness: 2,
+  n_disqualified: 1,
+  model_n: 9,
+  model_point: 0.8889,
+  model_ci_low: 0.565,
+  model_ci_high: 0.981,
+  failure_split: { builder_red: 1, budget: 1, protocol: 1, harness: 2, disqualified: 1 },
+  ...over,
+})
+
+const MAP_WITH_CONTROLS: CapabilityMapWithControls = {
+  ...MAP,
+  cells: [splitCell({})],
+  summary: { ...MAP.summary, false_q1_total: 0, deliver_cells: 0, measured_cells: 1 },
+  policy: { ...MAP.policy, min_controls_share: 0.5, max_controls_escapes: 0, controls_version: 'controls-gate.v1' },
+  controls: VERDICT_FAILED,
+}
+
+describe('CapabilityPage — controls verdict + failure split (A2)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('shows the failed controls pill, the split and the model point next to the point', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': MAP_WITH_CONTROLS,
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    await waitFor(() => expect(screen.getByTestId('tile-controls')).toBeInTheDocument())
+
+    // the repo-level verdict: FAILED, with its k of N and the gate it is judged by
+    const tile = screen.getByTestId('tile-controls')
+    expect(tile.textContent).toContain('FAILED')
+    expect(tile.textContent).toContain('49 of 49')
+    expect(tile.textContent).toContain('controls-gate.v1')
+    expect(screen.getAllByTestId('controls-failed').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByTestId('controls-failed')[0]!.getAttribute('aria-label')).toMatch(/gate FAILED/)
+
+    // the cell: all-rows point, clean n/N, then the model rate and the split — never instead of
+    const measured = screen.getByTestId('cell-measured')
+    expect(measured.getAttribute('aria-label')).toBe('bug.fix S: human, n 13, point 61.5%, false-Q1 0')
+    expect(measured.textContent).toContain('61.5%')
+    expect(measured.textContent).toContain('clean 8/13')
+    const model = measured.querySelector('[data-testid="model-point"]')!
+    expect(model.textContent).toContain('model 89%')
+    expect(model.textContent).toContain('(8/9)')
+    const split = measured.querySelector('[data-testid="failure-split"]')!
+    expect(split.getAttribute('aria-label')).toBe('red 1, budget 1, protocol 1, harness 2, DQ 1')
+    expect(split.querySelector('[data-testid="kind-harness"]')!.textContent).toBe('harness2')
+
+    // the route pill carries the reason on hover; the detail card names the code
+    expect(measured.querySelector('[data-testid="verdict-human"]')!.getAttribute('aria-label')).toContain('controls_failed')
+    fireEvent.click(measured)
+    const reason = await screen.findByTestId('cell-reason')
+    expect(reason.querySelector('code')!.textContent).toBe('controls_failed')
+    expect(reason.textContent).toContain('instrument defect')
+    expect(screen.getByTestId('tile-model-point').textContent).toContain('88.9%')
+    expect(screen.getByTestId('tile-model-point').textContent).toContain('diagnostic, not a gate')
+    expect(screen.getByTestId('tile-point').textContent).toContain('the rate that routes')
+    expect(screen.getByTestId('cell-split-pills')).toBeInTheDocument()
+  })
+
+  it('renders unmeasured, thin and escaped verdicts as their own pills', async () => {
+    const thin: ControlsVerdict = { ...VERDICT_FAILED, passed: true, constructible: 24, total: 56, share: 0.4286, state: 'thin' }
+    const escaped: ControlsVerdict = { ...VERDICT_FAILED, passed: true, escapes: 3, state: 'escaped' }
+    const unmeasured: ControlsVerdict = { measured: false, passed: false, complete: true, constructible: 0, total: 0, share: 0, escapes: 0, run_id: '', created: '', state: 'unmeasured' }
+    for (const [v, testid, text] of [
+      [thin, 'controls-thin', 'thin 24 of 56'],
+      [escaped, 'controls-escaped', '3 escapes'],
+      [unmeasured, 'controls-unmeasured', 'unmeasured'],
+    ] as const) {
+      const { fetchMock } = mockApi({
+        'GET /auth/me': PRINCIPAL,
+        'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+        'GET /capability-map': { ...MAP_WITH_CONTROLS, cells: [splitCell({ route: 'calibrate', reason: 'controls_thin: …', reason_code: 'controls_thin' })], controls: v },
+      })
+      const { unmount } = renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+      await waitFor(() => expect(screen.getAllByTestId(testid).length).toBeGreaterThanOrEqual(1))
+      expect(screen.getAllByTestId(testid)[0]!.textContent).toContain(text)
+      expect(fetchMock).toHaveBeenCalled()
+      unmount()
+      vi.unstubAllGlobals()
+    }
   })
 })
