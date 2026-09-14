@@ -83,6 +83,7 @@ const PROBE_DISPLAY: Record<ProbeStatus | 'not_probed', Display> = {
   ok: { label: 'OK', tone: 'green', glyph: '✓', describe: 'Probe: ok' },
   degraded: { label: 'Degraded', tone: 'amber', glyph: '⚠', describe: 'Probe: degraded' },
   down: { label: 'Down', tone: 'red', glyph: '✗', describe: 'Probe: down' },
+  skipped: { label: 'Skipped', tone: 'muted', glyph: '–', describe: 'Probe: skipped for this process role (never lowers the aggregate)' },
   not_probed: { label: 'Not probed', tone: 'muted', glyph: '·', describe: 'Probe: not yet run' },
 }
 
