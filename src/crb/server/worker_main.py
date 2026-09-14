@@ -93,6 +93,10 @@ def settings_from_args(
 ) -> WorkerSettings:
     e = env if env is not None else dict(os.environ)
     home = Path(args.home or e.get(HOME_ENV) or ".crb").expanduser()
+    # Builders resolve the secrets dir from the environment only (core has no settings
+    # object): a worker started with --home but no CRB_HOME would otherwise look under
+    # ./.crb/secrets for the Claude Code token the Settings UI stored under <home>.
+    os.environ.setdefault(HOME_ENV, str(home))
     executor = (args.executor or e.get(EXECUTOR_ENV) or "local").strip().lower()
     image = (args.image or e.get(IMAGE_ENV) or "").strip()
     docker = DockerSettings(image=image) if image else None
