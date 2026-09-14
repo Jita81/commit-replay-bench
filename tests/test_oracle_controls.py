@@ -467,3 +467,66 @@ def test_regression_control_on_target_only_belt_names_the_config_weakness() -> N
     # OBS_RED on the regression control is 'not constructible' (poison broke the target),
     # never a violation: the grader credited nothing.
     assert c.OBS_RED not in c.EXPECTED[c.REGRESSION]
+
+
+# --- language dispatch (ADR-0010): python keeps the AST path; go/js are text; jvm/rust honest --
+def test_language_dispatch_refuses_jvm_and_rust_honestly(fixture_repo, fix_task, scratch, harness):
+    """A language with no transform yet must read ``not_constructible`` with the reason —
+    never a violation, never silently graded with the Python transforms."""
+    from crb.core.spec import Language
+
+    for lang, runner in ((Language.JVM, "maven"), (Language.RUST, "cargo")):
+        config = RepoConfig(name="other", language=lang, runner=runner)
+        with Workspace.create(
+            fixture_repo.git, fix_task.task_id, scratch / f"dispatch-{lang.value}", config=config
+        ) as ws:
+            ws.overlay_tests(fix_task.test_files)
+            for control in (nc.STUB, nc.REGRESSION, nc.HARDCODE_CHEAT, nc.ENV_POISON):
+                with pytest.raises(nc.NOT_CONSTRUCTIBLE_ERRORS) as ei:
+                    nc._apply_control(
+                        control,
+                        ws,
+                        fix_task,
+                        config,
+                        runner=harness["runner"],
+                        executor=harness["executor"],
+                    )
+                assert f"no transform for {lang.value} yet" in str(ei.value)
+                assert "python, go, javascript" in str(ei.value)
+            # the language-agnostic controls still work on any language
+            assert (
+                nc._apply_control(
+                    nc.NOOP,
+                    ws,
+                    fix_task,
+                    config,
+                    runner=harness["runner"],
+                    executor=harness["executor"],
+                )
+                == ""
+            )
+
+
+def test_caught_and_escape_notes_name_the_belt_and_the_meaning(control_matrix):
+    """A reader must see WHICH belt caught a measurement control, and an env_poison
+    escape must read as a belt-1 gap (review §4.3), not as weak repository tests."""
+    from crb.core.spec import Language
+
+    py = fixture_config()
+    assert "belt-1 coverage gap" in nc._escape_note(nc.ENV_POISON, py)
+    assert "NOT a weakness of the repository's tests" in nc._escape_note(nc.ENV_POISON, py)
+    go = RepoConfig(name="g", language=Language.GO)
+    assert "Go init()" in nc._escape_note(nc.ENV_POISON, go)
+    assert "lookup" in nc._escape_note(nc.HARDCODE_CHEAT, py)
+    assert control_matrix[nc.ENV_POISON].note.startswith("MEASURED ESCAPE — env_poison")
+    assert "belt-1 coverage gap" in control_matrix[nc.ENV_POISON].note
+    guard = nc.TamperGuard.__new__(nc.TamperGuard)
+    guard.tamper_note = ""
+    dq = _gr(disqualified=True, dq_reason="test infrastructure modified: jest.config.js")
+    assert nc._caught_note(nc.OBS_DISQUALIFIED, guard, dq) == (
+        "caught by belt 1: test infrastructure modified: jest.config.js"
+    )
+    assert nc._caught_note(nc.OBS_REGRESSED, guard, dq).startswith("caught by belt 3")
+    assert nc._caught_note(nc.OBS_RED, guard, dq).startswith("caught by belt 2")
+    assert nc.CONTROLS_VERSION == "controls.v2"
+    assert nc.TRANSFORM_LANGUAGES == (Language.PYTHON, Language.GO, Language.JAVASCRIPT)
