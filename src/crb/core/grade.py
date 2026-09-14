@@ -36,7 +36,13 @@ Everything else fails closed:
   (compile error, crash) → belt 3 ``False``;
 * a malformed oracle (a "test" file with no tests), a tampered test file or a
   touched test-infrastructure file → ``disqualified`` — the observation is
-  excluded, not counted either way.
+  excluded, not counted either way;
+* a worktree whose git view is no longer the harness's (``HEAD`` moved, a
+  skip-worktree bit, an edited ``info/exclude`` — :meth:`Workspace.enforce_integrity`)
+  → ``disqualified`` with ``dq_reason="worktree integrity: …"``. Independently of
+  that check, :meth:`Workspace.touched_files` reads the filesystem against the
+  parent tree, so nothing the builder does to git's own views can hide a file
+  from belts 1b, 1c or 4.
 
 :class:`GradeResult` enforces the invariant in ``__post_init__``: it is
 impossible to construct a ``clean=True`` result with any belt not ``True``.
@@ -285,6 +291,32 @@ def grade(
         return GradeResult(**merged)
 
     try:
+        # --- pre-flight (both modes): the worktree's git view is still the harness's.
+        #     HEAD is the parent, the gitdir is the clone's, no index entry carries a
+        #     skip-worktree / assume-unchanged bit, and the shared info/exclude holds
+        #     only what the harness wrote (anything else is removed and reported). The
+        #     independent review pass (2026-09-14, finding 1) graded a hidden
+        #     conftest.py clean by each of these routes. A violation is a DQ, never a
+        #     verdict — and touched_files() below reads the tree, not git's views, so
+        #     the check is a belt over the ground, not the only thing holding it. ----
+        violations = ws.enforce_integrity()
+        if violations:
+            files = sorted({f for v in violations for f in v.files})
+            _emit(
+                on_event,
+                "grade.tamper",
+                task=task.task_id,
+                files=files[:10],
+                kind="worktree",
+                violations=[v.to_dict() for v in violations][:10],
+            )
+            belts = Belts(tests_unmodified=False)
+            return done(
+                disqualified=True,
+                dq_reason="worktree integrity: " + "; ".join(v.detail for v in violations)[:500],
+                tamper_files=tuple(files[:50]),
+            )
+
         # --- belt 1b (both modes, pre-run): no test-infrastructure file touched ---
         touched_pre = ws.touched_files()
         infra = infra_tampered(ws, touched_pre, exclude=task.test_files, config=config)

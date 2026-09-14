@@ -13,6 +13,15 @@ The escalation ladder is a tuple of *rung labels*; the build callable maps a
 label to a (builder, model) pair. A task climbs the ladder only while its grade
 is not clean and not disqualified; a disqualified attempt (tamper, malformed
 oracle) stops the task — the observation is excluded, not retried.
+
+The worktree the builder edited is graded exactly as ``crb grade`` grades one:
+:func:`~crb.core.grade.grade` runs :meth:`~crb.core.workspace.Workspace.enforce_integrity`
+first (``HEAD`` still the parent, no index bits, the shared ``info/exclude``
+restored) and enumerates the builder's changes from the tree, not from git's
+views. The independent review pass (2026-09-14, finding 1(b)) found this path
+graded a worktree whose builder had committed the poison ``clean`` while the CLI
+refused it on its own HEAD check; both paths now share the one check inside
+``grade()`` (``tests/test_run.py`` pins it here).
 """
 
 from __future__ import annotations

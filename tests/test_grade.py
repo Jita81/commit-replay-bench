@@ -777,6 +777,182 @@ def test_builder_authored_gitignore_cannot_hide_a_conftest(
     _assert_infra_dq(res, "conftest.py")
 
 
+# ---------------------------------------------------------------------------
+# The builder cannot move the ground: the three false-pass paths of the independent
+# review pass (2026-09-14, finding 1), each an identity source edit + a hidden poison
+# conftest.py, must all disqualify — and the honest paths must still grade clean.
+# ---------------------------------------------------------------------------
+
+_POISON = 'import calc as _m\nexec("def subtract(a, b):\\n    return a - b\\n", _m.__dict__)\n'
+_WT_DQ = "worktree integrity"
+
+
+def _identity_edit(ws: Workspace) -> None:
+    """A source change that changes nothing (belt 4 holds; the poison does the work)."""
+    with (ws.root / pr.SRC).open("a", encoding="utf-8") as fh:
+        fh.write("# touched\n")
+
+
+def _assert_worktree_dq(res: g.GradeResult, *files: str) -> None:
+    assert res.disqualified is True and res.clean is False
+    assert res.belts.tests_unmodified is False and res.belts.target_green is None
+    assert res.target_run is None and res.belt_run is None
+    assert res.dq_reason.startswith(_WT_DQ), res.dq_reason
+    assert res.tamper_files == tuple(files)
+    with pytest.raises(g.FalseQ1Violation):
+        g.GradeResult(res.task_id, res.repo, res.mode, clean=True, belts=res.belts)
+
+
+def test_poison_hidden_in_info_exclude_is_disqualified(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    """Finding 1(a): ``echo conftest.py >> $(git rev-parse --git-path info/exclude)``
+    graded CLEAN on 842875b. The pre-flight removes the line and disqualifies; and
+    the poison is a touched file whatever the exclude file says."""
+    (trial.root / "conftest.py").write_text(_POISON, encoding="utf-8")
+    _identity_edit(trial)
+    exclude = pyrepo.path / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a", encoding="utf-8") as fh:
+        fh.write("conftest.py\n")
+    events, on_event = _collector()
+    res = _grade(trial, feat_task, pyrepo, runner, executor, on_event=on_event)
+    _assert_worktree_dq(res, ".git/info/exclude")
+    assert "info/exclude" in res.dq_reason
+    assert "conftest.py" not in exclude.read_text(encoding="utf-8")  # restored
+    tamper = [p for a, p in events if a == "grade.tamper"]
+    assert tamper[0]["kind"] == "worktree" and tamper[0]["files"] == [".git/info/exclude"]
+    assert tamper[0]["violations"][0]["kind"] == "exclude_edited"
+    # a second grade of the same worktree: the exclude file is clean now, so the
+    # poison itself is what disqualifies (belt 1b) — never a pass
+    res2 = _grade(trial, feat_task, pyrepo, runner, executor)
+    _assert_infra_dq(res2, "conftest.py")
+
+
+def test_poison_hidden_in_info_exclude_is_disqualified_on_a_bound_worktree(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """The CLI's ``crb grade`` binds a Workspace to a worktree it did not create (no
+    exclude baseline to restore). The poison is still a touched file: belt 1b."""
+    created = pyrepo.trial(tmp_path / "wt")
+    try:
+        (created.root / "conftest.py").write_text(_POISON, encoding="utf-8")
+        _identity_edit(created)
+        with (pyrepo.path / ".git" / "info" / "exclude").open("a", encoding="utf-8") as fh:
+            fh.write("conftest.py\n")
+        bound = Workspace(pyrepo.repo, created.root, sha=pyrepo.feat_sha, parent=pyrepo.initial_sha)
+        res = _grade(bound, feat_task, pyrepo, runner, executor)
+        _assert_infra_dq(res, "conftest.py")
+    finally:
+        created.remove()
+
+
+def test_poison_committed_inside_the_worktree_is_disqualified(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    """Finding 1(b): ``git add conftest.py && git commit`` moved HEAD; ``grade()``
+    (the ``run_task`` path, which had no HEAD check) returned CLEAN on 842875b."""
+    (trial.root / "conftest.py").write_text(_POISON, encoding="utf-8")
+    _identity_edit(trial)
+    pr.git(trial.root, "add", "-f", "conftest.py")
+    pr.git(trial.root, "commit", "-q", "-m", "hide the poison")
+    assert "conftest.py" not in trial.repo.run("diff", "--name-only", "HEAD", cwd=trial.root).lines
+    res = _grade(trial, feat_task, pyrepo, runner, executor)
+    _assert_worktree_dq(res, ".git/HEAD")
+    assert "is not the parent" in res.dq_reason
+
+
+def test_poison_flagged_skip_worktree_is_disqualified(
+    pyrepo: pr.PyRepo, executor: LocalExecutor, tmp_path: Path
+) -> None:
+    """Finding 1(c): a repo whose parent TRACKS an (empty) conftest.py; the builder
+    poisons it and sets ``--skip-worktree`` / ``--assume-unchanged`` so ``git diff``
+    never lists it. CLEAN on 842875b (HEAD unchanged, so the CLI's check did not help)."""
+    (pyrepo.path / "conftest.py").write_text("", encoding="utf-8")
+    pr.git(pyrepo.path, "add", "-A")
+    pr.git(pyrepo.path, "commit", "-q", "-m", "chore: empty conftest")
+    sha = _commit_multiply(pyrepo)
+    task = pyrepo.feat_task(
+        task_id=sha,
+        test_files=[pr.TEST_MULTIPLY],
+        target_tests=[pr.TEST_MULTIPLY],
+        baseline_failing=[pr.TEST_MULTIPLY],
+    )
+    runner = PytestRunner(pyrepo.config)
+    poison = 'import calc as _m\nexec("def multiply(a, b):\\n    return a * b\\n", _m.__dict__)\n'
+    for flag, undo in (
+        ("--skip-worktree", "--no-skip-worktree"),
+        ("--assume-unchanged", "--no-assume-unchanged"),
+    ):
+        ws = Workspace.create(pyrepo.repo, sha, tmp_path / flag.strip("-"), config=pyrepo.config)
+        try:
+            ws.overlay_tests([pr.TEST_MULTIPLY])
+            (ws.root / "conftest.py").write_text(poison, encoding="utf-8")
+            _identity_edit(ws)
+            ws.repo.run("update-index", flag, "conftest.py", cwd=ws.root, check=True)
+            assert (
+                "conftest.py" not in ws.repo.run("diff", "--name-only", "HEAD", cwd=ws.root).lines
+            )
+            res = g.grade(ws, task, config=pyrepo.config, runner=runner, executor=executor)
+            _assert_worktree_dq(res, "conftest.py")
+            assert "skip-worktree / assume-unchanged" in res.dq_reason
+            # the flag alone, on an honest file, is still a DQ: the ground moved
+            ws.repo.run("update-index", undo, "conftest.py", cwd=ws.root, check=True)
+            res = g.grade(ws, task, config=pyrepo.config, runner=runner, executor=executor)
+            _assert_infra_dq(res, "conftest.py")  # the poison, seen by belt 1b
+        finally:
+            ws.remove()
+
+
+def test_gold_still_grades_clean_with_a_tracked_conftest_at_the_parent(
+    pyrepo: pr.PyRepo, executor: LocalExecutor, tmp_path: Path
+) -> None:
+    """The honest counterpart of 1(c): an untouched tracked conftest.py is not a change."""
+    (pyrepo.path / "conftest.py").write_text("# repo's own\n", encoding="utf-8")
+    pr.git(pyrepo.path, "add", "-A")
+    pr.git(pyrepo.path, "commit", "-q", "-m", "chore: conftest")
+    sha = _commit_multiply(pyrepo)
+    task = pyrepo.feat_task(
+        task_id=sha,
+        test_files=[pr.TEST_MULTIPLY],
+        target_tests=[pr.TEST_MULTIPLY],
+        baseline_failing=[pr.TEST_MULTIPLY],
+    )
+    ws = Workspace.create(pyrepo.repo, sha, tmp_path / "gold", config=pyrepo.config)
+    try:
+        ws.overlay_tests([pr.TEST_MULTIPLY])
+        ws.overlay_sources([pr.SRC])
+        res = g.grade(
+            ws, task, config=pyrepo.config, runner=PytestRunner(pyrepo.config), executor=executor
+        )
+        assert res.clean is True and res.changed_files == (pr.SRC,)
+    finally:
+        ws.remove()
+
+
+def _commit_multiply(pyrepo: pr.PyRepo) -> str:
+    (pyrepo.path / pr.SRC).write_text(
+        pr.SRC_FEAT + "\n\ndef multiply(a: int, b: int) -> int:\n    return a * b\n",
+        encoding="utf-8",
+    )
+    (pyrepo.path / pr.TEST_MULTIPLY).write_text(pr.TEST_MULTIPLY_SRC, encoding="utf-8")
+    pr.git(pyrepo.path, "add", "-A")
+    pr.git(pyrepo.path, "commit", "-q", "-m", "feat: add multiply")
+    return pr.git(pyrepo.path, "rev-parse", "HEAD")
+
+
 def test_harness_written_conftest_is_not_a_builder_change_until_edited(
     pyrepo: pr.PyRepo, feat_task: TaskSpec, executor: LocalExecutor, tmp_path: Path
 ) -> None:
