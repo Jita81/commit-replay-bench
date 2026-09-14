@@ -16,6 +16,7 @@ from crb.core import capability as cap
 from crb.core import signoff as so
 from crb.core.ledger import GradeRow, LedgerIntegrityError
 from crb.core.routing import ROUTE_DELIVER
+from crb.core.version import APPARATUS_VERSION
 
 PACK = "b" * 64
 
@@ -128,7 +129,7 @@ def test_append_load_roundtrip(tmp_path: Path) -> None:
     assert loaded[0].verifier == "alice@x.com"
     # evidence snapshot stamped from the live cell
     assert a.n_at_signoff == 12 and a.point_at_signoff == 1.0 and a.false_q1_at_signoff == 0
-    assert a.apparatus_version == "2.0"
+    assert a.apparatus_version == APPARATUS_VERSION  # stamped from the instrument, never a literal
     # chained
     assert a.prev_hash == "0" * 64 and b.prev_hash == a.row_hash
     assert led.verify() == 2
