@@ -10,7 +10,7 @@ and be recorded here.
 
 | ADR | Title | Status | Date |
 |---|---|---|---|
-| [0001](0001-four-belts-and-false-q1-at-write.md) | Four belts and false-Q1 = 0 enforced at write | Accepted | 2026-09-13 |
+| [0001](0001-four-belts-and-false-q1-at-write.md) | Four belts and false-Q1 = 0 enforced at write (amended 2026-09-13: belt 1 covers test infrastructure) | Accepted | 2026-09-13 |
 | [0002](0002-append-only-hash-chained-ledger.md) | Append-only, hash-chained ledger | Accepted | 2026-09-13 |
 | [0003](0003-one-routing-rule.md) | One routing rule (reconciles the published rule with the SPC rule) | Accepted | 2026-09-13 |
 | [0004](0004-builder-registry-sighted-and-blind.md) | Builder registry; sighted and blind modes | Accepted | 2026-09-13 |

@@ -10,6 +10,20 @@ Test-file integrity is checked by **content hash against the commit's own
 version** (``git show <sha>:<path>``), not by ``git diff`` heuristics, so a
 builder cannot satisfy belt 1 by any means other than leaving the oracle
 byte-identical.
+
+:meth:`Workspace.touched_files` is "what the builder changed", with three
+invariants the belts rely on:
+
+* **Every kind of change is listed** — modified, deleted and staged tracked files
+  (renames are reported as a deletion plus an addition, never collapsed into the
+  new name) and untracked additions at any depth.
+* **Git-ignored paths stay out** (``node_modules``, virtualenvs, build output)
+  *unless the ignore rule that hides them is the builder's own*: a rule added to
+  a ``.gitignore`` since the parent, or a ``.gitignore`` the builder created,
+  cannot hide a file from the grader.
+* **What the harness itself wrote at create time is not a builder change** while
+  it is byte-identical to what was written (``post_create`` hooks, the
+  ``node_modules`` symlink). Overlaid test files are the caller's to exclude.
 """
 
 from __future__ import annotations
@@ -18,12 +32,13 @@ import contextlib
 import hashlib
 import os
 import shutil
+import subprocess
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from crb.core.git import GitRepo
+from crb.core.git import GitError, GitRepo
 from crb.core.spec import Language, RepoConfig
 
 
@@ -47,12 +62,19 @@ class DiffStats:
         }
 
 
+#: Marker in :attr:`Workspace.harness_files` for a symlink the harness created.
+HARNESS_SYMLINK = "symlink"
+
+
 class Workspace:
     def __init__(self, repo: GitRepo, root: Path, *, sha: str, parent: str) -> None:
         self.repo = repo
         self.root = Path(root)
         self.sha = sha
         self.parent = parent
+        #: rel path → sha256 of what the harness wrote (or :data:`HARNESS_SYMLINK`)
+        #: during ``_post_create``. Such a file is not a builder change while unchanged.
+        self.harness_files: dict[str, str] = {}
 
     # --- lifecycle ---------------------------------------------------------------
     @classmethod
@@ -124,6 +146,7 @@ class Workspace:
                 with contextlib.suppress(OSError):
                     link.symlink_to(main_nm)
                     self._exclude_from_git("/node_modules")
+                    self.harness_files["node_modules"] = HARNESS_SYMLINK
         for hook in config.runner_opts.get("post_create", []) or []:
             self._apply_hook(hook)
 
@@ -148,18 +171,32 @@ class Workspace:
     def _apply_hook(self, hook: Mapping[str, Any]) -> None:
         if "write_if_missing" in hook:
             spec = hook["write_if_missing"]
-            p = self.root / str(spec["path"])
+            rel = str(spec["path"])
+            p = self.root / rel
             if p.parent.is_dir() and not p.exists():
-                p.write_text(str(spec.get("content", "")), encoding="utf-8")
+                content = str(spec.get("content", "")).encode("utf-8")
+                p.write_bytes(content)
+                self.harness_files[rel] = sha256_bytes(content)
         elif "symlink" in hook:
             spec = hook["symlink"]
-            link = self.root / str(spec["path"])
+            rel = str(spec["path"])
+            link = self.root / rel
             target = Path(str(spec["target"]))
             if not target.is_absolute():
                 target = self.repo.path / target
             if not link.exists() and target.exists():
                 with contextlib.suppress(OSError):
                     link.symlink_to(target)
+                    self.harness_files[rel] = HARNESS_SYMLINK
+
+    def harness_unchanged(self, rel: str) -> bool:
+        """``rel`` was written by the harness at create time and is still exactly that."""
+        recorded = self.harness_files.get(rel)
+        if recorded is None:
+            return False
+        if recorded == HARNESS_SYMLINK:
+            return (self.root / rel).is_symlink()
+        return self.file_hash(rel) == recorded
 
     # --- overlays ----------------------------------------------------------------
     def overlay_tests(self, test_files: Sequence[str]) -> None:
@@ -208,11 +245,96 @@ class Workspace:
                 offending.append(f)
         return (not offending, offending)
 
+    def parent_text(self, rel: str) -> str | None:
+        """``rel``'s content at the parent commit, or ``None`` if it did not exist."""
+        return self.repo.show_file(self.parent, rel)
+
     def touched_files(self) -> list[str]:
-        """Working-tree files that differ from the parent (tracked + staged)."""
-        tracked = self.repo.diff_names("HEAD", cwd=self.root)
+        """Files the BUILDER changed relative to the parent (see the module docstring).
+
+        ``git diff --name-only --no-renames HEAD`` (modified + deleted + staged; a
+        rename is its deletion and its addition) ∪ ``git ls-files --others
+        --exclude-standard`` (untracked, not ignored) ∪ ignored files hidden only by
+        a builder-authored ignore rule, minus harness-written files still unchanged.
+        """
+        tracked = self.repo.run(
+            "diff", "--name-only", "--no-renames", "HEAD", cwd=self.root, check=True
+        ).lines
         untracked = self.repo.run("ls-files", "--others", "--exclude-standard", cwd=self.root).lines
-        return sorted(set(tracked) | set(untracked))
+        touched = set(tracked) | set(untracked)
+        touched |= self._hidden_by_builder_ignore_rules(touched)
+        return sorted(f for f in touched if not self.harness_unchanged(f))
+
+    def _hidden_by_builder_ignore_rules(self, touched: set[str]) -> set[str]:
+        """Ignored, untracked paths whose ignore rule the builder wrote.
+
+        Only consulted when a ``.gitignore`` is itself touched (modified or new).
+        Every ignored path is attributed with ``git check-ignore -v``; a rule from an
+        untouched ignore file, or one whose pattern line already existed in the
+        parent's version of that file, is honoured. Anything else is un-hidden —
+        directories are expanded to the files beneath them.
+        """
+        sources = {f for f in touched if f == ".gitignore" or f.endswith("/.gitignore")}
+        if not sources:
+            return set()
+        ignored = self.repo.run(
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+            cwd=self.root,
+        ).stdout.split("\0")
+        ignored = [p for p in ignored if p]
+        if not ignored:
+            return set()
+        attributed = self._check_ignore(ignored)
+        parent_lines: dict[str, set[str]] = {}
+        out: set[str] = set()
+        # -z output: <source> NUL <linenum> NUL <pattern> NUL <pathname> NUL, repeated
+        for i in range(0, len(attributed) - 3, 4):
+            source, _lineno, pattern, path = attributed[i : i + 4]
+            if source not in sources:
+                continue  # a rule from an ignore file the builder did not touch
+            if source not in parent_lines:
+                before = self.parent_text(source) or ""
+                parent_lines[source] = {ln.strip() for ln in before.splitlines()}
+            if pattern.strip() in parent_lines[source]:
+                continue  # the rule pre-dates the builder
+            if path.endswith("/"):
+                base = self.root / path
+                for dirpath, _dirs, names in os.walk(base, followlinks=False):
+                    out.update(self.relpath(Path(dirpath) / n) for n in names)
+            else:
+                out.add(path)
+        return out
+
+    def _check_ignore(self, paths: Sequence[str]) -> list[str]:
+        """``git check-ignore -z -v --stdin`` over ``paths``: the NUL-separated fields.
+
+        ``-z`` (unambiguous for any path byte) is only accepted with ``--stdin``, and
+        the argv-only :class:`GitRepo` wrapper has no stdin — so this is the one git
+        call the workspace makes itself, with the wrapper's binary and timeout.
+        """
+        argv = [self.repo.git_binary, "-C", str(self.root), "check-ignore", "-z", "-v", "--stdin"]
+        try:
+            p = subprocess.run(  # argv-only, our own git binary, no shell
+                argv,
+                input="\0".join(paths) + "\0",
+                capture_output=True,
+                text=True,
+                timeout=self.repo.timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise GitError(argv, 124, f"timed out after {self.repo.timeout}s") from e
+        if p.returncode not in (0, 1):  # 1 = no path ignored; anything else is an error
+            raise GitError(argv, p.returncode, p.stderr or "")
+        fields = (p.stdout or "").split("\0")
+        if fields and fields[-1] == "":
+            fields.pop()  # the record terminator, not a fifth field
+        return fields
 
     def diff_stats(self, exclude: Iterable[str] = ()) -> DiffStats:
         """Stats + hash of the full working-tree diff vs the parent (tests excluded by caller)."""
