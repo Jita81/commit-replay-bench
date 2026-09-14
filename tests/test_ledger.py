@@ -563,8 +563,10 @@ def test_grade_row_from_result_pins_failure_kind_and_cost_known() -> None:
         name="claude_code", model="m", provider="p", cost_usd=0.2, tokens_in=100, note="done"
     )
     r = _from_result(_result(clean=True), priced)
-    assert r.failure_kind == "" and r.labels["failure_kind"] == "" and r.cost_known is True
-    assert r.labels["cost_known"] == "true" and r.labels["stop_reason"] == "done"
+    # a clean row pins nothing it does not need: no failure_kind label, no cost_known
+    # label (the priced row already says so) — byte-identical to a pre-A2 clean row
+    assert r.failure_kind == "" and "failure_kind" not in r.labels and r.cost_known is True
+    assert "cost_known" not in r.labels and r.labels["stop_reason"] == "done"
 
     red = _from_result(_result(clean=False), priced)
     assert red.failure_kind == lg.FAILURE_BUILDER_RED
@@ -620,7 +622,7 @@ def test_grade_row_from_result_cost_known_cases() -> None:
     assert _from_result(_result(clean=True), unpriced).cost_known is False
     assert _from_result(_result(clean=True), unpriced).labels["cost_known"] == "false"
     nothing = _from_result(_result(clean=True), None)
-    assert nothing.cost_known is False and nothing.labels["cost_known"] == "false"
+    assert nothing.cost_known is False and "cost_known" not in nothing.labels  # derivable
     assert nothing.stop_reason == "" and "stop_reason" not in nothing.labels
 
 

@@ -22,12 +22,16 @@ be split into "the model failed" and "the instrument failed" wherever it is
 shown — a naive clean rate over rows that include harness errors misdescribes
 the model, and a rate that silently drops them overclaims. The kind is derived
 by ONE rule (:func:`derive_failure_kind`) from fields the row already hashes;
-new rows additionally pin it into ``labels`` (so the hash chain commits to the
-classification and a SQL ``GROUP BY`` can read it) and rows written before the
-label existed derive it on read from the same rule — never guessed, never
-stored without the inputs that justify it. :attr:`GradeRow.cost_known` likewise
-distinguishes a true ``$0`` (a fixture, a metered subscription) from a cost
-nobody measured.
+a non-clean row written today additionally pins it into ``labels`` — with the
+builder's stop reason, the one input the rule needs that the row does not
+otherwise carry — so the hash chain commits to the classification and a SQL
+``GROUP BY`` can read it. A clean row needs no label (its kind is ``""`` by
+definition) and is byte-identical to one written before the label existed;
+rows without a label derive the kind on read from the same rule — never
+guessed. :attr:`GradeRow.cost_known` likewise distinguishes a true ``$0`` (a
+fixture, a metered subscription) from a cost nobody measured; its label is
+written only when the builder's report contradicts what the row alone implies
+(tokens metered, no price for the model).
 
 The JSONL implementation here is the portable, stdlib reference. The server
 stores the same rows in a database with the same chain (see ``crb.store``).
@@ -472,6 +476,15 @@ def grade_row_from_result(
         builder_reported=builder is not None and bool(b.name),
         pricing_known=COST_UNKNOWN_MARK not in b.note,
     )
+    # What a reader of the stored row would conclude without the builder's note.
+    # The label is written only when the note changes the answer (no price for the
+    # model) — a label that repeats what the row already says pins nothing new.
+    cost_known_default = derive_cost_known(
+        cost_usd=b.cost_usd,
+        tokens_in=b.tokens_in,
+        tokens_out=b.tokens_out,
+        builder_reported=builder is not None and bool(b.name),
+    )
     return GradeRow(
         repo=result.repo or task.repo,
         task_id=result.task_id,
@@ -510,8 +523,12 @@ def grade_row_from_result(
             **{k: str(v) for k, v in task.labels.items()},
             **({"builder_error": builder_error[:300]} if builder_error else {}),
             **dict(labels or {}),
-            LABEL_FAILURE_KIND: kind,
-            LABEL_COST_KNOWN: _bool_label(cost_known),
+            **({LABEL_FAILURE_KIND: kind} if kind else {}),
+            **(
+                {LABEL_COST_KNOWN: _bool_label(cost_known)}
+                if cost_known != cost_known_default
+                else {}
+            ),
             **({LABEL_STOP_REASON: stop_reason} if stop_reason else {}),
         },
     )

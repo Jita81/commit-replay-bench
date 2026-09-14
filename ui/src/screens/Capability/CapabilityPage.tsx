@@ -148,7 +148,7 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
           </div>
         )}
         <div className="flex flex-wrap gap-3">
-          <StatTile label="Pass rate (all rows)" value={fmtPct(cell.point)} n={cell.n} ci={{ low: cell.ci_low, high: cell.ci_high }} apparatus={`${fmtInt(cell.clean)} clean of ${fmtInt(cell.n)} eligible · Wilson 95% · the rate that routes`} data-testid="tile-point" />
+          <StatTile label="Pass rate" value={fmtPct(cell.point)} n={cell.n} ci={{ low: cell.ci_low, high: cell.ci_high }} apparatus={`all rows: ${fmtInt(cell.clean)} clean of ${fmtInt(cell.n)} eligible · Wilson 95% · the rate that routes`} data-testid="tile-point" />
           {cell.failure_split && (
             <StatTile
               label="Model rate (fair attempts)"

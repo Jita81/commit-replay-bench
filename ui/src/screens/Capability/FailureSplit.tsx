@@ -15,7 +15,7 @@ export function FailureSplitPills({ split, size = 'xs', ...rest }: { split: Fail
       {KIND_DISPLAY.map((k) => {
         const n = split[k.key]
         return (
-          <span key={k.key} title={k.long} data-testid={`kind-${k.key}`} className={`inline-flex items-baseline gap-0.5 ${size === 'xs' ? 'text-[10px]' : 'text-xs'} ${n > 0 ? TONE_TEXT[k.tone] : 'text-on-surface-muted/70'}`}>
+          <span key={k.key} title={k.long} data-testid={`kind-${k.key}`} className={`inline-flex items-baseline gap-0.5 ${size === 'xs' ? 'text-[10px]' : 'text-xs'} ${n > 0 ? TONE_TEXT[k.tone] : 'text-on-surface-muted'}`}>
             <span>{k.short}</span>
             <span className={n > 0 ? 'font-semibold' : ''}>{fmtInt(n)}</span>
           </span>
@@ -33,7 +33,7 @@ export function ModelPointLine({ modelPoint, modelN, clean, size = 'xs' }: { mod
   const cls = size === 'xs' ? 'text-[10px]' : 'text-xs'
   return (
     <span className={`num ${cls} text-on-surface-muted`} data-testid="model-point" title="clean / (clean + builder red): the model's rate where it got a fair, finished attempt — diagnostic, never the routing input">
-      model {modelPoint === null ? '—' : fmtPct(modelPoint, 0)} <span className="opacity-80">({fmtInt(clean)}/{fmtInt(modelN)})</span>
+      model {modelPoint === null ? '—' : fmtPct(modelPoint, 0)} <span>({fmtInt(clean)}/{fmtInt(modelN)})</span>
     </span>
   )
 }
