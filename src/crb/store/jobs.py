@@ -69,6 +69,7 @@ KIND_REPLAY = "replay"
 KIND_BLIND = "blind"
 KIND_ORACLE = "oracle"
 KIND_CONTROLS = "controls"
+KIND_LABEL = "label"
 RUN_KINDS: tuple[str, ...] = (
     KIND_SETUP,
     KIND_PROBE,
@@ -77,6 +78,7 @@ RUN_KINDS: tuple[str, ...] = (
     KIND_BLIND,
     KIND_ORACLE,
     KIND_CONTROLS,
+    KIND_LABEL,
 )
 
 DEFAULT_MAX_RECLAIMS = 3
@@ -420,6 +422,7 @@ __all__ = [
     "DEFAULT_MAX_RECLAIMS",
     "KIND_BLIND",
     "KIND_CONTROLS",
+    "KIND_LABEL",
     "KIND_MINE",
     "KIND_ORACLE",
     "KIND_PROBE",

@@ -23,6 +23,7 @@ from crb.cli.commands import (
     repo,
     route,
     service,
+    tasks,
 )
 from crb.core.execution import SandboxUnavailable
 from crb.core.git import GitError
@@ -51,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     grade.register(sub)
     ledger.register(sub)
     route.register(sub)
+    tasks.register(sub)
     config.register(sub)
     service.register(sub)
     return parser

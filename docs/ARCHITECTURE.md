@@ -140,7 +140,9 @@ C4Container
 flowchart TB
     subgraph core["crb.core (stdlib only)"]
         version["version<br/>__version__, APPARATUS_VERSION"]
-        spec["spec<br/>Language, SIZE_TIERS, classify_path/commit, RepoConfig, TaskSpec"]
+        taxonomy["taxonomy<br/>ALL_CLASSES (path), INTENT_CLASSES, CLASS_VOCABULARY (closed), definitions"]
+        classify["classify<br/>IntentLabel, LabelEvidence (+hash), Labeller, resolve() — human > intent > path"]
+        spec["spec<br/>Language, SIZE_TIERS, classify_path/commit, RepoConfig, TaskSpec (path_class, intent → capability_class)"]
         git["git<br/>GitRepo (argv-only wrapper)"]
         exec["execution<br/>Command, LocalExecutor, DockerExecutor (fail-closed), SandboxUnavailable"]
         runners["runners/<br/>BaseRunner contract; pytest, go, node/vitest/jest/mocha, maven, cargo"]
@@ -154,6 +156,7 @@ flowchart TB
         routing["routing<br/>RoutingPolicy, route() → RouteDecision"]
         run["run<br/>RunSpec, BuildFn (injected builder), run_task/run → RunSummary; one ledger row per attempt (r1, r2 …)"]
     end
+    taxonomy --> classify --> spec
     spec --> mine
     git --> ws --> mine
     exec --> runners --> mine
@@ -387,8 +390,8 @@ DB triggers forbidding `UPDATE` and `DELETE`, and rows carry `prev_hash` / `row_
 | Table | Key columns | Notes |
 |---|---|---|
 | `repos` | `name`, `language`, `runner`, `src_prefix`, `test_prefix`, `belt_scope`, `runner_opts`, `sandbox_image`, `mining` | `RepoConfig.to_dict()` shape; loads the census `configs.json` shape unchanged. |
-| `runs` | `id`, `repo`, `kind ∈ bench\|blind\|oracle\|factory`, `status`, `builder`, `model`, `provider`, `budget`, `apparatus` (stamp JSON), `counts` | Orphaned `running` runs are resumed by the worker, never at API boot. |
-| `tasks` | `task_id` (sha), `repo`, `subject`, `authored`, `pool`, `size`, `capability_class`, `language`, `test_files`, `src_files`, `target_tests`, `belt_scope`, `baseline_failing`, `red_checked`, `gold_clean`, `gold_note` | `TaskSpec.to_dict()` shape. |
+| `runs` | `id`, `repo`, `kind ∈ setup\|probe\|mine\|replay\|blind\|oracle\|controls\|label`, `status`, `builder`, `model`, `provider`, `budget`, `apparatus` (stamp JSON), `counts` | Orphaned `running` runs are resumed by the worker, never at API boot. |
+| `tasks` | `task_id` (sha), `repo`, `subject`, `authored`, `pool`, `size`, `capability_class` (resolved), `language`, `test_files`, `src_files`, `target_tests`, `belt_scope`, `baseline_failing`, `red_checked`, `gold_clean`, `gold_note`; in `spec_json` also `path_class`, `intent` (label or null), `class_source` | `TaskSpec.to_dict()` shape (§7.5). A `label` run rewrites `spec_json` + the `capability_class` column via the same upsert as `mine`. |
 | `attempts` | `id`, `run_id`, `task_id`, `builder`, `mode`, `turns`, `tokens_in/out`, `cost_usd`, `latency_s`, `transcript_ref` (opt-in) | `BuilderRef` shape. |
 | `grades` **(append-only)** | `row_id`, `repo`, `task_id`, `clean`, four belts, `disqualified`, `dq_reason`, `error`, `evidence_pack_hash`, `apparatus_version`, `belt_set ∈ v4\|v3-legacy`, `provenance`, cell fields, cost/latency, `actor`, `created`, `prev_hash`, `row_hash` | `GradeRow` — same invariants as the JSONL ledger, checked by a DB constraint **and** in Python before write. |
 | `events` **(append-only)** | `StepEvent` envelope columns | SSE reads from here. |
@@ -404,6 +407,48 @@ DB triggers forbidding `UPDATE` and `DELETE`, and rows carry `prev_hash` / `row_
 taxonomy, routing rule. Changing any of those bumps `APPARATUS_VERSION` and needs an ADR.
 Rows and packs from different apparatus versions are never blended in a claim
 ([EVIDENCE-AND-CLAIMS §4](EVIDENCE-AND-CLAIMS.md)).
+
+### 7.5 Change class: two axes, one resolved value
+
+The class axis of every cell key (`capability_class`) is **resolved** from two
+independent sources, kept separately on the task so a reviewer can see which one won
+(critical-friend review 2026-09-13, §4.2 reading 4 / action #5):
+
+| Axis | Where it comes from | What it can see | Vocabulary |
+|---|---|---|---|
+| **Path class** (`TaskSpec.path_class`) | `crb.core.spec.classify_commit` at mine time — deterministic, free, no model | *where* the change lands: routes, models, migrations, tests, docs, CI, IaC. Any other code file is `bug.fix`, so on a library repository every task is `bug.fix`. | `ALL_CLASSES` (14, `crb.core.taxonomy`) |
+| **Intent label** (`TaskSpec.intent`, an `IntentLabel`) | a `label` run (worker) / `crb tasks label-llm` through `crb.builders.labeller` — the run's `builder:model[@provider]` — or a human via `crb tasks label … --by <name>` | *what kind* of change: the commit subject, message, changed paths and per-path line counts. **Never the diff body**, so the label cannot leak the implementation into a task the same model may later replay. | `CLASS_VOCABULARY` = `ALL_CLASSES` ∪ `INTENT_CLASSES` (18): the census `class_labels.json` vocabulary (`feature.add`, `behavior.change`, `refactor`, `perf`; its `other` is `(unclassified)`) — the vocabulary the quality-floor essay's per-class numbers were measured on |
+
+Precedence (`crb.core.classify.resolve`, deterministic and total):
+
+```
+human label (labeller "human:<name>")            → wins outright     class_source = "human"
+intent label, confidence ≥ 0.70, not unclassified → wins              class_source = "intent"
+otherwise                                         → the path class    class_source = "path"
+```
+
+`TaskSpec.capability_class` is *derived* at construction from `(path_class, intent)`, so
+every consumer — cell key, ledger row, capability map, forecast — is unchanged. Records
+from before labels existed carry `capability_class` only; on load it becomes the path
+class and, with no intent, the resolved class — byte-identical to the old verdict.
+
+Honesty properties of a label: the vocabulary is **closed** (a model answer outside it is
+`(unclassified)` with confidence 0, never a new class; a human cannot invent one either);
+every label stamps the sha256 of the exact evidence it was shown (`evidence_hash` =
+`LabelEvidence.digest()`), so a label made on stale evidence is detectable; a transport,
+auth, timeout or parse failure yields `(unclassified)`/0 with the reason in `rationale`
+(the path class stands, the run continues) — never a pass; a `label` run whose every call
+errored ends `failed`, not `succeeded`; a model run never overwrites a human label
+(`relabel` redoes model labels only). `crb tasks classes <repo>` prints task · subject ·
+path · intent · confidence · resolved · source · labeller so the review's "human-audited
+sample per repo" takes minutes; `counts_json` of a `label` run carries the per-class
+counts, mean confidence (with its n), the unclassified count and the labeller's cost.
+
+Layering: `crb.core.taxonomy` (data) ← `crb.core.classify` (label, evidence, resolution,
+reply parser, prompt) ← `crb.core.spec` (task spec); `crb.builders.labeller` adds the two
+transports (OpenAI-compatible chat; `claude -p` with `--tools ""`, one turn, structured
+output, the same `auth = api_key | cli` environment as the builder). Extending the
+vocabulary changes the instrument (§7.4).
 
 ---
 
