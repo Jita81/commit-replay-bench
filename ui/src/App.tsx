@@ -6,6 +6,7 @@ import { FactoryPage } from './screens/Factory/FactoryPage'
 import { LedgerPage } from './screens/Ledger/LedgerPage'
 import { LoginPage } from './screens/Login/LoginPage'
 import { NotFoundPage } from './screens/NotFoundPage'
+import { LearnPage } from './screens/Learn/LearnPage'
 import { OraclePage } from './screens/Oracle/OraclePage'
 import { RepoDetail } from './screens/Repos/RepoDetail'
 import { ReposPage } from './screens/Repos/ReposPage'
@@ -41,6 +42,7 @@ export function App() {
           <Route path="/capability" element={<CapabilityPage />} />
           <Route path="/routing" element={<RoutingPage />} />
           <Route path="/oracle" element={<OraclePage />} />
+          <Route path="/learn" element={<LearnPage />} />
           <Route path="/ledger" element={<LedgerPage />} />
           <Route path="/signoff" element={<SignoffPage />} />
           <Route path="/factory" element={<FactoryPage />} />

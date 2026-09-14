@@ -14,6 +14,7 @@ const NAV: Array<{ to: string; label: string }> = [
   { to: '/capability', label: 'Capability' },
   { to: '/routing', label: 'Routing' },
   { to: '/oracle', label: 'Oracle' },
+  { to: '/learn', label: 'Learn' },
   { to: '/ledger', label: 'Ledger' },
   { to: '/signoff', label: 'Sign-off' },
   { to: '/factory', label: 'Factory' },
