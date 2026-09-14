@@ -406,9 +406,21 @@ def test_load_oracle_export_accepts_every_server_shape() -> None:
     ] == ["click"]
     # a to_report() dict without a repo: scores keep their own (empty) repo
     assert load_oracle_export({"tasks": [{"task_id": TASK_A, **score}]})[0].repo == ""
-    # a single score object, and things that are not scores at all
+    # a single score object
     assert load_oracle_export({"task_id": TASK_A, **score})[0].task_id == TASK_A
-    assert load_oracle_export([1, "x", None]) == []
+    # an EMPTY export is an honest empty list (no oracle run yet) …
+    assert load_oracle_export({"repo": "alpha", "tasks": []}) == []
+    assert load_oracle_export({"items": [], "total": 0, "limit": 50, "offset": 0}) == []
+    assert load_oracle_export([]) == []
+    # … but entries with no per-task score among them are the WRONG export: refused, never
+    # a silent empty list (which would read every held cell as "without scores")
+    for wrong in (
+        [1, "x", None],
+        {"n_rows": 14, "escapes": 1, "passed": True},  # the controls report
+        {"items": [_event("grade.belt", TASK_A, {"belt": "target_green", "value": True})]},
+    ):
+        with pytest.raises(CliError, match="no per-task oracle score"):
+            load_oracle_export(wrong)
     with pytest.raises(CliError, match="--oracle must be"):
         load_oracle_export("not a list")
 

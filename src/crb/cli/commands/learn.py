@@ -273,7 +273,10 @@ def load_oracle_export(raw: Any) -> list[OracleTaskScore]:
     * an oracle-strength report (``to_report()``: ``{"tasks": [...]}``);
     * a bare list of per-task score dicts.
 
-    Anything else is a :class:`CliError`, never a silent empty list.
+    An empty export (``tasks: []``, an event log with no score) is an honest empty
+    list. A file that has entries but not one per-task score in them — the wrong
+    export, a controls report, a replay run's log — is a :class:`CliError`, never a
+    silent empty list that would make every held cell read "without scores".
     """
     default_repo = ""
     if isinstance(raw, Mapping):
@@ -304,7 +307,15 @@ def load_oracle_export(raw: Any) -> list[OracleTaskScore]:
         if not d.get("repo") and default_repo:
             d["repo"] = default_repo
         scores.append(d)
-    return load_oracle_scores(scores)
+    loaded = load_oracle_scores(scores)
+    if raw and not loaded:
+        raise CliError(
+            f"--oracle: {len(raw)} entr{'y' if len(raw) == 1 else 'ies'} but no per-task oracle "
+            "score among them (a score has a task_id; an event's action is one of "
+            f"{sorted(ORACLE_SCORE_ACTIONS)}) — export GET /oracle/<repo> or an ORACLE run's "
+            "events/log"
+        )
+    return loaded
 
 
 def load_controls_export(raw: Any) -> ControlsVerdict:
