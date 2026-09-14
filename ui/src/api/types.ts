@@ -49,7 +49,7 @@ export interface PageParams {
 // Health / metrics / version
 // ---------------------------------------------------------------------------
 
-export type ProbeStatus = 'ok' | 'degraded' | 'down'
+export type ProbeStatus = 'ok' | 'degraded' | 'down' | 'skipped'
 
 /** `crb.observability.probes.ProbeResult.to_dict()` */
 export interface Probe {

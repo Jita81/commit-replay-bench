@@ -27,6 +27,7 @@ in parallel, so changes here are changes to both.
 | Method | Path | Returns |
 |---|---|---|
 | GET | `/health` | `{"status": "ok|degraded|down", "probes": [...]}` — db (incl. append-only trigger check), sandbox, toolchains, builders, worker heartbeat |
+| GET | `/health/live` | – | process up + database reachable; never probes the sandbox (container HEALTHCHECK / Helm liveness); 503 when the store is gone |
 | GET | `/metrics` | Prometheus text (`crb_false_q1_total` must be 0) |
 | GET | `/version` | `{"crb": "...", "apparatus": "2.0", "policy": "routing.v1"}` |
 

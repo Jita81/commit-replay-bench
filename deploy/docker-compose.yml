@@ -114,6 +114,7 @@ services:
     command: ["serve"]
     environment:
       <<: *crb-env
+      CRB_ROLE: api  # the api container has no docker socket: /health reports the sandbox probe as skipped, never degraded
       CRB_BIND_HOST: 0.0.0.0
       CRB_BIND_PORT: "8000"
       # Trust X-Forwarded-* only from your reverse proxy. `*` is acceptable ONLY because the

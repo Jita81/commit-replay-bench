@@ -16,6 +16,9 @@ from typing import Any
 OK = "ok"
 DEGRADED = "degraded"
 DOWN = "down"
+#: A probe deliberately not run for this process role (e.g. the sandbox probe on an api
+#: container without a docker socket); never lowers the aggregate.
+SKIPPED = "skipped"
 
 
 @dataclass(frozen=True)
