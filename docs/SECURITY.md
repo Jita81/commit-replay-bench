@@ -30,14 +30,20 @@ credentials and the host, and **prove** that stored evidence has not been altere
 │        │                                                             │
 │  Worker (crb.server.worker) ──▶ throwaway git worktrees             │
 │        ├──▶ Sandboxed test runs   [docker: no network, read-only]    │
-│        └──▶ Builder attempt       [worktree; egress = model endpoint]│
-│                                                                      │
-│  Model endpoint (Azure OpenAI in-tenant / configured provider)  ◀────┘
+│        └──▶ Builder attempt       [CRB_BUILDER__EXECUTOR=docker:     │
+│              sealed export of the parent tree (no gold commit in its │
+│              object store) in a hardened container on an --internal  │
+│              network ──▶ egress sidecar (CONNECT-only allowlist) ──┐ │
+│              host mode (dev/eval): worktree; egress = worker's]    │ │
+│                                                                    │ │
+│  Model endpoint (Azure OpenAI in-tenant / configured provider)  ◀──┘─┘
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 Nothing crosses the tenant boundary except calls to the model endpoint the operator
-configures. There is no telemetry, no update check, no licence phone-home.
+configures. There is no telemetry, no update check, no licence phone-home. With the
+builder in its container (ADR-0012) the model endpoint is reachable from exactly one
+process — the egress sidecar — and only for the hosts on the allowlist.
 
 ## 3. Controls
 
@@ -70,14 +76,38 @@ hostile repositories. This is documented, not implemented.
 | `builder_config` cannot carry identity or secrets | `POST /runs` refuses `model` / `provider` / `name` (the rung is the recorded identity; an override would make the ledger row lie) and credential-shaped keys (`*api_key*`, `*token*`, `*secret*`, `*password*` …): provider keys come from the worker's environment, never from a persisted, served request body | [measured] `tests/test_server_routes_w3b.py` |
 | The builder's self-report is untrusted | `BuildOutcome.summary` is labelled `trusted: False`; only the grader decides | [design, enforced by construction] |
 
-**Residual risk:** in v2.0 the builder runs in a host worktree (not a container) with egress
-to the model endpoint. The agentic adapters can execute repository build/test commands. A
-malicious repository can therefore run code with the worker's privileges during a build
-attempt. Mitigations now: run the worker as a dedicated low-privilege user on a dedicated
-node with an egress policy allowing only the model endpoint (Helm chart ships a default-deny
-`NetworkPolicy`); do not onboard repositories you would not run locally. Planned (phase P5):
-the builder attempt inside the same hardened container with the model endpoint as the only
-egress.
+#### 3.2.1 The builder in a sealed container — `crb.builders.container` (ADR-0012)
+
+Enabled by `CRB_BUILDER__EXECUTOR=docker` on the **worker** (a deployment posture, never a
+run parameter — there is no per-run way back to host execution). `/settings` shows the
+posture under `builder`; `probe_builder_container()` is the `crb doctor` hook.
+
+| Control | Implementation | Status |
+|---|---|---|
+| **Gold-commit exfiltration closed by construction** | The builder edits a `SealedCheckout`: `git archive <parent>` → fresh `git init` (inert config: no host config, hooks, signing or templates) → one commit. One tree object is serialised and nothing else, so the object store holds the parent tree and the overlaid tests only; `git cat-file -e <gold>` fails, and so does it for the gold blob of the answer file. `export-ignore`/`export-subst` are undone from the parent's own blobs so the tree is exact. The archaeology guard and the CLI deny rules stay on, as belt-and-braces | [measured] `tests/test_builders_container.py` (one reachable commit; gold commit and blob absent; own `.git` directory, no alternates, no remote; tree byte-equal to the parent) |
+| Result reaches the grader; nothing else does | `copy_back` transfers modified / added / deleted **regular files** into the real worktree; a symlink on either side, a `.git` component, a directory, or a path resolving outside the worktree is refused and reported; byte-identical files untouched; a tampered test IS transferred so belt 1 sees it. Grading is the unchanged host-side grader in its own sandbox | [measured] |
+| Hardened builder container | `deploy/Dockerfile.builder` (toolchain base + git + the pinned Claude Code native binary). `docker run --init --read-only --cap-drop=ALL --security-opt no-new-privileges --pids-limit --memory --cpus --tmpfs /tmp --user <worker uid:gid>` (root refused); the sealed checkout is the only rw mount (`/work`); `--stop-timeout` = the wall clock. Argv asserted flag by flag | [measured] `builder_run_args` tests; `tests/test_builders_container_docker.py` proves read-only root, non-root uid, no host path visible, the builder's own test run inside |
+| **Egress allowlist** | Per attempt: an `--internal` bridge (no gateway, no external DNS) shared by the builder and ONE sidecar running `crb/builders/egress_proxy.py` — standard-library, **CONNECT-only** (plain HTTP → `405`), exact host match + port (`api.anthropic.com:443` by default; `host[:port]` entries; no wildcards) → else `403` and a `deny host:port` log line; the sidecar alone is dual-homed onto the operator's egress network. `HTTPS_PROXY=http://proxy:3128` in the builder. Empty allowlist ⇒ `--network=none`, no sidecar. Bypassing the proxy is impossible by topology, not by rule | [measured] in-process proxy policy tests; docker test: mock endpoint reachable through the proxy, `example.com` `403`, direct sockets fail (no route / no DNS); network-marked test: TLS end to end to the real endpoint, zero spend |
+| **Token exposure surface** | Secret-named variables (`*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*`) are passed as `--env NAME` and resolved from the docker **client's** environment — never on a `docker run` argv (not in `ps`, not in the daemon's event log), never written to a file inside the container (`HOME=/tmp` is a tmpfs that dies with it, `--no-session-persistence` still applies). The surface is: the worker process, the docker client process for the attempt's duration, the daemon, and the container's own environment. Source order unchanged (§3.3.1) | [measured] argv tests assert the value is absent; the docker test reads `key=present` from inside and re-asserts the argv |
+| Fail closed | No daemon / builder image or sidecar image absent from the store / sidecar without `READY` in 30 s / network create fails / launch failure / spawn outside the sealed checkout ⇒ `SandboxUnavailable`; the run **stops** (`stopped_reason: sandbox unavailable: …`), no attempt runs on the host, no verdict is written. Sidecar and network are removed even on a failed start | [measured] host tests with a fake session; docker tests with a missing image and a python-less sidecar image |
+| Cancel / wall clock | `DockerStream` (core) kills the **container** (`docker kill <name>`) on the run's cancel token or the budget's wall clock, then the client | [measured] docker tests: `cancelled` / `timed_out`, container gone |
+| Per builder | `claude_code`: the CLI itself runs in the container through the unchanged spawn contract; `openai_agent`: trusted loop stays host-side, the model's commands run in the builder image with `--network=none` over the sealed checkout; `editblock`: sealed checkout only; `fixture_gold` (test-only): unsealed by design | [measured] |
+
+**Residual risk (container mode):** container escape via the kernel (as §3.1); the
+`--internal` bridge still has the host's bridge interface on its subnet — a daemon bound to
+TCP, or any service listening on all host interfaces, would be reachable from the builder
+(keep the daemon on its socket; bind host services to specific interfaces). The sidecar's
+allowlist is exact-host, so a compromised builder can still talk to the model endpoint —
+that is the intended channel, and spend is bounded by the budget.
+
+**Residual risk (host mode, `CRB_BUILDER__EXECUTOR=host`, the default for development and
+evaluation):** the builder runs in a host worktree that shares the main clone's object
+store (the gold commit is reachable, and only the guards stand in the way) with the
+worker's privileges and egress. Run the worker as a dedicated low-privilege user on a
+dedicated node with an egress policy allowing only the model endpoint (Helm ships a
+default-deny `NetworkPolicy`); do not onboard repositories you would not run locally; and
+use container mode for any measurement that will be relied on. The API logs a warning
+when `CRB_ENV=prod` and the builder executor is `host`.
 
 ### 3.3 Credentials
 
@@ -198,7 +228,10 @@ subject to a retention window.
 | T1 | A repository's tests exfiltrate data or attack the network | test run | 3.1 no network, read-only, caps |
 | T2 | A repository's tests escape the container | test run | 3.1 least privilege + residual risk note |
 | T3 | The builder edits or weakens the oracle to go green | build | 3.2 guard + belt 1 disqualification |
-| T4 | The builder recovers the real patch from git history | build | 3.2 archaeology guard + deny rules |
+| T4 | The builder recovers the real patch from git history | build | 3.2.1 sealed checkout — the commit is **not in the object store** (closed by construction); 3.2 archaeology guard + deny rules remain as belt-and-braces |
+| T4a | The builder reaches the upstream repository, a registry, a search engine or a paste of the real diff | build | 3.2.1 egress allowlist: only the model endpoint's host, only through the sidecar, only `CONNECT`; no DNS and no route from the builder itself |
+| T4b | A repository's build/test commands, run by the builder, attack the worker host or network | build | 3.2.1 read-only root, `cap-drop=ALL`, non-root, pid/mem/cpu caps, `--internal` network; the sealed checkout is the only writable mount |
+| T4c | The model credential leaks via `ps`, the daemon's event log, or a file the builder can read | build | 3.2.1 `--env NAME` from the client's environment (never on argv); tmpfs `HOME`; nothing written by the worker into the container |
 | T5 | Prompt injection from repository content steers the builder | build | `--bare` (no repo `CLAUDE.md`/hooks); builder output untrusted; grader decides |
 | T6 | A builder loop runs unbounded / burns budget | build | 3.2 budgets |
 | T7 | Model credentials leak into a worktree, a pack or a log | everywhere | 3.3 env-only, redaction, never persisted |
@@ -217,7 +250,11 @@ subject to a retention window.
 
 - No penetration test has been performed on v2.0. [gap]
 - The OIDC flow has not been exercised against a live identity provider. [gap]
-- The builder is not yet containerised (see 3.2 residual risk). [gap — phase P5]
+- Container mode for the builder (3.2.1) is proven with a scripted builder and a mock
+  endpoint plus a zero-spend TLS probe to the real endpoint; a full `claude -p` build
+  through the sidecar with a live credential has not yet been run in CI (it needs a
+  credential and spend). Host mode remains the default until an operator sets
+  `CRB_BUILDER__EXECUTOR=docker`. [gap — measured on the fake-model path only]
 - Container escape is out of scope for the application layer.
 
 Report a vulnerability to the repository owner privately; do not open a public issue.

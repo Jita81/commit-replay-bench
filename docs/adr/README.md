@@ -21,6 +21,7 @@ and be recorded here.
 | [0009](0009-text-level-mutators.md) | Text-level mutators for the non-Python languages (`uncompilable` excluded; family stamped) | Accepted | 2026-09-13 |
 | [0010](0010-polyglot-negative-controls.md) | Polyglot negative controls (Go + JavaScript text transforms; env_poison escape = belt-1 gap) | Accepted | 2026-09-14 |
 | [0011](0011-repo-lint-belt.md) | Belt 5: the repository's own formatter/linter (`repo_lint_clean`; apparatus 2.2, belt set `v5`, failure kind `lint`; amends ADR-0001 and ADR-0002 rule 2) | Accepted | 2026-09-14 |
+| [0012](0012-builder-in-a-sealed-container.md) | The builder runs in a sealed container: an exported checkout that cannot contain the gold commit, a hardened container, one allowlisting egress sidecar (`CRB_BUILDER__EXECUTOR=docker`; amends ADR-0005's scope) | Accepted | 2026-09-14 |
 
 ## Format
 

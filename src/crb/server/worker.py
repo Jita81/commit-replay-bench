@@ -84,6 +84,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from crb.builders.adapter import (
     as_run_ledger,
     build_fn_for,
+    container_settings_from_env,
     ladder_labels,
     parse_rung_label,
 )
@@ -1057,6 +1058,7 @@ class Worker:
                 else None
             ),
             builder_overrides=dict(p.get("builder_config") or {}),
+            container=container_settings_from_env(),  # CRB_BUILDER__EXECUTOR=docker (ADR-0012)
         )
         self._progress(ctx, 0, total)
 
