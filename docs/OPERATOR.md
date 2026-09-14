@@ -81,6 +81,91 @@ toolchain and the dependencies are in place. Belt scope options:
 
 The census `configs.json` shape is accepted unchanged by `RepoConfig.from_dict`.
 
+### 2.0 Configuring a repository from the UI
+
+A registered repository is edited on its page under **Configuration** (operators and
+admins edit; viewers see the same form read-only). The form covers every field
+`PUT /repos/{name}` accepts — language, runner, clone path / URL, layout (source prefix,
+extensions, test mode with the matching test prefix or `|`-separated test suffixes), belt
+scope (the three policies or an explicit list with one scope per row), probe scope,
+sandbox image, layer, mining caps — and the **runner options** as a sub-form that offers
+exactly the keys the selected runner reads (below), with a *Raw JSON* view that
+round-trips for anything else. Inline validation refuses what the API would refuse, in
+the API's words (`test_mode='suffix' requires test_suffix`, `String should have at most
+32 characters`, …), and the runner-option checks refuse what the *runner* would choke on
+at run time (a `pip` given as a string instead of a list, an empty `extra_args` row, a
+non-integer `timeout`).
+
+**Save** sends only the fields you changed (the pending line under the form lists them);
+the server merges, re-validates the whole config and appends a `repo.updated` event whose
+payload is the redacted field diff. The **Audit trail** card below the form lists those
+events newest first — who changed which fields, with the from/to values as stored — so
+"who widened the belt" is answered from the append-only events table. After a save the
+toast offers **Run probe now**: the probe run is enqueued and followed inline until it
+ends, green with the runner's own summary (`5 passed in 0.02s`) or red with the reason
+(`probe not green: rc=1`, `setup failed: …`), linked to the run. A probe always runs the
+*stored* configuration, so the button is disabled while the form has unsaved edits.
+
+Runner options the form offers, runner by runner (nothing else is read; unknown keys are
+kept untouched and listed as "not read by this runner"):
+
+| Runner | Keys read (`crb.core.runners`) |
+|---|---|
+| every runner | `timeout` (s, one test command), `setup_timeout` (s, one setup step) |
+| `pytest` | `python`, `pythonpath_suffix`, `pip` (list), `pip_fallback` (list), `uninstall` (list), `env` (map) |
+| `node` | `node`, `npm`, `env` — `node --test` takes no extra arguments |
+| `jest` / `vitest` | `npm`, `extra_args` (list), `env` |
+| `mocha` | `npm`, `mocha_require`, `extra_args`, `env` |
+| `go` | `go`, `cgo` (`0`/`1`), `gomodcache` (docker only) |
+| `cargo` | `cargo`, `offline` (default true), `cargo_home` (docker only) |
+| `maven` | `mvn`, `maven_flags` (list), `java_home`, `offline` (default true), `writable` (list), `maven_opts` (docker only) |
+
+Three shapes we met onboarding NHS repositories, as worked examples — each is what the
+form saves, shown as the stored `runner_opts` / layout it produces:
+
+**A jest monorepo that must exclude a browser project and needs node 24.** The suite has
+several jest projects; the browser-driven one has no place in a regression belt, and the
+package's `engines` pins node ≥ 24 while the host default is older. Runner `jest`, source
+prefix `packages/`, extensions `.js|.mjs|.ts|.tsx`. The tests are co-located with their
+sources, so a test *prefix* cannot tell them apart: test mode **suffix** with
+`.test.js|.test.mjs|.test.ts|.test.tsx`. Belt scope **AFFECTED_DIRS**. Runner options:
+*Extra arguments* rows `--selectProjects` and `unit` (one row each — jest's variadic
+option would otherwise swallow the test paths, which is why the runner puts `--` before
+them), and an *Environment variables* row `PATH` = `/opt/homebrew/opt/node@24/bin:/usr/bin:/bin`
+(applies to `npm ci` in setup as well as to every test command). Stored:
+
+```json
+{"extra_args": ["--selectProjects", "unit"],
+ "env": {"PATH": "/opt/homebrew/opt/node@24/bin:/usr/bin:/bin"}}
+```
+
+**A jest + TypeScript component library whose commits touch snapshots.** Many commits
+change only a `__snapshots__/*.snap`; the runner maps a snapshot to the test that owns
+it, but only if the snapshot counts as a *test file* — so the suffixes must include
+`.snap`. Test mode **suffix** with `.test.ts|.test.tsx|.snap`, extensions `.ts|.tsx`,
+source prefix `src/`. The suite is small and fast, so belt scope **BARE** (the whole
+suite on every task — the widest belt, the strongest green). Runner options: none beyond
+`timeout` if the default 420 s is tight; `npm` only when the host's npm is not the one
+that installed `node_modules`.
+
+**A pytest package installed editable, with its own distribution removed.** A `src/`
+layout whose tests import the package by name. Setup must install the test dependencies
+*and* make sure the tests import the worktree's source, not a wheel built from the clone
+at `HEAD` — the census invariant. Runner `pytest`, source prefix `src/`, test prefix
+`tests/`, belt scope **AFFECTED_DIRS**, *PYTHONPATH suffix* `/src`, *pip install
+arguments* rows `-e`, `.[test]` (one token per row; a single `"-e .[test]"` row is also
+split on whitespace by the runner), *Uninstall after install* row `<distribution-name>`.
+Stored:
+
+```json
+{"pythonpath_suffix": "/src",
+ "pip": ["-e", ".[test]"],
+ "uninstall": ["<distribution-name>"]}
+```
+
+Then **Save → Run probe now**: green means the belt can be trusted for that shape; red
+names the step (a missing extra, a wrong PATH) before any task is mined.
+
 ### 2.1 Environment setup — the only network phase
 
 Everything `crb` measures runs **offline**: mining, grading, oracle scoring and the
