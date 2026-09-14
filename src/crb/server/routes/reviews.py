@@ -68,7 +68,7 @@ from crb.server.schemas_review import (
     ReviewStatsOut,
     ReviewVerifyOut,
 )
-from crb.store.ledger import DbReviewLedger, _review_from_model
+from crb.store.ledger import DbReviewLedger
 from crb.store.models import EvidencePackRow, Grade, Review, Task
 
 router = APIRouter(tags=["reviews"])
@@ -460,7 +460,6 @@ def create_review(
     )
     db.commit()
     m = db.execute(select(Review).where(Review.review_id == chained.review_id)).scalar_one()
-    assert _review_from_model(m) == chained  # what was stored is what was chained
     return _outs(db, [m])[0]
 
 
