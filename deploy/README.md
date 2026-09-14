@@ -10,7 +10,7 @@ Contents: [1 Quickstart](#1-quickstart) · [1.1 Released image](#11-use-the-rele
 [3 Sandbox (docker socket)](#3-let-the-worker-sandbox-tests-docker-socket-opt-in) ·
 [4 Backup & restore](#4-backup-and-restore) · [5 Upgrade](#5-upgrade) ·
 [6 Air-gap](#6-air-gap-egress-only-to-the-model-endpoint) · [7 Azure OpenAI](#7-azure-openai-in-your-tenant) ·
-[8 Troubleshooting](#8-troubleshooting)
+[8 Troubleshooting](#8-troubleshooting) · [9 Builder in a sealed container](#9-builder-in-a-sealed-container-crb_builder__executordocker)
 
 ## 1. Quickstart
 
@@ -231,7 +231,9 @@ telemetry, no update checks, no registry pulls at run time. Pin the posture on t
   endpoint health probe on `/api/v1/health` reports the builder reachable.
 
 Sandbox containers always run with `--network=none`; nothing a repository's tests do can
-reach the network regardless of the host policy.
+reach the network regardless of the host policy. With the builder in its own container
+(§9) the *builder* also has no route out: only its egress sidecar talks to the endpoint,
+so the host rule above is the second wall, not the only one.
 
 ## 7. Azure OpenAI in your tenant
 
@@ -263,3 +265,105 @@ of your provisioning, and rotate by editing `.env` and `docker compose up -d wor
 | Sandboxes start with an empty `/work` | `CRB_HOST_DIR` differs from `/srv/crb` or is a named volume; the paths must match (§3). |
 | `/api/v1/health` reports `append_only: false` | The triggers are missing (someone ran DDL by hand). `docker compose run --rm migrate` re-installs them; then investigate — this is a stop condition ([OPERATOR.md §8](../docs/OPERATOR.md#8-stop-conditions)). |
 | Login loops behind the proxy | `CRB_FORWARDED_ALLOW_IPS` does not include the proxy, so the app sees plain HTTP and refuses to set a `Secure` cookie. |
+
+## 9. Builder in a sealed container (`CRB_BUILDER__EXECUTOR=docker`)
+
+By default a builder attempt runs **on the worker host** in a `git worktree` of the main
+clone — fine for development, but that worktree shares the clone's object store, which
+contains the commit being replayed, and the agent runs with the worker's network. The
+sealed-container mode ([ADR-0012](../docs/adr/0012-builder-in-a-sealed-container.md),
+[SECURITY.md §3.2.1](../docs/SECURITY.md)) closes both by construction:
+
+* the builder edits an **export** of the parent tree (`git archive` → `git init` → one
+  commit): the gold commit is not in its object store, so no shell trick can reach it;
+* the builder process runs in a **hardened container** (read-only root, `cap-drop=ALL`,
+  non-root = the worker's uid, pid/memory/cpu caps) whose **only network is an internal
+  bridge shared with one sidecar**: a CONNECT-only proxy that tunnels to the allowlisted
+  host(s) and nothing else;
+* the result is copied back (regular files only) into the real worktree and graded by the
+  unchanged grader; anything that cannot be provisioned stops the run (`sandbox unavailable`).
+
+### 9.1 Build the builder image
+
+From the repository root, on top of the toolchain the repository under test needs (the
+default base is the same `python:3.12` image the product uses; pass your Go / Node / JVM
+sandbox image as `BASE_IMAGE` — it must be glibc-based and, if it has no `apt-get`,
+already contain `git` and `ca-certificates`):
+
+```bash
+docker build -f deploy/Dockerfile.builder -t crb-builder:local .
+docker build -f deploy/Dockerfile.builder -t crb-builder-go:local --build-arg BASE_IMAGE=<go sandbox image> .
+docker run --rm crb-builder:local              # prints the pinned CLI version, as uid 65534
+```
+
+The image contains the Claude Code CLI as the npm package's **native binary** (pinned by
+`CLAUDE_CODE_VERSION`, the version the adapter's argv is verified against) — no Node
+runtime is added. Like sandbox images, it must be present in the host daemon's store
+(`docker load` on an air-gapped host); the worker never pulls.
+
+### 9.2 Configure the worker
+
+```
+CRB_BUILDER__EXECUTOR=docker
+CRB_BUILDER__IMAGE=crb-builder:local              # required
+CRB_BUILDER__PROXY_IMAGE=                          # sidecar image; default = IMAGE (needs python3 only)
+CRB_BUILDER__ALLOW_HOSTS=api.anthropic.com         # host[:port], comma-separated; port defaults to 443
+CRB_BUILDER__EGRESS_NETWORK=bridge                 # the docker network the SIDECAR reaches the endpoint from
+CRB_BUILDER__MEMORY=4g  CRB_BUILDER__CPUS=2  CRB_BUILDER__PIDS_LIMIT=1024  CRB_BUILDER__TMP_SIZE=1g
+CRB_BUILDER__USER=                                 # uid:gid; default = the worker's own; root refused
+```
+
+Add these to `deploy/.env` next to the sandbox settings; the worker needs the daemon
+socket exactly as in §3. `/settings` (admin) shows the posture under `builder`, and the
+API warns at start-up when `CRB_ENV=prod` and the executor is still `host`. For an
+Azure OpenAI endpoint set `CRB_BUILDER__ALLOW_HOSTS=<resource>.privatelink.openai.azure.com`
+(the sidecar resolves it through the host's DNS, so the private zone applies).
+
+What one attempt does, exactly:
+
+```
+docker network create --internal --driver bridge crb-b-<task>-<id>
+docker run -d --name crb-proxy-<task>-<id> --network=<EGRESS_NETWORK> --read-only --cap-drop=ALL \
+  --security-opt no-new-privileges --user <uid:gid> --pids-limit=64 --memory=256m \
+  --tmpfs /tmp --mount type=bind,src=<CRB_HOME>/…/crb-egress-<id>.py,dst=/opt/crb/egress_proxy.py,readonly \
+  <PROXY_IMAGE> python3 /opt/crb/egress_proxy.py --listen 0.0.0.0:3128 --allow <ALLOW_HOSTS>
+docker network connect --alias proxy crb-b-<task>-<id> crb-proxy-<task>-<id>     # wait for READY
+docker run --rm --name crb-build-<task>-<id> --init --network=crb-b-<task>-<id> \
+  --memory=4g --cpus=2 --pids-limit=1024 --user <uid:gid> --cap-drop=ALL \
+  --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+  --mount type=bind,src=<sealed checkout>,dst=/work \
+  --env ANTHROPIC_API_KEY --env CLAUDE_CODE_OAUTH_TOKEN         # names only; values from the client env \
+  --env HTTPS_PROXY=http://proxy:3128 --env HOME=/tmp --env CI=1 … \
+  --workdir /work --stop-timeout=<wall clock> <IMAGE> claude -p … --output-format stream-json …
+docker rm -f crb-proxy-<task>-<id>; docker network rm crb-b-<task>-<id>
+```
+
+The sealed checkout lives next to the trial worktree under `$CRB_HOME` — which is why, as
+for sandboxes, `$CRB_HOME` must be the **same path** on the host and in the worker
+container (§3).
+
+### 9.3 Prove it locally (colima / Docker Desktop)
+
+```bash
+colima start                                       # or Docker Desktop; `docker info` must answer
+docker build -f deploy/Dockerfile.builder -t crb-builder:local .
+.venv/bin/pytest -q tests/test_builders_container.py tests/test_builders_container_docker.py
+```
+
+The first file needs no daemon (the export's guarantees, copy-back, the `docker run`
+argv, the proxy's policy in process). The second runs against the daemon with a
+**scripted builder** standing in for `claude -p` — it edits the source and runs the target
+tests *inside* the container, the result is graded clean on the host — and proves from
+inside the container: read-only root, non-root uid, no host path visible, the credential
+in the environment but never on argv, `example.com` refused by the sidecar (`403`) while
+a mock endpoint on the allowlist is reachable and direct sockets fail; the
+`network`-marked test finishes with a zero-spend TLS handshake to `api.anthropic.com`
+through the tunnel. Nothing is left behind: the tests assert the sidecar, the network and
+the sealed checkout are gone.
+
+| Symptom | Cause / fix |
+|---|---|
+| run stops with `sandbox unavailable: docker image 'crb-builder:local' is not present` | Build or `docker load` the image on the worker's daemon (§9.1). |
+| `sandbox unavailable: egress proxy unhealthy (no READY line)` | `PROXY_IMAGE` has no `python3`, or the sidecar cannot bind 3128 as the configured uid. `docker logs` of a `crb-proxy-*` container from a `retain` run shows why. |
+| the builder reports `model_error: … 403` / cannot reach the endpoint | The endpoint's host is not on `CRB_BUILDER__ALLOW_HOSTS` (the sidecar's log line says `deny host:port`), or the sidecar's `EGRESS_NETWORK` has no route to it (§6 host firewall). |
+| `refusing to run the builder container as root` | The worker runs as uid 0; set `CRB_BUILDER__USER` to a non-root `uid:gid` that can write `$CRB_HOME`. |
