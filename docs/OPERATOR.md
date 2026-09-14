@@ -289,6 +289,8 @@ red *or* green because of it.
 | `variants: [{name, era: {after, before}, fixtures, generate, env}]` | eras of the service, selected by the task's authored date (`after <= authored < before`, dates are midnight UTC); declare them oldest first; at most one variant without an era (the default), last |
 | `logs_tail`, `keep`, `start_timeout_s` | log lines kept for the evidence (200); leave the service running when crb exits (`false`); wall clock for a start/build (1800 s) |
 
+`CRB_SERVICES_DIR` (worker environment) moves the staging root off `CRB_HOME` for hosts whose container runtime cannot bind-mount it (colima and Docker Desktop share `$HOME`, not `/private/tmp`).
+
 Top-level `fixtures` / `generate` are shared by every variant; without `variants` they
 form the single default variant.
 
