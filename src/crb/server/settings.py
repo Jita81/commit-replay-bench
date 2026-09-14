@@ -87,6 +87,62 @@ class SandboxSettings(BaseModel):
     image: str = ""
 
 
+class BuilderSettings(BaseModel):
+    """Where the builder attempt runs (ADR-0012). Read by the worker from the same
+    ``CRB_BUILDER__*`` variables (:meth:`crb.builders.container.BuilderContainerSettings.from_env`);
+    this model is the API's view of that posture for ``/settings`` and ``crb doctor``.
+
+    ``docker``: a sealed export of the parent tree, built inside ``image`` on an
+    internal network whose only egress is the allowlisting proxy (``allow_hosts``,
+    ``host[:port]``; empty ⇒ no network at all). ``host`` (default): the builder runs
+    in the worker's process / host worktree — development and evaluation only.
+    """
+
+    executor: Literal["host", "docker"] = "host"
+    image: str = ""
+    proxy_image: str = ""
+    #: Comma-separated or a JSON list in the environment (``NoDecode`` hands us the raw string).
+    allow_hosts: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["api.anthropic.com"]
+    )
+    egress_network: str = "bridge"
+    memory: str = "4g"
+    cpus: str = "2"
+    pids_limit: int = Field(default=1024, ge=1)
+    tmp_size: str = "1g"
+    #: ``uid:gid`` for the builder container; empty ⇒ the worker's own uid:gid. Root is refused by the worker.
+    user: str = ""
+
+    @field_validator("allow_hosts", mode="before")
+    @classmethod
+    def _split_hosts(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            raw = v.strip()
+            if raw.startswith("["):
+                return json.loads(raw)
+            return [p.strip() for p in raw.split(",") if p.strip()]
+        return v
+
+    @model_validator(mode="after")
+    def _docker_needs_image(self) -> BuilderSettings:
+        if self.executor == "docker" and not self.image.strip():
+            raise ValueError("CRB_BUILDER__IMAGE is required when CRB_BUILDER__EXECUTOR=docker")
+        return self
+
+    def redacted(self) -> dict[str, Any]:
+        return {
+            "executor": self.executor,
+            "image": self.image,
+            "proxy_image": self.proxy_image or self.image,
+            "allow_hosts": list(self.allow_hosts),
+            "egress_network": self.egress_network if self.allow_hosts else "none",
+            "memory": self.memory,
+            "cpus": self.cpus,
+            "pids_limit": self.pids_limit,
+            "user": self.user or "worker uid:gid",
+        }
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="CRB_",
@@ -112,6 +168,7 @@ class Settings(BaseSettings):
     trusted_proxies: Annotated[list[str], NoDecode] = Field(default_factory=list)
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
+    builder: BuilderSettings = Field(default_factory=BuilderSettings)
     metrics_enabled: bool = True
     log_format: Literal["json", "text"] = "json"
     log_level: str = "INFO"
@@ -155,6 +212,11 @@ class Settings(BaseSettings):
             )
         if self.env == "prod" and self.sandbox.executor == "local":
             log.warning("CRB_SANDBOX__EXECUTOR=local in prod: test runs are NOT isolated")
+        if self.env == "prod" and self.builder.executor == "host":
+            log.warning(
+                "CRB_BUILDER__EXECUTOR=host in prod: builder attempts run on the host with a "
+                "worktree that shares the main clone's objects (ADR-0012 recommends docker)"
+            )
         return self
 
     # --- derived ---------------------------------------------------------------
@@ -212,6 +274,7 @@ class Settings(BaseSettings):
             "trusted_proxies": list(self.trusted_proxies),
             "retention": {"transcripts_days": self.retention.transcripts_days},
             "sandbox": {"executor": self.sandbox.executor, "image": self.sandbox.image},
+            "builder": self.builder.redacted(),
             "metrics_enabled": self.metrics_enabled,
             "log_format": self.log_format,
             "worker_heartbeat_stale_s": self.worker_heartbeat_stale_s,
@@ -223,6 +286,7 @@ __all__ = [
     "ROLE_LADDER",
     "ROLE_RANK",
     "BootstrapAdmin",
+    "BuilderSettings",
     "OidcSettings",
     "RetentionSettings",
     "Role",

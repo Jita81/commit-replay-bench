@@ -35,10 +35,19 @@ Honesty properties
   remain the record of what happened.
 * A transcript is never inlined in the attempt: with ``transcript_dir`` set the
   redacted transcript is written to a file and referenced by path.
+* **Sealed container path** (``container=``, ADR-0012). The builder never sees the
+  real worktree: it gets a :class:`~crb.builders.container.SealedCheckout` (an export
+  of the parent tree with no other object in its store) and, for the agentic
+  builders, runs inside a hardened container whose only egress is the allowlisting
+  proxy. The result is copied back (regular files only) into the real worktree,
+  which the unchanged grader then grades. A sandbox that cannot be provided is
+  :class:`~crb.core.execution.SandboxUnavailable` and propagates — the run stops —
+  rather than becoming a recorded attempt on the host.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shlex
 import uuid
@@ -59,8 +68,15 @@ from crb.builders.base import (
     emit,
 )
 from crb.builders.budget import budget_for_rung
+from crb.builders.container import (
+    SEALABLE_BUILDERS,
+    BuilderContainerSettings,
+    ContainerSession,
+    SealedCheckout,
+    SessionFactory,
+)
 from crb.core.evidence import BuilderRef
-from crb.core.execution import Executor
+from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.grade import MODE_SIGHTED
 from crb.core.ledger import GradeRow, JsonlLedger
 from crb.core.redact import redact_and_cap
@@ -71,6 +87,10 @@ from crb.core.workspace import Workspace
 
 #: ``message_for(task) -> str`` — the full commit message (``GitRepo.message(sha)``).
 MessageFn = Callable[[TaskSpec], str]
+
+#: The worker's builder-container posture from ``CRB_BUILDER__*`` (``None`` = host);
+#: raises ``SandboxUnavailable`` when ``docker`` is requested but incomplete.
+container_settings_from_env = BuilderContainerSettings.from_env
 
 #: Prefix on the actions a builder emits, so a stream can tell the builder's own
 #: ``build.attempt`` from the orchestrator's ``build.start`` / ``build.done``.
@@ -297,6 +317,8 @@ def build_fn_for(
     message_for: MessageFn | None = None,
     transcript_dir: str | Path | None = None,
     builder_overrides: Mapping[str, Any] | None = None,
+    container: BuilderContainerSettings | None = None,
+    session_factory: SessionFactory = ContainerSession,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -320,6 +342,12 @@ def build_fn_for(
     builder_overrides:
         Extra constructor kwargs applied to every builder (e.g. a scripted
         ``chat_fn`` in tests, an ``endpoint``).
+    container:
+        When set (the worker's ``CRB_BUILDER__EXECUTOR=docker`` posture), every
+        rung whose builder is in :data:`SEALABLE_BUILDERS` builds against a
+        :class:`SealedCheckout` inside a :class:`ContainerSession`; other builders
+        (the test-only gold replay) keep the real worktree. ``session_factory``
+        exists for tests.
     """
     index = rung_index(ladder)
     overrides = dict(builder_overrides or {})
@@ -358,10 +386,61 @@ def build_fn_for(
             emit(on_event, BUILDER_EVENT_PREFIX + "discard", files=dropped, error=attempt.error)
         return attempt
 
+    def sealed_build(
+        ws: Workspace, task: TaskSpec, rung: Rung, brief: BuildBrief, rung_budget: Budget
+    ) -> BuildOutcome:
+        """One attempt against a sealed checkout inside a container session. The
+        builder is instantiated per attempt (its spawn/executor belong to the
+        session); ``SandboxUnavailable`` propagates. Copy-back happens even when the
+        builder raised: whatever it left is the record of the attempt, and an errored
+        attempt is discarded by the caller regardless."""
+        assert container is not None
+        dest = ws.root.parent / f"{ws.root.name}-sealed"
+        tests = task.test_files if brief.sighted else ()
+        with SealedCheckout.create(ws, dest, test_files=tests) as sealed:
+            emit(
+                on_event,
+                BUILDER_EVENT_PREFIX + "sealed",
+                task=task.task_id,
+                commit=sealed.commit,
+                image=container.image,
+                network="proxy" if container.networked else "none",
+            )
+            # the run's cancel token (when the executor exposes one) so `docker kill`
+            # follows a cancelled run instead of waiting for the wall clock
+            cancel = getattr(executor, "cancel_fn", None)
+            try:
+                with session_factory(
+                    container, sealed, cancel=cancel, label=task.short_id
+                ) as session:
+                    # the session supplies the container-bound spawn / executor; an
+                    # explicit override (a test's fake binary) still wins
+                    builder = builder_for_rung(
+                        rung, **{**session.overrides_for(rung.builder), **overrides}
+                    )
+                    outcome = builder.build(
+                        sealed.workspace(), brief, rung_budget, on_event=builder_on_event
+                    )
+            except BaseException:
+                # best effort: whatever the builder left is the record of the attempt;
+                # the in-flight exception (SandboxUnavailable included) is what matters
+                with contextlib.suppress(Exception):
+                    sealed.copy_back(ws)
+                raise
+            try:
+                copied = sealed.copy_back(ws)
+            except Exception as exc:  # the result is not admissible: an errored attempt
+                raise RuntimeError(f"copy_back failed: {type(exc).__name__}: {exc}") from exc
+            emit(
+                on_event, BUILDER_EVENT_PREFIX + "copy_back", task=task.task_id, **copied.to_dict()
+            )
+        return outcome
+
     def build(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
         rung = index.get(rung_label)
         if rung is None:
             return _failed_attempt(rung_label, mode, f"unknown rung {rung_label!r} (not on ladder)")
+        sealed = container is not None and rung.builder in SEALABLE_BUILDERS
         try:
             builder = instantiate(rung)
         except Exception as exc:
@@ -378,7 +457,12 @@ def build_fn_for(
         )
         rung_budget = budget_for_rung(rung, budget)
         try:
-            outcome = builder.build(ws, brief, rung_budget, on_event=builder_on_event)
+            if sealed:
+                outcome = sealed_build(ws, task, rung, brief, rung_budget)
+            else:
+                outcome = builder.build(ws, brief, rung_budget, on_event=builder_on_event)
+        except SandboxUnavailable:
+            raise  # the run stops (ADR-0005): never a host-side attempt, never a verdict
         except Exception as exc:
             failed = BuildAttempt(
                 BuilderRef(
@@ -409,6 +493,7 @@ __all__ = [
     "as_run_ledger",
     "attempt_error",
     "build_fn_for",
+    "container_settings_from_env",
     "discard_source_edits",
     "ladder_from_spec",
     "ladder_labels",

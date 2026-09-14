@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -103,6 +104,7 @@ from crb.builders.base import (
     emit,
 )
 from crb.builders.budget import CostMeter, price_for
+from crb.core.execution import SandboxUnavailable
 from crb.core.redact import redact_and_cap
 from crb.core.secrets_file import SecretsError, SecretsStore, fingerprint
 from crb.core.workspace import Workspace
@@ -444,9 +446,21 @@ class StreamStats:
     """Accumulates what the stream-json events say. Tolerant of unknown shapes:
     anything it cannot read is skipped, never inferred."""
 
-    def __init__(self, git_guard: GitArchaeologyGuard, guard: TestFileGuard | None = None) -> None:
+    def __init__(
+        self,
+        git_guard: GitArchaeologyGuard,
+        guard: TestFileGuard | None = None,
+        *,
+        workdir_alias: str = "",
+    ) -> None:
+        """``workdir_alias`` is the path the worktree has *inside a container* (the
+        sealed-container path mounts it at ``/work``): tool-use paths and shell
+        commands are translated back to the guard's host root before they are
+        checked, so path verification (``git diff <path>``, ``npx`` local binaries)
+        keeps working. The transcript records what the agent actually ran."""
         self.git_guard = git_guard
         self.guard = guard
+        self.workdir_alias = workdir_alias.rstrip("/")
         self.assistant_messages = 0
         self.tool_uses = 0
         self.tool_names: list[str] = []
@@ -553,6 +567,14 @@ class StreamStats:
         self.tokens_out += int(usage.get("output_tokens", 0) or 0)
         self.cached_in += int(usage.get("cache_read_input_tokens", 0) or 0)
 
+    def host_view(self, text: str) -> str:
+        """``text`` with the container alias replaced by the guard's host root (only
+        whole path components: ``/work/x`` → ``<root>/x``, ``/workspace`` untouched)."""
+        if not self.workdir_alias or self.guard is None or self.workdir_alias not in text:
+            return text
+        root = str(self.guard.root)
+        return re.sub(rf"{re.escape(self.workdir_alias)}(?=/|$|[\s'\"`;&|)])", root, text)
+
     def _inspect_tool_use(self, name: str, inp: Any, summary: dict[str, Any] | None) -> None:
         if not isinstance(inp, dict):
             return
@@ -561,7 +583,7 @@ class StreamStats:
             self.bash_commands.append(cmd)
             if summary is not None:
                 summary.setdefault("commands", []).append(redact_and_cap(cmd, max_chars=300))
-            reason = self.git_guard.check_shell(cmd)
+            reason = self.git_guard.check_shell(self.host_view(cmd))
             if reason:
                 self.violations.append(f"{reason} (attempted: {cmd[:120]})")
         elif name in {"Edit", "Write", "MultiEdit", "NotebookEdit"}:
@@ -570,9 +592,9 @@ class StreamStats:
             if summary is not None:
                 summary.setdefault("paths", []).append(path)
             if self.guard is not None and path:
-                rel = path
+                rel = self.host_view(path)
                 try:
-                    p = Path(path)
+                    p = Path(rel)
                     if p.is_absolute():
                         rel = str(p.resolve().relative_to(self.guard.root))
                 except (ValueError, OSError):
@@ -663,11 +685,14 @@ class ClaudeCodeBuilder:
         auth: str = "",
         keep_transcript: bool = False,
         extra_args: tuple[str, ...] | list[str] = (),
+        workdir_alias: str = "",
     ) -> None:
         """``model`` / ``auth`` resolve explicit value → worker environment
         (:data:`MODEL_ENV` / :data:`AUTH_ENV`) → :data:`DEFAULT_MODEL` / ``api_key``.
         ``bare`` defaults to ``True`` under ``auth="api_key"`` and to ``False`` under
-        ``auth="cli"`` (``--bare`` forces API-key auth, so the two cannot combine)."""
+        ``auth="cli"`` (``--bare`` forces API-key auth, so the two cannot combine).
+        ``workdir_alias`` is set by the sealed-container path (:mod:`crb.builders.container`):
+        the worktree's path inside the container, translated back for the guards."""
         model = model.strip() or default_model()
         auth_source = "explicit" if auth else AUTH_ENV
         auth = auth.strip() or default_auth()
@@ -697,9 +722,10 @@ class ClaudeCodeBuilder:
         self.tools: tuple[str, ...] = BARE_TOOLS if bare else FULL_TOOLS
         self.keep_transcript = keep_transcript
         self.extra_args = tuple(str(a) for a in extra_args)
+        self.workdir_alias = workdir_alias.rstrip("/")
 
     def describe(self) -> dict[str, Any]:
-        return {
+        d = {
             "builder": self.name,
             "model": self.model,
             "provider": self.provider,
@@ -708,6 +734,9 @@ class ClaudeCodeBuilder:
             "bare": self.bare,
             "auth": self.auth,
         }
+        if self.workdir_alias:
+            d["container_workdir"] = self.workdir_alias
+        return d
 
     def _binary(self) -> str:
         if self.claude_binary:
@@ -803,7 +832,9 @@ class ClaudeCodeBuilder:
         started = time.monotonic()
         config = brief.repo_config()
         guard = TestFileGuard(workspace.root, config, brief.test_files, mode=brief.mode)
-        stats = StreamStats(GitArchaeologyGuard(cwd=workspace.root), guard)
+        stats = StreamStats(
+            GitArchaeologyGuard(cwd=workspace.root), guard, workdir_alias=self.workdir_alias
+        )
         meter = CostMeter(price_for(self.model), model=self.model)
         errors: list[str] = []
 
@@ -879,6 +910,8 @@ class ClaudeCodeBuilder:
                     # the CLI has no tool-call cap; --max-turns bounds it, this is the belt
                     over_cap = True
                     errors.append(f"budget: tool uses exceeded 2x cap ({stats.tool_uses})")
+        except SandboxUnavailable:
+            raise  # a container that cannot launch stops the run; it is not a model error
         except Exception as exc:
             errors.append(
                 f"model_error: {type(exc).__name__}: {redact_and_cap(str(exc), max_chars=500)}"
