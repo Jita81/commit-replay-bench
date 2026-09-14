@@ -469,3 +469,8 @@ node - <<'EOF'\nrequire('child_process').execSync('git reflog')\nEOF	archaeology
 python <<'EOF'\nprint(open('.git/HEAD').read())\nEOF	archaeology:
 $GIT log	archaeology:
 G=git; $G log	archaeology:
+# reads of .git through pattern commands are still reads
+grep foo .git/HEAD	archaeology:
+grep -v x .git/config	archaeology:
+sed -n 1p .git/HEAD	archaeology:
+awk '{print}' .git/packed-refs	archaeology:

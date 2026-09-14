@@ -1251,19 +1251,40 @@ def _leaves_worktree(path: str) -> bool:
     return p.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:", p)) or ".." in p.split("/")
 
 
+_PATTERN_COMMANDS: frozenset[str] = frozenset(
+    {"grep", "egrep", "fgrep", "rg", "ag", "ack", "sed", "awk", "gawk", "perl"}
+)
+_REGEX_META = re.compile(r"[\\^$|()\[\]{}+]")
+
+
 def _is_git_dir_path(a: str) -> bool:
+    """A literal path naming ``.git`` or something under it. Regex-shaped text
+    (``^\\.git``, ``\\.git/``) is a PATTERN, not a path — a grep filter that mentions
+    ``.git`` refused an honest NHSDigital/mesh-client build (2026-09-14)."""
+    if _REGEX_META.search(a):
+        return False
     p = a.replace("\\", "/")
     return p == ".git" or p.startswith(".git/") or "/.git/" in p or p.endswith("/.git")
 
 
 def _git_dir_arg(args: Sequence[str]) -> str:
     """A non-git command that names ``.git`` (or a path into one) is reading the
-    repository's guts — ``cat .git`` alone reveals the main clone's location."""
+    repository's guts — ``cat .git`` alone reveals the main clone's location.
+    For pattern-taking commands (grep, sed, awk …) the first positional argument is
+    the pattern and is never a path (``grep -v .git``); later positionals still are."""
+    exe = Path(args[0]).name if args else ""
+    pattern_seen = exe not in _PATTERN_COMMANDS
     for i in range(1, len(args)):
         a = args[i]
         if a.startswith(("-", "!")):
             continue
-        if _is_git_dir_path(a) and args[i - 1] not in _PATH_EXCLUDE_OPTS:
+        if args[i - 1] in _PATH_EXCLUDE_OPTS:
+            continue
+        if not pattern_seen:
+            pattern_seen = True  # grep's pattern (or sed/awk's program)
+            if args[i - 1] not in {"-e", "--regexp", "-f", "--file"}:
+                continue
+        if _is_git_dir_path(a):
             return f"archaeology: '.git' is off limits ({a})"
     return ""
 

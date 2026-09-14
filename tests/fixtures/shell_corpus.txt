@@ -466,3 +466,8 @@ echo $((1 + 2))
 echo ${PYTHONPATH:-unset}
 echo "${HOME}/x"
 for f in $(git ls-files -- 'lib/*.js'); do node --check "$f" || echo "bad: $f"; done
+# learned 2026-09-14 from mesh-client/57376c6f5d (protocol row): a grep FILTER that mentions .git is not a read of .git
+find . -iname "*conftest*" -o -iname "*helpers*" | grep -v ".git"
+find . -name "*.py" | grep -v .git
+ls -la | grep -v "^\.git"
+git ls-files | grep -v "^\.git"
