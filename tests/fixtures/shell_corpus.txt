@@ -471,3 +471,8 @@ find . -iname "*conftest*" -o -iname "*helpers*" | grep -v ".git"
 find . -name "*.py" | grep -v .git
 ls -la | grep -v "^\.git"
 git ls-files | grep -v "^\.git"
+# learned 2026-09-14 from nhsuk-frontend/b65ca47124 (protocol row): single quotes are literal inside a double-quoted substitution
+echo "$(node -e "console.log(require('./jest.config.mjs').default ? '' : '')")"
+echo "$(node -e "console.log(1)")"
+echo "$(a "$(b)")"
+echo "it's $(pwd)"

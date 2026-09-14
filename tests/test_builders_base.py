@@ -757,3 +757,17 @@ def test_guard_git_env_redirect_and_parallel() -> None:
     assert g.check_shell("GIT_PAGER=cat git diff") == ""
     assert g.check_shell("export GIT_PAGER=cat; git diff --stat") == ""
     assert g.check_shell("parallel -j4 go vet ::: ./pkg ./cmd") == ""
+
+
+def test_matching_paren_treats_single_quotes_inside_double_quotes_as_literal() -> None:
+    """``"$(node -e "console.log(require('x').y ? '' : '')")"`` refused an honest
+    nhsuk-frontend build (2026-09-14): a ``'`` inside a double-quoted string opened a
+    single-quote state inside the substitution and the closing paren was never found."""
+    from crb.builders.base import GitArchaeologyGuard, _hoist_substitutions
+
+    cmd = """echo "$(node -e "console.log(require('./jest.config.mjs').default ? '' : '')")" """
+    flat, inners = _hoist_substitutions(cmd)
+    assert flat is not None and len(inners) == 1
+    assert inners[0].startswith("node -e ")
+    assert GitArchaeologyGuard().check_shell(cmd) == ""
+    assert "git log" in GitArchaeologyGuard().check_shell('''echo "$(git log -1 "it's")"''')

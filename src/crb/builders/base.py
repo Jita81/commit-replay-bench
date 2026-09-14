@@ -1089,22 +1089,30 @@ def _matching_paren(command: str, start: int) -> int:
         if quote == "'":
             if ch == "'":
                 quote = ""
+        elif quote == '"':
+            # inside double quotes a single quote is LITERAL — treating it as an opener
+            # lost the closing paren of `"$(node -e "console.log(require('x'))")"` and
+            # refused an honest nhsuk-frontend build (2026-09-14)
+            if ch == "\\":
+                j += 1
+            elif ch == '"':
+                quote = ""
+            elif ch == "(" and j > 0 and command[j - 1] == "$":
+                depth += 1  # $( … ) inside double quotes still nests
+            elif ch == ")" and depth > 1:
+                depth -= 1
         elif ch == "\\":
             j += 1
         elif ch == "'":
             quote = "'"
         elif ch == '"':
-            quote = "" if quote == '"' else '"'
-        elif not quote and ch == "(":
+            quote = '"'
+        elif ch == "(":
             depth += 1
-        elif not quote and ch == ")":
+        elif ch == ")":
             depth -= 1
             if depth == 0:
                 return j
-        elif quote == '"' and ch == "(" and j > 0 and command[j - 1] == "$":
-            depth += 1  # $( … ) inside double quotes still nests
-        elif quote == '"' and ch == ")" and depth > 1:
-            depth -= 1
         j += 1
     return -1
 
