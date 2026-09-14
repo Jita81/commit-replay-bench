@@ -149,6 +149,39 @@ published bar"**; until prospective and audited evidence exists it does not mean
 "autonomous delivery is safe". `calibrate` and `human` routes are product successes
 (refusals), reported with the same rigour as passes.
 
+### 6a. What a signed cell may be claimed to mean (`signoff-policy.v1`)
+
+A human sign-off lifts a cell's **verification tier** (`automated-pass` →
+`human-verified` / `ab-confirmed`); it never lifts its route, its point or its interval.
+Since `signoff-policy.v1` (DL-014) a sign-off is a *policy decision refused at write*
+(`crb.core.signoff`), so a signed cell licenses exactly this claim shape:
+
+> "Under apparatus V, cell C of repo R (n, point, Wilson lower — all ≥ the published
+> bar: n ≥ 10, point ≥ 0.90, lower ≥ 0.80, false-Q1 = 0, route `deliver`) was signed off
+> by a named approver on date D under `signoff-policy.v1`, with the repository's
+> negative-controls gate **passed, k of N constructible, 0 escapes** (controls run X), and
+> the approver's attestation that they read accepted row H (task T)."
+
+Every word of that sentence is a field of the record (`policy_version`,
+`policy_thresholds`, `route_reason_code`, `controls_*`, `attestation`), hash-chained with
+the sign-off and served back verbatim by `GET /signoffs/{id}`. What it does **not** mean:
+
+- that the cell is safe for autonomous delivery (§6 still applies: `deliver` is a
+  high-confidence candidate under the published bar, not a safety claim);
+- that every accepted change in the cell was read — the attestation names **one** row;
+  a per-change human verdict is the `review` row type (Wave B13), not the sign-off;
+- that the cell stays signed: a later false-Q1 row invalidates the attestation at read
+  (`active: false`), an apparatus bump makes its snapshot stale (§4), and a revocation
+  is one append away.
+
+A deployment may relax the numeric thresholds and the route / controls switches within
+the published bounds (`docs/API.md`, `/signoffs/policy`); a record then says so
+(`policy_thresholds` differs from the defaults, `relaxed: true` on the policy) and any
+quote of it must name the relaxed bar. Two clauses have no knob and never will: a
+false-Q1 cell cannot be signed, and a sign-off without an attestation cannot be made.
+A record signed before the policy (`schema: crb.signoff.v1`) carries no policy snapshot
+and may only be quoted as "signed before `signoff-policy.v1`".
+
 ## 7. What must never be said
 
 - **"Delivers unseen software correctly 97.5% of the time."** — or any rate from a sighted,

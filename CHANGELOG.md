@@ -8,6 +8,34 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### Sign-off is a policy decision, refused at write (`signoff-policy.v1`, Wave B7, DL-014)
+- `crb.core.signoff.SignoffPolicy` (defaults: `n_min = 10`, route must be `deliver`, controls
+  gate passed with `max_controls_escapes = 0` and `min_constructible_share = 0.5`,
+  `min_oracle_strength = 0.80` when measured, attestation mandatory) and
+  `evaluate_signoff` / `check_signable`: refusal codes `false_q1` (first, non-overridable),
+  `thin_cell`, `controls_unmeasured|failed|escapes|thin`, `oracle_weak`,
+  `route_not_deliver:<reason_code>`, `attestation_missing` (non-overridable), each naming the
+  number that failed and the threshold it missed. Operator-adjustable within published bounds
+  via `CRB_SIGNOFF__*`; a value outside them makes the sign-off routes answer
+  `503 signoff_policy_invalid`.
+- `SignoffRecord` schema `crb.signoff.v2`: `ci_low_at_signoff`, `oracle_strength_at_signoff`,
+  `policy_version` + `policy_thresholds`, `route_at_signoff` + `route_reason_code`,
+  `controls_verdict|run_id|k|total|escapes`, `attestation {reviewed_task_id,
+  reviewed_row_hash, statement, at}` — all hashed into the chain; `v1` records still verify
+  (schema-aware body) and load with defaults.
+- API: `POST /signoffs` takes `attestation {reviewed_row_hash, statement}` (the row must be an
+  accepted row of the cell — else 422), routes the cell under the repo's latest controls
+  verdict (the same helper as `/capability-map`) and answers `409 signoff_refused` with
+  `detail.{code, thresholds, observed, refusals[]}`; `GET /signoffs/preview` (the bar before
+  the approver tries, plus the cell's accepted rows), `GET /signoffs/policy`,
+  `GET /signoffs/{id}`.
+- UI: the Sign-off screen shows n / point / Wilson-low / false-Q1 / oracle strength / the
+  controls verdict (k of N, escapes, run, date) / route + reason, every refusal with observed
+  vs threshold, an accepted-row picker with the "I have read this accepted diff" affirmation
+  and statement; the button stays disabled while the preview refuses. Walkthrough `08-signoff`
+  proves the refusal on the live fixture (whose `hardcode_cheat` control really escapes) and a
+  real sign-off on an API-seeded repo whose tests are parametrised.
+
 ## [2.0.0a1] — 2026-09-13 — first releasable v2 (tag pending)
 
 Apparatus version **2.0** (unchanged). Everything on `reboot/v2` since the reboot commit,
