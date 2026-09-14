@@ -26,6 +26,19 @@ so a sandboxing executor can tell it apart), records every step as a
 answers — without network — whether the environment is usable now. Setup is a
 *host* phase: a sandbox image must ship its own toolchain and dependencies, so
 under a docker executor ``setup`` refuses rather than pretending.
+
+Services the oracle needs
+-------------------------
+Some suites are only an oracle next to a running service (mesh-client's MESH
+sandbox on ``localhost:8701``). ``runner_opts.services`` declares them
+(:mod:`crb.core.services`); the runner owns one :class:`~crb.core.services.ServiceSession`
+per repository: :meth:`BaseRunner.setup` stages every era's fixtures and starts
+the services once (recorded in the :class:`SetupResult`), :meth:`BaseRunner.run`
+makes sure the variant the task's authored date selects is healthy — reusing the
+running one — merges the session's exported environment into the test command,
+and stamps the :class:`TestRun` with which service version answered. A service
+that cannot be provided is :class:`~crb.core.services.ServiceUnavailable`: the
+run stops, nothing is graded against a missing oracle.
 """
 
 from __future__ import annotations
@@ -41,6 +54,16 @@ from typing import Any, Protocol
 from crb.core.execution import Command, ExecResult, Executor, LocalExecutor
 from crb.core.lint import LintPlan, lint_disabled, plan_from_config
 from crb.core.redact import redact_and_cap
+from crb.core.services import (
+    SERVICES_SANDBOX_REFUSED,
+    ServiceRecord,
+    ServiceSession,
+    ServiceSpec,
+    ServiceUnavailable,
+    authored_of,
+    clone_root_of,
+    parse_services,
+)
 from crb.core.spec import BELT_AFFECTED_DIRS, BELT_BARE, BELT_TARGET_ONLY, RepoConfig
 
 #: Sentinel: "run the toolchain's default discovery" (the census ``BARE`` scope).
@@ -66,12 +89,20 @@ SETUP_SANDBOX_REFUSED = (
 
 @dataclass(frozen=True)
 class TestRun:
+    """What the toolchain said. ``services`` names the service instances (image
+    digest, variant, when they read healthy) the tests ran against — part of the
+    apparatus, so a verdict carries which oracle service answered."""
+
     returncode: int
     failing: frozenset[str]
     tail: str = ""
     timed_out: bool = False
     duration_s: float = 0.0
     parse_error: str = ""
+    services: tuple[ServiceRecord, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "services", tuple(self.services))
 
     @property
     def green(self) -> bool:
@@ -82,7 +113,7 @@ class TestRun:
         return not self.green
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "returncode": self.returncode,
             "failing": sorted(self.failing),
             "tail": self.tail,
@@ -90,6 +121,11 @@ class TestRun:
             "duration_s": round(self.duration_s, 3),
             "parse_error": self.parse_error,
         }
+        # Present iff the oracle ran against a service: packs of repos without one
+        # stay byte-identical (content-addressed hashes are part of the evidence).
+        if self.services:
+            d["services"] = [s.to_dict() for s in self.services]
+        return d
 
 
 def tail_of(text: str, n: int = TAIL_LINES) -> str:
@@ -146,9 +182,12 @@ class SetupResult:
     steps: tuple[SetupStep, ...] = ()
     note: str = ""
     duration_s: float = 0.0
+    #: The oracle's services setup started (or adopted), with their image digests.
+    services: tuple[ServiceRecord, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "steps", tuple(self.steps))
+        object.__setattr__(self, "services", tuple(self.services))
 
     @property
     def last_tail(self) -> str:
@@ -156,12 +195,15 @@ class SetupResult:
         return self.steps[-1].tail if self.steps else ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "ok": self.ok,
             "steps": [s.to_dict() for s in self.steps],
             "note": self.note,
             "duration_s": round(self.duration_s, 3),
         }
+        if self.services:
+            d["services"] = [s.to_dict() for s in self.services]
+        return d
 
 
 class SetupSession:
@@ -181,6 +223,10 @@ class SetupSession:
         self.steps: list[SetupStep] = []
         self._started = time.monotonic()
 
+    @property
+    def executor(self) -> Executor:
+        return self._executor
+
     def run(self, cmd: Command) -> SetupStep:
         net = cmd if cmd.network else _with_network(cmd)
         started = time.monotonic()
@@ -188,13 +234,17 @@ class SetupSession:
             res = self._executor.run(net)
         except OSError as exc:
             # a missing toolchain binary is a failed step, not a crash: rc 127 as a shell would
-            step = SetupStep(
-                net.argv, 127, f"{type(exc).__name__}: {exc}", time.monotonic() - started
+            res = ExecResult(
+                127, "", f"{type(exc).__name__}: {exc}", False, time.monotonic() - started
             )
-        else:
-            step = SetupStep(
-                net.argv, res.returncode, tail_of(res.combined), res.duration_s, res.timed_out
-            )
+        return self.record(net, res)
+
+    def record(self, cmd: Command, res: ExecResult) -> SetupStep:
+        """Append a step for a command that ran elsewhere (a service start) and
+        stream it like any other."""
+        step = SetupStep(
+            cmd.argv, res.returncode, tail_of(res.combined), res.duration_s, res.timed_out
+        )
         self.steps.append(step)
         if self._on_step is not None:
             self._on_step(step)
@@ -204,8 +254,10 @@ class SetupSession:
     def all_ok(self) -> bool:
         return all(s.ok for s in self.steps)
 
-    def result(self, ok: bool, note: str) -> SetupResult:
-        return SetupResult(ok, tuple(self.steps), note, time.monotonic() - self._started)
+    def result(self, ok: bool, note: str, services: Sequence[ServiceRecord] = ()) -> SetupResult:
+        return SetupResult(
+            ok, tuple(self.steps), note, time.monotonic() - self._started, tuple(services)
+        )
 
 
 def _with_network(cmd: Command) -> Command:
@@ -217,6 +269,20 @@ def _with_network(cmd: Command) -> Command:
         timeout=cmd.timeout,
         writable_paths=cmd.writable_paths,
         network=True,
+    )
+
+
+def _with_env(cmd: Command, base: dict[str, str]) -> Command:
+    """``base`` under the command's own environment: what a service exports reaches
+    the tests, but the runner's (and ``runner_opts.env``'s) explicit values win."""
+    return Command(
+        cmd.argv,
+        cmd.root,
+        cwd_rel=cmd.cwd_rel,
+        env={**base, **cmd.env},
+        timeout=cmd.timeout,
+        writable_paths=cmd.writable_paths,
+        network=cmd.network,
     )
 
 
@@ -299,6 +365,12 @@ class BaseRunner:
         self.config = config
         self.opts: dict[str, Any] = dict(config.runner_opts)
         self.env_dir: Path | None = Path(env_dir) if env_dir is not None else None
+        #: The current task's author date (``TaskSpec.authored``), bound by the
+        #: caller like ``env_dir`` — it selects the era variant of a declared
+        #: service. ``None`` → the worktree HEAD's date is the fallback (see :meth:`run`).
+        self.authored: str | None = None
+        #: The oracle's services, once started (see :meth:`ensure_services`).
+        self._services: ServiceSession | None = None
 
     # --- scopes ------------------------------------------------------------------
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
@@ -329,11 +401,33 @@ class BaseRunner:
     def run(
         self, executor: Executor, root: Path, scope: Sequence[str], *, timeout: int = 0
     ) -> TestRun:
+        """Run ``scope`` in ``root`` and report what the toolchain said.
+
+        With services declared, the variant :attr:`authored` selects is made
+        healthy first (:meth:`run_for` binds it for one call). A caller that binds
+        nothing gets the worktree HEAD's date — the commit's *parent* — as the
+        fallback: exact except for a commit sitting on an era boundary, so grading
+        callers should bind the task's own date.
+        """
         t = timeout or int(self.opts.get("timeout", self.default_timeout))
+        records: tuple[ServiceRecord, ...] = ()
+        service_env: dict[str, str] = {}
+        if self.has_services():
+            records = self.ensure_services(executor, root, authored=self.authored)
+            service_env = self.service_env()
         cmd = self.command(root, scope, executor=executor, timeout=t)
+        if service_env:
+            cmd = _with_env(cmd, service_env)
         result = executor.run(cmd)
         if result.timed_out:
-            return TestRun(124, frozenset(), tail_of(result.combined), True, result.duration_s)
+            return TestRun(
+                124,
+                frozenset(),
+                tail_of(result.combined),
+                True,
+                result.duration_s,
+                services=records,
+            )
         run = self.parse(result, root)
         parse_error = run.parse_error
         # FAIL CLOSED on unattributed failure: a non-zero exit with no parsed failing
@@ -348,7 +442,105 @@ class BaseRunner:
             False,
             result.duration_s,
             parse_error,
+            records,
         )
+
+    def run_for(
+        self,
+        executor: Executor,
+        root: Path,
+        scope: Sequence[str],
+        *,
+        timeout: int = 0,
+        authored: str | None,
+    ) -> TestRun:
+        """:meth:`run` with the task's author date bound for the call (era
+        selection of a declared service), the previous binding restored after.
+        Additive: every language runner's ``run`` override keeps its signature."""
+        previous = self.authored
+        self.authored = authored
+        try:
+            return self.run(executor, root, scope, timeout=timeout)
+        finally:
+            self.authored = previous
+
+    # --- services the oracle needs (runner_opts.services) --------------------------
+    def has_services(self) -> bool:
+        return bool(self.opts.get("services"))
+
+    def service_specs(self) -> tuple[ServiceSpec, ...]:
+        """The declared services, validated. A malformed declaration is a harness
+        error (:class:`ServiceUnavailable`), never a verdict."""
+        try:
+            return parse_services(self.opts)
+        except ValueError as exc:
+            raise ServiceUnavailable(f"runner_opts.services: {exc}") from exc
+
+    def ensure_services(
+        self,
+        executor: Executor,
+        root: Path,
+        *,
+        authored: str | None = None,
+        on_command: Callable[[Command, ExecResult], object] | None = None,
+        warm: bool = False,
+    ) -> tuple[ServiceRecord, ...]:
+        """Every declared service healthy for the variant the task needs; ``()``
+        when none is declared.
+
+        One :class:`~crb.core.services.ServiceSession` per runner, keyed to the
+        repository *clone* (``root`` may be a trial worktree; fixtures and
+        ``generate`` come from the clone every worktree shares). Fixtures stage
+        under ``<env_dir>/services``. ``warm`` is the setup phase: stage every
+        variant and start the latest era so the record names what will answer.
+        Under a sandbox executor this refuses (the tests could not reach the
+        service through ``--network=none``); the caller stops, nothing is graded.
+        """
+        specs = self.service_specs()
+        if not specs:
+            return ()
+        if executor.name == "docker":
+            raise ServiceUnavailable(SERVICES_SANDBOX_REFUSED)
+        clone = clone_root_of(Path(root))
+        session = self._services
+        if session is None or session.clone != clone:
+            if session is not None:
+                session.close()
+            session = ServiceSession(
+                specs,
+                executor,
+                clone=clone,
+                repo=self.config.name,
+                state_dir=(self.env_dir / "services") if self.env_dir is not None else None,
+            )
+            self._services = session
+        session.executor = executor
+        session.on_command = on_command
+        try:
+            if warm:
+                session.prepare()
+                return session.ensure(None, latest=True)
+            if authored is None and any(s.needs_era for s in specs):
+                authored = authored_of(Path(root))
+            return session.ensure(authored)
+        finally:
+            session.on_command = None
+
+    def service_env(self) -> dict[str, str]:
+        """The environment the active services export to the test command."""
+        return dict(self._services.env) if self._services is not None else {}
+
+    def service_records(self) -> tuple[ServiceRecord, ...]:
+        return self._services.records if self._services is not None else ()
+
+    def service_logs(self) -> dict[str, str]:
+        """Redacted, capped log tails of services that stopped or failed health."""
+        return dict(self._services.logs) if self._services is not None else {}
+
+    def close_services(self) -> None:
+        """Stop the services this runner started (``keep: true`` ones stay up)."""
+        if self._services is not None:
+            self._services.close()
 
     # --- oracle validity ---------------------------------------------------------
     def is_valid_oracle(self, root: Path, test_file: str) -> bool:
@@ -361,7 +553,12 @@ class BaseRunner:
             return False
 
     def describe(self) -> dict[str, Any]:
-        return {"runner": self.name}
+        """Apparatus description: the runner and the service instances it is using."""
+        out: dict[str, Any] = {"runner": self.name}
+        records = self.service_records()
+        if records:
+            out["services"] = [r.to_dict() for r in records]
+        return out
 
     # --- belt 5: the repository's own formatter / linter (ADR-0011) ------------
     def lint_plan(self, root: Path, executor: Executor) -> LintPlan | None:
@@ -422,8 +619,11 @@ class BaseRunner:
 
     def finish_setup(self, session: SetupSession, root: Path, env_dir: Path) -> SetupResult:
         """Close a session: ok iff the step that stopped the phase passed AND the
-        environment reads ready. Runners stop at the first unrecovered failure, so
-        the last step is decisive; an earlier failure means a fallback recovered it."""
+        environment reads ready AND the oracle's services (if declared) are up.
+        Runners stop at the first unrecovered failure, so the last step is decisive;
+        an earlier failure means a fallback recovered it. The service commands are
+        recorded as steps too; a service that cannot be provided fails the phase
+        with its reason (and the bit-rot hint when a pinned build is what broke)."""
         steps = session.steps
         if steps and not steps[-1].ok:
             return session.result(False, failed_step_note(steps))
@@ -435,7 +635,18 @@ class BaseRunner:
             if not recovered
             else ("ready (step " + ", ".join(map(str, recovered)) + " failed; fallback succeeded)")
         )
-        return session.result(True, note)
+        if not self.has_services():
+            return session.result(True, note)
+        if self.env_dir is None:
+            self.env_dir = Path(env_dir)
+        try:
+            records = self.ensure_services(
+                session.executor, root, on_command=session.record, warm=True
+            )
+        except ServiceUnavailable as exc:
+            return session.result(False, f"services: {exc}")
+        named = ", ".join(f"{r.name}@{r.variant}" for r in records)
+        return session.result(True, f"{note}; services: {named}", records)
 
 
 _FAIL_LINE = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.M)
