@@ -455,7 +455,7 @@ def test_grade_gold_edit_is_clean_and_ledgered(
     assert row.evidence_pack_hash == d["evidence_pack_hash"]
     assert row.builder == "human-gold" and row.model == "gold" and row.provider == "git"
     assert row.run_id == "t1" and row.trial == "r1" and row.actor == "pytest"
-    assert row.belt_set == "v4" and row.provenance == "measured" and row.gold_clean is True
+    assert row.belt_set == "v5" and row.provenance == "measured" and row.gold_clean is True
     assert false_q1_total(rows) == 0
 
 

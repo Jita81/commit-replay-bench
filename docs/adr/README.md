@@ -20,6 +20,7 @@ and be recorded here.
 | [0008](0008-stdlib-core-and-downward-layers.md) | Standard-library core and downward-only layers | Accepted | 2026-09-13 |
 | [0009](0009-text-level-mutators.md) | Text-level mutators for the non-Python languages (`uncompilable` excluded; family stamped) | Accepted | 2026-09-13 |
 | [0010](0010-polyglot-negative-controls.md) | Polyglot negative controls (Go + JavaScript text transforms; env_poison escape = belt-1 gap) | Accepted | 2026-09-14 |
+| [0011](0011-repo-lint-belt.md) | Belt 5: the repository's own formatter/linter (`repo_lint_clean`; apparatus 2.2, belt set `v5`, failure kind `lint`; amends ADR-0001 and ADR-0002 rule 2) | Accepted | 2026-09-14 |
 
 ## Format
 

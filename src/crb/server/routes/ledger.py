@@ -33,8 +33,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.evidence import canonical_json, sha256_text
 from crb.core.federated import export_abstract
-from crb.core.grade import FalseQ1Violation
-from crb.core.ledger import GENESIS_HASH, GradeRow, LedgerIntegrityError, verify_chain
+from crb.core.grade import BELT_NAMES, OPTIONAL_BELT_NAMES, FalseQ1Violation
+from crb.core.ledger import (
+    GENESIS_HASH,
+    RECORDED_BELTS,
+    GradeRow,
+    LedgerIntegrityError,
+    verify_chain,
+)
 from crb.core.redact import redact
 from crb.server.auth import AdminDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
@@ -66,8 +72,17 @@ def _now() -> str:
 
 def row_hash_from_stored(g: Grade) -> str:
     """Recompute ``row_hash`` from the stored columns — the same canonical body
-    :meth:`GradeRow.body` produces (every field but ``row_hash``; ``labels`` as a dict)."""
-    body = {k: v for k, v in grade_to_dict(g).items() if k not in ("row_hash", "seq")}
+    :meth:`GradeRow.body` produces: every field but ``row_hash``, ``labels`` as a dict,
+    minus any optional belt the row's ``belt_set`` does not record (ADR-0011: a
+    ``v4`` / ``v3-legacy`` row never hashed ``repo_lint_clean``). An unknown ``belt_set``
+    (a tampered row) hashes every belt and fails the comparison as it should."""
+    recorded = RECORDED_BELTS.get(g.belt_set, BELT_NAMES)
+    unrecorded = set(OPTIONAL_BELT_NAMES) - set(recorded)
+    body = {
+        k: v
+        for k, v in grade_to_dict(g).items()
+        if k not in ("row_hash", "seq") and k not in unrecorded
+    }
     return sha256_text(canonical_json(body))
 
 

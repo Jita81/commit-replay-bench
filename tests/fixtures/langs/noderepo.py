@@ -22,6 +22,7 @@ and ``build`` symlinks it into the repo (``.gitignore`` hides the link, and
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 from crb.core.spec import BELT_BARE, Language, RepoConfig
@@ -118,8 +119,13 @@ def _package_json(tool: str) -> str:
 
 
 def build(
-    tmp_path: Path, tool: str = "node", *, node_modules: Path | None = None
+    tmp_path: Path,
+    tool: str = "node",
+    *,
+    node_modules: Path | None = None,
+    extra: Mapping[str, str] | None = None,
 ) -> tuple[Path, str]:
+    """``extra`` = more files in the initial commit (a lint config the parent carries)."""
     if tool not in TOOLS:
         raise ValueError(f"tool must be one of {TOOLS}, got {tool!r}")
     initial = {
@@ -127,6 +133,7 @@ def build(
         ".gitignore": "node_modules\n",
         SRC_ADD: add_source(tool),
         test_add(tool): test_module("add", "calc", "1, 2", "3", ADD_TEST_ID, tool),
+        **(extra or {}),
     }
     feat = {
         SRC_SUB: src_module("sub", "a - b", tool),

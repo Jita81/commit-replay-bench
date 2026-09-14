@@ -370,7 +370,9 @@ class TestTasks:
             "target_green": True,
             "no_new_failures": True,
             "source_changed": True,
+            "repo_lint_clean": None,  # v5 row, no linter configured: not evaluated
         }
+        assert t3["belt_set"] == "v5"
         assert t3["cost_usd"] == pytest.approx(0.024) and t3["latency_s"] == pytest.approx(84.0)
         assert len(t3["pack_hashes"]) == 2 and len(t3["row_ids"]) == 2
         assert (

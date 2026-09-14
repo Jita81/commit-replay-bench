@@ -177,10 +177,12 @@ class TestCapabilityMap:
             assert set(c) >= CELL_KEYS
             assert set(c["failure_split"]) == {
                 "builder_red",
+                "lint",
                 "budget",
                 "protocol",
                 "harness",
                 "disqualified",
+                "lint_evaluated",
             }
             assert c["capability_class"] != "*" and c["size"] != "*" and c["language"] == "*"
 
@@ -213,16 +215,18 @@ class TestCapabilityMap:
         assert "1 measurement control(s) graded clean" in str(c["reason"])
         assert f"(controls run {RUN_IDS['controls'][:8]})" in str(c["reason"])
         assert c["false_q1"] == 0 and c["verification_tier"] == "automated-pass"
-        assert c["apparatus_versions"] == [APPARATUS_VERSION] and c["belt_set"] == "v4"
+        assert c["apparatus_versions"] == [APPARATUS_VERSION] and c["belt_set"] == "v5"
         assert c["cost_usd_mean"] == pytest.approx(0.012) and c["latency_s_mean"] == 42.0
         assert c["cost_known"] is True and c["oracle_strength_mean"] is None
         # the split: 2 builder_red rows, no instrument rows → model point = all-rows point
         assert c["failure_split"] == {
             "builder_red": 2,
+            "lint": 0,
             "budget": 0,
             "protocol": 0,
             "harness": 0,
             "disqualified": 0,
+            "lint_evaluated": 0,  # the seed's repo configures no linter: belt 5 never evaluated
         }
         assert c["n_builder_red"] == 2 and c["model_n"] == 40 and c["model_point"] == 0.95
         assert c["model_ci_low"] == c["ci_low"] and c["model_ci_high"] == c["ci_high"]
@@ -350,10 +354,12 @@ class TestCapabilityMap:
         # 1 builder_red + 1 harness (the failed run's sandbox error) → model 2/3 vs all-rows 2/4
         assert c["failure_split"] == {
             "builder_red": 1,
+            "lint": 0,
             "budget": 0,
             "protocol": 0,
             "harness": 1,
             "disqualified": 0,
+            "lint_evaluated": 0,
         }
         assert c["point"] == 0.5 and c["model_n"] == 3 and c["model_point"] == round(2 / 3, 4)
         assert c["model_ci_low"] < c["model_point"] < c["model_ci_high"]
@@ -552,7 +558,15 @@ class TestFailureSplit:
         assert d["n"] == d["clean"] + d["builder_red"] + d["budget"] + d["protocol"] + d["harness"]
         # legacy rows name no builder-priced cost: 44 native rows known, 6 census rows unknown
         assert d["cost_known"] == 44 and d["cost_unknown"] == 6
-        assert d["kinds"] == ["", "builder_red", "budget", "protocol", "harness", "disqualified"]
+        assert d["kinds"] == [
+            "",
+            "builder_red",
+            "lint",
+            "budget",
+            "protocol",
+            "harness",
+            "disqualified",
+        ]
 
     def test_run_split(self, env: Env) -> None:
         d = env.get(f"/failure-split?repo={ALPHA}&run_id={RUN_IDS['succeeded']}").json()

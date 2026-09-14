@@ -26,7 +26,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from crb.core.ledger import BELT_SET_V3_LEGACY
+from crb.core.ledger import BELT_SET_V3_LEGACY, BELT_SET_V5
 from crb.core.routing import POLICY_VERSION
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.observability import metrics, probes
@@ -95,12 +95,15 @@ def probe_append_only(factory: sessionmaker[Session]) -> ProbeResult:
 
 
 def ledger_counts(factory: sessionmaker[Session]) -> tuple[int, int]:
-    """``(rows, false_q1)`` — a clean row whose recorded belts are not all True is false-Q1."""
+    """``(rows, false_q1)`` — a clean row whose recorded belts are not all True is false-Q1
+    (belt 5 counts only where recorded — ``v5`` — and only when it rejected: ``NULL``
+    there is *not evaluated*, ADR-0011)."""
     not_all_true = or_(
         Grade.tests_unmodified.is_not(True),
         Grade.target_green.is_not(True),
         Grade.no_new_failures.is_not(True),
         (Grade.belt_set != BELT_SET_V3_LEGACY) & Grade.source_changed.is_not(True),
+        (Grade.belt_set == BELT_SET_V5) & Grade.repo_lint_clean.is_(False),
     )
     with factory() as s:
         rows = int(s.execute(select(func.count(Grade.seq))).scalar_one())

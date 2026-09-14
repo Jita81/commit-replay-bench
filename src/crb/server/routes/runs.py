@@ -548,6 +548,7 @@ def run_task_rows(session: Session, run_id: str) -> list[RunTaskRow]:
                 first_pass_clean=bool(rs[0].clean),
                 disqualified=any(g.disqualified for g in rs),
                 error=next((g.error for g in reversed(rs) if g.error), ""),
+                belt_set=decisive.belt_set,
                 belts=_belts_of(decisive),
                 cost_usd=round(sum(g.cost_usd for g in rs), 6),
                 latency_s=round(sum(g.latency_s for g in rs), 3),

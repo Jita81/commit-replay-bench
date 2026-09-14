@@ -12,6 +12,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from crb.core.execution import Command, ExecResult, Executor
+from crb.core.lint import LintPlan, rust_plan
 from crb.core.runners.base import (
     BaseRunner,
     SetupResult,
@@ -65,6 +66,25 @@ class CargoRunner(BaseRunner):
             )
         )
         return self.finish_setup(session, root, Path(env_dir))
+
+    # --- belt 5 -------------------------------------------------------------------
+    def _lint_env(self, root: Path, executor: Executor) -> dict[str, str]:
+        env = {
+            "CARGO_TARGET_DIR": "/work/target"
+            if executor.name == "docker"
+            else str(Path(root) / "target"),
+            "CARGO_TERM_COLOR": "never",
+        }
+        if executor.name == "docker":
+            env["CARGO_HOME"] = str(self.opts.get("cargo_home", "/tmp/cargo"))
+        return env
+
+    def detect_lint(self, root: Path, executor: Executor) -> LintPlan | None:
+        """``cargo fmt --check`` / ``cargo clippy -- -D warnings`` (crate-wide,
+        offline) when the repository configures them — clap: ``.clippy.toml`` and the
+        ``rustfmt`` / ``clippy`` jobs of ``ci.yml``."""
+        cargo = executor.tool("cargo", self.opts.get("cargo"))
+        return rust_plan(root, cargo, self._lint_env(root, executor))
 
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
         # tests/foo.rs -> integration test binary "foo"; tests/builder/env.rs -> "builder"

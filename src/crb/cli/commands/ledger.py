@@ -348,7 +348,10 @@ def cmd_stats(args: argparse.Namespace) -> int:
         "point": "clean / n",
         "ci": "Wilson score interval, 95%",
         "false_q1": "clean rows whose recorded belts are not all True (must be 0)",
-        "belt_sets": "v4 = four belts; v3-legacy = three belts (source_changed not measured)",
+        "belt_sets": (
+            "v5 = five belts (repo_lint_clean may be null: no linter configured); "
+            "v4 = four belts; v3-legacy = three belts (source_changed not measured)"
+        ),
     }
     out = {
         "ledger": str(ledger.path),

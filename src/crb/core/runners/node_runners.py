@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from crb.core.execution import Command, ExecResult, Executor
+from crb.core.lint import LintPlan, js_plan
 from crb.core.runners.base import (
     BARE,
     BaseRunner,
@@ -122,6 +123,15 @@ class _NodeBase(BaseRunner):
             )
         )
         return self.finish_setup(session, root, Path(env_dir))
+
+    # --- belt 5 -------------------------------------------------------------------
+    def detect_lint(self, root: Path, executor: Executor) -> LintPlan | None:
+        """``eslint`` then ``prettier --check`` when configured, else ``standard``
+        when ``scripts.lint`` names it (koa: ``"lint": "standard"``, CI ``npm run
+        lint``). Tools resolve from ``node_modules/.bin`` (the image's PATH under
+        docker); a binary without its config is not evidence."""
+        bin_dir = None if executor.name == "docker" else Path(root) / "node_modules" / ".bin"
+        return js_plan(root, bin_dir)
 
     def _bin(self, root: Path, executor: Executor, tool: str) -> str:
         if executor.name == "docker":

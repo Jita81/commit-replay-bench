@@ -91,7 +91,7 @@ describe('RoutingPage — reason codes, the controls verdict and the split (A2)'
     // the split and the model rate travel with each decision
     const splits = screen.getAllByTestId('failure-split')
     expect(splits.map((s) => s.getAttribute('aria-label'))).toEqual(
-      expect.arrayContaining(['red 2, budget 0, protocol 0, harness 0, DQ 0', 'red 1, budget 0, protocol 0, harness 1, DQ 0']),
+      expect.arrayContaining(['red 2, lint 0, budget 0, protocol 0, harness 0, DQ 0', 'red 1, lint 0, budget 0, protocol 0, harness 1, DQ 0']),
     )
     const models = screen.getAllByTestId('model-point').map((m) => m.textContent)
     expect(models.some((t) => t?.includes('model 67%') && t.includes('(2/3)'))).toBe(true)

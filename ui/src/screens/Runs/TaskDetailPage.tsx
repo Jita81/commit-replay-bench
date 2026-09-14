@@ -32,7 +32,7 @@ export function TaskDetailPage() {
         sortValue: (r) => Number(r.clean),
         cell: (r) => (r.clean ? <Pill tone="green" glyph="✓" size="xs" label="Clean">clean</Pill> : r.disqualified ? <Pill tone="amber" glyph="⊘" size="xs" label={`Disqualified: ${r.dq_reason}`}>DQ</Pill> : <Pill tone="red" glyph="✗" size="xs" label={r.error || 'Not clean'}>no</Pill>),
       },
-      { key: 'belts', header: 'Belts', cell: (r) => <BeltPills belts={beltsOf(r)} showNames={false} /> },
+      { key: 'belts', header: 'Belts', cell: (r) => <BeltPills belts={beltsOf(r)} beltSet={r.belt_set} showNames={false} /> },
       { key: 'cost', header: 'Cost', numeric: true, sortValue: (r) => r.cost_usd, cell: (r) => fmtUsd(r.cost_usd) },
       { key: 'latency', header: 'Latency', numeric: true, sortValue: (r) => r.latency_s, cell: (r) => fmtSeconds(r.latency_s) },
       { key: 'prov', header: 'Provenance', cell: (r) => <Provenance apparatus={r.apparatus_version} beltSet={r.belt_set} provenance={r.provenance} />, hideBelowMd: true },

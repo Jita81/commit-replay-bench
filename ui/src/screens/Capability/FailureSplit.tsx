@@ -11,9 +11,9 @@ import { KIND_DISPLAY, controlsDisplay, type ControlsVerdict, type FailureSplit 
  */
 export function FailureSplitPills({ split, size = 'xs', ...rest }: { split: FailureSplit; size?: 'xs' | 'sm'; 'data-testid'?: string }) {
   return (
-    <span className="num inline-flex flex-wrap items-center gap-1" data-testid={rest['data-testid'] ?? 'failure-split'} aria-label={KIND_DISPLAY.map((k) => `${k.short} ${split[k.key]}`).join(', ')}>
+    <span className="num inline-flex flex-wrap items-center gap-1" data-testid={rest['data-testid'] ?? 'failure-split'} aria-label={KIND_DISPLAY.map((k) => `${k.short} ${split[k.key] ?? 0}`).join(', ')}>
       {KIND_DISPLAY.map((k) => {
-        const n = split[k.key]
+        const n = split[k.key] ?? 0
         return (
           <span key={k.key} title={k.long} data-testid={`kind-${k.key}`} className={`inline-flex items-baseline gap-0.5 ${size === 'xs' ? 'text-[10px]' : 'text-xs'} ${n > 0 ? TONE_TEXT[k.tone] : 'text-on-surface-muted'}`}>
             <span>{k.short}</span>

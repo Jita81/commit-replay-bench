@@ -1258,6 +1258,10 @@ def controls_for_task(
                     mode=MODE_SIGHTED,
                     timeout=timeout,
                     on_event=on_event,
+                    # the controls measure the four ORACLE belts; a synthetic edit is
+                    # not written in the repo's style, so belt 5 stays unevaluated
+                    # (ADR-0011) — an escape must never hide behind a lint rejection
+                    evaluate_lint=False,
                 )
         except SandboxUnavailable:
             raise

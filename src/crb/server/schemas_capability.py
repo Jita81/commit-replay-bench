@@ -67,13 +67,16 @@ class ControlsVerdictOut(BaseModel):
 
 class FailureSplitOut(BaseModel):
     """Counts by :attr:`crb.core.ledger.GradeRow.failure_kind`. ``builder_red +
-    budget + protocol + harness + clean == n``; ``disqualified`` sits outside n."""
+    lint + budget + protocol + harness + clean == n``; ``disqualified`` sits outside n.
+    ``lint_evaluated`` is how many of the n rows carried belt 5 at all (ADR-0011)."""
 
     builder_red: int
     budget: int
     protocol: int
     harness: int
     disqualified: int
+    lint: int = 0
+    lint_evaluated: int = 0
 
 
 class CapabilityCellSplitOut(CapabilityCellOut):
@@ -87,6 +90,8 @@ class CapabilityCellSplitOut(CapabilityCellOut):
     n_protocol: int
     n_harness: int
     n_disqualified: int
+    n_lint: int = 0
+    n_lint_evaluated: int = 0
     model_n: int
     model_point: float | None
     model_ci_low: float
@@ -144,6 +149,8 @@ class FailureSplitResponse(BaseModel):
     harness: int
     disqualified: int
     rows: int
+    lint: int = 0
+    lint_evaluated: int = 0
     point: float
     ci_low: float
     ci_high: float

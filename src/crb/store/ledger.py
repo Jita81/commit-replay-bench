@@ -133,7 +133,7 @@ class DbLedger:
             labels = dict(r.labels)
             if r.row_hash:
                 labels.setdefault("source_row_hash", r.row_hash)
-            d = r.body()
+            d = r.fields()
             d["labels"] = labels
             d["prev_hash"] = ""
             prepared.append(GradeRow(**d))

@@ -51,13 +51,15 @@ def test_clean_row_with_full_evidence_is_accepted() -> None:
     assert r.clean and r.eligible and r.belts_all_true()
     assert r.row_id and len(r.row_id) == 32
     assert r.created and r.schema == lg.GRADE_SCHEMA and r.apparatus_version == APPARATUS_VERSION
-    assert r.belt_set == lg.BELT_SET_V4 and r.provenance == "measured"
+    assert r.belt_set == lg.BELT_SET_V5 and r.provenance == "measured"
     assert r.recorded_belts() == (
         "tests_unmodified",
         "target_green",
         "no_new_failures",
         "source_changed",
+        "repo_lint_clean",
     )
+    assert r.repo_lint_clean is None  # a v5 row with no linter: belt 5 not evaluated
 
 
 @pytest.mark.parametrize(
@@ -106,7 +108,75 @@ def test_v3_legacy_belt_set_ignores_source_changed() -> None:
     with pytest.raises(FalseQ1Violation):
         row(belt_set=lg.BELT_SET_V3_LEGACY, no_new_failures=False)
     with pytest.raises(ValueError, match="belt_set"):
-        row(belt_set="v5")
+        row(belt_set="v6")
+
+
+# ---------------------------------------------------------------------------
+# belt 5 (ADR-0011): recorded on v5 only; None = not evaluated; False never clean
+# ---------------------------------------------------------------------------
+
+
+def test_v5_row_belt_five_none_is_not_evaluated_and_false_is_a_false_q1() -> None:
+    assert lg.BELT_SETS == ("v5", "v4", "v3-legacy")
+    assert row(repo_lint_clean=None).clean
+    assert row(repo_lint_clean=True).clean and row(repo_lint_clean=True).belts_all_true()
+    with pytest.raises(FalseQ1Violation, match="refuses clean row"):
+        row(repo_lint_clean=False)
+    failed = row(clean=False, repo_lint_clean=False)
+    assert not failed.belts_all_true() and failed.eligible and failed.lint_only()
+    assert failed.failure_kind == lg.FAILURE_LINT
+    # lint is named only when the code otherwise works
+    red = row(clean=False, target_green=False, repo_lint_clean=False)
+    assert not red.lint_only() and red.failure_kind == lg.FAILURE_BUILDER_RED
+    assert lg.lint_only_failure({"repo_lint_clean": False}) is False
+
+
+@pytest.mark.parametrize("belt_set", [lg.BELT_SET_V4, lg.BELT_SET_V3_LEGACY])
+@pytest.mark.parametrize("value", [True, False])
+def test_pre_belt_five_rows_never_carry_belt_five(belt_set: str, value: bool) -> None:
+    """A census / v4 row is never re-interpreted: belt 5 is unrecorded there."""
+    kw: dict[str, Any] = {"belt_set": belt_set, "repo_lint_clean": value}
+    if belt_set == lg.BELT_SET_V3_LEGACY:
+        kw["source_changed"] = None
+    with pytest.raises(ValueError, match="unrecorded"):
+        row(**kw)
+    r = row(**{**kw, "repo_lint_clean": None})
+    assert "repo_lint_clean" not in r.recorded_belts() and not r.lint_only()
+    assert "repo_lint_clean" not in r.body()  # not hashed: pre-belt-5 rows verify as before
+    assert r.to_dict()["repo_lint_clean"] is None  # but written honestly as null
+
+
+def test_pre_belt_five_hashes_are_byte_identical_to_the_four_belt_apparatus() -> None:
+    """The load-bearing compatibility fact: a v4 body is exactly the pre-belt-5 body, so
+    a ledger written before ADR-0011 verifies unchanged after the upgrade."""
+    r = row(belt_set=lg.BELT_SET_V4).chained(lg.GENESIS_HASH)
+    body = r.body()
+    assert set(body) == set(lg.GradeRow.__dataclass_fields__) - {"row_hash", "repo_lint_clean"}
+    assert r.verify_hash()
+    v5 = row(belt_set=lg.BELT_SET_V5).chained(lg.GENESIS_HASH)
+    assert "repo_lint_clean" in v5.body() and v5.body()["repo_lint_clean"] is None
+    # the same facts under v4 and v5 hash differently: the belt set is part of the body
+    assert v5.row_hash != r.row_hash
+    # v5 commits to "not evaluated": flipping it to True changes the hash
+    flipped = lg.GradeRow(**{**v5.fields(), "repo_lint_clean": True})
+    assert flipped.compute_hash() != v5.row_hash
+
+
+def test_v5_rows_round_trip_through_jsonl_with_belt_five(tmp_path: Path) -> None:
+    led = lg.JsonlLedger(tmp_path / "g.jsonl")
+    led.append(row(repo_lint_clean=True))
+    led.append(row(clean=False, repo_lint_clean=False))
+    led.append(row(repo_lint_clean=None))
+    led.append(row(belt_set=lg.BELT_SET_V4))
+    rows = list(led.rows())
+    assert [r.repo_lint_clean for r in rows] == [True, False, None, None]
+    assert [r.belt_set for r in rows] == ["v5", "v5", "v5", "v4"]
+    assert [r.failure_kind for r in rows] == ["", "lint", "", ""]
+    assert led.verify() == 4
+    assert lg.false_q1_total(rows) == 0
+    lines = [json.loads(line) for line in led.path.read_text().splitlines()]
+    assert lines[1]["failure_kind"] == "lint" and lines[1]["labels"] == {}
+    assert lines[3]["repo_lint_clean"] is None and lines[3]["belt_set"] == "v4"
 
 
 def test_labels_are_copied_and_cell_key() -> None:
@@ -373,6 +443,16 @@ def test_group_by_cell_and_projections() -> None:
         ({"clean": False, "stop_reason": "done"}, lg.FAILURE_BUILDER_RED),
         ({"clean": False, "stop_reason": "no_tool_call"}, lg.FAILURE_BUILDER_RED),
         ({"clean": False}, lg.FAILURE_BUILDER_RED),
+        # belt 5: working but non-conforming code is its own kind …
+        ({"clean": False, "lint_only": True}, lg.FAILURE_LINT),
+        ({"clean": False, "lint_only": True, "stop_reason": "done"}, lg.FAILURE_LINT),
+        # … unless the attempt was cut short or the instrument failed
+        ({"clean": False, "lint_only": True, "stop_reason": "wall_clock"}, lg.FAILURE_BUDGET),
+        (
+            {"clean": False, "lint_only": True, "error": "lint: ruff: not runnable"},
+            lg.FAILURE_HARNESS,
+        ),
+        ({"clean": False, "lint_only": True, "disqualified": True}, lg.FAILURE_DISQUALIFIED),
     ],
 )
 def test_derive_failure_kind_each_branch(kw: dict[str, Any], expected: str) -> None:
@@ -689,6 +769,7 @@ def test_failure_split_counts_and_two_rates() -> None:
     s = lg.failure_split(_split_rows())
     assert s.rows == 13 and s.n == 11 and s.disqualified == 1
     assert (s.clean, s.builder_red, s.budget, s.protocol, s.harness) == (6, 1, 1, 1, 2)
+    assert s.lint == 0 and s.lint_evaluated == 0  # no row here carried belt 5
     assert s.instrument == 3
     assert s.point == pytest.approx(6 / 11) and s.ci == wilson_interval(6, 11)
     assert s.model_n == 7 and s.model_point == pytest.approx(6 / 7)
@@ -698,6 +779,7 @@ def test_failure_split_counts_and_two_rates() -> None:
     d = s.to_dict()
     assert d["n"] == 11 and d["model_n"] == 7 and d["model_point"] == round(6 / 7, 4)
     assert d["model_ci_low"] == round(s.model_ci.low, 4) and d["harness"] == 2
+    assert d["lint"] == 0 and d["lint_evaluated"] == 0
     assert lg.failure_split([]).n == 0 and lg.failure_split([]).model_point == 0.0
     with pytest.raises(ValueError, match="sum of its eligible kinds"):
         lg.FailureSplit(
@@ -711,6 +793,42 @@ def test_failure_split_counts_and_two_rates() -> None:
             rows=3,
             cost_known=0,
             cost_unknown=0,
+        )
+
+
+def test_failure_split_names_lint_and_counts_belt_five_coverage() -> None:
+    """``lint`` is a model kind (the code worked, the repo rejected it): it sits in
+    ``model_n``; ``lint_evaluated`` says how many rows carried belt 5 at all."""
+    rows = [
+        row(repo_lint_clean=True),
+        row(repo_lint_clean=True),
+        row(clean=False, repo_lint_clean=False),  # lint
+        row(clean=False, target_green=False, repo_lint_clean=None),  # builder_red, no linter
+        row(repo_lint_clean=None),  # clean, no linter
+        row(belt_set=lg.BELT_SET_V4),  # clean, belt 5 unrecorded
+        row(clean=False, error="lint: ruff: not runnable (rc=127)", repo_lint_clean=False),
+    ]
+    s = lg.failure_split(rows)
+    assert s.n == 7 and s.clean == 4 and s.lint == 1 and s.builder_red == 1 and s.harness == 1
+    assert s.lint_evaluated == 4  # True, True, False(lint), False(harness) — not the Nones
+    assert s.model_n == 6 and s.model_point == pytest.approx(4 / 6)
+    assert s.to_dict()["lint"] == 1 and s.to_dict()["lint_evaluated"] == 4
+    c = lg.cell_stats(rows)
+    assert c.n_lint == 1 and c.n_lint_evaluated == 4 and c.model_n == 6
+    assert c.to_dict()["n_lint"] == 1 and c.to_dict()["n_lint_evaluated"] == 4
+    with pytest.raises(ValueError, match="sum of its eligible kinds"):
+        lg.FailureSplit(
+            n=2,
+            clean=1,
+            builder_red=0,
+            budget=0,
+            protocol=0,
+            harness=0,
+            disqualified=0,
+            rows=2,
+            cost_known=0,
+            cost_unknown=0,
+            lint=0,
         )
 
 

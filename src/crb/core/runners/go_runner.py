@@ -14,6 +14,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from crb.core.execution import Command, ExecResult, Executor
+from crb.core.lint import LintPlan, go_plan
 from crb.core.runners.base import (
     BaseRunner,
     SetupResult,
@@ -66,6 +67,12 @@ class GoRunner(BaseRunner):
             )
         )
         return self.finish_setup(session, root, Path(env_dir))
+
+    # --- belt 5 -------------------------------------------------------------------
+    def detect_lint(self, root: Path, executor: Executor) -> LintPlan | None:
+        """``gofmt -l`` — shipped with every Go toolchain and enabled by cobra's
+        ``.golangci.yml`` (``formatters: gofmt``) and ``Makefile fmt``."""
+        return go_plan(root, executor.tool("gofmt", self.opts.get("gofmt")))
 
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
         pkgs = set()

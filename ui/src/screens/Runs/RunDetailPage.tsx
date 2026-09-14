@@ -137,7 +137,7 @@ function TaskTable({ runId, poll, onOpenPack }: { runId: string; poll: boolean; 
         sortValue: (t) => (t.clean ? 2 : t.disqualified ? 1 : 0),
         cell: (t) =>
           t.clean ? (
-            <Pill tone="green" glyph="✓" size="xs" label="Clean: all four belts held">clean</Pill>
+            <Pill tone="green" glyph="✓" size="xs" label="Clean: every recorded belt held">clean</Pill>
           ) : t.disqualified ? (
             <Pill tone="amber" glyph="⊘" size="xs" label="Disqualified — excluded from the denominator">DQ</Pill>
           ) : t.error ? (
@@ -146,7 +146,7 @@ function TaskTable({ runId, poll, onOpenPack }: { runId: string; poll: boolean; 
             <Pill tone="red" glyph="✗" size="xs" label="Not clean">not clean</Pill>
           ),
       },
-      { key: 'belts', header: 'Belts (last trial)', cell: (t) => <BeltPills belts={t.belts} showNames={false} /> },
+      { key: 'belts', header: 'Belts (last trial)', cell: (t) => <BeltPills belts={t.belts} beltSet={t.belt_set ?? null} showNames={false} /> },
       { key: 'cost', header: 'Cost', numeric: true, sortValue: (t) => t.cost_usd, cell: (t) => fmtUsd(t.cost_usd), hideBelowMd: true },
       { key: 'latency', header: 'Latency', numeric: true, sortValue: (t) => t.latency_s, cell: (t) => fmtSeconds(t.latency_s), hideBelowMd: true },
       {
