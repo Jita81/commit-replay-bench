@@ -463,10 +463,12 @@ class TestNodeFixMatrix:
         assert row.verdict == nc.VERDICT_ESCAPE and nodefix.SRC_MUL in row.note
 
     def test_env_poison_takes_effect_through_the_runner_hook(self, fix_matrix, tool):
-        """The vector must actually flip the target: the graded ``src/mul.js`` is
-        byte-identical to the parent and the green (or the DQ once belt 1 covers test
-        infrastructure — workstream A1) comes from the hook. ``red`` here would mean the
-        poison did NOT take effect, which is the one outcome that must not pass."""
+        """The hook file is test infrastructure, so belt 1b disqualifies the row before a
+        test runs (``caught by belt 1: test infrastructure modified: [<hook>]``) with the
+        graded ``src/mul.js`` byte-identical to the parent. A ``clean`` row is the other
+        acceptable outcome — an ESCAPE the note labels a belt-1 coverage gap to report
+        (the vectors were measured to flip the target before belt 1b landed). ``red``
+        would mean the poison never took effect: the one outcome that must not pass."""
         if tool == "node":
             pytest.skip("node --test has no collection-time hook (asserted above)")
         row = fix_matrix[nc.ENV_POISON]
