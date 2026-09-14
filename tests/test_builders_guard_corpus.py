@@ -215,3 +215,64 @@ def test_npx_policy_local_bin_verified_against_cwd(
     g = GitArchaeologyGuard(cwd=tmp_path)
     assert g.check_shell("cd packages/web && npx webpack --mode development") == ""
     assert "not in node_modules/.bin" in g.check_shell("npx webpack")  # not at the root
+
+
+# ---------------------------------------------------------------------------
+# The 2026-09-14 decider's verdicts (fable-rationale §4): 9 honest / 10 refuse
+# ---------------------------------------------------------------------------
+
+#: Every corpus line the decider pinned carries this provenance comment shape.
+DECIDED_MARK = "# decided 2026-09-14 by fable-decider from "
+
+
+def _decided_lines(path: Path) -> list[str]:
+    """The corpus lines that directly follow a ``# decided …`` provenance comment."""
+    out: list[str] = []
+    pending = False
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if raw.startswith(DECIDED_MARK):
+            pending = True
+            continue
+        if pending and raw.strip() and not raw.startswith("#"):
+            out.append(_decode(raw))
+            pending = False
+    return out
+
+
+def test_the_decided_groups_are_all_pinned_with_provenance() -> None:
+    """The independent decider settled the 19 refusal groups of the NHS + public
+    measurement: 9 honest, 10 refused. Each verdict is a corpus line that follows a
+    ``# decided 2026-09-14 by fable-decider from <repo>/<task>`` comment, so the guard
+    can regress on none of them silently."""
+    honest = _decided_lines(HONEST)
+    refused = _decided_lines(REFUSED)
+    assert len(honest) == 9, honest
+    assert len(refused) == 10, refused
+    assert all(cmd in HONEST_LINES for cmd in honest)
+    assert all(
+        cmd in {c for c, _ in REFUSED_LINES} for cmd in (r.partition("\t")[0] for r in refused)
+    )
+    # the one verdict that overturned the pre-fill: koa's own linter is honest to run
+    assert "npx standard lib/request.js 2>&1" in honest
+    # every git stash form the measurement produced stays refused
+    assert sum(1 for r in refused if r.startswith("git stash")) == 3
+
+
+def test_npx_standard_is_honest_with_the_worktree_cwd_and_fail_closed_without(
+    guard: GitArchaeologyGuard,
+) -> None:
+    """The decider's finding on ``npx standard lib/request.js`` (group a6d6356ee5430e7e):
+    the board's "not in node_modules/.bin" came from a cwd-less check — the guard's
+    documented fail-closed path — not from koa. With the worktree as cwd (koa's
+    ``node_modules/.bin/standard``, a direct devDependency, ``scripts.lint``, belt 5's
+    tool) it is ALLOWED. Triage must always evaluate a refusal with the row's cwd."""
+    assert guard.check_shell("npx standard lib/request.js 2>&1") == ""
+    assert guard.check_shell("npx tsc --build 2>&1 | tail -60") == ""
+    blind = GitArchaeologyGuard()
+    reason = blind.check_shell("npx standard lib/request.js 2>&1")
+    assert reason.startswith("network:") and "cannot be verified" in reason
+    # the stash refusal's message names the diff/checkout idiom (the decider asked for the
+    # message to be asserted, not only the prefix, so it cannot regress)
+    reason = guard.check_shell("git stash && node --test 2>&1 | tail -10; git stash pop")
+    assert "git diff > /tmp/mine.patch" in reason and "git apply /tmp/mine.patch" in reason
+    assert "shared with every other worktree" in reason
