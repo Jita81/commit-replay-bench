@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select, text
 
-from crb.core.ledger import GENESIS_HASH, LedgerIntegrityError
+from crb.core.ledger import BELT_SET_V5, GENESIS_HASH, LedgerIntegrityError
 from crb.core.version import APPARATUS_VERSION
 from crb.server.routes.runs import system_trace_id
 from crb.server.routes.signoffs import signoff_hash, verify_signoff_rows
@@ -549,13 +549,15 @@ class TestPreview:
         )
         assert ev["ci_low"] == pytest.approx(0.835, abs=0.001) and ev["ci_high"] > 0.95
         assert ev["false_q1"] == 0 and ev["oracle_strength"] is None
-        assert ev["apparatus_versions"] == [APPARATUS_VERSION] and ev["belt_sets"] == ["v4"]
+        assert ev["apparatus_versions"] == [APPARATUS_VERSION] and ev["belt_sets"] == [BELT_SET_V5]
         assert ev["failure_split"] == {
             "builder_red": 2,
             "budget": 0,
             "protocol": 0,
             "harness": 0,
             "disqualified": 0,
+            "lint": 0,
+            "lint_evaluated": 0,
         }
         assert ev["model_n"] == 40 and ev["model_point"] == 0.95
         # the controls verdict (k of N, escapes, run id, date) and the route + reason

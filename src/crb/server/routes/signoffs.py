@@ -58,6 +58,7 @@ from crb.core.capability import WILDCARD, CapabilityCell, empty_cell, key_matche
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.ledger import (
     BELT_SET_V3_LEGACY,
+    BELT_SET_V5,
     CELL_FIELDS,
     GENESIS_HASH,
     CellKey,
@@ -144,6 +145,8 @@ FALSE_Q1_PREDICATE = or_(
     Grade.target_green.is_not(True),
     Grade.no_new_failures.is_not(True),
     (Grade.belt_set != BELT_SET_V3_LEGACY) & Grade.source_changed.is_not(True),
+    # belt 5 exists only from v5 on: a recorded False is a violation, an absent value is not
+    (Grade.belt_set == BELT_SET_V5) & Grade.repo_lint_clean.is_(False),
 )
 
 
