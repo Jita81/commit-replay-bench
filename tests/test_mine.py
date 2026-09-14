@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
+import stat
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -10,11 +13,23 @@ import pytest
 
 from crb.core import mine as m
 from crb.core.execution import LocalExecutor
+from crb.core.git import GitRepo
+from crb.core.lint import LintRun, LintStep
 from crb.core.runners import base as rb
+from crb.core.runners import get_runner
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import POOL_HARD, POOL_STANDARD, Language, RepoConfig
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+
+try:  # tests/ is a package only if the conftest owner made it one
+    from tests import conftest_langs as langs
+except ImportError:  # pragma: no cover — layout-dependent
+    import conftest_langs as langs  # type: ignore[no-redef]
+
+_gorepo = langs.fixture_module("gorepo")
+_pyrepo_min = langs.fixture_module("pyrepo_min")
+_fx = langs.fixture_module("__init__")
 
 Events = list[tuple[str, dict[str, Any]]]
 
@@ -140,6 +155,8 @@ def test_qualify_produces_a_gold_clean_task(
         "baseline_failing": 1,
     }
     assert events[2][1]["clean"] is True
+    # no linter configured for the fixture: belt 5 was not evaluated on the gold
+    assert events[2][1]["lint"] is None
 
 
 def test_qualify_without_gold_leaves_gold_clean_unset(
@@ -295,7 +312,7 @@ def test_gold_check_false_when_gold_breaks_the_belt(
     assert task.gold_clean is False
     assert task.gold_note == "gold introduced 2 belt failure(s)"
     gold_events = [p for k, p in events if k == "mine.gold"]
-    assert gold_events == [{"sha": sha, "clean": False, "note": task.gold_note}]
+    assert gold_events == [{"sha": sha, "clean": False, "note": task.gold_note, "lint": None}]
 
 
 def test_gold_check_false_when_gold_target_not_green(
@@ -375,7 +392,10 @@ def test_gold_check_never_credits_on_harness_error(
         assert task.gold_clean is False
         assert task.gold_note == "gold error: RuntimeError: runner exploded"
         assert events == [
-            ("mine.gold", {"sha": pyrepo.feat_sha, "clean": False, "note": task.gold_note})
+            (
+                "mine.gold",
+                {"sha": pyrepo.feat_sha, "clean": False, "note": task.gold_note, "lint": None},
+            )
         ]
     finally:
         ws.remove()
@@ -503,3 +523,254 @@ def test_mined_task_serialises_both_class_axes_and_survives_a_label(
         k: v for k, v in d.items() if k not in {"capability_class", "intent", "class_source"}
     }
     assert TaskSpec.from_dict(labelled.to_dict()) == labelled
+
+
+# ---------------------------------------------------------------------------
+# gold_check: belt 5 on the gold (ADR-0011 follow-up)
+# ---------------------------------------------------------------------------
+#
+# The maintainers' own patch must pass the repository's own linter too. A gold that
+# fails belt 5 is ``gold_clean=False`` with ``gold_note="gold fails belt 5 (<detected>): …"``
+# so pre-existing lint debt is EXCLUDED from the denominator rather than counted against
+# the builder. A linter that cannot run is a harness error (never a pass); no linter, or
+# nothing lintable, leaves belt 5 not evaluated and the gold verdict unchanged.
+
+
+def _lint_script(path: Path, body: str) -> Path:
+    """An executable POSIX shell script standing in for a repository's linter."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+def _qualify_with_lint(
+    pyrepo: pr.PyRepo, lint: dict[str, Any], tmp_path: Path
+) -> tuple[m.MineOutcome, Events]:
+    cfg = pr.default_config(lint=lint)
+    cand = next(c for c in m.iter_candidates(pyrepo.repo, cfg) if c.sha == pyrepo.feat_sha)
+    events, on_event = _collector()
+    out = m.qualify(
+        pyrepo.repo,
+        cfg,
+        cand,
+        runner=get_runner(cfg),
+        executor=LocalExecutor(),
+        scratch=tmp_path / "scratch",
+        on_event=on_event,
+    )
+    return out, events
+
+
+def test_gold_check_declared_linter_rejecting_the_gold_marks_it_dirty(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A declared ``RepoConfig.lint`` that rejects the maintainers' own file: the task
+    is kept, ``gold_clean=False``, and the note names belt 5 and the detected plan."""
+    script = _lint_script(tmp_path / "bin" / "house-lint", 'echo "debt in $@"\nexit 1\n')
+    out, events = _qualify_with_lint(pyrepo, {"command": [str(script)]}, tmp_path)
+    task = out.task
+    assert task is not None and task.red_checked is True
+    assert task.gold_clean is False
+    assert task.gold_note == "gold fails belt 5 (config): config rejected 1 changed file(s)"
+    gold = [p for k, p in events if k == "mine.gold"]
+    assert gold == [{"sha": pyrepo.feat_sha, "clean": False, "note": task.gold_note, "lint": False}]
+
+
+def test_gold_check_declared_linter_accepting_the_gold_keeps_it_clean(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    script = _lint_script(tmp_path / "bin" / "house-lint", "exit 0\n")
+    out, events = _qualify_with_lint(pyrepo, {"command": [str(script)]}, tmp_path)
+    task = out.task
+    assert task is not None and task.gold_clean is True and task.gold_note == ""
+    gold = [p for k, p in events if k == "mine.gold"]
+    assert gold == [{"sha": pyrepo.feat_sha, "clean": True, "note": "", "lint": True}]
+
+
+def test_gold_check_linter_that_cannot_run_never_credits_the_gold(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The instrument, not the patch: a missing binary is a harness error — the gold is
+    not credited and the note says the linter could not run (not that the gold failed)."""
+    missing = str(tmp_path / "bin" / "no-such-linter")
+    out, events = _qualify_with_lint(pyrepo, {"command": [missing]}, tmp_path)
+    task = out.task
+    assert task is not None and task.gold_clean is False
+    assert task.gold_note.startswith("gold lint could not run (config): config: not runnable")
+    assert "gold fails belt 5" not in task.gold_note
+    assert [p["lint"] for k, p in events if k == "mine.gold"] == [False]
+
+
+def test_gold_check_lint_timeout_is_a_failure_never_a_pass(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    script = _lint_script(tmp_path / "bin" / "slow-lint", "sleep 5\nexit 0\n")
+    out, _ = _qualify_with_lint(pyrepo, {"command": [str(script)], "timeout": 1}, tmp_path)
+    task = out.task
+    assert task is not None and task.gold_clean is False
+    assert task.gold_note == "gold fails belt 5 (config): config timed out"
+
+
+def test_gold_check_disabled_lint_leaves_belt_five_unevaluated(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    out, events = _qualify_with_lint(pyrepo, {"disabled": True}, tmp_path)
+    task = out.task
+    assert task is not None and task.gold_clean is True and task.gold_note == ""
+    assert [p["lint"] for k, p in events if k == "mine.gold"] == [None]
+
+
+def test_gold_check_lint_runs_only_after_the_core_belts_hold(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A gold that breaks the belt is reported as such; belt 5 is not consulted (the
+    linter would have rejected it too, and its verdict would only obscure the finding)."""
+    script = _lint_script(tmp_path / "bin" / "house-lint", "exit 1\n")
+    cfg = pr.default_config(lint={"command": [str(script)]})
+    sha = pyrepo.add_bad_gold_commit()
+    cand = next(c for c in m.iter_candidates(pyrepo.repo, cfg) if c.sha == sha)
+    events, on_event = _collector()
+    out = m.qualify(
+        pyrepo.repo,
+        cfg,
+        cand,
+        runner=get_runner(cfg),
+        executor=LocalExecutor(),
+        scratch=tmp_path / "scratch",
+        on_event=on_event,
+    )
+    task = out.task
+    assert task is not None and task.gold_clean is False
+    assert task.gold_note == "gold introduced 2 belt failure(s)"
+    assert [p["lint"] for k, p in events if k == "mine.gold"] == [None]
+
+
+def test_read_gold_lint_is_the_one_place_the_verdict_is_read() -> None:
+    assert m._read_gold_lint(None) == (True, "")
+    assert m._read_gold_lint(LintRun("gofmt", (), None, "nothing to lint")) == (True, "")
+    ok = LintRun("gofmt", (LintStep("gofmt", ("gofmt", "-l"), ("a.go",), 0, True),), True)
+    assert m._read_gold_lint(ok) == (True, "")
+    rejected = LintRun(
+        "ruff+ruff-format",
+        (LintStep("ruff", ("ruff", "check"), ("a.py",), 1, False, "F401"),),
+        False,
+        "ruff rejected 1 changed file(s)",
+    )
+    assert m._read_gold_lint(rejected) == (
+        False,
+        "gold fails belt 5 (ruff+ruff-format): ruff rejected 1 changed file(s)",
+    )
+    harness = LintRun(
+        "ruff",
+        (LintStep("ruff", ("ruff",), ("a.py",), 127, None, "", False, 0.0, "ruff: not runnable"),),
+        False,
+        "ruff: not runnable",
+        "ruff: not runnable",
+    )
+    assert m._read_gold_lint(harness) == (
+        False,
+        "gold lint could not run (ruff): ruff: not runnable",
+    )
+
+
+# --- the real toolchains: the maintainers' patch, mis-formatted on purpose -------------
+
+
+def _qualify_sha(
+    repo: GitRepo, config: RepoConfig, sha: str, scratch: Path
+) -> tuple[m.MineOutcome, Events]:
+    cand = langs.feat_candidate(repo, config, sha)
+    events, on_event = _collector()
+    out = m.qualify(
+        repo,
+        config,
+        cand,
+        runner=get_runner(config),
+        executor=LocalExecutor(),
+        scratch=scratch,
+        on_event=on_event,
+    )
+    return out, events
+
+
+@pytest.mark.toolchain("go")
+@pytest.mark.skipif(
+    not (langs.has_tool("go") and langs.has_tool("gofmt")), reason="go/gofmt not on PATH"
+)
+def test_go_gold_that_gofmt_rejects_is_not_gold_clean(tmp_path: Path) -> None:
+    """The fixture's feat commit is gofmt-clean: the gold passes belt 5 (``lint=True``).
+    A later commit whose source the maintainers left un-gofmt'd — cobra #1559's shape,
+    but in the gold itself — is kept and flagged: pre-existing lint debt, not a builder
+    observation."""
+    root, feat_sha = _gorepo.build(tmp_path)
+    repo, config = GitRepo(root), _gorepo.config()
+    out, events = _qualify_sha(repo, config, feat_sha, tmp_path / "mine-clean")
+    assert out.task is not None and out.task.gold_clean is True and out.task.gold_note == ""
+    assert [p["lint"] for k, p in events if k == "mine.gold"] == [True]
+
+    _fx.write_files(
+        root,
+        {
+            "calc/mul.go": (
+                "package calc\n\n// Mul returns a * b.\nfunc Mul(a,b int) int {\n\treturn a*b\n  }\n"
+            ),
+            "calc/mul_test.go": (
+                'package calc\n\nimport "testing"\n\n'
+                "func TestMul(t *testing.T) {\n"
+                "\tif got := Mul(3, 2); got != 6 {\n"
+                '\t\tt.Fatalf("Mul(3, 2) = %d, want 6", got)\n'
+                "\t}\n}\n"
+            ),
+        },
+    )
+    ugly_sha = _fx.commit_all(root, "feat: add mul (unformatted)")
+    out, events = _qualify_sha(repo, config, ugly_sha, tmp_path / "mine-ugly")
+    task = out.task
+    assert task is not None and task.red_checked is True  # kept, but flagged
+    assert task.gold_clean is False
+    assert task.gold_note == "gold fails belt 5 (gofmt): gofmt rejected 1 changed file(s)"
+    assert [p["lint"] for k, p in events if k == "mine.gold"] == [False]
+
+
+def _ruff_binary() -> str | None:
+    sibling = Path(sys.executable).parent / "ruff"
+    if sibling.exists():
+        return str(sibling)
+    return shutil.which("ruff")
+
+
+@pytest.mark.skipif(_ruff_binary() is None, reason="ruff not available")
+def test_python_gold_that_ruff_rejects_is_not_gold_clean(tmp_path: Path) -> None:
+    """click's apparatus (``[tool.ruff]`` + the ``ruff-format`` hook): the feat gold is
+    clean; a later gold with an unused import is flagged, and the note names the plan."""
+    extra = {
+        "pyproject.toml": "[tool.ruff]\nline-length = 88\n[tool.ruff.lint]\nselect = ['E', 'F']\n",
+        ".pre-commit-config.yaml": (
+            "repos:\n  - hooks:\n      - id: ruff-check\n      - id: ruff-format\n"
+        ),
+    }
+    root, feat_sha = _pyrepo_min.build(tmp_path, extra=extra)
+    repo = GitRepo(root)
+    config = _pyrepo_min.config(runner_opts={"python": sys.executable})
+    out, events = _qualify_sha(repo, config, feat_sha, tmp_path / "mine-clean")
+    assert out.task is not None and out.task.gold_clean is True, out.task
+    assert [p["lint"] for k, p in events if k == "mine.gold"] == [True]
+
+    _fx.write_files(
+        root,
+        {
+            "pkg/mul.py": "import os\n\n\ndef mul(a: int, b: int) -> int:\n    return a * b\n",
+            "tests/test_mul.py": (
+                "from pkg.mul import mul\n\n\ndef test_mul():\n    assert mul(3, 2) == 6\n"
+            ),
+        },
+    )
+    ugly_sha = _fx.commit_all(root, "feat: add mul (unused import)")
+    out, events = _qualify_sha(repo, config, ugly_sha, tmp_path / "mine-ugly")
+    task = out.task
+    assert task is not None and task.gold_clean is False
+    assert task.gold_note == "gold fails belt 5 (ruff+ruff-format): ruff rejected 1 changed file(s)"
+    assert [p["lint"] for k, p in events if k == "mine.gold"] == [False]
+    # the gold source stays as the maintainers wrote it: `ruff check --no-fix` never edits
+    assert (root / "pkg" / "mul.py").read_text().startswith("import os\n")
