@@ -28,6 +28,8 @@ The engine is deliberately small and mechanical:
 * :mod:`crb.core.signoff`   — human attestations (refused at write on false-Q1).
 * :mod:`crb.core.federated` — abstract-cell export (allowlist, k-anonymity). Export only.
 * :mod:`crb.core.legacy`    — importers for the census and Athena ledgers.
+* :mod:`crb.core.secrets_file` — owner-only secrets at rest (0700 dir / 0600 files,
+  atomic writes, fingerprint-only status); shared by the builders and the server.
 """
 
 from crb.core.version import APPARATUS_VERSION, __version__

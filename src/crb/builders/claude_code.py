@@ -24,14 +24,25 @@ Authentication modes (``auth=``)
     operator's subscription, not a service account's. Selected per run with
     ``builder_config: {"auth": "cli"}`` or per worker with ``CRB_CLAUDE_CODE_AUTH=cli``.
 
+    Token source order (``cli`` mode; the first hit wins, nothing is merged):
+    ``CLAUDE_CODE_OAUTH_TOKEN`` in the worker's environment → the owner-only
+    secrets file ``<CRB_SECRETS_DIR | $CRB_HOME/secrets>/claude_code_oauth_token``
+    (:mod:`crb.core.secrets_file`; the admin UI writes it) → nothing, in which case
+    the CLI uses its own login (``claude login`` keychain / credentials file). An
+    insecure secrets file (group/world readable) is a ``PermissionError`` — the
+    build fails closed rather than use a credential anyone on the host can read.
+    :func:`verify_login` probes exactly that resolution, and :func:`auth_status`
+    names the source; ``crb doctor`` and the admin ``verify`` route use both.
+
     Still isolated (checked against claude 2.1.132 ``--help``): the tool set
     (``--tools``/``--allowedTools``), ``--permission-mode dontAsk``, the deny rules
     (``--disallowedTools``), slash commands (``--disable-slash-commands``), the
     target repository's ``.claude/settings.json`` / ``settings.local.json`` — its
     hooks and permission rules — via ``--setting-sources user`` (the CLI's own
     switch: only the operator's *user* settings load), the minimal child
-    environment (``PATH HOME LANG LC_ALL TMPDIR TERM TZ`` plus ``USER``/``LOGNAME``
-    and ``CLAUDE_CONFIG_DIR``, nothing else), ``--no-session-persistence``, and
+    environment (``PATH HOME LANG LC_ALL TMPDIR TERM TZ`` plus ``USER``/``LOGNAME``,
+    ``CLAUDE_CONFIG_DIR`` and ``CLAUDE_CODE_OAUTH_TOKEN``, nothing else),
+    ``--no-session-persistence``, and
     every post-hoc guard (test tamper, git archaeology, network) — the grader
     decides regardless.
 
@@ -73,6 +84,7 @@ import threading
 import time
 import warnings
 from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -92,6 +104,7 @@ from crb.builders.base import (
 )
 from crb.builders.budget import CostMeter, price_for
 from crb.core.redact import redact_and_cap
+from crb.core.secrets_file import SecretsError, SecretsStore, fingerprint
 from crb.core.workspace import Workspace
 
 #: The census's measured path (quality-floor essay): Sonnet 5 through the agentic CLI.
@@ -135,6 +148,32 @@ CLI_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 #: keychain token cannot be refreshed. Forwarded in ``cli`` mode only, never logged.
 CLI_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"  # noqa: S105 — an env var NAME, not a secret
 _CLI_ENV_PASSTHROUGH: tuple[str, ...] = ("USER", "LOGNAME", CLI_CONFIG_DIR_ENV, CLI_OAUTH_TOKEN_ENV)
+#: The secrets-file name (``crb.core.secrets_file``) the token is read from when the
+#: environment does not carry it. The admin ``PUT /settings/secrets/claude-code-token``
+#: writes it; ``CRB_SECRETS_DIR`` / ``CRB_HOME`` locate the directory.
+CLI_TOKEN_SECRET = "claude_code_oauth_token"  # noqa: S105 — a secret NAME, not a value
+#: Token sources, as :func:`token_source` / :func:`auth_status` report them (labels
+#: for WHERE a token comes from — never a value; hence the S105 suppressions).
+TOKEN_SOURCE_ENV = "env"  # noqa: S105
+TOKEN_SOURCE_SECRETS_FILE = "secrets_file"  # noqa: S105
+TOKEN_SOURCE_KEYCHAIN = "keychain"  # noqa: S105
+TOKEN_SOURCE_NONE = "none"  # noqa: S105
+#: The verify probe: one turn, no tools, the cheapest known model, a fixed prompt.
+VERIFY_MODEL = "claude-haiku-4-5"
+VERIFY_PROMPT = "Reply with the single word: pong"
+VERIFY_TIMEOUT_S = 60
+VERIFY_OK = "ok"
+VERIFY_INVALID = "invalid"
+VERIFY_CLI_MISSING = "cli_missing"
+VERIFY_TIMEOUT = "timeout"
+VERIFY_ERROR = "error"
+VERIFY_STATUSES: tuple[str, ...] = (
+    VERIFY_OK,
+    VERIFY_INVALID,
+    VERIFY_CLI_MISSING,
+    VERIFY_TIMEOUT,
+    VERIFY_ERROR,
+)
 #: ``cli`` mode: load the operator's user settings only — never the target repository's
 #: ``.claude/settings.json`` (hooks, permission rules) nor its ``.claude/settings.local.json``.
 CLI_SETTING_SOURCES = "user"
@@ -194,6 +233,42 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 
 #: Environment passed to the CLI. Nothing else from the operator's shell leaks in.
 _ENV_PASSTHROUGH: tuple[str, ...] = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TERM", "TZ")
+
+
+def _base_env() -> dict[str, str]:
+    """The credential-free child environment: the passthrough set + the CLI's hygiene flags."""
+    env = {k: v for k, v in os.environ.items() if k in _ENV_PASSTHROUGH}
+    env.setdefault("LANG", "C.UTF-8")
+    env["NO_COLOR"] = "1"
+    env["CI"] = "1"
+    env["DISABLE_AUTOUPDATER"] = "1"
+    env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+    return env
+
+
+def _stored_token() -> str:
+    """The secrets-file token, ``""`` when absent; ``PermissionError`` when the file
+    exists but must not be used (mode/ownership) or cannot be read."""
+    try:
+        return SecretsStore.from_env().get(CLI_TOKEN_SECRET) or ""
+    except SecretsError as exc:
+        raise PermissionError(f"claude_code: secrets file refused — {exc}") from exc
+    except OSError as exc:
+        raise PermissionError(
+            f"claude_code: secrets file unreadable — {type(exc).__name__}: {exc}"
+        ) from exc
+
+
+def token_source() -> tuple[str, str]:
+    """Where a ``cli``-mode build would take its token from: ``("env", "")``,
+    ``("secrets_file", <fingerprint>)`` or ``("", "")`` when neither holds one (the
+    CLI's own login then applies). Raises ``PermissionError`` like :meth:`env`."""
+    if os.environ.get(CLI_OAUTH_TOKEN_ENV, "").strip():
+        return TOKEN_SOURCE_ENV, ""
+    stored = _stored_token()
+    if stored:
+        return TOKEN_SOURCE_SECRETS_FILE, fingerprint(stored)
+    return "", ""
 
 
 def default_model() -> str:
@@ -693,14 +768,21 @@ class ClaudeCodeBuilder:
         a key the operator meant for production; ``USER``/``LOGNAME`` (the keychain
         account the login is stored under), ``CLAUDE_CONFIG_DIR`` (a relocated
         login) and ``CLAUDE_CODE_OAUTH_TOKEN`` (a ``claude setup-token`` token for
-        headless use) are forwarded when set. Nothing else from the shell leaks in.
+        headless use) are forwarded when set. When the environment carries no token
+        the owner-only secrets file (:data:`CLI_TOKEN_SECRET`) supplies it; an
+        insecure or unreadable secrets file is a ``PermissionError`` (fail closed).
+        Nothing else from the shell leaks in.
         """
-        env = {k: v for k, v in os.environ.items() if k in _ENV_PASSTHROUGH}
+        env = _base_env()
         if auth == AUTH_CLI:
             for k in _CLI_ENV_PASSTHROUGH:
                 v = os.environ.get(k, "").strip()
                 if v:
                     env[k] = v
+            if CLI_OAUTH_TOKEN_ENV not in env:
+                stored = _stored_token()
+                if stored:
+                    env[CLI_OAUTH_TOKEN_ENV] = stored
         else:
             key = os.environ.get(API_KEY_ENV, "").strip()
             if not key:
@@ -708,11 +790,6 @@ class ClaudeCodeBuilder:
                     f"{API_KEY_ENV} is not set — the claude_code builder needs it (auth={auth!r})"
                 )
             env[API_KEY_ENV] = key
-        env.setdefault("LANG", "C.UTF-8")
-        env["NO_COLOR"] = "1"
-        env["CI"] = "1"
-        env["DISABLE_AUTOUPDATER"] = "1"
-        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         return env
 
     def build(
@@ -842,6 +919,208 @@ class ClaudeCodeBuilder:
         return finish(done=done and stop == STOP_DONE, summary=summary, stop=stop, extra=extra)
 
 
+# ---------------------------------------------------------------------------
+# Login probes (``crb doctor`` / the admin "test the login" route)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LoginCheck:
+    """The outcome of :func:`verify_login`. ``detail`` is redacted and capped; no field
+    ever carries the token — ``fingerprint`` is at most four trailing characters."""
+
+    status: str
+    detail: str = ""
+    source: str = ""
+    fingerprint: str = ""
+    model: str = VERIFY_MODEL
+    cli_version: str = ""
+    duration_s: float = 0.0
+    cost_usd: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "detail": self.detail,
+            "source": self.source,
+            "fingerprint": self.fingerprint,
+            "model": self.model,
+            "cli_version": self.cli_version,
+            "duration_s": round(self.duration_s, 3),
+            "cost_usd": self.cost_usd,
+        }
+
+
+def cli_version(binary: str = "", timeout_s: int = 15) -> str:
+    """``claude --version`` (first line), or ``""`` when the CLI is missing or silent."""
+    found = binary or shutil.which("claude") or ""
+    if not found:
+        return ""
+    try:
+        r = subprocess.run(
+            [found, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+            env=_base_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    out = (r.stdout or "").strip()
+    return out.splitlines()[0].strip() if out else ""
+
+
+def auth_status(binary: str = "", timeout_s: int = 15) -> tuple[str, str, str]:
+    """``(source, fingerprint, detail)`` — where a ``cli``-mode build gets its login:
+    ``env`` | ``secrets_file`` (with fingerprint) | ``keychain`` | ``none``, or
+    ``cli_missing``. The keychain answer comes from ``claude auth status --json`` run
+    with the builder's own passthrough environment (local, no API call, no spend);
+    an insecure secrets file reports ``error`` with the reason (never the value)."""
+    try:
+        source, fp = token_source()
+    except PermissionError as exc:
+        return VERIFY_ERROR, "", redact_and_cap(str(exc), max_chars=400)
+    if source:
+        return (
+            source,
+            fp,
+            "token supplied by the "
+            + ("worker environment" if source == TOKEN_SOURCE_ENV else "secrets file"),
+        )
+    found = binary or shutil.which("claude") or ""
+    if not found:
+        return VERIFY_CLI_MISSING, "", "the 'claude' CLI was not found on PATH"
+    try:
+        r = subprocess.run(
+            [found, "auth", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+            env=ClaudeCodeBuilder.env(AUTH_CLI),
+            cwd=tempfile.gettempdir(),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return VERIFY_ERROR, "", redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=400)
+    try:
+        body = json.loads(r.stdout or "{}")
+    except json.JSONDecodeError:
+        body = {}
+    if isinstance(body, dict) and body.get("loggedIn"):
+        method = str(body.get("authMethod", "") or "")
+        who = str(body.get("email", "") or "")
+        detail = "CLI login" + (f" ({method})" if method else "") + (f" as {who}" if who else "")
+        return TOKEN_SOURCE_KEYCHAIN, "", detail
+    return TOKEN_SOURCE_NONE, "", "no token and no CLI login — run `claude setup-token`"
+
+
+def verify_argv(binary: str, *, model: str = VERIFY_MODEL) -> list[str]:
+    """One turn, no tools, cheapest model, the same hygiene flags as a ``cli`` build."""
+    return [
+        binary,
+        "-p",
+        VERIFY_PROMPT,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--model",
+        model,
+        "--max-turns",
+        "1",
+        "--permission-mode",
+        "dontAsk",
+        "--tools",
+        "",
+        "--no-session-persistence",
+        "--disable-slash-commands",
+        "--setting-sources",
+        CLI_SETTING_SOURCES,
+    ]
+
+
+def verify_login(
+    *,
+    token: str = "",
+    binary: str = "",
+    model: str = VERIFY_MODEL,
+    timeout_s: int = VERIFY_TIMEOUT_S,
+    spawn: SpawnFn | None = None,
+    cwd: Path | None = None,
+) -> LoginCheck:
+    """Prove a ``cli``-mode login works by running the CLI once, exactly as a build
+    would: :meth:`ClaudeCodeBuilder.env` (``cli``) plus — when ``token`` is given —
+    that token in ``CLAUDE_CODE_OAUTH_TOKEN`` (the admin route verifies the stored
+    token this way; ``crb doctor --verify`` passes nothing and probes the real
+    resolution). Stops at the first ``api_retry`` 401/403 (the CLI would otherwise
+    retry for ~90 s) → ``invalid``; a ``result`` that is not an error → ``ok``;
+    no CLI → ``cli_missing``; the deadline → ``timeout``; anything else → ``error``
+    with the redacted tail. Spend: one Haiku turn (``$0`` on a subscription)."""
+    started = time.monotonic()
+    if token:
+        source, fp = "explicit", fingerprint(token)
+    else:
+        try:
+            source, fp = token_source()
+        except PermissionError as exc:
+            return LoginCheck(VERIFY_ERROR, redact_and_cap(str(exc), max_chars=400), model=model)
+        source = source or TOKEN_SOURCE_KEYCHAIN
+    found = binary or shutil.which("claude") or ""
+    if not found:
+        return LoginCheck(
+            VERIFY_CLI_MISSING, "the 'claude' CLI was not found on PATH", source, fp, model
+        )
+    try:
+        env = ClaudeCodeBuilder.env(AUTH_CLI)
+    except PermissionError as exc:
+        return LoginCheck(VERIFY_ERROR, redact_and_cap(str(exc), max_chars=400), source, fp, model)
+    if token:
+        env[CLI_OAUTH_TOKEN_ENV] = token
+    version = cli_version(found)
+    stats = StreamStats(GitArchaeologyGuard())
+    workdir = cwd or Path(tempfile.mkdtemp(prefix="crb-verify-"))
+    spawn_fn = spawn or subprocess_spawn
+
+    def finish(status: str, detail: str) -> LoginCheck:
+        return LoginCheck(
+            status=status,
+            detail=redact_and_cap(detail, max_chars=600),
+            source=source,
+            fingerprint=fp,
+            model=model,
+            cli_version=version,
+            duration_s=time.monotonic() - started,
+            cost_usd=stats.reported_cost(),
+        )
+
+    try:
+        handle = spawn_fn(verify_argv(found, model=model), env, workdir, timeout_s)
+        for line in handle.lines():
+            stats.feed(line, keep=False)
+            if stats.auth_failed:
+                handle.kill()
+                break
+    except OSError as exc:
+        return finish(VERIFY_ERROR, f"{type(exc).__name__}: {exc}")
+    if stats.auth_failed:
+        code = stats.api_retries[-1] if stats.api_retries else 401
+        return finish(VERIFY_INVALID, f"authentication failed (HTTP {code})")
+    if handle.timed_out:
+        return finish(VERIFY_TIMEOUT, f"no result within {timeout_s}s")
+    result = stats.result or {}
+    if result:
+        if not result.get("is_error"):
+            return finish(VERIFY_OK, str(result.get("result", "") or "").strip()[:80] or "ok")
+        api_status = result.get("api_error_status")
+        if api_status in {401, 403}:
+            return finish(VERIFY_INVALID, f"authentication failed (HTTP {api_status})")
+        return finish(VERIFY_ERROR, str(result.get("result", "") or "error"))
+    return finish(
+        VERIFY_ERROR,
+        f"exit {handle.returncode}, no result event; stderr: {handle.stderr_tail.strip()[-400:]}",
+    )
+
+
 __all__ = [
     "API_KEY_ENV",
     "AUTH_API_KEY",
@@ -850,22 +1129,42 @@ __all__ = [
     "AUTH_MODES",
     "BARE_TOOLS",
     "CLI_CONFIG_DIR_ENV",
+    "CLI_OAUTH_TOKEN_ENV",
     "CLI_SETTING_SOURCES",
+    "CLI_TOKEN_SECRET",
     "DEFAULT_MODEL",
     "DENY_RULES",
     "FULL_TOOLS",
     "KNOWN_MODELS",
     "MODEL_ENV",
     "OUTPUT_SCHEMA",
+    "TOKEN_SOURCE_ENV",
+    "TOKEN_SOURCE_KEYCHAIN",
+    "TOKEN_SOURCE_NONE",
+    "TOKEN_SOURCE_SECRETS_FILE",
     "TOOLS",
+    "VERIFY_CLI_MISSING",
+    "VERIFY_ERROR",
+    "VERIFY_INVALID",
+    "VERIFY_MODEL",
+    "VERIFY_OK",
+    "VERIFY_STATUSES",
+    "VERIFY_TIMEOUT",
+    "VERIFY_TIMEOUT_S",
     "ClaudeCodeBuilder",
+    "LoginCheck",
     "SpawnFn",
     "SpawnHandle",
     "StreamStats",
     "SubprocessHandle",
+    "auth_status",
+    "cli_version",
     "default_auth",
     "default_model",
     "subprocess_spawn",
     "system_rules",
     "task_prompt",
+    "token_source",
+    "verify_argv",
+    "verify_login",
 ]
