@@ -64,9 +64,9 @@ def emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
 DEFAULT_RULES = """RULES (violations disqualify the run):
 - NEVER modify, delete, or add any test files. Source files only.
 - Work only inside the worktree you were given.
-- Do not use git to look at other commits or history to recover the real change: no git log, git show, git reflog, git stash, git bisect, git checkout/switch of another revision, no git diff against another revision.
+- Do not use git to look at other commits or history to recover the real change: no git log, git show, git blame, git reflog, git bisect, git checkout/switch of another revision, no git diff against another revision. No git stash in any form: the stash stack is shared with other trials — to run the tests without your edits use `git diff > /tmp/mine.patch; git checkout -- <paths>` and `git apply /tmp/mine.patch` after.
 - NEVER consult external sources for this change: no fetching the upstream repository, no package-registry downloads, no web lookups of the project's history or PRs. Solving by finding the real commit's diff anywhere is a DISQUALIFYING protocol violation. Solve from the local code (and, when they are present, the failing tests) only.
-- The test environment is ALREADY PROVISIONED. NEVER install or upgrade packages (no pip/uv/npm/yarn/pnpm install, go get, cargo add, mvn dependency:*): if the tests cannot import the package, run them EXACTLY with the test command you were given — it sets the interpreter and PYTHONPATH/NODE_PATH for this worktree.
+- The test environment is ALREADY PROVISIONED. NEVER install or upgrade packages (no pip/uv/npm/yarn/pnpm install, go get, cargo add, mvn dependency:*; npx only for binaries already in node_modules/.bin): if the tests cannot import the package, run them EXACTLY with the test command you were given — it sets the interpreter and PYTHONPATH/NODE_PATH for this worktree.
 - Keep the change minimal and idiomatic to the codebase; do not break neighbouring behaviour."""
 
 
@@ -624,68 +624,402 @@ class TestFileGuard:
         return sorted(out)
 
 
-#: git sub-commands a builder may run inside the worktree. Everything else is
-#: refused: the worktree shares the main clone's object store, so ``log``,
-#: ``show``, ``reflog``, ``cat-file``… would reveal the very commit under test.
-GIT_ALLOWED: frozenset[str] = frozenset(
-    {"status", "diff", "ls-files", "grep", "add", "version", "help", "check-ignore"}
+# ---------------------------------------------------------------------------
+# Shell guard — vocabulary
+# ---------------------------------------------------------------------------
+
+
+def _words(text: str) -> frozenset[str]:
+    """A whitespace-separated word list as a frozenset (keeps the vocabulary readable)."""
+    return frozenset(text.split())
+
+
+#: git sub-commands a builder may run inside the worktree. Several carry per-verb
+#: rules in :class:`GitArchaeologyGuard` (``diff``/``grep`` may not name another
+#: revision; ``checkout``/``restore`` only ever paths; ``rev-parse``/``config``
+#: read-only). Everything else is refused: the worktree shares the main clone's
+#: object store AND its stash stack, so ``log``, ``show``, ``reflog``, ``cat-file``,
+#: ``stash``… would reveal the very commit under test or another trial's edits.
+GIT_ALLOWED: frozenset[str] = _words(
+    "status diff ls-files grep add version help check-ignore rev-parse config apply mv checkout "
+    "restore"
+)
+
+#: git sub-commands that reach the network. Refused with the ``network:`` prefix
+#: (not ``archaeology:``) so a refusal-rate split can tell "fetched upstream" from
+#: "read history" — the review asks for instrument-vs-builder labelling.
+_GIT_NETWORK: frozenset[str] = _words(
+    "fetch pull push clone remote ls-remote submodule lfs request-pull send-email svn instaweb "
+    "daemon"
 )
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,64}$")
-_REF_RE = re.compile(r"(@\{|~|\^|^refs/|^origin/|^upstream/|^HEAD@)")
-
-#: Executables that reach the network (or install from it). The real belt is the
-#: sandbox's ``--network=none``; this guard just refuses the obvious ones early.
-NETWORK_TOOLS: frozenset[str] = frozenset(
-    {
-        "curl",
-        "wget",
-        "ssh",
-        "scp",
-        "sftp",
-        "rsync",
-        "nc",
-        "ncat",
-        "netcat",
-        "telnet",
-        "ftp",
-        "http",
-        "https",
-        "aria2c",
-        "gh",
-        "glab",
-        "hub",
-    }
+_REF_RE = re.compile(r"(@\{|~|\^|\.\.|^refs/|^origin/|^upstream/|^remotes/|^tags/|^heads/|^HEAD@)")
+#: Bare words that name a branch or symbolic ref far more often than a path. A
+#: refname can never contain ``*``, ``?`` or ``[`` and never starts with ``:``, so
+#: globs and pathspec magic are always paths.
+_BRANCHISH: frozenset[str] = _words(
+    "main master develop development dev trunk next release staging production prod stable canary @ "
+    "FETCH_HEAD ORIG_HEAD MERGE_HEAD CHERRY_PICK_HEAD REBASE_HEAD AUTO_MERGE"
 )
 
-_NETWORK_SUBCOMMANDS: dict[str, frozenset[str]] = {
-    "pip": frozenset({"install", "download", "wheel"}),
-    "pip3": frozenset({"install", "download", "wheel"}),
-    "uv": frozenset({"pip", "add", "sync", "tool", "run"}),
-    "npm": frozenset({"install", "i", "ci", "add", "update", "exec", "npx"}),
-    "npx": frozenset(),
-    "yarn": frozenset({"install", "add", "up", "dlx"}),
-    "pnpm": frozenset({"install", "i", "add", "dlx", "update"}),
-    "go": frozenset({"get", "install"}),
-    "cargo": frozenset({"add", "fetch", "install", "update", "publish"}),
-    "mvn": frozenset({"dependency:get", "dependency:resolve", "deploy"}),
-    "gradle": frozenset({"dependencies", "publish"}),
-    "gem": frozenset({"install", "fetch"}),
-    "bundle": frozenset({"install", "update"}),
-    "apt": frozenset({"install", "update"}),
-    "apt-get": frozenset({"install", "update"}),
-    "brew": frozenset({"install", "update", "upgrade"}),
-    "conda": frozenset({"install", "update"}),
-    "poetry": frozenset({"add", "install", "update"}),
+_GIT_VALUE_OPTS: dict[str, frozenset[str]] = {
+    "diff": _words(
+        "-S -G -O -l -U -I --unified --inter-hunk-context --word-diff-regex --diff-filter "
+        "--src-prefix --dst-prefix --line-prefix --output --anchored --rotate-to --skip-to "
+        "--find-object --ignore-matching-lines"
+    ),
+    "grep": _words("-e -f -A -B -C -m -O --max-depth --max-count --threads"),
+    "checkout": frozenset({"--pathspec-from-file", "--conflict"}),
+    "restore": frozenset({"--pathspec-from-file", "--conflict", "-s", "--source"}),
+    "config": frozenset({"-f", "--file", "--type", "--default", "--blob"}),
 }
+_CHECKOUT_OK: frozenset[str] = _words(
+    "-q --quiet -f --force -p --patch --ours --theirs -m --merge --overlay --no-overlay "
+    "--ignore-skip-worktree-bits --progress --no-progress --recurse-submodules "
+    "--no-recurse-submodules --pathspec-from-file --pathspec-file-nul --conflict"
+)
+_RESTORE_OK: frozenset[str] = _CHECKOUT_OK | frozenset(
+    {"-W", "--worktree", "-S", "--staged", "--ignore-unmerged"}
+)
+_REV_PARSE_OK: frozenset[str] = _words(
+    "--show-toplevel --show-prefix --show-cdup --is-inside-work-tree --is-inside-git-dir "
+    "--is-bare-repository --is-shallow-repository --abbrev-ref --verify --short -q --quiet "
+    "--symbolic-full-name --show-object-format --sq-quote --local-env-vars"
+)
+_CONFIG_READ: frozenset[str] = _words(
+    "--get --get-all --get-regexp -l --list --get-urlmatch --get-color"
+)
+_CONFIG_WRITE: frozenset[str] = _words(
+    "--add --unset --unset-all --replace-all --rename-section --remove-section -e --edit"
+)
 
-_WRAPPERS: frozenset[str] = frozenset({"env", "sudo", "nohup", "time", "command", "exec", "nice"})
-_SHELLS: frozenset[str] = frozenset({"sh", "bash", "zsh", "dash", "fish", "ksh"})
+#: Executables that reach the network, leave the sandbox, or open a browser. The
+#: real belt is the sandbox's ``--network=none``; this guard refuses the obvious
+#: ones early so an honest mistake is a one-line refusal, not a lost build.
+NETWORK_TOOLS: frozenset[str] = _words(
+    "curl wget wget2 ssh scp sftp rsync nc ncat netcat socat telnet ftp http https xh httpie aria2c "
+    "gh glab hub dig nslookup host ping traceroute mtr nmap whois lynx w3m links elinks xdg-open "
+    "open docker podman nerdctl kubectl helm aws gcloud az rclone s3cmd gsutil uvx n pacman"
+)
+
+#: Package / toolchain managers → the sub-commands that install, fetch or mutate
+#: the provisioned environment. Anything else they do (``list``, ``show``, ``run``,
+#: ``test``…) is honest. The environment is ALREADY PROVISIONED; the rules say so.
+_INSTALLERS: dict[str, frozenset[str]] = {
+    "gem": frozenset({"install", "fetch", "update", "uninstall"}),
+    "bundle": frozenset({"install", "update", "add", "remove"}),
+    "bundler": frozenset({"install", "update", "add", "remove"}),
+    "apt": _words("install update upgrade remove purge full-upgrade"),
+    "apt-get": _words("install update upgrade remove purge dist-upgrade"),
+    "aptitude": frozenset({"install", "update", "upgrade", "remove", "purge"}),
+    "brew": _words("install update upgrade uninstall reinstall tap bundle"),
+    "conda": _words("install update create remove uninstall env"),
+    "mamba": _words("install update create remove uninstall env"),
+    "micromamba": _words("install update create remove uninstall env"),
+    "poetry": _words("add install update remove lock publish self"),
+    "pipx": _words("install run runpip upgrade upgrade-all inject reinstall uninstall"),
+    "pipenv": _words("install update sync lock uninstall upgrade"),
+    "apk": frozenset({"add", "update", "upgrade", "del", "fetch"}),
+    "dnf": frozenset({"install", "update", "upgrade", "remove", "makecache"}),
+    "yum": frozenset({"install", "update", "upgrade", "remove", "makecache"}),
+    "zypper": _words("install in update up remove rm refresh"),
+    "snap": frozenset({"install", "refresh", "remove"}),
+    "choco": frozenset({"install", "upgrade", "uninstall"}),
+    "winget": frozenset({"install", "upgrade"}),
+    "scoop": frozenset({"install", "update"}),
+    "nvm": frozenset({"install", "upgrade"}),
+    "pyenv": frozenset({"install", "update", "uninstall"}),
+    "rustup": _words("update install toolchain target component self"),
+    "sdk": frozenset({"install", "update", "selfupdate", "upgrade"}),
+    "asdf": frozenset({"install", "plugin", "update"}),
+    "volta": frozenset({"install", "fetch", "pin"}),
+    "mise": _words("install i use u upgrade up self-update plugins"),
+    "corepack": frozenset({"prepare", "use", "install", "up", "pack"}),
+}
+_PIP_REFUSED: frozenset[str] = _words("install download wheel index search uninstall")
+_UV_PIP_OK: frozenset[str] = frozenset({"list", "freeze", "show", "tree", "check"})
+_UV_OK: frozenset[str] = frozenset({"venv", "cache", "version", "help"})
+_NPM_REFUSED: frozenset[str] = _words(
+    "install i in ins inst insta instal isnt isnta isntal isntall add ci clean-install ic "
+    "install-ci-test cit install-test it update up upgrade udpate uninstall un unlink remove rm r "
+    "link ln dedupe ddp prune view v info show search s se find outdated audit publish unpublish "
+    "deprecate dist-tag owner star stars unstar login logout adduser add-user whoami ping hook org "
+    "team token access doctor create init innit fund docs home repo bugs issues diff edit profile "
+    "sbom"
+)
+_YARN_REFUSED: frozenset[str] = _words(
+    "install add remove up upgrade upgrade-interactive dlx link unlink import info npm set plugin "
+    "dedupe outdated audit publish login logout global create init patch patch-commit"
+)
+_PNPM_REFUSED: frozenset[str] = _words(
+    "install i add remove rm un uninstall update up upgrade link ln unlink dlx fetch import dedupe "
+    "prune publish create init outdated audit setup self-update deploy patch patch-commit "
+    "install-test it"
+)
+_PNPM_VALUE_OPTS: frozenset[str] = frozenset({"--filter", "-F", "-C", "--dir"})
+_CARGO_ALWAYS: frozenset[str] = _words("install uninstall publish login logout owner yank search")
+_CARGO_ONLINE: frozenset[str] = _words("add remove rm fetch update vendor generate-lockfile")
+_MVN_VALUE_OPTS: frozenset[str] = _words(
+    "-pl --projects -f --file -s --settings -gs --global-settings -t --toolchains -l --log-file -rf "
+    "--resume-from -T --threads -b --builder"
+)
+_MVN_ONLINE_PREFIXES: tuple[str, ...] = (
+    "dependency:",
+    "archetype:",
+    "versions:",
+    "wrapper:",
+    "release:",
+    "scm:",
+)
+_GRADLE_VALUE_OPTS: frozenset[str] = _words(
+    "--tests --project-dir -p -b --build-file -c --settings-file -g --gradle-user-home -I "
+    "--init-script --console --max-workers --project-cache-dir"
+)
+_TOX_READONLY: frozenset[str] = _words(
+    "-l --listenvs -a --listenvs-all --showconfig --version -h --help"
+)
+_NOX_READONLY: frozenset[str] = _words("-l --list --list-sessions --version -h --help")
+_PRECOMMIT_READONLY: frozenset[str] = _words(
+    "--version -V -h --help sample-config validate-config validate-manifest"
+)
+
+_PIP_RE = re.compile(r"^pip-?3?(\.\d+)?$")
+_PYTHON_RE = re.compile(r"^(python|pypy)\d?(\.\d+)?$")
+_ASSIGN_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
+#: ``__SUBST_k__`` stands for ``$( … )``/backticks (its output becomes text — as an
+#: exe name that is a computed command), ``__GROUP_k__`` for a ``( … )`` sub-shell
+#: (already checked; as a whole segment it runs nothing else).
+_PLACEHOLDER_RE = re.compile(r"__(?:SUBST|GROUP)_(\d+)__")
+_COMPUTED_RE = re.compile(r"__SUBST_\d+__")
+_GROUP_RE = re.compile(r"^__GROUP_\d+__$")
+_FUNCDEF_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*__GROUP_\d+__$")
+
+#: Command prefixes that run *another* command: name → (options that take a value,
+#: positionals to skip before the wrapped command — ``timeout DURATION cmd``).
+_WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
+    "env": (_words("-u --unset -C --chdir -S --split-string"), 0),
+    "sudo": (
+        _words("-u --user -g --group -C -D --chdir -h --host -p -r -t -U"),
+        0,
+    ),
+    "doas": (frozenset({"-u", "-C"}), 0),
+    "nohup": (frozenset(), 0),
+    "time": (frozenset({"-f", "--format", "-o", "--output"}), 0),
+    "command": (frozenset(), 0),
+    "builtin": (frozenset(), 0),
+    "exec": (frozenset({"-a"}), 0),
+    "nice": (frozenset({"-n", "--adjustment"}), 0),
+    "ionice": (frozenset({"-c", "-n", "-p"}), 0),
+    "stdbuf": (frozenset({"-i", "-o", "-e"}), 0),
+    "unbuffer": (frozenset(), 0),
+    "caffeinate": (frozenset({"-t", "-w"}), 0),
+    "chronic": (frozenset(), 0),
+    "timeout": (frozenset({"-k", "--kill-after", "-s", "--signal"}), 1),
+    "watch": (frozenset({"-n", "--interval"}), 0),
+    "parallel": (
+        _words("-j --jobs -N -n --max-args -S --sshlogin --colsep --delay --results --tmpdir"),
+        0,
+    ),
+    "xargs": (
+        _words(
+            "-I -i -n -L -l -P -d -s -E -a --max-args --max-procs --max-lines --max-chars "
+            "--delimiter --eof --arg-file --replace --process-slot-var"
+        ),
+        0,
+    ),
+}
+_SHELLS: frozenset[str] = _words("sh bash zsh dash fish ksh")
+#: Environment variables that point git at ANOTHER repository / object store.
+_GIT_ENV_REDIRECT: frozenset[str] = _words(
+    "GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES "
+    "GIT_INDEX_FILE GIT_NAMESPACE"
+)
+_EXPORTERS: frozenset[str] = _words("export declare typeset setenv")
+#: Interpreters → the flags that carry INLINE CODE (``python -c``, ``node -e``). The code
+#: string is scanned with :func:`_scan_code`; ``python -``/``node -`` read a heredoc, which
+#: is scanned the same way.
+_INLINE_FLAGS: dict[str, tuple[str, ...]] = {
+    "python": ("-c",),
+    "node": ("-e", "--eval", "-p", "--print"),
+    "nodejs": ("-e", "--eval", "-p", "--print"),
+    "deno": ("eval",),
+    "bun": ("-e", "--eval", "-p", "--print"),
+    "ruby": ("-e",),
+    "perl": ("-e", "-E"),
+    "php": ("-r",),
+    "lua": ("-e",),
+    "Rscript": ("-e",),
+}
+#: Inline-code scanning (2026-09-14, A8's human-review exercises): the guard used to
+#: read only each segment's first word, so ``python -c "subprocess.run(['git','log'])"``
+#: passed. Code is not parsed as shell (that would refuse honest one-liners); instead the
+#: text is scanned for a git verb, a ``.git`` path or a network tool. Fail closed on a
+#: ``git checkout``/``reset`` in code too — their argument forms cannot be verified there.
+_CODE_SEP = r"[\s'\",\[\]()]*"
+_CODE_GIT_HISTORY = re.compile(
+    r"\bgit\b"
+    + _CODE_SEP
+    + r"(log|show|reflog|blame|stash|bisect|cat-file|rev-list|checkout|switch|worktree|"
+    r"describe|branch|tag|shortlog|whatchanged|ls-tree|archive|format-patch|bundle|"
+    r"name-rev|for-each-ref|cherry|notes|reset|revert|cherry-pick|rebase|merge|commit)\b"
+)
+_CODE_GIT_NETWORK = re.compile(
+    r"\bgit\b" + _CODE_SEP + r"(fetch|pull|push|clone|remote|ls-remote|submodule|lfs)\b"
+)
+_CODE_GIT_DIFF_REV = re.compile(
+    r"\bgit\b"
+    + _CODE_SEP
+    + r"diff\b[^\n;]*?(HEAD[~^@]|\b[0-9a-f]{7,40}\b|\b(main|master|develop)\b|origin/|\.\.)"
+)
+_CODE_GIT_DIR = re.compile(r"(^|[^\w.])\.git(/|['\"])")
+_CODE_NET_TOOL = re.compile(
+    r"\b(curl|wget|ssh|scp|sftp|rsync|ncat|netcat|telnet|aria2c)\b|\bgh\s+(pr|api|repo|issue)\b"
+)
+#: Shell keywords that precede a command in the same segment (``if git log; then``).
+_KEYWORDS: frozenset[str] = _words("! if then else elif fi do done while until coproc")
+#: Segments that are a loop/case HEADER, not a command (``for f in …``, ``case x in``).
+_HEADERS: frozenset[str] = frozenset({"for", "case", "select", "esac", "in"})
+_SEPARATORS: frozenset[str] = _words("&& || ; ;; | & |& ) { }")
+_PIPES: frozenset[str] = frozenset({"|", "|&"})
+#: Option names whose value is an EXCLUSION pattern — ``.git`` there is honest.
+_PATH_EXCLUDE_OPTS: frozenset[str] = _words(
+    "-path -ipath -wholename -iwholename -name -iname -regex -not ! -prune --exclude --exclude-dir "
+    "--exclude-from -g --glob --iglob --ignore --ignore-dir --ignore-file -I -x --filter"
+)
+
+
+# ---------------------------------------------------------------------------
+# Shell guard — parsing helpers (pure functions)
+# ---------------------------------------------------------------------------
+
+
+def _strip_heredocs(command: str) -> tuple[str, list[tuple[str, bool]]] | None:
+    """Remove every here-document BODY from ``command`` (quote-aware, in the order
+    the shell would read them) and return ``(rest, [(body, literal), …])``.
+
+    ``literal`` is true for a quoted tag (``<<'EOF'``, ``<<"EOF"``, ``<<\\EOF``):
+    the body is data and must not be parsed at all — an apostrophe in a Python
+    comment written through ``cat <<'EOF' > repro.py`` refused an honest build
+    (2026-09-13). For an unquoted tag the body still undergoes ``$( … )`` and
+    backtick expansion, so the caller extracts those with
+    :func:`_heredoc_body_inners`. ``None`` when a ``<<`` has no tag or an
+    unterminated quoted tag (fail closed).
+    """
+    out: list[str] = []
+    bodies: list[tuple[str, bool]] = []
+    pending: list[tuple[str, bool, bool]] = []
+    i, n = 0, len(command)
+    quote = ""
+    while i < n:
+        ch = command[i]
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            out.append(command[i : i + 2])
+            i += 2
+            continue
+        if ch == "'":
+            quote = "'"
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '"':
+            quote = "" if quote == '"' else '"'
+            out.append(ch)
+            i += 1
+            continue
+        if not quote and ch == "\n" and pending:
+            out.append("\n")
+            i += 1
+            for tag, literal, strip_tabs in pending:
+                lines: list[str] = []
+                while i < n:
+                    j = command.find("\n", i)
+                    line = command[i:] if j < 0 else command[i:j]
+                    i = n if j < 0 else j + 1
+                    if (line.lstrip("\t") if strip_tabs else line) == tag:
+                        break
+                    lines.append(line)
+                bodies.append(("\n".join(lines), literal))
+            pending = []
+            continue
+        if (
+            not quote
+            and ch == "<"
+            and command.startswith("<<", i)
+            and not command.startswith("<<<", i)
+            and (i == 0 or command[i - 1] != "<")
+        ):
+            j = i + 2
+            strip_tabs = False
+            if j < n and command[j] == "-":
+                strip_tabs = True
+                j += 1
+            while j < n and command[j] in " \t":
+                j += 1
+            literal = False
+            if j < n and command[j] in "'\"":
+                q = command[j]
+                k = command.find(q, j + 1)
+                if k < 0:
+                    return None
+                tag, literal, j = command[j + 1 : k], True, k + 1
+            else:
+                if j < n and command[j] == "\\":
+                    literal = True
+                    j += 1
+                k = j
+                while k < n and not command[k].isspace() and command[k] not in ";|&<>()":
+                    k += 1
+                tag, j = command[j:k], k
+            if not tag:
+                return None
+            out.append(command[i:j])
+            pending.append((tag, literal, strip_tabs))
+            i = j
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out), bodies
+
+
+def _heredoc_body_inners(body: str) -> list[str] | None:
+    """``$( … )`` and backtick commands inside an UNQUOTED here-document body.
+    Quotes are not special there (``it's $HOME`` is fine); only ``\\`` escapes."""
+    inners: list[str] = []
+    i, n = 0, len(body)
+    while i < n:
+        ch = body[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "`":
+            j = body.find("`", i + 1)
+            if j < 0:
+                return None
+            inners.append(body[i + 1 : j])
+            i = j + 1
+            continue
+        if body.startswith("$(", i):
+            end = _matching_paren(body, i + 2)
+            if end < 0:
+                return None
+            inners.append(body[i + 2 : end])
+            i = end + 1
+            continue
+        i += 1
+    return inners
 
 
 def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
-    """Replace every ``$( … )``, backtick and ``( … )`` sub-shell with a placeholder and
-    return the inner commands for recursive checking. ``None`` when unbalanced.
+    """Replace every ``$( … )``, backtick and ``( … )`` sub-shell with a numbered
+    placeholder ``__SUBST_k__`` and return the inner commands for recursive
+    checking. ``None`` when unbalanced.
 
     Quoting is honoured the way ``sh`` does: inside single quotes nothing is special;
     inside double quotes only ``$( … )`` and backticks open a substitution, a bare
@@ -723,7 +1057,7 @@ def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
             if j < 0:
                 return None, inners
             inners.append(command[i + 1 : j])
-            out.append("__SUBST__")
+            out.append(f"__SUBST_{len(inners) - 1}__")
             i = j + 1
             continue
         is_dollar = ch == "$" and command.startswith("$(", i)
@@ -733,7 +1067,8 @@ def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
             if end < 0:
                 return None, inners
             inners.append(command[start:end])
-            out.append("__SUBST__")
+            kind = "SUBST" if is_dollar else "GROUP"  # a group is not a computed name
+            out.append(f"__{kind}_{len(inners) - 1}__")
             i = end + 1
             continue
         out.append(ch)
@@ -774,115 +1109,926 @@ def _matching_paren(command: str, start: int) -> int:
     return -1
 
 
-class GitArchaeologyGuard:
-    """Refuse commands that recover the real patch or leave the sandbox.
+def _split_lines(flat: str) -> str | None:
+    """Turn every UNQUOTED newline into a ``;`` separator and drop backslash-newline
+    continuations. A newline separates commands exactly as ``;`` does — without
+    this ``ls\\ngit log`` slipped past the guard as one ``ls`` segment. ``None`` on
+    an unterminated quote."""
+    out: list[str] = []
+    i, n = 0, len(flat)
+    quote = ""
+    while i < n:
+        ch = flat[i]
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            if flat[i + 1] == "\n":
+                out.append(" ")
+            else:
+                out.append(flat[i : i + 2])
+            i += 2
+            continue
+        if ch == "'" and not quote:
+            quote = "'"
+        elif ch == '"':
+            quote = "" if quote == '"' else '"'
+        elif not quote and ch in "\r\n":
+            out.append(" ; ")
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return None if quote else "".join(out)
 
-    ``check(argv)`` inspects one argv; ``check_shell(command)`` splits a shell
-    command line on ``&&``, ``||``, ``;`` and ``|`` and checks every segment
-    (unwrapping ``env``/``sudo``/``time`` and ``sh -c``). Returns a reason string
-    prefixed ``archaeology:`` or ``network:`` — or ``""`` when allowed.
+
+def _unwrap(argv: Sequence[str]) -> tuple[list[str] | None, dict[str, str]]:
+    """Strip leading ``VAR=value`` assignments (returned), shell keywords, function
+    definitions and command WRAPPERS (``env``, ``sudo``, ``timeout 30``, ``xargs -n1``…)
+    so the executable that actually runs is ``args[0]``. ``None`` for a loop/case
+    header (``for f in …``), which runs nothing itself."""
+    args = list(argv)
+    assigns: dict[str, str] = {}
+    while args:
+        head = args[0]
+        m = _ASSIGN_RE.match(head)
+        if m:
+            assigns[m.group(1)] = head[m.end() :]
+            args = args[1:]
+            continue
+        if head in _HEADERS:
+            return None, assigns
+        if head in _KEYWORDS:
+            args = args[1:]
+            continue
+        if head == "function":
+            args = args[2:]
+            continue
+        if _FUNCDEF_RE.match(head):
+            args = args[1:]
+            continue
+        name = Path(head).name
+        if name in _WRAPPERS:
+            value_opts, skip = _WRAPPERS[name]
+            args = args[1:]
+            while args and args[0].startswith("-"):
+                if args[0] == "--":
+                    args = args[1:]
+                    break
+                args = args[2:] if args[0] in value_opts else args[1:]
+            args = args[skip:]
+            continue
+        break
+    return args, assigns
+
+
+def _positionals(args: Sequence[str], value_opts: frozenset[str] = frozenset()) -> list[str]:
+    """Arguments that are not options (nor an option's value), stopping at ``--``.
+    ``+nightly``-style toolchain selectors count as options."""
+    out: list[str] = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            break
+        if a.startswith(("-", "+")) and a != "-":
+            if a in value_opts:
+                i += 1
+        else:
+            out.append(a)
+        i += 1
+    return out
+
+
+def _git_args(
+    rest: Sequence[str], value_opts: frozenset[str]
+) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+    """``(options as (name, value), positionals before --, tokens after --)``."""
+    opts: list[tuple[str, str]] = []
+    pos: list[str] = []
+    i = 0
+    while i < len(rest):
+        a = rest[i]
+        if a == "--":
+            return opts, pos, list(rest[i + 1 :])
+        if a.startswith("-") and a != "-":
+            name, eq, val = a.partition("=")
+            if eq:
+                opts.append((name, val))
+            elif name in value_opts and i + 1 < len(rest):
+                opts.append((name, rest[i + 1]))
+                i += 1
+            else:
+                opts.append((a, ""))
+        else:
+            pos.append(a)
+        i += 1
+    return opts, pos, []
+
+
+def _revisionish(a: str) -> bool:
+    """Does ``a`` look like a revision rather than a path? Globs and pathspec magic
+    can never be refnames."""
+    if a == "HEAD" or a.startswith(":") or any(c in a for c in "*?["):
+        return False
+    return bool(_SHA_RE.match(a) or _REF_RE.search(a) or a in _BRANCHISH)
+
+
+def _worktree_path(here: Path, a: str) -> bool:
+    if a == "." or a.startswith(":") or any(c in a for c in "*?["):
+        return True
+    try:
+        return (here / a).exists()
+    except (OSError, ValueError):
+        return False
+
+
+def _leaves_worktree(path: str) -> bool:
+    p = path.replace("\\", "/")
+    return p.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:", p)) or ".." in p.split("/")
+
+
+def _is_git_dir_path(a: str) -> bool:
+    p = a.replace("\\", "/")
+    return p == ".git" or p.startswith(".git/") or "/.git/" in p or p.endswith("/.git")
+
+
+def _git_dir_arg(args: Sequence[str]) -> str:
+    """A non-git command that names ``.git`` (or a path into one) is reading the
+    repository's guts — ``cat .git`` alone reveals the main clone's location."""
+    for i in range(1, len(args)):
+        a = args[i]
+        if a.startswith(("-", "!")):
+            continue
+        if _is_git_dir_path(a) and args[i - 1] not in _PATH_EXCLUDE_OPTS:
+            return f"archaeology: '.git' is off limits ({a})"
+    return ""
+
+
+def _inline_code(exe: str, args: Sequence[str], stdin: str | None) -> list[str]:
+    """The code strings an interpreter invocation would execute: every ``-c``/``-e``
+    value (separate or attached) plus a here-document when the script is stdin
+    (``python -``, or no script argument at all)."""
+    flags = _INLINE_FLAGS.get("python" if _PYTHON_RE.match(exe) else exe)
+    if flags is None:
+        return []
+    code: list[str] = []
+    i = 1
+    positional = False
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            positional = positional or i + 1 < len(args)
+            break
+        if a in flags:
+            if i + 1 < len(args):
+                code.append(args[i + 1])
+            i += 2
+            continue
+        attached = next((f for f in flags if len(f) == 2 and a.startswith(f) and len(a) > 2), "")
+        if attached:
+            code.append(a[2:])
+        elif a.startswith("--") and "=" in a and a.split("=", 1)[0] in flags:
+            code.append(a.split("=", 1)[1])
+        elif a == "-m":
+            return code  # a module run, never inline code
+        elif a != "-" and not a.startswith("-"):
+            positional = True
+        i += 1
+    if stdin is not None and not code and not positional:
+        code.append(stdin)
+    return code
+
+
+def _scan_code(code: str, exe: str) -> str:
+    """Refuse inline code that shells out to git history, reads ``.git`` or calls a
+    network tool. Text scan, not a parse — see :data:`_CODE_GIT_HISTORY`."""
+    m = _CODE_GIT_NETWORK.search(code)
+    if m:
+        return f"network: inline {exe} code runs 'git {m.group(1)}' (no network access)"
+    m = _CODE_GIT_HISTORY.search(code)
+    if m:
+        return f"archaeology: inline {exe} code runs 'git {m.group(1)}' (history/other revisions)"
+    if _CODE_GIT_DIFF_REV.search(code):
+        return f"archaeology: inline {exe} code runs 'git diff' against another revision"
+    if _CODE_GIT_DIR.search(code):
+        return f"archaeology: inline {exe} code reads '.git'"
+    m = _CODE_NET_TOOL.search(code)
+    if m:
+        return f"network: inline {exe} code runs '{m.group(0).split()[0]}' (no network access)"
+    return ""
+
+
+def _chdir(here: Path | None, target: str) -> Path | None:
+    """Where the shell is after ``cd target``; ``None`` when unknown (home, ``-``)."""
+    if here is None or target in {"", "-", "~"} or target.startswith("~"):
+        return None
+    t = Path(target)
+    if t.is_absolute():
+        return t
+    return Path(posixpath.normpath((here / target).as_posix()))
+
+
+# ---------------------------------------------------------------------------
+# Shell guard
+# ---------------------------------------------------------------------------
+
+
+class GitArchaeologyGuard:
+    """Refuse commands that recover the real patch, reach other revisions, leave
+    the sandbox, or mutate the provisioned environment.
+
+    ``check(argv)`` inspects one argv; ``check_shell(command)`` parses a shell
+    command line — ``&&`` ``||`` ``;`` ``|`` ``&`` *and newlines* separate segments;
+    ``$( … )``, backticks and ``( … )`` sub-shells are checked recursively; here-
+    document bodies are data (quoted tag) or scanned for substitutions (unquoted
+    tag); wrappers (``env``, ``sudo``, ``timeout``, ``xargs``, ``find -exec``,
+    ``sh -c``, function bodies, ``alias`` values) are unwrapped to the command that
+    actually runs. Returns ``""`` when allowed, else a reason prefixed
+    ``archaeology:`` (history / other revisions / the shared stash stack / ``.git``
+    / cannot be parsed safely) or ``network:`` (fetch / install / registry / cloud).
+
+    ``cwd`` (constructor or per call) is the worktree the command runs in. With it
+    the guard can *verify* instead of guess: ``npx <bin>`` is honest when
+    ``node_modules/.bin/<bin>`` exists at the (``cd``-tracked) cwd or an ancestor
+    up to the worktree root; ``git diff <word>`` / ``git checkout <word>`` are paths
+    only if they exist. Without a cwd those forms fail closed — ``npx`` is refused,
+    ``git diff <unknown word>`` is allowed only when it does not look like a ref.
+
+    **Policy: ``git stash`` stays refused in every form (2026-09-13).** Measured on a
+    throwaway clone: ``refs/stash`` lives in the common git dir, so it is shared by
+    the main clone and EVERY ``git worktree add --detach`` task worktree —
+    ``git stash list`` / ``show -p`` in one worktree printed another worktree's
+    diff, and ``git stash pop`` there stole it (the first worktree's entry was
+    gone). A stash from a concurrent trial of the *same task* is that trial's
+    candidate solution; the operator's WIP is on the same stack. That is
+    cross-trial contamination and destruction of another trial's work, not just
+    "the agent's own loss", so no ``push``/``list``/``show``/``apply``/``pop``/
+    ``drop`` subset is safe. The honest goal ("run the tests without my edits") has
+    a working-tree-only idiom that reaches no shared state and is allowed:
+    ``git diff > /tmp/mine.patch; git checkout -- <paths>; <tests>; git apply
+    /tmp/mine.patch`` (or copy the file). The refusal message says so.
+
+    **Policy: ``npx``.** Refused wholesale before (three honest koa builds).
+    ``npx <name>`` never fetches when ``node_modules/.bin/<name>`` exists, so with a
+    cwd it is allowed exactly then; ``--no-install``/``--no`` is offline by
+    construction and allowed anywhere; ``-p``/``--package``/``-y``/``--yes``, a
+    ``name@version``, a scoped ``@org/pkg``, ``--call`` and an unknown binary are
+    refused. ``npm exec`` follows the same rule.
+
+    **Not this guard's job: shell edits to test files** (``sed -i … foo_test.go``,
+    ``> tests/x.py``, ``cp``, ``tee``). The shell guard is path-blind and cannot
+    classify tests; belt 1 (:meth:`TestFileGuard.tampered` →
+    :meth:`~crb.core.workspace.Workspace.tests_byte_identical`) catches every such
+    edit post hoc, byte for byte, however it was made. Detecting them here would be
+    unbounded (``python -c "open(…, 'w')"``) and advisory at best.
+
+    **Inline code** (``python -c``, ``node -e``, ``ruby``/``perl``/``php -e``/``-r``,
+    and a here-document fed to ``python -``) is *scanned*, not parsed as shell: the
+    text is searched for a git history/network verb, a ``.git`` path or a network tool
+    (:func:`_scan_code`). Parsing code as shell would refuse honest one-liners; the
+    scan keeps ``subprocess.run(['git','status'])`` honest and refuses
+    ``subprocess.run(['git','log'])``.
+
+    **Known gaps (documented, not hidden):** script FILES (``bash script.sh``,
+    ``source x.sh``, ``make``) and library-level network in code (``urllib``,
+    ``requests``) are not inspected — the sandbox's ``--network=none`` is the belt
+    for network, and history access from code is only closed for good by giving the
+    builder a clone that does not *contain* the gold commit (the P5
+    builder-in-container item). Without a cwd, ``git diff <branch-not-in-the-known-
+    list>`` passes. None of these can mint a false pass (the belts still hold); they
+    could contaminate a measurement by recovering the gold patch.
+
+    History (false positives this guard has refused on honest builds, each now a
+    corpus line in ``tests/fixtures/shell_corpus.txt``):
+
+    * 2026-09-13 — ``$(pwd)``, ``$(find …)`` (koa): substitutions were refused
+      wholesale; now hoisted and checked recursively.
+    * 2026-09-13 — ``grep "preRun(ctx"`` (cobra): a quoted ``(`` was read as a
+      sub-shell; parsing now honours quoting.
+    * 2026-09-13 — ``pip install`` after ImportError (click ×8): the brief lacked the
+      runner's env prefix (fixed in the adapter); ``python -m pip list/show`` was
+      also refused by an ``or`` fall-through here.
+    * 2026-09-13 — ``npx standard`` (koa): ``npx`` refused wholesale → cwd-verified
+      local binaries.
+    * 2026-09-13 — this corpus (414 honest lines): the old guard refused 45 —
+      ``git rev-parse --show-toplevel``, ``git config --get``, ``git apply``,
+      ``git mv``, ``git checkout -- <path>``, ``git restore -- <path>``,
+      ``uv pip list``, ``npm exec -- jest``, ``case … esac``, and every heredoc
+      whose body contained an apostrophe. All fixed; 14 bypass classes closed
+      in the same pass (newline separator, leading redirection, ``{ }``/``if``
+      groups, ``bash -x -c``, ``xargs``, ``find -exec``, ``env -i``, ``timeout``,
+      ``git diff main``, ``git grep pat main``, bare ``yarn``, ``./mvnw
+      dependency:*``, ``docker``, function definitions).
+    * 2026-09-14 — A8's human-review exercises found the guard read only each
+      segment's first word: ``python -c "subprocess.run(['git','log'])"``,
+      ``GIT_DIR=… git diff``, ``parallel git log`` and ``git -c core.worktree=``
+      passed. Closed by the inline-code scan, the ``GIT_*`` redirect rule and the
+      ``parallel`` wrapper; the honest counterparts (``subprocess.run(['git',
+      'status'])``, ``open('.gitignore')``) are corpus lines.
     """
 
-    def check(self, argv: Sequence[str]) -> str:
-        args = [str(a) for a in argv]
-        # strip leading VAR=value assignments and wrappers
-        while args and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", args[0]):
-            args = args[1:]
-        while args and Path(args[0]).name in _WRAPPERS:
-            args = args[1:]
-            while args and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", args[0]):
-                args = args[1:]
-        if not args:
-            return ""
-        exe = Path(args[0]).name
-        if exe in _SHELLS and len(args) >= 3 and args[1] in {"-c", "-lc", "-ec"}:
-            return self.check_shell(args[2])
-        if exe == "eval":
-            return "archaeology: 'eval' is not allowed"
-        if exe in NETWORK_TOOLS:
-            return f"network: '{exe}' is not allowed (no network access)"
-        if exe == "git" or exe.startswith("git-"):
-            return self._check_git(args[1:] if exe == "git" else [exe[4:], *args[1:]])
-        if exe in _NETWORK_SUBCOMMANDS:
-            subs = _NETWORK_SUBCOMMANDS[exe]
-            tail = [a for a in args[1:] if not a.startswith("-")]
-            if not subs or (tail and tail[0] in subs):
-                return f"network: '{' '.join(args[:2])}' installs from the network"
-            if exe in {"pip", "pip3"} and any(a == "-r" for a in args):
-                return "network: 'pip -r' installs from the network"
-        if exe in {"python", "python3"} and "-m" in args:
-            i = args.index("-m")
-            if i + 1 < len(args) and args[i + 1] in {"pip", "ensurepip"}:
-                return (
-                    self.check(["pip", *args[i + 2 :]]) or "network: 'python -m pip' is not allowed"
-                )
-        return ""
+    def __init__(self, cwd: Path | str | None = None) -> None:
+        self.cwd: Path | None = Path(cwd) if cwd is not None else None
 
-    def check_shell(self, command: str, *, _depth: int = 0) -> str:
-        """Split a shell command line on ``&&`` ``||`` ``;`` ``|`` ``&`` and check every
-        segment. Sub-shells and command substitutions (``$( … )``, backticks,
-        ``( … )``) are checked RECURSIVELY — ``$(pwd)`` and ``$(find …)`` are ordinary
-        developer shell, refusing them wholesale disqualified honest builds on
-        koajs/koa — and refused only if the inner command violates (or nests
-        deeper than the parser will follow)."""
+    # --- public --------------------------------------------------------------------
+    def check(self, argv: Sequence[str], *, cwd: Path | str | None = None) -> str:
+        """Check one argv (already split). Returns a reason or ``""``."""
+        return self._segment([str(a) for a in argv], self._here(cwd), stdin=None, piped=False)
+
+    def check_shell(self, command: str, *, cwd: Path | str | None = None, _depth: int = 0) -> str:
+        """Parse and check a shell command line (see the class docstring)."""
         if _depth > 4:
             return "archaeology: command substitution nested too deep to check"
-        flat, inners = _hoist_substitutions(command)
+        here = self._here(cwd)
+        stripped = _strip_heredocs(command)
+        if stripped is None:
+            return "archaeology: could not parse the command safely (here-document tag)"
+        rest, bodies = stripped
+        body_inners: list[str] = []
+        for body, literal in bodies:
+            if literal:
+                continue
+            found = _heredoc_body_inners(body)
+            if found is None:
+                return "archaeology: could not parse the command safely (unbalanced substitution)"
+            body_inners += found
+        flat, inners = _hoist_substitutions(rest)
         if flat is None:
             return "archaeology: could not parse the command safely (unbalanced substitution)"
-        for inner in inners:
-            r = self.check_shell(inner, _depth=_depth + 1)
+        for inner in body_inners:
+            r = self.check_shell(inner, cwd=here, _depth=_depth + 1)
             if r:
                 return r
-        lex = shlex.shlex(flat, posix=True, punctuation_chars=True)
+        lined = _split_lines(flat)
+        if lined is None:
+            return "archaeology: could not parse the command safely (unterminated quote)"
+        lex = shlex.shlex(lined, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
         try:
             tokens = list(lex)
         except ValueError:
             return "archaeology: could not parse the command safely"
+
         segments: list[list[str]] = [[]]
-        for tok in tokens:
-            if tok in {"&&", "||", ";", ";;", "|", "&", "|&"}:
-                segments.append([])
+        piped: list[bool] = [False]
+        heredocs: list[int] = [0]
+        checked: set[int] = set()
+        skip_next = False
+        for idx, tok in enumerate(tokens):
+            # every substitution is checked wherever it sits — as an argument, a
+            # redirection target, an assignment value or an exe name
+            for m in _PLACEHOLDER_RE.finditer(tok):
+                k = int(m.group(1))
+                if k < len(inners) and k not in checked:
+                    checked.add(k)
+                    r = self.check_shell(inners[k], cwd=here, _depth=_depth + 1)
+                    if r:
+                        return r
+            if skip_next:
+                skip_next = False
                 continue
-            if tok in {"(", ")", "`", "$"}:
+            if tok in _SEPARATORS:
+                segments.append([])
+                piped.append(tok in _PIPES)
+                heredocs.append(0)
+                continue
+            if tok in {"(", "`", "$"}:
                 return "archaeology: could not parse the command safely (stray sub-shell token)"
-            if tok.startswith(("<", ">")):
-                continue  # redirections
+            if tok.startswith("<<") and not tok.startswith("<<<"):
+                heredocs[-1] += 1
+                skip_next = True  # the tag
+                continue
+            if tok.startswith(("<", ">")) or tok in {"&>", "&>>"}:
+                skip_next = True  # the redirection target is not a command
+                continue
+            if tok.isdigit() and idx + 1 < len(tokens) and tokens[idx + 1].startswith(("<", ">")):
+                continue  # a file descriptor: `2>/dev/null git log` still runs git log
             segments[-1].append(tok)
-        for seg in segments:
-            r = self.check(seg)
+        for k, inner in enumerate(inners):  # defensive: a placeholder can never vanish
+            if k not in checked:
+                r = self.check_shell(inner, cwd=here, _depth=_depth + 1)
+                if r:
+                    return r
+        body_iter = iter(body for body, _ in bodies)
+        for i, seg in enumerate(segments):
+            stdin: str | None = None
+            for _ in range(heredocs[i]):
+                stdin = next(body_iter, None)
+            r = self._segment(seg, here, stdin=stdin, piped=piped[i], depth=_depth)
             if r:
                 return r
+            if seg and seg[0] in {"cd", "pushd"}:
+                here = _chdir(here, seg[1] if len(seg) > 1 else "")
+            elif seg and seg[0] == "popd":
+                here = None
         return ""
 
-    def _check_git(self, args: list[str]) -> str:
-        # skip global options: -C <p>, -c k=v, --git-dir=…, --no-pager…
+    # --- one segment -----------------------------------------------------------------
+    def _here(self, cwd: Path | str | None) -> Path | None:
+        return Path(cwd) if cwd is not None else self.cwd
+
+    def _segment(
+        self,
+        seg: Sequence[str],
+        here: Path | None,
+        *,
+        stdin: str | None,
+        piped: bool,
+        depth: int = 0,
+    ) -> str:
+        args, assigns = _unwrap(seg)
+        redirected = sorted(set(assigns) & _GIT_ENV_REDIRECT)
+        if redirected:
+            return f"archaeology: '{redirected[0]}=' points git at another repository"
+        if not args:
+            return ""
+        head = args[0]
+        if head in _EXPORTERS:
+            for a in args[1:]:
+                m = _ASSIGN_RE.match(a)
+                if m and m.group(1) in _GIT_ENV_REDIRECT:
+                    return f"archaeology: '{m.group(1)}=' points git at another repository"
+            return ""
+        if _GROUP_RE.match(head):
+            return ""  # a `( … )` group — its contents were checked when hoisted
+        if head.startswith("$") or _COMPUTED_RE.fullmatch(head):
+            return (
+                "archaeology: the command name is computed (a variable or substitution) and "
+                "cannot be checked — run the program by name"
+            )
+        exe = Path(head).name
+        if exe in _SHELLS:
+            return self._shell_exe(args, here, stdin=stdin, piped=piped, depth=depth)
+        if exe == "eval":
+            return "archaeology: 'eval' is not allowed"
+        if exe == "alias":
+            for a in args[1:]:
+                _, eq, val = a.partition("=")
+                if eq:
+                    r = self.check_shell(val, cwd=here, _depth=depth + 1)
+                    if r:
+                        return r
+            return ""
+        if exe in NETWORK_TOOLS:
+            return f"network: '{exe}' is not allowed (no network access)"
+        if exe == "git" or exe.startswith("git-"):
+            return self._check_git(args[1:] if exe == "git" else [exe[4:], *args[1:]], here)
+        r = _git_dir_arg(args)
+        if r:
+            return r
+        for code in _inline_code(exe, args, stdin):
+            r = _scan_code(code, exe)
+            if r:
+                return r
+        if exe == "find":
+            return self._find_exec(args, here, depth)
+        return self._tool(exe, args[1:], assigns, here, depth)
+
+    def _shell_exe(
+        self, args: list[str], here: Path | None, *, stdin: str | None, piped: bool, depth: int
+    ) -> str:
+        """``sh -c 'cmd'`` is checked; a here-document or pipe fed to a bare shell is
+        a script and is checked or refused; a script FILE is a documented gap."""
+        i, inline = 1, False
+        while i < len(args) and args[i].startswith(("-", "+")) and args[i] != "--":
+            f = args[i]
+            if not f.startswith("--") and f[-1] in "oO":
+                i += 2  # `-o pipefail` / `-euo pipefail`: the option name is the next token
+                continue
+            if not f.startswith("--") and "c" in f[1:]:
+                inline = True
+            i += 1
+        if i < len(args) and args[i] == "--":
+            i += 1
+        if inline:
+            if i >= len(args):
+                return "archaeology: shell -c without a command string"
+            return self.check_shell(args[i], cwd=here, _depth=depth + 1)
+        if i < len(args):
+            return ""  # a script file (documented gap)
+        if stdin is not None:
+            return self.check_shell(stdin, cwd=here, _depth=depth + 1)
+        if piped:
+            return "archaeology: piping a script into a shell cannot be checked"
+        return ""
+
+    def _find_exec(self, args: list[str], here: Path | None, depth: int) -> str:
+        i = 1
+        while i < len(args):
+            if args[i] in {"-exec", "-execdir", "-ok", "-okdir"}:
+                j = i + 1
+                sub: list[str] = []
+                while j < len(args) and args[j] not in {";", "+"}:
+                    sub.append(args[j])
+                    j += 1
+                r = self._segment(sub, here, stdin=None, piped=False, depth=depth)
+                if r:
+                    return r
+                i = j
+            i += 1
+        return ""
+
+    # --- git -------------------------------------------------------------------------
+    def _check_git(self, args: list[str], here: Path | None) -> str:
         i = 0
         while i < len(args) and args[i].startswith("-"):
-            if args[i] in {"-C", "-c", "--git-dir", "--work-tree"}:
+            a = args[i]
+            if a.startswith(("--git-dir", "--work-tree")):
+                return f"archaeology: 'git {a}' points git at another repository"
+            if a in {"-C", "-c", "--namespace", "--exec-path", "--super-prefix", "--config-env"}:
+                val = args[i + 1] if i + 1 < len(args) else ""
+                if a == "-C" and _leaves_worktree(val):
+                    return f"archaeology: 'git -C {val}' leaves the worktree"
+                if a == "-c" and val.split("=", 1)[0] in {"core.worktree", "core.gitdir"}:
+                    return f"archaeology: 'git -c {val}' points git at another repository"
                 i += 2
             else:
                 i += 1
         if i >= len(args):
             return ""
-        sub = args[i]
-        rest = args[i + 1 :]
+        sub, rest = args[i], args[i + 1 :]
+        if sub in _GIT_NETWORK:
+            return f"network: 'git {sub}' reaches the network (no network access)"
+        if sub == "stash":
+            return (
+                "archaeology: 'git stash' is not allowed — the stash stack is shared with every "
+                "other worktree of this clone (other trials, the operator). To test without your "
+                "edits: git diff > /tmp/mine.patch; git checkout -- <paths>; run the tests; "
+                "git apply /tmp/mine.patch"
+            )
         if sub not in GIT_ALLOWED:
             return f"archaeology: 'git {sub}' is not allowed (no history/other revisions)"
         if sub == "diff":
-            positional = [a for a in rest if not a.startswith("-")]
-            if "--" in rest:
-                positional = [a for a in rest[: rest.index("--")] if not a.startswith("-")]
-            for a in positional:
-                if a == "HEAD":
-                    continue
-                if _SHA_RE.match(a) or _REF_RE.search(a) or a in {"--all"}:
-                    return f"archaeology: 'git diff {a}' compares against another revision"
-            if "--all" in rest:
-                return "archaeology: 'git diff --all' is not allowed"
-        if sub == "grep" and any(re.match(r"^[0-9a-f]{7,64}$", a) for a in rest):
-            return "archaeology: 'git grep <revision>' is not allowed"
+            return self._git_diff(rest, here)
+        if sub == "grep":
+            return self._git_grep(rest, here)
+        if sub == "checkout":
+            return self._git_checkout(rest, here)
+        if sub == "restore":
+            return self._git_restore(rest)
+        if sub == "rev-parse":
+            return self._git_rev_parse(rest)
+        if sub == "config":
+            return self._git_config(rest)
+        return ""
+
+    @staticmethod
+    def _revision_arg(verb: str, a: str, here: Path | None) -> str:
+        if a == "HEAD":
+            return ""
+        if _revisionish(a):
+            return f"archaeology: 'git {verb} {a}' compares against another revision"
+        if here is not None and not _worktree_path(here, a):
+            return f"archaeology: 'git {verb} {a}' is not a path in the worktree (a revision?)"
+        return ""
+
+    def _git_diff(self, rest: list[str], here: Path | None) -> str:
+        opts, pos, _ = _git_args(rest, _GIT_VALUE_OPTS["diff"])
+        if any(n == "--all" for n, _ in opts):
+            return "archaeology: 'git diff --all' is not allowed"
+        for a in pos:
+            r = self._revision_arg("diff", a, here)
+            if r:
+                return r
+        return ""
+
+    def _git_grep(self, rest: list[str], here: Path | None) -> str:
+        opts, pos, _ = _git_args(rest, _GIT_VALUE_OPTS["grep"])
+        explicit_pattern = any(n in {"-e", "-f"} for n, _ in opts)
+        for a in pos if explicit_pattern else pos[1:]:
+            r = self._revision_arg("grep", a, here)
+            if r:
+                return r
+        return ""
+
+    def _git_checkout(self, rest: list[str], here: Path | None) -> str:
+        opts, pos, _ = _git_args(rest, _GIT_VALUE_OPTS["checkout"])
+        for n, _v in opts:
+            if n not in _CHECKOUT_OK:
+                return (
+                    f"archaeology: 'git checkout {n}' switches branches/revisions — only "
+                    "'git checkout [HEAD] -- <paths>' is allowed"
+                )
+        if "--" in rest:
+            bad = [p for p in pos if p != "HEAD"] + pos[1:]
+            if bad:
+                return f"archaeology: 'git checkout {bad[0]}' names another revision"
+            return ""
+        for j, p in enumerate(pos):
+            if p == "HEAD" and j == 0:
+                continue
+            if here is not None and not _revisionish(p) and _worktree_path(here, p):
+                continue
+            return (
+                f"archaeology: 'git checkout {p}' cannot be verified as a path — use "
+                "'git checkout -- <paths>'"
+            )
+        return ""
+
+    def _git_restore(self, rest: list[str]) -> str:
+        opts, _pos, _ = _git_args(rest, _GIT_VALUE_OPTS["restore"])
+        for n, v in opts:
+            if n in {"-s", "--source"}:
+                if v != "HEAD":
+                    return f"archaeology: 'git restore --source={v}' restores another revision"
+            elif n not in _RESTORE_OK:
+                return f"archaeology: 'git restore {n}' is not allowed"
+        return ""
+
+    def _git_rev_parse(self, rest: list[str]) -> str:
+        opts, pos, after = _git_args(rest, frozenset())
+        for n, _v in opts:
+            if n not in _REV_PARSE_OK:
+                return (
+                    f"archaeology: 'git rev-parse {n}' reveals the repository layout or a revision"
+                )
+        for p in pos + after:
+            if p != "HEAD":
+                return f"archaeology: 'git rev-parse {p}' resolves another revision"
+        return ""
+
+    def _git_config(self, rest: list[str]) -> str:
+        opts, pos, after = _git_args(rest, _GIT_VALUE_OPTS["config"])
+        names = {n for n, _ in opts}
+        if names & _CONFIG_WRITE or (
+            pos and pos[0] in {"set", "unset", "edit", "rename-section", "remove-section"}
+        ):
+            return "archaeology: 'git config' may only read (--get/--list); writes change the shared clone config"
+        if "--blob" in names:
+            return "archaeology: 'git config --blob' reads another revision"
+        if names & _CONFIG_READ or (pos and pos[0] in {"get", "list"}):
+            return ""
+        if len(pos) + len(after) <= 1:
+            return ""
+        return "archaeology: 'git config <key> <value>' writes the shared clone config"
+
+    # --- package / build tools ---------------------------------------------------------
+    def _tool(
+        self,
+        exe: str,
+        args: list[str],
+        assigns: Mapping[str, str],
+        here: Path | None,
+        depth: int,
+    ) -> str:
+        if _PIP_RE.match(exe):
+            return self._pip(args)
+        if _PYTHON_RE.match(exe):
+            return self._python(args, assigns, here, depth)
+        if exe == "uv":
+            return self._uv(args)
+        if exe == "npm":
+            return self._npm(args, here, depth)
+        if exe == "npx":
+            return self._npx(args, here, depth, verb="npx")
+        if exe == "yarn":
+            return self._yarn(args)
+        if exe == "pnpm":
+            return self._pnpm(args)
+        if exe == "go":
+            return self._go(args, assigns)
+        if exe == "cargo":
+            return self._cargo(args)
+        if exe in {"mvn", "mvnw"}:
+            return self._mvn(exe, args)
+        if exe in {"gradle", "gradlew"}:
+            return self._gradle(exe, args)
+        if exe == "tox":
+            return (
+                ""
+                if set(args) & _TOX_READONLY
+                else "network: 'tox' creates virtualenvs and installs into them"
+            )
+        if exe == "nox":
+            return (
+                ""
+                if set(args) & _NOX_READONLY
+                else "network: 'nox' creates virtualenvs and installs into them"
+            )
+        if exe == "pre-commit":
+            pos = _positionals(args)
+            if (
+                not args
+                or set(args) & _PRECOMMIT_READONLY
+                or (pos and pos[0] in _PRECOMMIT_READONLY)
+            ):
+                return ""
+            return "network: 'pre-commit' installs hook environments"
+        if exe in _INSTALLERS:
+            pos = _positionals(args)
+            if pos and pos[0] in _INSTALLERS[exe]:
+                return f"network: '{exe} {pos[0]}' installs from the network"
+        return ""
+
+    def _pip(self, args: list[str]) -> str:
+        pos = _positionals(args)
+        if pos and pos[0] in _PIP_REFUSED:
+            what = (
+                "modifies the provisioned environment"
+                if pos[0] == "uninstall"
+                else "installs from the network"
+            )
+            return f"network: 'pip {pos[0]}' {what}"
+        return ""
+
+    def _python(
+        self, args: list[str], assigns: Mapping[str, str], here: Path | None, depth: int
+    ) -> str:
+        if "-m" not in args:
+            return ""
+        i = args.index("-m")
+        if i + 1 >= len(args):
+            return ""
+        mod, rest = args[i + 1], args[i + 2 :]
+        if mod == "pip":
+            return self._pip(rest)
+        if mod == "ensurepip":
+            return "network: 'python -m ensurepip' installs pip"
+        if mod in {"pipx", "pipenv", "poetry", "uv", "conda"}:
+            return self._tool(mod, rest, assigns, here, depth)
+        return ""
+
+    def _uv(self, args: list[str]) -> str:
+        pos = _positionals(args)
+        if not pos:
+            return ""
+        sub = pos[0]
+        if sub == "pip":
+            if len(pos) < 2 or pos[1] in _UV_PIP_OK:
+                return ""
+            return f"network: 'uv pip {pos[1]}' installs or changes the provisioned environment"
+        if sub in _UV_OK:
+            return ""
+        return f"network: 'uv {sub}' installs or syncs from the network"
+
+    def _npm(self, args: list[str], here: Path | None, depth: int) -> str:
+        pos = _positionals(args)
+        if not pos:
+            return ""
+        sub = pos[0]
+        if sub in {"exec", "x"}:
+            return self._npx(args[args.index(sub) + 1 :], here, depth, verb="npm exec")
+        if sub == "explore":
+            if "--" in args:
+                return self._segment(
+                    args[args.index("--") + 1 :], here, stdin=None, piped=False, depth=depth
+                )
+            return ""
+        if sub == "version":
+            return "network: 'npm version <x>' bumps and tags the package" if len(pos) > 1 else ""
+        if sub in _NPM_REFUSED:
+            return f"network: 'npm {sub}' installs from the network"
+        return ""
+
+    def _npx(self, args: list[str], here: Path | None, depth: int, *, verb: str) -> str:
+        i, no_install = 0, False
+        while i < len(args):
+            a = args[i]
+            if a == "--":
+                i += 1
+                break
+            if not a.startswith("-"):
+                break
+            name, eq, val = a.partition("=")
+            if name in {"--no-install", "--no"}:
+                no_install = True
+            elif name in {"-p", "--package", "-y", "--yes", "--ignore-existing"}:
+                return f"network: '{verb} {name}' may fetch a package from the registry"
+            elif name in {"-c", "--call"}:
+                cmd = val if eq else (args[i + 1] if i + 1 < len(args) else "")
+                r = self.check_shell(cmd, cwd=here, _depth=depth + 1)
+                return r or f"network: '{verb} --call' may install before running"
+            i += 1
+        if i >= len(args):
+            return ""
+        name = args[i]
+        if "@" in name or "/" in name or name.startswith("."):
+            return f"network: '{verb} {name}' names a package or version, not a binary in node_modules/.bin"
+        if no_install:
+            return ""
+        if here is None:
+            return (
+                f"network: '{verb} {name}' cannot be verified against node_modules/.bin "
+                "(no worktree cwd) — it may fetch from the registry"
+            )
+        if self._local_bin(here, name):
+            return ""
+        return f"network: '{verb} {name}' is not in node_modules/.bin — it would be fetched from the registry"
+
+    def _local_bin(self, here: Path, name: str) -> bool:
+        """``node_modules/.bin/<name>`` at ``here`` or an ancestor up to the worktree root
+        (npm walks up the same way; monorepos hoist binaries to the root)."""
+        root = self.cwd
+        d = here
+        for _ in range(64):
+            try:
+                if (d / "node_modules" / ".bin" / name).exists():
+                    return True
+            except (OSError, ValueError):
+                return False
+            at_root = d in (root, d.parent)
+            if at_root or (root is not None and root not in d.parents):
+                return False
+            d = d.parent
+        return False
+
+    def _yarn(self, args: list[str]) -> str:
+        pos = _positionals(args)
+        if not pos:
+            return (
+                ""
+                if any(a in {"-v", "--version", "-h", "--help"} for a in args)
+                else "network: bare 'yarn' installs"
+            )
+        sub = pos[0]
+        if sub == "workspace":
+            sub = pos[2] if len(pos) > 2 else ""
+        elif sub == "workspaces":
+            sub = "focus" if len(pos) > 1 and pos[1] == "focus" else ""
+        elif sub == "cache":
+            sub = "cache clean" if len(pos) > 1 and pos[1] in {"clean", "clear"} else ""
+        if sub in _YARN_REFUSED or sub in {"cache clean", "focus"}:
+            return f"network: 'yarn {sub}' installs or changes the provisioned environment"
+        return ""
+
+    def _pnpm(self, args: list[str]) -> str:
+        pos = _positionals(args, _PNPM_VALUE_OPTS)
+        if not pos:
+            return ""
+        sub = pos[0]
+        if sub == "store" and len(pos) > 1 and pos[1] == "prune":
+            return "network: 'pnpm store prune' destroys the provisioned store"
+        if sub in _PNPM_REFUSED:
+            return f"network: 'pnpm {sub}' installs or changes the provisioned environment"
+        return ""
+
+    def _go(self, args: list[str], assigns: Mapping[str, str]) -> str:
+        pos = _positionals(args)
+        if not pos:
+            return ""
+        sub = pos[0]
+        offline = assigns.get("GOPROXY") == "off" or "-mod=vendor" in assigns.get("GOFLAGS", "")
+        if sub in {"get", "install"}:
+            return f"network: 'go {sub}' installs from the network"
+        if (
+            sub == "mod"
+            and len(pos) > 1
+            and pos[1] in {"download", "tidy", "vendor"}
+            and not offline
+        ):
+            return f"network: 'go mod {pos[1]}' fetches modules"
+        if sub == "telemetry":
+            return "network: 'go telemetry' is not allowed"
+        if sub == "clean" and any(a in {"-modcache", "-cache"} for a in args):
+            return "network: 'go clean -modcache/-cache' destroys the provisioned cache"
+        if sub == "env" and "-w" in args:
+            return "network: 'go env -w' writes persistent toolchain configuration"
+        if sub in {"run", "build", "test", "list", "doc", "vet"} and any("@" in p for p in pos[1:]):
+            return f"network: 'go {sub} pkg@version' fetches a module"
+        return ""
+
+    def _cargo(self, args: list[str]) -> str:
+        pos = _positionals(args)
+        if not pos:
+            return ""
+        sub = pos[0]
+        offline = "--offline" in args
+        if sub in _CARGO_ALWAYS:
+            return f"network: 'cargo {sub}' installs or reaches the registry"
+        if sub in _CARGO_ONLINE and not offline:
+            return f"network: 'cargo {sub}' fetches from the registry (add --offline to resolve locally)"
+        return ""
+
+    def _mvn(self, exe: str, args: list[str]) -> str:
+        goals = _positionals(args, _MVN_VALUE_OPTS)
+        offline = "-o" in args or "--offline" in args
+        if any(g == "deploy" or g.startswith("deploy:") for g in goals):
+            return f"network: '{exe} deploy' publishes to a remote repository"
+        if "-U" in args or "--update-snapshots" in args:
+            return f"network: '{exe} -U' forces remote resolution"
+        if not offline:
+            for g in goals:
+                if g.startswith(_MVN_ONLINE_PREFIXES):
+                    return f"network: '{exe} {g}' resolves from the network (use -o)"
+        return ""
+
+    def _gradle(self, exe: str, args: list[str]) -> str:
+        tasks = _positionals(args, _GRADLE_VALUE_OPTS)
+        offline = "--offline" in args
+        for flag in ("--refresh-dependencies", "--write-locks", "--update-locks"):
+            if flag in args:
+                return f"network: '{exe} {flag}' resolves from the network"
+        for t in tasks:
+            if t.startswith("publish"):
+                return f"network: '{exe} {t}' publishes to a remote repository"
+            if not offline and (
+                t in {"dependencies", "wrapper", "init"} or t.startswith("dependency")
+            ):
+                return f"network: '{exe} {t}' resolves from the network (use --offline)"
         return ""
 
 
