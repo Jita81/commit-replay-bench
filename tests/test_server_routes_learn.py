@@ -9,17 +9,28 @@ so nothing is stale until the query asks about a newer one.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
+from sqlalchemy import select
 
 from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND
 from crb.core.version import APPARATUS_VERSION
 from crb.store.ledger import DbLedger
-from crb.store.models import Grade
-from fixtures.server_seed import ALPHA, BETA, Env, assert_rbac, envelope, make_env
+from crb.store.models import Event, Grade
+from fixtures.server_seed import (
+    ALPHA,
+    BETA,
+    RUN_IDS,
+    Env,
+    assert_rbac,
+    envelope,
+    make_env,
+)
 
 ERR_NHS = (
     "protocol violation: archaeology: '.git' is off limits (.git) (attempted: find . -iname "
@@ -116,6 +127,81 @@ def test_strengthen_uses_the_controls_verdict_and_the_oracle_scores(env: Env) ->
     assert "bug.fix|S" in d2["cells_without_scores"]
     r = env.get(f"/learn/strengthen?repo={ALPHA}&by=nope")
     assert r.status_code == 422
+
+
+def test_strengthen_reads_per_task_scores_from_the_store_events(env: Env) -> None:
+    """The per-task scores are the repo's ``oracle.score`` events (an oracle run's
+    ``counts_json`` is only the cell roll-up): every item names a SEEDED scored task
+    of the held cell, carries the repo, and the strengths are the seed's."""
+    d = env.get(f"/learn/strengthen?repo={ALPHA}").json()
+    items = [i for i in d["items"] if i["labels"]["cell"] == "bug.fix|S"]
+    with env.factory() as session:
+        scored = {
+            ev.task_id: dict(ev.payload_json or {})
+            for ev in session.execute(
+                select(Event).where(Event.repo == ALPHA, Event.action == "oracle.score")
+            ).scalars()
+            if (ev.payload_json or {}).get("capability_class") == "bug.fix"
+        }
+    assert items and {i["labels"]["task_id"] for i in items} <= set(scored)
+    assert all(i["labels"]["repo"] == ALPHA for i in items)
+    assert all(i["labels"]["reason_code"] == "controls_escapes" for i in items)
+    for i in items:
+        payload = scored[i["labels"]["task_id"]]
+        assert i["labels"]["mutants"] == str(payload["total"])
+        assert i["labels"]["escaped"] == str(payload["total"] - payload["killed"])
+    assert "bug.fix|S" not in d["cells_without_scores"]
+    # the item id is sha(cell, repo, task): stable across reads
+    assert [i["id"] for i in d["items"]] == [
+        i["id"] for i in env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"]
+    ]
+
+
+def test_cli_over_the_exports_derives_the_route_items(
+    env: Env, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A ledger export is the rows alone: over it the CLI honestly flags nothing, even
+    with the scores — the cell is held by the controls verdict. Given the two exports
+    the route reads from the store (``GET /oracle/{repo}`` and
+    ``GET /oracle/{repo}/controls``) the CLI derives the SAME items with the SAME ids;
+    the oracle run's ``events/log`` page is an equivalent source of the scores."""
+    from crb.cli.main import main
+
+    route = env.get(f"/learn/strengthen?repo={ALPHA}").json()
+    want = sorted(
+        (i["id"], i["labels"]["task_id"], i["labels"]["oracle_strength"]) for i in route["items"]
+    )
+    assert want
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text(env.get(f"/ledger/export?repo={ALPHA}&format=jsonl").text, encoding="utf-8")
+    oracle = tmp_path / "oracle.json"
+    oracle.write_text(env.get(f"/oracle/{ALPHA}").text, encoding="utf-8")
+    controls = tmp_path / "controls.json"
+    controls.write_text(env.get(f"/oracle/{ALPHA}/controls").text, encoding="utf-8")
+    events = tmp_path / "events.json"
+    events.write_text(
+        env.get(f"/runs/{RUN_IDS['oracle']}/events/log?limit=200").text, encoding="utf-8"
+    )
+
+    def cli(*extra: str) -> dict[str, Any]:
+        capsys.readouterr()
+        argv = ["learn", "strengthen", "--path", str(ledger), "--json", "--workdir", str(tmp_path)]
+        code = main([*argv, *extra])
+        out = capsys.readouterr()
+        assert code == 0, out.err
+        return dict(json.loads(out.out))
+
+    bare = cli("--oracle", str(oracle))
+    with_controls = cli("--oracle", str(oracle), "--controls", str(controls))
+    from_events = cli("--oracle", str(events), "--controls", str(controls))
+    assert bare["cells_flagged"] == [] and bare["items"] == [] and bare["controls"] is None
+    for d in (with_controls, from_events):
+        got = sorted(
+            (i["id"], i["labels"]["task_id"], i["labels"]["oracle_strength"]) for i in d["items"]
+        )
+        assert got == want
+        assert d["cells_flagged"] == route["cells_flagged"]
+        assert d["controls"]["escapes"] == 1 and d["controls"]["measured"] is True
 
 
 def test_remeasure_nothing_stale_until_the_apparatus_moves(env: Env) -> None:

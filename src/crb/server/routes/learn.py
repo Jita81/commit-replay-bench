@@ -9,7 +9,13 @@ matching :mod:`crb.core.learn` derivation and returns its ``to_dict()``:
   deliberately no ``POST`` here — the corpus lives in the repository, not the store);
 * ``/learn/strengthen`` — oracle-held cells of the class × size map (routed under the
   repo's latest controls verdict, as ``/capability-map`` does) joined to the latest
-  ``oracle.score`` events → ``test.add`` items in the frozen-backlog shape;
+  ``oracle.score`` events → ``test.add`` items in the frozen-backlog shape. The
+  per-task scores are read from the store's **events** (one ``oracle.score`` per task
+  per oracle run; an oracle run's ``counts_json`` keeps only the per-cell roll-up, and
+  there is no per-task score table) — the same reader ``/oracle/{repo}`` uses, so the
+  two screens can never disagree about a task's strength. Every score carries the
+  repo, so the item ids equal what ``crb learn strengthen --oracle <GET /oracle/{repo}>
+  --controls <GET /oracle/{repo}/controls>`` derives from the exports;
 * ``/learn/remeasure`` — cells stamped with an older apparatus → ``n`` needed, cost and
   the ``POST /runs`` bodies an operator can queue. Nothing is queued.
 
@@ -45,7 +51,11 @@ _ERR = {"model": ErrorEnvelope}
 
 
 def _scores(session: Session, repo: str) -> list[dict[str, Any]]:
-    """The latest ``oracle.score`` payload per task (events are in insertion order)."""
+    """The latest ``oracle.score`` payload per task, from the store's events (the
+    per-task scores live nowhere else: ``runs.counts_json`` is the cell roll-up).
+    Events are in insertion order, so the last one per task is the latest oracle
+    run's. ``repo`` is stamped on every payload — the item id is
+    ``sha(cell, repo, task)`` and must equal the CLI's over the same export."""
     latest: dict[str, dict[str, Any]] = {}
     for ev in session.execute(
         select(Event)
@@ -56,6 +66,7 @@ def _scores(session: Session, repo: str) -> list[dict[str, Any]]:
         tid = str(ev.task_id or payload.get("task_id") or "")
         if tid:
             payload["task_id"] = tid
+            payload.setdefault("repo", repo)
             latest[tid] = payload
     return [latest[k] for k in sorted(latest)]
 

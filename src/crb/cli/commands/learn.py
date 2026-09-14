@@ -3,19 +3,33 @@
 * ``crb learn refusals [--apply <decisions.json>]`` — protocol rows → candidate
   guard-corpus lines (every verdict ``unsure``); ``--apply`` appends what a named
   human decided, with provenance, to ``tests/fixtures/shell_corpus*.txt``.
-* ``crb learn strengthen [--oracle <report.json>] [--out backlog.json]`` — oracle-held
-  cells → ``test.add`` items in the frozen-backlog shape (validated through the
-  factory's ``BacklogItem`` + DoR gate before they are written).
+* ``crb learn strengthen [--oracle <scores.json>] [--controls <report.json>] [--out
+  backlog.json]`` — oracle-held cells → ``test.add`` items in the frozen-backlog shape
+  (validated through the factory's ``BacklogItem`` + DoR gate before they are written).
 * ``crb learn remeasure [--apparatus X]`` — cells whose rows predate the apparatus →
   the ``POST /runs`` bodies an operator can queue. Nothing is queued.
 
 The ledger is read the way ``crb route`` reads it: ``--path`` or ``<workdir>/ledger.jsonl``.
+
+What a ledger export cannot carry
+---------------------------------
+A ``GET /ledger/export`` JSONL is the rows alone. Two things the server routes
+``/learn/strengthen`` on live elsewhere in the store: the per-task oracle scores
+(``oracle.score`` events of the repo's oracle runs — ``counts_json`` keeps only the
+per-cell roll-up) and the repo's negative-controls verdict (its latest
+``controls.report``). Over a bare export the CLI can therefore see neither an
+``oracle_weak`` task nor a ``controls_escapes`` / ``controls_thin`` cell, and
+``strengthen`` honestly flags nothing. ``--oracle`` and ``--controls`` hand it those
+two exports — ``GET /oracle/{repo}`` (or a run's ``events/log``) and
+``GET /oracle/{repo}/controls`` — so the CLI and the route produce the same items
+with the same ids from the same evidence.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +45,7 @@ from crb.cli.commands import (
 from crb.cli.commands.route import load_policy
 from crb.core.capability import PROJECTIONS, build_capability_map
 from crb.core.learn import (
+    OracleTaskScore,
     RefusalDecision,
     apply_triage,
     dumps,
@@ -44,11 +59,20 @@ from crb.core.learn import (
     triage_refusals,
 )
 from crb.core.ledger import JsonlLedger
+from crb.core.routing import ControlsVerdict
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.backlog import BacklogItem
 from crb.factory.readiness import ROUTE_BUILD, assess
 
 DEFAULT_CORPUS_DIR = "tests/fixtures"
+
+#: The event actions whose payload is ONE task's oracle score: the worker's
+#: ``oracle.score`` and the core's own ``oracle.mutation.scored``. Mirrors
+#: ``crb.server.routes.oracle.SCORE_ACTIONS`` (the CLI cannot import the server
+#: package; ``tests/test_cli_learn.py`` pins the two equal). An exported event log
+#: carries every stage's events — a ``grade.belt`` event is not a score, and read
+#: as one it would become an "unscoreable" item.
+ORACLE_SCORE_ACTIONS: frozenset[str] = frozenset({"oracle.score", "oracle.mutation.scored"})
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -85,9 +109,18 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     s.add_argument(
         "--oracle",
         default="",
-        metavar="REPORT.json",
-        help="an oracle-strength report (to_report() JSON, a list of per-task scores, or "
-        "oracle.score event payloads) — supplies the escaped mutants per task",
+        metavar="SCORES.json",
+        help="per-task oracle scores, in any shape the server exports them: GET /oracle/<repo> "
+        "JSON, a run's GET /runs/<id>/events/log page or JSONL of its oracle.score events, "
+        "an oracle-strength report (to_report() JSON), or a list of per-task scores",
+    )
+    s.add_argument(
+        "--controls",
+        default="",
+        metavar="CONTROLS.json",
+        help="the repo's negative-controls verdict (GET /oracle/<repo>/controls JSON, or a "
+        "'controls' run's counts) — without it cells are routed with controls NOT evaluated, "
+        "so no controls_escapes / controls_thin cell can be flagged from a bare ledger export",
     )
     s.add_argument("--repo", default="", help="subjects from <workdir>/tasks/<repo>.jsonl")
     s.add_argument(
@@ -228,6 +261,73 @@ def _subjects(wd: Workdir, repo: str) -> dict[str, str]:
     return {t.task_id: t.subject for t in wd.load_tasks(repo)}
 
 
+def load_oracle_export(raw: Any) -> list[OracleTaskScore]:
+    """Per-task oracle scores from whatever the product exports them as:
+
+    * ``GET /oracle/{repo}`` — ``{"repo": …, "tasks": [OracleTaskOut…]}`` (the latest
+      score per task; ``repo`` is carried onto every score so item ids match the
+      server's);
+    * a ``GET /runs/{id}/events/log`` page — ``{"items": [StepEvent…]}`` — or a JSONL
+      of those events: only :data:`ORACLE_SCORE_ACTIONS` are scores, the envelope's
+      ``task_id`` / ``repo`` sit beside the ``payload``;
+    * an oracle-strength report (``to_report()``: ``{"tasks": [...]}``);
+    * a bare list of per-task score dicts.
+
+    Anything else is a :class:`CliError`, never a silent empty list.
+    """
+    default_repo = ""
+    if isinstance(raw, Mapping):
+        default_repo = str(raw.get("repo") or "")
+        if isinstance(raw.get("items"), list):
+            raw = raw["items"]
+        elif isinstance(raw.get("tasks"), list):
+            raw = raw["tasks"]
+        else:
+            raw = [raw]
+    if not isinstance(raw, list):
+        raise CliError("--oracle must be a JSON object, a list, or JSON lines of per-task scores")
+    scores: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        action = item.get("action")
+        if action is not None and str(action) not in ORACLE_SCORE_ACTIONS:
+            continue
+        d: dict[str, Any] = dict(item)
+        payload = d.get("payload")
+        if isinstance(payload, Mapping):  # a StepEvent envelope around the score
+            d = {
+                **payload,
+                "task_id": d.get("task_id") or payload.get("task_id", ""),
+                "repo": d.get("repo") or payload.get("repo", ""),
+            }
+        if not d.get("repo") and default_repo:
+            d["repo"] = default_repo
+        scores.append(d)
+    return load_oracle_scores(scores)
+
+
+def load_controls_export(raw: Any) -> ControlsVerdict:
+    """The repo's negative-controls verdict from ``GET /oracle/{repo}/controls`` (a
+    ``controls.report`` payload: ``passed``, ``escapes``, ``n_rows``…, plus ``run_id`` /
+    ``reported_at``) or from a ``controls`` run body (``GET /runs/{id}`` → ``counts``).
+    Reduced by the same :meth:`ControlsVerdict.from_counts` the server routes on."""
+    if isinstance(raw, Mapping) and isinstance(raw.get("counts"), Mapping):
+        counts: Mapping[str, Any] = raw["counts"]
+        if "passed" in counts:
+            return ControlsVerdict.from_counts(
+                counts,
+                run_id=str(raw.get("id", "") or ""),
+                created=str(raw.get("finished", "") or ""),
+            )
+    if not isinstance(raw, Mapping) or "passed" not in raw:
+        raise CliError(
+            "--controls must be a controls report (GET /oracle/<repo>/controls) or a "
+            "'controls' run body with counts — no 'passed' field found"
+        )
+    return ControlsVerdict.from_counts(raw)
+
+
 def validate_items(items: list[dict[str, Any]]) -> list[str]:
     """Round-trip every item through the factory's ``BacklogItem`` and the DoR gate.
     Returns the ids that are NOT ready for ``build`` (should be none: every item
@@ -248,8 +348,15 @@ def cmd_strengthen(args: argparse.Namespace) -> int:
     path, rows = _rows(args)
     wd = workdir_of(args)
     policy = load_policy(args.policy_json)
-    cmap = build_capability_map(rows, projection=PROJECTIONS[args.by], policy=policy)
-    scores = load_oracle_scores(_read_json(args.oracle, what="--oracle")) if args.oracle else []
+    controls = (
+        load_controls_export(_read_json(args.controls, what="--controls"))
+        if args.controls
+        else None
+    )
+    cmap = build_capability_map(
+        rows, projection=PROJECTIONS[args.by], policy=policy, controls=controls
+    )
+    scores = load_oracle_export(_read_json(args.oracle, what="--oracle")) if args.oracle else []
     backlog = strengthening_backlog(
         cmap,
         scores,
@@ -262,7 +369,12 @@ def cmd_strengthen(args: argparse.Namespace) -> int:
     not_ready = validate_items(payload["items"])
     if not_ready:  # a poka-yoke on our own output: never hand the factory a blocked item
         raise CliError(f"strengthening item(s) would not pass the DoR gate: {not_ready}")
-    out: dict[str, Any] = {"ledger": str(path), "projection": args.by, **payload}
+    out: dict[str, Any] = {
+        "ledger": str(path),
+        "projection": args.by,
+        "controls": controls.to_dict() if controls is not None else None,
+        **payload,
+    }
     if args.out:
         _write(args.out, dumps(backlog.to_backlog_dict(repo=args.repo)))
         out["written"] = str(Path(args.out).expanduser())
@@ -295,4 +407,13 @@ def cmd_remeasure(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-__all__ = ["RefusalDecision", "cmd_refusals", "cmd_remeasure", "cmd_strengthen", "register"]
+__all__ = [
+    "ORACLE_SCORE_ACTIONS",
+    "RefusalDecision",
+    "cmd_refusals",
+    "cmd_remeasure",
+    "cmd_strengthen",
+    "load_controls_export",
+    "load_oracle_export",
+    "register",
+]
