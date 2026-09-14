@@ -9,8 +9,10 @@
 #   security  gitleaks (secrets in history) + pip-audit on the resolved environment
 #   sbom      CycloneDX SBOM of the resolved environment, uploaded as an artifact
 #   test-postgres  the store suite (tests/test_store_*.py) against a real PostgreSQL 16 service
-#   container      docker buildx build of deploy/Dockerfile (no push), image smoke, helm lint,
-#                  compose config — always runs (~2–4 min) and is blocking
+#   container      hadolint + docker buildx build of deploy/Dockerfile (no push), image smoke
+#                  (non-root, read-only root, migrate, UI present), helm lint, compose config —
+#                  always runs (~2–4 min) and is blocking; the same Dockerfile is what
+#                  release.yml pushes to GHCR on a tag
 #   walkthrough    the full-browser walkthrough (ui/e2e/walkthrough) against a LIVE stack that
 #                  scripts/walkthrough.sh boots in a temp dir — tier 1: hermetic, no network,
 #                  no model (fixture repo over file://, test-only fixture_gold builder); the
@@ -269,6 +271,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: hadolint deploy/Dockerfile
+        uses: hadolint/hadolint-action@v3
+        with:
+          dockerfile: deploy/Dockerfile
       - uses: docker/setup-buildx-action@v3
       - name: Build deploy/Dockerfile (no push; GHA layer cache)
         uses: docker/build-push-action@v6
@@ -280,11 +286,16 @@ jobs:
           tags: crb:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Smoke the image — non-root, read-only root, migrate on SQLite, tools present
+      - name: Smoke the image — non-root, read-only root, migrate on SQLite, UI + tools present
+        # tmpfs ownership is explicit: newer daemons make --tmpfs inherit the image
+        # directory's root:0750, which uid 10001 cannot write ("unable to open database
+        # file" — the ubuntu-latest runner in CI run 34780605823 and Docker 29 / colima alike).
         run: |
+          set -euo pipefail
           docker run --rm crb:ci python -c "import os; assert os.getuid() == 10001, os.getuid(); print('uid ok')"
-          docker run --rm --read-only --tmpfs /tmp --tmpfs /srv/crb crb:ci migrate upgrade -v
-          docker run --rm --read-only --tmpfs /tmp --tmpfs /srv/crb crb:ci migrate current
+          docker run --rm --read-only --tmpfs /tmp --tmpfs /srv/crb:rw,uid=10001,gid=10001,mode=0750 crb:ci migrate upgrade -v
+          docker run --rm --read-only --tmpfs /tmp --tmpfs /srv/crb:rw,uid=10001,gid=10001,mode=0750 crb:ci migrate current
+          docker run --rm crb:ci python -c "import os; assert os.path.isfile('/app/ui/dist/index.html'), 'UI missing from image'; print('ui ok')"
           docker run --rm crb:ci sh -c 'command -v docker && command -v git && test -x /usr/local/bin/crb-entrypoint'
           docker run --rm crb:ci python -c "import crb.store.migrate, crb.core, crb.builders; print('imports ok')"
       - uses: azure/setup-helm@v4
