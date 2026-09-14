@@ -259,6 +259,33 @@ def test_guard_refuses_symlink_escape(tmp_path: Path) -> None:
     assert "outside" in g.check_write("pkg/link/x.py")
 
 
+def test_guard_classifies_a_path_by_what_it_resolves_to(tmp_path: Path) -> None:
+    """Independent review pass (2026-09-14), finding 6c: ``gitlink -> .git`` was
+    readable (the main clone's location) and writable (the worktree's gitdir
+    pointer); ``t2 -> tests`` let ``t2/test_x.py`` through ``check_write``. Symlinks
+    are followed before classifying; ``.git`` is off limits as written OR resolved."""
+    g = _guard(tmp_path, "sighted")
+    (tmp_path / ".git").write_text("gitdir: /elsewhere/.git/worktrees/x\n", encoding="utf-8")
+    (tmp_path / "gitlink").symlink_to(".git")
+    (tmp_path / "t2").symlink_to("tests")
+    (tmp_path / "pkg" / "deep").symlink_to("../.git")
+    assert ".git" in g.check_read("gitlink")
+    assert ".git" in g.check_write("gitlink")
+    assert ".git" in g.check_read("gitlink/HEAD")
+    assert ".git" in g.check_write("pkg/deep/info/exclude")
+    assert "test file" in g.check_write("t2/test_other.py")
+    assert "immutable" in g.check_write("t2/test_target.py")
+    assert g.is_protected("t2/test_other.py") and g.is_protected("t2/test_target.py")
+    assert not g.is_protected("pkg/mod.py")
+    assert g.check_read("t2/test_other.py") == ""  # reads of tests are fine
+    assert g.check_write("pkg/mod.py") == "" and g.check_write("newdir/x.py") == ""
+    assert g.check_read(".") == "" and g.check_read("pkg") == ""
+    assert g.resolved_rel("gitlink") == ".git" and g.resolved_rel("") == ""
+    assert g.resolved_rel("../x") is None
+    with pytest.raises(base.GuardRefused):
+        g.resolve_read("gitlink/HEAD")
+
+
 def test_guard_tampered_post_hoc(tmp_path: Path) -> None:
     fx = make_fixture(tmp_path)
     ws = fx.workspace(tmp_path / "wt", mode="sighted")
@@ -771,6 +798,102 @@ def test_matching_paren_treats_single_quotes_inside_double_quotes_as_literal() -
     assert inners[0].startswith("node -e ")
     assert GitArchaeologyGuard().check_shell(cmd) == ""
     assert "git log" in GitArchaeologyGuard().check_shell('''echo "$(git log -1 "it's")"''')
+
+
+def test_guard_quoted_parens_are_text_not_sub_shells() -> None:
+    """Independent review pass (2026-09-14), finding 7: ``echo "a (b" | grep '('`` was
+    refused as a "stray sub-shell token" — ``shlex`` returns ``(`` for both ``'('`` and a
+    bare ``(``. A quoted or escaped paren is a sentinel through tokenisation and text
+    again in the segment; a bare one that escaped the hoist is still refused."""
+    from crb.builders.base import GitArchaeologyGuard, _hoist_substitutions, _unsentinel
+
+    g = GitArchaeologyGuard()
+    for cmd in (
+        "echo \"a (b\" | grep '('",
+        "grep -c ')' src/click/core.py",
+        "echo ')'",
+        "find . -name '*.py' \\( -path './build' -prune \\) -o -print",
+        "echo 'don`t'",
+        "awk '{ print $1 }' f",
+        'echo x > "out (1).txt"',
+    ):
+        assert g.check_shell(cmd) == "", cmd
+    flat, inners = _hoist_substitutions("grep '(' f")
+    assert flat is not None and "(" not in flat and inners == []
+    assert _unsentinel(flat) == "grep '(' f"
+    # the segment sees the real text — a quoted git verb is still a git verb
+    assert "history" in g.check_shell("sh -c 'git log (x)'") or "archaeology" in g.check_shell(
+        "sh -c 'git log (x)'"
+    )
+    assert "archaeology" in g.check_shell("echo '(' | git log")
+
+
+def test_guard_inspects_redirection_targets_and_write_targets(tmp_path: Path) -> None:
+    """Independent review pass (2026-09-14), findings 1(a) / 6(a): redirection targets
+    were skipped (``skip_next``), so ``echo conftest.py >> .git/info/exclude`` was allowed
+    — and hid a poison file from the grader. Every file-opening redirection, ``dd of=``
+    and the tee/cp/mv/install/ln targets are inspected; with a cwd, symlinks are followed
+    (``gitlink -> .git``)."""
+    from crb.builders.base import GitArchaeologyGuard
+
+    (tmp_path / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
+    (tmp_path / "gitlink").symlink_to(".git")
+    (tmp_path / "src").mkdir()
+    with_cwd = GitArchaeologyGuard(cwd=tmp_path)
+    no_cwd = GitArchaeologyGuard()
+    refused_everywhere = [
+        "echo conftest.py >> .git/info/exclude",
+        "echo conftest.py > .git/info/exclude",
+        "cat < .git/HEAD",
+        "printf '%s\\n' x >| .git/x",
+        "echo x &> .git/x",
+        "echo x &>> .git/x",
+        "cd src && echo x > ../.git/config",
+        "dd if=foo of=.git/info/exclude",
+        "echo x | tee .git/info/exclude",
+        "echo x | tee -a .git/info/exclude",
+        "cp foo .git/hooks/pre-commit",
+        "mv foo .git/x",
+        "install -m 755 hook .git/hooks/pre-commit",
+        "ln -s foo .git/x",
+        "true > .git/x 2>&1",
+    ]
+    for cmd in refused_everywhere:
+        assert with_cwd.check_shell(cmd).startswith("archaeology: '.git' is off limits"), cmd
+        assert no_cwd.check_shell(cmd).startswith("archaeology: '.git' is off limits"), cmd
+    refused_with_cwd = [
+        "echo x >> gitlink/info/exclude",
+        "cat < gitlink/HEAD",
+        "dd if=foo of=gitlink/info/exclude",
+        "echo x | tee gitlink/info/exclude",
+        "cp foo gitlink/x",
+        "mv foo gitlink/x",
+        "install foo gitlink/hooks/pre-commit",
+        "ln -s foo gitlink/x",
+        "cd src && echo x > ../gitlink/config",
+    ]
+    for cmd in refused_with_cwd:
+        assert with_cwd.check_shell(cmd).startswith("archaeology: '.git' is off limits"), cmd
+        assert no_cwd.check_shell(cmd) == "", cmd  # without a cwd a symlink cannot be seen
+    honest = [
+        "echo x > out.txt",
+        "echo x >> log.txt",
+        "cat < in.txt",
+        "cmd > /dev/null 2>&1",
+        "echo x 2>&1 | tail -5",
+        "cmd >&2",
+        'cat <<< "a (b"',
+        'echo x > "out (1).txt"',
+        "cd src && echo x > out.txt",
+        "git diff > /tmp/mine.patch",
+        "echo x | tee -a /tmp/log",
+        "cp a.py b.py",
+        "dd if=/dev/zero of=/tmp/blk bs=1 count=1",
+        "grep -v '^\\.git' files.txt > kept.txt",
+    ]
+    for cmd in honest:
+        assert with_cwd.check_shell(cmd) == "", cmd
+        assert no_cwd.check_shell(cmd) == "", cmd
 
 
 def test_blind_brief_carries_the_harness_command_but_never_the_oracle() -> None:
