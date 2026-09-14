@@ -254,6 +254,43 @@ export interface RunProgress {
   current_task_id: string | null
 }
 
+/**
+ * Per-attempt caps (`crb.builders.base.Budget`). Every field optional: an absent field keeps
+ * the next level's value (rung → run → the builder's defaults 25 turns / 25 tool calls /
+ * 0 tokens = no cap / $0 = no cap / 900 s). @contract API.md "POST /runs: budget".
+ */
+export interface RunBudget {
+  max_turns?: number
+  max_tool_calls?: number
+  max_tokens?: number
+  max_cost_usd?: number
+  wall_clock_s?: number
+}
+
+/**
+ * An object rung of a ladder: the identity the ledger row will name plus a budget that
+ * overrides the run's for THIS rung only. Nothing else is accepted on a rung.
+ * @contract API.md "POST /runs: ladder".
+ */
+export interface LadderRung {
+  builder: string
+  model: string
+  provider?: string
+  budget?: RunBudget
+}
+
+/** A ladder entry: a rung label (`r1`, `builder:model[:provider]`) or an object rung. */
+export type LadderEntry = string | LadderRung
+
+/** One line for a ladder entry: a label as written; an object rung as `builder:model[@provider] [cap=n …]`. */
+export function ladderEntryLabel(entry: LadderEntry): string {
+  if (typeof entry === 'string') return entry
+  const caps = Object.entries(entry.budget ?? {})
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${k}=${v}`)
+  return `${entry.builder}:${entry.model}${entry.provider ? `@${entry.provider}` : ''}${caps.length ? ` [${caps.join(' ')}]` : ''}`
+}
+
 /** @contract API.md "GET /runs/{id}: run + counts + progress". */
 export interface Run {
   id: string
@@ -264,7 +301,10 @@ export interface Run {
   builder: string
   model: string
   provider: string
-  ladder: string[]
+  /** The ladder as declared — labels and/or object rungs (`ladder_json`). */
+  ladder: LadderEntry[]
+  /** Run-level budget overrides (`params.budget`; `{}` when the defaults apply). */
+  budget?: RunBudget
   executor: string
   timeout: number
   pool: string
@@ -291,7 +331,14 @@ export interface RunCreateRequest {
   builder?: string
   model?: string
   provider?: string
-  ladder?: string[]
+  /**
+   * One attempt per rung until clean. A string is a rung label (`r1` = the run's own
+   * builder:model, or `builder:model[:provider]`); an object rung carries its own budget —
+   * the same model at 25 → 50 → 100 tool calls is a budget ladder.
+   */
+  ladder?: LadderEntry[]
+  /** Run-level caps; only the fields set are sent, a rung's own budget overrides them. */
+  budget?: RunBudget
   task_ids?: string[]
   limit?: number
   pool?: string
@@ -362,6 +409,10 @@ export interface RunTaskRow {
   latency_s: number
   pack_hashes: string[]
   row_ids: string[]
+  /** The decisive attempt's `labels.budget_tier` (`<tool calls>/<turns>/<wall clock s>`; `""` before the label). */
+  budget_tier?: string
+  /** One tier per attempt, aligned with `row_ids` — a blind rate quoted without its tier is not a claim. */
+  budget_tiers?: string[]
 }
 
 // ---------------------------------------------------------------------------

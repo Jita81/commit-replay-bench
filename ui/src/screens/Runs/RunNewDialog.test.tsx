@@ -1,9 +1,9 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Principal, Settings } from '../../api/types'
 import { PRINCIPAL, json, mockApi, renderApp } from '../../test/utils'
-import { RunNewDialog } from './RunNewDialog'
+import { BLIND_SWEEP_TOOL_CALLS, BUDGET_DEFAULTS, RunNewDialog, budgetFromDraft } from './RunNewDialog'
 
 const ADMIN: Principal = { ...PRINCIPAL, role: 'admin' }
 const SETTINGS: Settings = {
@@ -142,8 +142,123 @@ describe('RunNewDialog', () => {
     const { calls } = setup()
     await user.selectOptions(screen.getByLabelText(/^Kind/), 'mine')
     expect(screen.queryByLabelText(/Builder config/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('run-budget')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('run-ladder')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Queue run' }))
     const body = await postedBody(calls)
     expect(body).toEqual({ repo: 'httpx', kind: 'mine' })
+  })
+
+  // --- budget + ladder (C8) --------------------------------------------------------------------
+
+  it('the Budget section shows the builder defaults and sends only the caps that were typed', async () => {
+    const user = userEvent.setup()
+    const { calls } = setup()
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+    const budget = screen.getByTestId('run-budget')
+    for (const [label, def] of [
+      ['Max turns', 25],
+      ['Max tool calls', 25],
+      ['Max tokens', 0],
+      ['Max cost (USD)', 0],
+      ['Wall clock (s)', 900],
+    ] as const) {
+      expect(within(budget).getByLabelText(label)).toHaveAttribute('placeholder', String(def))
+    }
+    expect(BUDGET_DEFAULTS).toEqual({ max_turns: 25, max_tool_calls: 25, max_tokens: 0, max_cost_usd: 0, wall_clock_s: 900 })
+    await user.type(within(budget).getByLabelText('Max tool calls'), '50')
+    await user.type(within(budget).getByLabelText('Wall clock (s)'), '1800')
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const body = await postedBody(calls)
+    expect(body.budget).toEqual({ max_tool_calls: 50, wall_clock_s: 1800 })
+    expect(body.ladder).toEqual(['r1'])
+  })
+
+  it('omits budget when every cap is blank', async () => {
+    const user = userEvent.setup()
+    const { calls } = setup()
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'editblock')
+    await user.type(screen.getByLabelText(/^Model/), 'gpt-oss-120b')
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const body = await postedBody(calls)
+    expect(body).not.toHaveProperty('budget')
+    expect(budgetFromDraft({ max_turns: '', max_tool_calls: ' ' })).toBeUndefined()
+    expect(budgetFromDraft({ max_turns: '3', max_cost_usd: '0.5', max_tokens: 'abc' })).toEqual({ max_turns: 3, max_cost_usd: 0.5 })
+  })
+
+  it('the blind sweep preset replaces the ladder with three object rungs of the same model at 25 → 50 → 100 tool calls', async () => {
+    const user = userEvent.setup()
+    const { calls } = setup()
+    await user.selectOptions(screen.getByLabelText(/^Kind/), 'blind')
+    const preset = screen.getByRole('button', { name: 'Blind budget sweep 25 → 50 → 100 tool calls' })
+    expect(preset).toBeDisabled() // no builder yet
+    expect(screen.getByText('Name a builder and a model to add rungs.')).toBeInTheDocument()
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+    expect(preset).toBeEnabled() // claude_code has a default model
+    await user.click(preset)
+    const list = screen.getByRole('list', { name: 'Ladder rungs' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(3)
+    expect(screen.getByLabelText(/^Ladder$/)).toHaveValue('') // the preset IS the ladder
+    expect(within(list).getByLabelText('Rung 1 tool calls')).toHaveValue(25)
+    expect(within(list).getByLabelText('Rung 3 tool calls')).toHaveValue(100)
+    expect(within(list).getByLabelText(/^Rung 2 model/)).toHaveValue('claude-sonnet-5')
+    expect(within(list).getByText('tier 50/25/900')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const body = await postedBody(calls)
+    expect(body).toEqual({
+      repo: 'httpx',
+      kind: 'blind',
+      mode: 'blind',
+      builder: 'claude_code',
+      ladder: BLIND_SWEEP_TOOL_CALLS.map((n) => ({ builder: 'claude_code', model: 'claude-sonnet-5', budget: { max_tool_calls: n } })),
+    })
+  })
+
+  it('object rungs are appended after the labels, carry provider + typed caps only, and can be removed', async () => {
+    const user = userEvent.setup()
+    const { calls } = setup()
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'openai_agent')
+    await user.type(screen.getByLabelText(/^Model/), 'gpt-oss-120b')
+    await user.type(screen.getByLabelText(/^Provider/), 'cerebras')
+    await user.click(screen.getByRole('button', { name: 'Add rung' }))
+    await user.click(screen.getByRole('button', { name: 'Add rung' }))
+    const list = screen.getByRole('list', { name: 'Ladder rungs' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    // rung 1: inherits everything (no budget sent); rung 2: a bigger cap and a different model
+    await user.clear(within(list).getByLabelText(/^Rung 2 model/))
+    await user.type(within(list).getByLabelText(/^Rung 2 model/), 'zai-glm-4.7')
+    await user.type(within(list).getByLabelText('Rung 2 turns'), '60')
+    await user.type(within(list).getByLabelText('Rung 2 wall clock (s)'), '1800')
+    // a third rung, removed again
+    await user.click(screen.getByRole('button', { name: 'Add rung' }))
+    await user.click(screen.getByRole('button', { name: 'Remove rung 3' }))
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const body = await postedBody(calls)
+    expect(body.ladder).toEqual([
+      'r1',
+      { builder: 'openai_agent', model: 'gpt-oss-120b', provider: 'cerebras' },
+      { builder: 'openai_agent', model: 'zai-glm-4.7', provider: 'cerebras', budget: { max_turns: 60, wall_clock_s: 1800 } },
+    ])
+  })
+
+  it('an empty ladder (no labels, no rungs) or an incomplete rung blocks submit with the reason', async () => {
+    const user = userEvent.setup()
+    setup()
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'editblock')
+    await user.type(screen.getByLabelText(/^Model/), 'm')
+    const submit = screen.getByRole('button', { name: 'Queue run' })
+    const ladder = screen.getByLabelText(/^Ladder$/)
+    await user.clear(ladder)
+    expect(screen.getByText(/needs at least one rung/)).toBeInTheDocument()
+    expect(submit).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Add rung' }))
+    expect(submit).toBeEnabled()
+    const list = screen.getByRole('list', { name: 'Ladder rungs' })
+    await user.clear(within(list).getByLabelText(/^Rung 1 model/))
+    expect(submit).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Clear rungs' }))
+    await user.type(ladder, 'r1')
+    expect(submit).toBeEnabled()
   })
 })
