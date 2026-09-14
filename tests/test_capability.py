@@ -31,6 +31,7 @@ from crb.core.routing import (
     ROUTE_DO_NOT_SHIP,
     ROUTE_GRANULARIZE,
     ROUTE_HUMAN,
+    ControlsVerdict,
 )
 from crb.core.spec import Language, RepoConfig, classify_commit, size_tier
 
@@ -605,3 +606,169 @@ def test_real_census_map_has_zero_false_q1_and_no_thin_deliver() -> None:
 def test_cell_fields_are_the_projection_basis() -> None:
     assert cap.PROJECTION_CELL == CELL_FIELDS
     assert isinstance(cap.projected_key(_row().cell, cap.PROJECTION_CLASS), CellKey)
+
+
+# ---------------------------------------------------------------------------
+# the controls gate on the map (ADR-0003 amendment) + the failure split on cells
+# ---------------------------------------------------------------------------
+
+
+def _verdict(**kw: object) -> ControlsVerdict:
+    base: dict[str, object] = {
+        "passed": True,
+        "constructible": 56,
+        "total": 56,
+        "escapes": 0,
+        "run_id": "c" * 32,
+        "created": "2026-09-13T00:00:00+00:00",
+    }
+    base.update(kw)
+    return ControlsVerdict(**base)  # type: ignore[arg-type]
+
+
+def test_map_without_a_verdict_says_so_and_routes_on_numbers() -> None:
+    m = cap.build_capability_map(_rows(40, 39))
+    assert m.controls is None and m.to_dict()["controls"] is None
+    c = m.cells[0]
+    assert c.route == ROUTE_DELIVER and c.reason_code == "deliver"
+    assert c.decision is not None and c.decision.controls is None
+    assert c.decision.controls_policy == ""
+
+
+def test_green_cell_routes_human_under_a_failed_gate() -> None:
+    m = cap.build_capability_map(_rows(40, 39), controls=_verdict(passed=False))
+    c = m.cells[0]
+    assert c.route == ROUTE_HUMAN and c.reason_code == "controls_failed"
+    assert "instrument defect" in c.reason
+    assert m.controls is not None and not m.controls.passed
+    d = c.to_dict()
+    assert d["reason_code"] == "controls_failed" and d["decision"]["controls"]["passed"] is False
+    # by_route + TAC see the same verdict: nothing delivers on a failed gate
+    assert m.by_route()[ROUTE_HUMAN] == [c] and m.by_route()[ROUTE_DELIVER] == []
+
+
+def test_green_cell_calibrates_under_thin_or_unmeasured_controls() -> None:
+    thin = cap.build_capability_map(_rows(40, 39), controls=_verdict(constructible=24, total=56))
+    assert thin.cells[0].route == ROUTE_CALIBRATE
+    assert thin.cells[0].reason_code == "controls_thin"
+    absent = cap.build_capability_map(_rows(40, 39), controls=ControlsVerdict.unmeasured())
+    assert absent.cells[0].route == ROUTE_CALIBRATE
+    assert absent.cells[0].reason_code == "controls_unmeasured"
+    assert absent.to_dict()["controls"]["measured"] is False
+
+
+def test_green_cell_delivers_only_with_passed_majority_and_zero_escapes() -> None:
+    ok = cap.build_capability_map(_rows(40, 39), controls=_verdict())
+    c = ok.cells[0]
+    assert c.route == ROUTE_DELIVER and c.reason_code == "deliver"
+    assert c.decision is not None and c.decision.controls_policy == "controls-gate.v1"
+    assert c.decision.controls is not None and c.decision.controls.run_id == "c" * 32
+    escaped = cap.build_capability_map(_rows(40, 39), controls=_verdict(escapes=2))
+    assert escaped.cells[0].route == ROUTE_HUMAN
+    assert escaped.cells[0].reason_code == "controls_escapes"
+
+
+def test_config_pick_and_tac_are_routed_under_the_maps_verdict() -> None:
+    rows = _config("a", cost=0.01, latency=5.0) + _config("b", cost=0.02, latency=6.0)
+    assert cap.best_config(rows, capability_class="bug.fix") is not None
+    assert (
+        cap.best_config(rows, capability_class="bug.fix", controls=_verdict(passed=False)) is None
+    )
+    assert (
+        cap.config_candidates(rows, capability_class="bug.fix", controls=_verdict(constructible=1))
+        == []
+    )
+    pick = cap.best_config(rows, capability_class="bug.fix", controls=_verdict())
+    assert pick is not None and pick.label.startswith("agentic/a@")
+    profile = cap.RepoChangeProfile(
+        repo="r", n_commits=10, examined=10, skipped=0, cells={("bug.fix", "S"): 10}
+    )
+    # the class × size map failed the gate → the config pick is never consulted, coverage 0
+    failed = cap.build_capability_map(rows, controls=_verdict(passed=False))
+    s = cap.trusted_autonomy_coverage(profile, rows, cells=failed)
+    assert s.coverage == 0.0 and s.volume_by_route[ROUTE_HUMAN] == 10
+    assert s.cells[0].to_dict()["reason_code"] == "controls_failed"
+    passed = cap.build_capability_map(rows, controls=_verdict())
+    assert cap.trusted_autonomy_coverage(profile, rows, cells=passed).coverage == 1.0
+
+
+def _kind_rows() -> list[GradeRow]:
+    """8 clean · 2 builder_red · 1 budget · 1 protocol · 2 harness · 1 DQ (n = 14)."""
+    out = _rows(10, 8)
+    out[8] = GradeRow.from_dict(
+        {**out[8].to_dict(), "labels": {"failure_kind": "budget", "stop_reason": "wall_clock"}}
+    )
+    out += [
+        GradeRow.from_dict(
+            {
+                **_row(clean=False, task_id="aa" * 8).to_dict(),
+                "error": "protocol violation: network: curl",
+            }
+        ),
+        GradeRow.from_dict(
+            {**_row(clean=False, task_id="bb" * 8).to_dict(), "error": "SandboxUnavailable: docker"}
+        ),
+        GradeRow.from_dict(
+            {**_row(clean=False, task_id="cc" * 8).to_dict(), "error": "TimeoutError: belt"}
+        ),
+        _row(clean=False, disqualified=True, task_id="dd" * 8),
+    ]
+    return out
+
+
+def test_cell_carries_the_failure_split_and_model_point_next_to_the_point() -> None:
+    m = cap.build_capability_map(_kind_rows())
+    c = m.cells[0]
+    assert c.n == 13 and c.point == pytest.approx(8 / 13)
+    assert (c.n_builder_red, c.n_budget, c.n_protocol, c.n_harness, c.n_disqualified) == (
+        1,
+        1,
+        1,
+        2,
+        1,
+    )
+    assert c.model_n == 9 and c.model_point == pytest.approx(8 / 9)
+    assert c.point is not None and c.model_point is not None and c.point < c.model_point
+    d = c.to_dict()
+    assert d["failure_split"] == {
+        "builder_red": 1,
+        "budget": 1,
+        "protocol": 1,
+        "harness": 2,
+        "disqualified": 1,
+    }
+    assert d["model_n"] == 9 and d["model_point"] == round(8 / 9, 4)
+    assert d["stats"]["n_harness"] == 2 and d["stats"]["model_point"] == round(8 / 9, 4)
+    # the all-rows point is what routes: 8/13 = 0.615 calibrates although the model point is 0.89
+    assert c.route == ROUTE_CALIBRATE and c.reason_code == "point_below_bar"
+    # the honest-empty cell has no split and no model point
+    e = cap.empty_cell(c.key)
+    assert e.model_point is None and e.model_n == 0 and e.n_harness == 0
+    assert e.to_dict()["model_point"] is None and e.reason == "no rows for this cell"
+    # a cell of only instrument errors: point 0, model point None (no fair attempt to speak of)
+    only = cap.build_capability_map(
+        [
+            GradeRow.from_dict(
+                {**_row(clean=False, task_id=f"{i:016x}").to_dict(), "error": "OSError: x"}
+            )
+            for i in range(3)
+        ]
+    ).cells[0]
+    assert only.point == 0.0 and only.model_point is None and only.n_harness == 3
+
+
+def test_render_markdown_shows_the_split_the_model_point_and_the_controls_state() -> None:
+    m = cap.build_capability_map(_kind_rows(), controls=_verdict(constructible=3, total=7))
+    out = cap.render_markdown(m)
+    assert "| model | split r·b·p·h·dq |" in out.splitlines()[4]
+    assert "controls=thin (3/7 constructible, 0 escape(s))" in out
+    assert "| 1·1·1·2·1 |" in out and "(n=9)" in out
+    assert "controls=not evaluated" in cap.render_markdown(cap.build_capability_map(_kind_rows()))
+    assert "controls=unmeasured" in cap.render_markdown(
+        cap.build_capability_map(_kind_rows(), controls=ControlsVerdict.unmeasured())
+    )
+    assert "controls=failed (7/7" in cap.render_markdown(
+        cap.build_capability_map(
+            _kind_rows(), controls=_verdict(passed=False, constructible=7, total=7)
+        )
+    )

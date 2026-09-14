@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import { useCapabilityMap } from '../../api/hooks'
-import { NOT_YET_MEASURED, type CapabilityCell, type CapabilityMap, type CellField } from '../../api/types'
+import { NOT_YET_MEASURED, type CapabilityMap, type CellField } from '../../api/types'
 import { AnchorButton, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { CiBar } from '../../components/CiBar'
@@ -17,6 +16,8 @@ import { VerdictPill } from '../../components/VerdictPill'
 import { apiUrl } from '../../api/client'
 import { fmtInt, fmtPct, fmtRatio, fmtSeconds, fmtUsd, wilson } from '../../lib/format'
 import { tierDisplay } from '../../lib/verdict'
+import { REASON_DISPLAY, controlsDisplay, useCapabilityMapWithControls, type CapabilityCellSplit as CapabilityCell, type ControlsVerdict } from './contract'
+import { ControlsPill, FailureSplitPills, ModelPointLine } from './FailureSplit'
 
 const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL']
 
@@ -75,12 +76,19 @@ function CellBox({ cell, policy, onOpen }: { cell: CapabilityCell | undefined; p
         <span className="num text-[10px] text-on-surface-muted">n={fmtInt(cell.n)}</span>
       </div>
       <div className="num flex items-baseline gap-1">
-        <span className="text-[15px] font-semibold text-on-surface">{fmtPct(cell.point)}</span>
+        <span className="text-[15px] font-semibold text-on-surface" title={`clean ${fmtInt(cell.clean)} of ${fmtInt(cell.n)} eligible rows — the all-rows rate that routes`}>{fmtPct(cell.point)}</span>
         <span className="text-[10px] text-on-surface-muted">
           [{fmtPct(cell.ci_low, 0)}, {fmtPct(cell.ci_high, 0)}]
         </span>
+        <span className="text-[10px] text-on-surface-muted">clean {fmtInt(cell.clean)}/{fmtInt(cell.n)}</span>
       </div>
       <CiBar point={cell.point} low={cell.ci_low} high={cell.ci_high} n={cell.n} minPoint={policy?.min_point} minCiLow={policy?.min_ci_low} width={110} />
+      {cell.failure_split && (
+        <div className="flex flex-wrap items-center gap-x-2">
+          <ModelPointLine modelPoint={cell.model_point ?? null} modelN={cell.model_n ?? 0} clean={cell.clean} />
+          <FailureSplitPills split={cell.failure_split} />
+        </div>
+      )}
       <div className="num flex flex-wrap items-center gap-x-2 text-[10px] text-on-surface-muted">
         <span className={bad ? 'font-semibold text-status-red' : ''} data-testid="cell-false-q1-value">
           fQ1 {cell.false_q1}
@@ -122,9 +130,35 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
           )}
           <Provenance apparatus={cell.apparatus_versions} beltSet={cell.belt_set ?? null} />
         </div>
-        <p className="text-sm">{cell.reason}</p>
+        <p className="text-sm" data-testid="cell-reason">
+          {cell.reason_code && (
+            <code className="mr-2 rounded bg-surface-high px-1 py-0.5 font-mono text-[11px]" title={REASON_DISPLAY[cell.reason_code]}>
+              {cell.reason_code}
+            </code>
+          )}
+          {cell.reason}
+        </p>
+        {cell.failure_split && (
+          <div className="flex flex-wrap items-center gap-3 text-xs" data-testid="cell-split">
+            <span className="label">Why not clean</span>
+            <FailureSplitPills split={cell.failure_split} size="sm" data-testid="cell-split-pills" />
+            <span className="text-on-surface-muted">
+              n = clean + red + budget + protocol + harness; DQ sits outside n. Instrument rows (protocol, harness) count against autonomy until the instrument is fixed.
+            </span>
+          </div>
+        )}
         <div className="flex flex-wrap gap-3">
-          <StatTile label="Pass rate" value={fmtPct(cell.point)} n={cell.n} ci={{ low: cell.ci_low, high: cell.ci_high }} apparatus={`${fmtInt(cell.clean)} clean of ${fmtInt(cell.n)} eligible · Wilson 95%`} />
+          <StatTile label="Pass rate" value={fmtPct(cell.point)} n={cell.n} ci={{ low: cell.ci_low, high: cell.ci_high }} apparatus={`all rows: ${fmtInt(cell.clean)} clean of ${fmtInt(cell.n)} eligible · Wilson 95% · the rate that routes`} data-testid="tile-point" />
+          {cell.failure_split && (
+            <StatTile
+              label="Model rate (fair attempts)"
+              value={cell.model_point === null || cell.model_point === undefined ? '—' : fmtPct(cell.model_point)}
+              n={cell.model_n ?? 0}
+              ci={cell.model_point === null || cell.model_point === undefined ? null : { low: cell.model_ci_low, high: cell.model_ci_high }}
+              apparatus={`${fmtInt(cell.clean)} clean of ${fmtInt(cell.model_n ?? 0)} finished attempts (clean + red) · Wilson 95% · diagnostic, not a gate`}
+              data-testid="tile-model-point"
+            />
+          )}
           <StatTile label="false-Q1" value={String(cell.false_q1)} n={cell.n} apparatus="clean rows with a failed belt — must be 0" tone={cell.false_q1 > 0 ? 'red' : 'green'} />
           <StatTile label="Cost / trial" value={fmtUsd(cell.cost_usd_mean)} n={cell.n} apparatus="mean of builder-reported USD" />
           <StatTile label="Latency / trial" value={fmtSeconds(cell.latency_s_mean)} n={cell.n} apparatus="mean wall-clock of the build" />
@@ -148,6 +182,32 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
   )
 }
 
+function ControlsTile({ verdict, policy }: { verdict: ControlsVerdict | undefined; policy: CapabilityMap['policy'] | undefined }) {
+  const d = controlsDisplay(verdict)
+  const measured = Boolean(verdict?.measured)
+  const value = !measured ? '—' : verdict!.state === 'failed' ? 'FAILED' : verdict!.state === 'escaped' ? `${verdict!.escapes} escape${verdict!.escapes === 1 ? '' : 's'}` : verdict!.state === 'thin' ? 'thin' : 'passed'
+  return (
+    <div data-testid="tile-controls" className="min-w-[150px] flex-[1_1_150px] rounded-[var(--radius-card)] border border-border bg-surface-container px-4 py-3 shadow-[var(--shadow-card)]">
+      <div className="label">Negative controls</div>
+      <div className={`num mt-1 text-[24px] font-semibold leading-8 ${!measured ? 'text-on-surface-muted' : d.tone === 'green' ? 'text-status-green' : d.tone === 'red' ? 'text-status-red' : 'text-status-amber'}`}>{value}</div>
+      <dl className="num mt-1 space-y-0.5 text-[11px] text-on-surface-muted">
+        <div className="flex gap-1">
+          <dt>constructible</dt>
+          <dd>{measured ? `${fmtInt(verdict!.constructible)} of ${fmtInt(verdict!.total)}` : '—'}</dd>
+        </div>
+        <div className="flex gap-1">
+          <dt>gate</dt>
+          <dd>{policy ? `${(policy as { controls_version?: string }).controls_version ?? '—'} · deliver needs passed ∧ ≥ 50% constructible ∧ 0 escapes` : '—'}</dd>
+        </div>
+      </dl>
+      <div className="mt-2">
+        <ControlsPill verdict={verdict} size="xs" />
+      </div>
+      <p className="mt-1 text-[11px] text-on-surface-muted">{d.describe}</p>
+    </div>
+  )
+}
+
 export function CapabilityPage() {
   const [repo, setRepo] = useRepoParam()
   const [byLanguage, setByLanguage] = useState(false)
@@ -163,7 +223,7 @@ export function CapabilityPage() {
     return p
   }, [byLanguage, byModel])
 
-  const map = useCapabilityMap(repo, projection)
+  const map = useCapabilityMapWithControls(repo, projection)
 
   return (
     <>
@@ -174,6 +234,7 @@ export function CapabilityPage() {
         actions={
           <>
             <RepoPicker value={repo} onChange={setRepo} />
+            {repo && map.data && <ControlsPill verdict={map.data.controls} />}
             {repo && (
               <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=csv&repo=${encodeURIComponent(repo)}`)} download>
                 Export CSV
@@ -213,6 +274,7 @@ export function CapabilityPage() {
                   tone={(s.false_q1_total ?? 0) > 0 || badCells > 0 ? 'red' : 'green'}
                   data-testid="tile-false-q1"
                 />
+                <ControlsTile verdict={m.controls} policy={m.policy} />
               </div>
 
               {((s.false_q1_total ?? 0) > 0 || badCells > 0) && (
@@ -298,7 +360,7 @@ export function CapabilityPage() {
                   </div>
                 )}
                 <p className="mt-3 text-[11px] text-on-surface-muted">
-                  Each cell: route · n · pass rate [Wilson 95%] · interval bar with policy ticks (point ≥ {fmtPct(m.policy?.min_point, 0)}, lower ≥ {fmtPct(m.policy?.min_ci_low, 0)}) · fQ1 (false-Q1, must be 0) · mean cost · mean latency · or (oracle strength).
+                  Each cell: route · n · pass rate [Wilson 95%] · clean n/N · interval bar with policy ticks (point ≥ {fmtPct(m.policy?.min_point, 0)}, lower ≥ {fmtPct(m.policy?.min_ci_low, 0)}) · model rate on fair attempts (clean / (clean + red)) · the split red · budget · protocol · harness · DQ · fQ1 (false-Q1, must be 0) · mean cost · mean latency · or (oracle strength). Every cell is routed under the repo's controls verdict shown above.
                 </p>
               </Card>
 

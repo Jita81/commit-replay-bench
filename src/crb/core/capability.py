@@ -12,9 +12,18 @@ Invariants
 * **Honest-empty.** A cell that has no rows is reported as
   :data:`NOT_YET_MEASURED` with ``stats=None`` and ``decision=None`` — never a
   zero-filled row, never a default point estimate.
-* **One rule.** A cell's route is exactly ``route(stats)``. The SPC variant
-  (σ ≤ 0.10, n ≥ 20) is NOT a gate here; σ is exposed on the cell as an
-  advisory field only.
+* **One rule.** A cell's route is exactly ``route(stats, controls=…)``. The SPC
+  variant (σ ≤ 0.10, n ≥ 20) is NOT a gate here; σ is exposed on the cell as an
+  advisory field only. The repo's negative-controls verdict
+  (:class:`~crb.core.routing.ControlsVerdict`) is a map-level input applied to
+  every cell: a failed gate routes ``human``, an absent or thin one withholds
+  ``deliver`` (see ADR-0003). A map built without one says so
+  (``controls=None``) — absence is visible, never a pass.
+* **Two rates, next to each other.** Every measured cell carries the all-rows
+  point (the fail-closed number the router consumes) AND ``model_point`` —
+  clean over the rows where the model got a fair, finished attempt — with the
+  ``failure_kind`` split (``builder_red · budget · protocol · harness ·
+  disqualified``) that separates them. The split never replaces the point.
 * **Trust before economics.** A config is a candidate for "cheapest + fastest"
   only if its own full-key cell routes to ``deliver``; any cell with
   ``false_q1 > 0`` is excluded before cost or latency is even looked at.
@@ -50,6 +59,7 @@ from crb.core.routing import (
     DEFAULT_POLICY,
     ROUTE_DELIVER,
     ROUTES,
+    ControlsVerdict,
     RouteDecision,
     RoutingPolicy,
     route,
@@ -203,6 +213,47 @@ class CapabilityCell:
         return self.stats.false_q1 if self.stats is not None else 0
 
     @property
+    def reason(self) -> str:
+        return self.decision.reason if self.decision is not None else "no rows for this cell"
+
+    @property
+    def reason_code(self) -> str:
+        return self.decision.reason_code if self.decision is not None else ""
+
+    # --- the failure split (see FailureSplit) --------------------------------------
+    @property
+    def n_builder_red(self) -> int:
+        return self.stats.n_builder_red if self.stats is not None else 0
+
+    @property
+    def n_budget(self) -> int:
+        return self.stats.n_budget if self.stats is not None else 0
+
+    @property
+    def n_protocol(self) -> int:
+        return self.stats.n_protocol if self.stats is not None else 0
+
+    @property
+    def n_harness(self) -> int:
+        return self.stats.n_harness if self.stats is not None else 0
+
+    @property
+    def n_disqualified(self) -> int:
+        return self.stats.n_disqualified if self.stats is not None else 0
+
+    @property
+    def model_n(self) -> int:
+        return self.stats.model_n if self.stats is not None else 0
+
+    @property
+    def model_point(self) -> float | None:
+        """``clean / (clean + builder_red)`` — the model's rate on fair, finished
+        attempts; ``None`` when unmeasured or when no such attempt exists."""
+        if self.stats is None or self.stats.model_n == 0:
+            return None
+        return self.stats.model_point
+
+    @property
     def earned(self) -> bool:
         return self.verification_tier in EARNED_TIERS
 
@@ -227,6 +278,8 @@ class CapabilityCell:
             "label": self.label,
             "measured": self.measured,
             "route": self.route,
+            "reason": self.reason,
+            "reason_code": self.reason_code,
             "stats": None if self.stats is None else self.stats.to_dict(),
             "decision": None if self.decision is None else self.decision.to_dict(),
             "verification_tier": self.verification_tier,
@@ -236,6 +289,15 @@ class CapabilityCell:
             "belt_sets": list(self.belt_sets),
             "cost_known": self.cost_known,
             "latency_known": self.latency_known,
+            "failure_split": {
+                "builder_red": self.n_builder_red,
+                "budget": self.n_budget,
+                "protocol": self.n_protocol,
+                "harness": self.n_harness,
+                "disqualified": self.n_disqualified,
+            },
+            "model_n": self.model_n,
+            "model_point": None if self.model_point is None else round(self.model_point, 4),
         }
 
 
@@ -262,10 +324,13 @@ def measure_cell(
     projection: Sequence[str] = PROJECTION_CELL,
     *,
     policy: RoutingPolicy = DEFAULT_POLICY,
+    controls: ControlsVerdict | None = None,
 ) -> CapabilityCell:
     """Reduce one group of rows (all sharing the projected key) to a cell.
 
-    The route is ``route(stats, policy)`` — nothing else. The tier is
+    The route is ``route(stats, controls=controls, policy=policy)`` — nothing
+    else. ``controls`` is the repo's negative-controls verdict (``None`` = not
+    evaluated by this caller; the decision records the absence). The tier is
     ``untrusted`` iff ``false_q1 > 0`` (structurally impossible for rows written
     through :class:`~crb.core.ledger.GradeRow`, re-checked here anyway) and
     ``automated-pass`` otherwise; earned tiers are overlaid by
@@ -276,7 +341,7 @@ def measure_cell(
         raise ValueError("measure_cell needs at least one row; use empty_cell for none")
     stats = projected_stats(rows, proj)
     eligible = [r for r in rows if r.eligible]
-    decision = route(stats, policy=policy)
+    decision = route(stats, controls=controls, policy=policy)
     tier = TIER_UNTRUSTED if stats.false_q1 > 0 else TIER_AUTOMATED_PASS
     return CapabilityCell(
         key=stats.cell,
@@ -300,7 +365,10 @@ def measure_cell(
 
 @dataclass(frozen=True)
 class CapabilityMap:
-    """All cells of one projection, plus the numbers that qualify every other number."""
+    """All cells of one projection, plus the numbers that qualify every other number.
+
+    ``controls`` is the repo-level negative-controls verdict every cell was routed
+    under (``None`` when the caller evaluated none — visible as an absence)."""
 
     projection: tuple[str, ...]
     cells: tuple[CapabilityCell, ...]
@@ -308,6 +376,7 @@ class CapabilityMap:
     false_q1_total: int
     policy: RoutingPolicy
     apparatus_versions: tuple[str, ...]
+    controls: ControlsVerdict | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "projection", _check_projection(self.projection))
@@ -350,6 +419,7 @@ class CapabilityMap:
             "false_q1_total": self.false_q1_total,
             "policy": self.policy.to_dict(),
             "apparatus_versions": list(self.apparatus_versions),
+            "controls": None if self.controls is None else self.controls.to_dict(),
             "cells": [c.to_dict() for c in self.cells],
             "cells_by_route": routes,
         }
@@ -363,12 +433,14 @@ def build_capability_map(
     *,
     projection: Sequence[str] = PROJECTION_CLASS_SIZE,
     policy: RoutingPolicy = DEFAULT_POLICY,
+    controls: ControlsVerdict | None = None,
 ) -> CapabilityMap:
-    """Group ``rows`` by ``projection`` and route every group. Pure; no I/O."""
+    """Group ``rows`` by ``projection`` and route every group under ``controls``
+    (the repo's negative-controls verdict; ``None`` = not evaluated). Pure; no I/O."""
     proj = _check_projection(projection)
     rs = list(rows)
     groups = group_by_cell(rs, key_fields=proj)
-    cells = [measure_cell(g, proj, policy=policy) for g in groups.values()]
+    cells = [measure_cell(g, proj, policy=policy, controls=controls) for g in groups.values()]
     cells.sort(key=lambda c: c.key.to_tuple())
     return CapabilityMap(
         projection=proj,
@@ -377,16 +449,20 @@ def build_capability_map(
         false_q1_total=false_q1_total(rs),
         policy=policy,
         apparatus_versions=tuple(sorted({r.apparatus_version for r in rs})),
+        controls=controls,
     )
 
 
 def capability_views(
-    rows: Iterable[GradeRow], *, policy: RoutingPolicy = DEFAULT_POLICY
+    rows: Iterable[GradeRow],
+    *,
+    policy: RoutingPolicy = DEFAULT_POLICY,
+    controls: ControlsVerdict | None = None,
 ) -> dict[str, CapabilityMap]:
     """Every named projection in :data:`PROJECTIONS`, built from one pass over the rows."""
     rs = list(rows)
     return {
-        name: build_capability_map(rs, projection=proj, policy=policy)
+        name: build_capability_map(rs, projection=proj, policy=policy, controls=controls)
         for name, proj in PROJECTIONS.items()
     }
 
@@ -467,15 +543,17 @@ def config_candidates(
     size: str | None = None,
     language: str | None = None,
     policy: RoutingPolicy = DEFAULT_POLICY,
+    controls: ControlsVerdict | None = None,
 ) -> list[CapabilityCell]:
     """Config cells (see :func:`config_projection`) for the class that PASS.
 
-    Passing = the config's own cell routes to ``deliver`` under ``policy``. Cells
-    with ``false_q1 > 0`` are dropped first, explicitly, before routing — the
-    routing rule would also refuse them, but the exclusion is not left implicit.
+    Passing = the config's own cell routes to ``deliver`` under ``policy`` (and
+    ``controls``, when given). Cells with ``false_q1 > 0`` are dropped first,
+    explicitly, before routing — the routing rule would also refuse them, but
+    the exclusion is not left implicit.
     """
     proj = config_projection(size=size, language=language)
-    cmap = build_capability_map(rows, projection=proj, policy=policy)
+    cmap = build_capability_map(rows, projection=proj, policy=policy, controls=controls)
     out: list[CapabilityCell] = []
     for c in cmap.cells:
         k = c.key
@@ -532,6 +610,7 @@ def best_config(
     language: str | None = None,
     policy: RoutingPolicy = DEFAULT_POLICY,
     selection: str = SELECTION_COST_THEN_LATENCY,
+    controls: ControlsVerdict | None = None,
 ) -> ConfigPick | None:
     """The cheapest + fastest PASSING config for a class (× size × language).
 
@@ -542,7 +621,12 @@ def best_config(
         raise ValueError(f"selection must be one of {SELECTIONS}, got {selection!r}")
     rs = list(rows)
     candidates = config_candidates(
-        rs, capability_class=capability_class, size=size, language=language, policy=policy
+        rs,
+        capability_class=capability_class,
+        size=size,
+        language=language,
+        policy=policy,
+        controls=controls,
     )
     if not candidates:
         return None
@@ -727,7 +811,8 @@ class ProfiledCell:
             "point": self.cell.point,
             "false_q1": self.cell.false_q1,
             "pick": None if self.pick is None else self.pick.to_dict(),
-            "why": self.cell.decision.reason if self.cell.decision else "no rows for this cell",
+            "why": self.cell.reason,
+            "reason_code": self.cell.reason_code,
         }
 
 
@@ -782,9 +867,11 @@ def trusted_autonomy_coverage(
 
     ``cells`` may be a class × size map with sign-offs already applied (see
     :func:`crb.core.signoff.apply_signoffs`); otherwise it is built from ``rows``.
-    ``rows`` are always needed for the config pick. A profiled cell counts toward
-    ``deliver_volume`` only when it routes to ``deliver`` AND a passing config
-    exists; ``earned_volume`` additionally requires an earned tier.
+    ``rows`` are always needed for the config pick, which is routed under the
+    map's own controls verdict so a config never passes on a gate the map failed.
+    A profiled cell counts toward ``deliver_volume`` only when it routes to
+    ``deliver`` AND a passing config exists; ``earned_volume`` additionally
+    requires an earned tier.
     """
     rs = list(rows)
     cmap = cells if cells is not None else build_capability_map(rs, policy=policy)
@@ -796,7 +883,14 @@ def trusted_autonomy_coverage(
     for (cls, size), count in profile.ranked():
         cell = cmap.get(capability_class=cls, size=size)
         pick = (
-            best_config(rs, capability_class=cls, size=size, language=language, policy=policy)
+            best_config(
+                rs,
+                capability_class=cls,
+                size=size,
+                language=language,
+                policy=policy,
+                controls=cmap.controls,
+            )
             if cell.route == ROUTE_DELIVER
             else None
         )
@@ -827,14 +921,27 @@ def _fmt_pct(x: float | None) -> str:
     return "—" if x is None else f"{x:.1%}"
 
 
+def _fmt_controls(c: ControlsVerdict | None, policy: RoutingPolicy) -> str:
+    if c is None:
+        return "not evaluated"
+    state = c.state(min_share=policy.min_controls_share, max_escapes=policy.max_controls_escapes)
+    if not c.measured:
+        return state
+    return f"{state} ({c.constructible}/{c.total} constructible, {c.escapes} escape(s))"
+
+
 def render_markdown(cmap: CapabilityMap) -> str:
-    """One markdown table, one row per cell, every number next to its n."""
+    """One markdown table, one row per cell, every number next to its n. The
+    all-rows point sits beside the model point and the failure split that
+    separates them (``red·budget·protocol·harness·DQ``)."""
     head = [
         *cmap.projection,
         "n",
         "clean",
         "point",
         "95% CI",
+        "model",
+        "split r·b·p·h·dq",
         "sigma",
         "false-Q1",
         "tier",
@@ -845,7 +952,8 @@ def render_markdown(cmap: CapabilityMap) -> str:
         f"# Capability map — {' x '.join(cmap.projection)}",
         "",
         f"rows={cmap.rows} · false-Q1={cmap.false_q1_total} · policy={cmap.policy.version} · "
-        f"apparatus={','.join(cmap.apparatus_versions) or '—'}",
+        f"apparatus={','.join(cmap.apparatus_versions) or '—'} · "
+        f"controls={_fmt_controls(cmap.controls, cmap.policy)}",
         "",
         "| " + " | ".join(head) + " |",
         "|" + "---|" * len(head),
@@ -858,7 +966,7 @@ def render_markdown(cmap: CapabilityMap) -> str:
     for c in cmap.cells:
         keyvals = [f"`{getattr(c.key, f)}`" for f in c.projection]
         if c.stats is None:
-            body = ["0", "0", "—", "—", "—", "0", "—", f"**{c.route}**", "no rows"]
+            body = ["0", "0", "—", "—", "—", "—", "—", "0", "—", f"**{c.route}**", "no rows"]
         else:
             s = c.stats
             body = [
@@ -866,6 +974,8 @@ def render_markdown(cmap: CapabilityMap) -> str:
                 str(s.clean),
                 _fmt_pct(s.point),
                 f"[{s.ci.low:.2f}, {s.ci.high:.2f}]",
+                f"{_fmt_pct(c.model_point)} (n={s.model_n})",
+                f"{s.n_builder_red}·{s.n_budget}·{s.n_protocol}·{s.n_harness}·{s.n_disqualified}",
                 "—" if c.sigma is None else f"{c.sigma:.2f}",
                 str(s.false_q1),
                 c.verification_tier or "—",

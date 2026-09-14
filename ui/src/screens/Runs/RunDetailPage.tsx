@@ -18,6 +18,8 @@ import { StatTile } from '../../components/StatTile'
 import { useAuth } from '../../lib/auth'
 import { fmtDate, fmtInt, fmtPct, fmtSeconds, fmtUsd, shortId, wilson } from '../../lib/format'
 import { runStatusDisplay } from '../../lib/verdict'
+import { useFailureSplit } from '../Capability/contract'
+import { FailureSplitPills } from '../Capability/FailureSplit'
 import { EvidenceDrawer } from './EvidenceDrawer'
 import { Progress } from './RunsPage'
 
@@ -82,6 +84,42 @@ function Tiles({ run }: { run: Run }) {
       <StatTile label="Ledger rows" value={fmtInt(c.rows)} n={c.rows} apparatus="one row per attempt (trial r1, r2 …)" data-testid="tile-rows" />
       <StatTile label="Cost" value={fmtUsd(run.cost_usd)} n={graded} apparatus="builder-reported USD, summed" data-testid="tile-cost" />
     </div>
+  )
+}
+
+/**
+ * The run's rows by `failure_kind` (GET /failure-split?repo=&run_id=): the all-rows
+ * rate and the model rate on fair attempts side by side, and the split
+ * red · budget · protocol · harness · DQ that separates them. Rendered only once the
+ * split has loaded (a run with no rows yet shows an honest n = 0, never a zero rate).
+ */
+function SplitTiles({ repo, runId, poll }: { repo: string; runId: string; poll: boolean }) {
+  const split = useFailureSplit(repo, runId)
+  if (split.isError) {
+    return (
+      <p className="text-xs text-status-amber" role="status" data-testid="split-unavailable">
+        Failure split unavailable: {split.error.message}
+      </p>
+    )
+  }
+  const d = split.data
+  if (!d) return null
+  const app = 'from the run\'s ledger rows · Wilson 95%'
+  return (
+    <Card title="Why not clean" eyebrow={`${fmtInt(d.rows)} ledger row${d.rows === 1 ? '' : 's'}${poll ? ' · updating' : ''}`}>
+      <div className="flex flex-wrap gap-3">
+        <StatTile label="Clean (all rows)" value={d.n ? fmtPct(d.point) : '—'} n={d.n} ci={d.n ? { low: d.ci_low, high: d.ci_high } : null} apparatus={`${fmtInt(d.clean)} clean of ${fmtInt(d.n)} eligible rows · ${app} · the rate that routes`} tone={d.n ? 'green' : undefined} data-testid="tile-split-point" />
+        <StatTile label="Model rate (fair attempts)" value={d.model_n ? fmtPct(d.model_point) : '—'} n={d.model_n} ci={d.model_n ? { low: d.model_ci_low, high: d.model_ci_high } : null} apparatus={`${fmtInt(d.clean)} clean of ${fmtInt(d.model_n)} finished attempts (clean + red) · ${app} · diagnostic, not a gate`} data-testid="tile-split-model" />
+        <StatTile label="Instrument (protocol + harness)" value={fmtInt(d.protocol + d.harness)} n={d.n} apparatus="rows the harness, not the model, failed — count against autonomy until fixed" tone={d.protocol + d.harness ? 'violet' : undefined} data-testid="tile-split-instrument" />
+        <StatTile label="Budget-capped" value={fmtInt(d.budget)} n={d.n} apparatus="attempts cut short by their own cap (wall clock, turns, tool calls, tokens, cost)" tone={d.budget ? 'amber' : undefined} data-testid="tile-split-budget" />
+        <StatTile label="Cost known" value={d.n ? `${fmtInt(d.cost_known)} / ${fmtInt(d.n)}` : '—'} n={d.n} apparatus="rows whose $ is a measurement (a true $0 counts); the rest carry no price" data-testid="tile-split-cost-known" />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+        <span className="label">Split</span>
+        <FailureSplitPills split={d} size="sm" data-testid="run-split" />
+        <span className="text-on-surface-muted">n = clean + red + budget + protocol + harness; DQ sits outside n.</span>
+      </div>
+    </Card>
   )
 }
 
@@ -198,6 +236,7 @@ export function RunDetailPage({ eventSourceFactory }: RunDetailPageProps = {}) {
             )}
           </Card>
           <Tiles run={run.data} />
+          <SplitTiles repo={run.data.repo} runId={run.data.id} poll={!terminal} />
         </>
       )}
       <Card title="Live log" eyebrow="step events · SSE">

@@ -167,3 +167,64 @@ describe('RunDetailPage', () => {
     expect(screen.getByTestId('live-log').textContent).toContain('Complete')
   })
 })
+
+describe('RunDetailPage — the failure split (A2)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    FakeEventSource.instances = []
+  })
+
+  it('shows the run\'s split tiles: all-rows rate, model rate, instrument, budget, cost known', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': { ...RUN, status: 'succeeded', finished: '2026-09-13T09:30:00Z' },
+      'GET /runs/run-1/tasks': { items: [], total: 0, limit: 500, offset: 0 },
+      'GET /failure-split': {
+        repo: 'sqlalchemy',
+        run_id: 'run-1',
+        n: 11,
+        clean: 6,
+        builder_red: 1,
+        budget: 1,
+        protocol: 1,
+        harness: 2,
+        disqualified: 1,
+        rows: 12,
+        point: 0.5455,
+        ci_low: 0.28,
+        ci_high: 0.787,
+        model_n: 7,
+        model_point: 0.8571,
+        model_ci_low: 0.487,
+        model_ci_high: 0.974,
+        cost_known: 8,
+        cost_unknown: 3,
+        kinds: ['', 'builder_red', 'budget', 'protocol', 'harness', 'disqualified'],
+      },
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} />, { route: '/runs/run-1', path: '/runs/:id' })
+    await waitFor(() => expect(screen.getByTestId('tile-split-point')).toBeInTheDocument())
+
+    expect(screen.getByTestId('tile-split-point').textContent).toContain('54.5%')
+    expect(screen.getByTestId('tile-split-point').textContent).toContain('the rate that routes')
+    expect(screen.getByTestId('tile-split-model').textContent).toContain('85.7%')
+    expect(screen.getByTestId('tile-split-model').textContent).toContain('6 clean of 7 finished attempts')
+    expect(screen.getByTestId('tile-split-instrument').textContent).toContain('3')
+    expect(screen.getByTestId('tile-split-budget').textContent).toContain('1')
+    expect(screen.getByTestId('tile-split-cost-known').textContent).toContain('8 / 11')
+    expect(screen.getByTestId('run-split').getAttribute('aria-label')).toBe('red 1, budget 1, protocol 1, harness 2, DQ 1')
+    expect(screen.queryByTestId('split-unavailable')).toBeNull()
+  })
+
+  it('says so when the split endpoint fails instead of fabricating zeros', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': RUN,
+      'GET /runs/run-1/tasks': { items: [], total: 0, limit: 500, offset: 0 },
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const status = await screen.findByTestId('split-unavailable')
+    expect(status.textContent).toContain('Failure split unavailable')
+    expect(screen.queryByTestId('tile-split-point')).toBeNull()
+  })
+})

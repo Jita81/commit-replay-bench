@@ -12,6 +12,13 @@ frozen policy the router uses.
 
 An unscoreable oracle (``strength: null``) is reported as ``unscoreable`` and never
 averaged in; a repo with no controls report answers ``404 not_measured``.
+
+:func:`latest_controls_verdict` reduces the same latest report to the
+:class:`~crb.core.routing.ControlsVerdict` the capability map and ``/routes``
+route under (ADR-0003 amendment) — ONE source for the controls screen and the
+router, so they can never disagree. When no report event exists it falls back to
+the latest finished ``controls`` run's ``counts_json``; when neither exists it
+returns :meth:`ControlsVerdict.unmeasured` (an honest absence, never a pass).
 """
 
 from __future__ import annotations
@@ -29,19 +36,72 @@ from crb.core.oracle.adequacy import (
     licenses_autoship,
     routing_decision,
 )
+from crb.core.routing import DEFAULT_POLICY as ROUTING_POLICY
+from crb.core.routing import ControlsVerdict, RoutingPolicy
 from crb.core.spec import SIZE_TIER_NAMES
 from crb.core.stats import mean
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.schemas import AdequacyPolicyOut, OracleCellOut, OracleReportOut, OracleTaskOut
-from crb.store.models import Event, Task
+from crb.store.models import Event, Run, Task
 
 router = APIRouter(tags=["oracle"])
 _ERR = {"model": ErrorEnvelope}
 
 SCORE_ACTIONS: frozenset[str] = frozenset({"oracle.score", "oracle.mutation.scored"})
 CONTROLS_ACTION = "controls.report"
+CONTROLS_KIND = "controls"
+#: Run statuses whose ``counts_json`` is a finished measurement (a FAILED controls
+#: run is the gate saying FAIL — exactly the verdict routing must see).
+CONTROLS_FINISHED: tuple[str, ...] = ("succeeded", "failed")
+
+
+def _latest_controls_event(session: Session, repo: str) -> Event | None:
+    return session.execute(
+        select(Event)
+        .where(Event.repo == repo, Event.action == CONTROLS_ACTION)
+        .order_by(Event.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def latest_controls_verdict(session: Session, repo: str) -> ControlsVerdict:
+    """The repo's latest negative-controls verdict, for routing.
+
+    Source order: the latest ``controls.report`` event (what ``/oracle/{repo}/controls``
+    serves); else the latest finished ``controls`` run's ``counts_json`` (the worker
+    writes both, so this only matters for a report whose event was pruned); else
+    :meth:`ControlsVerdict.unmeasured`.
+    """
+    ev = _latest_controls_event(session, repo)
+    if ev is not None:
+        return ControlsVerdict.from_counts(
+            dict(ev.payload_json or {}), run_id=ev.trace_id, created=ev.timestamp
+        )
+    run = session.execute(
+        select(Run)
+        .where(Run.repo == repo, Run.kind == CONTROLS_KIND, Run.status.in_(CONTROLS_FINISHED))
+        .order_by(Run.created.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if run is not None and "passed" in (run.counts_json or {}):
+        return ControlsVerdict.from_counts(
+            dict(run.counts_json), run_id=run.id, created=run.finished or run.created
+        )
+    return ControlsVerdict.unmeasured()
+
+
+def verdict_dict(
+    verdict: ControlsVerdict, policy: RoutingPolicy = ROUTING_POLICY
+) -> dict[str, Any]:
+    """:meth:`ControlsVerdict.to_dict` + the ``state`` word under ``policy``'s bars."""
+    return {
+        **verdict.to_dict(),
+        "state": verdict.state(
+            min_share=policy.min_controls_share, max_escapes=policy.max_controls_escapes
+        ),
+    }
 
 
 def _float_or_none(v: Any) -> float | None:
@@ -192,12 +252,7 @@ def get_oracle(repo: str, viewer: ViewerDep, db: DbDep) -> OracleReportOut:
 def get_controls(repo: str, viewer: ViewerDep, db: DbDep) -> dict[str, Any]:
     del viewer
     get_repo_or_404(db, repo)
-    ev = db.execute(
-        select(Event)
-        .where(Event.repo == repo, Event.action == CONTROLS_ACTION)
-        .order_by(Event.id.desc())
-        .limit(1)
-    ).scalar_one_or_none()
+    ev = _latest_controls_event(db, repo)
     if ev is None:
         raise ApiError(
             404,
@@ -208,7 +263,18 @@ def get_controls(repo: str, viewer: ViewerDep, db: DbDep) -> dict[str, Any]:
     report = dict(ev.payload_json or {})
     report.setdefault("run_id", ev.trace_id)
     report.setdefault("reported_at", ev.timestamp)
+    # the routing-reduced view of this same report (what the capability map gates on)
+    report["verdict"] = verdict_dict(
+        ControlsVerdict.from_counts(report, run_id=ev.trace_id, created=ev.timestamp)
+    )
     return report
 
 
-__all__ = ["CONTROLS_ACTION", "SCORE_ACTIONS", "oracle_report", "router"]
+__all__ = [
+    "CONTROLS_ACTION",
+    "SCORE_ACTIONS",
+    "latest_controls_verdict",
+    "oracle_report",
+    "router",
+    "verdict_dict",
+]
