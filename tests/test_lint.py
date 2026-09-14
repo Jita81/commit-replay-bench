@@ -450,9 +450,13 @@ def test_rejecting_linter_is_not_clean_and_is_the_lint_kind(
     pyfix: tuple[GitRepo, str, RepoConfig], tmp_path: Path
 ) -> None:
     repo, feat_sha, config = pyfix
+    # The gold is mined under the repo's real (lint-less) config so it is lint-clean and
+    # the task ELIGIBLE: a linter that rejected the maintainers' own patch would make
+    # the task gold-dirty at mine time (the ADR-0011 follow-up) — a different finding.
+    task = _mine(repo, config, feat_sha, tmp_path)
+    assert task.gold_clean is True
     script = _script(tmp_path / "bin" / "lint", 'echo "$@: E501 line too long"\nexit 1\n')
     config = _config_with(config, lint=_fake_lint_config(script, exts=[".py"]))
-    task = _mine(repo, config, feat_sha, tmp_path)
     ws = _trial(repo, config, task, tmp_path / "t")
     ws.overlay_sources(task.src_files)
     events: list[tuple[str, dict[str, Any]]] = []
@@ -546,6 +550,10 @@ def test_lint_runs_only_on_changed_non_test_files_that_still_exist(
     script = _script(tmp_path / "bin" / "lint", f'echo "$@" >> "{seen}"\nexit 0\n')
     config = _config_with(config, lint=_fake_lint_config(script, exts=[".py"]))
     task = _mine(repo, config, feat_sha, tmp_path)
+    # the gold check ran the same plan on the gold (pkg/sub.py) at mine time; this
+    # test is about which files the GRADE hands the linter, so start the record afresh
+    assert seen.read_text().split() == [pyrepo_min.SRC_SUB] and task.gold_clean is True
+    seen.write_text("")
     ws = _trial(repo, config, task, tmp_path / "t")
     ws.overlay_sources(task.src_files)
     (ws.root / "pkg" / "extra.py").write_text("X = 1\n")
