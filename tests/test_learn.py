@@ -459,6 +459,39 @@ class TestApply:
         with pytest.raises(learn.LearnError, match="decided_by"):
             learn.apply_triage([], rep, corpus_dir=corpus, decided_by="  ")
 
+    def test_contradicting_the_other_corpus_is_refused_loudly(
+        self, tmp_path: Path, corpus: Path
+    ) -> None:
+        """An `honest` decision for a line the refused corpus already holds (or the
+        reverse) is never applied: the corpus rule is "never weaken a refusal to make a
+        line pass" — a person moves the line by hand, with a reason."""
+        rep = learn.triage_refusals(_tonight(tmp_path))
+        stash = next(g for g in rep.groups if g.shape.startswith("git stash"))
+        (corpus / learn.CORPUS_REFUSED_FILE).write_text(
+            f"# refused\n{stash.candidate_honest}\tarchaeology:\n", encoding="utf-8"
+        )
+        before = {p: p.read_text(encoding="utf-8") for p in corpus.iterdir()}
+        ok = next(g for g in rep.groups if g.shape == "uv run pytest -q <path>")
+        with pytest.raises(learn.LearnError, match="OTHER corpus"):
+            learn.apply_triage(
+                [
+                    learn.RefusalDecision(ok.group_id, "honest"),
+                    learn.RefusalDecision(stash.group_id, "honest"),
+                ],
+                rep,
+                corpus_dir=corpus,
+                decided_by="paul",
+            )
+        assert {p: p.read_text(encoding="utf-8") for p in corpus.iterdir()} == before
+        # the same line decided `refuse` again is merely a duplicate: skipped, not an error
+        applied = learn.apply_triage(
+            [learn.RefusalDecision(stash.group_id, "refuse")],
+            rep,
+            corpus_dir=corpus,
+            decided_by="paul",
+        )
+        assert applied.skipped == (f"{stash.candidate_honest}\tarchaeology:",)
+
     def test_human_completes_a_truncated_line(self, tmp_path: Path, corpus: Path) -> None:
         rep = learn.triage_refusals(_tonight(tmp_path))
         pwd = next(g for g in rep.groups if g.truncated)

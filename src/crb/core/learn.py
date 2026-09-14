@@ -549,7 +549,9 @@ def apply_triage(
     base = Path(corpus_dir)
     honest_path = base / CORPUS_HONEST_FILE
     refused_path = base / CORPUS_REFUSED_FILE
-    # validate all first
+    honest_have = _existing_lines(honest_path)
+    refused_have = {ln.partition("\t")[0] for ln in _existing_lines(refused_path)}
+    # validate all first — nothing is written until every decision is sound
     planned: list[tuple[RefusalDecision, RefusalGroup, str]] = []
     unsure: list[str] = []
     for d in decisions:
@@ -567,6 +569,13 @@ def apply_triage(
                 f"decision {d.group_id}: every recorded example was truncated by the "
                 "recorder's cap; supply the full 'command'"
             )
+        other = refused_have if d.verdict == VERDICT_HONEST else honest_have
+        if cmd in other:
+            raise LearnError(
+                f"decision {d.group_id}: {cmd!r} is already in the OTHER corpus — a "
+                "contradiction is moved by hand with a reason, never applied (the corpus rule: "
+                "never weaken a refusal to make a line pass)"
+            )
         if d.verdict == VERDICT_REFUSE:
             prefix = d.prefix or (g.prefix if g.prefix in CORPUS_REFUSED_PREFIXES else "")
             if not prefix:
@@ -578,8 +587,6 @@ def apply_triage(
             planned.append((d, g, f"{cmd}\t{prefix}:"))
         else:
             planned.append((d, g, cmd))
-    honest_have = _existing_lines(honest_path)
-    refused_have = {ln.partition("\t")[0] for ln in _existing_lines(refused_path)}
     honest_added: list[str] = []
     refused_added: list[str] = []
     skipped: list[str] = []
