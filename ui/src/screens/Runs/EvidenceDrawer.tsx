@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useEvidence } from '../../api/hooks'
-import type { EvidencePack, TestRun } from '../../api/types'
+import type { EvidencePack, LintRun, TestRun } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
 import { Button } from '../../components/Button'
 import { ErrorState } from '../../components/ErrorState'
@@ -33,6 +33,50 @@ function KV({ rows }: { rows: Array<[string, React.ReactNode]> }) {
         </div>
       ))}
     </dl>
+  )
+}
+
+/**
+ * Belt 5's record (ADR-0011): which linter the repository's own configuration
+ * selected, and what it said about the changed files. `null` = not evaluated
+ * (no linter configured) — shown as such, never as a pass.
+ */
+function LintRunTail({ run }: { run: LintRun | null }) {
+  if (!run) {
+    return (
+      <div className="text-xs text-on-surface-muted" data-testid="lint-run-none">
+        Lint run (belt 5): not evaluated — the repository configures no formatter/linter
+      </div>
+    )
+  }
+  const tone = run.error ? 'amber' : run.ok === true ? 'green' : run.ok === false ? 'red' : 'muted'
+  const glyph = run.error ? '⚠' : run.ok === true ? '✓' : run.ok === false ? '✗' : '—'
+  const word = run.error ? 'could not run' : run.ok === true ? 'accepted' : run.ok === false ? 'rejected' : 'not evaluated'
+  return (
+    <details className="rounded-[var(--radius-control)] border border-border bg-surface-high" data-testid="lint-run">
+      <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-xs">
+        <span className="font-semibold">Lint run (belt 5)</span>
+        <Pill tone={tone} glyph={glyph} size="xs" label={`Lint run (belt 5, ${run.detected}): ${word}`}>
+          {word}
+        </Pill>
+        <span className="num text-on-surface-muted">
+          {run.detected} · {run.steps.length} step{run.steps.length === 1 ? '' : 's'} · {fmtSeconds(run.duration_s)}
+        </span>
+      </summary>
+      <div className="space-y-2 border-t border-border px-3 py-2">
+        {run.error && <p className="text-xs text-status-amber">{run.error}</p>}
+        {run.note && !run.error && <p className="text-xs text-on-surface-muted">{run.note}</p>}
+        {run.steps.map((s, i) => (
+          <div key={`${s.tool}-${i}`} className="space-y-1">
+            <div className="font-mono text-[11px]" title={s.argv.join(' ')}>
+              {s.tool}: rc {s.rc}{s.timed_out ? ' (timed out)' : ''} · {s.files.length ? `${s.files.length} file(s)` : 'repo-wide'}
+            </div>
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-surface-container p-2 font-mono text-[11px] leading-4 text-on-surface-body">{s.tail || '(no output tail)'}</pre>
+          </div>
+        ))}
+        <p className="text-[10px] text-on-surface-muted">Tail is redacted at capture; secrets never enter a pack.</p>
+      </div>
+    </details>
   )
 }
 
@@ -139,6 +183,7 @@ function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean })
         <div className="space-y-2">
           <TestRunTail label="Target run (belt 2)" run={g.target_run} />
           <TestRunTail label="Belt run (belt 3)" run={g.belt_run} />
+          {'repo_lint_clean' in g && <LintRunTail run={g.lint_run ?? null} />}
         </div>
       </Section>
 

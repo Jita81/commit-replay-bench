@@ -129,10 +129,12 @@ export const BELT_LABELS: Record<string, { short: string; long: string }> = {
   target_green: { short: 'B2 target', long: 'Belt 2 — target green' },
   no_new_failures: { short: 'B3 no new', long: 'Belt 3 — no new failures' },
   source_changed: { short: 'B4 source', long: 'Belt 4 — source changed' },
+  repo_lint_clean: { short: 'B5 lint', long: "Belt 5 — repo's own lint clean" },
 }
 
-export function beltDisplay(value: boolean | null): Display {
+export function beltDisplay(value: boolean | null | undefined, name?: string): Display {
   if (value === true) return { label: 'pass', tone: 'green', glyph: '✓', describe: 'held' }
   if (value === false) return { label: 'fail', tone: 'red', glyph: '✗', describe: 'failed' }
+  if (name === 'repo_lint_clean') return { label: 'n/a', tone: 'muted', glyph: '—', describe: 'not evaluated — no linter configured for this repository' }
   return { label: 'n/a', tone: 'muted', glyph: '—', describe: 'not recorded' }
 }

@@ -1,9 +1,18 @@
 """crb.store.migrate — Alembic parity with ``init_db``, adoption, idempotence, the CLI.
 
-The load-bearing test is :func:`test_upgrade_head_equals_init_db`: the initial revision and
-``Base.metadata.create_all`` must produce the same schema (autogenerate diff empty; every
-table/column/index/constraint identical through the inspector; on SQLite the
-``sqlite_master`` rows byte-identical), and both must carry the append-only triggers.
+The load-bearing test is :func:`test_upgrade_head_equals_init_db`: the migration chain at
+head and ``Base.metadata.create_all`` must produce the same schema (autogenerate diff
+empty; every table/column/index/constraint identical — and in the same order — through the
+inspector; on SQLite the ``sqlite_master`` rows identical definition-for-definition), and
+both must carry the append-only triggers. Since revision 0002 (belt 5, ADR-0011) the chain
+has an ``ADD COLUMN`` step, and SQLite records that by splicing the definition into the
+stored ``CREATE TABLE`` text — so the SQLite comparison is by definition set, not by byte
+(the inspector comparison keeps the order strict).
+
+Adoption of an unversioned ``create_all`` database is revision-aware
+(:data:`crb.store.migrate.REVISION_MARKERS`): a database created by an older release is
+stamped at the revision it is at and receives the missing revisions; one created by this
+release is stamped at head.
 
 Parametrised over SQLite and (when ``CRB_TEST_POSTGRES_URL`` is set) PostgreSQL.
 """
@@ -78,11 +87,44 @@ def _snapshot(engine: Engine) -> dict[str, Any]:
     return snap
 
 
-def _sqlite_master(path: Path) -> list[tuple[str, ...]]:
+def _canonical_sql(sql: str | None) -> tuple[str, frozenset[str]]:
+    """``CREATE TABLE t (a, b, PRIMARY KEY (a))`` → ``("CREATE TABLE t", {"a", "b",
+    "PRIMARY KEY (a)"})``: the head before the parenthesis, whitespace-collapsed, and the
+    set of depth-0 comma-separated definitions. ``ALTER TABLE … ADD COLUMN`` on SQLite
+    splices ``, col TYPE`` before the closing parenthesis of the stored text, so byte
+    equality with ``create_all`` is unattainable past the initial revision; definition
+    equality is what the schema actually says (column order is checked by the inspector)."""
+    if not sql:
+        return ("", frozenset())
+    open_at = sql.find("(")
+    if open_at < 0:
+        return (" ".join(sql.split()), frozenset())
+    head = " ".join(sql[:open_at].split())
+    body = sql[open_at + 1 : sql.rfind(")")]
+    defs: list[str] = []
+    depth = 0
+    cur: list[str] = []
+    for ch in body:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            defs.append(" ".join("".join(cur).split()))
+            cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        defs.append(" ".join("".join(cur).split()))
+    return (head, frozenset(d for d in defs if d))
+
+
+def _sqlite_master(path: Path) -> list[tuple[str, str, str, tuple[str, frozenset[str]]]]:
     conn = sqlite3.connect(path)
     try:
         return sorted(
-            conn.execute(
+            (str(t), str(n), str(tn), _canonical_sql(sql))
+            for t, n, tn, sql in conn.execute(
                 "SELECT type, name, tbl_name, sql FROM sqlite_master "
                 "WHERE name NOT LIKE 'sqlite_%' AND name != 'alembic_version'"
             ).fetchall()
@@ -186,7 +228,7 @@ def test_upgrade_is_idempotent(backend: Backend) -> None:
     migrate.upgrade(backend.url, revision="head")
     assert _snapshot(backend.engine) == before
     assert migrate.check(backend.url) is True
-    assert migrate.current(backend.url) == migrate.INITIAL_REVISION
+    assert migrate.current(backend.url) == migrate.head_revision()
 
 
 def test_migrated_database_is_append_only_and_chains(backend: Backend) -> None:
@@ -209,14 +251,71 @@ def test_upgrade_adopts_an_init_db_database_and_keeps_its_rows(backend: Backend)
     assert migrate.current(backend.url) is None
     assert migrate.check(backend.url) is False
 
-    migrate.upgrade(backend.url)  # stamps 0001, then upgrades (no-op) — never re-creates
+    migrate.upgrade(backend.url)  # stamps head (create_all == the models), never re-creates
 
-    assert migrate.current(backend.url) == migrate.INITIAL_REVISION
+    assert migrate.current(backend.url) == migrate.head_revision()
     assert migrate.check(backend.url) is True
     assert ledger.verify() == 1
     assert next(iter(ledger.rows())).trial == "pre-adoption"
     assert_append_only(backend.factory)
     assert _autogen_diff(backend.engine) == []
+
+
+def _drop_column(backend: Backend, table: str, column: str) -> None:
+    """Turn this release's ``create_all`` schema into an older release's (no ``column``)."""
+    if backend.dialect == "sqlite" and sqlite3.sqlite_version_info < (3, 35):
+        pytest.skip("SQLite < 3.35 cannot DROP COLUMN")
+    with backend.engine.begin() as c:
+        c.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+
+
+def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
+    backend: Backend,
+) -> None:
+    """A database created by ``init_db`` BEFORE belt 5 existed (no ``repo_lint_clean``
+    column) holding four-belt rows: adoption stamps it at 0001, 0002 adds the nullable
+    column in place, every existing row still verifies (belt 5 is unrecorded for ``v4``,
+    not hashed), and five-belt rows can be appended after it."""
+    init_db(backend.engine)
+    ledger = DbLedger(backend.factory)
+    ledger.append(grade_row(trial="four-belt", belt_set="v4"))
+    _drop_column(backend, "grades", "repo_lint_clean")
+    assert "repo_lint_clean" not in {
+        c["name"] for c in inspect(backend.engine).get_columns("grades")
+    }
+    assert migrate.current(backend.url) is None
+    assert _autogen_diff(backend.engine) != []  # an older release's schema
+
+    migrate.upgrade(backend.url)  # stamps 0001, applies 0002
+
+    assert migrate.current(backend.url) == migrate.head_revision() == "0002"
+    assert migrate.check(backend.url) is True
+    assert _autogen_diff(backend.engine) == []
+    assert "repo_lint_clean" in {c["name"] for c in inspect(backend.engine).get_columns("grades")}
+    assert_append_only(backend.factory)
+    old = next(iter(ledger.rows()))
+    assert old.trial == "four-belt" and old.belt_set == "v4" and old.repo_lint_clean is None
+    assert old.verify_hash() and ledger.verify() == 1
+    ledger.append(grade_row(trial="five-belt", repo_lint_clean=True))
+    ledger.append(grade_row(trial="five-belt-rejected", clean=False, repo_lint_clean=False))
+    rows = list(ledger.rows())
+    assert [r.repo_lint_clean for r in rows] == [None, True, False]
+    assert [r.belt_set for r in rows] == ["v4", "v5", "v5"]
+    assert rows[2].failure_kind == "lint"
+    assert ledger.verify() == 3
+
+
+def test_upgrade_refuses_an_unversioned_schema_that_matches_no_release(
+    backend: Backend,
+) -> None:
+    """Every table present, the belt-5 marker present, but a column nobody shipped: not a
+    known ``create_all`` — refused rather than stamped at head."""
+    init_db(backend.engine)
+    with backend.engine.begin() as c:
+        c.execute(text("ALTER TABLE repos ADD COLUMN bogus TEXT"))
+    with pytest.raises(migrate.SchemaStateError, match="neither a known release"):
+        migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) is None
 
 
 def test_upgrade_refuses_a_partial_schema(backend: Backend) -> None:
@@ -253,7 +352,42 @@ def test_downgrade_refuses_while_the_ledger_holds_rows(backend: Backend) -> None
     with pytest.raises(RuntimeError, match="refusing to downgrade"):
         _downgrade_to_base(backend)
     assert "grades" in inspect(backend.engine).get_table_names()
-    assert migrate.current(backend.url) == migrate.INITIAL_REVISION
+    assert migrate.current(backend.url) == migrate.head_revision()
+
+
+def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_otherwise(
+    backend: Backend,
+) -> None:
+    """Revision 0002's downgrade is real: refused while any row records belt 5 (the
+    column IS evidence then); with only pre-belt-5 rows the empty column may go, and the
+    append-only triggers survive the drop."""
+    migrate.upgrade(backend.url)
+    ledger = DbLedger(backend.factory)
+    ledger.append(grade_row(trial="v4", belt_set="v4"))
+    ledger.append(grade_row(trial="v5", repo_lint_clean=True))
+    cfg = migrate.alembic_config(backend.url)
+    with (
+        pytest.raises(RuntimeError, match="refusing to downgrade 0002"),
+        backend.engine.begin() as connection,
+    ):
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0001")
+    assert migrate.current(backend.url) == "0002"
+
+    fresh = _reset(backend)
+    migrate.upgrade(backend.url)
+    DbLedger(make_session_factory(fresh)).append(grade_row(trial="v4-only", belt_set="v4"))
+    cfg = migrate.alembic_config(backend.url)
+    with fresh.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0001")
+    assert migrate.current(backend.url) == "0001"
+    assert "repo_lint_clean" not in {c["name"] for c in inspect(fresh).get_columns("grades")}
+    assert {"grades_no_update", "grades_no_delete"} <= backend.trigger_names()
+    with pytest.raises(DBAPIError, match="append-only"), fresh.begin() as c:
+        c.execute(text("DELETE FROM grades"))
+    migrate.upgrade(backend.url)  # and back up again
+    assert migrate.current(backend.url) == "0002" and _autogen_diff(fresh) == []
 
 
 def test_downgrade_of_an_empty_database_drops_the_schema(backend: Backend) -> None:
@@ -301,7 +435,7 @@ def test_cli_upgrade_current_check(backend: Backend, capsys: pytest.CaptureFixtu
     assert migrate.main(["check", "--url", backend.url]) == 1
     assert "pending" in capsys.readouterr().out
     assert migrate.main(["upgrade", "--url", backend.url]) == 0
-    assert capsys.readouterr().out.strip() == f"ok: database at {migrate.INITIAL_REVISION}"
+    assert capsys.readouterr().out.strip() == f"ok: database at {migrate.head_revision()}"
     assert migrate.main(["check", "--url", backend.url]) == 0
     assert capsys.readouterr().out.strip() == "ok: at head"
     assert migrate.main(["--url", backend.url]) == 0  # default action is upgrade; idempotent

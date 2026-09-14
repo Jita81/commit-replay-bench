@@ -34,6 +34,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from crb.core.execution import Command, ExecResult, Executor
+from crb.core.lint import LintPlan, python_plan
 from crb.core.runners.base import (
     BaseRunner,
     SetupResult,
@@ -169,6 +170,28 @@ class PytestRunner(BaseRunner):
         except OSError:
             return False
         return _PYTEST_DEF_RE.search(text) is not None
+
+    # --- belt 5 -------------------------------------------------------------------
+    def ruff_for(self, root: Path, executor: Executor) -> str:
+        """The ``ruff`` binary belt 5 runs: the one next to the configured interpreter
+        (``runner_opts.python`` or the setup venv — click's ``dev`` extra installs
+        it there), else the host's, else the bare name (fails closed at run time as a
+        visible harness error, never a silent skip). Under a sandbox the image's PATH
+        resolves it."""
+        if executor.name == "docker":
+            return executor.tool("ruff")
+        python = self.configured_python(root, self.env_dir)
+        if python:
+            sibling = Path(python).parent / ("ruff.exe" if os.name == "nt" else "ruff")
+            if sibling.exists():
+                return str(sibling)
+        return shutil.which("ruff") or "ruff"
+
+    def detect_lint(self, root: Path, executor: Executor) -> LintPlan | None:
+        """``ruff check`` (+ ``ruff format --check``) when the repository configures
+        ruff — click: ``pyproject.toml [tool.ruff]`` and the ``ruff-check`` /
+        ``ruff-format`` pre-commit hooks its CI runs on every PR."""
+        return python_plan(root, self.ruff_for(root, executor))
 
     # --- environment -------------------------------------------------------------
     def environment_ready(self, root: Path, env_dir: Path) -> bool:

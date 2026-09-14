@@ -33,6 +33,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from crb.core.classify import IntentLabel, resolve
+from crb.core.lint import plan_from_config
 from crb.core.taxonomy import ALL_CLASSES, CLASS_VOCABULARY, INTENT_CLASSES, UNCLASSIFIED
 
 # ---------------------------------------------------------------------------
@@ -287,6 +288,15 @@ class RepoConfig:
     runner_opts:
         Runner-specific options (``python``, ``pythonpath_suffix``, ``maven_flags``,
         ``mocha_require``, ``node_modules``…). Free-form but validated by the runner.
+    lint:
+        Belt 5 (``repo_lint_clean``): the repository's own formatter/linter, run on
+        the changed non-test files at grade time. Empty (the default) ⇒ the runner
+        auto-detects it from the repository's configuration (``gofmt``, ``ruff``,
+        ``eslint``/``prettier``/``standard``, ``spotless``/``checkstyle``,
+        ``cargo fmt``/``clippy`` — ADR-0011); ``{"command": [...], "paths":
+        "changed"|"all", "timeout": s}`` declares it; ``{"disabled": true}`` switches
+        the belt off for the repo (not evaluated, never a pass). Validated by
+        :func:`crb.core.lint.plan_from_config`.
     path:
         Local clone path (host). Optional in the config; the CLI and server fill it.
     sandbox_image:
@@ -312,6 +322,7 @@ class RepoConfig:
     runner_opts: Mapping[str, Any] = field(default_factory=dict)
     sandbox_image: str = ""
     mining: Mapping[str, int] = field(default_factory=dict)
+    lint: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", self.name):
@@ -338,6 +349,8 @@ class RepoConfig:
             )
         object.__setattr__(self, "runner_opts", dict(self.runner_opts))
         object.__setattr__(self, "mining", dict(self.mining))
+        object.__setattr__(self, "lint", dict(self.lint))
+        plan_from_config(self.lint)  # validates the declared shape (raises ValueError)
 
     # --- source / test discrimination (exact for the configured layout) -------
     @property
@@ -446,6 +459,7 @@ class RepoConfig:
             runner_opts=opts,
             sandbox_image=str(d.get("sandbox_image", "")),
             mining=mining,
+            lint=dict(d.get("lint") or {}),
         )
 
 

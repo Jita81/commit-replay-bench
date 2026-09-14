@@ -311,16 +311,39 @@ export interface RunListParams extends PageParams {
   status?: RunStatus
 }
 
-/** The four belts. `null` = not recorded (legacy v3 rows have no belt 4). */
+/**
+ * The belts. `null` = not recorded / not evaluated: a legacy v3 row has no belt 4; belt 5
+ * (`repo_lint_clean`, ADR-0011) is recorded only under `belt_set = 'v5'` and is `null`
+ * there when the repository configures no linter — never a pass, never a fail.
+ */
 export interface Belts {
   tests_unmodified: boolean | null
   target_green: boolean | null
   no_new_failures: boolean | null
   source_changed: boolean | null
+  repo_lint_clean?: boolean | null
 }
 
-export const BELT_NAMES = ['tests_unmodified', 'target_green', 'no_new_failures', 'source_changed'] as const
-export type BeltName = (typeof BELT_NAMES)[number]
+/** The four core belts every apparatus since 2.0 recorded. */
+export const CORE_BELT_NAMES = ['tests_unmodified', 'target_green', 'no_new_failures', 'source_changed'] as const
+/** Every belt, in belt order; belt 5 is shown only when the row's belt set records it. */
+export const ALL_BELT_NAMES = [...CORE_BELT_NAMES, 'repo_lint_clean'] as const
+/** @deprecated use CORE_BELT_NAMES / beltNamesFor — kept as the four-belt alias. */
+export const BELT_NAMES = CORE_BELT_NAMES
+export type BeltName = (typeof ALL_BELT_NAMES)[number]
+export type BeltSet = 'v5' | 'v4' | 'v3-legacy'
+export const BELT_SET_V5: BeltSet = 'v5'
+
+/**
+ * Which belts a row shows: five under `v5`, four otherwise. With no belt set (a
+ * `GradeResult` inside an evidence pack) the presence of the `repo_lint_clean` key
+ * says whether the apparatus that wrote it had belt 5. A missing belt is never
+ * rendered — and never rendered as failed.
+ */
+export function beltNamesFor(beltSet: string | null | undefined, belts?: Belts): readonly BeltName[] {
+  if (beltSet) return beltSet === BELT_SET_V5 ? ALL_BELT_NAMES : CORE_BELT_NAMES
+  return belts && 'repo_lint_clean' in belts ? ALL_BELT_NAMES : CORE_BELT_NAMES
+}
 
 /** @contract API.md "GET /runs/{id}/tasks: task, trials, clean, belts, cost, latency, pack hashes". */
 export interface RunTaskRow {
@@ -332,6 +355,8 @@ export interface RunTaskRow {
   clean: boolean
   disqualified: boolean
   error: string
+  /** The decisive attempt's belt set (`v5` = five belts, else four). */
+  belt_set?: BeltSet | string
   belts: Belts
   cost_usd: number
   latency_s: number
@@ -425,7 +450,7 @@ export interface GradeRow extends Belts {
   gold_clean: boolean | null
   evidence_pack_hash: string
   apparatus_version: string
-  belt_set: 'v4' | 'v3-legacy'
+  belt_set: BeltSet
   provenance: string
   labels: Record<string, string>
   schema: string
@@ -440,7 +465,31 @@ export function beltsOf(row: Belts): Belts {
     target_green: row.target_green,
     no_new_failures: row.no_new_failures,
     source_changed: row.source_changed,
+    repo_lint_clean: row.repo_lint_clean ?? null,
   }
+}
+
+/** `crb.core.lint.LintStep.to_dict()` — one linter command as it ran (tail redacted). */
+export interface LintStep {
+  tool: string
+  argv: string[]
+  files: string[]
+  rc: number
+  verdict: boolean | null
+  tail: string
+  timed_out: boolean
+  duration_s: number
+  error: string
+}
+
+/** `crb.core.lint.LintRun.to_dict()` — belt 5's record: which linter, what it said. */
+export interface LintRun {
+  detected: string
+  steps: LintStep[]
+  ok: boolean | null
+  note: string
+  error: string
+  duration_s: number
 }
 
 /** `GET /tasks/{repo}/{task_id}` — spec + all grade rows for it. */
@@ -496,6 +545,8 @@ export interface GradeResult extends Belts {
   diff: DiffStats | null
   target_run: TestRun | null
   belt_run: TestRun | null
+  /** Absent on packs written before apparatus 2.2; `null` when belt 5 was not evaluated. */
+  lint_run?: LintRun | null
   duration_s: number
   extra: Record<string, unknown>
 }

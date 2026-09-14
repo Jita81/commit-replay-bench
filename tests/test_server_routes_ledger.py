@@ -236,6 +236,56 @@ class TestImport:
         assert r.status_code == 200 and r.json()["source_chain_ok"] is False
         assert r.json()["imported"] == 1 and r.json()["skipped"] == 4
 
+    def test_pre_belt_five_rows_verify_in_the_store_with_belt_five_unrecorded(
+        self, env: Env
+    ) -> None:
+        """ADR-0011: a ``v4`` row (four belts, ``repo_lint_clean`` unrecorded) and a ``v5``
+        row (belt 5 recorded, here rejected) imported side by side — the store's own
+        verify recomputes each hash by the SAME body rule the core uses, so the chain is
+        intact and the v5 rejection is a plain non-clean row, never a false-Q1."""
+        src = env.info.rows[0].to_dict()
+        v4 = GradeRow.from_dict(
+            {
+                **src,
+                "repo": "delta",
+                "row_id": "delta-v4",
+                "belt_set": "v4",
+                "repo_lint_clean": None,
+                "evidence_pack_hash": "a" * 64,
+                "prev_hash": "",
+                "row_hash": "",
+            }
+        ).chained(GENESIS_HASH)
+        v5 = GradeRow.from_dict(
+            {
+                **src,
+                "repo": "delta",
+                "row_id": "delta-v5",
+                "clean": False,
+                "belt_set": "v5",
+                "repo_lint_clean": False,
+                "evidence_pack_hash": "b" * 64,
+                "labels": {},
+                "prev_hash": "",
+                "row_hash": "",
+            }
+        ).chained(v4.row_hash)
+        assert "repo_lint_clean" not in v4.body() and v5.body()["repo_lint_clean"] is False
+        r = env.client.post(
+            f"{API_PREFIX}/ledger/import",
+            files={"file": ("delta.jsonl", _jsonl([v4, v5]), "application/x-ndjson")},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["imported"] == 2 and r.json()["source_chain_ok"] is True
+        verify = env.get("/ledger/verify").json()
+        assert verify["ok"] is True and verify["chain_ok"] is True and verify["false_q1_total"] == 0
+        items = {g["row_id"]: g for g in env.get("/grades?repo=delta").json()["items"]}
+        assert (
+            items["delta-v4"]["belt_set"] == "v4" and items["delta-v4"]["repo_lint_clean"] is None
+        )
+        assert items["delta-v5"]["repo_lint_clean"] is False and items["delta-v5"]["clean"] is False
+        assert GradeRow.from_dict(items["delta-v5"]).failure_kind == "lint"
+
     def test_census_rows_point_at_the_cli(self, env: Env) -> None:
         census = {
             "repo": "sqlalchemy",

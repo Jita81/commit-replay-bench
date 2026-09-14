@@ -145,6 +145,11 @@ class Grade(Base):
     labels_json: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     row_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # Belt 5 (ADR-0011, revision 0002). Declared LAST so ``create_all`` and
+    # ``ALTER TABLE … ADD COLUMN`` produce the same column order (the migration parity
+    # test compares them). NULL on every pre-belt-5 row and on a ``v5`` row whose
+    # repository has no linter; only ``belt_set`` says which.
+    repo_lint_clean: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     __table_args__ = (
         Index(

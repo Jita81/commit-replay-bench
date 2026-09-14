@@ -17,6 +17,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from crb.core.execution import Command, ExecResult, Executor
+from crb.core.lint import LintPlan, jvm_plan
 from crb.core.runners.base import (
     BaseRunner,
     SetupResult,
@@ -50,6 +51,14 @@ class MavenRunner(BaseRunner):
         if executor.name == "docker":
             env["MAVEN_OPTS"] = "-Dmaven.repo.local=/tmp/m2 " + str(self.opts.get("maven_opts", ""))
         return env
+
+    # --- belt 5 -------------------------------------------------------------------
+    def detect_lint(self, root: Path, executor: Executor) -> LintPlan | None:
+        """``spotless:check`` / ``checkstyle:check`` (offline, module-wide) when the
+        pom declares the plugin — gson (spotless), petclinic and commons-lang
+        (checkstyle)."""
+        root = Path(root)
+        return jvm_plan(root, self._mvn(root, executor), self._flags(), self._env(executor))
 
     def environment_ready(self, root: Path, env_dir: Path) -> bool:
         root = Path(root)

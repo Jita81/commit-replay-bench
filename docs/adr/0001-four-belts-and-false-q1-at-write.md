@@ -23,8 +23,9 @@ checks, not judgement calls.
 
 ## Decision
 
-1. **Exactly four belts**, defined in `crb.core.grade.BELT_NAMES`, all of which must be
-   `True` for `clean`:
+1. **Exactly four belts**, defined in `crb.core.grade.BELT_NAMES` (since ADR-0011:
+   `CORE_BELT_NAMES`; `BELT_NAMES` also lists belt 5), all of which must be `True` for
+   `clean`:
    - `tests_unmodified` — every target test file is byte-identical to the commit's own
      version (`Workspace.tests_byte_identical`: `git diff <sha> -- <paths>` **and** a SHA-256
      compare). A modified oracle **disqualifies** the trial (`disqualified=True`).
@@ -64,7 +65,12 @@ checks, not judgement calls.
   which the UI shows beside `n`.
 - Adding a fifth belt, or changing the meaning of one, is an apparatus change: bump
   `APPARATUS_VERSION`, add an ADR, and the ledger's `apparatus_versions` on every cell
-  makes the boundary visible.
+  makes the boundary visible. **Done once, 2026-09-14:** belt 5 `repo_lint_clean` — the
+  repository's own formatter/linter on the changed files — is
+  [ADR-0011](0011-repo-lint-belt.md) (apparatus 2.2, `belt_set="v5"`). Belts 1–4 keep
+  the meaning above and remain the *core* belts (`crb.core.grade.CORE_BELT_NAMES`);
+  belt 5 is evaluated only where the repository configures a linter and `None`
+  otherwise, so the clean rule reads: every **evaluated** belt holds.
 - Timeouts count as failures. A slow-but-correct change is scored as a failure at the
   configured timeout; the timeout is part of the apparatus stamp.
 - The three-belt census rows cannot be re-graded into four-belt rows without re-running

@@ -129,6 +129,8 @@ def split_out(c: CapabilityCell) -> FailureSplitOut:
         protocol=c.n_protocol,
         harness=c.n_harness,
         disqualified=c.n_disqualified,
+        lint=c.stats.n_lint if c.stats is not None else 0,
+        lint_evaluated=c.stats.n_lint_evaluated if c.stats is not None else 0,
     )
 
 
@@ -168,6 +170,8 @@ def cell_out(c: CapabilityCell) -> CapabilityCellSplitOut:
         n_protocol=s.n_protocol,
         n_harness=s.n_harness,
         n_disqualified=s.n_disqualified,
+        n_lint=s.n_lint,
+        n_lint_evaluated=s.n_lint_evaluated,
         model_n=s.model_n,
         model_point=None if c.model_point is None else round(c.model_point, 4),
         model_ci_low=round(s.model_ci.low, 4),

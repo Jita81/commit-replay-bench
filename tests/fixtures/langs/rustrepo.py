@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 from crb.core.spec import BELT_BARE, Language, RepoConfig
@@ -60,10 +61,11 @@ _FEAT = {
 }
 
 
-def build(tmp_path: Path) -> tuple[Path, str]:
+def build(tmp_path: Path, *, extra: Mapping[str, str] | None = None) -> tuple[Path, str]:
+    """``extra`` = more files in the initial commit (a lint config the parent carries)."""
     root = Path(tmp_path) / "rustrepo"
     init_repo(root)
-    write_files(root, _INITIAL)
+    write_files(root, {**_INITIAL, **(extra or {})})
     # Commit the lockfile: cargo would otherwise create it on first build and the
     # untracked file would read as a source change (belt 4) in every worktree.
     subprocess.run(

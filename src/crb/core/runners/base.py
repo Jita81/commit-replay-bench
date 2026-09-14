@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from crb.core.execution import Command, ExecResult, Executor, LocalExecutor
+from crb.core.lint import LintPlan, lint_disabled, plan_from_config
 from crb.core.redact import redact_and_cap
 from crb.core.spec import BELT_AFFECTED_DIRS, BELT_BARE, BELT_TARGET_ONLY, RepoConfig
 
@@ -280,6 +281,8 @@ class TestRunner(Protocol):
 
     def environment_ready(self, root: Path, env_dir: Path) -> bool: ...
 
+    def lint_plan(self, root: Path, executor: Executor) -> LintPlan | None: ...
+
 
 class BaseRunner:
     """Shared plumbing. Subclasses implement ``target_scope``, ``command``, ``parse``.
@@ -359,6 +362,25 @@ class BaseRunner:
 
     def describe(self) -> dict[str, Any]:
         return {"runner": self.name}
+
+    # --- belt 5: the repository's own formatter / linter (ADR-0011) ------------
+    def lint_plan(self, root: Path, executor: Executor) -> LintPlan | None:
+        """What belt 5 runs on the changed files: the declared ``RepoConfig.lint``
+        when present, else this language's default (:meth:`detect_lint`), else
+        ``None`` — the belt is then *not evaluated* (never a pass, never a fail).
+        ``{"disabled": true}`` in the config is an explicit ``None``."""
+        if lint_disabled(self.config.lint):
+            return None
+        declared = plan_from_config(self.config.lint)
+        if declared is not None:
+            return declared
+        return self.detect_lint(Path(root), executor)
+
+    def detect_lint(self, root: Path, executor: Executor) -> LintPlan | None:
+        """The language default, from the repository's OWN configuration only
+        (``.golangci.yml``, ``[tool.ruff]``, an ESLint config, a pom plugin…). The
+        base runner detects nothing; each language runner cites its evidence."""
+        return None
 
     # --- environment setup (the one network phase) ----------------------------
     def setup(

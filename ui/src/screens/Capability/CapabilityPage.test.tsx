@@ -180,7 +180,7 @@ describe('CapabilityPage — controls verdict + failure split (A2)', () => {
     expect(model.textContent).toContain('model 89%')
     expect(model.textContent).toContain('(8/9)')
     const split = measured.querySelector('[data-testid="failure-split"]')!
-    expect(split.getAttribute('aria-label')).toBe('red 1, budget 1, protocol 1, harness 2, DQ 1')
+    expect(split.getAttribute('aria-label')).toBe('red 1, lint 0, budget 1, protocol 1, harness 2, DQ 1')
     expect(split.querySelector('[data-testid="kind-harness"]')!.textContent).toBe('harness2')
 
     // the route pill carries the reason on hover; the detail card names the code

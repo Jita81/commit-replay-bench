@@ -12,14 +12,21 @@ Two invariants are enforced at *write* time, not read time:
   ``True``, no disqualification and no error (:class:`FalseQ1Violation`);
 * **no pack ⇒ no Q1** — a clean row must carry a non-empty ``evidence_pack_hash``.
 
-Legacy census rows graded before belt 4 existed carry ``belt_set="v3-legacy"``
-and ``provenance="imported:…"``; the invariant applies to the three belts they
-recorded, and the capability layer reports them as a separate apparatus.
+``belt_set`` says which belts a row's apparatus recorded and is never
+re-interpreted: ``v3-legacy`` (census rows graded before belt 4 existed,
+``provenance="imported:…"``) the first three; ``v4`` the first four; ``v5``
+(apparatus 2.2, ADR-0011) all five, where belt 5 ``repo_lint_clean`` may be
+``None`` = *not evaluated* (the repository configures no linter) — a fact the row
+commits to, neither a pass nor a fail. On a ``v3-legacy`` / ``v4`` row belt 5 is
+*unrecorded*: it must be ``None``, is not part of the hashed body (so every row
+written before belt 5 existed still verifies byte-for-byte) and is never shown
+as a belt. The invariant applies to the belts the row recorded; the capability
+layer reports each belt set as its own apparatus.
 
 Every non-clean row also says **why** it is not clean, in one word
 (:attr:`GradeRow.failure_kind`, vocabulary :data:`FAILURE_KINDS`), so a rate can
-be split into "the model failed" and "the instrument failed" wherever it is
-shown — a naive clean rate over rows that include harness errors misdescribes
+be split into "the model failed", "the model wrote working but non-conforming
+code" (``lint``) and "the instrument failed" wherever it is shown — a naive clean rate over rows that include harness errors misdescribes
 the model, and a rate that silently drops them overclaims. The kind is derived
 by ONE rule (:func:`derive_failure_kind`) from fields the row already hashes;
 a non-clean row written today additionally pins it into ``labels`` — with the
@@ -48,14 +55,31 @@ from pathlib import Path
 from typing import Any
 
 from crb.core.evidence import BuilderRef, canonical_json, sha256_text, utc_now_iso
-from crb.core.grade import BELT_NAMES, FalseQ1Violation, GradeResult
+from crb.core.grade import (
+    BELT_NAMES,
+    CORE_BELT_NAMES,
+    OPTIONAL_BELT_NAMES,
+    FalseQ1Violation,
+    GradeResult,
+)
 from crb.core.spec import TaskSpec
 from crb.core.stats import Interval, mean, wilson_interval
 from crb.core.version import APPARATUS_VERSION
 
 GRADE_SCHEMA = "crb.grade.v2"
+#: Five belts (apparatus ≥ 2.2): belt 5 ``repo_lint_clean`` recorded (``None`` = not evaluated).
+BELT_SET_V5 = "v5"
+#: Four belts (apparatus 2.0–2.1); belt 5 unrecorded.
 BELT_SET_V4 = "v4"
+#: Three belts (the census); belts 4 and 5 unrecorded.
 BELT_SET_V3_LEGACY = "v3-legacy"
+BELT_SETS: tuple[str, ...] = (BELT_SET_V5, BELT_SET_V4, BELT_SET_V3_LEGACY)
+#: The belts each set records, in belt order.
+RECORDED_BELTS: dict[str, tuple[str, ...]] = {
+    BELT_SET_V3_LEGACY: BELT_NAMES[:3],
+    BELT_SET_V4: BELT_NAMES[:4],
+    BELT_SET_V5: BELT_NAMES,
+}
 PROCESS_REPLAY = "replay"
 PROCESS_FACTORY = "factory"
 
@@ -67,6 +91,9 @@ FAILURE_CLEAN = ""
 #: The MODEL failed the task: target not green, a regression, or no source change,
 #: with the builder having finished on its own terms.
 FAILURE_BUILDER_RED = "builder_red"
+#: The model wrote WORKING but NON-CONFORMING code: belts 1–4 held and only belt 5
+#: (the repository's own formatter/linter) rejected the changed files (ADR-0011).
+FAILURE_LINT = "lint"
 #: The builder's :class:`Budget` was exhausted (wall clock, turns, tool calls, tokens or
 #: cost) before it finished — neither the model failing nor an instrument error.
 FAILURE_BUDGET = "budget"
@@ -81,11 +108,15 @@ FAILURE_DISQUALIFIED = "disqualified"
 FAILURE_KINDS: tuple[str, ...] = (
     FAILURE_CLEAN,
     FAILURE_BUILDER_RED,
+    FAILURE_LINT,
     FAILURE_BUDGET,
     FAILURE_PROTOCOL,
     FAILURE_HARNESS,
     FAILURE_DISQUALIFIED,
 )
+#: The kinds where the model finished and was judged on its own terms (the
+#: denominator of ``model_point`` together with clean).
+MODEL_FAILURE_KINDS: tuple[str, ...] = (FAILURE_BUILDER_RED, FAILURE_LINT)
 #: The kinds that are the INSTRUMENT's doing (the model never got a fair attempt).
 INSTRUMENT_FAILURE_KINDS: tuple[str, ...] = (FAILURE_PROTOCOL, FAILURE_HARNESS)
 
@@ -165,6 +196,7 @@ def derive_failure_kind(
     error: str = "",
     builder_error: str = "",
     stop_reason: str = "",
+    lint_only: bool = False,
 ) -> str:
     """THE rule that names why a row is not clean. Deterministic; first match wins.
 
@@ -174,17 +206,23 @@ def derive_failure_kind(
        ``protocol violation:``                              → ``protocol``
        (the builder was refused by a guard; the belts then judge an empty patch)
     4. any other non-empty ``error``                        → ``harness``
-       (grader exception, sandbox, parse, timeout, setup, ``model_error: …``)
+       (grader exception, sandbox, parse, timeout, setup, ``model_error: …``,
+       a linter that could not run)
     5. ``stop_reason`` in :data:`BUDGET_STOP_REASONS`       → ``budget``
        (the attempt was cut short by its own Budget; the belts judged a partial patch)
-    6. otherwise                                            → ``builder_red``
+    6. ``lint_only`` — belts 1–4 all ``True`` and belt 5
+       ``False``                                            → ``lint``
+       (the model wrote working code the repository's own linter rejects)
+    7. otherwise                                            → ``builder_red``
        (the builder finished on its own terms and the belts failed it)
 
     Instrument causes come before ``budget`` because an errored grade is not a
-    valid observation of the patch at all; ``budget`` comes before ``builder_red``
-    because a patch the model never finished is not evidence the model cannot
-    finish it. ``protocol`` outranks ``harness``: a refusal happened first and is
-    the reason the row exists.
+    valid observation of the patch at all; ``budget`` comes before ``lint`` and
+    ``builder_red`` because a patch the model never finished is not evidence the
+    model cannot finish it; ``lint`` is named only when the code otherwise works —
+    a patch that fails a core belt is ``builder_red`` whatever the linter said.
+    ``protocol`` outranks ``harness``: a refusal happened first and is the reason
+    the row exists.
     """
     if clean:
         return FAILURE_CLEAN
@@ -198,7 +236,16 @@ def derive_failure_kind(
         return FAILURE_HARNESS
     if stop_reason in BUDGET_STOP_REASONS:
         return FAILURE_BUDGET
+    if lint_only:
+        return FAILURE_LINT
     return FAILURE_BUILDER_RED
+
+
+def lint_only_failure(belts: Mapping[str, Any]) -> bool:
+    """``True`` iff belts 1–4 all held and belt 5 rejected — the ``lint`` kind's input."""
+    return belts.get("repo_lint_clean") is False and all(
+        belts.get(b) is True for b in CORE_BELT_NAMES
+    )
 
 
 def derive_cost_known(
@@ -246,6 +293,7 @@ class GradeRow:
     target_green: bool | None
     no_new_failures: bool | None
     source_changed: bool | None
+    repo_lint_clean: bool | None = None
     capability_class: str = ""
     size: str = ""
     language: str = ""
@@ -272,7 +320,7 @@ class GradeRow:
     gold_clean: bool | None = None
     evidence_pack_hash: str = ""
     apparatus_version: str = APPARATUS_VERSION
-    belt_set: str = BELT_SET_V4
+    belt_set: str = BELT_SET_V5
     provenance: str = "measured"
     labels: Mapping[str, str] = field(default_factory=dict)
     schema: str = GRADE_SCHEMA
@@ -284,16 +332,32 @@ class GradeRow:
         object.__setattr__(self, "labels", dict(self.labels))
         if not self.row_id:
             object.__setattr__(self, "row_id", uuid.uuid4().hex)
-        if self.belt_set not in {BELT_SET_V4, BELT_SET_V3_LEGACY}:
-            raise ValueError(f"belt_set must be {BELT_SET_V4!r} or {BELT_SET_V3_LEGACY!r}")
+        if self.belt_set not in BELT_SETS:
+            raise ValueError(f"belt_set must be one of {BELT_SETS}")
+        if self.belt_set != BELT_SET_V5 and self.repo_lint_clean is not None:
+            raise ValueError(
+                f"belt 5 (repo_lint_clean) is unrecorded under belt_set={self.belt_set!r}; "
+                "a row from a pre-belt-5 apparatus is never re-interpreted"
+            )
         self.assert_invariants()
 
     # --- invariants ------------------------------------------------------------
     def recorded_belts(self) -> tuple[str, ...]:
-        return BELT_NAMES[:3] if self.belt_set == BELT_SET_V3_LEGACY else BELT_NAMES
+        """The belts this row's apparatus recorded (``v3-legacy`` 3, ``v4`` 4, ``v5`` 5)."""
+        return RECORDED_BELTS[self.belt_set]
 
     def belts_all_true(self) -> bool:
-        return all(getattr(self, b) is True for b in self.recorded_belts())
+        """The clean predicate over the RECORDED belts: every recorded core belt
+        ``True`` and no recorded optional belt ``False`` (``None`` there = the
+        repository has no linter; the row says so and may still be clean)."""
+        recorded = self.recorded_belts()
+        return all(getattr(self, b) is True for b in recorded if b in CORE_BELT_NAMES) and all(
+            getattr(self, b) is not False for b in recorded if b not in CORE_BELT_NAMES
+        )
+
+    def lint_only(self) -> bool:
+        """Belts 1–4 held and belt 5 rejected (the ``lint`` failure kind)."""
+        return lint_only_failure({b: getattr(self, b) for b in self.recorded_belts()})
 
     def assert_invariants(self) -> None:
         if self.clean:
@@ -351,6 +415,7 @@ class GradeRow:
             error=self.error,
             builder_error=self.labels.get("builder_error", ""),
             stop_reason=self.stop_reason,
+            lint_only=self.lint_only(),
         )
 
     @property
@@ -388,17 +453,30 @@ class GradeRow:
         return not self.disqualified and self.gold_clean is not False
 
     # --- hashing ---------------------------------------------------------------
-    def body(self) -> dict[str, Any]:
+    def fields(self) -> dict[str, Any]:
+        """Every field except ``row_hash`` (``labels`` copied) — the constructor shape."""
         d = {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "row_hash"}
         d["labels"] = dict(self.labels)
         return d
+
+    def body(self) -> dict[str, Any]:
+        """The HASHED body: :meth:`fields` minus any belt added after the row schema
+        froze (:data:`~crb.core.grade.OPTIONAL_BELT_NAMES`) that this row's
+        ``belt_set`` does not record. A ``v4`` / ``v3-legacy`` row therefore hashes
+        byte-for-byte as it did before belt 5 existed — including its ``source_changed``
+        (``None`` on ``v3-legacy``), which was always in the body — so an existing
+        ledger keeps verifying after the apparatus grew (ADR-0002 rule 2, amended by
+        ADR-0011). A ``v5`` row hashes ``repo_lint_clean``, ``None`` included: "not
+        evaluated" is a fact the chain commits to."""
+        unrecorded = set(OPTIONAL_BELT_NAMES) - set(self.recorded_belts())
+        return {k: v for k, v in self.fields().items() if k not in unrecorded}
 
     def compute_hash(self) -> str:
         return sha256_text(canonical_json(self.body()))
 
     def chained(self, prev_hash: str) -> GradeRow:
         """Return a copy with ``prev_hash`` set and ``row_hash`` computed."""
-        d = self.body()
+        d = self.fields()
         d["prev_hash"] = prev_hash
         row = GradeRow(**d)
         object.__setattr__(row, "row_hash", row.compute_hash())
@@ -409,11 +487,12 @@ class GradeRow:
 
     # --- serialisation -----------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
-        """The hashed body + ``row_hash`` + the two derived fields (``failure_kind``,
+        """Every field + ``row_hash`` + the two derived fields (``failure_kind``,
         ``cost_known``). The derived fields are a function of the hashed body (and,
         on new rows, pinned inside its ``labels``); :meth:`from_dict` drops the
-        top-level copies on read."""
-        d = self.body()
+        top-level copies on read. An unrecorded belt is written as ``null`` — the
+        honest value — and is simply not part of the hash."""
+        d = self.fields()
         d["row_hash"] = self.row_hash
         d["failure_kind"] = self.failure_kind
         d["cost_known"] = self.cost_known
@@ -468,6 +547,7 @@ def grade_row_from_result(
         error=error,
         builder_error=builder_error,
         stop_reason=stop_reason,
+        lint_only=lint_only_failure(result.belts.to_dict()),
     )
     cost_known = derive_cost_known(
         cost_usd=b.cost_usd,
@@ -493,6 +573,7 @@ def grade_row_from_result(
         target_green=result.belts.target_green,
         no_new_failures=result.belts.no_new_failures,
         source_changed=result.belts.source_changed,
+        repo_lint_clean=result.belts.repo_lint_clean,
         capability_class=task.capability_class,
         size=task.size,
         language=language or task.language,
@@ -516,7 +597,7 @@ def grade_row_from_result(
         latency_s=b.latency_s,
         gold_clean=task.gold_clean,
         evidence_pack_hash=pack_hash,
-        belt_set=BELT_SET_V4,
+        belt_set=BELT_SET_V5,
         provenance="measured",
         labels={
             "rung": trial,
@@ -617,14 +698,17 @@ class FailureSplit:
 
     ``n`` counts ELIGIBLE rows (not disqualified, oracle not known-bad) — the same
     denominator :class:`CellStats` routes on — so ``n == clean + builder_red +
-    budget + protocol + harness``; ``disqualified`` is counted over all rows and
-    sits outside ``n``. ``point`` is the all-rows rate (``clean / n``): the
+    lint + budget + protocol + harness``; ``disqualified`` is counted over all rows
+    and sits outside ``n``. ``point`` is the all-rows rate (``clean / n``): the
     fail-closed number, where every instrument error counts against autonomy.
-    ``model_point`` is ``clean / (clean + builder_red)`` — how often the model
-    succeeded when it got a fair, finished attempt — reported NEXT TO ``point``,
-    never instead of it, with its own n (``model_n``) and Wilson interval.
-    ``cost_known`` / ``cost_unknown`` split the eligible rows by
-    :attr:`GradeRow.cost_known`.
+    ``model_point`` is ``clean / (clean + builder_red + lint)`` — how often the
+    model succeeded when it got a fair, finished attempt (``lint`` is such an
+    attempt: the code worked and the repository rejected it) — reported NEXT TO
+    ``point``, never instead of it, with its own n (``model_n``) and Wilson
+    interval. ``cost_known`` / ``cost_unknown`` split the eligible rows by
+    :attr:`GradeRow.cost_known`. ``lint_evaluated`` counts the eligible rows that
+    carried belt 5 at all (a ``v5`` row whose repository has a linter) — the
+    number a reader needs before quoting ``lint``.
     """
 
     n: int
@@ -637,9 +721,12 @@ class FailureSplit:
     rows: int
     cost_known: int
     cost_unknown: int
+    lint: int = 0
+    lint_evaluated: int = 0
 
     def __post_init__(self) -> None:
-        if self.n != self.clean + self.builder_red + self.budget + self.protocol + self.harness:
+        kinds = self.clean + self.builder_red + self.lint + self.budget + self.protocol
+        if self.n != kinds + self.harness:
             raise ValueError("a FailureSplit's n must equal the sum of its eligible kinds")
 
     @property
@@ -652,7 +739,7 @@ class FailureSplit:
 
     @property
     def model_n(self) -> int:
-        return self.clean + self.builder_red
+        return self.clean + self.builder_red + self.lint
 
     @property
     def model_point(self) -> float:
@@ -672,11 +759,13 @@ class FailureSplit:
             "n": self.n,
             "clean": self.clean,
             "builder_red": self.builder_red,
+            "lint": self.lint,
             "budget": self.budget,
             "protocol": self.protocol,
             "harness": self.harness,
             "disqualified": self.disqualified,
             "rows": self.rows,
+            "lint_evaluated": self.lint_evaluated,
             "point": round(self.point, 4),
             "ci_low": round(self.ci.low, 4),
             "ci_high": round(self.ci.high, 4),
@@ -707,6 +796,8 @@ def failure_split(rows: Iterable[GradeRow]) -> FailureSplit:
         rows=len(rs),
         cost_known=sum(1 for r in eligible if r.cost_known),
         cost_unknown=sum(1 for r in eligible if not r.cost_known),
+        lint=kinds[FAILURE_LINT],
+        lint_evaluated=sum(1 for r in eligible if r.repo_lint_clean is not None),
     )
 
 
@@ -736,6 +827,8 @@ class CellStats:
     model_n: int = 0
     model_point: float = 0.0
     model_ci: Interval = field(default_factory=lambda: Interval(0.0, 1.0))
+    n_lint: int = 0
+    n_lint_evaluated: int = 0
 
     @property
     def n_disqualified(self) -> int:
@@ -763,10 +856,12 @@ class CellStats:
             ),
             "apparatus_versions": list(self.apparatus_versions),
             "n_builder_red": self.n_builder_red,
+            "n_lint": self.n_lint,
             "n_budget": self.n_budget,
             "n_protocol": self.n_protocol,
             "n_harness": self.n_harness,
             "n_disqualified": self.n_disqualified,
+            "n_lint_evaluated": self.n_lint_evaluated,
             "model_n": self.model_n,
             "model_point": round(self.model_point, 4),
             "model_ci_low": round(self.model_ci.low, 4),
@@ -807,6 +902,8 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         model_n=split.model_n,
         model_point=split.model_point,
         model_ci=split.model_ci,
+        n_lint=split.lint,
+        n_lint_evaluated=split.lint_evaluated,
     )
 
 

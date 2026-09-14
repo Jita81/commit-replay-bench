@@ -39,7 +39,7 @@ from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack, utc_now_
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, GradeResult, grade
-from crb.core.ledger import BELT_SET_V4, PROCESS_FACTORY, GradeRow, JsonlLedger
+from crb.core.ledger import BELT_SET_V5, PROCESS_FACTORY, GradeRow, JsonlLedger
 from crb.core.redact import redact_and_cap
 from crb.core.run import write_pack
 from crb.core.runners.base import BaseRunner
@@ -284,6 +284,7 @@ def factory_row(
         target_green=result.belts.target_green,
         no_new_failures=result.belts.no_new_failures,
         source_changed=result.belts.source_changed,
+        repo_lint_clean=result.belts.repo_lint_clean,
         capability_class=task.capability_class,
         size=task.size,
         language=task.language,
@@ -307,7 +308,7 @@ def factory_row(
         latency_s=builder.latency_s,
         gold_clean=None,
         evidence_pack_hash=pack.pack_hash,
-        belt_set=BELT_SET_V4,
+        belt_set=BELT_SET_V5,
         provenance="measured",
         labels={"rung": trial, **dict(labels)},
     )

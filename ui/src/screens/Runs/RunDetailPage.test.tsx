@@ -212,8 +212,55 @@ describe('RunDetailPage — the failure split (A2)', () => {
     expect(screen.getByTestId('tile-split-instrument').textContent).toContain('3')
     expect(screen.getByTestId('tile-split-budget').textContent).toContain('1')
     expect(screen.getByTestId('tile-split-cost-known').textContent).toContain('8 / 11')
-    expect(screen.getByTestId('run-split').getAttribute('aria-label')).toBe('red 1, budget 1, protocol 1, harness 2, DQ 1')
+    expect(screen.getByTestId('run-split').getAttribute('aria-label')).toBe('red 1, lint 0, budget 1, protocol 1, harness 2, DQ 1')
     expect(screen.queryByTestId('split-unavailable')).toBeNull()
+  })
+
+  it('renders five belt pills for a v5 task row and four for a v4 row (belt 5 never shown as failed)', async () => {
+    const base = {
+      capability_class: 'bug.fix',
+      size: 'XS',
+      pool: 'standard',
+      language: 'go',
+      trials: 1,
+      clean: false,
+      first_pass_clean: false,
+      disqualified: false,
+      error: '',
+      cost_usd: 0.1,
+      latency_s: 3,
+      pack_hashes: [],
+      row_ids: [],
+    }
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': { ...RUN, status: 'succeeded', finished: '2026-09-13T09:30:00Z' },
+      'GET /runs/run-1/tasks': {
+        items: [
+          {
+            ...base,
+            task_id: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+            belt_set: 'v5',
+            belts: { tests_unmodified: true, target_green: true, no_new_failures: true, source_changed: true, repo_lint_clean: false },
+          },
+          {
+            ...base,
+            task_id: 'b1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+            belt_set: 'v4',
+            belts: { tests_unmodified: true, target_green: false, no_new_failures: null, source_changed: null, repo_lint_clean: null },
+          },
+        ],
+        total: 2,
+        limit: 500,
+        offset: 0,
+      },
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const lists = await screen.findAllByRole('list', { name: /belts$/i })
+    expect(lists.map((l) => l.getAttribute('data-belt-count'))).toEqual(['5', '4'])
+    const b5 = screen.getAllByTestId('belt-repo_lint_clean')
+    expect(b5).toHaveLength(1)
+    expect(b5[0]).toHaveAttribute('aria-label', "Belt 5 — repo's own lint clean: failed")
   })
 
   it('says so when the split endpoint fails instead of fabricating zeros', async () => {

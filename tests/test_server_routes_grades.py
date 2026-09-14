@@ -39,7 +39,7 @@ class TestGrades:
         first = body["items"][0]
         # exactly GradeRow.to_dict() + seq
         assert set(first) == set(GradeRow.__dataclass_fields__) | {"seq"}
-        assert first["schema"] == "crb.grade.v2" and first["belt_set"] == "v4"
+        assert first["schema"] == "crb.grade.v2" and first["belt_set"] == "v5"
         assert first["prev_hash"] == "0" * 64 and len(first["row_hash"]) == 64
         # every row round-trips into a GradeRow that verifies its own hash
         prev = "0" * 64

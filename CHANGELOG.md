@@ -36,6 +36,26 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   proves the refusal on the live fixture (whose `hardcode_cheat` control really escapes) and a
   real sign-off on an API-seeded repo whose tests are parametrised.
 
+### Apparatus 2.1 → 2.2 — belt 5 `repo_lint_clean` (ADR-0011, Wave B5)
+- **Grader**: after belt 4, the repository's OWN formatter/linter runs on the changed
+  non-test files (`crb.core.lint`): declared by `RepoConfig.lint` or detected from the
+  repo's configuration — `gofmt -l` (Go), `ruff check` (+ `ruff format --check`) (Python),
+  `eslint` / `prettier --check` / `standard` (JS), `spotless:check` / `checkstyle:check`
+  (Maven), `cargo fmt --check` / `clippy` (Rust). No linter ⇒ belt `None` (not evaluated:
+  neither a pass nor a fail). Rejected or timed out ⇒ `False`, never clean. A linter that
+  cannot run ⇒ harness error. `GradeResult.lint_run` records the tool, files and redacted
+  tail; `grade.belt` events carry `belt="repo_lint_clean"` + `detected`.
+- **Ledger**: `GradeRow.repo_lint_clean`; `belt_set="v5"` for new rows; `v4` / `v3-legacy`
+  rows never carry belt 5 and hash byte-for-byte as before (ADR-0002 rule 2 amended: the
+  body excludes an unrecorded optional belt). New failure kind `lint` (belts 1–4 held,
+  belt 5 rejected); `FailureSplit.lint` / `lint_evaluated`; `CellStats.n_lint` /
+  `n_lint_evaluated`; `model_n` includes `lint`.
+- **Store**: revision `0002` adds `grades.repo_lint_clean` (nullable, in place);
+  revision-aware adoption of unversioned `init_db` databases (`REVISION_MARKERS`).
+- **API/UI**: `repo_lint_clean` on grade rows and belts, `belt_set` on run task rows,
+  `lint` / `lint_evaluated` on every split; five belt pills under `v5`, four otherwise;
+  "Lint run (belt 5)" in the evidence drawer.
+
 ## [2.0.0a1] — 2026-09-13 — first releasable v2 (tag pending)
 
 Apparatus version **2.0** (unchanged). Everything on `reboot/v2` since the reboot commit,

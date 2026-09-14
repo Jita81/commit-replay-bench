@@ -68,7 +68,7 @@ export function LedgerPage() {
             <Pill tone="red" glyph="✗" size="xs" label={r.error ? `Error: ${r.error}` : 'Not clean'}>{r.error ? 'error' : 'no'}</Pill>
           ),
       },
-      { key: 'belts', header: 'Belts', cell: (r) => <BeltPills belts={beltsOf(r)} showNames={false} /> },
+      { key: 'belts', header: 'Belts', cell: (r) => <BeltPills belts={beltsOf(r)} beltSet={r.belt_set} showNames={false} /> },
       { key: 'cost', header: 'Cost', numeric: true, sortValue: (r) => r.cost_usd, cell: (r) => fmtUsd(r.cost_usd), hideBelowMd: true },
       { key: 'latency', header: 'Latency', numeric: true, sortValue: (r) => r.latency_s, cell: (r) => fmtSeconds(r.latency_s), hideBelowMd: true },
       { key: 'oracle', header: 'Oracle', numeric: true, sortValue: (r) => r.oracle_strength ?? -1, cell: (r) => fmtRatio(r.oracle_strength), hideBelowMd: true },

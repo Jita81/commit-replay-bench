@@ -1,8 +1,8 @@
-"""THE four-belt grader. false-Q1 = 0 by construction.
+"""THE belt grader. false-Q1 = 0 by construction.
 
-A trial worktree (the commit's parent + the builder's edits) is graded by four
-independent, mechanical belts. **All four must hold** for the trial to be
-credited ``clean``:
+A trial worktree (the commit's parent + the builder's edits) is graded by
+independent, mechanical belts. **Every belt that was evaluated must hold** for
+the trial to be credited ``clean`` — the four core belts are always evaluated:
 
 1. ``tests_unmodified`` — every target test file is byte-identical to the real
    commit's version, AND no test-infrastructure file (``conftest.py``,
@@ -16,6 +16,17 @@ credited ``clean``:
 4. ``source_changed``   — the diff against the parent touches at least one
    non-test file. A green with no source change means the target was never
    truly RED (a build-cache ghost) and is not a legitimate observation.
+5. ``repo_lint_clean``  — the repository's OWN formatter/linter accepts the
+   changed non-test files (ADR-0011; :mod:`crb.core.lint`). Evaluated only when
+   the repository configures one (``RepoConfig.lint`` or the runner's detection:
+   ``gofmt``, ``ruff``, ``eslint``/``prettier``/``standard``, ``spotless``/
+   ``checkstyle``, ``cargo fmt``/``clippy``); otherwise ``None`` — *not evaluated*,
+   which is neither a pass nor a fail. ``False`` (rejected or timed out) is never
+   clean; a linter that could not run is a harness error.
+
+The clean rule, exactly: ``clean ⇔ belts 1–4 all True ∧ belt 5 is not False ∧
+not disqualified ∧ no error``. :attr:`Belts.evaluated` records which belts a
+result carries; the ledger's ``belt_set`` records which belts the apparatus had.
 
 Everything else fails closed:
 
@@ -54,6 +65,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from crb.core.execution import Executor, SandboxUnavailable
+from crb.core.lint import LintRun, run_plan
 from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner, TestRun
 from crb.core.spec import RepoConfig, TaskSpec
@@ -64,12 +76,19 @@ MODE_SIGHTED = "sighted"
 MODE_BLIND = "blind"
 MODES = (MODE_SIGHTED, MODE_BLIND)
 
-BELT_NAMES: tuple[str, ...] = (
+#: The four belts every grade evaluates. All must be ``True`` for ``clean``.
+CORE_BELT_NAMES: tuple[str, ...] = (
     "tests_unmodified",
     "target_green",
     "no_new_failures",
     "source_changed",
 )
+#: Belts evaluated only when the repository provides the instrument (belt 5: a
+#: configured or detected linter). ``None`` = not evaluated; ``False`` is never clean.
+OPTIONAL_BELT_NAMES: tuple[str, ...] = ("repo_lint_clean",)
+#: Every belt, in belt order (1–5). The ledger's ``belt_set`` says how many a row
+#: recorded: ``v3-legacy`` the first three, ``v4`` the first four, ``v5`` all five.
+BELT_NAMES: tuple[str, ...] = (*CORE_BELT_NAMES, *OPTIONAL_BELT_NAMES)
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
@@ -80,14 +99,28 @@ class FalseQ1Violation(AssertionError):
 
 @dataclass(frozen=True)
 class Belts:
+    """The belt values of one grade. ``None`` is *not evaluated*: for a core belt
+    that means the grade stopped earlier (never clean); for ``repo_lint_clean`` it
+    means the repository has no linter to run (clean is still possible)."""
+
     tests_unmodified: bool | None = None
     target_green: bool | None = None
     no_new_failures: bool | None = None
     source_changed: bool | None = None
+    repo_lint_clean: bool | None = None
 
     @property
     def all_true(self) -> bool:
-        return all(getattr(self, b) is True for b in BELT_NAMES)
+        """The clean predicate over the belts: every core belt ``True`` and no
+        evaluated optional belt ``False``."""
+        return all(getattr(self, b) is True for b in CORE_BELT_NAMES) and all(
+            getattr(self, b) is not False for b in OPTIONAL_BELT_NAMES
+        )
+
+    @property
+    def evaluated(self) -> tuple[str, ...]:
+        """The belts this grade actually evaluated (value not ``None``), in belt order."""
+        return tuple(b for b in BELT_NAMES if getattr(self, b) is not None)
 
     def to_dict(self) -> dict[str, bool | None]:
         return {b: getattr(self, b) for b in BELT_NAMES}
@@ -114,6 +147,7 @@ class GradeResult:
     diff: DiffStats | None = None
     target_run: TestRun | None = None
     belt_run: TestRun | None = None
+    lint_run: LintRun | None = None
     duration_s: float = 0.0
     extra: Mapping[str, Any] = field(default_factory=dict)
 
@@ -144,14 +178,22 @@ class GradeResult:
             "diff": self.diff.to_dict() if self.diff else None,
             "target_run": self.target_run.to_dict() if self.target_run else None,
             "belt_run": self.belt_run.to_dict() if self.belt_run else None,
+            "lint_run": self.lint_run.to_dict() if self.lint_run else None,
             "duration_s": round(self.duration_s, 3),
             "extra": dict(self.extra),
         }
 
 
 def derive_clean(belts: Mapping[str, Any], *, disqualified: bool = False, error: str = "") -> bool:
-    """The clean rule, exposed so imported/legacy rows can be re-derived and audited."""
-    return all(belts.get(b) is True for b in BELT_NAMES) and not disqualified and not error
+    """The clean rule, exposed so imported/legacy rows can be re-derived and audited:
+    every core belt ``True``, no optional belt ``False`` (absent = not evaluated),
+    not disqualified, no error."""
+    return (
+        all(belts.get(b) is True for b in CORE_BELT_NAMES)
+        and all(belts.get(b) is not False for b in OPTIONAL_BELT_NAMES)
+        and not disqualified
+        and not error
+    )
 
 
 def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
@@ -210,9 +252,19 @@ def grade(
     mode: str = MODE_SIGHTED,
     timeout: int = 0,
     on_event: EventFn | None = None,
+    evaluate_lint: bool = True,
 ) -> GradeResult:
     """Grade the trial worktree ``ws`` for ``task``. Never raises for a test failure;
-    raises :class:`SandboxUnavailable` (infrastructure) so the run can stop."""
+    raises :class:`SandboxUnavailable` (infrastructure) so the run can stop.
+
+    ``evaluate_lint=False`` leaves belt 5 *not evaluated* (``None``, recorded as such)
+    whatever the repository configures. The negative controls use it: they measure
+    the four ORACLE belts (ADR-0010) with synthetic edits that are not written in the
+    repository's style, so a control's verdict must not turn on the formatter — an
+    oracle escape would otherwise read as a lint rejection, and a gold commit that
+    predates the repo's linter as an instrument bug. Every builder trial keeps the
+    default.
+    """
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}")
     started = time.monotonic()
@@ -374,16 +426,51 @@ def grade(
         if not source_changed and not note:
             note = "green with no source change — target was not truly RED at the parent"
 
+        # --- belt 5: the repository's own formatter/linter accepts the changed files.
+        #     Evaluated only when the repo configures one (else None: not a pass, not a
+        #     fail). Deleted files cannot be linted; a tool that cannot run is a harness
+        #     error, never a verdict (ADR-0011). --------------------------------------
+        lint_run: LintRun | None = None
+        lint_error = ""
+        plan = runner.lint_plan(ws.root, executor) if evaluate_lint else None
+        if plan is not None:
+            present = [f for f in changed if ws.exists(f)]
+            # the plan's own wall clock (RepoConfig.lint.timeout or the lint default)
+            # governs; the test-run timeout is a different budget
+            lint_run = run_plan(plan, executor, ws.root, present)
+            _emit(
+                on_event,
+                "grade.belt",
+                task=task.task_id,
+                belt="repo_lint_clean",
+                value=lint_run.ok,
+                detected=lint_run.detected,
+                note=lint_run.note,
+            )
+            if lint_run.error:
+                lint_error = f"lint: {lint_run.error}"
+            elif lint_run.ok is False and not note:
+                note = f"lint: {lint_run.note}"
+        belts = Belts(
+            tests_unmodified=True,
+            target_green=True,
+            no_new_failures=no_new,
+            source_changed=source_changed,
+            repo_lint_clean=lint_run.ok if lint_run is not None else None,
+        )
+
         diff = ws.diff_stats(exclude=task.test_files)
-        clean = belts.all_true
+        clean = belts.all_true and not lint_error
         return done(
             clean=clean,
             note=note,
+            error=lint_error,
             new_failures=tuple(sorted(new)[:50]),
             changed_files=tuple(changed[:200]),
             diff=diff,
             target_run=target_run,
             belt_run=belt_run,
+            lint_run=lint_run,
         )
     except SandboxUnavailable:
         raise

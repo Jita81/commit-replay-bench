@@ -71,9 +71,38 @@ def test_belts_all_true_and_round_trip() -> None:
         "target_green": False,
         "no_new_failures": None,
         "source_changed": True,
+        "repo_lint_clean": None,
     }
     assert g.Belts.from_dict(d) == g.Belts(True, False, None, True)
     assert g.Belts.from_dict({}) == g.Belts()
+
+
+def test_belt_five_is_optional_none_is_not_evaluated_false_is_never_clean() -> None:
+    """ADR-0011: belt 5 ``None`` = not evaluated (clean still possible); ``False`` = not
+    clean; ``True`` = the repo's own linter accepted the changed files."""
+    assert (*g.CORE_BELT_NAMES, "repo_lint_clean") == g.BELT_NAMES
+    assert g.OPTIONAL_BELT_NAMES == ("repo_lint_clean",)
+    assert g.Belts(True, True, True, True, None).all_true
+    assert g.Belts(True, True, True, True, True).all_true
+    assert not g.Belts(True, True, True, True, False).all_true
+    # a lint pass never rescues a failed core belt
+    assert not g.Belts(True, True, False, True, True).all_true
+    assert g.Belts(True, True, True, True, None).evaluated == g.CORE_BELT_NAMES
+    assert g.Belts(True, True, True, True, False).evaluated == g.BELT_NAMES
+    assert g.Belts(True, None, None, None, None).evaluated == ("tests_unmodified",)
+    with pytest.raises(g.FalseQ1Violation):
+        g.GradeResult(
+            "a" * 40, "r", g.MODE_SIGHTED, clean=True, belts=g.Belts(True, True, True, True, False)
+        )
+    ok = g.GradeResult(
+        "a" * 40, "r", g.MODE_SIGHTED, clean=True, belts=g.Belts(True, True, True, True, True)
+    )
+    assert ok.to_dict()["repo_lint_clean"] is True and ok.to_dict()["lint_run"] is None
+    core = dict.fromkeys(g.CORE_BELT_NAMES, True)
+    assert g.derive_clean(core)  # absent = not evaluated
+    assert g.derive_clean({**core, "repo_lint_clean": None})
+    assert g.derive_clean({**core, "repo_lint_clean": True})
+    assert not g.derive_clean({**core, "repo_lint_clean": False})
 
 
 @pytest.mark.parametrize(
@@ -109,7 +138,7 @@ def test_grade_result_accepts_clean_only_when_everything_holds() -> None:
     d = r.to_dict()
     assert d["mode"] == "blind"
     assert d["diff"] is None and d["target_run"] is None and d["belt_run"] is None
-    assert all(d[b] is True for b in g.BELT_NAMES)
+    assert all(d[b] is True for b in g.CORE_BELT_NAMES) and d["repo_lint_clean"] is None
     assert g.GradeResult("a" * 40, "r", g.MODE_SIGHTED, clean=False, belts=_ALL_TRUE).clean is False
 
 
@@ -362,7 +391,9 @@ def test_events_are_emitted_per_belt_in_order(
     res = _grade(trial, feat_task, pyrepo, runner, executor, on_event=on_event)
     assert res.clean
     belts = [(p["belt"], p["value"]) for k, p in events if k == "grade.belt"]
-    assert belts == [(b, True) for b in g.BELT_NAMES]
+    # the pyrepo fixture configures no linter: belt 5 is not evaluated and emits no event
+    assert res.belts.repo_lint_clean is None and res.lint_run is None
+    assert belts == [(b, True) for b in g.CORE_BELT_NAMES]
     target = next(p for k, p in events if p.get("belt") == "target_green")
     assert target["rc"] == 0 and target["timed_out"] is False
     belt3 = next(p for k, p in events if p.get("belt") == "no_new_failures")

@@ -461,10 +461,14 @@ class RunCreateRequest(BaseModel):
 
 
 class Belts(BaseModel):
+    """Belt values; ``repo_lint_clean`` (belt 5, ADR-0011) is ``null`` when not
+    evaluated — the row's ``belt_set`` says whether it was recorded at all."""
+
     tests_unmodified: bool | None
     target_green: bool | None
     no_new_failures: bool | None
     source_changed: bool | None
+    repo_lint_clean: bool | None = None
 
 
 class RunTaskRow(BaseModel):
@@ -478,6 +482,8 @@ class RunTaskRow(BaseModel):
     trials: int
     clean: bool
     first_pass_clean: bool
+    #: The decisive attempt's belt set (``v5`` = five belts shown, else four).
+    belt_set: str = ""
     disqualified: bool
     error: str
     belts: Belts
@@ -530,6 +536,7 @@ class GradeRowOut(BaseModel):
     target_green: bool | None
     no_new_failures: bool | None
     source_changed: bool | None
+    repo_lint_clean: bool | None = None
     capability_class: str
     size: str
     language: str

@@ -15,10 +15,14 @@ Invariants
   (:func:`install_append_only_triggers_on`), and :func:`upgrade` re-asserts them afterwards.
   There is no path through this module that leaves ``grades`` writable.
 * **Adopting an ``init_db`` database is explicit.** A database that already has every
-  model table but no ``alembic_version`` row was created by ``Base.metadata.create_all``;
-  it is *stamped* at the initial revision (which is exactly ``create_all`` — the parity
-  test proves it) and then upgraded. A database with only *some* of the tables is refused:
-  that is a partial or foreign schema and the operator must look.
+  model table but no ``alembic_version`` row was created by ``Base.metadata.create_all``
+  — by *some* release's models. It is *stamped* at the revision its schema corresponds
+  to (:data:`REVISION_MARKERS`: the newest revision whose added column it carries; none
+  → the initial revision) and then upgraded to head, so a database created by an older
+  release receives exactly the revisions it lacks and one created by this release (which
+  equals head — the parity test proves it) receives none. A database with only *some* of
+  the tables, or one at head that still differs from the models, is refused: that is a
+  partial or foreign schema and the operator must look.
 * The URL comes from the caller or ``CRB_DATABASE_URL``; it is never written to disk and
   never logged (a PostgreSQL URL can embed a password).
 """
@@ -34,6 +38,7 @@ from pathlib import Path
 from typing import cast
 
 from alembic import command
+from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
@@ -47,8 +52,14 @@ log = logging.getLogger("crb.store.migrate")
 STORE_DIR = Path(__file__).resolve().parent
 INI_PATH = STORE_DIR / "alembic.ini"
 MIGRATIONS_DIR = STORE_DIR / "migrations"
-#: The revision that equals ``Base.metadata.create_all`` at the time it was written.
+#: The revision that equalled ``Base.metadata.create_all`` at the time it was written.
 INITIAL_REVISION = "0001"
+#: ``(revision, table, column)`` — the column each revision after the initial one ADDS.
+#: An unversioned ``create_all`` schema is at the newest revision whose column it
+#: carries (checked in order; the first missing marker stops the walk). Every migration
+#: that adds a column appends its marker here, or adoption of a newer ``init_db``
+#: database would try to add a column it already has.
+REVISION_MARKERS: tuple[tuple[str, str, str], ...] = (("0002", "grades", "repo_lint_clean"),)
 
 
 class SchemaStateError(RuntimeError):
@@ -128,8 +139,21 @@ def _current_heads(connection: Connection) -> tuple[str, ...]:
     return MigrationContext.configure(connection).get_current_heads()
 
 
+def _unversioned_revision(connection: Connection) -> str:
+    """The revision an unversioned (``create_all``) schema corresponds to — see
+    :data:`REVISION_MARKERS`."""
+    insp = inspect(connection)
+    revision = INITIAL_REVISION
+    for rev, table, column in REVISION_MARKERS:
+        if column not in {c["name"] for c in insp.get_columns(table)}:
+            break
+        revision = rev
+    return revision
+
+
 def _adopt_unversioned_schema(connection: Connection, cfg: Config) -> None:
-    """Stamp a ``create_all`` database at the initial revision; refuse a partial one."""
+    """Stamp a ``create_all`` database at the revision its schema is at; refuse a
+    partial one, and refuse one that claims to be at head but differs from the models."""
     if _current_heads(connection):
         return
     present, expected = _model_tables_present(connection)
@@ -141,8 +165,17 @@ def _adopt_unversioned_schema(connection: Connection, cfg: Config) -> None:
             "database has some crb tables but no alembic_version and is missing "
             f"{missing}; refusing to guess — restore from backup or drop the partial schema"
         )
-    log.info("adopting unversioned create_all schema: stamping %s", INITIAL_REVISION)
-    command.stamp(cfg, INITIAL_REVISION)
+    revision = _unversioned_revision(connection)
+    if revision == head_revision():
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        if diff:
+            raise SchemaStateError(
+                "database has every crb table, no alembic_version, and a schema that is "
+                f"neither a known release's create_all nor the current models ({len(diff)} "
+                "difference(s)); refusing to guess — restore from backup or migrate by hand"
+            )
+    log.info("adopting unversioned create_all schema: stamping %s", revision)
+    command.stamp(cfg, revision)
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +285,7 @@ if __name__ == "__main__":  # pragma: no cover — exercised via tests calling m
 
 __all__ = [
     "INITIAL_REVISION",
+    "REVISION_MARKERS",
     "SchemaStateError",
     "alembic_config",
     "check",

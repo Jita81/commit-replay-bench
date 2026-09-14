@@ -19,4 +19,8 @@ __version__ = "2.0.0a0"
 #: every non-target test file [ADR-0001 amendment]; routing gated on the negative-controls
 #: verdict [ADR-0003 amendment]; intent-resolved change class [ARCHITECTURE §7.5];
 #: polyglot controls.v2 [ADR-0010]). Rows stamped 2.0 are never blended with 2.1.
-APPARATUS_VERSION = "2.1"
+#: 2.1 → 2.2 (2026-09-14, Wave B: belt 5 ``repo_lint_clean`` — the repository's own
+#: formatter/linter on the changed files, ``belt_set="v5"``, failure kind ``lint``
+#: [ADR-0011]). Rows stamped 2.1 (``v4``) keep their four-belt meaning; belt 5 is
+#: unrecorded for them, never re-derived.
+APPARATUS_VERSION = "2.2"

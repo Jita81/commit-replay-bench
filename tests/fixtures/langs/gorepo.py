@@ -17,6 +17,7 @@ Go's ``is_test`` is suffix-based (``*_test.go``), so no prefixes are configured.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from crb.core.spec import BELT_BARE, Language, RepoConfig
@@ -74,8 +75,9 @@ BREAK_TWICE = (
 )
 
 
-def build(tmp_path: Path) -> tuple[Path, str]:
-    return two_commit_repo(Path(tmp_path) / "gorepo", _INITIAL, _FEAT)
+def build(tmp_path: Path, *, extra: Mapping[str, str] | None = None) -> tuple[Path, str]:
+    """``extra`` = more files in the initial commit (a lint config the parent carries)."""
+    return two_commit_repo(Path(tmp_path) / "gorepo", {**_INITIAL, **(extra or {})}, _FEAT)
 
 
 def config(belt_scope: str | tuple[str, ...] = BELT_BARE) -> RepoConfig:

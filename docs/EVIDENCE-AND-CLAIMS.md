@@ -40,7 +40,7 @@ and is re-tagged.
 
 | Term | Definition | Who decides |
 |---|---|---|
-| **CLEAN** | All four mechanical belts hold (`tests_unmodified`, `target_green`, `no_new_failures`, `source_changed`), the trial is not disqualified, no harness error, and an evidence pack exists. | The grader, mechanically (`crb.core.grade`). |
+| **CLEAN** | Every **evaluated** mechanical belt holds: the four core belts (`tests_unmodified`, `target_green`, `no_new_failures`, `source_changed`) are all `True`, and belt 5 (`repo_lint_clean` — the repository's own formatter/linter on the changed files, [ADR-0011](adr/0011-repo-lint-belt.md), apparatus ≥ 2.2) is not `False`; the trial is not disqualified, no harness error, and an evidence pack exists. Belt 5 is `null` = *not evaluated* where the repository configures no linter — neither a pass nor a fail, and the cell shows how many rows carried it (`n_lint_evaluated`). | The grader, mechanically (`crb.core.grade`). |
 | **Semantic Q1** | CLEAN **plus**: the oracle is adequate for the change (strength ≥ 0.80 when measured), no prohibited test manipulation, security gates pass, provenance complete, no critical unresolved ambiguity, the route permits it, and the change is within the validated envelope. | The routing rule plus, for production use, an independent audit. |
 | **False-Q1 (mechanical)** | A row credited `clean` that its own recorded belts contradict. **Must be 0**; cannot be constructed (`FalseQ1Violation`) or written (`GradeRow.assert_invariants`). | Enforced in code; re-checked at read time (`cell_stats.false_q1`, `false_q1_total`). |
 | **False-Q1 (audited, semantic)** | A Q1 accepted for delivery in which an independent assessment later finds a defect that should have blocked acceptance. | Independent human or hidden-evidence audit. |
@@ -131,6 +131,13 @@ The product handles this as follows and it is not configurable:
   clean row has a false belt. That gate proves the *mechanical* false-Q1 = 0 statement
   about the seed data; it says nothing about the fourth belt on the 706 rows, which is
   simply unmeasured for them.
+- The same caveat applies one belt on: rows written before apparatus 2.2 carry
+  `belt_set = "v4"` and **belt 5 (`repo_lint_clean`) is unrecorded for them** — never
+  re-derived, not hashed, not rendered ([ADR-0011](adr/0011-repo-lint-belt.md)). Rows
+  written by 2.2 carry `belt_set = "v5"`; there belt 5 is `null` when the repository
+  configures no linter (*not evaluated*), and that `null` is hashed. The belt sets are
+  three populations — `v3-legacy` (3 belts), `v4` (4), `v5` (5, with belt 5 optional) —
+  and `belt_sets` on a cell keeps them apart.
 
 ## 6. Permitted claim shapes, by maturity
 
