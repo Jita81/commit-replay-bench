@@ -15,7 +15,8 @@ Rules for crb migrations (docs/ARCHITECTURE.md §7.3, ADR-0002):
 * append-only tables (``grades``, ``events``, ``signoffs``, ``evidence``) are never
   rewritten — a migration may ADD nullable columns or indexes, never drop or alter rows;
 * after any change to an append-only table, re-run
-  ``crb.store.migrate.install_append_only_triggers_on(op.get_bind())``;
+  ``crb.store.migrate.install_append_only_triggers_on(op.get_bind(), <tables>)`` with the
+  append-only tables that exist AT THAT REVISION (pinned in the script);
 * ``downgrade`` must be real or must raise — never a silent ``pass`` on a data table.
 
 ``ALTER TABLE … ADD COLUMN`` is in-place on both SQLite and PostgreSQL: no row is
@@ -36,10 +37,13 @@ down_revision: str | None = "0001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+#: The append-only tables that exist at this revision (pinned; see 0001).
+APPEND_ONLY_AT_0002: tuple[str, ...] = ("grades", "events", "signoffs", "evidence")
+
 
 def upgrade() -> None:
     op.add_column("grades", sa.Column("repo_lint_clean", sa.Boolean(), nullable=True))
-    install_append_only_triggers_on(op.get_bind())
+    install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0002)
 
 
 def downgrade() -> None:
@@ -56,4 +60,4 @@ def downgrade() -> None:
     # row trigger, and the triggers are re-installed on the new table below.
     with op.batch_alter_table("grades") as batch:
         batch.drop_column("repo_lint_clean")
-    install_append_only_triggers_on(bind)
+    install_append_only_triggers_on(bind, APPEND_ONLY_AT_0002)

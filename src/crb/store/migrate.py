@@ -20,9 +20,11 @@ Invariants
   to (:data:`REVISION_MARKERS`: the newest revision whose added column it carries; none
   → the initial revision) and then upgraded to head, so a database created by an older
   release receives exactly the revisions it lacks and one created by this release (which
-  equals head — the parity test proves it) receives none. A database with only *some* of
-  the tables, or one at head that still differs from the models, is refused: that is a
-  partial or foreign schema and the operator must look.
+  equals head — the parity test proves it) receives none. A table a later revision ADDS
+  (:data:`REVISION_TABLES`) may be absent from an older release's ``create_all`` schema
+  without making it partial; any other missing table, or a schema at head that still
+  differs from the models, is refused: that is a partial or foreign schema and the
+  operator must look.
 * The URL comes from the caller or ``CRB_DATABASE_URL``; it is never written to disk and
   never logged (a PostgreSQL URL can embed a password).
 """
@@ -59,7 +61,14 @@ INITIAL_REVISION = "0001"
 #: carries (checked in order; the first missing marker stops the walk). Every migration
 #: that adds a column appends its marker here, or adoption of a newer ``init_db``
 #: database would try to add a column it already has.
-REVISION_MARKERS: tuple[tuple[str, str, str], ...] = (("0002", "grades", "repo_lint_clean"),)
+REVISION_MARKERS: tuple[tuple[str, str, str], ...] = (
+    ("0002", "grades", "repo_lint_clean"),
+    ("0003", "reviews", "review_id"),
+)
+#: ``(revision, table)`` — the TABLE each revision after the initial one ADDS. An older
+#: release's ``create_all`` schema lacks it and is still a complete schema *for its
+#: release*: adoption tolerates its absence (the revision that adds it will create it).
+REVISION_TABLES: tuple[tuple[str, str], ...] = (("0003", "reviews"),)
 
 
 class SchemaStateError(RuntimeError):
@@ -135,6 +144,10 @@ def _model_tables_present(connection: Connection) -> tuple[set[str], set[str]]:
     return present & expected, expected
 
 
+#: The tables a later revision adds — optional in an unversioned schema (see above).
+_LATER_TABLES: frozenset[str] = frozenset(t for _rev, t in REVISION_TABLES)
+
+
 def _current_heads(connection: Connection) -> tuple[str, ...]:
     return MigrationContext.configure(connection).get_current_heads()
 
@@ -143,9 +156,10 @@ def _unversioned_revision(connection: Connection) -> str:
     """The revision an unversioned (``create_all``) schema corresponds to — see
     :data:`REVISION_MARKERS`."""
     insp = inspect(connection)
+    tables = set(insp.get_table_names())
     revision = INITIAL_REVISION
     for rev, table, column in REVISION_MARKERS:
-        if column not in {c["name"] for c in insp.get_columns(table)}:
+        if table not in tables or column not in {c["name"] for c in insp.get_columns(table)}:
             break
         revision = rev
     return revision
@@ -159,7 +173,7 @@ def _adopt_unversioned_schema(connection: Connection, cfg: Config) -> None:
     present, expected = _model_tables_present(connection)
     if not present:
         return
-    if present != expected:
+    if present != expected and (expected - present) - _LATER_TABLES:
         missing = sorted(expected - present)
         raise SchemaStateError(
             "database has some crb tables but no alembic_version and is missing "
@@ -286,6 +300,7 @@ if __name__ == "__main__":  # pragma: no cover — exercised via tests calling m
 __all__ = [
     "INITIAL_REVISION",
     "REVISION_MARKERS",
+    "REVISION_TABLES",
     "SchemaStateError",
     "alembic_config",
     "check",

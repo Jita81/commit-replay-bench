@@ -286,9 +286,9 @@ def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
     assert migrate.current(backend.url) is None
     assert _autogen_diff(backend.engine) != []  # an older release's schema
 
-    migrate.upgrade(backend.url)  # stamps 0001, applies 0002
+    migrate.upgrade(backend.url)  # stamps 0001, applies 0002 (and every later revision)
 
-    assert migrate.current(backend.url) == migrate.head_revision() == "0002"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0003"
     assert migrate.check(backend.url) is True
     assert _autogen_diff(backend.engine) == []
     assert "repo_lint_clean" in {c["name"] for c in inspect(backend.engine).get_columns("grades")}
@@ -372,7 +372,9 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0001")
-    assert migrate.current(backend.url) == "0002"
+    # the refusal rolls the whole downgrade back — 0003's drop of the (empty) reviews
+    # table included — so the database stays exactly where it was
+    assert migrate.current(backend.url) == "0003"
 
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -387,7 +389,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     with pytest.raises(DBAPIError, match="append-only"), fresh.begin() as c:
         c.execute(text("DELETE FROM grades"))
     migrate.upgrade(backend.url)  # and back up again
-    assert migrate.current(backend.url) == "0002" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0003" and _autogen_diff(fresh) == []
 
 
 def test_downgrade_of_an_empty_database_drops_the_schema(backend: Backend) -> None:

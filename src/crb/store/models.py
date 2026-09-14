@@ -10,6 +10,8 @@ evidence   — evidence pack bodies keyed by pack hash (opt-in retention window 
              to any transcript ref inside; the pack itself is always kept)
 events     — APPEND-ONLY: StepEvent stream, ordered by (trace_id, seq)
 signoffs   — APPEND-ONLY: human attestations (revocations are new rows)
+reviews    — APPEND-ONLY: human post-hoc verdicts on ONE graded row each, hash-chained
+             (``ReviewRecord`` columns; revision 0003)
 users      — local accounts / OIDC subjects and their role
 """
 
@@ -222,6 +224,33 @@ class Signoff(Base):
     row_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
 
 
+class Review(Base):
+    """APPEND-ONLY. Columns mirror :class:`crb.core.review.ReviewRecord`: one human
+    verdict on the graded row ``grade_row_hash``, chained on its own ``prev_hash`` /
+    ``row_hash``. A later review of the same row is a new row; nothing is edited."""
+
+    __tablename__ = "reviews"
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    review_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    schema: Mapped[str] = mapped_column(String(32), nullable=False)
+    grade_row_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    repo: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    reviewer: Mapped[str] = mapped_column(String(128), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    findings_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    mergeable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    statement: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    patch_sha256_reviewed: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    evidence_pack_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    apparatus_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    created: Mapped[str] = mapped_column(String(40), nullable=False)
+    prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    row_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+
+    __table_args__ = (Index("ix_reviews_repo_task", "repo", "task_id"),)
+
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -242,4 +271,7 @@ class User(Base):
     __table_args__ = (UniqueConstraint("issuer", "subject", name="uq_users_issuer_subject"),)
 
 
-APPEND_ONLY_TABLES: tuple[str, ...] = ("grades", "events", "signoffs", "evidence")
+#: Every append-only table of the CURRENT schema. A revision script pins the tuple that
+#: existed at its own revision (a table a later revision adds has no triggers to install
+#: yet); ``init_db`` and ``migrate.upgrade`` use this live one.
+APPEND_ONLY_TABLES: tuple[str, ...] = ("grades", "events", "signoffs", "evidence", "reviews")

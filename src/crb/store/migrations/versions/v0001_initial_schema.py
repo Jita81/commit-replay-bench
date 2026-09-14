@@ -14,7 +14,8 @@ Rules for crb migrations (docs/ARCHITECTURE.md §7.3, ADR-0002):
 * append-only tables (``grades``, ``events``, ``signoffs``, ``evidence``) are never
   rewritten — a migration may ADD nullable columns or indexes, never drop or alter rows;
 * after any change to an append-only table, re-run
-  ``crb.store.migrate.install_append_only_triggers_on(op.get_bind())``;
+  ``crb.store.migrate.install_append_only_triggers_on(op.get_bind(), <tables>)`` with the
+  append-only tables that exist AT THAT REVISION (pinned in the script);
 * ``downgrade`` must be real or must raise — never a silent ``pass`` on a data table.
 """
 
@@ -26,12 +27,16 @@ import sqlalchemy as sa
 from alembic import op
 
 from crb.store.migrate import install_append_only_triggers_on
-from crb.store.models import APPEND_ONLY_TABLES
 
 revision: str = "0001"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
+
+#: The append-only tables THIS revision creates — pinned, not the live
+#: ``crb.store.models.APPEND_ONLY_TABLES`` (a later revision's table does not exist yet
+#: when this one runs, and a trigger on a missing table fails the whole upgrade).
+APPEND_ONLY_AT_0001: tuple[str, ...] = ("grades", "events", "signoffs", "evidence")
 
 
 def upgrade() -> None:
@@ -243,7 +248,7 @@ def upgrade() -> None:
 
     # --- the store-level half of the honesty invariant ---------------------------
     # Same helper, same SQL as init_db(); on THIS connection, inside THIS transaction.
-    install_append_only_triggers_on(op.get_bind())
+    install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0001)
 
 
 def downgrade() -> None:
@@ -253,7 +258,7 @@ def downgrade() -> None:
     (``crb ledger export`` / ``verify``), then drop the tables by hand if you really mean it.
     """
     bind = op.get_bind()
-    for table in APPEND_ONLY_TABLES:
+    for table in APPEND_ONLY_AT_0001:
         n = bind.execute(sa.select(sa.func.count()).select_from(sa.table(table))).scalar_one()
         if n:
             raise RuntimeError(

@@ -20,6 +20,7 @@ from crb.store.models import (
     Event,
     EvidencePackRow,
     Repo,
+    Review,
     Run,
     Signoff,
 )
@@ -59,11 +60,34 @@ def _one_row(table: str) -> object:
         )
     if table == "evidence":
         return EvidencePackRow(pack_hash="p" * 64, repo="r", task_id="x" * 40, body_json={"k": 1})
+    if table == "reviews":
+        return Review(
+            review_id="v" * 32,
+            schema="crb.review.v1",
+            grade_row_hash="g" * 64,
+            repo="r",
+            task_id="x" * 40,
+            reviewer="reviewer@example.org",
+            verdict="ok",
+            findings_json=[],
+            statement="read it",
+            patch_sha256_reviewed="d" * 64,
+            apparatus_version="2.2",
+            created="2026-09-14T12:00:00+00:00",
+            prev_hash=GENESIS_HASH,
+            row_hash="b" * 64,
+        )
     raise AssertionError(table)
 
 
 def _pk(table: str) -> str:
-    return {"grades": "seq", "events": "id", "signoffs": "seq", "evidence": "pack_hash"}[table]
+    return {
+        "grades": "seq",
+        "events": "id",
+        "signoffs": "seq",
+        "evidence": "pack_hash",
+        "reviews": "seq",
+    }[table]
 
 
 def _count(b: Backend, table: str) -> int:
