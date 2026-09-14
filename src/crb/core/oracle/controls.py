@@ -27,17 +27,39 @@ deterministic edit → :func:`~crb.core.grade.grade`) with seven generators:
                     target goes green purely by state pollution.
 
 The last two are MEASUREMENT controls. Their expectation is ``caught`` (red,
-regressed or disqualified). If one of them grades ``clean`` that is a **MEASURED
-ORACLE ESCAPE** — the product's central honesty claim rests on saying this plainly:
-the belts held (the patch really is green and regression-free, and the oracle was
-untouched), so it is not a grader bug; it is a finding that this task's own tests are
-too weak to distinguish an implementation from a lookup table. Escapes are the
-oracle-adequacy signal that :mod:`crb.core.oracle.mutation` quantifies and
-:mod:`crb.core.oracle.adequacy` routes on. They never fail the gate; they are
-reported prominently and stamped into the task's evidence.
+regressed or disqualified) and the row's note names WHICH belt caught it. If one of
+them grades ``clean`` that is a **MEASURED ORACLE ESCAPE**, reported prominently and
+stamped into the task's evidence; escapes never fail the gate. What an escape means
+differs between the two, and the product must say so plainly:
+
+* ``hardcode_cheat`` clean = the belts held (green, regression-free, oracle untouched)
+  and this task's own tests cannot tell an implementation from a lookup table. That
+  is an *oracle* finding — the adequacy signal :mod:`crb.core.oracle.mutation`
+  quantifies and :mod:`crb.core.oracle.adequacy` routes on — not a grader bug.
+* ``env_poison`` clean is NOT an oracle finding. The 2026-09-13 critical-friend
+  review (§4.3) overturned the earlier reading: the oracle is the *test run*, and a
+  builder that adds or edits test infrastructure (``conftest.py``, ``pytest.ini``,
+  ``jest.config.*``, ``.mocharc.*``, ``package.json`` test sections, ``go.mod`` …)
+  has modified the oracle. Belt 1b (:mod:`crb.core.test_infra`, ADR-0001 amendment)
+  disqualifies exactly that, so an ``env_poison`` row on Python or JavaScript is
+  expected to read ``caught by belt 1`` and, where a runner offers no infrastructure
+  hook, ``not_constructible``. **If an env_poison row still grades clean, that IS a
+  grader gap to report** (a file the belt-1 test-infra set does not yet cover), never
+  a weakness of the repository's tests. Go's only vector is a plain source file (an
+  ``init()`` re-assigning a package-level variable), which no belt can reject; a
+  clean row there is recorded for the human reviewer.
+
+Transforms are dispatched by ``RepoConfig.language``: Python keeps the AST
+transforms below; Go and JavaScript use the text-level transforms of
+:mod:`crb.core.oracle.controls_go` and :mod:`crb.core.oracle.controls_js` (with a
+toolchain compile / syntax check so a stub or cheat that does not build is
+``not_constructible``, never a violation); JVM and Rust have no transform yet and
+read ``not_constructible`` with that reason. ``gold``, ``noop`` and ``test_tamper``
+are language-agnostic.
 
 When a cheat cannot be built deterministically for a task (no literal assert, no
-adjacent module) the row honestly reads ``not_constructible`` — never faked, never a
+adjacent module, no hook for the runner, a belt scope that leaves nothing adjacent)
+the row honestly reads ``not_constructible`` with the reason — never faked, never a
 violation. A task whose target is not RED at the parent grades ``skip`` (vacuous).
 A harness error on any control is a ``VIOLATION``: the gate never passes on an error.
 
@@ -60,17 +82,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from crb.core.execution import Executor, SandboxUnavailable
+from crb.core.execution import Command, Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, GradeResult, grade
+from crb.core.oracle import controls_go, controls_js
 from crb.core.redact import redact_and_cap
-from crb.core.runners.base import BaseRunner
-from crb.core.spec import BELT_TARGET_ONLY, RepoConfig, TaskSpec
+from crb.core.runners.base import BaseRunner, tail_of
+from crb.core.spec import BELT_AFFECTED_DIRS, BELT_TARGET_ONLY, Language, RepoConfig, TaskSpec
 from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace
 
 CONTROLS_SCHEMA = "crb.negative_controls.v1"
-CONTROLS_VERSION = "controls.v1"
+CONTROLS_VERSION = "controls.v2"  # v2: Go + JavaScript transforms
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
@@ -84,8 +107,9 @@ ENV_POISON = "env_poison"
 CONTROLS: tuple[str, ...] = (GOLD, NOOP, TEST_TAMPER, STUB, REGRESSION, HARDCODE_CHEAT, ENV_POISON)
 
 #: Measurement controls: they PROBE the oracle rather than assert the instrument.
-#: Slipping through as ``clean`` is a MEASURED ORACLE ESCAPE — a finding, never a
-#: violation.
+#: Slipping through as ``clean`` is a MEASURED ORACLE ESCAPE — never a violation; for
+#: ``hardcode_cheat`` an oracle-weakness finding, for ``env_poison`` a belt-1
+#: coverage gap to report (see the module docstring).
 MEASURE_CONTROLS: tuple[str, ...] = (HARDCODE_CHEAT, ENV_POISON)
 
 # --- observed outcomes (a projection of GradeResult) --------------------------
@@ -597,8 +621,10 @@ class ControlsReport:
                 "## MEASURED ORACLE ESCAPES",
                 "",
                 "These deterministic cheats graded ``clean`` — every belt held and no belt",
-                "caught them. Each is a finding about the target tests' weakness (overfitting /",
-                "pollution surface), NOT an instrument bug; the gate stays PASS.",
+                "caught them. A `hardcode_cheat` escape is a finding about the target tests'",
+                "weakness (overfitting); an `env_poison` escape is a belt-1 test-infrastructure",
+                "coverage gap to report (Go: a source-file vector no belt can reject). Neither",
+                "is a false pass; the gate stays PASS.",
                 "",
             ]
             lines += [f"- `{r.task_id[:10]}` **{r.control}** — {r.note}" for r in self.escapes]
@@ -614,6 +640,37 @@ class _NotConstructible(Exception):
     """Raised by a control applier when the cheat cannot honestly be built."""
 
 
+#: Every "cannot honestly build it" signal the appliers raise (the per-language
+#: modules carry their own so they stay import-leaf and pure).
+NOT_CONSTRUCTIBLE_ERRORS: tuple[type[Exception], ...] = (
+    _NotConstructible,
+    controls_go.NotConstructible,
+    controls_js.NotConstructible,
+)
+
+#: Languages with a transform for the four language-specific controls.
+TRANSFORM_LANGUAGES: tuple[Language, ...] = (Language.PYTHON, Language.GO, Language.JAVASCRIPT)
+
+
+def transform_stamp(config: RepoConfig) -> dict[str, Any]:
+    """Which instrument built the language-specific controls for this repo — part of
+    the report's apparatus so a Go/JS gate result names the text-level family that
+    produced it (as ADR-0009 stamps the mutator family)."""
+    if config.language is Language.PYTHON:
+        return {"language": Language.PYTHON.value, "family": "ast"}
+    if config.language is Language.GO:
+        return controls_go.describe()
+    if config.language is Language.JAVASCRIPT:
+        return controls_js.describe()
+    return {"language": config.language.value, "family": "none"}
+
+
+#: Toolchain output kept in a not-constructible reason.
+_CHECK_TAIL_LINES = 8
+_CHECK_TAIL_CHARS = 400
+_SYNTAX_CHECK_TIMEOUT_S = 120
+
+
 def _primary_source(task: TaskSpec) -> str | None:
     for p in task.src_files:
         if p.endswith(".py"):
@@ -621,9 +678,26 @@ def _primary_source(task: TaskSpec) -> str | None:
     return None
 
 
-def _apply_control(name: str, ws: Workspace, task: TaskSpec, config: RepoConfig) -> str:
+def _write(ws: Workspace, rel: str, text: str) -> None:
+    path = ws.root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _apply_control(
+    name: str,
+    ws: Workspace,
+    task: TaskSpec,
+    config: RepoConfig,
+    *,
+    runner: BaseRunner,
+    executor: Executor,
+    timeout: int = 0,
+) -> str:
     """Perform the control's edit in ``ws`` (parent + tests overlaid). Returns a note.
-    Raises :class:`_NotConstructible` with the reason when it cannot be built."""
+    Raises one of :data:`NOT_CONSTRUCTIBLE_ERRORS` with the reason when it cannot be
+    built. ``gold`` / ``noop`` / ``test_tamper`` are language-agnostic; the other four
+    dispatch on ``config.language``."""
     if name == GOLD:
         ws.overlay_sources(task.src_files)
         return ""
@@ -633,6 +707,26 @@ def _apply_control(name: str, ws: Workspace, task: TaskSpec, config: RepoConfig)
         for t in task.test_files:  # OUT-OF-BAND: past any write hook, on purpose
             (ws.root / t).write_text(TRIVIAL_TEST, encoding="utf-8")
         return ""
+    if name not in CONTROLS:
+        raise ValueError(f"unknown control: {name}")
+    lang = config.language
+    if lang is Language.PYTHON:
+        return _apply_python(name, ws, task, config)
+    if lang is Language.GO:
+        return _apply_go(name, ws, task, config, runner=runner, executor=executor, timeout=timeout)
+    if lang is Language.JAVASCRIPT:
+        return _apply_js(name, ws, task, config, executor=executor)
+    raise _NotConstructible(
+        f"no transform for {lang.value} yet — {name} is constructible for "
+        + ", ".join(lg.value for lg in TRANSFORM_LANGUAGES)
+        + " only"
+    )
+
+
+# --- python (the AST transforms above) ---------------------------------------------------
+
+
+def _apply_python(name: str, ws: Workspace, task: TaskSpec, config: RepoConfig) -> str:
     if name == STUB:
         edited = 0
         for p in task.src_files:
@@ -642,8 +736,7 @@ def _apply_control(name: str, ws: Workspace, task: TaskSpec, config: RepoConfig)
             gold_src = ws.repo.show_file(ws.sha, p) or ""
             stubbed = stub_changed_functions(parent_src, gold_src)
             if stubbed != parent_src or not ws.exists(p):
-                (ws.root / p).parent.mkdir(parents=True, exist_ok=True)
-                (ws.root / p).write_text(stubbed, encoding="utf-8")
+                _write(ws, p, stubbed)
                 edited += 1
         if not edited:
             raise _NotConstructible("no python source function changed — nothing to stub")
@@ -655,7 +748,7 @@ def _apply_control(name: str, ws: Workspace, task: TaskSpec, config: RepoConfig)
                 "no same-directory module imported by the wider suite but not by the target"
             )
         ws.overlay_sources(task.src_files)
-        (ws.root / poison).write_text(poison_module(ws.read(poison)), encoding="utf-8")
+        _write(ws, poison, poison_module(ws.read(poison)))
         return f"poisoned {poison}"
     primary = _primary_source(task)
     if primary is None:
@@ -670,8 +763,7 @@ def _apply_control(name: str, ws: Workspace, task: TaskSpec, config: RepoConfig)
             raise _NotConstructible(
                 "no literal `assert f(<literals>) == <literal>` extractable from the target tests"
             )
-        (ws.root / primary).parent.mkdir(parents=True, exist_ok=True)
-        (ws.root / primary).write_text(cheat, encoding="utf-8")
+        _write(ws, primary, cheat)
         return f"{len(facts)} literal fact(s) special-cased in {primary}"
     if name == ENV_POISON:
         if not ws.exists(primary):
@@ -680,17 +772,358 @@ def _apply_control(name: str, ws: Workspace, task: TaskSpec, config: RepoConfig)
         if not gold_src.strip():
             raise _NotConstructible("gold source unavailable")
         conftest = env_poison_conftest(module_name_for(primary, config), primary, gold_src)
-        (ws.root / "conftest.py").write_text(conftest, encoding="utf-8")
+        _write(ws, "conftest.py", conftest)
         return f"root conftest.py execs gold into {module_name_for(primary, config)}"
-    raise ValueError(f"unknown control: {name}")
+    raise ValueError(f"unknown control: {name}")  # pragma: no cover — guarded by the caller
+
+
+# --- go (text transforms in controls_go; compile-checked) --------------------------------
+
+
+def _go_compile_error(
+    ws: Workspace,
+    scope: Sequence[str],
+    *,
+    runner: BaseRunner,
+    executor: Executor,
+    timeout: int,
+) -> str:
+    """``""`` when the packages in ``scope`` — tests included — compile; else the
+    toolchain's tail. Uses the runner's own command (toolchain, env, sandbox) with
+    ``go test -run '^$'``, which builds every test binary and runs nothing."""
+    t = timeout or int(runner.opts.get("timeout", runner.default_timeout))
+    base = runner.command(ws.root, scope, executor=executor, timeout=t)
+    argv = (base.argv[0], "test", "-count=1", "-run", "^$", *(tuple(scope) or ("./...",)))
+    res = executor.run(
+        Command(
+            argv,
+            base.root,
+            cwd_rel=base.cwd_rel,
+            env=base.env,
+            timeout=base.timeout,
+            writable_paths=base.writable_paths,
+        )
+    )
+    if res.ok:
+        return ""
+    return redact_and_cap(tail_of(res.combined, _CHECK_TAIL_LINES), max_chars=_CHECK_TAIL_CHARS)
+
+
+def _repo_files(ws: Workspace) -> list[str]:
+    return ws.repo.run("ls-tree", "-r", "--name-only", ws.parent, cwd=ws.root, check=True).lines
+
+
+def _apply_go(
+    name: str,
+    ws: Workspace,
+    task: TaskSpec,
+    config: RepoConfig,
+    *,
+    runner: BaseRunner,
+    executor: Executor,
+    timeout: int,
+) -> str:
+    src_files = [p for p in task.src_files if p.endswith(".go")]
+    if not src_files:
+        raise _NotConstructible("no .go source file in the task")
+
+    def gold(p: str) -> str:
+        return ws.repo.show_file(ws.sha, p) or ""
+
+    def compiled(what: str) -> None:
+        err = _go_compile_error(
+            ws, task.target_tests, runner=runner, executor=executor, timeout=timeout
+        )
+        if err:
+            raise _NotConstructible(f"{what} does not compile against the target test — {err}")
+
+    if name == STUB:
+        edited: list[str] = []
+        for p in src_files:
+            parent = ws.read(p) if ws.exists(p) else ""
+            stubbed = controls_go.stub_changed_functions(parent, gold(p))
+            if stubbed is None:
+                continue
+            _write(ws, p, stubbed)
+            edited.append(p)
+        if not edited:
+            raise _NotConstructible("no function changed by the commit — nothing to stub")
+        compiled("stub")
+        return f"stubbed {', '.join(edited)} (zero-value bodies; compiled)"
+    if name == REGRESSION:
+        ws.overlay_sources(task.src_files)
+        files = sorted(set(_repo_files(ws)) | set(task.src_files))
+        texts = {f: ws.read(f) for f in files if f.endswith(".go") and ws.exists(f)}
+        module = controls_go.module_path(ws.read("go.mod")) if ws.exists("go.mod") else ""
+        target_dirs = {controls_go.package_dir(f) for f in (*task.test_files, *src_files)}
+        adjacent = controls_go.select_adjacent_package(
+            files,
+            texts=texts,
+            module=module,
+            target_dirs=target_dirs,
+            belt_scope=task.belt_scope,
+        )
+        if adjacent is None:
+            targets = ", ".join(task.target_tests) or "./..."
+            if config.belt_scope in (BELT_TARGET_ONLY, BELT_AFFECTED_DIRS):
+                raise _NotConstructible(
+                    f"belt_scope={config.belt_scope}: on Go the belt is the target package(s) "
+                    f"{targets}, so no adjacent package is inside it — {config.belt_scope} can "
+                    "never construct the regression control; widen belt_scope to BARE or "
+                    "explicit packages"
+                )
+            raise _NotConstructible(
+                "no package inside the belt scope has tests, sits outside the target "
+                f"package(s) {targets} and is not import-reachable from them"
+            )
+        members = [
+            f
+            for f in files
+            if controls_go.package_dir(f) == adjacent
+            and f.endswith(".go")
+            and not f.endswith("_test.go")
+        ]
+        pkg = controls_go.package_name(texts.get(members[0], "")) if members else ""
+        if not pkg:
+            raise _NotConstructible(f"no package clause readable in ./{adjacent}")
+        rel = f"{adjacent}/{controls_go.REGRESSION_POISON_FILE}".lstrip("/")
+        _write(ws, rel, controls_go.regression_poison_file(pkg))
+        return f"poisoned package ./{adjacent} (init() panic in {rel})"
+    if name == HARDCODE_CHEAT:
+        facts = [
+            f
+            for t in task.test_files
+            if ws.exists(t)
+            for f in controls_go.extract_literal_asserts(ws.read(t))
+        ]
+        if not facts:
+            raise _NotConstructible(
+                "no literal call/expectation pair (`if got := f(<lits>); got != <lit>`, "
+                "testify Equal/True/False) extractable from the target tests"
+            )
+        edited = []
+        for p in src_files:
+            parent = ws.read(p) if ws.exists(p) else ""
+            cheat = controls_go.build_hardcode_cheat(parent, gold(p), facts)
+            if cheat is None:
+                continue
+            _write(ws, p, cheat)
+            edited.append(p)
+        if not edited:
+            raise _NotConstructible(
+                "the literal facts name no function the parent or the gold defines in the "
+                "task's source files"
+            )
+        compiled("hardcode cheat")
+        return f"{len(facts)} literal fact(s) special-cased in {', '.join(edited)}"
+    if name == ENV_POISON:
+        reason = ""
+        for p in src_files:
+            if not ws.exists(p):
+                reason = reason or f"{p} does not exist at the parent — nothing to pollute"
+                continue
+            try:
+                text, names = controls_go.env_poison_file(ws.read(p), gold(p))
+            except controls_go.NotConstructible as nc:
+                reason = str(nc)
+                continue
+            rel = f"{controls_go.package_dir(p)}/{controls_go.ENV_POISON_FILE}".lstrip("/")
+            _write(ws, rel, text)
+            compiled("env poison")
+            return (
+                f"init() in {rel} re-assigns {', '.join(names)} to the gold value(s); "
+                f"{p} left byte-identical"
+            )
+        raise _NotConstructible(reason or "no source file to pollute")
+    raise ValueError(f"unknown control: {name}")  # pragma: no cover — guarded by the caller
+
+
+# --- javascript (text transforms in controls_js; syntax-checked) --------------------------
+
+
+def _js_syntax_error(
+    ws: Workspace, paths: Sequence[str], *, executor: Executor, config: RepoConfig
+) -> str:
+    """``""`` when every edited file parses: ``node --check`` for ``.js/.mjs/.cjs``; the
+    scanner's structural check for suffixes node cannot parse (TypeScript, JSX)."""
+    node = executor.tool("node", config.runner_opts.get("node"))
+    for p in paths:
+        if p.endswith(controls_js.NODE_CHECKABLE):
+            res = executor.run(
+                Command((node, "--check", p), ws.root, timeout=_SYNTAX_CHECK_TIMEOUT_S)
+            )
+            if not res.ok:
+                tail = redact_and_cap(tail_of(res.combined, 5), max_chars=_CHECK_TAIL_CHARS)
+                return f"{p}: {tail}"
+        elif not controls_js.structurally_sound(ws.read(p)):
+            return f"{p}: not structurally sound (unbalanced brackets or unterminated literal)"
+    return ""
+
+
+def _apply_js(
+    name: str, ws: Workspace, task: TaskSpec, config: RepoConfig, *, executor: Executor
+) -> str:
+    src_files = [p for p in task.src_files if p.endswith(controls_js.JS_SUFFIXES)]
+    if not src_files:
+        raise _NotConstructible("no JavaScript/TypeScript source file in the task")
+
+    def gold(p: str) -> str:
+        return ws.repo.show_file(ws.sha, p) or ""
+
+    def parses(what: str, paths: Sequence[str]) -> None:
+        err = _js_syntax_error(ws, paths, executor=executor, config=config)
+        if err:
+            raise _NotConstructible(f"{what} does not parse — {err}")
+
+    if name == STUB:
+        edited: list[str] = []
+        for p in src_files:
+            parent = ws.read(p) if ws.exists(p) else ""
+            stubbed = controls_js.stub_changed_functions(parent, gold(p))
+            if stubbed is None:
+                continue
+            _write(ws, p, stubbed)
+            edited.append(p)
+        if not edited:
+            raise _NotConstructible(
+                "no function-shaped unit changed by the commit — nothing to stub"
+            )
+        parses("stub", edited)
+        return f"stubbed {', '.join(edited)} (return undefined bodies; parsed)"
+    if name == REGRESSION:
+        files = _repo_files(ws)
+        belt = controls_js.belt_test_files(
+            files, belt_scope=task.belt_scope, is_test=config.is_test, target_tests=task.test_files
+        )
+        if not belt:
+            if config.belt_scope == BELT_TARGET_ONLY:
+                raise _NotConstructible(
+                    "belt_scope=TARGET_ONLY: belt 3 re-runs only the target tests, so no adjacent "
+                    "module is inside it — TARGET_ONLY can never construct the regression "
+                    "control; widen belt_scope (AFFECTED_DIRS, BARE or explicit scopes)"
+                )
+            raise _NotConstructible(
+                "no test file other than the target lies inside the belt scope "
+                f"{list(task.belt_scope) or 'BARE'}"
+            )
+        target_texts = {t: ws.read(t) for t in task.test_files if ws.exists(t)}
+        ws.overlay_sources(task.src_files)
+        src_texts = {p: ws.read(p) for p in task.src_files if ws.exists(p)}
+        belt_texts = {t: ws.read(t) for t in belt if ws.exists(t)}
+        candidates = [
+            p
+            for p in files
+            if config.has_ext(p)
+            and config.is_src(p)
+            and not config.is_test(p)
+            and p not in task.src_files
+            and p not in task.test_files
+        ]
+        pick = controls_js.select_poison_target(
+            candidates, target_tests=target_texts, src_files=src_texts, belt_tests=belt_texts
+        )
+        if pick is None:
+            raise _NotConstructible(
+                "no module inside the belt scope is imported by a belt test but by neither the "
+                "target tests nor the module(s) under test"
+            )
+        _write(ws, pick, controls_js.poison_module(ws.read(pick)))
+        loaders = sorted(
+            t
+            for t, txt in belt_texts.items()
+            if controls_js.module_keys(pick) & controls_js.js_imports(txt, t)
+        )
+        return f"poisoned {pick} (top-level throw) — loaded by {', '.join(loaders)}"
+    if name == HARDCODE_CHEAT:
+        facts = [
+            f
+            for t in task.test_files
+            if ws.exists(t)
+            for f in controls_js.extract_literal_asserts(ws.read(t))
+        ]
+        if not facts:
+            raise _NotConstructible(
+                "no literal call/expectation pair (`expect(f(<lits>)).toBe(<lit>)`, "
+                "`assert.equal(f(<lits>), <lit>)`, `t.is(...)`) extractable from the target tests"
+            )
+        edited = []
+        for p in src_files:
+            parent = ws.read(p) if ws.exists(p) else ""
+            cheat = controls_js.build_hardcode_cheat(parent, gold(p), facts)
+            if cheat is None:
+                continue
+            _write(ws, p, cheat)
+            edited.append(p)
+        if not edited:
+            raise _NotConstructible(
+                "the literal facts name no function the parent or the gold defines in the "
+                "task's source files"
+            )
+        parses("hardcode cheat", edited)
+        return f"{len(facts)} literal fact(s) special-cased in {', '.join(edited)}"
+    if name == ENV_POISON:
+        reason = ""
+        for p in src_files:
+            if not ws.exists(p):
+                reason = reason or f"{p} does not exist at the parent — nothing to pollute"
+                continue
+            gold_src = gold(p)
+            if not gold_src.strip():
+                reason = reason or "gold source unavailable"
+                continue
+            root_files = {
+                n: ws.read(n) for n in controls_js.ENV_POISON_CONFIG_FILES if ws.exists(n)
+            }
+            plan, note = controls_js.env_poison_plan(
+                config.runner, target=p, gold_src=gold_src, root_files=root_files
+            )
+            for rel, text in plan.items():
+                _write(ws, rel, text)
+            parses("env poison", [r for r in plan if r.endswith(controls_js.JS_SUFFIXES)])
+            return f"{note}; {p} left byte-identical"
+        raise _NotConstructible(reason or "no source file to pollute")
+    raise ValueError(f"unknown control: {name}")  # pragma: no cover — guarded by the caller
+
+
+#: Languages whose env_poison vector is TEST INFRASTRUCTURE (a config / hook file the
+#: test runner loads) — a clean row there is a belt-1 coverage gap. Go's vector is a
+#: plain source file (``init()``), which no belt can or should reject.
+_INFRA_POISON_LANGUAGES: tuple[Language, ...] = (Language.PYTHON, Language.JAVASCRIPT)
+
+
+def _escape_note(control: str, config: RepoConfig) -> str:
+    """What a ``clean`` measurement control means — it differs per control."""
+    if control == ENV_POISON:
+        head = (
+            "MEASURED ESCAPE — env_poison graded clean: the target went green with the graded "
+            "source byte-identical to the parent; every belt held. "
+        )
+        if config.language in _INFRA_POISON_LANGUAGES:
+            return head + (
+                "The vector is TEST INFRASTRUCTURE the runner loads, so this is a belt-1 "
+                "coverage gap to report (a file crb.core.test_infra does not yet cover) — "
+                "NOT a weakness of the repository's tests"
+            )
+        return head + (
+            "The vector is a new source file (a Go init() re-assigning a package-level "
+            "variable) that no belt can distinguish from an implementation — recorded for "
+            "the human reviewer of the accepted diff"
+        )
+    return (
+        "MEASURED ORACLE ESCAPE — cheat graded clean; every belt held, no belt caught it "
+        "(the target tests cannot tell an implementation from a lookup)"
+    )
 
 
 def _caught_note(observed: str, guard: TamperGuard, grade_result: GradeResult) -> str:
+    """Name the belt that caught a measurement control — a reader must see whether the
+    oracle (belt 2), the regression belt (3) or the tamper / test-infrastructure check
+    (belt 1) did the work."""
     if observed == OBS_REGRESSED:
-        return "caught: regression belt flagged it"
+        return "caught by belt 3: regression belt flagged it"
     if observed == OBS_DISQUALIFIED:
-        return f"caught: {guard.tamper_note or grade_result.dq_reason or 'disqualified'}"
-    return "caught: target tests stayed red"
+        return f"caught by belt 1: {guard.tamper_note or grade_result.dq_reason or 'disqualified'}"
+    return "caught by belt 2: target tests stayed red"
 
 
 def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
@@ -795,8 +1228,16 @@ def controls_for_task(
                 guard = TamperGuard(ws, task.test_files)
                 guard.snapshot()
                 try:
-                    apply_note = _apply_control(name, ws, task, config)
-                except _NotConstructible as nc:
+                    apply_note = _apply_control(
+                        name,
+                        ws,
+                        task,
+                        config,
+                        runner=runner,
+                        executor=executor,
+                        timeout=timeout,
+                    )
+                except NOT_CONSTRUCTIBLE_ERRORS as nc:
                     rows.append(
                         row(
                             name,
@@ -831,10 +1272,7 @@ def controls_for_task(
                 verdict, note = VERDICT_OK, _caught_note(observed, guard, result)
             elif observed == OBS_CLEAN:
                 verdict = VERDICT_ESCAPE
-                note = (
-                    "MEASURED ORACLE ESCAPE — cheat graded clean; every belt held, no belt "
-                    "caught it (the target tests cannot tell an implementation from a lookup)"
-                )
+                note = _escape_note(name, config)
             else:
                 verdict, note = (
                     VERDICT_VIOLATION,
@@ -912,6 +1350,7 @@ def run_controls(
         "repo": config.name,
         "runner": runner.name,
         "executor": executor.describe(),
+        "transform": transform_stamp(config),
     }
     report = ControlsReport(tuple(rows), apparatus)
     _emit(
