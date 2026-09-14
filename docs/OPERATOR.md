@@ -248,6 +248,141 @@ image must already contain what setup would have installed (the `node_modules` a
 setup installed in the clone is visible to the container through the read-only worktree
 mount; a host venv, module cache or `~/.m2` is not). P7 ships reference images.
 
+### 2.2 Services the oracle needs
+
+Some test suites are only an oracle when a **service** is running next to them —
+NHSDigital/mesh-client's integration tests talk to the MESH sandbox on `localhost:8701`
+over TLS, with certificates that must match the ones the commit's own tests carry. The
+first measurement of that repository (`docs/reviews/2026-09-14-nhs-public-repos.md`) was
+assembled by hand and therefore not reproducible from the configuration. `runner_opts.services`
+is the first-class notion: the service, how to know it is up, what it must be given, what
+the tests are told, and which *era* of it a commit needs.
+
+**What happens.** `crb repo setup` (or the `setup` run kind) stages every variant's
+fixtures under `<env_dir>/services/<service>/<variant>/` (running each `generate` once, in
+the clone) and starts the latest variant; every docker command it ran is a recorded setup
+step, and the `SetupResult` carries `services: [{name, variant, ref, image_digest,
+healthy_at, adopted, container}]`. At grade time the runner makes sure the variant the
+task's authored date selects is healthy — reusing the running one, replacing it when the
+era changes — merges the service's `export` environment into the test command, and stamps
+the same record onto every `TestRun` (`target_run.services` / `belt_run.services` in the
+evidence). A service that cannot be started, built, staged or probed healthy is
+`ServiceUnavailable` (a `SandboxUnavailable`): the run stops `failed` with the reason and the
+service's last log lines; nothing is graded against a missing oracle, and nothing reads as
+red *or* green because of it.
+
+**The shape.** One entry per service, exactly one of `image` | `compose` | `build`:
+
+| key | meaning |
+|---|---|
+| `name` | lowercase `[a-z0-9_.-]`, unique; part of the container / compose project name |
+| `image` | a runnable image (`docker run -d`) |
+| `compose: {file, service, override}` | a service of the **repository's own** compose file; `override` is merged as a second compose file — where the build ref that still builds, extra environment, or anything the pinned file gets wrong today goes |
+| `build: {context, ref}` | `docker build` of a directory in the clone, or of a git URL at `ref` |
+| `command` | overrides the image's command (an image with no entrypoint of its own) |
+| `ports` | `["<host>:<container>", …]` (compose: replaces the file's ports when given) |
+| `env` | the container's environment |
+| `export` | environment for the **test command**; `{host}`, `{port}` (first host port), `{fixtures}` (the staged directory), `{name}` are substituted |
+| `health: {url \| cmd, timeout_s, interval_s, insecure_tls}` | required: a URL answering 2xx/3xx (`insecure_tls: true` accepts the service's self-signed certificate) or a command exiting 0, polled until `timeout_s` |
+| `fixtures: [{src, dst, ro}]` | files the service must see: `src` is a path in the clone (after `generate`) **or `<ref>:<path>`** — the file as committed at `ref`, read with `git show`; `dst` is the absolute container path |
+| `generate: [argv…]` | a repository command that produces fixtures (certificates…); runs **once per variant**, in the clone, before the fixtures are staged |
+| `variants: [{name, era: {after, before}, fixtures, generate, env}]` | eras of the service, selected by the task's authored date (`after <= authored < before`, dates are midnight UTC); declare them oldest first; at most one variant without an era (the default), last |
+| `logs_tail`, `keep`, `start_timeout_s` | log lines kept for the evidence (200); leave the service running when crb exits (`false`); wall clock for a start/build (1800 s) |
+
+Top-level `fixtures` / `generate` are shared by every variant; without `variants` they
+form the single default variant.
+
+**Worked example — mesh-client.** The repository's `docker-compose.yml` builds the sandbox
+from `mesh-sandbox.git#refs/tags/v1.0.27`, which no longer builds (Debian bullseye's
+security archive is gone); `v1.0.110` does. Commits before 2025-08-01 committed the test
+certificates; commit `5d0047a77c` (MESH-2092, Python 3.13) removed them and added
+`scripts/create-test-certs-keys.sh`, which writes `tests/{ca,server,client}.*.pem`
+(git-ignored). The sandbox must present the *era's* server certificate, and the tests read
+the client certificate from `tests/` in every worktree:
+
+```json
+"runner_opts": {
+  "post_create": [
+    {"symlink": {"path": "tests/ca.cert.pem",     "target": "tests/ca.cert.pem"}},
+    {"symlink": {"path": "tests/client.cert.pem", "target": "tests/client.cert.pem"}},
+    {"symlink": {"path": "tests/client.key.pem",  "target": "tests/client.key.pem"}}
+  ],
+  "services": [
+    {
+      "name": "mesh_sandbox",
+      "compose": {
+        "file": "docker-compose.yml",
+        "service": "mesh_sandbox",
+        "override": {"services": {"mesh_sandbox": {"build": {
+          "context": "https://github.com/NHSDigital/mesh-sandbox.git#refs/tags/v1.0.110"}}}}
+      },
+      "ports": ["8701:443"],
+      "health": {"url": "https://localhost:8701/health", "insecure_tls": true,
+                 "timeout_s": 180, "interval_s": 3},
+      "fixtures": [
+        {"src": "tests/mailboxes.jsonl", "dst": "/app/mesh_sandbox/store/data/mailboxes.jsonl"},
+        {"src": "tests/workflows.jsonl", "dst": "/app/mesh_sandbox/store/data/workflows.jsonl"}
+      ],
+      "variants": [
+        {
+          "name": "committed-certs",
+          "era": {"before": "2025-08-01"},
+          "fixtures": [
+            {"src": "5d0047a77c^:tests/server.cert.pem", "dst": "/tmp/server-cert.pem"},
+            {"src": "5d0047a77c^:tests/server.key.pem",  "dst": "/tmp/server-cert.key"}
+          ]
+        },
+        {
+          "name": "generated-certs",
+          "era": {"after": "2025-08-01"},
+          "generate": ["bash", "scripts/create-test-certs-keys.sh"],
+          "fixtures": [
+            {"src": "tests/server.cert.pem", "dst": "/tmp/server-cert.pem"},
+            {"src": "tests/server.key.pem",  "dst": "/tmp/server-cert.key"}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Reading it: the compose file's volumes (`./tests/server.cert.pem:/tmp/server-cert.pem:ro`
+…) are replaced by the staged fixtures — compose merges volumes by container path — and its
+`build.context` by the override's, so the sandbox builds from `v1.0.110` and presents, for a
+task authored 2023-07-01, the certificate committed at the parent of `5d0047a77c`; for one
+authored 2025-09-01, the one `create-test-certs-keys.sh` generated (once, in the clone —
+which is also what the `post_create` symlinks point every worktree's client certificate at;
+pre-boundary worktrees have their own committed copies and the symlink hook leaves an
+existing file alone). The tests keep their hard-coded `https://localhost:8701`; no `export`
+is needed. Switching eras restarts the one service (compose project
+`crb-mesh-client-mesh_sandbox-<variant>`), so **concurrency is 1 per service**: two runs of
+the same repository must not share a worker. To run two eras side by side give each variant
+its own host port and export the URL instead.
+
+**Where fixtures live, and why.** Under the runner's `env_dir` — `<home>/envs/<name>/services/`
+(worker) or `<workdir>/envs/<name>/services/` (CLI) — never under `/private/tmp` or
+`$TMPDIR`. On macOS the VM behind docker (colima, Docker Desktop) shares `/Users` but not
+`/private/tmp` or `/private/var/folders`, so a bind mount from a temp path is silently
+*empty* inside the container; the same applies to any host whose docker VM has a mount
+table. Keep `CRB_HOME` on a path the VM mounts.
+
+**Bit-rot policy.** When a pinned build no longer builds, the start fails **closed** and the
+message names the exact key to set (`compose.override.services.<svc>.build.context`, or
+`build.ref`) with the hint to try the latest release tag. crb never substitutes a version
+silently: the version the oracle ran against is in every record, and changing it is your
+configuration change.
+
+**Adoption and cleanup.** Container / project names are deterministic
+(`crb-<repo>-<service>-<variant>`), so a healthy instance another process left running is
+adopted (`adopted: true` in the record) rather than restarted. What crb started it stops
+when the process ends (`keep: true` leaves it up); `docker ps --filter label=crb.service`
+lists anything left behind. Under the docker executor services refuse — the sandbox runs
+tests with `--network=none`, so the tests could not reach `localhost` anyway; run such a
+repository under the local executor or ship the service inside the sandbox image. The last
+`logs_tail` lines of a service are kept, redacted and capped like test output, when it
+stops or fails its health wait (see `DATA-RETENTION.md`).
+
 ## 3. Run a sweep
 
 ```bash
