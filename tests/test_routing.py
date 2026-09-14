@@ -257,9 +257,9 @@ def test_escapes_route_human_conservatively() -> None:
     assert rt.route(stats(3, 4), controls=verdict(escapes=3)).route == rt.ROUTE_CALIBRATE
     # a stricter-or-laxer bar is a policy choice, stamped on the decision
     lax = rt.RoutingPolicy(max_controls_escapes=3)
-    assert (
-        rt.route(stats(*GREEN), controls=verdict(escapes=3), policy=lax).route == rt.ROUTE_DELIVER
-    )
+    lax_d = rt.route(stats(*GREEN), controls=verdict(escapes=3), policy=lax)
+    assert lax_d.route == rt.ROUTE_DELIVER
+    assert lax_d.reason.endswith("escapes=3")  # the measured count, never a flattering zero
     assert rt.route(stats(*GREEN), controls=verdict(escapes=4), policy=lax).route == rt.ROUTE_HUMAN
 
 

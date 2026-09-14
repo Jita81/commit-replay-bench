@@ -405,7 +405,9 @@ def route(
         )
     tail = "" if strength is None else f" oracle={strength:.2f}"
     if controls is not None:
-        tail += f" controls=passed {controls.constructible}/{controls.total} escapes=0"
+        tail += (
+            f" controls=passed {controls.constructible}/{controls.total} escapes={controls.escapes}"
+        )
     return RouteDecision(
         ROUTE_DELIVER,
         f"n={stats.n} point={stats.point:.3f} ci_low={stats.ci.low:.3f} false_q1=0" + tail,
