@@ -117,6 +117,12 @@ class BuildBrief:
     test_files: tuple[str, ...] = ()
     target_tests: tuple[str, ...] = ()
     test_command: str = ""
+    #: The test HARNESS command without any target scope (interpreter, PYTHONPATH /
+    #: NODE_PATH, runner binary and its fixed flags). Safe in blind mode: it discloses
+    #: the provisioned environment, never which tests are held out. Without it a blind
+    #: builder cannot import the package and reaches for `pip install` / `uv run`,
+    #: which the no-network rule refuses — 6 of 8 NHS blind misses (2026-09-14).
+    harness_command: str = ""
     spec_text: str = ""
     spec_facts: tuple[str, ...] = ()
     rules: str = DEFAULT_RULES
@@ -156,6 +162,7 @@ class BuildBrief:
         mode: str = MODE_SIGHTED,
         message: str = "",
         test_command: str = "",
+        harness_command: str = "",
         spec_text: str = "",
         spec_facts: Sequence[str] = (),
         rules: str = DEFAULT_RULES,
@@ -176,6 +183,7 @@ class BuildBrief:
             test_files=() if blind else tuple(task.test_files),
             target_tests=() if blind else tuple(task.target_tests),
             test_command="" if blind else test_command,
+            harness_command=harness_command,
             spec_text=spec_text,
             spec_facts=tuple(spec_facts),
             rules=rules,
@@ -210,6 +218,11 @@ class BuildBrief:
                 "held out — you will be graded against tests you cannot see. Implement the "
                 "change the commit message describes, completely and idiomatically."
             )
+            if self.harness_command:
+                lines.append(
+                    "The test environment is provisioned. Run any existing tests (or tests you "
+                    f"write to check your work) with: {self.harness_command} <paths>"
+                )
         if self.spec_text.strip():
             lines += [
                 "",

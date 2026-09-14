@@ -771,3 +771,39 @@ def test_matching_paren_treats_single_quotes_inside_double_quotes_as_literal() -
     assert inners[0].startswith("node -e ")
     assert GitArchaeologyGuard().check_shell(cmd) == ""
     assert "git log" in GitArchaeologyGuard().check_shell('''echo "$(git log -1 "it's")"''')
+
+
+def test_blind_brief_carries_the_harness_command_but_never_the_oracle() -> None:
+    """Six of eight NHS blind misses (2026-09-14) were the builder reaching for
+    `pip install` / `uv run` because the blind brief named no environment. The
+    scope-free harness command is safe to disclose; the target paths and the
+    sighted test command are not."""
+    from crb.builders.base import MODE_BLIND, BuildBrief
+    from crb.core.spec import TaskSpec
+
+    t = TaskSpec.from_dict(
+        {
+            "task_id": "a" * 40,
+            "repo": "r",
+            "subject": "fix pager",
+            "authored": "",
+            "test_files": ["tests/test_secret.py"],
+            "src_files": ["src/x.py"],
+            "target_tests": ["tests/test_secret.py"],
+            "belt_scope": "BARE",
+            "pool": "standard",
+            "src_churn": 1,
+            "size": "XS",
+            "capability_class": "bug.fix",
+            "language": "python",
+        }
+    )
+    b = BuildBrief.from_task(
+        t,
+        mode=MODE_BLIND,
+        harness_command="PYTHONPATH=/wt/src /venv/bin/python -m pytest -q",
+        test_command="PYTHONPATH=/wt/src /venv/bin/python -m pytest tests/test_secret.py",
+    )
+    txt = b.task_text(worktree="/wt")
+    assert "PYTHONPATH=/wt/src /venv/bin/python -m pytest -q <paths>" in txt
+    assert "test_secret" not in txt and b.test_command == "" and b.target_tests == ()

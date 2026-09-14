@@ -452,8 +452,15 @@ def build_fn_for(
             if mode == MODE_SIGHTED
             else ""
         )
+        # the harness command without a scope discloses the environment, never the oracle
+        harness_command = sighted_test_command(runner, executor, ws.root, ())
         brief = BuildBrief.from_task(
-            task, mode=mode, message=message(task), test_command=test_command, config=config
+            task,
+            mode=mode,
+            message=message(task),
+            test_command=test_command,
+            harness_command=harness_command,
+            config=config,
         )
         rung_budget = budget_for_rung(rung, budget)
         try:
