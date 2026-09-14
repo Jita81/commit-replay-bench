@@ -8,6 +8,12 @@ standalone with :func:`crb.core.ledger.verify_chain`.
 
 Imports (``import_rows``) re-chain foreign rows into this ledger and keep the
 source row's own hash in ``labels['source_row_hash']`` for traceability.
+
+:class:`DbReviewLedger` is the same contract for the ``reviews`` table
+(:class:`crb.core.review.ReviewRecord`): its own chain, its own write lock, and the
+patch-hash anchor (:func:`crb.core.review.check_patch_anchor`) applied at append against
+the reviewed row's stored evidence pack — a review of bytes the instrument did not grade
+cannot be written.
 """
 
 from __future__ import annotations
@@ -27,9 +33,17 @@ from crb.core.ledger import (
     LedgerIntegrityError,
     verify_chain,
 )
-from crb.store.models import EvidencePackRow, Grade
+from crb.core.review import (
+    REFUSAL_NO_DIFF_IN_PACK,
+    ReviewRecord,
+    ReviewRefused,
+    check_patch_anchor,
+    verify_review_chain,
+)
+from crb.store.models import EvidencePackRow, Grade, Review
 
 _ROW_COLUMNS = tuple(k for k in GradeRow.__dataclass_fields__ if k != "labels")
+_REVIEW_COLUMNS = tuple(k for k in ReviewRecord.__dataclass_fields__ if k != "findings")
 
 
 def _to_model(row: GradeRow) -> Grade:
@@ -148,6 +162,94 @@ class DbLedger:
                 f.write(json.dumps(r.to_dict(), sort_keys=True, ensure_ascii=False) + "\n")
                 n += 1
         return n
+
+
+def _review_to_model(rec: ReviewRecord) -> Review:
+    data: dict[str, Any] = {k: getattr(rec, k) for k in _REVIEW_COLUMNS}
+    data["findings_json"] = [f.to_dict() for f in rec.findings]
+    return Review(**data)
+
+
+def _review_from_model(m: Review) -> ReviewRecord:
+    d: dict[str, Any] = {k: getattr(m, k) for k in _REVIEW_COLUMNS}
+    d["findings"] = list(m.findings_json or [])
+    return ReviewRecord.from_dict(d)
+
+
+class DbReviewLedger:
+    """The ``reviews`` table as a hash-chained ledger of :class:`ReviewRecord`."""
+
+    def __init__(self, factory: sessionmaker[Session]) -> None:
+        self._factory = factory
+
+    def _lock(self, s: Session) -> None:
+        dialect = s.get_bind().dialect.name
+        if dialect == "sqlite":
+            s.execute(text("BEGIN IMMEDIATE"))
+        elif dialect == "postgresql":
+            s.execute(text("SELECT pg_advisory_xact_lock(7333)"))
+
+    def _last_hash(self, s: Session) -> str:
+        last = s.execute(
+            select(Review.row_hash).order_by(Review.seq.desc()).limit(1)
+        ).scalar_one_or_none()
+        return last or GENESIS_HASH
+
+    def append(self, record: ReviewRecord, *, pack: dict[str, Any] | None = None) -> ReviewRecord:
+        """Anchor-check, chain and insert in one locked transaction. ``pack`` is the
+        reviewed row's evidence pack body; when the caller passes none it is looked up
+        by ``record.evidence_pack_hash`` (a review with a verdict of a row whose pack is
+        not stored is refused — ``no_diff_in_pack``)."""
+        with self._factory() as s:
+            body = pack
+            if body is None and record.reviewed:
+                m = s.get(EvidencePackRow, record.evidence_pack_hash)
+                if m is None:
+                    raise ReviewRefused(
+                        f"no evidence pack {record.evidence_pack_hash[:12]!r}… for the "
+                        "reviewed row — nothing to anchor the review to",
+                        code=REFUSAL_NO_DIFF_IN_PACK,
+                        observed=record.patch_sha256_reviewed,
+                    )
+                body = dict(m.body_json)
+            if body is not None:
+                check_patch_anchor(record, body)
+            self._lock(s)
+            chained = record.chained(self._last_hash(s))
+            s.add(_review_to_model(chained))
+            s.commit()
+        return chained
+
+    def records(
+        self,
+        *,
+        repo: str | None = None,
+        task_id: str | None = None,
+        grade_row_hash: str | None = None,
+    ) -> Iterator[ReviewRecord]:
+        with self._factory() as s:
+            q = select(Review).order_by(Review.seq)
+            if repo:
+                q = q.where(Review.repo == repo)
+            if task_id:
+                q = q.where(Review.task_id == task_id)
+            if grade_row_hash:
+                q = q.where(Review.grade_row_hash == grade_row_hash)
+            for m in s.execute(q).scalars():
+                yield _review_from_model(m)
+
+    def get(self, review_id: str) -> ReviewRecord | None:
+        with self._factory() as s:
+            m = s.execute(select(Review).where(Review.review_id == review_id)).scalar_one_or_none()
+            return None if m is None else _review_from_model(m)
+
+    def count(self) -> int:
+        with self._factory() as s:
+            return int(s.execute(select(func.count(Review.seq))).scalar_one())
+
+    def verify(self) -> int:
+        """Walk the whole review chain in ``seq`` order; raise :class:`LedgerIntegrityError`."""
+        return verify_review_chain(self.records())
 
 
 def assert_append_only(factory: sessionmaker[Session]) -> None:

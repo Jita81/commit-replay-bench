@@ -1,0 +1,172 @@
+"""crb.store.ledger.DbReviewLedger — chain, anchor against the stored pack, append-only.
+
+Parametrised over SQLite and (when ``CRB_TEST_POSTGRES_URL`` is set) PostgreSQL.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+
+from crb.core.grade import Belts, GradeResult
+from crb.core.ledger import GENESIS_HASH, LedgerIntegrityError
+from crb.core.review import (
+    REFUSAL_NO_DIFF_IN_PACK,
+    REFUSAL_PATCH_HASH_MISMATCH,
+    Finding,
+    ReviewRecord,
+    ReviewRefused,
+    verify_review_chain,
+)
+from crb.core.workspace import DiffStats
+from crb.store.db import init_db
+from crb.store.ledger import DbLedger, DbReviewLedger
+
+try:
+    from tests.conftest_store import Backend, backend, evidence_pack, grade_row, pg_schema
+except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
+    from conftest_store import Backend, backend, evidence_pack, grade_row, pg_schema  # noqa: F401
+
+
+@pytest.fixture
+def store(backend: Backend) -> tuple[DbLedger, DbReviewLedger]:
+    init_db(backend.engine)
+    return DbLedger(backend.factory), DbReviewLedger(backend.factory)
+
+
+def _review(row_hash: str, pack_hash: str, diff_sha: str, **kw: Any) -> ReviewRecord:
+    base: dict[str, Any] = {
+        "grade_row_hash": row_hash,
+        "repo": "r",
+        "task_id": "x" * 40,
+        "reviewer": "reviewer@example.org",
+        "statement": "read every hunk",
+        "patch_sha256_reviewed": diff_sha,
+        "evidence_pack_hash": pack_hash,
+    }
+    base.update(kw)
+    return ReviewRecord(**base)
+
+
+def _graded(store: tuple[DbLedger, DbReviewLedger]) -> tuple[str, str, str]:
+    """A stored pack WITH a diff, and a clean row pointing at it → (row_hash, pack_hash, diff_sha)."""
+    ledger, _ = store
+    diff_sha = "d" * 64
+    result = GradeResult(
+        "x" * 40,
+        "r",
+        "sighted",
+        clean=True,
+        belts=Belts(True, True, True, True),
+        diff=DiffStats(files=("src/a.py",), additions=3, deletions=1, diff_sha256=diff_sha),
+    )
+    pack = evidence_pack(grade=result)
+    ledger.store_pack(pack)
+    row = ledger.append(grade_row(evidence_pack_hash=pack.pack_hash))
+    return row.row_hash, pack.pack_hash, diff_sha
+
+
+def test_append_chains_anchors_and_verifies(store: tuple[DbLedger, DbReviewLedger]) -> None:
+    _ledger, reviews = store
+    row_hash, pack_hash, diff_sha = _graded(store)
+    assert reviews.count() == 0 and reviews.verify() == 0
+    r1 = reviews.append(_review(row_hash, pack_hash, diff_sha))
+    r2 = reviews.append(
+        _review(
+            row_hash,
+            pack_hash,
+            diff_sha,
+            verdict="defect",
+            findings=(Finding("defect", "flag ignored", file="a.py", line=3),),
+            mergeable=False,
+        )
+    )
+    assert r1.prev_hash == GENESIS_HASH and r2.prev_hash == r1.row_hash
+    assert r1.verify_hash() and r2.verify_hash()
+    assert reviews.count() == 2 and reviews.verify() == 2
+    got = list(reviews.records())
+    assert [g.review_id for g in got] == [r1.review_id, r2.review_id]
+    assert got[1].findings[0].file == "a.py" and got[1].mergeable is False
+    assert got[1] == r2  # round-trips through the columns byte-for-byte
+    assert verify_review_chain(got) == 2
+    assert reviews.get(r2.review_id) == r2 and reviews.get("nope") is None
+
+
+def test_append_refuses_a_hash_that_is_not_the_packs(
+    store: tuple[DbLedger, DbReviewLedger],
+) -> None:
+    _ledger, reviews = store
+    row_hash, pack_hash, _diff_sha = _graded(store)
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(_review(row_hash, pack_hash, "e" * 64))
+    assert ei.value.code == REFUSAL_PATCH_HASH_MISMATCH
+    assert reviews.count() == 0
+
+
+def test_append_refuses_when_the_pack_is_not_stored(store: tuple[DbLedger, DbReviewLedger]) -> None:
+    _ledger, reviews = store
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(_review("a" * 64, "z" * 64, "d" * 64))
+    assert ei.value.code == REFUSAL_NO_DIFF_IN_PACK
+    # a not_reviewed record attests to nothing and needs no pack
+    nr = reviews.append(
+        _review("a" * 64, "z" * 64, "", verdict="not_reviewed", statement="nothing to read")
+    )
+    assert nr.verify_hash() and reviews.count() == 1
+
+
+def test_append_with_an_explicit_pack_skips_the_lookup(
+    store: tuple[DbLedger, DbReviewLedger],
+) -> None:
+    _ledger, reviews = store
+    pack = {"grade": {"diff": {"diff_sha256": "c" * 64}}}
+    rec = reviews.append(_review("a" * 64, "z" * 64, "c" * 64), pack=pack)
+    assert rec.verify_hash()
+    with pytest.raises(ReviewRefused):
+        reviews.append(_review("a" * 64, "z" * 64, "d" * 64), pack=pack)
+
+
+def test_filters(store: tuple[DbLedger, DbReviewLedger]) -> None:
+    _ledger, reviews = store
+    row_hash, pack_hash, diff_sha = _graded(store)
+    reviews.append(_review(row_hash, pack_hash, diff_sha))
+    reviews.append(_review(row_hash, pack_hash, diff_sha, repo="other", task_id="y" * 40))
+    assert len(list(reviews.records(repo="r"))) == 1
+    assert len(list(reviews.records(task_id="y" * 40))) == 1
+    assert len(list(reviews.records(grade_row_hash=row_hash))) == 2
+    assert len(list(reviews.records(grade_row_hash="0" * 64))) == 0
+
+
+def test_reviews_table_is_append_only(
+    backend: Backend, store: tuple[DbLedger, DbReviewLedger]
+) -> None:
+    _ledger, reviews = store
+    row_hash, pack_hash, diff_sha = _graded(store)
+    rec = reviews.append(_review(row_hash, pack_hash, diff_sha))
+    with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
+        c.execute(
+            text("UPDATE reviews SET verdict = 'ok' WHERE review_id = :id"), {"id": rec.review_id}
+        )
+    with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
+        c.execute(text("DELETE FROM reviews"))
+    assert reviews.count() == 1
+
+
+def test_a_tampered_row_breaks_verify(
+    backend: Backend, store: tuple[DbLedger, DbReviewLedger]
+) -> None:
+    _ledger, reviews = store
+    row_hash, pack_hash, diff_sha = _graded(store)
+    reviews.append(_review(row_hash, pack_hash, diff_sha))
+    reviews.append(_review(row_hash, pack_hash, diff_sha))
+    with backend.engine.begin() as c:
+        if backend.dialect == "sqlite":
+            c.execute(text("DROP TRIGGER reviews_no_update"))
+        else:
+            c.execute(text("DROP TRIGGER reviews_no_update ON reviews"))
+        c.execute(text("UPDATE reviews SET statement = 'edited' WHERE seq = 1"))
+    with pytest.raises(LedgerIntegrityError, match="review 1"):
+        reviews.verify()

@@ -12,21 +12,42 @@ still go through ``GradeRow`` and therefore refuse with ``409 false_q1_refused``
 ``/evidence/{hash}`` returns the stored pack body and ``verified`` = the canonical
 SHA-256 of the body equals the key it was stored under (and, for a native pack, its
 own ``pack_hash`` field).
+
+Retained artefacts (ADR-0006 amendment). A run queued with ``retain.worktrees`` /
+``retain.transcripts`` leaves the graded worktree under the worker's scratch and the
+redacted transcript under ``<home>/transcripts/<run>``; nothing is stored twice.
+``/grades/{row_hash}/patch`` serves the unified diff of that worktree, COMPUTED ON DEMAND
+by the same procedure :meth:`crb.core.workspace.Workspace.diff_stats` hashed at grade
+time (``git diff HEAD`` + every untracked file against ``/dev/null``, in path order),
+redacted, capped at :data:`PATCH_MAX_BYTES`; the response says whether the bytes it
+computed still hash to the pack's ``diff_sha256`` (``X-CRB-Patch-Verified``) and whether
+redaction or the cap changed what was served (``X-CRB-Redacted`` / ``X-CRB-Truncated``).
+The pack's hash is the anchor; a review attests to it (``/reviews``).
+``/grades/{row_hash}/transcript`` serves the retained transcript file the pack refers
+to — only from inside the transcripts directory. Both answer **404** with a one-line
+``reason`` when the artefact was never retained or is gone.
 """
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from crb.core.evidence import canonical_json, sha256_text, verify_pack
+from crb.core.git import GitError, GitRepo
 from crb.core.ledger import GradeRow
+from crb.core.redact import redact
+from crb.core.review import pack_diff_sha256
 from crb.core.spec import TaskSpec
+from crb.core.workspace import Workspace
 from crb.server.auth import ViewerDep
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope
+from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep
 from crb.server.schemas import (
     EvidenceResponse,
     GradeRowOut,
@@ -35,10 +56,22 @@ from crb.server.schemas import (
     TaskDetail,
     TaskSpecOut,
 )
-from crb.store.models import EvidencePackRow, Grade, Task
+from crb.server.schemas_review import RetainedArtefactStatus
+from crb.store.models import EvidencePackRow, Grade, Run, Task
 
 router = APIRouter(tags=["grades"])
 _ERR = {"model": ErrorEnvelope}
+
+#: A served patch is capped here (the hash is computed over the FULL diff first).
+PATCH_MAX_BYTES = 1024 * 1024
+#: The response headers the patch route answers with.
+HDR_DIFF_SHA = "X-CRB-Diff-SHA256"  # the pack's anchor
+HDR_PATCH_SHA = "X-CRB-Patch-SHA256"  # what the worktree hashes to now
+HDR_VERIFIED = "X-CRB-Patch-Verified"  # the two are equal
+HDR_REDACTED = "X-CRB-Redacted"  # redaction changed the served bytes
+HDR_TRUNCATED = "X-CRB-Truncated"  # the cap changed the served bytes
+HDR_SERVED_SHA = "X-CRB-Served-SHA256"  # what the served bytes hash to
+PATCH_MEDIA_TYPE = "text/x-diff; charset=utf-8"
 
 #: The hashed body of a row, in ``GradeRow`` field order (``labels`` is stored as ``labels_json``).
 ROW_FIELDS: tuple[str, ...] = tuple(GradeRow.__dataclass_fields__)
@@ -192,4 +225,279 @@ def get_evidence(pack_hash: str, viewer: ViewerDep, db: DbDep) -> EvidenceRespon
     return evidence_out(get_pack_row(db, pack_hash))
 
 
-__all__ = ["ROW_FIELDS", "evidence_out", "grade_out", "grade_to_dict", "pack_verified", "router"]
+# ---------------------------------------------------------------------------
+# Retained artefacts: the patch and the transcript behind a graded row
+# ---------------------------------------------------------------------------
+
+
+def worktree_path(scratch: Path, *, repo: str, task_id: str, run_id: str, trial: str) -> Path:
+    """Where ``crb.core.run.run_task`` left a row's worktree when the run retained
+    worktrees: ``<scratch>/run-<repo>-<task[:10]>-<run[:8]>-<trial>``."""
+    return scratch / f"run-{repo}-{task_id[:10]}-{run_id[:8]}-{trial}"
+
+
+def _worktree_of(home: Path, g: Grade) -> Path:
+    return worktree_path(
+        home / "scratch", repo=g.repo, task_id=g.task_id, run_id=g.run_id, trial=g.trial
+    )
+
+
+def retained_patch_text(root: Path) -> str:
+    """The unified diff of a retained worktree, assembled EXACTLY as
+    :meth:`crb.core.workspace.Workspace.diff_stats` assembled the text it hashed:
+    ``git diff HEAD`` plus every untracked, non-ignored file diffed against
+    ``/dev/null`` (``--no-index``), appended in path order.
+    ``tests/test_server_routes_reviews.py`` pins the two to the same hash on a real
+    worktree — that test is the drift guard."""
+    repo = GitRepo(root)
+    ws = Workspace(repo, root, sha="HEAD", parent="HEAD")
+    text = repo.diff_text("HEAD", cwd=root)
+    tracked = set(repo.diff_names("HEAD", cwd=root))
+    for rel in ws.touched_files():
+        if rel in tracked:
+            continue
+        p = root / rel
+        if not p.is_file() or p.is_symlink():
+            continue
+        r = repo.run("diff", "--no-index", "--", "/dev/null", rel, cwd=root)
+        if r.stdout:
+            text += ("" if text.endswith("\n") or not text else "\n") + r.stdout
+    return text
+
+
+@dataclass(frozen=True)
+class RetainedPatch:
+    """What the patch route computed: the full text's hash, the bytes to serve, flags."""
+
+    diff_sha256: str  # the pack's anchor
+    patch_sha256: str  # sha256 of the full recomputed text
+    body: str  # redacted, capped
+    redacted: bool
+    truncated: bool
+
+    @property
+    def verified(self) -> bool:
+        return bool(self.diff_sha256) and self.patch_sha256 == self.diff_sha256
+
+    @property
+    def served_sha256(self) -> str:
+        return sha256_text(self.body)
+
+    def headers(self) -> dict[str, str]:
+        return {
+            HDR_DIFF_SHA: self.diff_sha256,
+            HDR_PATCH_SHA: self.patch_sha256,
+            HDR_SERVED_SHA: self.served_sha256,
+            HDR_VERIFIED: "true" if self.verified else "false",
+            HDR_REDACTED: "true" if self.redacted else "false",
+            HDR_TRUNCATED: "true" if self.truncated else "false",
+            "Cache-Control": "no-store",
+        }
+
+
+def build_retained_patch(
+    root: Path, diff_sha256: str, *, cap: int = PATCH_MAX_BYTES
+) -> RetainedPatch:
+    text = retained_patch_text(root)
+    full_hash = sha256_text(text)
+    body = redact(text)
+    redacted = body != text
+    raw = body.encode("utf-8")
+    truncated = len(raw) > cap
+    if truncated:
+        body = raw[:cap].decode("utf-8", errors="ignore")
+    return RetainedPatch(diff_sha256, full_hash, body, redacted, truncated)
+
+
+def _grade_by_hash(session: Session, row_hash: str) -> Grade:
+    g = session.execute(select(Grade).where(Grade.row_hash == row_hash)).scalar_one_or_none()
+    if g is None:
+        raise ApiError(404, "not_found", f"no grade row with row_hash {row_hash[:12]}…")
+    return g
+
+
+def _run_retention(session: Session, run_id: str) -> tuple[bool, bool]:
+    """``(worktrees, transcripts)`` the run asked to retain (``params.retain`` or the
+    legacy ``keep_worktrees`` / ``keep_transcripts`` flags)."""
+    run = session.get(Run, run_id) if run_id else None
+    if run is None:
+        return False, False
+    params = dict(run.params_json or {})
+    retain = dict(params.get("retain") or {})
+    return (
+        bool(retain.get("worktrees") or params.get("keep_worktrees")),
+        bool(retain.get("transcripts") or params.get("keep_transcripts")),
+    )
+
+
+def _transcript_ref(pack: dict[str, Any] | None) -> str:
+    if not pack:
+        return ""
+    builder = pack.get("builder")
+    ref = str(builder.get("transcript_ref", "") or "") if isinstance(builder, dict) else ""
+    if not ref:
+        notes = pack.get("notes")
+        ref = str(notes.get("transcript_ref", "") or "") if isinstance(notes, dict) else ""
+    return ref
+
+
+def _transcript_file(home: Path, ref: str) -> tuple[Path | None, str]:
+    """The transcript file for ``ref`` if it lies inside ``<home>/transcripts`` — a
+    reference anywhere else is refused, never opened (a pack is data, not a path)."""
+    if not ref:
+        return None, "the builder transcript was not retained (retain.transcripts was off)"
+    base = (home / "transcripts").resolve()
+    try:
+        path = Path(ref).resolve()
+    except OSError:
+        return None, "the transcript reference is not a readable path"
+    if base not in path.parents:
+        return None, "the transcript reference points outside the transcripts directory — refused"
+    if not path.is_file():
+        return None, "the retained transcript no longer exists (removed by the retention sweep)"
+    return path, ""
+
+
+def retained_status(session: Session, home: Path, g: Grade) -> RetainedArtefactStatus:
+    """What is reachable for row ``g`` right now, with a one-line reason per artefact."""
+    pack_row = session.get(EvidencePackRow, g.evidence_pack_hash) if g.evidence_pack_hash else None
+    pack = dict(pack_row.body_json or {}) if pack_row is not None else None
+    diff_sha = pack_diff_sha256(pack) if pack else ""
+    wt, tr = _run_retention(session, g.run_id)
+    root = _worktree_of(home, g)
+    if pack is None:
+        patch_ok, patch_reason = (
+            False,
+            "the row has no stored evidence pack — nothing to anchor a patch to",
+        )
+    elif not diff_sha:
+        patch_ok, patch_reason = (
+            False,
+            "the evidence pack records no diff (the trial changed nothing)",
+        )
+    elif not root.is_dir():
+        patch_ok, patch_reason = (
+            False,
+            (
+                "the retained worktree no longer exists (removed by retention)"
+                if wt
+                else "the run did not retain worktrees (retain.worktrees was off) and none exists"
+            ),
+        )
+    elif not (root / ".git").exists():
+        patch_ok, patch_reason = False, "the retained directory is not a git worktree"
+    else:
+        patch_ok, patch_reason = True, ""
+    tpath, treason = _transcript_file(home, _transcript_ref(pack))
+    return RetainedArtefactStatus(
+        row_hash=g.row_hash,
+        run_id=g.run_id,
+        retain_worktrees=wt,
+        retain_transcripts=tr,
+        patch_available=patch_ok,
+        patch_reason=patch_reason,
+        transcript_available=tpath is not None,
+        transcript_reason=treason,
+        diff_sha256=diff_sha,
+        extra={"worktree": str(root)} if patch_ok else {},
+    )
+
+
+@router.get(
+    "/grades/{row_hash}/retained",
+    response_model=RetainedArtefactStatus,
+    responses={401: _ERR, 404: _ERR},
+    summary="Whether the row's retained patch / transcript are reachable, with reasons",
+)
+def get_grade_retained(
+    row_hash: str, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> RetainedArtefactStatus:
+    del viewer
+    return retained_status(db, Path(settings.home), _grade_by_hash(db, row_hash))
+
+
+@router.get(
+    "/grades/{row_hash}/patch",
+    responses={
+        200: {"content": {"text/x-diff": {}}, "description": "The unified diff, redacted"},
+        401: _ERR,
+        404: _ERR,
+    },
+    summary="The retained worktree's unified diff (computed on demand, redacted, ≤ 1 MiB); headers carry the hash check",
+)
+def get_grade_patch(row_hash: str, viewer: ViewerDep, db: DbDep, settings: SettingsDep) -> Response:
+    del viewer
+    g = _grade_by_hash(db, row_hash)
+    status = retained_status(db, Path(settings.home), g)
+    if not status.patch_available:
+        raise ApiError(
+            404,
+            "patch_unavailable",
+            status.patch_reason,
+            detail={"reason": status.patch_reason, **status.model_dump(exclude={"extra"})},
+        )
+    root = _worktree_of(Path(settings.home), g)
+    try:
+        patch = build_retained_patch(root, status.diff_sha256)
+    except GitError as exc:
+        reason = f"git could not read the retained worktree: {redact(str(exc))[:300]}"
+        raise ApiError(404, "patch_unavailable", reason, detail={"reason": reason}) from exc
+    return Response(content=patch.body, media_type=PATCH_MEDIA_TYPE, headers=patch.headers())
+
+
+@router.get(
+    "/grades/{row_hash}/transcript",
+    responses={
+        200: {"content": {"application/json": {}}, "description": "The retained transcript file"},
+        401: _ERR,
+        404: _ERR,
+    },
+    summary="The retained (redacted) builder transcript the row's pack refers to",
+)
+def get_grade_transcript(
+    row_hash: str, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> Response:
+    del viewer
+    g = _grade_by_hash(db, row_hash)
+    status = retained_status(db, Path(settings.home), g)
+    if not status.transcript_available:
+        raise ApiError(
+            404,
+            "transcript_unavailable",
+            status.transcript_reason,
+            detail={"reason": status.transcript_reason, **status.model_dump(exclude={"extra"})},
+        )
+    pack_row = db.get(EvidencePackRow, g.evidence_pack_hash)
+    body = dict(pack_row.body_json or {}) if pack_row is not None else None
+    path, _ = _transcript_file(Path(settings.home), _transcript_ref(body))
+    assert path is not None  # retained_status said so
+    # redacted at write by the adapter; passed through again as defence in depth
+    text = redact(path.read_text(encoding="utf-8", errors="replace"))
+    try:
+        json.loads(text)
+        media = "application/json"
+    except ValueError:
+        media = "text/plain; charset=utf-8"
+    return Response(content=text, media_type=media, headers={"Cache-Control": "no-store"})
+
+
+__all__ = [
+    "HDR_DIFF_SHA",
+    "HDR_PATCH_SHA",
+    "HDR_REDACTED",
+    "HDR_SERVED_SHA",
+    "HDR_TRUNCATED",
+    "HDR_VERIFIED",
+    "PATCH_MAX_BYTES",
+    "ROW_FIELDS",
+    "RetainedPatch",
+    "build_retained_patch",
+    "evidence_out",
+    "grade_out",
+    "grade_to_dict",
+    "pack_verified",
+    "retained_patch_text",
+    "retained_status",
+    "router",
+    "worktree_path",
+]

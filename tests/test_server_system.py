@@ -106,7 +106,7 @@ class TestHealth:
         assert body["role"] == "all"  # no CRB_ROLE: every probe evaluated
         ao = _probe(body, "append_only")
         assert ao["status"] == "ok"
-        assert ao["data"] == {"triggers": 8, "expected": 8}
+        assert ao["data"] == {"triggers": 10, "expected": 10}
         assert _probe(body, "db")["status"] == "ok"
         assert _probe(body, "db")["data"]["users"] == 1
         assert _probe(body, "ledger") == {

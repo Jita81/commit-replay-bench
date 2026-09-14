@@ -14,7 +14,7 @@ it may touch:
 |---|---|---|---|
 | Commit metadata: author date, subject, message | the repository's git history | The commit message is the builder's task description (blind mode) and the task's label | `tasks.spec_json` (subject, authored date); the full message is passed to the builder at run time and **not stored** |
 | Author names / e-mails | git history | **Not used.** crb reads `%aI` (date) and `%s`/`%B` (subject/body) only; author identity fields are never read | — |
-| Operator identity: display name, e-mail, OIDC subject, role | the identity provider or a local account | Authentication, audit (`actor` on every ledger row and event) | `users`; `grades.actor`; `events.actor`; `signoffs.verifier` |
+| Operator identity: display name, e-mail, OIDC subject, role | the identity provider or a local account | Authentication, audit (`actor` on every ledger row and event) | `users`; `grades.actor`; `events.actor`; `signoffs.verifier`; `reviews.reviewer` |
 | Repository file paths and test identifiers | the repository | Verdict evidence: which files changed, which tests failed | `grades`, `evidence`, `events` |
 | Source code | the repository | Read by builders and test runners in a **throwaway worktree** | Worktrees are deleted after grading. Code is **not** stored in the database. Diffs are stored as a hash + counts (see §2) |
 | Model prompts and responses | builder runs | Needed only for debugging | **Not retained by default** (see §2) |
@@ -27,7 +27,8 @@ it may touch:
 | Evidence packs | Kept indefinitely (content-addressed). Contain: the task spec (paths, sha, subject), belt values, **redacted and capped** test-output tails (≤ 8 KB), diff **hash + file list + line counts** (never the diff text), builder cost/turn metrics, the apparatus stamp | — |
 | Events (StepEvents) | Kept, append-only; payloads are redacted at construction | — |
 | Builder transcripts (raw model I/O) | **Off.** `BuildOutcome.transcript` is discarded unless `keep_transcript` is enabled per builder | When enabled: stored under `CRB_HOME/transcripts/` with a `retention.transcripts_days` sweep (default 30); referenced from the pack by `transcript_ref` only |
-| Throwaway worktrees | Deleted immediately after grading (`RunSpec.keep_worktrees=false`) | `keep_worktrees` for debugging only |
+| Throwaway worktrees | Deleted immediately after grading (`RunSpec.keep_worktrees=false`) | `retain.worktrees` on `POST /runs` (per run, operator's choice) or `keep_worktrees` for debugging. A retained worktree is the ONLY source of the served patch (`GET /grades/{row_hash}/patch`, computed on demand, redacted, ≤ 1 MiB, never copied into the database — ADR-0006 amendment); it follows the existing worktree retention and, once removed, the route answers 404 with the reason |
+| Human reviews (`reviews` table: a reviewer's verdict on one graded row — findings, mergeable, statement, the sha256 of the patch they read) | **Kept forever, append-only, hash-chained.** A review is governance evidence: it records that a named person read an accepted change and what they found; deleting it would erase the human half of the audit trail. Revision 0003 refuses to downgrade while any review exists | No deletion path by design. Statements, notes and file names are redacted at write. The reviewer's principal id is on the row (as `actor` is on grades) — pseudonymise the `users` row if required (§6) |
 | Repository clones | Kept on the worker host under `CRB_HOME/repos/` for as long as the repository is configured | Remove the repository to delete |
 | Access logs | JSON to stdout/stderr, redacted; retention is the host's log policy | — |
 | Session cookies | `session_ttl` (default 12 h), signed, `HttpOnly` | `CRB_SESSION_TTL` |
@@ -46,7 +47,7 @@ running repository code. [measured — `tests/test_redact.py`, `tests/test_execu
 | Role | Can see | Cannot |
 |---|---|---|
 | viewer | every verdict, pack, event, capability map, ledger export | create runs, sign off |
-| operator | + create/cancel runs, add repositories, abstract export | sign off, manage users |
+| operator | + create/cancel runs, add repositories, abstract export, record a human review of a graded row (`POST /reviews`, anchored to the patch hash) | sign off, manage users |
 | approver | + sign off cells (human attestation) | manage users |
 | admin | + users, settings (secrets shown only as configured yes/no), ledger import | — |
 
@@ -75,6 +76,10 @@ designed, not implemented — see ADR-0007).
   verify against the old export. Record this as a registered evolution.
 - **Transcripts** (if enabled): deleted by the retention sweep or by removing the file; the
   pack's `transcript_ref` then dangles, which the UI shows honestly.
+- **Retained worktrees**: removing one removes the served patch; the pack's `diff_sha256`
+  and any review anchored to it remain (they are hashes and verdicts, not code).
+- **Reviews**: never deleted (see §2). A review that must not be read any more is handled
+  like a ledger row: export, remove, re-import into a new ledger, and record the evolution.
 
 ## 7. Where data lives (self-hosted)
 

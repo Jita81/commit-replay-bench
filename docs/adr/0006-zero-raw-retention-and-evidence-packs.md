@@ -1,8 +1,10 @@
 # ADR-0006 — Zero raw retention by default; evidence packs
 
-**Status:** Accepted
+**Status:** Accepted — amended 2026-09-14 (retained patches are served, never stored twice;
+human reviews are first-class ledger rows)
 **Date:** 2026-09-13
-**Apparatus impact:** none; `EVIDENCE_SCHEMA = "crb.evidence.v1"`
+**Apparatus impact:** none; `EVIDENCE_SCHEMA = "crb.evidence.v1"`; the amendment adds
+`REVIEW_SCHEMA = "crb.review.v1"` and store revision `0003` (the `reviews` table)
 
 ## Context
 
@@ -68,3 +70,50 @@ not stored; transcripts were sometimes retained inline.
   gigabytes into the evidence store.
 - **Redact at display time only.** Rejected: the stored artefact is what leaks in a backup
   or an export.
+
+## Amendment 2026-09-14 — retained patches are served; human reviews are ledger rows
+
+The 2026-09-13 critical-friend review (§5 plays 05 and 07, action #3) found two gaps in
+what this ADR stores: a human cannot re-examine the diff the instrument accepted (the pack
+holds `diff_sha256` + counts), and a human's post-hoc finding on an accepted change has
+nowhere to live. The NHS public-repos measurement (2026-09-14, §4) confirmed the need:
+three of three clean patches were mechanically clean and plausibly not the PR a maintainer
+would merge as-is. The retention switch (`retain: {worktrees, transcripts}` on `POST /runs`,
+655e732) left the artefacts behind; this amendment makes them reachable and gives the
+verdict a home. Three rules:
+
+1. **Retained patches are served, never stored twice.** `GET /grades/{row_hash}/patch`
+   computes the unified diff of the retained worktree ON DEMAND, by exactly the procedure
+   `Workspace.diff_stats` hashed at grade time (`git diff HEAD` plus every untracked file
+   against `/dev/null`, in path order), passes it through `crb.core.redact` and caps it at
+   1 MiB. Nothing new is written to the database: the pack keeps its hash and counts, the
+   worktree keeps the bytes, and each answers for the other. When the worktree is gone
+   (retention), the route says so with a reason — it never falls back to a stored copy,
+   because there is none. Rule 2 above ("diffs are stored as hash + statistics") stands.
+2. **The pack's hash is the anchor.** The response carries what the worktree hashes to now
+   and whether that equals the pack's `diff_sha256` (`X-CRB-Patch-Verified`); the UI hashes
+   the bytes it received and shows a warning when they do not match the anchor (redaction,
+   the cap, or drift). A reviewer attests to bytes: `POST /reviews` is refused (422
+   `review_refused`) unless the `patch_sha256` the reviewer loaded equals the pack's
+   `diff_sha256`. A patch whose bytes cannot be reproduced exactly — the worktree is gone,
+   or redaction changed them — cannot be reviewed through the product; the reviewer may
+   record `not_reviewed`, which attests to nothing.
+3. **Human reviews are first-class ledger rows.** `crb.core.review.ReviewRecord` — one
+   verdict on one graded row (`grade_row_hash`), with `findings [{kind, note, file, line}]`
+   whose most severe kind IS the verdict (one rule, `derive_verdict`), `mergeable`, a
+   redacted `statement`, `patch_sha256_reviewed`, the reviewer and the apparatus — lives in
+   the `reviews` table: append-only (the same triggers as `grades`), hash-chained on its own
+   `prev_hash` / `row_hash`, verified by `GET /reviews/verify` from the stored columns so a
+   tampered row is reported, not hidden. A later review of the same row is a new record;
+   the latest per row is the standing verdict. Reviews are governance evidence and are kept
+   forever (`docs/DATA-RETENTION.md`); no migration may drop the table while it holds a row.
+   The standing verdicts are joined onto the capability cells (`n_reviewed`,
+   `n_review_defects`; `GET /reviews/stats`) so a cell can say how much of it a human has
+   read — without changing `CellStats` or the routing rule.
+
+Consequences: an auditor now opens the pack, the patch and the human verdict from one row,
+and the three agree by hash rather than by trust. The product still holds no second copy of
+the customer's source; retention of the worktree remains the operator's per-run choice and
+follows the existing sweep. Transcripts (`GET /grades/{row_hash}/transcript`) are served
+only from inside `<home>/transcripts/` — a pack's reference is data, never a path to open.
+
