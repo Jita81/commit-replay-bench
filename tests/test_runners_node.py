@@ -287,3 +287,21 @@ def test_parse_load_failure_fails_closed(trial, runner, executor, tool):
         assert len(run.failing) == 1
         (fid,) = run.failing
         assert fid.startswith("suite:") and fid.endswith(noderepo.test_sub(tool))
+
+
+def test_planted_node_modules_link_is_git_ignored(trial, config, tool):
+    """The harness plants ``node_modules`` as a symlink. A repo whose ``.gitignore``
+    says ``node_modules/`` (trailing slash = directory only) does not ignore a
+    symlink, so the link surfaced as an untracked touched file and
+    ``discard_source_edits`` deleted it — every grade then failed with
+    ``FileNotFoundError: 'jest'`` (nhsuk-react-components, 2026-09-13). The worktree's
+    ``info/exclude`` must hide it whatever the repo's pattern says."""
+    from crb.builders.adapter import discard_source_edits
+
+    if tool == "node":
+        pytest.skip("dependency-free fixture has no node_modules to plant")
+    (trial.root / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    assert "node_modules" not in trial.touched_files()
+    discarded = discard_source_edits(trial, config, [])
+    assert "node_modules" not in discarded
+    assert (trial.root / "node_modules").is_symlink()

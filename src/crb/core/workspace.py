@@ -123,8 +123,27 @@ class Workspace:
             if not link.exists() and main_nm.is_dir():
                 with contextlib.suppress(OSError):
                     link.symlink_to(main_nm)
+                    self._exclude_from_git("/node_modules")
         for hook in config.runner_opts.get("post_create", []) or []:
             self._apply_hook(hook)
+
+    def _exclude_from_git(self, pattern: str) -> None:
+        """Ignore a harness fixup in THIS worktree only (``info/exclude``).
+
+        A repo's ``.gitignore`` commonly says ``node_modules/`` — the trailing slash
+        matches a directory, not the symlink the harness plants — so the link showed
+        up as an untracked touched file and ``discard_source_edits`` deleted it,
+        after which every grade failed with ``FileNotFoundError: 'jest'``
+        (NHSDigital/nhsuk-react-components, 2026-09-13). The exclude file is
+        per-worktree, never committed, never seen by the builder as a change.
+        """
+        rel = self.repo.run("rev-parse", "--git-path", "info/exclude", cwd=self.root).stdout
+        path = Path(rel.strip())
+        if not path.is_absolute():
+            path = self.root / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(f"{pattern}\n")
 
     def _apply_hook(self, hook: Mapping[str, Any]) -> None:
         if "write_if_missing" in hook:
