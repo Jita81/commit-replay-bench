@@ -121,7 +121,9 @@ def test_qualify_produces_a_gold_clean_task(
     assert task.baseline_failing == (pr.TEST_SUBTRACT,)  # collection error at the parent
     assert task.src_churn == pr.FEAT_SRC_CHURN
     assert task.size == "XS"
-    assert task.capability_class == "bug.fix"
+    # the miner assigns the PATH axis only; the intent label is a later, separate step
+    assert task.path_class == "bug.fix" and task.intent is None
+    assert task.capability_class == "bug.fix" and task.class_source == "path"
     assert task.gold_clean is True
     assert task.gold_note == ""
     assert task.labels == {}
@@ -468,3 +470,36 @@ def test_mine_continues_past_a_skipped_candidate(
 def test_mine_outcome_dataclass_defaults() -> None:
     o = m.MineOutcome("abc", None)
     assert o.skipped_reason == "" and o.duration_s == 0.0
+
+
+def test_mined_task_serialises_both_class_axes_and_survives_a_label(
+    pyrepo: pr.PyRepo, runner: PytestRunner, executor: LocalExecutor, tmp_path: Path
+) -> None:
+    """What ``crb mine`` writes carries ``path_class`` + ``intent: null``; a later label
+    (the ``label`` run / ``crb tasks label``) changes the resolved class and nothing the
+    miner measured."""
+    from crb.core.classify import IntentLabel
+    from crb.core.spec import TaskSpec
+
+    out = m.qualify(
+        pyrepo.repo,
+        pyrepo.config,
+        _feat_candidate(pyrepo),
+        runner=runner,
+        executor=executor,
+        scratch=tmp_path / "scratch",
+    )
+    assert out.task is not None
+    d = out.task.to_dict()
+    assert d["path_class"] == "bug.fix" and d["intent"] is None and d["class_source"] == "path"
+    labelled = out.task.with_(intent=IntentLabel("feature.add", 0.9, "adds subtract", "m"))
+    assert labelled.capability_class == "feature.add" and labelled.path_class == "bug.fix"
+    unchanged = {
+        k: v
+        for k, v in labelled.to_dict().items()
+        if k not in {"capability_class", "intent", "class_source"}
+    }
+    assert unchanged == {
+        k: v for k, v in d.items() if k not in {"capability_class", "intent", "class_source"}
+    }
+    assert TaskSpec.from_dict(labelled.to_dict()) == labelled

@@ -7,8 +7,11 @@ is enforced by import-linter in CI (see ``[tool.importlinter]`` in
 
 The engine is deliberately small and mechanical:
 
-* :mod:`crb.core.spec`      — the vocabulary: languages, size tiers, change
-  classes, repo config, task spec.
+* :mod:`crb.core.taxonomy`  — the closed change-class vocabulary (path + intent) as data.
+* :mod:`crb.core.classify`  — the intent label, its evidence hash, and the one
+  resolution rule (human > confident intent > path).
+* :mod:`crb.core.spec`      — the vocabulary: languages, size tiers, path
+  classifier, repo config, task spec (two class axes → one resolved class).
 * :mod:`crb.core.git`       — a thin, argv-only git wrapper.
 * :mod:`crb.core.execution` — where commands run: on the host, or inside a
   hardened, network-less container (fail-closed).

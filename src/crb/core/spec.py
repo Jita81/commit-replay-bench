@@ -9,9 +9,15 @@ Design rules
   carried their own churn→tier boundaries. There is exactly one now
   (:data:`SIZE_TIERS`); it is the census table (the largest measured corpus) and
   it is stamped by :data:`crb.core.version.APPARATUS_VERSION`.
-* **Deterministic change classes.** :func:`classify_path` is the language-agnostic
-  15-class taxonomy (path role + extension; most-specific wins; no LLM). A commit's
-  class is the class of its *source* files, resolved by :func:`classify_commit`.
+* **Two class axes, one resolved class.** :func:`classify_path` is the deterministic
+  path taxonomy (path role + extension; most-specific wins; no LLM); a commit's
+  *path class* is the class of its *source* files (:func:`classify_commit`). It is
+  blind to intent — on a library repository every code change is ``bug.fix`` — so a
+  task may also carry an :class:`~crb.core.classify.IntentLabel` (a model's or a
+  human's judgement, made without the diff body). ``TaskSpec.capability_class`` is
+  the **resolved** class (:func:`~crb.core.classify.resolve`: human > confident
+  intent > path) and is what every cell key, ledger row and capability map keys
+  on. The vocabulary is closed and lives in :mod:`crb.core.taxonomy`.
 * **Repo config is data.** :class:`RepoConfig` says how to tell source from test,
   which runner to use, and what the regression belt covers. It round-trips to JSON
   and can load the census ``configs.json`` shape unchanged.
@@ -25,6 +31,9 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from crb.core.classify import IntentLabel, resolve
+from crb.core.taxonomy import ALL_CLASSES, CLASS_VOCABULARY, INTENT_CLASSES, UNCLASSIFIED
 
 # ---------------------------------------------------------------------------
 # Languages
@@ -90,25 +99,8 @@ def size_tier(src_churn: int) -> str:
 # Change classes (language-agnostic, deterministic)
 # ---------------------------------------------------------------------------
 
-UNCLASSIFIED = "(unclassified)"
-
-#: The full taxonomy so a capability map can report 0-count classes honestly.
-ALL_CLASSES: tuple[str, ...] = (
-    "backend.migration.add",
-    "backend.model.edit",
-    "backend.route.add",
-    "backend.route.edit",
-    "bug.fix",
-    "ci.workflow.edit",
-    "docs.update",
-    "frontend.component.add",
-    "frontend.component.edit",
-    "frontend.route.add",
-    "infra.helm.edit",
-    "infra.terraform.edit",
-    "test.add",
-    "test.fix",
-)
+# ``UNCLASSIFIED``, ``ALL_CLASSES`` (the path taxonomy), ``INTENT_CLASSES`` and the closed
+# ``CLASS_VOCABULARY`` are defined once in :mod:`crb.core.taxonomy` and re-exported here.
 
 _CODE_EXTS = frozenset(
     {
@@ -482,6 +474,15 @@ class TaskSpec:
     test files overlaid, the target tests are RED (``red_checked``), and — once
     gold-checked — the commit's own source turns them GREEN with no new failures
     in the belt scope (``gold_clean``). Both are recorded, never assumed.
+
+    Class axes: ``path_class`` is the class assigned without an intent label (the
+    miner's :func:`classify_commit`; the backlog's declared class for a factory
+    task); ``intent`` is an optional :class:`~crb.core.classify.IntentLabel`.
+    ``capability_class`` is **derived** at construction —
+    :func:`~crb.core.classify.resolve` (human > confident intent > path) — and is
+    what every consumer keys on; passing it without ``path_class`` (the pre-label
+    shape, and every stored task from before labels existed) makes it the path
+    class. ``class_source`` says which axis won.
     """
 
     task_id: str  # the commit sha (full)
@@ -502,6 +503,8 @@ class TaskSpec:
     gold_clean: bool | None = None
     gold_note: str = ""
     labels: Mapping[str, str] = field(default_factory=dict)
+    path_class: str = ""
+    intent: IntentLabel | None = None
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[0-9a-f]{7,64}", self.task_id):
@@ -517,10 +520,25 @@ class TaskSpec:
         for attr in ("test_files", "src_files", "target_tests", "belt_scope", "baseline_failing"):
             object.__setattr__(self, attr, tuple(getattr(self, attr)))
         object.__setattr__(self, "labels", dict(self.labels))
+        # Class axes → the resolved class (the invariant every consumer relies on).
+        if not self.path_class:
+            object.__setattr__(self, "path_class", self.capability_class or UNCLASSIFIED)
+        object.__setattr__(
+            self, "capability_class", resolve(self.path_class, self.intent).capability_class
+        )
 
     @property
     def short_id(self) -> str:
         return self.task_id[:10]
+
+    @property
+    def class_source(self) -> str:
+        """Which axis produced ``capability_class``: ``human`` | ``intent`` | ``path``."""
+        return resolve(self.path_class, self.intent).source
+
+    @property
+    def class_reason(self) -> str:
+        return resolve(self.path_class, self.intent).reason
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -542,12 +560,26 @@ class TaskSpec:
             "gold_clean": self.gold_clean,
             "gold_note": self.gold_note,
             "labels": dict(self.labels),
+            "path_class": self.path_class,
+            "intent": self.intent.to_dict() if self.intent is not None else None,
+            "class_source": self.class_source,  # derived; ignored on load
         }
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> TaskSpec:
-        """Load from the native shape OR a census ``<repo>_tasks.json`` record."""
+        """Load from the native shape OR a census ``<repo>_tasks.json`` record.
+
+        Pre-label records carry ``capability_class`` only: it becomes ``path_class``
+        and, with no intent, the resolved class — byte-for-byte the old verdict."""
         task_id = str(d.get("task_id") or d.get("task") or d.get("commit"))
+        raw_intent = d.get("intent")
+        intent: IntentLabel | None
+        if isinstance(raw_intent, IntentLabel):
+            intent = raw_intent
+        elif isinstance(raw_intent, Mapping):
+            intent = IntentLabel.from_dict(raw_intent)
+        else:
+            intent = None
         return cls(
             task_id=task_id,
             repo=str(d.get("repo", "")),
@@ -569,9 +601,41 @@ class TaskSpec:
             gold_clean=d.get("gold_clean"),
             gold_note=str(d.get("gold_note", "")),
             labels=dict(d.get("labels") or {}),
+            path_class=str(d.get("path_class") or ""),
+            intent=intent,
         )
 
     def with_(self, **changes: Any) -> TaskSpec:
+        """A copy with fields replaced. ``capability_class`` is derived, so changing
+        it alone changes the *path* class (the only axis a caller sets directly);
+        ``intent`` accepts an :class:`~crb.core.classify.IntentLabel`, a dict or
+        ``None`` (clears the label)."""
         d = self.to_dict()
+        if "capability_class" in changes and "path_class" not in changes:
+            changes = {**changes, "path_class": changes["capability_class"]}
         d.update(changes)
         return TaskSpec.from_dict(d)
+
+
+__all__ = [
+    "ALL_CLASSES",
+    "BELT_AFFECTED_DIRS",
+    "BELT_BARE",
+    "BELT_TARGET_ONLY",
+    "CLASS_VOCABULARY",
+    "INTENT_CLASSES",
+    "POOL_HARD",
+    "POOL_STANDARD",
+    "RUNNERS",
+    "SIZE_TIERS",
+    "SIZE_TIER_NAMES",
+    "UNCLASSIFIED",
+    "IntentLabel",
+    "Language",
+    "RepoConfig",
+    "TaskSpec",
+    "classify_commit",
+    "classify_path",
+    "is_test_path",
+    "size_tier",
+]

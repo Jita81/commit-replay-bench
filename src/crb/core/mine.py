@@ -12,6 +12,10 @@ measured, never assumed:
    new belt failures. A task whose gold does not pass is kept but flagged
    ``gold_clean=False`` and is excluded from capability statistics: the oracle
    could not be satisfied by the humans' own patch, so it cannot judge a builder.
+
+The miner assigns the **path class** only (:func:`~crb.core.spec.classify_commit`);
+the intent label is a separate step (:mod:`crb.core.classify`) so mining never
+needs a model.
 """
 
 from __future__ import annotations
@@ -151,7 +155,10 @@ def qualify(
             pool=pool,
             src_churn=churn,
             size=size_tier(churn),
-            capability_class=classify_commit(list(cand.src_files)),
+            # The path axis only: intent labels are a separate, later step (`label` run /
+            # ``crb tasks label``), so a freshly mined task resolves to its path class.
+            path_class=classify_commit(list(cand.src_files)),
+            intent=None,
             language=config.language.value,
             baseline_failing=tuple(sorted(base.failing)),
             red_checked=True,

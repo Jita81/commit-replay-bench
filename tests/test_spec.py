@@ -688,12 +688,14 @@ def test_task_spec_from_dict_derives_size_and_class_when_absent() -> None:
     d = _task().to_dict()
     del d["size"]
     del d["capability_class"]
+    del d["path_class"]  # the same axis: a record without a class carries neither
     del d["baseline_failing"]
     d["src_churn"] = 50
     d["src_files"] = ["app/models/user.py"]
     t = TaskSpec.from_dict(d)
     assert t.size == "M"
     assert t.capability_class == "backend.model.edit"
+    assert t.path_class == "backend.model.edit" and t.class_source == "path"
     assert t.red_checked is False
     assert TaskSpec.from_dict({**d, "task_id": None, "commit": _SHA}).task_id == _SHA
 
@@ -729,3 +731,96 @@ def test_ext_and_test_suffix_accept_alternatives() -> None:
     assert cfg.is_src("src/a/A.tsx") and cfg.is_src("src/index.ts")
     assert not cfg.is_src("src/a/__tests__/A.test.tsx")
     assert cfg.language_files(["src/a.ts", "src/b.tsx", "README.md"]) == ["src/a.ts", "src/b.tsx"]
+
+
+# ---------------------------------------------------------------------------
+# TaskSpec: the two class axes and the resolved class
+# ---------------------------------------------------------------------------
+
+
+def test_task_spec_capability_class_is_resolved_from_path_and_intent() -> None:
+    from crb.core.classify import IntentLabel, human_label
+
+    t = _task(capability_class="bug.fix")  # the pre-label constructor shape
+    assert (t.path_class, t.capability_class, t.class_source) == ("bug.fix", "bug.fix", "path")
+    assert t.intent is None and t.class_reason == "no intent label"
+
+    confident = IntentLabel("feature.add", 0.9, "adds an option", "claude_code:claude-sonnet-5")
+    t2 = t.with_(intent=confident)
+    assert (t2.path_class, t2.capability_class, t2.class_source) == (
+        "bug.fix",
+        "feature.add",
+        "intent",
+    )
+    weak = IntentLabel("feature.add", 0.4, "unsure", "claude_code:claude-sonnet-5")
+    t3 = t.with_(intent=weak)
+    assert (t3.capability_class, t3.class_source) == ("bug.fix", "path")
+    assert "below threshold" in t3.class_reason
+    t4 = t3.with_(intent=human_label("behavior.change", by="reviewer"))
+    assert (t4.capability_class, t4.class_source) == ("behavior.change", "human")
+    # clearing the label restores the path class
+    assert t4.with_(intent=None).capability_class == "bug.fix"
+    # a direct TaskSpec(path_class=…, intent=…) construction resolves the same way
+    direct = _task(path_class="docs.update", intent=confident)
+    assert direct.capability_class == "feature.add" and direct.class_source == "intent"
+
+
+def test_task_spec_with_capability_class_moves_the_path_axis() -> None:
+    """``capability_class`` is derived; callers who set it (fixtures, the factory) are
+    setting the path/declared class, and an intent label still takes precedence."""
+    from crb.core.classify import IntentLabel
+
+    t = _task(capability_class="bug.fix").with_(capability_class="docs.update")
+    assert t.path_class == "docs.update" and t.capability_class == "docs.update"
+    labelled = t.with_(intent=IntentLabel("refactor", 0.95, "r", "m"))
+    moved = labelled.with_(capability_class="test.add")
+    assert moved.path_class == "test.add" and moved.capability_class == "refactor"
+
+
+def test_task_spec_round_trip_with_intent_and_derived_fields() -> None:
+    from crb.core.classify import IntentLabel
+
+    t = _task(capability_class="bug.fix").with_(
+        intent=IntentLabel(
+            "perf",
+            0.85,
+            "faster",
+            "openai_agent:gpt-oss-120b@cerebras",
+            labelled_at="2026-09-13T10:00:00+00:00",
+            evidence_hash="cd" * 32,
+        )
+    )
+    d = t.to_dict()
+    json.dumps(d)
+    assert d["path_class"] == "bug.fix" and d["capability_class"] == "perf"
+    assert d["class_source"] == "intent" and d["intent"]["labeller"].startswith("openai_agent:")
+    assert TaskSpec.from_dict(d) == t
+    # the derived key is informational: dropping it changes nothing
+    del d["class_source"]
+    assert TaskSpec.from_dict(d) == t
+    # an intent given as a dict (the stored shape) or an IntentLabel loads alike
+    assert TaskSpec.from_dict({**d, "intent": t.intent}) == t
+
+
+def test_task_spec_loads_records_from_before_labels_existed() -> None:
+    """Every stored task predating this field set carries ``capability_class`` only;
+    it must load unchanged: that value is the path class and the resolved class."""
+    old = _task(capability_class="backend.route.add").to_dict()
+    for k in ("path_class", "intent", "class_source"):
+        del old[k]
+    t = TaskSpec.from_dict(old)
+    assert t.path_class == "backend.route.add" and t.capability_class == "backend.route.add"
+    assert t.intent is None and t.class_source == "path"
+    # the census record shape (no class at all) derives both axes from src_files
+    census = TaskSpec.from_dict({**_CENSUS_TASK, "repo": "sqlalchemy"})
+    assert census.path_class == "bug.fix" and census.class_source == "path"
+
+
+def test_intent_classes_extend_the_closed_vocabulary() -> None:
+    from crb.core.spec import CLASS_VOCABULARY, INTENT_CLASSES
+
+    assert set(INTENT_CLASSES) == {"behavior.change", "feature.add", "perf", "refactor"}
+    assert set(INTENT_CLASSES).isdisjoint(ALL_CLASSES)  # bug.fix is shared, and in ALL_CLASSES
+    assert set(CLASS_VOCABULARY) == set(ALL_CLASSES) | set(INTENT_CLASSES)
+    # the path classifier never returns an intent-only class
+    assert classify_commit(["command.go", "completions.go"]) == "bug.fix"
