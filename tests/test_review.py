@@ -9,14 +9,18 @@ from typing import Any
 
 import pytest
 
+from crb.core.evidence import canonical_json, sha256_text
 from crb.core.ledger import GENESIS_HASH, GradeRow, LedgerIntegrityError
 from crb.core.review import (
     DEFECT_VERDICTS,
     FINDING_KINDS,
     REFUSAL_NO_DIFF_IN_PACK,
+    REFUSAL_PACK_MISMATCH,
+    REFUSAL_PACK_REQUIRED,
     REFUSAL_PATCH_HASH_MISMATCH,
     REFUSAL_PATCH_HASH_MISSING,
     REFUSAL_ROW_HASH_MISSING,
+    REFUSAL_ROW_MISMATCH,
     REVIEW_SCHEMA,
     VERDICTS,
     Finding,
@@ -25,21 +29,23 @@ from crb.core.review import (
     ReviewRecord,
     ReviewRefused,
     check_patch_anchor,
+    check_review_anchor,
     derive_verdict,
     is_sha256,
     latest_reviews,
     pack_diff_sha256,
+    pack_is_authentic,
     review_cell_stats,
     verify_review_chain,
 )
 
 DIFF_SHA = "d" * 64
 ROW_HASH = "a" * 64
-PACK_HASH = "p" * 64
 
 
 def pack(diff_sha: str | None = DIFF_SHA) -> dict[str, Any]:
-    """A serialised evidence pack with (or without) a recorded diff."""
+    """A serialised evidence pack with (or without) a recorded diff. Content-addressed
+    like a real one: ``pack_hash`` recomputes from the body (``verify_pack``)."""
     grade: dict[str, Any] = {"clean": True}
     if diff_sha is not None:
         grade["diff"] = {
@@ -48,7 +54,12 @@ def pack(diff_sha: str | None = DIFF_SHA) -> dict[str, Any]:
             "deletions": 1,
             "diff_sha256": diff_sha,
         }
-    return {"schema": "crb.evidence.v1", "grade": grade, "pack_hash": PACK_HASH}
+    body = {"schema": "crb.evidence.v1", "grade": grade}
+    return {**body, "pack_hash": sha256_text(canonical_json(body))}
+
+
+#: The hash of the with-diff pack — what the records and rows below name.
+PACK_HASH = pack()["pack_hash"]
 
 
 def record(**kw: Any) -> ReviewRecord:
@@ -253,11 +264,77 @@ def test_jsonl_ledger_chains_verifies_and_anchors(tmp_path: Path) -> None:
     assert led.verify() == 2  # nothing was written
 
 
+def test_jsonl_ledger_requires_the_reviewed_rows_pack_for_a_verdict(tmp_path: Path) -> None:
+    """Independent review pass (2026-09-14), finding 5: ``JsonlReviewLedger.append``
+    without ``pack`` checked nothing. A verdict is never chained without the reviewed
+    row's own, self-certifying pack; a ``not_reviewed`` record needs none."""
+    led = JsonlReviewLedger(tmp_path / "reviews.jsonl")
+    with pytest.raises(ReviewRefused) as ei:
+        led.append(record())
+    assert ei.value.code == REFUSAL_PACK_REQUIRED
+    assert led.verify() == 0
+    nr = led.append(record(verdict="not_reviewed", patch_sha256_reviewed=""))
+    assert nr.verify_hash() and led.verify() == 1
+    # the sign-off's cross-row reproduction: row A's review carrying row B's pack and
+    # B's diff hash. B's pack is authentic for the record's OWN field, so the pack
+    # alone cannot tell; the row can, and the row is what the caller hands in.
+    b_pack = pack("2" * 64)
+    cross = record(
+        grade_row_hash=ROW_HASH,
+        evidence_pack_hash=b_pack["pack_hash"],
+        patch_sha256_reviewed="2" * 64,
+    )
+    row_a = grade_row().chained(GENESIS_HASH)
+    with pytest.raises(ReviewRefused) as ei:
+        led.append(cross, pack=b_pack, row=GradeRow(**{**row_a.fields(), "row_hash": ROW_HASH}))
+    assert ei.value.code == REFUSAL_PACK_MISMATCH
+    assert ei.value.expected == PACK_HASH and ei.value.observed == b_pack["pack_hash"]
+    # a pack that is not the record's (hash does not recompute, or names another)
+    with pytest.raises(ReviewRefused) as ei:
+        led.append(record(), pack={**pack(), "pack_hash": "p" * 64})
+    assert ei.value.code == REFUSAL_PACK_MISMATCH
+    with pytest.raises(ReviewRefused) as ei:
+        led.append(record(), pack={**pack(), "grade": {"clean": False}})  # tampered body
+    assert ei.value.code == REFUSAL_PACK_MISMATCH
+    # the wrong row handed in
+    with pytest.raises(ReviewRefused) as ei:
+        led.append(record(), pack=pack(), row=GradeRow(**{**row_a.fields(), "row_hash": "b" * 64}))
+    assert ei.value.code == REFUSAL_ROW_MISMATCH
+    assert led.verify() == 1  # nothing above was written
+    # the honest path: the row's own pack (and the row) → chained
+    ok = led.append(record(), pack=pack(), row=GradeRow(**{**row_a.fields(), "row_hash": ROW_HASH}))
+    assert ok.verify_hash() and led.verify() == 2
+
+
+def test_check_review_anchor_and_pack_authenticity() -> None:
+    assert pack_is_authentic(pack(), PACK_HASH)
+    assert not pack_is_authentic(pack(), "q" * 64)
+    assert not pack_is_authentic({**pack(), "pack_hash": "q" * 64}, "q" * 64)
+    assert not pack_is_authentic(pack(), "")
+    check_review_anchor(record(), pack=pack())
+    check_review_anchor(record(verdict="not_reviewed", patch_sha256_reviewed=""), pack=None)
+    with pytest.raises(ReviewRefused) as ei:
+        check_review_anchor(record(), pack=None)
+    assert ei.value.code == REFUSAL_PACK_REQUIRED
+    with pytest.raises(ReviewRefused) as ei:
+        check_review_anchor(record(patch_sha256_reviewed="e" * 64), pack=pack())
+    assert ei.value.code == REFUSAL_PATCH_HASH_MISMATCH
+    with pytest.raises(ReviewRefused) as ei:
+        check_review_anchor(record(evidence_pack_hash=pack(None)["pack_hash"]), pack=pack(None))
+    assert ei.value.code == REFUSAL_NO_DIFF_IN_PACK
+    # a not_reviewed record with a pack that is not its row's is still refused
+    with pytest.raises(ReviewRefused) as ei:
+        check_review_anchor(
+            record(verdict="not_reviewed", patch_sha256_reviewed=""), pack=pack("2" * 64)
+        )
+    assert ei.value.code == REFUSAL_PACK_MISMATCH
+
+
 def test_jsonl_ledger_detects_edit_reorder_and_removal(tmp_path: Path) -> None:
     path = tmp_path / "reviews.jsonl"
     led = JsonlReviewLedger(path)
     for i in range(3):
-        led.append(record(statement=f"review {i}"))
+        led.append(record(statement=f"review {i}"), pack=pack())
     lines = path.read_text(encoding="utf-8").splitlines()
 
     edited = json.loads(lines[1])

@@ -15,7 +15,9 @@ from crb.core.grade import Belts, GradeResult
 from crb.core.ledger import GENESIS_HASH, LedgerIntegrityError
 from crb.core.review import (
     REFUSAL_NO_DIFF_IN_PACK,
+    REFUSAL_PACK_MISMATCH,
     REFUSAL_PATCH_HASH_MISMATCH,
+    REFUSAL_ROW_NOT_FOUND,
     Finding,
     ReviewRecord,
     ReviewRefused,
@@ -106,27 +108,113 @@ def test_append_refuses_a_hash_that_is_not_the_packs(
     assert reviews.count() == 0
 
 
-def test_append_refuses_when_the_pack_is_not_stored(store: tuple[DbLedger, DbReviewLedger]) -> None:
+def test_append_refuses_a_row_this_ledger_does_not_hold(
+    store: tuple[DbLedger, DbReviewLedger],
+) -> None:
+    """A review is a verdict on a row THIS ledger holds — with or without a verdict."""
     _ledger, reviews = store
     with pytest.raises(ReviewRefused) as ei:
         reviews.append(_review("a" * 64, "z" * 64, "d" * 64))
-    assert ei.value.code == REFUSAL_NO_DIFF_IN_PACK
-    # a not_reviewed record attests to nothing and needs no pack
-    nr = reviews.append(
-        _review("a" * 64, "z" * 64, "", verdict="not_reviewed", statement="nothing to read")
-    )
-    assert nr.verify_hash() and reviews.count() == 1
+    assert ei.value.code == REFUSAL_ROW_NOT_FOUND
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(
+            _review("a" * 64, "z" * 64, "", verdict="not_reviewed", statement="nothing to read")
+        )
+    assert ei.value.code == REFUSAL_ROW_NOT_FOUND
+    assert reviews.count() == 0
 
 
-def test_append_with_an_explicit_pack_skips_the_lookup(
+def test_append_refuses_when_the_rows_pack_is_not_stored(
     store: tuple[DbLedger, DbReviewLedger],
 ) -> None:
-    _ledger, reviews = store
-    pack = {"grade": {"diff": {"diff_sha256": "c" * 64}}}
-    rec = reviews.append(_review("a" * 64, "z" * 64, "c" * 64), pack=pack)
+    ledger, reviews = store
+    row = ledger.append(grade_row(clean=False, target_green=False, evidence_pack_hash=""))
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(_review(row.row_hash, "", "d" * 64))
+    assert ei.value.code == REFUSAL_NO_DIFF_IN_PACK
+    # a not_reviewed record attests to nothing and needs no pack — but its pack field
+    # must still be the row's
+    nr = reviews.append(
+        _review(row.row_hash, "", "", verdict="not_reviewed", statement="nothing to read")
+    )
+    assert nr.verify_hash() and reviews.count() == 1
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(
+            _review(row.row_hash, "z" * 64, "", verdict="not_reviewed", statement="nothing")
+        )
+    assert ei.value.code == REFUSAL_PACK_MISMATCH
+
+
+def test_append_anchors_to_the_reviewed_rows_pack_never_the_records(
+    store: tuple[DbLedger, DbReviewLedger],
+) -> None:
+    """Independent review pass (2026-09-14), finding 5: two clean rows A (diff 1…) and
+    B (diff 2…); a review of A carrying B's pack hash and B's diff hash was ACCEPTED —
+    the store looked the pack up by the record's own field. The pack is resolved
+    through the row now, and a record whose pack field is not the row's is refused."""
+    ledger, reviews = store
+    a_row, a_pack, a_diff = _graded(store)
+    b_result = GradeResult(
+        "y" * 40,
+        "r",
+        "sighted",
+        clean=True,
+        belts=Belts(True, True, True, True),
+        diff=DiffStats(files=("src/b.py",), additions=1, deletions=0, diff_sha256="2" * 64),
+    )
+    b_pack = evidence_pack(grade=b_result)
+    ledger.store_pack(b_pack)
+    b_row = ledger.append(grade_row(task_id="y" * 40, evidence_pack_hash=b_pack.pack_hash))
+    assert a_pack != b_pack.pack_hash and a_diff != "2" * 64
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(_review(a_row, b_pack.pack_hash, "2" * 64))
+    assert ei.value.code == REFUSAL_PACK_MISMATCH
+    assert ei.value.expected == a_pack and ei.value.observed == b_pack.pack_hash
+    # the same with the caller handing B's pack in explicitly
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(_review(a_row, b_pack.pack_hash, "2" * 64), pack=b_pack.to_dict())
+    assert ei.value.code == REFUSAL_PACK_MISMATCH
+    # a record naming A's pack but attesting to B's bytes: the patch anchor refuses
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(_review(a_row, a_pack, "2" * 64))
+    assert ei.value.code == REFUSAL_PATCH_HASH_MISMATCH
+    assert reviews.count() == 0
+    # each row reviewed against its own pack: chained
+    assert reviews.append(_review(a_row, a_pack, a_diff)).verify_hash()
+    assert reviews.append(_review(b_row.row_hash, b_pack.pack_hash, "2" * 64)).verify_hash()
+    assert reviews.verify() == 2
+
+
+def test_an_explicit_pack_is_only_a_self_certifying_copy_of_the_rows(
+    store: tuple[DbLedger, DbReviewLedger],
+) -> None:
+    """The caller's ``pack`` never replaces the lookup: it must BE the row's pack (its
+    hash recomputes to the row's ``evidence_pack_hash``) — a forged body, or another
+    pack, is refused even when the row's own pack is not stored."""
+    ledger, reviews = store
+    result = GradeResult(
+        "x" * 40,
+        "r",
+        "sighted",
+        clean=True,
+        belts=Belts(True, True, True, True),
+        diff=DiffStats(files=("src/a.py",), additions=3, deletions=1, diff_sha256="c" * 64),
+    )
+    real = evidence_pack(grade=result)
+    row = ledger.append(grade_row(evidence_pack_hash=real.pack_hash))  # pack NOT stored
+    forged = {"grade": {"diff": {"diff_sha256": "d" * 64}}, "pack_hash": real.pack_hash}
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(_review(row.row_hash, real.pack_hash, "d" * 64), pack=forged)
+    assert ei.value.code == REFUSAL_PACK_MISMATCH
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(_review(row.row_hash, real.pack_hash, "c" * 64))
+    assert ei.value.code == REFUSAL_NO_DIFF_IN_PACK
+    # the genuine pack, handed in by the caller, anchors the review
+    rec = reviews.append(_review(row.row_hash, real.pack_hash, "c" * 64), pack=real.to_dict())
     assert rec.verify_hash()
-    with pytest.raises(ReviewRefused):
-        reviews.append(_review("a" * 64, "z" * 64, "d" * 64), pack=pack)
+    with pytest.raises(ReviewRefused) as ei:
+        reviews.append(_review(row.row_hash, real.pack_hash, "d" * 64), pack=real.to_dict())
+    assert ei.value.code == REFUSAL_PATCH_HASH_MISMATCH
 
 
 def test_filters(store: tuple[DbLedger, DbReviewLedger]) -> None:

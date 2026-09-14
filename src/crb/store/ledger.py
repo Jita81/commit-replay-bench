@@ -11,9 +11,10 @@ source row's own hash in ``labels['source_row_hash']`` for traceability.
 
 :class:`DbReviewLedger` is the same contract for the ``reviews`` table
 (:class:`crb.core.review.ReviewRecord`): its own chain, its own write lock, and the
-patch-hash anchor (:func:`crb.core.review.check_patch_anchor`) applied at append against
-the reviewed row's stored evidence pack — a review of bytes the instrument did not grade
-cannot be written.
+anchor rule (:func:`crb.core.review.check_review_anchor`) applied at append against the
+REVIEWED ROW's stored evidence pack — resolved through the row named by
+``grade_row_hash``, never through the record's own pack field — so a review of bytes the
+instrument did not grade for that row cannot be written.
 """
 
 from __future__ import annotations
@@ -35,9 +36,12 @@ from crb.core.ledger import (
 )
 from crb.core.review import (
     REFUSAL_NO_DIFF_IN_PACK,
+    REFUSAL_PACK_MISMATCH,
+    REFUSAL_ROW_NOT_FOUND,
     ReviewRecord,
     ReviewRefused,
-    check_patch_anchor,
+    check_review_anchor,
+    pack_is_authentic,
     verify_review_chain,
 )
 from crb.store.models import EvidencePackRow, Grade, Review
@@ -196,24 +200,53 @@ class DbReviewLedger:
         return last or GENESIS_HASH
 
     def append(self, record: ReviewRecord, *, pack: dict[str, Any] | None = None) -> ReviewRecord:
-        """Anchor-check, chain and insert in one locked transaction. ``pack`` is the
-        reviewed row's evidence pack body; when the caller passes none it is looked up
-        by ``record.evidence_pack_hash`` (a review with a verdict of a row whose pack is
-        not stored is refused — ``no_diff_in_pack``)."""
+        """Anchor-check, chain and insert in one locked transaction.
+
+        The reviewed row is resolved by ``record.grade_row_hash`` (a review of a row
+        this ledger does not hold is refused — ``row_not_found``) and the pack by THE
+        ROW's ``evidence_pack_hash`` — never by the record's own field, which must
+        agree with the row's (``pack_hash_mismatch``; the independent review pass of
+        2026-09-14, finding 5, anchored a review of row A to row B's pack that way).
+        ``pack`` is optional: the stored pack is the anchor; a caller's copy is only
+        accepted in its place when it is self-certifying for the row's hash, and is
+        refused when it is not the row's. A record with a verdict whose row has no
+        stored (or supplied, authentic) pack is refused — ``no_diff_in_pack``.
+        """
         with self._factory() as s:
-            body = pack
+            g = s.execute(
+                select(Grade).where(Grade.row_hash == record.grade_row_hash)
+            ).scalar_one_or_none()
+            if g is None:
+                raise ReviewRefused(
+                    f"no graded row with row_hash {record.grade_row_hash[:12]}… — a review "
+                    "is a verdict on a row this ledger holds",
+                    code=REFUSAL_ROW_NOT_FOUND,
+                    expected=record.grade_row_hash,
+                )
+            row = _from_model(g)
+            body: dict[str, Any] | None = None
+            if g.evidence_pack_hash:
+                m = s.get(EvidencePackRow, g.evidence_pack_hash)
+                if m is not None:
+                    body = dict(m.body_json)
+            if pack is not None and not pack_is_authentic(pack, g.evidence_pack_hash):
+                raise ReviewRefused(
+                    "the evidence pack handed in is not the reviewed row's",
+                    code=REFUSAL_PACK_MISMATCH,
+                    expected=g.evidence_pack_hash,
+                    observed=str(pack.get("pack_hash", "") or ""),
+                )
+            if body is None and pack is not None:
+                body = dict(pack)  # a self-certifying copy of the row's own pack
             if body is None and record.reviewed:
-                m = s.get(EvidencePackRow, record.evidence_pack_hash)
-                if m is None:
-                    raise ReviewRefused(
-                        f"no evidence pack {record.evidence_pack_hash[:12]!r}… for the "
-                        "reviewed row — nothing to anchor the review to",
-                        code=REFUSAL_NO_DIFF_IN_PACK,
-                        observed=record.patch_sha256_reviewed,
-                    )
-                body = dict(m.body_json)
-            if body is not None:
-                check_patch_anchor(record, body)
+                raise ReviewRefused(
+                    f"no evidence pack {g.evidence_pack_hash[:12]!r}… stored for the "
+                    "reviewed row — nothing to anchor the review to",
+                    code=REFUSAL_NO_DIFF_IN_PACK,
+                    expected=g.evidence_pack_hash,
+                    observed=record.patch_sha256_reviewed,
+                )
+            check_review_anchor(record, pack=body, row=row)
             self._lock(s)
             chained = record.chained(self._last_hash(s))
             s.add(_review_to_model(chained))
