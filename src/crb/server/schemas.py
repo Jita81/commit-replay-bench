@@ -36,7 +36,16 @@ PAGE_MAX = 500
 
 #: Run kinds a client may create. ``probe`` is also reachable via ``POST /repos/{name}/probe``;
 #: ``setup`` is the environment phase (dependency install — the only network phase).
-RUN_KINDS: tuple[str, ...] = ("setup", "mine", "replay", "blind", "oracle", "controls", "probe")
+RUN_KINDS: tuple[str, ...] = (
+    "setup",
+    "mine",
+    "label",
+    "replay",
+    "blind",
+    "oracle",
+    "controls",
+    "probe",
+)
 #: Kinds that need a builder (they produce graded attempts).
 BUILD_KINDS: frozenset[str] = frozenset({"replay", "blind"})
 RUN_STATUSES: tuple[str, ...] = ("queued", "running", "succeeded", "failed", "cancelled")
@@ -264,6 +273,10 @@ class TaskSpecOut(BaseModel):
     gold_clean: bool | None
     gold_note: str
     labels: dict[str, str]
+    #: The two class axes (A4): ``capability_class`` is the RESOLVED class; these say how.
+    path_class: str = ""
+    intent: dict[str, Any] | None = None
+    class_source: str = "path"
 
 
 # ---------------------------------------------------------------------------
