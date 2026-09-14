@@ -1,18 +1,23 @@
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
-import { expect, primary, test } from './support'
+import { env, expect, primary, test } from './support'
 
 /**
  * 07 — the instrument describes itself honestly, and every screen the walkthrough
  * touched is accessible. Proves: the Settings page shows each builder credential as
  * configured yes/no (never a value), the sandbox mode, and the apparatus / policy
- * versions the footer also carries; then axe (WCAG 2.1 AA) finds 0 violations on
- * Repos, Runs, a Run detail (with real rows), Capability, Ledger and Sign-off —
- * against the live data these specs produced, not fixtures.
+ * versions the footer also carries; the Claude Code login card round-trips a
+ * (shape-valid, fake) `claude setup-token` value through the UI — status, ≤4-char
+ * fingerprint, provenance, remove — without the value ever appearing in the page;
+ * then axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a Run detail (with real
+ * rows), Capability, Ledger and Sign-off — against the live data these specs
+ * produced, not fixtures.
  */
 test.describe.configure({ mode: 'serial' })
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
+//: Shape-valid (prefix, length, alphabet) and deliberately not a real token.
+const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
 
 async function axeClean(page: Page, where: string): Promise<void> {
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
@@ -51,6 +56,57 @@ test.describe('07 settings + accessibility', () => {
     await expect(page.locator('footer')).toContainText(`apparatus ${apparatus}`)
     await expect(page.locator('footer')).toContainText(`policy ${policy}`)
     await axeClean(page, '/settings')
+  })
+
+  test('Claude Code login: paste → stored (fingerprint only) → remove, never the value', async ({ page }) => {
+    await page.goto('/settings')
+    await expect(page.getByRole('heading', { name: 'Claude Code login' })).toBeVisible()
+    await expect(page.getByTestId('claude-login-instructions')).toContainText(
+      'Run claude setup-token on any machine, paste the token here; it is stored owner-only on the API host under CRB_HOME/secrets and forwarded to builders only in auth: cli mode.',
+    )
+    const status = page.getByTestId('claude-login-status')
+    await expect(status).toHaveAttribute('data-present', 'false')
+    await expect(page.getByTestId('claude-login-verify')).toBeDisabled()
+    await expect(page.getByTestId('claude-login-remove')).toBeDisabled()
+
+    // a wrong shape is refused by the server and reported without echoing it
+    const field = page.getByTestId('claude-login-token')
+    await expect(field).toHaveAttribute('type', 'password')
+    await field.fill('sk-ant-api03-' + 'x'.repeat(40))
+    await page.getByTestId('claude-login-save').click()
+    await expect(page.getByText(/starts with 'sk-ant-oat01-'/)).toBeVisible()
+    await expect(status).toHaveAttribute('data-present', 'false')
+
+    // the real shape is stored: status flips, the field is cleared, only …E2E0 is shown
+    await field.fill(FAKE_SETUP_TOKEN)
+    await page.getByTestId('claude-login-save').click()
+    await expect(status).toHaveAttribute('data-present', 'true')
+    await expect(status).toContainText('…E2E0')
+    await expect(page.getByTestId('claude-login-provenance')).toContainText(`set by ${env.user}`)
+    await expect(field).toHaveValue('')
+    let text = (await page.locator('main').textContent()) ?? ''
+    expect(text).not.toContain(FAKE_SETUP_TOKEN)
+    expect(text).not.toContain('W'.repeat(20))
+    expect(text).not.toMatch(/sk-ant-|sk-[A-Za-z0-9]{20,}|csk-/)
+
+    // verify: tier 1 is offline by contract, so only prove the control is live; tier 2
+    // may call out — a fake token can only come back invalid (or cli_missing on a host
+    // without the CLI), never ok
+    await expect(page.getByTestId('claude-login-verify')).toBeEnabled()
+    if (env.publicTier) {
+      await page.getByTestId('claude-login-verify').click()
+      const result = page.getByTestId('claude-login-verify-result')
+      await expect(result).toBeVisible({ timeout: 90_000 })
+      await expect(result).toHaveAttribute('data-status', /^(invalid|cli_missing|error|timeout)$/)
+    }
+    await axeClean(page, '/settings (token stored)')
+
+    // remove: back to absent, still nothing that looks like a key on the page
+    await page.getByTestId('claude-login-remove').click()
+    await expect(status).toHaveAttribute('data-present', 'false')
+    await expect(page.getByTestId('claude-login-verify')).toBeDisabled()
+    text = (await page.locator('main').textContent()) ?? ''
+    expect(text).not.toMatch(/sk-ant-|sk-[A-Za-z0-9]{20,}|csk-/)
   })
 
   test('Repos and Runs have no WCAG 2.1 AA violations', async ({ page }) => {
