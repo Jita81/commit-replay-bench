@@ -177,9 +177,13 @@ The pattern: the *mechanical* governance is strong and honest; the *human* gover
 
 ### Appendix A — commands a governance reviewer can re-run
 
+*(Corrected 2026-09-14 after the human-review-guide exercises: the first query must be belt-set aware.)*
+
 ```bash
 # false-Q1 against the belts, not the flag
-sqlite3 $CRB_HOME/crb.db "select count(*) from grades where clean=1 and (tests_unmodified is not 1 or target_green is not 1 or no_new_failures is not 1 or source_changed is not 1);"
+# belt-set aware: census rows imported as v3-legacy predate belt 4 (source_changed unrecorded, not failed);
+# the naive four-belt form counts 682 phantom violations on the census — see human-review-guide.md exercise 7
+sqlite3 $CRB_HOME/crb.db "select count(*) from grades where clean=1 and (tests_unmodified is not 1 or target_green is not 1 or no_new_failures is not 1 or (belt_set='v4' and source_changed is not 1));"
 # failure split
 sqlite3 $CRB_HOME/crb.db "select repo, mode, count(*), sum(clean), sum(error<>''), sum(error='' and clean=0) from grades where process_step='replay' group by 1,2;"
 # hash chain
