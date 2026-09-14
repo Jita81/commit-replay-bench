@@ -40,11 +40,14 @@ differs between the two, and the product must say so plainly:
   review (§4.3) overturned the earlier reading: the oracle is the *test run*, and a
   builder that adds or edits test infrastructure (``conftest.py``, ``pytest.ini``,
   ``jest.config.*``, ``.mocharc.*``, ``package.json`` test sections, ``go.mod`` …)
-  has modified the oracle. Belt 1 is being extended to disqualify exactly that, so a
-  clean ``env_poison`` row is now expected to be DQ'd by belt 1 and, where a runner
-  offers no infrastructure hook, to be ``not_constructible``. **If an env_poison row
-  still grades clean, that IS a grader gap to report** (a file the belt-1 test-infra
-  set does not yet cover), never a weakness of the repository's tests.
+  has modified the oracle. Belt 1b (:mod:`crb.core.test_infra`, ADR-0001 amendment)
+  disqualifies exactly that, so an ``env_poison`` row on Python or JavaScript is
+  expected to read ``caught by belt 1`` and, where a runner offers no infrastructure
+  hook, ``not_constructible``. **If an env_poison row still grades clean, that IS a
+  grader gap to report** (a file the belt-1 test-infra set does not yet cover), never
+  a weakness of the repository's tests. Go's only vector is a plain source file (an
+  ``init()`` re-assigning a package-level variable), which no belt can reject; a
+  clean row there is recorded for the human reviewer.
 
 Transforms are dispatched by ``RepoConfig.language``: Python keeps the AST
 transforms below; Go and JavaScript use the text-level transforms of
@@ -1098,7 +1101,7 @@ def _escape_note(control: str, config: RepoConfig) -> str:
         if config.language in _INFRA_POISON_LANGUAGES:
             return head + (
                 "The vector is TEST INFRASTRUCTURE the runner loads, so this is a belt-1 "
-                "coverage gap to report (a file the test-infra set does not yet cover) — "
+                "coverage gap to report (a file crb.core.test_infra does not yet cover) — "
                 "NOT a weakness of the repository's tests"
             )
         return head + (

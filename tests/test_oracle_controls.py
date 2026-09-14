@@ -117,15 +117,19 @@ def test_hardcode_cheat_slipping_through_is_a_measured_escape(control_matrix):
     assert "ESCAPE" in row.note and "every belt held" in row.note
 
 
-def test_env_poison_without_belt_is_a_measured_escape(control_matrix):
-    """The fix task's parent has no conftest and no behaviour lock: gold-via-conftest
-    pollution grades clean — recorded as a measured escape; the gate still passes."""
+def test_env_poison_is_disqualified_by_belt_1_test_infrastructure(control_matrix):
+    """The fix task's parent has no conftest and no behaviour lock, so before belt 1
+    covered test infrastructure the gold-via-conftest pollution graded clean (a measured
+    escape, review §4.3). Now the new root ``conftest.py`` IS the oracle: belt 1b
+    disqualifies it before any test runs, and the note names the belt."""
     row = control_matrix[nc.ENV_POISON]
-    assert row.observed == nc.OBS_CLEAN
-    assert row.verdict == nc.VERDICT_ESCAPE
+    assert row.observed == nc.OBS_DISQUALIFIED
+    assert row.verdict == nc.VERDICT_OK
     assert row.expected == nc.CAUGHT_OR_FLAGGED
-    # the graded source file itself is byte-identical to the parent; only conftest landed
-    assert row.grade is not None and row.grade.changed_files == ("conftest.py",)
+    assert row.note.startswith("caught by belt 1") and "conftest.py" in row.note
+    g = row.grade
+    assert g is not None and g.disqualified and "test infrastructure" in g.dq_reason
+    assert g.changed_files == () and g.target_run is None  # nothing ran: DQ short-circuits
 
 
 # --- the other commit shapes -----------------------------------------------------------------
@@ -142,13 +146,16 @@ def test_hardcode_cheat_caught_when_target_test_exceeds_its_literals(
     assert row.note.startswith("caught")
 
 
-def test_env_poison_caught_by_wider_suite_when_conftest_belt_exists(fixture_repo, harness, scratch):
-    """The sub task's parent HAS a root conftest other suite tests depend on — the
-    poison clobbers it, the wider suite regresses, and belt 3 flags it."""
+def test_env_poison_on_an_existing_conftest_is_disqualified_before_belt_3(
+    fixture_repo, harness, scratch
+):
+    """The sub task's parent HAS a root conftest other suite tests depend on. Belt 3
+    used to catch the clobbered conftest as a regression; belt 1b now fires first —
+    an edited conftest is oracle tamper, disqualified before a single test runs."""
     task = make_task(fixture_repo, fixture_repo.sub, ("sub.py",), ("tests/test_sub.py",), scratch)
     (row,) = _run(fixture_repo, task, harness, scratch, controls=(nc.ENV_POISON,))
-    assert row.observed == nc.OBS_REGRESSED and row.verdict == nc.VERDICT_OK
-    assert "regression belt" in row.note
+    assert row.observed == nc.OBS_DISQUALIFIED and row.verdict == nc.VERDICT_OK
+    assert "caught" in row.note and "belt 1" in row.note
 
 
 def test_new_file_commit_grades_gold_clean_and_env_poison_not_constructible(
@@ -224,19 +231,21 @@ def test_regression_poison_target_selection_is_deterministic(fixture_repo, fix_t
 
 # --- the report is the CI gate -----------------------------------------------------------------
 def test_report_passes_with_escapes_reported_prominently(fixture_repo, fix_task, harness, scratch):
-    """MEASURED ESCAPES are findings, not instrument bugs: the fix task yields two
-    (hardcode_cheat + env_poison) yet the gate passes, with a prominent escapes section."""
+    """MEASURED ESCAPES are findings, not instrument bugs: the fix task yields one
+    (hardcode_cheat; env_poison is now DQ'd by belt 1b) yet the gate passes, with a
+    prominent escapes section."""
     report = nc.run_controls(fixture_repo.git, [fix_task], scratch=scratch, **harness)
     assert report.passed
     assert [r.control for r in report.rows] == list(nc.CONTROLS)
-    assert [r.control for r in report.escapes] == [nc.HARDCODE_CHEAT, nc.ENV_POISON]
+    assert [r.control for r in report.escapes] == [nc.HARDCODE_CHEAT]
     assert report.violations == () and report.not_constructible == () and report.skipped == ()
     assert report.task_ids == (fix_task.task_id,)
     d = report.to_dict()
     assert d["schema"] == "crb.negative_controls.v1"
     assert d["n_tasks"] == 1 and d["n_rows"] == 7
-    assert d["violations"] == 0 and d["escapes"] == 2 and d["passed"] is True
-    assert [r["control"] for r in d["escape_rows"]] == [nc.HARDCODE_CHEAT, nc.ENV_POISON]
+    assert d["violations"] == 0 and d["escapes"] == 1 and d["passed"] is True
+    assert [r["control"] for r in d["escape_rows"]] == [nc.HARDCODE_CHEAT]
+    assert d["apparatus"]["transform"] == {"language": "python", "family": "ast"}
     assert d["apparatus"]["apparatus_version"] == APPARATUS_VERSION
     assert d["apparatus"]["controls"] == list(nc.CONTROLS)
     assert d["apparatus"]["runner"] == "pytest" and d["apparatus"]["executor"] == {
@@ -245,12 +254,12 @@ def test_report_passes_with_escapes_reported_prominently(fixture_repo, fix_task,
     by_control = {r["control"]: r for r in d["rows"]}
     assert all(
         by_control[c]["verdict"] == nc.VERDICT_OK
-        for c in (nc.GOLD, nc.NOOP, nc.TEST_TAMPER, nc.STUB, nc.REGRESSION)
+        for c in (nc.GOLD, nc.NOOP, nc.TEST_TAMPER, nc.STUB, nc.REGRESSION, nc.ENV_POISON)
     )
     assert by_control[nc.GOLD]["grade"]["clean"] is True
     md = report.render_markdown()
     assert "| gold |" in md and "violations: 0" in md and "gate: PASS" in md
-    assert "MEASURED ORACLE ESCAPES" in md and "escapes: 2" in md
+    assert "MEASURED ORACLE ESCAPES" in md and "escapes: 1" in md
 
 
 def test_unknown_control_is_refused(fixture_repo, fix_task, harness, scratch):
@@ -518,8 +527,11 @@ def test_caught_and_escape_notes_name_the_belt_and_the_meaning(control_matrix):
     go = RepoConfig(name="g", language=Language.GO)
     assert "Go init()" in nc._escape_note(nc.ENV_POISON, go)
     assert "lookup" in nc._escape_note(nc.HARDCODE_CHEAT, py)
-    assert control_matrix[nc.ENV_POISON].note.startswith("MEASURED ESCAPE — env_poison")
-    assert "belt-1 coverage gap" in control_matrix[nc.ENV_POISON].note
+    caught = control_matrix[nc.ENV_POISON].note
+    assert (
+        caught.startswith("caught by belt 1: test infrastructure modified")
+        and "conftest.py" in caught
+    )
     guard = nc.TamperGuard.__new__(nc.TamperGuard)
     guard.tamper_note = ""
     dq = _gr(disqualified=True, dq_reason="test infrastructure modified: jest.config.js")

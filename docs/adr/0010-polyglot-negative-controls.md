@@ -61,14 +61,16 @@ the belt it exists to test.
 
 4. **An `env_poison` escape is no longer "not a grader bug".** The review (§4.3) overturned
    that reading: the oracle is the *test run*, and test infrastructure the runner loads is part
-   of it. Workstream A1 is extending belt 1 to disqualify changes to such files. The module
-   docstring, the escape note and the report now say: a clean `env_poison` row on Python or
-   JavaScript is expected to be DQ'd by belt 1 and, if it still grades clean, **that is a
-   belt-1 coverage gap to report** — never a weakness of the repository's tests. On Go the
-   vector is a plain source file (`init()`), which no belt can or should reject; an escape
-   there is recorded for the human reviewer of the accepted diff (review §7.1). The
-   expectation stays `caught_or_flagged`, so the rows are consistent whether A1 has landed
-   or not; the note says which belt did the work.
+   of it. Belt 1b (`crb.core.test_infra`, ADR-0001 amendment, merged 2026-09-14) disqualifies
+   any touched test-infrastructure file. The module docstring, the row notes and the report
+   now say: an `env_poison` row on Python or JavaScript is expected to read `caught by belt
+   1: test infrastructure modified: […]` — verified on the Python fixture (`conftest.py`) and
+   on the JS fix fixture (`jest.config.cjs`, `.mocharc.json`, `vitest.config.mjs`) — and if
+   one still grades clean, **that is a belt-1 coverage gap to report**, never a weakness of
+   the repository's tests. On Go the vector is a plain source file (`init()`), which no belt
+   can or should reject; an escape there is recorded for the human reviewer of the accepted
+   diff (review §7.1). The expectation stays `caught_or_flagged`; the note says which belt did
+   the work.
 5. **What the gold diff touched is derived from git, never from a builder.** Both modules
    compare the parent file (worktree) with the commit's own version (`git show <sha>:<path>`)
    unit by unit; the runner never reads a builder's diff.
@@ -90,7 +92,10 @@ toolchains (all four node runners).
   jest / vitest / mocha (6/7 on `node --test`, which has no hook) [measured, 2026-09-14].
   Every verdict landed where the contract says: stub `red` with the failing test *attributed*
   (no build failure), regression `regressed`, hardcode `ESCAPE` exactly as on the Python
-  fixture, `env_poison` built through the real hook with the graded file byte-identical.
+  fixture, `env_poison` built through the real hook with the graded file byte-identical and
+  — on the merged base with belt 1b — disqualified by belt 1 on jest / vitest / mocha
+  (`caught by belt 1: test infrastructure modified: ['jest.config.cjs']` etc.) while the Go
+  `init()` vector escapes as documented.
 - `"Controls: passed"` on a Go or JavaScript repository now means the load-bearing controls
   ran. On cobra with a `BARE` belt, `regression` will poison an adjacent package (`doc/`,
   `cobra/`) and `stub` will hollow the changed functions; `env_poison` will honestly read
@@ -105,10 +110,11 @@ toolchains (all four node runners).
   appended signatures need; anything subtler (a type the gold also adds, a receiver type the
   parent lacks) reaches the compiler and comes back `not_constructible` with the error. That
   count is reported per row; it is the honest edge of a text-level transform.
-- JavaScript `env_poison` on an ES-module repository graded under jest (babel-transformed
-  exports are getter-only) may not take effect; the row then reads `caught by belt 2`, which
-  is a weaker fact than a DQ. The vector is what it is; the fixture flavours prove it on CJS
-  jest / mocha and ESM vitest. `node --test` has no hook at all — the reason says so.
+- JavaScript `env_poison` is always DQ'd by belt 1b before it runs (the hook file is test
+  infrastructure), so whether the poison would have *taken effect* is no longer observed by
+  the gate; the fixture flavours proved the vectors flip the target on CJS jest / mocha and
+  ESM vitest before A1 landed [measured 2026-09-14], and a belt-1 DQ is the stronger fact.
+  `node --test` has no hook at all — the reason says so.
 - We must never: report a control that failed its compile / syntax check as anything but
   `not_constructible`; construct a Go `stub` with `panic`; let a `regression` poison sit
   inside the target scope and call the resulting `red` a belt-3 proof; read an `env_poison`
