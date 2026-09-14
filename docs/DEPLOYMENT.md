@@ -6,6 +6,7 @@ design behind these choices is [ARCHITECTURE §6](ARCHITECTURE.md#6-deployment-v
 [ADR-0005 (fail-closed sandbox)](adr/0005-fail-closed-docker-sandbox.md).
 
 Contents: [1 Shapes](#1-deployment-shapes) · [2 The image](#2-the-image-and-its-roles) ·
+[2.2 Released image, signature, SBOM](#22-the-released-image-name-signature-sbom) ·
 [3 Kubernetes (Helm)](#3-kubernetes-helm) · [4 Azure](#4-azure) ·
 [5 Backup & restore](#5-backup-and-restore) · [6 Upgrade](#6-upgrade) ·
 [7 Air-gap](#7-air-gap-posture) · [8 Go-live checklist](#8-go-live-checklist)
@@ -29,8 +30,10 @@ egress is the model endpoint (worker) and the OIDC issuer (api).
 
 `deploy/Dockerfile` builds one image from the repository root: a `node` stage builds `ui/`
 if present, a `python:3.12-slim` stage installs `crb[server,postgres]` non-editable into
-`/app/.venv` as uid **10001** (`crb`), with `git` and the Docker **client** binary. The
-entrypoint (`deploy/entrypoint.sh`) selects the role:
+`/app/.venv` as uid **10001** (`crb`), with `git` and the Docker **client** binary. Released
+builds of it are published, signed and SBOM-attested to GHCR (§2.2); the same Dockerfile is
+built and smoked by CI on every pull request. The entrypoint (`deploy/entrypoint.sh`)
+selects the role:
 
 | Role | Command | Notes |
 |---|---|---|
@@ -68,6 +71,54 @@ server and never appear in logs or `/settings`.
 | `CRB_CLAUDE_CODE_MODEL` | api, builder | default model for a `claude_code` run created without one (`claude-sonnet-5` when unset; read by the API at run creation and by the adapter at instantiation) |
 | `CRB_ALLOW_LOCAL_CLONE` | api, worker | `1` lets URL registrations use `file://` sources — **test and developer machines only**; never set it on a server |
 | `DOCKER_HOST` | worker | set by Helm for the `dind`/`hostSocket` sandbox modes |
+
+### 2.2 The released image: name, signature, SBOM
+
+You should not build the image yourself. Every `v*` tag runs `.github/workflows/release.yml`,
+which builds `deploy/Dockerfile` (UI bundle + the package installed non-editable), smokes
+the result (non-root uid 10001, read-only root, `migrate upgrade` on SQLite, UI and tools
+present), generates an SBOM, and only then pushes:
+
+| | |
+|---|---|
+| Repository | `ghcr.io/jita81/commit-replay-bench` (private GHCR package; the same string is the Helm `image.repository` default and `CRB_IMAGE` in compose) |
+| Tags | `<version>` — the git tag without its `v` (`v2.0.0a1` → `2.0.0a1`); `sha-<7-char sha>` — the same bytes by commit. No `latest`. |
+| Platform | `linux/amd64`. Build locally (`docker buildx build --load -f deploy/Dockerfile .`) for arm64 evaluation machines. |
+| Provenance | SLSA provenance (`mode=max`) and a BuildKit SBOM attestation in the image index (`docker buildx imagetools inspect <ref> --format '{{ json .Provenance }}'`). |
+| SBOM | syft, SPDX 2.3 JSON, of the exact smoked image: attached as a cosign in-toto attestation (`--type spdxjson`) and uploaded as the `crb-image-sbom-<tag>` artifact of the release run (365-day retention). |
+| Signature | cosign **keyless**: the GitHub Actions OIDC token of the release workflow → a short-lived Fulcio certificate → recorded in the Rekor transparency log. There is no signing key to rotate, leak or escrow. |
+| Signing identity | `https://github.com/Jita81/commit-replay-bench/.github/workflows/release.yml@refs/tags/v…`, issuer `https://token.actions.githubusercontent.com`. Forks, branches and manual dispatches build the image but never push or sign. |
+
+Verify — and pin the digest — before the image reaches a cluster or a host. The package
+is private: `docker login ghcr.io` with a token carrying `read:packages` first (cosign
+uses the same credentials to read the signature); for a cluster, `imagePullSecrets` in the
+Helm values, or mirror into your own registry (below).
+
+```bash
+deploy/verify-image.sh 2.0.0a1 --sbom sbom.spdx.json          # cosign ≥ 2, jq
+cosign triangulate --type digest ghcr.io/jita81/commit-replay-bench:2.0.0a1
+#   → ghcr.io/jita81/commit-replay-bench@sha256:…  ← image.digest (Helm) / CRB_IMAGE (compose)
+deploy/verify-image.sh 2.0.0a1 --digest sha256:…                # later: the tag still resolves to your pin
+```
+
+`deploy/verify-image.sh --print` shows the exact `cosign` invocations so a security reviewer
+can read what is accepted: only a signature whose certificate identity matches the release
+workflow **on a `v*` tag** of the canonical repository. Anything else fails verification.
+The script, the workflow and the Helm values are held to the same repository, issuer and
+identity by `tests/test_release_verify_image.py`.
+
+Mirroring into your own registry (§4.3, §7): verify first, then
+`cosign copy ghcr.io/jita81/commit-replay-bench:2.0.0a1 <acr>.azurecr.io/crb:2.0.0a1` —
+it copies the image index **with** its signature and attestations and keeps the digest, so
+`cosign verify` against the mirror's reference resolves the same Rekor entry. `docker pull`
++ `docker push` does neither (signatures are sibling OCI artifacts it does not carry, and a
+re-push can change the index digest); `crane copy` keeps the digest but not the signature.
+Admission control (Kyverno / Gatekeeper / Azure Policy) can enforce the same identity
+regexp cluster-wide so an unsigned or mis-signed image cannot be scheduled.
+
+Compose users: `CRB_IMAGE=ghcr.io/jita81/commit-replay-bench@sha256:…` in `deploy/.env`,
+then `docker compose pull` and `up -d` without `--build`
+([deploy/README.md §1.1](../deploy/README.md#11-use-the-released-image-instead-of-building)).
 
 ## 3. Kubernetes (Helm)
 
@@ -232,6 +283,8 @@ re-asserts the triggers) → api/worker → ledger verify → the append-only pr
 
 ```bash
 pg_dump … > pre-upgrade.dump                                   # always
+deploy/verify-image.sh <new version>                           # signature + SBOM attestation (§2.2)
+cosign triangulate --type digest ghcr.io/jita81/commit-replay-bench:<new version>   # → sha256:<new>
 helm upgrade crb deploy/helm/crb -n crb -f crb-values.yaml --set image.digest=sha256:<new> --wait
 ```
 
@@ -262,6 +315,8 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
 
 ## 8. Go-live checklist
 
+- [ ] The running image is a released digest: `deploy/verify-image.sh <version> --digest
+      sha256:<pinned>` passes (§2.2) and the digest is what `image.digest` / `CRB_IMAGE` says.
 - [ ] `GET /api/v1/health` is green: database reachable, migrations at head, append-only
       probe passes, sandbox reachable (worker), builder reachable.
 - [ ] `crb ledger verify` succeeds; the last `row_hash` is recorded out of band.
