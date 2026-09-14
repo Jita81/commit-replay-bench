@@ -26,6 +26,26 @@ the file's text before and after the builder ran:
   version bump or a new runtime dependency is an honest edit; a new
   ``[tool.pytest.ini_options]`` table or ``"jest"`` key is tamper.
 
+Lint configuration is test infrastructure too (ADR-0011 amendment, 2026-09-14)
+--------------------------------------------------------------------------------
+Belt 5 runs "the repository's own definition of acceptable" — and reads that
+definition from the worktree. The independent review pass (finding 2) wrote
+``[tool.ruff.lint] select = []`` into ``pyproject.toml``, and separately a nested
+``pkg/ruff.toml`` with the same, and turned a ``repo_lint_clean=False`` row into
+``CLEAN``. So the files belt 5's detection and the linters themselves read are in
+the table: whole-file ``ruff.toml`` / ``.ruff.toml`` / ``.flake8`` /
+``.pre-commit-config.yaml`` (ruff evidence), ``.eslintrc*`` / ``eslint.config.*`` /
+``.eslintignore`` / ``.prettierrc*`` / ``prettier.config.*`` / ``.prettierignore``
+/ ``.editorconfig`` (prettier reads it), ``.golangci.*``, ``rustfmt.toml`` /
+``.rustfmt.toml`` / ``clippy.toml`` / ``.clippy.toml``, ``*checkstyle*.xml``; and
+section-aware ``pyproject.toml [tool.ruff]``, ``setup.cfg`` / ``tox.ini``
+``[flake8]``, ``package.json`` ``eslintConfig`` / ``prettier`` / ``scripts.lint``,
+``Cargo.toml [lints]``. Spotless / checkstyle plugin configuration lives in
+``pom.xml <build>``, already covered. Touching any of them is belt-1b tamper before
+any test runs. ``.editorconfig`` is included for JavaScript only, because prettier
+resolves it by default (``indent_size``, ``max_line_length`` change its verdict);
+no other belt-5 tool reads it.
+
 Design rules
 ------------
 * **Fail closed.** Anything that cannot be parsed on either side, that is too large
@@ -157,20 +177,36 @@ INFRA_RULES: tuple[InfraRule, ...] = (
         _PY,
         _anywhere("pyproject.toml"),
         "[tool.pytest] / [tool.pytest.ini_options] is pytest config; "
-        "[project.entry-points.pytest11] registers plugins",
+        "[project.entry-points.pytest11] registers plugins; [tool.ruff] is belt 5's "
+        "definition of acceptable (a `select = []` turns a lint rejection into a pass)",
         partial=True,
     ),
     InfraRule(
         _PY,
         _anywhere("setup.cfg"),
-        "[tool:pytest] is pytest config (section-aware: packaging metadata is not)",
+        "[tool:pytest] is pytest config; [flake8] is lint config "
+        "(section-aware: packaging metadata is not)",
         partial=True,
     ),
     InfraRule(
         _PY,
         _anywhere("tox.ini"),
-        "[pytest] is pytest config (section-aware: tox environments are not run)",
+        "[pytest] is pytest config; [flake8] is lint config "
+        "(section-aware: tox environments are not run)",
         partial=True,
+    ),
+    InfraRule(
+        _PY,
+        _anywhere("ruff.toml", ".ruff.toml", ".flake8"),
+        "ruff reads the closest ruff.toml / .ruff.toml up the tree from each file (a "
+        "nested one overrides the root's); flake8 reads .flake8 — belt 5's definition "
+        "of acceptable is the repository's, never the builder's (ADR-0011)",
+    ),
+    InfraRule(
+        _PY,
+        _anywhere(".pre-commit-config.yaml", ".pre-commit-config.yml"),
+        "the ruff-check / ruff-format hooks are the evidence belt 5 detects the "
+        "formatter by; removing the hook makes belt 5 not evaluated",
     ),
     InfraRule(
         _PY,
@@ -200,8 +236,26 @@ INFRA_RULES: tuple[InfraRule, ...] = (
         _JS,
         _anywhere("package.json"),
         '"jest", "mocha" and "babel" are runner config; "scripts.test" (+pre/post) '
-        "is the canonical test entry point (not invoked by crb today, kept fail-closed)",
+        "is the canonical test entry point (not invoked by crb today, kept fail-closed); "
+        '"eslintConfig", "prettier" and "scripts.lint" are belt 5\'s lint config',
         partial=True,
+    ),
+    InfraRule(
+        _JS,
+        _anywhere(
+            ".eslintrc",
+            ".eslintrc.*",
+            "eslint.config.*",
+            ".eslintignore",
+            ".prettierrc",
+            ".prettierrc.*",
+            "prettier.config.*",
+            ".prettierignore",
+            ".editorconfig",
+        ),
+        "eslint and prettier read their config (and ignore files) from the tree; "
+        "prettier also resolves .editorconfig (indent_size, max_line_length). Belt 5's "
+        "definition of acceptable is the repository's, never the builder's (ADR-0011)",
     ),
     InfraRule(
         _JS,
@@ -280,6 +334,13 @@ INFRA_RULES: tuple[InfraRule, ...] = (
         _anywhere("go.work"),
         "a workspace file's `use` / `replace` redirect modules for every command",
     ),
+    InfraRule(
+        _GO,
+        _anywhere(".golangci.yml", ".golangci.yaml", ".golangci.toml", ".golangci.json"),
+        "golangci-lint's config enables the formatters/linters belt 5 runs when the "
+        "repository declares it (cobra: gofmt + goimports) — the repository's "
+        "definition of acceptable, never the builder's (ADR-0011)",
+    ),
     # --- jvm (maven / surefire) --------------------------------------------------
     InfraRule(
         _JVM,
@@ -312,6 +373,14 @@ INFRA_RULES: tuple[InfraRule, ...] = (
         "JUnit Platform discovers listeners and extensions through ServiceLoader on "
         "the test classpath — main resources included",
     ),
+    InfraRule(
+        _JVM,
+        _anywhere("*checkstyle*.xml"),
+        "checkstyle's rule set and suppressions (petclinic: src/checkstyle/"
+        "nohttp-checkstyle.xml + -suppressions.xml) are belt 5's definition of "
+        "acceptable; the spotless / checkstyle plugin configuration itself is in "
+        "pom.xml <build> (section-aware rule above)",
+    ),
     # --- rust (cargo test) --------------------------------------------------------
     InfraRule(
         _RS,
@@ -330,8 +399,15 @@ INFRA_RULES: tuple[InfraRule, ...] = (
         _anywhere("Cargo.toml"),
         "[dev-dependencies], [[test]] (path, harness), [patch], [replace], "
         "[profile.*], package.build/autotests and lib.test/doctest/harness/path "
-        "shape the test build; [dependencies], [features] and the version are honest",
+        "shape the test build; [lints] / [workspace.lints] is clippy's config (belt 5); "
+        "[dependencies], [features] and the version are honest",
         partial=True,
+    ),
+    InfraRule(
+        _RS,
+        _anywhere("rustfmt.toml", ".rustfmt.toml", "clippy.toml", ".clippy.toml"),
+        "cargo fmt --check and cargo clippy read their config from the tree — belt 5's "
+        "definition of acceptable is the repository's, never the builder's (ADR-0011)",
     ),
     InfraRule(
         _RS,
@@ -404,7 +480,11 @@ def is_test_infra(rel_path: str, language: str, *, runner: str = "") -> bool:
 
 #: TOML key paths (``*`` = any key at that level) that are oracle-relevant.
 _TOML_SECTIONS: dict[str, tuple[tuple[str, ...], ...]] = {
-    "pyproject.toml": (("tool", "pytest"), ("project", "entry-points", "pytest11")),
+    "pyproject.toml": (
+        ("tool", "pytest"),
+        ("project", "entry-points", "pytest11"),
+        ("tool", "ruff"),  # belt 5 (ADR-0011): the whole [tool.ruff*] tree
+    ),
     "cargo.toml": (
         ("dev-dependencies",),
         ("target", "*", "dev-dependencies"),
@@ -418,16 +498,19 @@ _TOML_SECTIONS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("lib", "doctest"),
         ("lib", "harness"),
         ("lib", "path"),
+        ("lints",),  # belt 5: clippy reads [lints] / [workspace.lints]
+        ("workspace", "lints"),
     ),
 }
 
-#: INI section names (lower-cased, whitespace stripped) that are pytest config.
+#: INI section names (lower-cased, whitespace stripped) that are pytest or lint config.
 _INI_SECTIONS: dict[str, frozenset[str]] = {
-    "setup.cfg": frozenset({"tool:pytest"}),
-    "tox.ini": frozenset({"pytest"}),
+    "setup.cfg": frozenset({"tool:pytest", "flake8"}),
+    "tox.ini": frozenset({"pytest", "flake8"}),
 }
 
 #: ``package.json`` key paths, each with the runners that read it (``()`` = all).
+#: The lint keys are runner-independent: belt 5 is orthogonal to the test runner.
 _PACKAGE_JSON_SECTIONS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("jest",), ("jest",)),
     (("mocha",), ("mocha",)),
@@ -435,6 +518,9 @@ _PACKAGE_JSON_SECTIONS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("scripts", "test"), ()),
     (("scripts", "pretest"), ()),
     (("scripts", "posttest"), ()),
+    (("eslintConfig",), ()),
+    (("prettier",), ()),
+    (("scripts", "lint"), ()),
 )
 
 #: go.mod directives that alter what gets built and how it runs.
