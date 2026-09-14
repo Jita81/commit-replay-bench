@@ -13,9 +13,9 @@ const ESCAPED: ControlsVerdict = { measured: true, passed: true, complete: true,
 const PASSED: ControlsVerdict = { ...ESCAPED, escapes: 0, run_id: '5'.repeat(32), created: '2026-09-10T09:00:00+00:00', state: 'passed' }
 
 const POLICY = {
-  policy_version: 'signoff-policy.v1',
+  policy_version: 'signoff-policy.v2',
   relaxed: false,
-  non_overridable: ['false_q1', 'attestation_missing'],
+  non_overridable: ['false_q1', 'oracle_unmeasured', 'attestation_missing'],
   bounds: { n_min: [1, 10000] as [number, number] },
   n_min: 10,
   require_route_deliver: true,
@@ -23,8 +23,13 @@ const POLICY = {
   max_controls_escapes: 0,
   min_constructible_share: 0.5,
   min_oracle_strength: 0.8,
+  require_oracle_measured: true,
   require_attestation: true,
 }
+/** The seed's measured oracle on the cell: 3 of its 4 tasks scored, mean 0.58 (< 0.80). */
+const ORACLE_WEAK = { strength: 0.5778, scored: 3, tasks: 4 }
+const ORACLE_STRONG = { strength: 0.9, scored: 4, tasks: 4 }
+const ORACLE_NONE = { strength: null, scored: 0, tasks: 4 }
 
 const MAP: CapabilityMapWithControls = {
   repo: 'r',
@@ -70,17 +75,19 @@ const MAP: CapabilityMapWithControls = {
 
 const ESCAPE_REFUSALS: SignoffRefusal[] = [
   { code: 'controls_escapes', message: '1 measurement control(s) graded clean on this repo (controls run 00000000) > max_controls_escapes=0 — the oracle cannot tell an implementation from a cheat', threshold: 0, observed: 1, overridable: true },
+  { code: 'oracle_weak', message: 'oracle strength 0.58 < min_oracle_strength=0.80 — green cannot license auto-delivery', threshold: 0.8, observed: 0.5778, overridable: true },
   { code: 'route_not_deliver:controls_escapes', message: "the routing rule says 'human' (controls_escapes): 1 measurement control(s) graded clean", threshold: 'deliver', observed: 'human', overridable: true },
   { code: 'attestation_missing', message: 'the approver must name one accepted (clean) row of this cell whose diff they have read, with a statement', threshold: 'reviewed_row_hash + statement', observed: '', overridable: false },
 ]
-const ATTESTATION_MISSING = ESCAPE_REFUSALS[2]!
+const ATTESTATION_MISSING = ESCAPE_REFUSALS[3]!
+const ORACLE_UNMEASURED: SignoffRefusal = { code: 'oracle_unmeasured', message: "no task of cell 'bug.fix|S' has a mutation score — the oracle's strength is unknown, so a green here is not evidence; run an 'oracle' run on this repo before signing (cannot be relaxed)", threshold: 'measured', observed: null, overridable: false }
 
 function preview(over: Partial<SignoffPreview> = {}): SignoffPreview {
   return {
     repo: 'r',
     cell: { process_step: '*', capability_class: 'bug.fix', size: 'S', language: '*', builder: '*', model: '*', provider: '*' },
     policy: POLICY,
-    evidence: { measured: true, n: 40, clean: 38, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, oracle_strength: null, apparatus_versions: ['2.1'], belt_sets: ['v4'], model_n: 40, model_point: 0.95, failure_split: { builder_red: 2, budget: 0, protocol: 0, harness: 0, disqualified: 0 } },
+    evidence: { measured: true, n: 40, clean: 38, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, oracle_strength: 0.5778, oracle: ORACLE_WEAK, apparatus_versions: ['2.1'], belt_sets: ['v4'], model_n: 40, model_point: 0.95, failure_split: { builder_red: 2, budget: 0, protocol: 0, harness: 0, disqualified: 0 } },
     route: { route: 'human', reason: 'controls_escapes: 1 measurement control(s) graded clean on this repo', reason_code: 'controls_escapes' },
     controls: ESCAPED,
     refusals: ESCAPE_REFUSALS,
@@ -110,8 +117,8 @@ const SIGNED: SignoffWithPolicy = {
   prev_hash: '0'.repeat(64),
   row_hash: 'a'.repeat(64),
   schema: 'crb.signoff.v2',
-  evidence: { n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, apparatus_versions: ['2.1'], oracle_strength: null },
-  policy_version: 'signoff-policy.v1',
+  evidence: { n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, apparatus_versions: ['2.1'], oracle_strength: 0.9 },
+  policy_version: 'signoff-policy.v2',
   policy_thresholds: POLICY,
   route: { route: 'deliver', reason: 'n=40 point=0.950 ci_low=0.835 false_q1=0', reason_code: 'deliver' },
   controls: { verdict: 'passed', run_id: '5'.repeat(32), k: 12, total: 14, escapes: 0, created: '2026-09-10T09:00:00+00:00' },
@@ -128,7 +135,19 @@ function previewFor(unsigned: SignoffPreview, signed: SignoffPreview) {
 
 const gateRow = (gate: HTMLElement, label: string | RegExp) => within(gate).getAllByRole('listitem').find((li) => (typeof label === 'string' ? li.textContent?.includes(label) : label.test(li.textContent ?? '')))!
 
-describe('SignoffPage (signoff-policy.v1)', () => {
+/** A preview whose only refusal is the attestation: clean gate, strong measured oracle, route deliver. */
+function signablePreview(over: Partial<SignoffPreview> = {}): SignoffPreview {
+  const base = preview()
+  return preview({
+    controls: PASSED,
+    route: { route: 'deliver', reason: 'n=40 point=0.950 ci_low=0.835 false_q1=0', reason_code: 'deliver' },
+    evidence: { ...base.evidence, oracle_strength: 0.9, oracle: ORACLE_STRONG },
+    refusals: [ATTESTATION_MISSING],
+    ...over,
+  })
+}
+
+describe('SignoffPage (signoff-policy.v2)', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('shows the bar before the approver tries: the seeded deliver cell is refused on the controls escape, with observed vs threshold', async () => {
@@ -156,7 +175,8 @@ describe('SignoffPage (signoff-policy.v1)', () => {
     expect(within(evidence).getByTestId('signoff-tile-point').textContent).toContain('40')
     expect(within(evidence).getByTestId('signoff-tile-ci-low').textContent).toContain('83.5%')
     expect(within(evidence).getByTestId('signoff-tile-false-q1').textContent).toContain('0')
-    expect(within(evidence).getByTestId('signoff-tile-oracle').textContent).toContain('—')
+    expect(within(evidence).getByTestId('signoff-tile-oracle').textContent).toContain('0.58')
+    expect(within(evidence).getByTestId('signoff-tile-oracle').textContent).toContain('3 of 4 task(s) scored')
     const controls = screen.getByTestId('signoff-controls')
     expect(within(controls).getByTestId('controls-escaped')).toBeInTheDocument()
     expect(controls.textContent).toContain('12 of 14 constructible')
@@ -173,6 +193,8 @@ describe('SignoffPage (signoff-policy.v1)', () => {
     expect(gateRow(gate, 'false-Q1 = 0').textContent).toMatch(/✓\s*satisfied:/)
     expect(gateRow(gate, 'n ≥ 10').textContent).toMatch(/✓\s*satisfied:/)
     expect(gateRow(gate, /Negative controls passed/).textContent).toMatch(/✗\s*not satisfied:/)
+    expect(gateRow(gate, /Oracle strength measured and ≥ 0\.80/).textContent).toMatch(/✗\s*not satisfied:/)
+    expect(gateRow(gate, /Oracle strength measured/).textContent).toContain('strength 0.58 · 3 of 4 task(s) scored')
     expect(gateRow(gate, 'Route = deliver').textContent).toMatch(/✗\s*not satisfied:/)
     expect(gateRow(gate, 'Accepted row read and affirmed').textContent).toMatch(/✗\s*not satisfied:/)
     const list = screen.getByTestId('signoff-refusals')
@@ -180,6 +202,10 @@ describe('SignoffPage (signoff-policy.v1)', () => {
     expect(escape.textContent).toContain('a measurement control escaped the oracle')
     expect(escape.textContent).toContain('observed 1')
     expect(escape.textContent).toContain('threshold 0')
+    const weak = within(list).getByTestId('refusal-oracle_weak')
+    expect(weak.textContent).toContain('oracle too weak to license auto-delivery')
+    expect(weak.textContent).toContain('observed 0.58 · threshold 0.80')
+    expect(weak.textContent).not.toContain('non-overridable')
     expect(within(list).getByTestId('refusal-route_not_deliver:controls_escapes').textContent).toContain('observed human')
     const missing = within(list).getByTestId('refusal-attestation_missing')
     expect(missing.textContent).toContain('non-overridable')
@@ -191,9 +217,51 @@ describe('SignoffPage (signoff-policy.v1)', () => {
     expect(screen.getByTestId('signoff-gate')).toHaveAttribute('data-state', 'CLOSED')
   })
 
+  it('shows an unmeasured oracle as a non-overridable refusal (signoff-policy.v2): the gate row, the tile and the clause', async () => {
+    const unmeasured = signablePreview({ evidence: { ...preview().evidence, oracle_strength: null, oracle: ORACLE_NONE }, refusals: [ORACLE_UNMEASURED, ATTESTATION_MISSING] })
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, controls: PASSED, cells: [{ ...MAP.cells[0]!, route: 'deliver', reason: 'ok', reason_code: 'deliver' }] },
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /signoffs/preview': unmeasured,
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const gate = screen.getByTestId('signoff-gate')
+    await waitFor(() => expect(screen.getByTestId('refusal-oracle_unmeasured')).toBeInTheDocument())
+    expect(gate.textContent).toContain('policy signoff-policy.v2')
+    expect(gate).toHaveAttribute('data-state', 'CLOSED')
+    // the tile says "—" (never 0) and how many tasks carry a score
+    const tile = screen.getByTestId('signoff-tile-oracle')
+    expect(tile.textContent).toContain('—')
+    expect(tile.textContent).toContain('0 of 4 task(s) scored')
+    // the gate row is the one criterion that fails besides the attestation
+    const row = gateRow(gate, /Oracle strength measured and ≥ 0\.80/)
+    expect(row.textContent).toMatch(/✗\s*not satisfied:/)
+    expect(row.textContent).toContain('unmeasured — no task of this cell has a mutation score')
+    expect(row.textContent).toContain('non-overridable')
+    expect(gateRow(gate, /Negative controls passed/).textContent).toMatch(/✓\s*satisfied:/)
+    expect(gateRow(gate, 'Route = deliver').textContent).toMatch(/✓\s*satisfied:/)
+    // the clause: observed null renders as "—", threshold "measured", and it cannot be relaxed
+    const clause = within(screen.getByTestId('signoff-refusals')).getByTestId('refusal-oracle_unmeasured')
+    expect(clause.textContent).toContain('oracle never measured on this cell')
+    expect(clause.textContent).toContain('no policy can waive this')
+    expect(clause.textContent).toContain('observed — · threshold measured')
+    expect(clause.textContent).toContain('non-overridable')
+    // naming and affirming a row does not open the gate: the server would still refuse
+    await user.selectOptions(screen.getByLabelText(/^Accepted row/), ROW)
+    await user.click(screen.getByTestId('attest-read'))
+    await user.type(screen.getByLabelText(/^Attestation statement/), 'Read it.')
+    expect(screen.getByRole('button', { name: 'Sign off' })).toBeDisabled()
+    expect(gate).toHaveAttribute('data-state', 'CLOSED')
+  })
+
   it('signs with an attestation once the preview reports no refusal, and lists the record with its snapshot', async () => {
     document.cookie = 'crb_csrf=t; path=/'
-    const unsigned = preview({ controls: PASSED, route: { route: 'deliver', reason: 'n=40 point=0.950 ci_low=0.835 false_q1=0', reason_code: 'deliver' }, refusals: [ATTESTATION_MISSING] })
+    const unsigned = signablePreview()
     const signed = { ...unsigned, refusals: [], signable: true, attestation: SIGNED.attestation }
     let items: SignoffWithPolicy[] = []
     const { calls } = mockApi({
@@ -234,7 +302,8 @@ describe('SignoffPage (signoff-policy.v1)', () => {
 
     await user.click(submit)
     await screen.findByTestId('signoff-recorded')
-    expect(screen.getByTestId('signoff-recorded').textContent).toContain('signoff-policy.v1')
+    expect(screen.getByTestId('signoff-recorded').textContent).toContain('signoff-policy.v2')
+    expect(gateRow(gate, /Oracle strength measured and ≥ 0\.80/).textContent).toMatch(/✓\s*satisfied:/)
     const post = calls.find((c) => c.method === 'POST' && c.path === '/signoffs')!
     expect((post.init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('t')
     expect(JSON.parse(String(post.init?.body))).toEqual({
@@ -246,14 +315,14 @@ describe('SignoffPage (signoff-policy.v1)', () => {
     // the record shows the snapshot: evidence, policy · route · controls, the attestation
     const table = await screen.findByRole('table', { name: 'Sign-offs for r' })
     await waitFor(() => expect(within(table).getByTestId('signoff-row-evidence')).toBeInTheDocument())
-    expect(within(table).getByTestId('signoff-row-evidence').textContent).toContain('n=40 · 95.0% · lower 83.5% · fQ1 0')
-    expect(within(table).getByTestId('signoff-row-policy').textContent).toContain('signoff-policy.v1 · deliver (deliver) · controls passed 12/14 esc 0')
+    expect(within(table).getByTestId('signoff-row-evidence').textContent).toContain('n=40 · 95.0% · lower 83.5% · fQ1 0 · oracle 0.90')
+    expect(within(table).getByTestId('signoff-row-policy').textContent).toContain('signoff-policy.v2 · deliver (deliver) · controls passed 12/14 esc 0')
     expect(within(table).getByTestId('signoff-row-attestation').textContent).toContain('cccccccccc · fix: task 4')
     expect(within(table).getByRole('img', { name: 'Active attestation' })).toBeInTheDocument()
   })
 
   it('renders a 409 signoff_refused from the server as a gate REFUSED with the clauses, and a 409 false_q1_refused as the floor', async () => {
-    const signable = preview({ controls: PASSED, route: { route: 'deliver', reason: 'ok', reason_code: 'deliver' }, refusals: [], signable: true, attestation: SIGNED.attestation })
+    const signable = signablePreview({ refusals: [], signable: true, attestation: SIGNED.attestation })
     const refusals: SignoffRefusal[] = [{ code: 'controls_escapes', message: '1 measurement control(s) graded clean on this repo > max_controls_escapes=0', threshold: 0, observed: 1, overridable: true }]
     let post = 0
     mockApi({
@@ -298,7 +367,7 @@ describe('SignoffPage (signoff-policy.v1)', () => {
   })
 
   it('renders other errors as the envelope and keeps the gate as the preview says', async () => {
-    const signable = preview({ controls: PASSED, route: { route: 'deliver', reason: 'ok', reason_code: 'deliver' }, refusals: [], signable: true, attestation: SIGNED.attestation })
+    const signable = signablePreview({ refusals: [], signable: true, attestation: SIGNED.attestation })
     mockApi({
       'GET /auth/me': PRINCIPAL,
       'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },

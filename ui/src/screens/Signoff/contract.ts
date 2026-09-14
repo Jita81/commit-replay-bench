@@ -1,8 +1,10 @@
 /**
  * The B7 additions to the sign-off contract (docs/API.md, review §5 play 06 / §7 item 6):
- * a sign-off is a policy decision refused at write (`signoff-policy.v1`), previewed
+ * a sign-off is a policy decision refused at write (`signoff-policy.v2`), previewed
  * before the approver tries, and recorded with the approver's attestation that they
- * read one specific accepted row of the cell.
+ * read one specific accepted row of the cell. v2 (2026-09-14) adds the non-relaxable
+ * `oracle_unmeasured` clause: the cell's oracle strength must be MEASURED (a task-level
+ * mutation score on the cell's tasks), not merely "≥ 0.80 when measured".
  *
  * Lives beside the screen (not in `api/types.ts` / `api/hooks.ts`, which another
  * workstream owns in this wave) — fold it in when the wave merges. Every field here is
@@ -27,11 +29,12 @@ export type RefusalCode =
   | 'controls_failed'
   | 'controls_escapes'
   | 'controls_thin'
+  | 'oracle_unmeasured'
   | 'oracle_weak'
   | `route_not_deliver:${ReasonCode | 'unrouted' | 'unknown'}`
   | 'attestation_missing'
 
-export const SIGNOFF_POLICY_VERSION = 'signoff-policy.v1'
+export const SIGNOFF_POLICY_VERSION = 'signoff-policy.v2'
 
 /** `SignoffPolicy.to_dict()` — the bar in force (defaults or the deployment's relaxed values). */
 export interface SignoffPolicy {
@@ -45,6 +48,8 @@ export interface SignoffPolicy {
   max_controls_escapes: number
   min_constructible_share: number
   min_oracle_strength: number
+  /** v2: always `true` — there is no knob; the server answers 503 to any attempt to set one. */
+  require_oracle_measured: boolean
   require_attestation: boolean
 }
 
@@ -122,6 +127,14 @@ export interface SignoffCreateWithAttestation {
   attestation: AttestationIn
 }
 
+/** `CellOracle.to_dict()` — the cell's oracle as its tasks' latest mutation scores measure it. */
+export interface SignoffOracle {
+  /** mean over the scored tasks; `null` = no task of the cell has a score (unmeasured, never 0) */
+  strength: number | null
+  scored: number
+  tasks: number
+}
+
 export interface SignoffPreviewEvidence {
   measured: boolean
   n: number
@@ -130,7 +143,9 @@ export interface SignoffPreviewEvidence {
   ci_low: number | null
   ci_high: number | null
   false_q1: number
+  /** the strength the policy judged: the task-level measurement, else the rows' own */
   oracle_strength: number | null
+  oracle: SignoffOracle
   apparatus_versions: string[]
   belt_sets: string[]
   model_n: number
@@ -217,6 +232,7 @@ export const REFUSAL_DISPLAY: Record<string, string> = {
   controls_failed: 'negative-controls gate FAILED on this repo — an instrument defect',
   controls_escapes: 'a measurement control escaped the oracle (graded clean)',
   controls_thin: 'fewer than half the controls were constructible',
+  oracle_unmeasured: 'oracle never measured on this cell — run an oracle run first; no policy can waive this',
   oracle_weak: 'oracle too weak to license auto-delivery',
   route_not_deliver: 'the routing rule does not say deliver',
   attestation_missing: 'name the accepted row you read and affirm it — no policy can waive this',

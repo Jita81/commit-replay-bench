@@ -16,7 +16,7 @@ matches a cell when every pattern field equals the cell's field or is ``"*"``;
 a projected cell (``"*"`` in its own key) is matched only by a pattern that is
 at least as wide — a Python-only attestation never lifts a class-wide cell.
 
-A sign-off is a policy decision, refused at write (``signoff-policy.v1``)
+A sign-off is a policy decision, refused at write (``signoff-policy.v2``)
 --------------------------------------------------------------------------
 The 2026-09-13 critical-friend review (§5 play 06, §7 item 6) found that the
 sign-off accepted thin cells and never showed the approver the negative-controls
@@ -32,6 +32,14 @@ enforced by :func:`check_signable` (the first failing clause, as
   ``controls_thin``                  — the repo's negative-controls gate was never
   run, FAILED, let a measurement control escape, or exercised fewer than
   ``min_constructible_share`` of its controls.
+* ``oracle_unmeasured``              — no task of the cell has a mutation score: the
+  oracle's strength is unknown. Never overridable (``signoff-policy.v2``, DL-016): signing a
+  cell whose oracle was never scored is exactly the "a green suite proves
+  correctness" claim ``EVIDENCE-AND-CLAIMS`` §7 forbids — the human would be
+  attesting to a number whose *meaning* was never measured. The 2026-09-14 NHS
+  reading is the evidence: an oracle of 0.36 (2 of 6 tasks scoreable) and 4 of 10
+  clean rows failing their own repository's type check — a weak or unmeasured
+  oracle is where a human sign-off is most likely to be wrong.
 * ``oracle_weak``                    — the cell's measured oracle strength is below
   ``min_oracle_strength``.
 * ``route_not_deliver:<reason_code>`` — the ONE routing rule does not say ``deliver``.
@@ -39,11 +47,21 @@ enforced by :func:`check_signable` (the first failing clause, as
   they read. Never overridable: an approver must have read at least one accepted
   diff in the cell (review §7 item 6).
 
+The cell's oracle strength is resolved in one place (:func:`resolve_oracle_strength`):
+the caller's ``oracle_strength`` (the server passes the mean of the latest task-level
+mutation scores of the cell's tasks — the same per-task reduction ``/oracle/{repo}``
+serves), else the route decision's, else the rows' own mean (census-imported rows
+carry one). It feeds the two oracle clauses and the stamped snapshot, never the
+route: the route stays the capability map's, so the two can never disagree.
+
 A deployment may relax the numeric thresholds and the two ``require_*`` route /
 controls switches (:meth:`SignoffPolicy.from_env`, bounds in :data:`POLICY_BOUNDS`);
-it can never relax ``false_q1`` or ``require_attestation``. The thresholds in force
+it can never relax ``false_q1``, ``require_oracle_measured`` or
+``require_attestation`` (no ``CRB_SIGNOFF__*`` knob exists for them; setting one to
+anything but true is a configuration error, not a lower bar). The thresholds in force
 are stamped into every record (``policy_thresholds``) so an audit reads the bar the
-approver actually cleared, not today's.
+approver actually cleared, not today's — a ``signoff-policy.v1`` record (no
+``require_oracle_measured`` threshold) still verifies and is served as signed under v1.
 
 Cardinal invariant, enforced in BOTH directions
 -----------------------------------------------
@@ -96,7 +114,8 @@ from crb.core.version import APPARATUS_VERSION
 
 SIGNOFF_SCHEMA_V1 = "crb.signoff.v1"
 SIGNOFF_SCHEMA = "crb.signoff.v2"
-SIGNOFF_POLICY_VERSION = "signoff-policy.v1"
+SIGNOFF_POLICY_VERSION_V1 = "signoff-policy.v1"
+SIGNOFF_POLICY_VERSION = "signoff-policy.v2"
 
 #: Earned-tier precedence when several active attestations match one cell.
 _TIER_RANK: dict[str, int] = {TIER_HUMAN_VERIFIED: 1, TIER_AB_CONFIRMED: 2}
@@ -133,6 +152,7 @@ REFUSAL_CONTROLS_UNMEASURED = "controls_unmeasured"
 REFUSAL_CONTROLS_FAILED = "controls_failed"
 REFUSAL_CONTROLS_ESCAPES = "controls_escapes"
 REFUSAL_CONTROLS_THIN = "controls_thin"
+REFUSAL_ORACLE_UNMEASURED = "oracle_unmeasured"
 REFUSAL_ORACLE_WEAK = "oracle_weak"
 REFUSAL_ROUTE_NOT_DELIVER = "route_not_deliver"  # emitted as ``route_not_deliver:<reason_code>``
 REFUSAL_ATTESTATION_MISSING = "attestation_missing"
@@ -144,12 +164,17 @@ REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_CONTROLS_FAILED,
     REFUSAL_CONTROLS_ESCAPES,
     REFUSAL_CONTROLS_THIN,
+    REFUSAL_ORACLE_UNMEASURED,
     REFUSAL_ORACLE_WEAK,
     REFUSAL_ROUTE_NOT_DELIVER,
     REFUSAL_ATTESTATION_MISSING,
 )
-#: Clauses no deployment setting can switch off.
-NON_OVERRIDABLE_REFUSALS: tuple[str, ...] = (REFUSAL_FALSE_Q1, REFUSAL_ATTESTATION_MISSING)
+#: Clauses no deployment setting can switch off (``signoff-policy.v2`` added the oracle one).
+NON_OVERRIDABLE_REFUSALS: tuple[str, ...] = (
+    REFUSAL_FALSE_Q1,
+    REFUSAL_ORACLE_UNMEASURED,
+    REFUSAL_ATTESTATION_MISSING,
+)
 
 
 def refusal_family(code: str) -> str:
@@ -228,10 +253,12 @@ _FALSE = frozenset({"0", "false", "no", "off"})
 
 @dataclass(frozen=True)
 class SignoffPolicy:
-    """The bar an attestation must clear. Defaults are the published ones (DL-014).
+    """The bar an attestation must clear. Defaults are the published ones (DL-014;
+    ``signoff-policy.v2`` keeps every number and adds the measured-oracle clause).
 
-    ``require_attestation`` is a field so the record can say it was in force; it
-    cannot be ``False`` — construction refuses it, as does :meth:`from_env`.
+    ``require_attestation`` and ``require_oracle_measured`` are fields so the record
+    can say they were in force; neither can be ``False`` — construction refuses it,
+    as does :meth:`from_env`.
     """
 
     n_min: int = 10
@@ -240,12 +267,18 @@ class SignoffPolicy:
     max_controls_escapes: int = 0
     min_constructible_share: float = 0.5
     min_oracle_strength: float = 0.80
+    require_oracle_measured: bool = True
     require_attestation: bool = True
     policy_version: str = SIGNOFF_POLICY_VERSION
 
     def __post_init__(self) -> None:
         if not self.require_attestation:
-            raise ValueError("require_attestation cannot be relaxed (signoff-policy.v1)")
+            raise ValueError(f"require_attestation cannot be relaxed ({SIGNOFF_POLICY_VERSION})")
+        if not self.require_oracle_measured:
+            raise ValueError(
+                f"require_oracle_measured cannot be relaxed ({SIGNOFF_POLICY_VERSION}): an "
+                "unmeasured oracle is the 'green proves correctness' claim §7 forbids"
+            )
         for name, (lo, hi) in POLICY_BOUNDS.items():
             v = getattr(self, name)
             if not lo <= v <= hi:
@@ -262,6 +295,7 @@ class SignoffPolicy:
             "max_controls_escapes": self.max_controls_escapes,
             "min_constructible_share": self.min_constructible_share,
             "min_oracle_strength": self.min_oracle_strength,
+            "require_oracle_measured": self.require_oracle_measured,
             "require_attestation": self.require_attestation,
         }
 
@@ -287,8 +321,9 @@ class SignoffPolicy:
         ``<prefix>MIN_CONSTRUCTIBLE_SHARE``, ``<prefix>MIN_ORACLE_STRENGTH``,
         ``<prefix>REQUIRE_ROUTE_DELIVER``, ``<prefix>REQUIRE_CONTROLS_PASSED``. Unset →
         the default; a value outside :data:`POLICY_BOUNDS`, a non-number, or an attempt
-        to set ``<prefix>REQUIRE_ATTESTATION`` to anything but true → ``ValueError``
-        (fail closed: a misconfigured bar is not a lower bar)."""
+        to set ``<prefix>REQUIRE_ATTESTATION`` / ``<prefix>REQUIRE_ORACLE_MEASURED`` to
+        anything but true → ``ValueError`` (fail closed: a misconfigured bar is not a
+        lower bar)."""
         source = os.environ if env is None else env
         kw: dict[str, Any] = {}
 
@@ -310,7 +345,12 @@ class SignoffPolicy:
                     kw[name] = float(raw)
                 except ValueError as exc:
                     raise ValueError(f"{prefix}{name.upper()}={raw!r} is not a number") from exc
-        for name in ("require_route_deliver", "require_controls_passed", "require_attestation"):
+        for name in (
+            "require_route_deliver",
+            "require_controls_passed",
+            "require_oracle_measured",
+            "require_attestation",
+        ):
             raw = _get(name)
             if raw is None:
                 continue
@@ -501,17 +541,40 @@ class SignoffRecord:
         return cls(**kw)
 
 
+def resolve_oracle_strength(
+    cell: CapabilityCell,
+    *,
+    decision: RouteDecision | None = None,
+    oracle_strength: float | None = None,
+) -> float | None:
+    """The ONE resolution of a cell's oracle strength for the sign-off policy.
+
+    ``oracle_strength`` is the caller's measurement (the server: the mean of the
+    latest task-level mutation scores of the cell's tasks, from the oracle events —
+    ``None`` = it found none); else the route decision's (``decision`` defaults to
+    the cell's own); else the rows' own mean (census-imported rows carry one).
+    ``None`` all the way down means *unmeasured* — never 0.0, never a pass.
+    """
+    if oracle_strength is not None:
+        return oracle_strength
+    d = decision if decision is not None else cell.decision
+    if d is not None and d.oracle_strength is not None:
+        return d.oracle_strength
+    return cell.stats.oracle_strength_mean if cell.stats is not None else None
+
+
 def stamp_evidence(
     record: SignoffRecord,
     cell: CapabilityCell,
     *,
     controls: ControlsVerdict | None = None,
     decision: RouteDecision | None = None,
+    oracle_strength: float | None = None,
     policy: SignoffPolicy = DEFAULT_SIGNOFF_POLICY,
 ) -> SignoffRecord:
-    """Copy the cell's current evidence, the route decision, the controls verdict and
-    the policy in force into the record's snapshot fields (the attestation is the
-    approver's and stays as given)."""
+    """Copy the cell's current evidence, the route decision, the controls verdict, the
+    resolved oracle strength and the policy in force into the record's snapshot
+    fields (the attestation is the approver's and stays as given)."""
     if cell.stats is None:
         raise SignoffRefused(
             f"cell {cell.label!r} has no measured evidence to attest to",
@@ -521,11 +584,7 @@ def stamp_evidence(
         )
     d = decision if decision is not None else cell.decision
     c = controls if controls is not None else (d.controls if d is not None else None)
-    strength = (
-        d.oracle_strength
-        if d is not None and d.oracle_strength is not None
-        else cell.stats.oracle_strength_mean
-    )
+    strength = resolve_oracle_strength(cell, decision=d, oracle_strength=oracle_strength)
     return replace(
         record,
         n_at_signoff=cell.stats.n,
@@ -567,6 +626,7 @@ def evaluate_signoff(
     *,
     controls: ControlsVerdict | None = None,
     decision: RouteDecision | None = None,
+    oracle_strength: float | None = None,
     policy: SignoffPolicy = DEFAULT_SIGNOFF_POLICY,
     repo: str = WILDCARD,
 ) -> tuple[SignoffRefusal, ...]:
@@ -574,7 +634,10 @@ def evaluate_signoff(
     the module docstring publishes. Empty ⇒ signable.
 
     ``decision`` defaults to the cell's own; ``controls`` to the decision's verdict
-    (``None`` = the caller evaluated none, which the policy reads as *unmeasured*).
+    (``None`` = the caller evaluated none, which the policy reads as *unmeasured*);
+    ``oracle_strength`` is the caller's measurement of the cell's oracle (see
+    :func:`resolve_oracle_strength`; ``None`` = it found none, and the cell falls
+    back to what its decision / rows carry — *unmeasured* when nothing does).
     A false-Q1 cell or a scope mismatch is returned alone — nothing else about such
     a cell matters. A revocation never fails (withdrawing trust needs no evidence).
     """
@@ -662,12 +725,21 @@ def evaluate_signoff(
                     )
                 )
 
-    strength = (
-        d.oracle_strength
-        if d is not None and d.oracle_strength is not None
-        else (cell.stats.oracle_strength_mean if cell.stats is not None else None)
-    )
-    if strength is not None and strength < policy.min_oracle_strength:
+    strength = resolve_oracle_strength(cell, decision=d, oracle_strength=oracle_strength)
+    if strength is None:
+        # signoff-policy.v2: "≥ min_oracle_strength when measured" became "measured AND ≥".
+        # No knob turns this off — an unmeasured oracle is the §7 claim in disguise.
+        out.append(
+            SignoffRefusal(
+                REFUSAL_ORACLE_UNMEASURED,
+                f"no task of cell {cell.label!r} has a mutation score — the oracle's "
+                "strength is unknown, so a green here is not evidence; run an 'oracle' run "
+                "on this repo before signing (cannot be relaxed)",
+                threshold="measured",
+                observed=None,
+            )
+        )
+    elif strength < policy.min_oracle_strength:
         out.append(
             SignoffRefusal(
                 REFUSAL_ORACLE_WEAK,
@@ -717,6 +789,7 @@ def check_signable(
     *,
     controls: ControlsVerdict | None = None,
     decision: RouteDecision | None = None,
+    oracle_strength: float | None = None,
     policy: SignoffPolicy = DEFAULT_SIGNOFF_POLICY,
     repo: str = WILDCARD,
 ) -> None:
@@ -726,7 +799,13 @@ def check_signable(
     A revocation is always writable (withdrawing trust never needs evidence).
     """
     refusals = evaluate_signoff(
-        record, cell, controls=controls, decision=decision, policy=policy, repo=repo
+        record,
+        cell,
+        controls=controls,
+        decision=decision,
+        oracle_strength=oracle_strength,
+        policy=policy,
+        repo=repo,
     )
     if refusals:
         first = refusals[0]
@@ -778,13 +857,15 @@ class JsonlSignoffLedger:
         *,
         repo: str = WILDCARD,
         controls: ControlsVerdict | None = None,
+        oracle_strength: float | None = None,
         policy: SignoffPolicy = DEFAULT_SIGNOFF_POLICY,
     ) -> SignoffRecord:
         """Check, stamp, chain and append. Returns the chained record.
 
         ``cell`` is the live cell the human reviewed; it is required for an
-        attestation (the write boundary applies ``policy`` against it and the repo's
-        ``controls`` verdict) and optional for a revocation.
+        attestation (the write boundary applies ``policy`` against it, the repo's
+        ``controls`` verdict and the caller's ``oracle_strength`` measurement) and
+        optional for a revocation.
         """
         if not record.revoked:
             if cell is None:
@@ -794,8 +875,17 @@ class JsonlSignoffLedger:
                     threshold=policy.n_min,
                     observed=0,
                 )
-            check_signable(record, cell, controls=controls, policy=policy, repo=repo)
-            record = stamp_evidence(record, cell, controls=controls, policy=policy)
+            check_signable(
+                record,
+                cell,
+                controls=controls,
+                oracle_strength=oracle_strength,
+                policy=policy,
+                repo=repo,
+            )
+            record = stamp_evidence(
+                record, cell, controls=controls, oracle_strength=oracle_strength, policy=policy
+            )
         chained = record.chained(self._last_hash())
         self.path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(chained.to_dict(), sort_keys=True, ensure_ascii=False)

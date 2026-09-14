@@ -3,9 +3,11 @@ NEVER able to lift a false-Q1 cell (refused at write, re-checked at read).
 
 Ports the upstream test_signoff_ledger cases onto crb types and adds the chain,
 the write-boundary refusal (→ HTTP 409 at the API), the scope rules and — since
-``signoff-policy.v1`` — the policy decision: every refusal code, the two
-non-overridable clauses, the operator-adjustable bounds, the v2 snapshot and the
-v1-record tolerance.
+``signoff-policy.v1`` — the policy decision: every refusal code, the non-overridable
+clauses, the operator-adjustable bounds, the v2 snapshot and the v1-record tolerance.
+``signoff-policy.v2`` (2026-09-14, the fable-decider's ``signoff-policy: adjust``)
+adds the third non-overridable clause: the cell's oracle strength must be MEASURED
+(``oracle_unmeasured``), not merely "≥ 0.80 when measured".
 """
 
 from __future__ import annotations
@@ -23,6 +25,8 @@ from crb.core.version import APPARATUS_VERSION
 
 PACK = "b" * 64
 ROW_HASH = "c" * 64
+#: The rows' own oracle strength (census-imported rows carry one); ``None`` = unmeasured.
+ORACLE = 0.9
 
 #: A controls verdict that clears the policy: passed, 5 of 7 constructible, no escape.
 PASSED = ControlsVerdict(passed=True, constructible=5, total=7, escapes=0, run_id="ctl00001")
@@ -37,7 +41,7 @@ def _row(
     model: str = "gpt-oss-120b",
     repo: str = "todo",
     task_id: str = "0123456789abcdef",
-    oracle_strength: float | None = None,
+    oracle_strength: float | None = ORACLE,
 ) -> GradeRow:
     return GradeRow(
         repo=repo,
@@ -106,8 +110,9 @@ def _signoff(
 
 
 def _signable_cell(**key: str) -> cap.CapabilityCell:
-    """16 clean rows under a passing controls verdict → routes ``deliver`` (Wilson
-    lower 0.806 ≥ 0.80; twelve clean rows would only reach 0.758)."""
+    """16 clean rows (oracle 0.9 measured on the rows) under a passing controls verdict →
+    routes ``deliver`` (Wilson lower 0.806 ≥ 0.80; twelve clean rows would only reach
+    0.758)."""
     key = key or {"capability_class": "frontend.component.add", "size": "S"}
     return _cell(_rows(16, 16), controls=PASSED, **key)
 
@@ -167,6 +172,46 @@ def test_record_roundtrip_and_hash_v2() -> None:
     assert not tampered.verify_hash()
 
 
+def test_policy_v1_record_still_verifies_and_reads_as_v1() -> None:
+    """A record signed under ``signoff-policy.v1`` (schema v2, thresholds without
+    ``require_oracle_measured``) keeps its hash and its stamped version after the
+    policy moved to v2 — the bar it cleared is the bar it says it cleared."""
+    v1_thresholds = {
+        "n_min": 10,
+        "require_route_deliver": True,
+        "require_controls_passed": True,
+        "max_controls_escapes": 0,
+        "min_constructible_share": 0.5,
+        "min_oracle_strength": 0.8,
+        "require_attestation": True,
+    }
+    rec = so.SignoffRecord(
+        repo="todo",
+        capability_class="frontend.component.add",
+        verifier="alice@x.com",
+        n_at_signoff=16,
+        point_at_signoff=1.0,
+        ci_low_at_signoff=0.806,
+        oracle_strength_at_signoff=None,
+        policy_version=so.SIGNOFF_POLICY_VERSION_V1,
+        policy_thresholds=v1_thresholds,
+        route_at_signoff="deliver",
+        route_reason_code="deliver",
+        controls_verdict="passed",
+        attestation=_attestation(),
+    ).chained("0" * 64)
+    assert rec.verify_hash() and so.verify_signoff_chain([rec]) == 1
+    again = so.SignoffRecord.from_dict(json.loads(json.dumps(rec.to_dict())))
+    assert again == rec and again.verify_hash()
+    assert again.policy_version == "signoff-policy.v1"
+    assert "require_oracle_measured" not in again.policy_thresholds
+    assert again.oracle_strength_at_signoff is None  # what it saw: unmeasured, under v1
+    # a v2 record chains after it (the version is data on the record, not a constant)
+    nxt = so.stamp_evidence(_signoff(), _signable_cell(), controls=PASSED).chained(rec.row_hash)
+    assert nxt.policy_version == "signoff-policy.v2"
+    assert so.verify_signoff_chain([rec, nxt]) == 2
+
+
 def test_v1_record_still_verifies_and_loads_with_defaults() -> None:
     """A record written before the policy (schema v1, ten snapshot fields) keeps its
     hash after this module learned the v2 fields — an old chain never breaks."""
@@ -210,8 +255,11 @@ def test_v1_record_still_verifies_and_loads_with_defaults() -> None:
 
 
 def test_policy_defaults_are_the_published_ones() -> None:
+    """signoff-policy.v2 keeps every v1 number (DL-014) and adds the measured-oracle
+    clause as a stamped, non-relaxable switch."""
     p = so.DEFAULT_SIGNOFF_POLICY
-    assert p.policy_version == "signoff-policy.v1"
+    assert p.policy_version == "signoff-policy.v2" == so.SIGNOFF_POLICY_VERSION
+    assert so.SIGNOFF_POLICY_VERSION_V1 == "signoff-policy.v1"
     assert p.thresholds() == {
         "n_min": 10,
         "require_route_deliver": True,
@@ -219,17 +267,21 @@ def test_policy_defaults_are_the_published_ones() -> None:
         "max_controls_escapes": 0,
         "min_constructible_share": 0.5,
         "min_oracle_strength": 0.8,
+        "require_oracle_measured": True,
         "require_attestation": True,
     }
     assert not p.relaxed
     d = p.to_dict()
-    assert d["non_overridable"] == ["false_q1", "attestation_missing"]
+    assert d["non_overridable"] == ["false_q1", "oracle_unmeasured", "attestation_missing"]
     assert d["bounds"]["n_min"] == [1, 10_000]
+    assert "require_oracle_measured" not in so.POLICY_BOUNDS  # a switch with no knob
 
 
 def test_policy_bounds_and_non_relaxable_attestation() -> None:
     with pytest.raises(ValueError, match="require_attestation cannot be relaxed"):
         so.SignoffPolicy(require_attestation=False)
+    with pytest.raises(ValueError, match="require_oracle_measured cannot be relaxed"):
+        so.SignoffPolicy(require_oracle_measured=False)
     with pytest.raises(ValueError, match="n_min=0 outside"):
         so.SignoffPolicy(n_min=0)
     with pytest.raises(ValueError, match=r"min_constructible_share=1\.5 outside"):
@@ -250,15 +302,18 @@ def test_policy_from_env_parses_relaxes_and_fails_closed() -> None:
             "CRB_SIGNOFF__REQUIRE_ROUTE_DELIVER": "false",
             "CRB_SIGNOFF__REQUIRE_CONTROLS_PASSED": "off",
             "CRB_SIGNOFF__REQUIRE_ATTESTATION": "yes",
+            "CRB_SIGNOFF__REQUIRE_ORACLE_MEASURED": "true",
             "CRB_SIGNOFF__UNKNOWN": "ignored",
         }
     )
     assert (p.n_min, p.max_controls_escapes, p.min_constructible_share) == (5, 1, 0.25)
     assert p.min_oracle_strength == 0.7
     assert not p.require_route_deliver and not p.require_controls_passed
-    assert p.require_attestation and p.relaxed
+    assert p.require_attestation and p.require_oracle_measured and p.relaxed
     with pytest.raises(ValueError, match="cannot be relaxed"):
         so.SignoffPolicy.from_env({"CRB_SIGNOFF__REQUIRE_ATTESTATION": "0"})
+    with pytest.raises(ValueError, match="require_oracle_measured cannot be relaxed"):
+        so.SignoffPolicy.from_env({"CRB_SIGNOFF__REQUIRE_ORACLE_MEASURED": "false"})
     with pytest.raises(ValueError, match="not an integer"):
         so.SignoffPolicy.from_env({"CRB_SIGNOFF__N_MIN": "ten"})
     with pytest.raises(ValueError, match="not a boolean"):
@@ -397,6 +452,79 @@ def test_refusal_oracle_weak_uses_the_measured_strength() -> None:
         size="S",
     )
     assert so.evaluate_signoff(_signoff(), strong, controls=PASSED, repo="todo") == ()
+    # the caller's measurement wins over the rows' own for the oracle clauses — and only
+    # for them: the route stays the capability map's (routed on the rows), so the two can
+    # never disagree about the route
+    refusals = so.evaluate_signoff(
+        _signoff(), cell, controls=PASSED, oracle_strength=0.95, repo="todo"
+    )
+    assert _codes(refusals) == ["route_not_deliver:oracle_weak"]
+    refusals = so.evaluate_signoff(
+        _signoff(), strong, controls=PASSED, oracle_strength=0.55, repo="todo"
+    )
+    assert _codes(refusals) == ["oracle_weak"] and refusals[0].observed == 0.55
+
+
+def test_refusal_oracle_unmeasured_is_not_overridable() -> None:
+    """signoff-policy.v2: a cell whose oracle was never scored is refused — under every
+    policy a deployment can configure — until a task-level mutation score exists."""
+    rows = _rows(16, 16, oracle_strength=None)
+    key = {"capability_class": "frontend.component.add", "size": "S"}
+    cell = _cell(rows, controls=PASSED, **key)
+    assert cell.route == ROUTE_DELIVER  # the routing rule does not see an unmeasured oracle
+    refusals = so.evaluate_signoff(_signoff(), cell, controls=PASSED, repo="todo")
+    assert _codes(refusals) == ["oracle_unmeasured"]
+    r = refusals[0]
+    assert r.threshold == "measured" and r.observed is None and not r.overridable
+    assert "mutation score" in r.message and "cannot be relaxed" in r.message
+    assert r.to_dict() == {
+        "code": "oracle_unmeasured",
+        "message": r.message,
+        "threshold": "measured",
+        "observed": None,
+        "overridable": False,
+    }
+    with pytest.raises(so.SignoffRefused, match="mutation score") as ei:
+        so.check_signable(_signoff(), cell, controls=PASSED, repo="todo")
+    assert ei.value.code == "oracle_unmeasured" and ei.value.observed is None
+    # the most relaxed policy there is still refuses it
+    relaxed = so.SignoffPolicy(
+        n_min=1,
+        max_controls_escapes=100,
+        min_constructible_share=0.0,
+        min_oracle_strength=0.0,
+        require_route_deliver=False,
+        require_controls_passed=False,
+    )
+    assert _codes(so.evaluate_signoff(_signoff(), cell, policy=relaxed, repo="todo")) == [
+        "oracle_unmeasured"
+    ]
+    # … and no knob exists to drop the clause
+    with pytest.raises(ValueError, match="require_oracle_measured cannot be relaxed"):
+        so.SignoffPolicy.from_env({"CRB_SIGNOFF__REQUIRE_ORACLE_MEASURED": "off"})
+    # the caller's measurement (the server: the cell's tasks' latest mutation scores)
+    # clears it — a strong one signs, a weak one is `oracle_weak`
+    assert (
+        so.evaluate_signoff(_signoff(), cell, controls=PASSED, oracle_strength=0.85, repo="todo")
+        == ()
+    )
+    weak = so.evaluate_signoff(_signoff(), cell, controls=PASSED, oracle_strength=0.5, repo="todo")
+    assert _codes(weak) == ["oracle_weak"] and weak[0].observed == 0.5
+    # the resolver: caller > decision > rows, never 0.0 for "unmeasured"
+    assert so.resolve_oracle_strength(cell) is None
+    assert so.resolve_oracle_strength(cell, oracle_strength=0.85) == 0.85
+    measured = _cell(_rows(16, 16, oracle_strength=0.7), controls=PASSED, **key)
+    assert so.resolve_oracle_strength(measured) == pytest.approx(0.7)
+    assert so.resolve_oracle_strength(measured, oracle_strength=0.85) == 0.85
+    # evaluation order: the clause sits after the controls clauses, before the route
+    thin = _cell(_rows(2, 2, oracle_strength=None), controls=None, **key)
+    assert _codes(so.evaluate_signoff(_signoff(attested=False), thin, repo="todo")) == [
+        "thin_cell",
+        "controls_unmeasured",
+        "oracle_unmeasured",
+        "route_not_deliver:n_below_min",
+        "attestation_missing",
+    ]
 
 
 def test_refusal_route_not_deliver_carries_the_reason_code() -> None:
@@ -456,6 +584,8 @@ def test_refusal_code_vocabulary_is_closed() -> None:
     with pytest.raises(ValueError, match="refusal code"):
         so.SignoffRefusal("made_up", "x")
     assert so.SignoffRefusal("route_not_deliver:ci_low_below_bar", "x").overridable
+    assert not so.SignoffRefusal("oracle_unmeasured", "x").overridable
+    assert so.NON_OVERRIDABLE_REFUSALS == ("false_q1", "oracle_unmeasured", "attestation_missing")
 
 
 # ---------------------------------------------------------------------------
@@ -469,9 +599,21 @@ def test_stamp_evidence_records_the_whole_decision() -> None:
     assert rec.n_at_signoff == 16 and rec.point_at_signoff == 1.0
     assert rec.ci_low_at_signoff == pytest.approx(0.806, abs=1e-3)
     assert rec.false_q1_at_signoff == 0 and rec.apparatus_version == APPARATUS_VERSION
-    assert rec.oracle_strength_at_signoff is None  # unmeasured stays None, never 0.0
-    assert rec.policy_version == "signoff-policy.v1"
+    assert rec.oracle_strength_at_signoff == pytest.approx(ORACLE)  # the rows' own
+    assert rec.policy_version == "signoff-policy.v2"
     assert rec.policy_thresholds == so.DEFAULT_SIGNOFF_POLICY.thresholds()
+    assert rec.policy_thresholds["require_oracle_measured"] is True
+    # the caller's measurement is what gets stamped when given; unmeasured stays None
+    assert (
+        so.stamp_evidence(_signoff(), cell, oracle_strength=0.85).oracle_strength_at_signoff == 0.85
+    )
+    unmeasured = _cell(
+        _rows(16, 16, oracle_strength=None),
+        controls=PASSED,
+        capability_class="frontend.component.add",
+        size="S",
+    )
+    assert so.stamp_evidence(_signoff(), unmeasured).oracle_strength_at_signoff is None
     assert rec.route_at_signoff == "deliver" and rec.route_reason_code == "deliver"
     assert (rec.controls_verdict, rec.controls_run_id) == ("passed", "ctl00001")
     assert (rec.controls_k, rec.controls_total, rec.controls_escapes) == (5, 7, 0)
@@ -501,7 +643,8 @@ def test_append_load_roundtrip(tmp_path: Path) -> None:
     # evidence snapshot stamped from the live cell
     assert a.n_at_signoff == 16 and a.point_at_signoff == 1.0 and a.false_q1_at_signoff == 0
     assert a.apparatus_version == APPARATUS_VERSION  # stamped from the instrument, never a literal
-    assert a.policy_version == "signoff-policy.v1" and a.controls_verdict == "passed"
+    assert a.policy_version == "signoff-policy.v2" and a.controls_verdict == "passed"
+    assert a.oracle_strength_at_signoff == pytest.approx(ORACLE)
     assert loaded[0].attestation == _attestation()
     # chained
     assert a.prev_hash == "0" * 64 and b.prev_hash == a.row_hash
@@ -594,7 +737,21 @@ def test_write_refuses_thin_cell_unmeasured_controls_and_no_attestation(tmp_path
     with pytest.raises(so.SignoffRefused, match="must name one accepted") as ei:
         led.append(_signoff(attested=False), ok, repo="todo", controls=PASSED)
     assert ei.value.code == "attestation_missing"
+    # an unmeasured oracle is refused at the write boundary too; the caller's
+    # measurement is what lets it through, and it is what the record carries
+    unscored = _cell(
+        _rows(16, 16, oracle_strength=None),
+        controls=PASSED,
+        capability_class="frontend.component.add",
+        size="S",
+    )
+    with pytest.raises(so.SignoffRefused, match="mutation score") as ei:
+        led.append(_signoff(), unscored, repo="todo", controls=PASSED)
+    assert ei.value.code == "oracle_unmeasured"
     assert not (tmp_path / "s.jsonl").exists()  # nothing written by any refusal
+    rec = led.append(_signoff(), unscored, repo="todo", controls=PASSED, oracle_strength=0.88)
+    assert rec.oracle_strength_at_signoff == 0.88 and rec.policy_version == "signoff-policy.v2"
+    assert led.verify() == 1
 
 
 def test_write_refuses_scope_mismatch(tmp_path: Path) -> None:

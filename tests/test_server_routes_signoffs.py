@@ -1,16 +1,20 @@
-"""``/signoffs`` under ``signoff-policy.v1`` — a sign-off is a policy decision, refused at write.
+"""``/signoffs`` under ``signoff-policy.v2`` — a sign-off is a policy decision, refused at write.
 
 The seed's deliver cell (``bug.fix|S``, n = 40, point 0.95, Wilson lower 0.835) sits under a
 controls report with ONE escape, so it is REFUSED (409 ``signoff_refused`` /
-``controls_escapes``) until a clean controls run lands (``pass_controls``); then it signs —
-with an attestation naming an accepted row — and the record carries the whole snapshot.
-Also: the false-Q1 floor (first, non-overridable, its historical envelope code), the
-preview, attestation validation (422), the policy endpoint and the deployment knobs,
-revoke and the chain.
+``controls_escapes``) until a clean controls run lands (``pass_controls``); its oracle is
+MEASURED from the seed's ``oracle.score`` events at 0.58 over 3 of its 4 tasks, so it is
+still ``oracle_weak`` until strong scores land (``score_oracle``); then it signs — with an
+attestation naming an accepted row — and the record carries the whole snapshot. A cell
+whose tasks were never scored is ``oracle_unmeasured``: refused under every deployment
+knob (the v2 clause). Also: the false-Q1 floor (first, non-overridable, its historical
+envelope code), the preview, attestation validation (422), the policy endpoint and the
+deployment knobs, revoke, the chain, and records signed under v1 served as such.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -24,14 +28,26 @@ from crb.core.version import APPARATUS_VERSION
 from crb.server.routes.runs import system_trace_id
 from crb.server.routes.signoffs import signoff_hash, verify_signoff_rows
 from crb.store.models import Event, Grade, Signoff
-from fixtures.server_seed import ALPHA, BETA, THIN_CELL, Env, assert_rbac, envelope, login, make_env
+from fixtures.server_seed import (
+    ALPHA,
+    BETA,
+    THIN_CELL,
+    Env,
+    assert_rbac,
+    envelope,
+    login,
+    make_env,
+)
 from fixtures.signoff_seed import (
     CLEAN_CONTROLS_RUN,
     STATEMENT,
+    STRONG_ORACLE,
     accepted_row,
     attestation_for,
     attested_body,
+    clear_policy,
     pass_controls,
+    score_oracle,
 )
 
 DELIVER = {"capability_class": "bug.fix", "size": "S"}
@@ -66,8 +82,11 @@ DEFAULT_THRESHOLDS = {
     "max_controls_escapes": 0,
     "min_constructible_share": 0.5,
     "min_oracle_strength": 0.8,
+    "require_oracle_measured": True,
     "require_attestation": True,
 }
+#: The seed's measured oracle on the deliver cell: (0.9 + 0.5 + 0.3333) / 3 over 3 of 4 tasks.
+SEED_ORACLE = 0.5778
 
 
 @pytest.fixture(autouse=True)
@@ -168,10 +187,17 @@ class TestCreate:
         assert d["code"] == "controls_escapes" and d["threshold"] == 0 and d["observed_value"] == 1
         assert "1 measurement control(s) graded clean" in e["message"]
         assert "max_controls_escapes=0" in e["message"]
-        assert d["policy_version"] == "signoff-policy.v1" and d["thresholds"] == DEFAULT_THRESHOLDS
-        assert _codes(d["refusals"]) == ["controls_escapes", "route_not_deliver:controls_escapes"]
+        assert d["policy_version"] == "signoff-policy.v2" and d["thresholds"] == DEFAULT_THRESHOLDS
+        assert _codes(d["refusals"]) == [
+            "controls_escapes",
+            "oracle_weak",
+            "route_not_deliver:controls_escapes",
+        ]
         obs = d["observed"]
         assert obs["n"] == 40 and obs["point"] == 0.95 and obs["false_q1"] == 0
+        # the oracle as the seed's task-level scores measure it: 3 of the cell's 4 tasks
+        assert obs["oracle_strength"] == SEED_ORACLE
+        assert obs["oracle"] == {"strength": SEED_ORACLE, "scored": 3, "tasks": 4}
         assert obs["route"] == "human" and obs["reason_code"] == "controls_escapes"
         assert obs["controls"] == {
             "verdict": "escaped",
@@ -186,8 +212,8 @@ class TestCreate:
         assert ev.status == "invalid" and ev.payload_json["code"] == "controls_escapes"
         assert ev.payload_json["envelope_code"] == "signoff_refused"
 
-    def test_201_once_the_controls_gate_is_clean(self, env: Env) -> None:
-        pass_controls(env)
+    def test_201_once_the_controls_gate_is_clean_and_the_oracle_is_strong(self, env: Env) -> None:
+        clear_policy(env)
         row = accepted_row(env, DELIVER)
         r = env.post("/signoffs", json=attested_body(env, DELIVER, note="reviewed 40 packs"))
         assert r.status_code == 201, r.text
@@ -213,10 +239,11 @@ class TestCreate:
         assert ev["n"] == 40 and ev["point"] == 0.95
         assert ev["ci_low"] == pytest.approx(0.835, abs=0.001)
         assert ev["false_q1"] == 0 and ev["apparatus_versions"] == [APPARATUS_VERSION]
-        assert ev["oracle_strength"] is None  # the seed's rows carry no strength — never 0
+        # the rows carry no strength; the stamped one is the task-level measurement
+        assert ev["oracle_strength"] == pytest.approx(STRONG_ORACLE)
         # the policy decision
         assert d["schema"] == "crb.signoff.v2"
-        assert d["policy_version"] == "signoff-policy.v1"
+        assert d["policy_version"] == "signoff-policy.v2"
         assert d["policy_thresholds"] == DEFAULT_THRESHOLDS
         assert d["route"]["route"] == "deliver" and d["route"]["reason_code"] == "deliver"
         assert "n=40" in d["route"]["reason"]
@@ -242,7 +269,9 @@ class TestCreate:
         assert len(rows) == 1 and rows[0].row_hash == signoff_hash(rows[0])
         cj = rows[0].cell_json
         assert rows[0].evidence_rows == 40 and cj["evidence_n"] == "40"
-        assert cj["policy_version"] == "signoff-policy.v1"
+        assert cj["policy_version"] == "signoff-policy.v2"
+        assert cj["evidence_oracle_strength"] == f"{STRONG_ORACLE:.6f}"
+        assert '"require_oracle_measured": true' in cj["policy_thresholds"]
         assert cj["route_reason_code"] == "deliver" and cj["controls_verdict"] == "passed"
         assert cj["controls_run_id"] == CLEAN_CONTROLS_RUN and cj["controls_escapes"] == "0"
         assert cj["attestation_reviewed_row_hash"] == row.row_hash
@@ -251,13 +280,82 @@ class TestCreate:
         (created,) = _events(env, "signoff.created")
         assert created.payload_json["n"] == 40
         assert created.payload_json["controls_verdict"] == "passed"
+        assert created.payload_json["oracle_strength"] == pytest.approx(STRONG_ORACLE)
+        assert (created.payload_json["oracle_scored"], created.payload_json["oracle_tasks"]) == (
+            4,
+            4,
+        )
         assert created.payload_json["reviewed_row_hash"] == row.row_hash
         # served back by id
         got = env.get(f"/signoffs/{d['id']}")
         assert got.status_code == 200 and got.json() == d
 
-    def test_full_cell_scope_and_second_attestation_chains(self, env: Env) -> None:
+    def test_409_oracle_weak_is_the_seed_s_measurement(self, env: Env) -> None:
+        """With the controls gate clean the seed's cell is still refused: its oracle IS
+        measured — 0.58 over 3 of 4 tasks — and below the bar. A deployment may lower
+        the numeric bar (the clause is overridable); the route is untouched by it."""
         pass_controls(env)
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 409, r.text
+        d = envelope(r)["detail"]
+        assert d["code"] == "oracle_weak" and d["threshold"] == 0.8
+        assert d["observed_value"] == SEED_ORACLE
+        assert _codes(d["refusals"]) == ["oracle_weak"]
+        assert d["refusals"][0]["overridable"] is True
+        assert d["observed"]["oracle"] == {"strength": SEED_ORACLE, "scored": 3, "tasks": 4}
+        assert d["observed"]["route"] == "deliver"  # the map's route; the oracle is a clause
+        assert _signoffs(env) == []
+
+    def test_409_oracle_unmeasured_is_not_overridable(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """signoff-policy.v2: a cell none of whose tasks carries a mutation score cannot be
+        signed — under any ``CRB_SIGNOFF__*`` setting; there is no knob, and trying to set
+        one is a misconfiguration (503), not a lower bar. A later oracle run clears it."""
+        pass_controls(env)
+        # the latest score per task wins: unscoreable scores on every task of the cell
+        # make the cell read as unmeasured (0 of 4)
+        score_oracle(env, strength=None, run_id="8" * 32)
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 409, r.text
+        e = envelope(r)
+        assert e["code"] == "signoff_refused"
+        d = e["detail"]
+        assert d["code"] == "oracle_unmeasured"
+        assert d["threshold"] == "measured" and d["observed_value"] is None
+        assert "mutation score" in e["message"] and "cannot be relaxed" in e["message"]
+        assert _codes(d["refusals"]) == ["oracle_unmeasured"]
+        assert d["refusals"][0]["overridable"] is False
+        assert d["observed"]["oracle_strength"] is None
+        assert d["observed"]["oracle"] == {"strength": None, "scored": 0, "tasks": 4}
+        assert d["observed"]["route"] == "deliver"
+        (ev,) = _events(env, "signoff.refused")
+        assert ev.payload_json["code"] == "oracle_unmeasured"
+        assert _signoffs(env) == []
+        # the most relaxed numeric bar there is does not touch it …
+        monkeypatch.setenv("CRB_SIGNOFF__MIN_ORACLE_STRENGTH", "0")
+        monkeypatch.setenv("CRB_SIGNOFF__N_MIN", "1")
+        monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_CONTROLS_PASSED", "false")
+        monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_ROUTE_DELIVER", "false")
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 409 and envelope(r)["detail"]["code"] == "oracle_unmeasured"
+        # … and there is no switch: setting one is a misconfigured policy, fail closed
+        monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_ORACLE_MEASURED", "false")
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 503 and envelope(r)["code"] == "signoff_policy_invalid"
+        assert "require_oracle_measured cannot be relaxed" in envelope(r)["message"]
+        assert env.get("/signoffs/policy").status_code == 503
+        monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_ORACLE_MEASURED", "true")  # the only value
+        assert env.get("/signoffs/policy").status_code == 200
+        # a newer oracle run that scores the cell's tasks measures it — and signs
+        score_oracle(env, run_id="9" * 32)
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 201, r.text
+        assert r.json()["evidence"]["oracle_strength"] == pytest.approx(STRONG_ORACLE)
+        assert r.json()["policy_version"] == "signoff-policy.v2"
+
+    def test_full_cell_scope_and_second_attestation_chains(self, env: Env) -> None:
+        clear_policy(env)
         r1 = env.post("/signoffs", json=attested_body(env, DELIVER))
         r2 = env.post(
             "/signoffs",
@@ -270,7 +368,7 @@ class TestCreate:
         assert env.get(f"/signoffs?repo={ALPHA}").json()["total"] == 2
 
     def test_409_thin_cell_lists_every_clause_with_observed_vs_threshold(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         r = env.post("/signoffs", json=attested_body(env, THIN))
         assert r.status_code == 409, r.text
         e = envelope(r)
@@ -278,14 +376,20 @@ class TestCreate:
         d = e["detail"]
         assert d["code"] == "thin_cell" and d["threshold"] == 10 and d["observed_value"] == 4
         assert "n=4 < n_min=10" in e["message"]
-        assert _codes(d["refusals"]) == ["thin_cell", "route_not_deliver:n_below_min"]
-        route = d["refusals"][1]
+        # the thin cell's tasks: one unscoreable seed score, one never scored → unmeasured
+        assert _codes(d["refusals"]) == [
+            "thin_cell",
+            "oracle_unmeasured",
+            "route_not_deliver:n_below_min",
+        ]
+        route = d["refusals"][2]
         assert route["threshold"] == "deliver" and route["observed"] == "calibrate"
-        assert all(r["overridable"] for r in d["refusals"])
+        assert [r["overridable"] for r in d["refusals"]] == [True, False, True]
+        assert d["observed"]["oracle"] == {"strength": None, "scored": 0, "tasks": 2}
         assert _signoffs(env) == []
 
     def test_409_attestation_missing_is_not_overridable(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         r = env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER, "note": "no row named"})
         assert r.status_code == 409, r.text
         d = envelope(r)["detail"]
@@ -303,10 +407,12 @@ class TestCreate:
         assert _codes(d["refusals"]) == [
             "thin_cell",
             "controls_unmeasured",
+            "oracle_unmeasured",
             "route_not_deliver:unrouted",
             "attestation_missing",
         ]
-        # a FAILED gate on alpha
+        # a FAILED gate on alpha (the oracle scored strong, so only the gate is at issue)
+        score_oracle(env)
         pass_controls(env, passed=False, run_id="6" * 32)
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
         d = envelope(r)["detail"]
@@ -322,7 +428,7 @@ class TestCreate:
         assert _codes(d["refusals"]) == ["controls_thin", "route_not_deliver:controls_thin"]
 
     def test_409_false_q1_row_inserted_around_the_ledger_is_first(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         bad = _seed_false_q1_row(env)
         r = env.post(
             "/signoffs",
@@ -345,7 +451,7 @@ class TestCreate:
         assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 201
 
     def test_read_time_check_invalidates_a_signed_cell(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 201
         _seed_false_q1_row(env, cls="bug.fix", size="S")  # the same cell, after the fact
         item = env.get(f"/signoffs?repo={ALPHA}&include_revoked=true").json()["items"][0]
@@ -396,7 +502,7 @@ class TestCreate:
         assert envelope(r)["code"] == "validation_error"
 
     def test_422_attestation_row_must_be_an_accepted_row_of_this_cell(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         loc = ["body", "attestation", "reviewed_row_hash"]
 
         def post(hash_: str) -> Any:
@@ -439,7 +545,7 @@ class TestCreate:
         assert env.post("/signoffs", json={"repo": "nope", "cell": DELIVER}).status_code == 404
 
     def test_note_and_statement_are_redacted(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         secret = "sk-live-abcdefghijklmnopqrstuvwxyz0123"
         r = env.post(
             "/signoffs",
@@ -464,28 +570,33 @@ class TestPolicy:
     def test_policy_endpoint_reports_the_defaults(self, env: Env) -> None:
         login(env.client, "viewer")
         d = env.get("/signoffs/policy").json()
-        assert d["policy_version"] == "signoff-policy.v1" and d["relaxed"] is False
+        assert d["policy_version"] == "signoff-policy.v2" and d["relaxed"] is False
         assert {k: d[k] for k in DEFAULT_THRESHOLDS} == DEFAULT_THRESHOLDS
-        assert d["non_overridable"] == ["false_q1", "attestation_missing"]
+        assert d["non_overridable"] == ["false_q1", "oracle_unmeasured", "attestation_missing"]
         assert d["bounds"]["n_min"] == [1, 10000]
+        assert "require_oracle_measured" not in d["bounds"]  # a switch with no knob
 
     def test_relaxed_thresholds_are_applied_and_stamped(
         self, env: Env, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A deployment allowing one escape signs the seeded cell WITHOUT a clean re-run —
-        and the record says which bar it cleared."""
+        """A deployment allowing one escape and a 0.5 oracle signs the seeded cell WITHOUT
+        a clean re-run — and the record says which bar it cleared."""
         monkeypatch.setenv("CRB_SIGNOFF__MAX_CONTROLS_ESCAPES", "1")
         monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_ROUTE_DELIVER", "false")  # the route is human
+        monkeypatch.setenv("CRB_SIGNOFF__MIN_ORACLE_STRENGTH", "0.5")  # the seed's is 0.58
         assert env.get("/signoffs/policy").json()["relaxed"] is True
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
         assert r.status_code == 201, r.text
         d = r.json()
         assert d["policy_thresholds"]["max_controls_escapes"] == 1
         assert d["policy_thresholds"]["require_route_deliver"] is False
+        assert d["policy_thresholds"]["min_oracle_strength"] == 0.5
+        assert d["policy_thresholds"]["require_oracle_measured"] is True  # never relaxable
         assert d["route"]["route"] == "human" and d["controls"]["verdict"] == "passed"
         assert d["controls"]["escapes"] == 1  # the count is still the truth
+        assert d["evidence"]["oracle_strength"] == pytest.approx(SEED_ORACLE, abs=1e-4)
 
-    def test_false_q1_and_attestation_cannot_be_relaxed(
+    def test_false_q1_oracle_measured_and_attestation_cannot_be_relaxed(
         self, env: Env, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_ATTESTATION", "false")
@@ -494,6 +605,11 @@ class TestPolicy:
         assert "require_attestation cannot be relaxed" in envelope(r)["message"]
         assert env.get("/signoffs/policy").status_code == 503
         monkeypatch.delenv("CRB_SIGNOFF__REQUIRE_ATTESTATION")
+        monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_ORACLE_MEASURED", "no")
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 503 and envelope(r)["code"] == "signoff_policy_invalid"
+        assert "require_oracle_measured cannot be relaxed" in envelope(r)["message"]
+        monkeypatch.delenv("CRB_SIGNOFF__REQUIRE_ORACLE_MEASURED")
         # every numeric knob has bounds; outside them the policy is invalid, not lower
         monkeypatch.setenv("CRB_SIGNOFF__N_MIN", "0")
         assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 503
@@ -504,7 +620,15 @@ class TestPolicy:
         _seed_false_q1_row(env, cls="bug.fix", size="S")
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
         assert r.status_code == 409 and envelope(r)["code"] == "false_q1_refused"
+        # … an unmeasured oracle (the thin cell's tasks carry no score) …
+        r = env.post("/signoffs", json={"repo": ALPHA, "cell": THIN})
+        assert r.status_code == 409 and envelope(r)["detail"]["code"] == "oracle_unmeasured"
+        assert _codes(envelope(r)["detail"]["refusals"]) == [
+            "oracle_unmeasured",
+            "attestation_missing",
+        ]
         # … and a missing attestation
+        score_oracle(env, cell=THIN_CELL)
         r = env.post("/signoffs", json={"repo": ALPHA, "cell": THIN})
         assert r.status_code == 409 and envelope(r)["detail"]["code"] == "attestation_missing"
 
@@ -536,19 +660,23 @@ class TestPreview:
         assert d["signable"] is False
         assert _codes(d["refusals"]) == [
             "controls_escapes",
+            "oracle_weak",
             "route_not_deliver:controls_escapes",
             "attestation_missing",
         ]
         esc = d["refusals"][0]
         assert esc["threshold"] == 0 and esc["observed"] == 1 and esc["overridable"] is True
-        assert d["refusals"][2]["overridable"] is False
+        weak = d["refusals"][1]
+        assert weak["threshold"] == 0.8 and weak["observed"] == SEED_ORACLE
+        assert d["refusals"][3]["overridable"] is False
         # what the approver must see: n / point / Wilson-low / false-Q1 / oracle / split
         ev = d["evidence"]
         assert (
             ev["measured"] is True and ev["n"] == 40 and ev["clean"] == 38 and ev["point"] == 0.95
         )
         assert ev["ci_low"] == pytest.approx(0.835, abs=0.001) and ev["ci_high"] > 0.95
-        assert ev["false_q1"] == 0 and ev["oracle_strength"] is None
+        assert ev["false_q1"] == 0 and ev["oracle_strength"] == SEED_ORACLE
+        assert ev["oracle"] == {"strength": SEED_ORACLE, "scored": 3, "tasks": 4}
         assert ev["apparatus_versions"] == [APPARATUS_VERSION] and ev["belt_sets"] == [BELT_SET_V5]
         assert ev["failure_split"] == {
             "builder_red": 2,
@@ -571,10 +699,13 @@ class TestPreview:
         }
         assert "graded clean" in d["route"]["reason"]
         # the policy in force and what the record would carry
-        assert d["policy"]["policy_version"] == "signoff-policy.v1"
+        assert d["policy"]["policy_version"] == "signoff-policy.v2"
+        assert d["policy"]["require_oracle_measured"] is True
         wr = d["would_record"]
         assert wr["n_at_signoff"] == 40 and wr["route_reason_code"] == "controls_escapes"
         assert wr["controls_verdict"] == "escaped" and wr["controls_escapes"] == 1
+        assert wr["oracle_strength_at_signoff"] == pytest.approx(SEED_ORACLE, abs=1e-4)
+        assert wr["policy_version"] == "signoff-policy.v2"
         assert wr["policy_thresholds"] == DEFAULT_THRESHOLDS and wr["attestation"] is None
         assert "row_hash" not in wr and "record_id" not in wr
         # the accepted rows the approver may name: clean, newest first, with subjects
@@ -584,10 +715,26 @@ class TestPreview:
         assert rows[0]["task_id"] == accepted_row(env, DELIVER).task_id
         assert d["attestation"] is None
 
-    def test_preview_becomes_signable_with_a_clean_gate_and_a_named_row(self, env: Env) -> None:
+    def test_preview_lists_oracle_unmeasured_with_observed_null(self, env: Env) -> None:
+        """The v2 clause in the preview: ``observed: null`` (nothing was measured — never
+        0), threshold ``measured``, non-overridable; the oracle block says 0 of 4 tasks."""
         pass_controls(env)
+        score_oracle(env, strength=None)  # every task of the cell: latest score unscoreable
+        d = _preview(env, DELIVER).json()
+        assert _codes(d["refusals"]) == ["oracle_unmeasured", "attestation_missing"]
+        unm = d["refusals"][0]
+        assert unm["observed"] is None and unm["threshold"] == "measured"
+        assert unm["overridable"] is False and "mutation score" in unm["message"]
+        assert d["evidence"]["oracle_strength"] is None
+        assert d["evidence"]["oracle"] == {"strength": None, "scored": 0, "tasks": 4}
+        assert d["would_record"]["oracle_strength_at_signoff"] is None
+        assert d["signable"] is False and d["route"]["route"] == "deliver"
+
+    def test_preview_becomes_signable_with_a_clean_gate_and_a_named_row(self, env: Env) -> None:
+        clear_policy(env)
         d = _preview(env, DELIVER).json()
         assert _codes(d["refusals"]) == ["attestation_missing"] and d["signable"] is False
+        assert d["evidence"]["oracle"] == {"strength": STRONG_ORACLE, "scored": 4, "tasks": 4}
         row = accepted_row(env, DELIVER)
         d = _preview(env, DELIVER, reviewed_row_hash=row.row_hash, statement="read-it").json()
         assert d["refusals"] == [] and d["signable"] is True
@@ -601,20 +748,24 @@ class TestPreview:
         assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 201
 
     def test_preview_thin_and_unmeasured_cells(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         d = _preview(env, THIN).json()
         assert d["evidence"]["n"] == 4 and d["refusals"][0]["code"] == "thin_cell"
         assert d["refusals"][0]["observed"] == 4 and d["refusals"][0]["threshold"] == 10
+        assert d["refusals"][1]["code"] == "oracle_unmeasured"  # the thin cell's tasks: unscored
+        assert d["evidence"]["oracle"] == {"strength": None, "scored": 0, "tasks": 2}
         assert d["route"]["reason_code"] == "n_below_min"
         assert len(d["accepted_rows"]) == 2
         d = _preview(env, {"capability_class": "docs.update", "size": "S"}).json()
         assert d["evidence"]["measured"] is False and d["evidence"]["n"] == 0
         assert d["evidence"]["point"] is None and d["route"]["route"] == "not_yet_measured"
         assert _codes(d["refusals"])[0] == "thin_cell" and d["accepted_rows"] == []
+        assert "oracle_unmeasured" in _codes(d["refusals"])
+        assert d["evidence"]["oracle"] == {"strength": None, "scored": 0, "tasks": 0}
         assert d["would_record"]["policy_version"] == ""  # nothing stamped for an unmeasured cell
 
     def test_preview_validates_the_named_row_like_the_post(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         red = accepted_row(env, DELIVER, clean=False)
         r = _preview(env, DELIVER, reviewed_row_hash=red.row_hash)
         assert r.status_code == 422 and "not an accepted row" in envelope(r)["message"]
@@ -642,7 +793,7 @@ class TestPreview:
 
 class TestListAndRevoke:
     def test_list_active_and_history(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         assert env.get("/signoffs").json() == {"items": [], "total": 0, "limit": 50, "offset": 0}
         sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
         login(env.client, "viewer")
@@ -701,17 +852,84 @@ class TestListAndRevoke:
         assert item["active"] is True  # trust once given stands until revoked / false-Q1
         assert verify_signoff_rows(_signoffs(env)) == 1
         # a new attestation chains after it
-        pass_controls(env)
+        clear_policy(env)
         assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 201
         assert verify_signoff_rows(_signoffs(env)) == 2
 
+    def test_row_signed_under_policy_v1_is_served_as_v1_and_still_verifies(self, env: Env) -> None:
+        """A record written under ``signoff-policy.v1`` (its thresholds carry no
+        ``require_oracle_measured``, its oracle snapshot may be empty) keeps the version
+        it was signed under, its chain verifies, and a v2 record chains after it."""
+        from crb.core.evidence import utc_now_iso
+        from crb.server.routes.signoffs import signoff_hash as _hash
+
+        v1_thresholds = {
+            k: v for k, v in DEFAULT_THRESHOLDS.items() if k != "require_oracle_measured"
+        }
+        row_hash = accepted_row(env, DELIVER).row_hash
+        with env.factory() as s:
+            row = Signoff(
+                signoff_id="policyv1" * 4,
+                repo=ALPHA,
+                cell_json={
+                    **dict.fromkeys(
+                        ("process_step", "language", "builder", "model", "provider"), "*"
+                    ),
+                    "capability_class": "bug.fix",
+                    "size": "S",
+                    "evidence_n": "40",
+                    "evidence_point": "0.950000",
+                    "evidence_ci_low": "0.835000",
+                    "evidence_ci_high": "0.985000",
+                    "evidence_false_q1": "0",
+                    "evidence_apparatus": "2.1",
+                    "evidence_oracle_strength": "",
+                    "policy_version": "signoff-policy.v1",
+                    "policy_thresholds": json.dumps(v1_thresholds, sort_keys=True),
+                    "route": "deliver",
+                    "route_reason": "n=40",
+                    "route_reason_code": "deliver",
+                    "controls_verdict": "passed",
+                    "controls_run_id": CLEAN_CONTROLS_RUN,
+                    "controls_created": "2026-09-14T00:00:00+00:00",
+                    "controls_k": "12",
+                    "controls_total": "14",
+                    "controls_escapes": "0",
+                    "attestation_reviewed_task_id": accepted_row(env, DELIVER).task_id,
+                    "attestation_reviewed_row_hash": row_hash,
+                    "attestation_statement": "read under v1",
+                    "attestation_at": "2026-09-14T00:00:00+00:00",
+                },
+                tier="human-verified",
+                verifier="v1-approver",
+                note="signed under signoff-policy.v1",
+                revoke=False,
+                evidence_rows=40,
+                created=utc_now_iso(),
+                prev_hash=GENESIS_HASH,
+            )
+            row.row_hash = _hash(row)
+            s.add(row)
+            s.commit()
+        item = env.get(f"/signoffs?repo={ALPHA}").json()["items"][0]
+        assert item["schema"] == "crb.signoff.v2" and item["policy_version"] == "signoff-policy.v1"
+        assert item["policy_thresholds"] == v1_thresholds
+        assert "require_oracle_measured" not in item["policy_thresholds"]
+        assert item["evidence"]["oracle_strength"] is None  # what it saw, not today's measurement
+        assert item["attestation"]["reviewed_row_hash"] == row_hash and item["active"] is True
+        assert verify_signoff_rows(_signoffs(env)) == 1
+        clear_policy(env)
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 201 and r.json()["policy_version"] == "signoff-policy.v2"
+        assert verify_signoff_rows(_signoffs(env)) == 2
+
     def test_revoke_rbac(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
         assert_rbac(env, "POST", f"/signoffs/{sid}/revoke", min_role="approver")
 
     def test_revoke_appends_and_hides(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
         assert (
             env.get(f"/capability-map?repo={ALPHA}").json()["cells"][1]["verification_tier"]
@@ -743,7 +961,7 @@ class TestListAndRevoke:
         assert env.get(f"/signoffs/{rows[1].signoff_id}").status_code == 404
 
     def test_re_attest_after_revoke(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
         env.post(f"/signoffs/{sid}/revoke")
         r = env.post("/signoffs", json=attested_body(env, DELIVER, note="again"))
@@ -753,7 +971,7 @@ class TestListAndRevoke:
         assert verify_signoff_rows(_signoffs(env)) == 3
 
     def test_chain_detects_tampering_including_the_attestation(self, env: Env) -> None:
-        pass_controls(env)
+        clear_policy(env)
         env.post("/signoffs", json=attested_body(env, DELIVER))
         env.post("/signoffs", json=attested_body(env, env.info.deliver_cell))
         with env.factory() as s:

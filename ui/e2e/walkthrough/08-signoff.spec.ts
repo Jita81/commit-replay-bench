@@ -6,7 +6,7 @@ import type { APIRequestContext, Locator, Page } from '@playwright/test'
 import { env, expect, field, primary, test } from './support'
 
 /**
- * 08 — a sign-off is a policy decision, refused at write (`signoff-policy.v1`).
+ * 08 — a sign-off is a policy decision, refused at write (`signoff-policy.v2`).
  *
  *  - The primary repo's only measured cell (n = 2 from 05) is REFUSED, and the reason is
  *    visible before the approver tries: the Sign-off page's preview lists every failing
@@ -20,11 +20,15 @@ import { env, expect, field, primary, test } from './support'
  *    pytest fixture and is not touched): a second fixture repo whose tests are
  *    PARAMETRISED (no literal fact to special-case → the cheat is not constructible →
  *    0 escapes) is built here, served as a bare file:// clone, onboarded, probed, mined,
- *    put through a controls run and replayed with `fixture_gold` — 18 clean rows in one
- *    cell → point 100 %, Wilson lower 80.6 % ≥ 80 % → route `deliver`. The approver
- *    picks the cell, names an accepted row, ticks "I have read this accepted diff",
- *    writes the statement, signs — and the record lists the snapshot (n, point, lower,
- *    false-Q1, policy, route, controls k of N / escapes / run, the attested row).
+ *    put through a controls run, an ORACLE run (`signoff-policy.v2`: the cell's oracle
+ *    strength must be MEASURED on its tasks — an unscored cell is `oracle_unmeasured`,
+ *    a refusal no deployment knob can waive; the parametrised tests kill every
+ *    arithmetic/return mutant, so the cell scores ≥ 0.80) and replayed with
+ *    `fixture_gold` — 18 clean rows in one cell → point 100 %, Wilson lower 80.6 % ≥
+ *    80 % → route `deliver`. The approver picks the cell, names an accepted row, ticks
+ *    "I have read this accepted diff", writes the statement, signs — and the record
+ *    lists the snapshot (n, point, lower, false-Q1, oracle, policy, route, controls k of
+ *    N / escapes / run, the attested row).
  */
 test.describe.configure({ mode: 'serial' })
 
@@ -111,7 +115,7 @@ test.describe('08 sign-off policy', () => {
     await page.goto(`/signoff?repo=${encodeURIComponent(t.name)}`)
     const gate = page.getByTestId('signoff-gate')
     await expect(gate).toBeVisible()
-    await expect(gate).toContainText('policy signoff-policy.v1')
+    await expect(gate).toContainText('policy signoff-policy.v2')
     const select = field(page, 'Cell')
     await expect.poll(async () => (await select.locator('option').count()) - 1).toBeGreaterThanOrEqual(1)
     const value = await select.locator('option').nth(1).getAttribute('value')
@@ -160,8 +164,8 @@ test.describe('08 sign-off policy', () => {
     await expect(page.getByRole('table', { name: `Sign-offs for ${t.name}` })).toContainText('No attestations yet')
   })
 
-  test(`seed a policy-satisfying cell through the API: onboard, probe, mine ${N_TASKS}, controls (0 escapes), replay ${N_TASKS} → deliver`, async ({ page }) => {
-    test.setTimeout(12 * MIN)
+  test(`seed a policy-satisfying cell through the API: onboard, probe, mine ${N_TASKS}, controls (0 escapes), oracle (≥ 0.80), replay ${N_TASKS} → deliver`, async ({ page }) => {
+    test.setTimeout(20 * MIN)
     const url = buildSignableRepo()
     const runnerOpts: Record<string, unknown> = { pythonpath_suffix: '/src' }
     if (env.python) runnerOpts.python = env.python
@@ -186,6 +190,12 @@ test.describe('08 sign-off policy', () => {
     const controls = await apiGet(page.request, `/oracle/${SIGNABLE_NAME}/controls`)
     expect(controls.passed, JSON.stringify(controls)).toBe(true)
     expect(Number(controls.escapes)).toBe(0) // parametrised tests: the cheat is not constructible
+    // signoff-policy.v2: the cell's oracle must be MEASURED — score every task by mutation
+    await startRunApi(page, { repo: SIGNABLE_NAME, kind: 'oracle', limit: N_TASKS }, 8 * MIN)
+    const oracle = await apiGet(page.request, `/oracle/${SIGNABLE_NAME}`)
+    const scored = (oracle.tasks as Array<Record<string, unknown>>).filter((t) => t.strength !== null)
+    expect(scored.length, JSON.stringify(oracle.cells)).toBeGreaterThanOrEqual(16)
+    for (const t of scored) expect(Number(t.strength), `task ${t.task_id} strength`).toBeGreaterThanOrEqual(0.5)
     await startRunApi(page, { repo: SIGNABLE_NAME, kind: 'replay', builder: 'fixture_gold', model: 'gold', limit: N_TASKS }, 6 * MIN)
 
     const map = await apiGet(page.request, `/capability-map?repo=${SIGNABLE_NAME}`)
@@ -198,6 +208,10 @@ test.describe('08 sign-off policy', () => {
     expect(best.false_q1).toBe(0)
     expect(best.route, `route ${best.route}: ${best.reason}`).toBe('deliver')
     expect((map.controls as Record<string, unknown>).state).toBe('passed')
+    // … and the oracle of THAT cell, as the sign-off will measure it, clears the bar
+    const oracleCell = (oracle.cells as Array<Record<string, unknown>>).find((c) => c.capability_class === signableClass && c.size === signableSize)!
+    expect(oracleCell, JSON.stringify(oracle.cells)).toBeTruthy()
+    expect(Number(oracleCell.strength_mean), JSON.stringify(oracleCell)).toBeGreaterThanOrEqual(0.8)
   })
 
   test('the approver signs the deliver cell with an attestation; the record shows the snapshot', async ({ page }) => {
@@ -217,6 +231,11 @@ test.describe('08 sign-off policy', () => {
     await expect(controls.getByTestId('controls-passed')).toBeVisible()
     await expect(controls).toContainText('0 escape(s)')
     await expect(page.getByTestId('signoff-route')).toContainText('deliver')
+    // the oracle is measured on the cell's tasks (never "—" here) and clears the bar
+    const oracleTile = page.getByTestId('signoff-tile-oracle')
+    await expect(oracleTile).toContainText(/^Oracle strength(0\.[89]\d|1\.00)/) // the value, never "—"
+    await expect(oracleTile).toContainText(/\d+ of \d+ task\(s\) scored/)
+    await expect(gateRow(gate, /Oracle strength measured and ≥ 0\.80/)).toContainText(/✓\s*satisfied:/)
     // only the attestation is missing
     const refusals = page.getByTestId('signoff-refusals')
     await expect(refusals.getByTestId('refusal-attestation_missing')).toBeVisible()
@@ -244,12 +263,13 @@ test.describe('08 sign-off policy', () => {
     await expect(submit).toBeEnabled()
 
     await submit.click()
-    await expect(page.getByTestId('signoff-recorded')).toContainText('signoff-policy.v1')
+    await expect(page.getByTestId('signoff-recorded')).toContainText('signoff-policy.v2')
     // the record: evidence at signing, policy · route · controls, the attested row
     const table = page.getByRole('table', { name: `Sign-offs for ${SIGNABLE_NAME}` })
     await expect(table.getByTestId('signoff-row-evidence')).toContainText(`n=${signableN} · 100.0% · lower `)
     await expect(table.getByTestId('signoff-row-evidence')).toContainText('fQ1 0')
-    await expect(table.getByTestId('signoff-row-policy')).toContainText('signoff-policy.v1 · deliver (deliver) · controls passed')
+    await expect(table.getByTestId('signoff-row-evidence')).toContainText(/oracle (0\.[89]\d|1\.00)/)
+    await expect(table.getByTestId('signoff-row-policy')).toContainText('signoff-policy.v2 · deliver (deliver) · controls passed')
     await expect(table.getByTestId('signoff-row-policy')).toContainText('esc 0')
     await expect(table.getByTestId('signoff-row-attestation')).toContainText(rowHash!.slice(0, 10))
     await expect(table.getByRole('img', { name: 'Active attestation' })).toBeVisible()
@@ -257,7 +277,9 @@ test.describe('08 sign-off policy', () => {
     // and the API serves the same snapshot, hash-chained
     const list = await apiGet(page.request, `/signoffs?repo=${SIGNABLE_NAME}`)
     const [rec] = list.items as Array<Record<string, unknown>>
-    expect(rec.policy_version).toBe('signoff-policy.v1')
+    expect(rec.policy_version).toBe('signoff-policy.v2')
+    expect((rec.policy_thresholds as Record<string, unknown>).require_oracle_measured).toBe(true)
+    expect(Number((rec.evidence as Record<string, unknown>).oracle_strength)).toBeGreaterThanOrEqual(0.8)
     expect((rec.route as Record<string, unknown>).reason_code).toBe('deliver')
     expect((rec.controls as Record<string, unknown>).escapes).toBe(0)
     expect((rec.attestation as Record<string, unknown>).reviewed_row_hash).toBe(rowHash)
