@@ -5,34 +5,56 @@ the previous sign-off's ``row_hash``; ``row_hash`` = SHA-256 of the canonical JS
 of the row minus ``row_hash``). A revocation is a new row with ``revoke=True`` for
 the same scope; the latest row per ``(repo, scope)`` wins.
 
-The cardinal invariant is enforced in BOTH directions, exactly as
-:mod:`crb.core.signoff` specifies:
+A sign-off is a policy decision, refused at write (``signoff-policy.v1``,
+:mod:`crb.core.signoff`). ``POST /signoffs``:
 
-* **At write** — the cell's rows are re-read from the ledger and the cell's
-  ``false_q1`` is counted in SQL over the STORED belts (the same predicate
-  ``/health`` uses), so a row that bypassed the write path is caught here too.
-  ``false_q1 > 0`` or an unmeasured cell → **409 false_q1_refused**, nothing is
-  written, and the refusal itself is recorded as a ``system/signoff.refused`` event.
-  The evidence the approver saw (n, point, interval, false-Q1, apparatus) is stamped
-  into the row and covered by its hash.
-* **At read** — every listed attestation carries ``current_false_q1`` and ``active``
-  (latest for its scope, not revoked, and the cell's CURRENT false-Q1 is 0); the
-  capability/forecast overlays use :func:`crb.core.signoff.apply_signoffs`, which
-  refuses to lift a cell whose false-Q1 is now > 0. A later violation
-  auto-invalidates the attestation.
+1. counts the cell's **false-Q1** in SQL over the STORED belts (the same predicate
+   ``/health`` uses) so a row that bypassed the write path is caught — ``> 0`` →
+   **409 false_q1_refused**, first and non-overridable;
+2. reduces the cell's rows under the ONE routing rule with the repo's latest
+   negative-controls verdict (:func:`crb.server.routes.oracle.latest_controls_verdict`
+   — the same helper the capability map routes under, so the two can never disagree);
+3. resolves the approver's **attestation** — the accepted row they name must exist in
+   the ledger, belong to this cell and be ``clean`` (else **422**);
+4. applies the policy (:func:`crb.core.signoff.evaluate_signoff`): a thin cell, a
+   controls gate that failed / was never run / let a control escape / was thin, a
+   weak oracle, a route other than ``deliver``, or a missing attestation → **409
+   signoff_refused** with ``detail.code``, ``detail.thresholds`` and ``detail.observed``
+   plus every failing clause; nothing is written and the refusal is recorded as a
+   ``system/signoff.refused`` event;
+5. stamps the whole decision (n, point, Wilson lower, false-Q1, oracle strength, route +
+   reason code, controls verdict / run / k of N / escapes, the policy and its thresholds,
+   the attestation) into the row, hash-covered.
+
+``GET /signoffs/preview`` runs steps 1–4 without writing and answers what the record
+WOULD carry and every refusal that would apply, plus the cell's accepted rows the
+approver may name — the UI shows the bar before the approver tries.
+
+At read, every listed attestation carries ``current_false_q1`` and ``active`` (latest
+for its scope, not revoked, and the cell's CURRENT false-Q1 is 0); the capability /
+forecast overlays use :func:`crb.core.signoff.apply_signoffs`, which refuses to lift a
+cell whose false-Q1 is now > 0. A later violation auto-invalidates the attestation.
+
+A deployment relaxes the numeric thresholds through ``CRB_SIGNOFF__*`` (see
+``docs/API.md``); a value outside the published bounds makes every sign-off answer
+**503 signoff_policy_invalid** rather than run under a bar nobody chose.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import uuid
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from typing import Any
 
 from fastapi import APIRouter, Query, status
+from pydantic import ValidationError
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
-from crb.core.capability import WILDCARD, measure_cell
+from crb.core.capability import WILDCARD, CapabilityCell, empty_cell, key_matches, measure_cell
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.ledger import (
     BELT_SET_V3_LEGACY,
@@ -43,21 +65,42 @@ from crb.core.ledger import (
     LedgerIntegrityError,
 )
 from crb.core.redact import redact
-from crb.core.signoff import SignoffRecord, SignoffRefused, check_signable, stamp_evidence
+from crb.core.routing import ControlsVerdict
+from crb.core.signoff import (
+    REFUSAL_FALSE_Q1,
+    SIGNOFF_SCHEMA,
+    SIGNOFF_SCHEMA_V1,
+    Attestation,
+    SignoffPolicy,
+    SignoffRecord,
+    SignoffRefusal,
+    SignoffRefused,
+    evaluate_signoff,
+    stamp_evidence,
+)
 from crb.observability.events import StepStatus
 from crb.server.auth import ApproverDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope
 from crb.server.routes.grades import grade_to_dict
+from crb.server.routes.oracle import latest_controls_verdict, verdict_dict
 from crb.server.routes.runs import append_system_event, system_trace_id
-from crb.server.schemas import (
-    Page,
-    PageDep,
-    SignoffCreateRequest,
-    SignoffEvidence,
-    SignoffOut,
-    SignoffRevokeRequest,
+from crb.server.schemas import Page, PageDep, SignoffCreateRequest, SignoffRevokeRequest
+from crb.server.schemas_capability import ControlsVerdictOut, FailureSplitOut
+from crb.server.schemas_signoff import (
+    AcceptedRowOut,
+    AttestationIn,
+    AttestationOut,
+    SignoffControlsSnapshot,
+    SignoffCreateWithAttestationRequest,
+    SignoffEvidenceWithOracle,
+    SignoffPolicyOut,
+    SignoffPreviewEvidence,
+    SignoffPreviewOut,
+    SignoffRefusalOut,
+    SignoffRouteOut,
+    SignoffWithPolicyOut,
 )
-from crb.store.models import Grade, Repo, Signoff
+from crb.store.models import Grade, Repo, Signoff, Task
 
 router = APIRouter(tags=["signoffs"])
 _ERR = {"model": ErrorEnvelope}
@@ -69,6 +112,31 @@ _EV_CI_LOW = "evidence_ci_low"
 _EV_CI_HIGH = "evidence_ci_high"
 _EV_FQ1 = "evidence_false_q1"
 _EV_APPARATUS = "evidence_apparatus"
+# signoff-policy.v1 snapshot keys (absent on rows written before the policy).
+_EV_ORACLE = "evidence_oracle_strength"
+_POLICY_VERSION = "policy_version"
+_POLICY_THRESHOLDS = "policy_thresholds"
+_ROUTE = "route"
+_ROUTE_REASON = "route_reason"
+_ROUTE_REASON_CODE = "route_reason_code"
+_CTL_VERDICT = "controls_verdict"
+_CTL_RUN = "controls_run_id"
+_CTL_CREATED = "controls_created"
+_CTL_K = "controls_k"
+_CTL_TOTAL = "controls_total"
+_CTL_ESCAPES = "controls_escapes"
+_ATT_TASK = "attestation_reviewed_task_id"
+_ATT_ROW = "attestation_reviewed_row_hash"
+_ATT_STATEMENT = "attestation_statement"
+_ATT_AT = "attestation_at"
+
+#: Envelope codes: the floor keeps its historical code; every policy clause is one.
+CODE_FALSE_Q1 = "false_q1_refused"
+CODE_REFUSED = "signoff_refused"
+CODE_POLICY_INVALID = "signoff_policy_invalid"
+
+#: How many accepted rows a preview lists for the attestation picker.
+ACCEPTED_ROWS_LIMIT = 50
 
 #: A clean row whose STORED belts are not all True (legacy rows: three belts).
 FALSE_Q1_PREDICATE = or_(
@@ -80,12 +148,33 @@ FALSE_Q1_PREDICATE = or_(
 
 
 # ---------------------------------------------------------------------------
+# Policy in force
+# ---------------------------------------------------------------------------
+
+
+def effective_policy() -> SignoffPolicy:
+    """The sign-off policy this deployment runs under (``CRB_SIGNOFF__*``); fail closed
+    on a value outside the published bounds."""
+    try:
+        return SignoffPolicy.from_env(os.environ)
+    except ValueError as exc:
+        raise ApiError(
+            503,
+            CODE_POLICY_INVALID,
+            f"the sign-off policy is misconfigured: {exc}",
+            detail={"prefix": "CRB_SIGNOFF__"},
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
 # Row hashing (the table's own chain)
 # ---------------------------------------------------------------------------
 
 
 def signoff_body(row: Signoff) -> dict[str, Any]:
-    """Everything that is hashed: the row minus ``row_hash`` (and minus the store's ``seq``)."""
+    """Everything that is hashed: the row minus ``row_hash`` (and minus the store's ``seq``).
+    ``cell_json`` carries the scope AND the whole evidence / policy / attestation
+    snapshot, so all of it is chain-covered."""
     return {
         "signoff_id": row.signoff_id,
         "repo": row.repo,
@@ -154,10 +243,50 @@ def _scope_key(row: Signoff) -> tuple[str, ...]:
     return (row.repo, *scope_of(row).to_tuple())
 
 
+def _float_or_none(v: Any) -> float | None:
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int(v: Any, default: int = 0) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _thresholds_of(cj: dict[str, str]) -> dict[str, Any]:
+    raw = cj.get(_POLICY_THRESHOLDS, "")
+    if not raw:
+        return {}
+    try:
+        d = json.loads(raw)
+    except ValueError:
+        return {}
+    return dict(d) if isinstance(d, dict) else {}
+
+
+def _attestation_of(cj: dict[str, str]) -> Attestation | None:
+    if not cj.get(_ATT_ROW):
+        return None
+    return Attestation(
+        reviewed_task_id=str(cj.get(_ATT_TASK, "")),
+        reviewed_row_hash=str(cj.get(_ATT_ROW, "")),
+        statement=str(cj.get(_ATT_STATEMENT, "")),
+        at=str(cj.get(_ATT_AT, "")),
+    )
+
+
 def to_record(row: Signoff) -> SignoffRecord:
-    """The :class:`~crb.core.signoff.SignoffRecord` view of a stored row (for the overlay)."""
+    """The :class:`~crb.core.signoff.SignoffRecord` view of a stored row (for the overlay).
+    A row written before the policy comes back as a ``crb.signoff.v1`` record."""
     cj = dict(row.cell_json or {})
     scope = scope_of(row)
+    v2 = _POLICY_VERSION in cj
     return SignoffRecord(
         repo=row.repo,
         capability_class=scope.capability_class,
@@ -172,10 +301,23 @@ def to_record(row: Signoff) -> SignoffRecord:
         note=row.note,
         revoked=bool(row.revoke),
         verified_at=row.created,
-        n_at_signoff=int(cj.get(_EV_N, row.evidence_rows) or 0),
-        point_at_signoff=float(cj.get(_EV_POINT, 0.0) or 0.0),
-        false_q1_at_signoff=int(cj.get(_EV_FQ1, 0) or 0),
+        n_at_signoff=_int(cj.get(_EV_N, row.evidence_rows)),
+        point_at_signoff=_float_or_none(cj.get(_EV_POINT)) or 0.0,
+        false_q1_at_signoff=_int(cj.get(_EV_FQ1, 0)),
         apparatus_version=str(cj.get(_EV_APPARATUS, "") or ""),
+        ci_low_at_signoff=_float_or_none(cj.get(_EV_CI_LOW)) or 0.0,
+        oracle_strength_at_signoff=_float_or_none(cj.get(_EV_ORACLE)),
+        policy_version=str(cj.get(_POLICY_VERSION, "") or ""),
+        policy_thresholds=_thresholds_of(cj),
+        route_at_signoff=str(cj.get(_ROUTE, "") or ""),
+        route_reason_code=str(cj.get(_ROUTE_REASON_CODE, "") or ""),
+        controls_verdict=str(cj.get(_CTL_VERDICT, "") or ""),
+        controls_run_id=str(cj.get(_CTL_RUN, "") or ""),
+        controls_k=_int(cj.get(_CTL_K, 0)),
+        controls_total=_int(cj.get(_CTL_TOTAL, 0)),
+        controls_escapes=_int(cj.get(_CTL_ESCAPES, 0)),
+        attestation=_attestation_of(cj) if not row.revoke else None,
+        schema=SIGNOFF_SCHEMA if v2 else SIGNOFF_SCHEMA_V1,
         record_id=row.signoff_id,
         prev_hash=row.prev_hash,
         row_hash=row.row_hash,
@@ -230,22 +372,138 @@ def _projection(scope: CellKey) -> tuple[str, ...]:
     return tuple(f for f in CELL_FIELDS if getattr(scope, f) != WILDCARD)
 
 
+def measured_cell(
+    rows: Sequence[GradeRow], scope: CellKey, controls: ControlsVerdict
+) -> CapabilityCell:
+    """The scope's cell routed under the repo's controls verdict; the honest-empty cell
+    when there are no rows."""
+    proj = _projection(scope)
+    if not rows:
+        return empty_cell(scope, proj)
+    return measure_cell(rows, proj, controls=controls)
+
+
+def _grade_key(g: Grade) -> CellKey:
+    return CellKey(**{f: str(getattr(g, f) or "") for f in CELL_FIELDS})
+
+
+def _subjects(session: Session, repo: str, task_ids: Iterable[str]) -> dict[str, str]:
+    ids = sorted(set(task_ids))
+    if not ids:
+        return {}
+    q = select(Task.task_id, Task.subject).where(Task.repo == repo, Task.task_id.in_(ids))
+    return {str(tid): str(subj or "") for tid, subj in session.execute(q)}
+
+
+def accepted_rows(
+    session: Session, repo: str, scope: CellKey, *, limit: int = ACCEPTED_ROWS_LIMIT
+) -> list[AcceptedRowOut]:
+    """The cell's accepted rows — clean and not disqualified — newest first, with the
+    graded task's subject, for the attestation picker."""
+    q = _scope_where(
+        select(Grade).where(Grade.clean.is_(True), Grade.disqualified.is_(False)), repo, scope
+    )
+    grades = list(session.execute(q.order_by(Grade.seq.desc()).limit(limit)).scalars())
+    subjects = _subjects(session, repo, (g.task_id for g in grades))
+    return [
+        AcceptedRowOut(
+            row_hash=g.row_hash,
+            row_id=g.row_id,
+            task_id=g.task_id,
+            subject=subjects.get(g.task_id, ""),
+            created=g.created,
+            run_id=g.run_id,
+            trial=g.trial,
+            builder=g.builder,
+            model=g.model,
+            evidence_pack_hash=g.evidence_pack_hash,
+        )
+        for g in grades
+    ]
+
+
+def _attestation_422(msg: str) -> ApiError:
+    return ApiError(
+        422,
+        "validation_error",
+        msg,
+        detail={
+            "errors": [
+                {
+                    "loc": ["body", "attestation", "reviewed_row_hash"],
+                    "msg": msg,
+                    "type": "value_error",
+                }
+            ]
+        },
+    )
+
+
+def resolve_attestation(
+    session: Session, repo: str, scope: CellKey, att: AttestationIn
+) -> tuple[Attestation, str]:
+    """The approver's attestation with ``reviewed_task_id`` resolved from the ledger,
+    plus the task's subject. 422 unless the row exists, is this repo's, sits in the
+    cell and is an ACCEPTED row (clean, not disqualified) — an approver can only
+    attest to a diff the instrument accepted."""
+    g = session.execute(
+        select(Grade).where(Grade.row_hash == att.reviewed_row_hash)
+    ).scalar_one_or_none()
+    if g is None:
+        raise _attestation_422(f"no ledger row with row_hash {att.reviewed_row_hash[:12]}…")
+    if g.repo != repo:
+        raise _attestation_422(
+            f"row {att.reviewed_row_hash[:12]}… belongs to repo {g.repo!r}, not {repo!r}"
+        )
+    if not key_matches(scope, _grade_key(g)):
+        raise _attestation_422(
+            f"row {att.reviewed_row_hash[:12]}… is in cell {_grade_key(g).label!r}, "
+            f"outside the attested scope {scope.label!r}"
+        )
+    if not g.clean or g.disqualified:
+        raise _attestation_422(
+            f"row {att.reviewed_row_hash[:12]}… is not an accepted row "
+            f"(clean={bool(g.clean)}, disqualified={bool(g.disqualified)}) — "
+            "an approver attests to a diff the instrument accepted"
+        )
+    subject = _subjects(session, repo, [g.task_id]).get(g.task_id, "")
+    return (
+        Attestation(
+            reviewed_task_id=g.task_id,
+            reviewed_row_hash=g.row_hash,
+            statement=att.statement,
+            at=utc_now_iso(),
+        ),
+        subject,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Serialisation
 # ---------------------------------------------------------------------------
 
 
-def _evidence(row: Signoff) -> SignoffEvidence:
+def _evidence(row: Signoff) -> SignoffEvidenceWithOracle:
     cj = dict(row.cell_json or {})
     apparatus = str(cj.get(_EV_APPARATUS, "") or "")
-    return SignoffEvidence(
-        n=int(cj.get(_EV_N, row.evidence_rows) or 0),
-        point=float(cj.get(_EV_POINT, 0.0) or 0.0),
-        ci_low=float(cj.get(_EV_CI_LOW, 0.0) or 0.0),
-        ci_high=float(cj.get(_EV_CI_HIGH, 0.0) or 0.0),
-        false_q1=int(cj.get(_EV_FQ1, 0) or 0),
+    return SignoffEvidenceWithOracle(
+        n=_int(cj.get(_EV_N, row.evidence_rows)),
+        point=_float_or_none(cj.get(_EV_POINT)) or 0.0,
+        ci_low=_float_or_none(cj.get(_EV_CI_LOW)) or 0.0,
+        ci_high=_float_or_none(cj.get(_EV_CI_HIGH)) or 0.0,
+        false_q1=_int(cj.get(_EV_FQ1, 0)),
         apparatus_versions=[a for a in apparatus.split(",") if a],
+        oracle_strength=_float_or_none(cj.get(_EV_ORACLE)),
     )
+
+
+def _attestation_out(session: Session, row: Signoff) -> AttestationOut | None:
+    cj = dict(row.cell_json or {})
+    att = _attestation_of(cj) if not row.revoke else None
+    if att is None:
+        return None
+    subject = _subjects(session, row.repo, [att.reviewed_task_id]).get(att.reviewed_task_id, "")
+    return AttestationOut(**att.to_dict(), subject=subject)
 
 
 def _revocation_for(row: Signoff, all_rows: Sequence[Signoff]) -> Signoff | None:
@@ -261,13 +519,16 @@ def _superseded(row: Signoff, all_rows: Sequence[Signoff]) -> bool:
     return any(r.seq > row.seq and not r.revoke and _scope_key(r) == key for r in all_rows)
 
 
-def signoff_out(session: Session, row: Signoff, all_rows: Sequence[Signoff]) -> SignoffOut:
+def signoff_out(
+    session: Session, row: Signoff, all_rows: Sequence[Signoff]
+) -> SignoffWithPolicyOut:
     revocation = _revocation_for(row, all_rows)
     current_fq1, _ = (
         cell_false_q1(session, row.repo, scope_of(row)) if row.repo != WILDCARD else (0, [])
     )
     active = revocation is None and not _superseded(row, all_rows) and current_fq1 == 0
-    return SignoffOut(
+    cj = dict(row.cell_json or {})
+    return SignoffWithPolicyOut(
         id=row.signoff_id,
         repo=row.repo,
         cell=scope_of(row).to_dict(),
@@ -283,43 +544,80 @@ def signoff_out(session: Session, row: Signoff, all_rows: Sequence[Signoff]) -> 
         evidence=_evidence(row),
         prev_hash=row.prev_hash,
         row_hash=row.row_hash,
+        schema=SIGNOFF_SCHEMA if _POLICY_VERSION in cj else SIGNOFF_SCHEMA_V1,
+        policy_version=str(cj.get(_POLICY_VERSION, "") or ""),
+        policy_thresholds=_thresholds_of(cj),
+        route=SignoffRouteOut(
+            route=str(cj.get(_ROUTE, "") or ""),
+            reason=str(cj.get(_ROUTE_REASON, "") or ""),
+            reason_code=str(cj.get(_ROUTE_REASON_CODE, "") or ""),
+        ),
+        controls=SignoffControlsSnapshot(
+            verdict=str(cj.get(_CTL_VERDICT, "") or ""),
+            run_id=str(cj.get(_CTL_RUN, "") or ""),
+            k=_int(cj.get(_CTL_K, 0)),
+            total=_int(cj.get(_CTL_TOTAL, 0)),
+            escapes=_int(cj.get(_CTL_ESCAPES, 0)),
+            created=str(cj.get(_CTL_CREATED, "") or ""),
+        ),
+        attestation=_attestation_out(session, row),
     )
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
+def _refusal_out(r: SignoffRefusal) -> SignoffRefusalOut:
+    return SignoffRefusalOut(**r.to_dict())
 
 
-@router.get(
-    "/signoffs",
-    response_model=Page[SignoffOut],
-    responses={401: _ERR},
-    summary="Attestations (active by default; ?include_revoked=true for the history)",
-)
-def list_signoffs(
-    viewer: ViewerDep,
-    db: DbDep,
-    page: PageDep,
-    repo: str | None = Query(default=None, max_length=64),
-    include_revoked: bool = Query(default=False),
-) -> Page[SignoffOut]:
-    del viewer
-    rows = load_signoff_rows(db, repo)
-    items = [signoff_out(db, r, rows) for r in rows if not r.revoke]
-    if not include_revoked:
-        items = [s for s in items if not s.revoked]
-    items.reverse()  # newest first
-    return Page[SignoffOut](
-        items=items[page.offset : page.offset + page.limit],
-        total=len(items),
-        limit=page.limit,
-        offset=page.offset,
-    )
+def _observed(
+    cell: CapabilityCell, controls: ControlsVerdict, policy: SignoffPolicy
+) -> dict[str, Any]:
+    s = cell.stats
+    d = cell.decision
+    return {
+        "n": cell.n,
+        "point": None if s is None else round(s.point, 4),
+        "ci_low": None if s is None else round(s.ci.low, 4),
+        "false_q1": cell.false_q1,
+        "oracle_strength": None
+        if s is None or s.oracle_strength_mean is None
+        else round(s.oracle_strength_mean, 4),
+        "route": cell.route,
+        "reason_code": cell.reason_code,
+        "controls": {
+            "verdict": controls.state(
+                min_share=policy.min_constructible_share, max_escapes=policy.max_controls_escapes
+            ),
+            "run_id": controls.run_id,
+            "k": controls.constructible,
+            "total": controls.total,
+            "escapes": controls.escapes,
+        },
+        "route_decision": None if d is None else d.to_dict(),
+    }
+
+
+def _would_record(stamped: SignoffRecord) -> dict[str, Any]:
+    """The snapshot a record would carry — the record minus its identity / chain fields."""
+    d = stamped.to_dict()
+    for k in ("record_id", "prev_hash", "row_hash", "verified_at", "verifier"):
+        d.pop(k, None)
+    return d
+
+
+# ---------------------------------------------------------------------------
+# The decision (shared by POST and preview)
+# ---------------------------------------------------------------------------
 
 
 def _refuse(
-    db: Session, *, repo: str, actor: str, scope: CellKey, reason: str, detail: dict[str, Any]
+    db: Session,
+    *,
+    repo: str,
+    actor: str,
+    scope: CellKey,
+    reason: str,
+    detail: dict[str, Any],
+    code: str = CODE_REFUSED,
 ) -> ApiError:
     """Record the refusal as a system event (committed) and build the 409."""
     append_system_event(
@@ -330,43 +628,36 @@ def _refuse(
         actor=actor,
         status=StepStatus.INVALID,
         error=reason,
-        payload={"cell": scope.to_dict(), **detail},
+        payload={"cell": scope.to_dict(), "envelope_code": code, **detail},
     )
     db.commit()
     return ApiError(
         409,
-        "false_q1_refused",
+        code,
         reason,
         detail={"cell": scope.to_dict(), "repo": repo, **detail},
     )
 
 
-@router.post(
-    "/signoffs",
-    response_model=SignoffOut,
-    status_code=status.HTTP_201_CREATED,
-    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
-    summary="Attest a cell (approver); 409 false_q1_refused if false-Q1 > 0 or unmeasured",
-)
-def create_signoff(body: SignoffCreateRequest, approver: ApproverDep, db: DbDep) -> SignoffOut:
-    if db.get(Repo, body.repo) is None:
-        raise ApiError(404, "not_found", f"no repo {body.repo!r}")
+def _record_from(
+    repo: str, cell: dict[str, str], *, verifier: str, tier: str, note: str
+) -> SignoffRecord:
     try:
-        record = SignoffRecord(
-            repo=body.repo,
-            capability_class=body.cell["capability_class"],
-            verifier=approver.id,
-            size=body.cell.get("size", WILDCARD),
-            language=body.cell.get("language", WILDCARD),
-            builder=body.cell.get("builder", WILDCARD),
-            model=body.cell.get("model", WILDCARD),
-            provider=body.cell.get("provider", WILDCARD),
-            process_step=body.cell.get("process_step", WILDCARD),
-            tier=body.tier,
-            note=body.note,
+        return SignoffRecord(
+            repo=repo,
+            capability_class=cell["capability_class"],
+            verifier=verifier,
+            size=cell.get("size", WILDCARD),
+            language=cell.get("language", WILDCARD),
+            builder=cell.get("builder", WILDCARD),
+            model=cell.get("model", WILDCARD),
+            provider=cell.get("provider", WILDCARD),
+            process_step=cell.get("process_step", WILDCARD),
+            tier=tier,
+            note=note,
         )
     except SignoffRefused as exc:
-        raise ApiError(409, "false_q1_refused", str(exc)) from exc
+        raise ApiError(409, CODE_FALSE_Q1, str(exc), detail={"code": exc.code}) from exc
     except ValueError as exc:
         raise ApiError(
             422,
@@ -374,46 +665,271 @@ def create_signoff(body: SignoffCreateRequest, approver: ApproverDep, db: DbDep)
             str(exc),
             detail={"errors": [{"loc": ["body"], "msg": str(exc), "type": "value_error"}]},
         ) from exc
+
+
+def _floor(db: Session, *, repo: str, actor: str, scope: CellKey) -> None:
+    """Step 1 — false-Q1 over the STORED belts. 409 ``false_q1_refused``, nothing else
+    evaluated: the cell is untrusted."""
+    fq1, bad_ids = cell_false_q1(db, repo, scope)
+    if fq1 > 0:
+        message = f"cell has false_q1={fq1} > 0 — untrusted, cannot be signed off"
+        raise _refuse(
+            db,
+            repo=repo,
+            actor=actor,
+            scope=scope,
+            reason=message,
+            code=CODE_FALSE_Q1,
+            detail={
+                "code": REFUSAL_FALSE_Q1,
+                "false_q1": fq1,
+                "rows": bad_ids,
+                "thresholds": {"false_q1": 0},
+                "observed": {"false_q1": fq1},
+                "refusals": [
+                    SignoffRefusal(REFUSAL_FALSE_Q1, message, threshold=0, observed=fq1).to_dict()
+                ],
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/signoffs",
+    response_model=Page[SignoffWithPolicyOut],
+    responses={401: _ERR},
+    summary="Attestations (active by default; ?include_revoked=true for the history)",
+)
+def list_signoffs(
+    viewer: ViewerDep,
+    db: DbDep,
+    page: PageDep,
+    repo: str | None = Query(default=None, max_length=64),
+    include_revoked: bool = Query(default=False),
+) -> Page[SignoffWithPolicyOut]:
+    del viewer
+    rows = load_signoff_rows(db, repo)
+    items = [signoff_out(db, r, rows) for r in rows if not r.revoke]
+    if not include_revoked:
+        items = [s for s in items if not s.revoked]
+    items.reverse()  # newest first
+    return Page[SignoffWithPolicyOut](
+        items=items[page.offset : page.offset + page.limit],
+        total=len(items),
+        limit=page.limit,
+        offset=page.offset,
+    )
+
+
+@router.get(
+    "/signoffs/policy",
+    response_model=SignoffPolicyOut,
+    responses={401: _ERR, 503: _ERR},
+    summary="The sign-off policy in force (signoff-policy.v1 defaults, or the deployment's relaxed thresholds)",
+)
+def signoff_policy(viewer: ViewerDep) -> SignoffPolicyOut:
+    del viewer
+    return SignoffPolicyOut(**effective_policy().to_dict())
+
+
+@router.get(
+    "/signoffs/preview",
+    response_model=SignoffPreviewOut,
+    responses={401: _ERR, 404: _ERR, 409: _ERR, 422: _ERR, 503: _ERR},
+    summary="What a sign-off of this cell WOULD record, and every refusal that would apply",
+)
+def preview_signoff(
+    viewer: ViewerDep,
+    db: DbDep,
+    *,
+    repo: str = Query(min_length=1, max_length=64),
+    capability_class: str = Query(min_length=1, max_length=64),
+    size: str = Query(default=WILDCARD, max_length=4),
+    language: str = Query(default=WILDCARD, max_length=16),
+    builder: str = Query(default=WILDCARD, max_length=64),
+    model: str = Query(default=WILDCARD, max_length=128),
+    provider: str = Query(default=WILDCARD, max_length=64),
+    process_step: str = Query(default=WILDCARD, max_length=16),
+    reviewed_row_hash: str = Query(default="", max_length=64),
+    statement: str = Query(default="", max_length=4000),
+) -> SignoffPreviewOut:
+    """Steps 1–4 of ``POST /signoffs`` without writing. ``reviewed_row_hash`` (with an
+    optional ``statement``) lets the approver's chosen row be validated the way the
+    POST would (422 when it is not an accepted row of this cell); without it the
+    ``attestation_missing`` refusal is listed, as it would be."""
+    if db.get(Repo, repo) is None:
+        raise ApiError(404, "not_found", f"no repo {repo!r}")
+    policy = effective_policy()
+    cell_in = {
+        k: v
+        for k, v in {
+            "capability_class": capability_class,
+            "size": size,
+            "language": language,
+            "builder": builder,
+            "model": model,
+            "provider": provider,
+            "process_step": process_step,
+        }.items()
+        if v and v != WILDCARD
+    }
+    try:  # the same cell validation the POST body gets (known fields, a size tier …)
+        cell_in = SignoffCreateRequest(repo=repo, cell=cell_in).cell
+    except ValidationError as exc:
+        msg = exc.errors()[0]["msg"] if exc.errors() else str(exc)
+        raise ApiError(
+            422,
+            "validation_error",
+            msg,
+            detail={"errors": [{"loc": ["query", "cell"], "msg": msg, "type": "value_error"}]},
+        ) from exc
+    record = _record_from(repo, cell_in, verifier=viewer.id, tier="human-verified", note="")
+    scope = record.scope()
+    fq1, bad_ids = cell_false_q1(db, repo, scope)
+    if fq1 > 0:
+        raise ApiError(
+            409,
+            CODE_FALSE_Q1,
+            f"cell has false_q1={fq1} > 0 — untrusted, cannot be signed off",
+            detail={
+                "cell": scope.to_dict(),
+                "repo": repo,
+                "code": REFUSAL_FALSE_Q1,
+                "false_q1": fq1,
+                "rows": bad_ids,
+            },
+        )
+    rows = cell_rows(db, repo, scope)
+    controls = latest_controls_verdict(db, repo)
+    cell = measured_cell(rows, scope, controls)
+    attestation_out: AttestationOut | None = None
+    if reviewed_row_hash:
+        try:
+            att_in = AttestationIn(
+                reviewed_row_hash=reviewed_row_hash, statement=statement or "(preview)"
+            )
+        except ValidationError as exc:
+            raise _attestation_422(exc.errors()[0]["msg"] if exc.errors() else str(exc)) from exc
+        att, subject = resolve_attestation(db, repo, scope, att_in)
+        record = replace(record, attestation=att)
+        attestation_out = AttestationOut(**att.to_dict(), subject=subject)
+    refusals = evaluate_signoff(record, cell, controls=controls, policy=policy, repo=repo)
+    stamped = (
+        stamp_evidence(record, cell, controls=controls, policy=policy)
+        if cell.stats is not None
+        else record
+    )
+    s = cell.stats
+    return SignoffPreviewOut(
+        repo=repo,
+        cell=scope.to_dict(),
+        policy=SignoffPolicyOut(**policy.to_dict()),
+        evidence=SignoffPreviewEvidence(
+            measured=cell.measured,
+            n=cell.n,
+            clean=0 if s is None else s.clean,
+            point=None if s is None else round(s.point, 4),
+            ci_low=None if s is None else round(s.ci.low, 4),
+            ci_high=None if s is None else round(s.ci.high, 4),
+            false_q1=cell.false_q1,
+            oracle_strength=None
+            if s is None or s.oracle_strength_mean is None
+            else round(s.oracle_strength_mean, 4),
+            apparatus_versions=[] if s is None else list(s.apparatus_versions),
+            belt_sets=list(cell.belt_sets),
+            model_n=cell.model_n,
+            model_point=None if cell.model_point is None else round(cell.model_point, 4),
+            failure_split=FailureSplitOut(
+                builder_red=cell.n_builder_red,
+                budget=cell.n_budget,
+                protocol=cell.n_protocol,
+                harness=cell.n_harness,
+                disqualified=cell.n_disqualified,
+            ),
+        ),
+        route=SignoffRouteOut(route=cell.route, reason=cell.reason, reason_code=cell.reason_code),
+        controls=ControlsVerdictOut(**verdict_dict(controls)),
+        refusals=[_refusal_out(r) for r in refusals],
+        signable=not refusals,
+        would_record=_would_record(stamped),
+        accepted_rows=accepted_rows(db, repo, scope),
+        attestation=attestation_out,
+    )
+
+
+@router.get(
+    "/signoffs/{signoff_id}",
+    response_model=SignoffWithPolicyOut,
+    responses={401: _ERR, 404: _ERR},
+    summary="One attestation with the snapshot it was made on",
+)
+def get_signoff(signoff_id: str, viewer: ViewerDep, db: DbDep) -> SignoffWithPolicyOut:
+    del viewer
+    row = db.execute(
+        select(Signoff).where(Signoff.signoff_id == signoff_id, Signoff.revoke.is_(False))
+    ).scalar_one_or_none()
+    if row is None:
+        raise ApiError(404, "not_found", f"no attestation {signoff_id!r}")
+    return signoff_out(db, row, load_signoff_rows(db, row.repo))
+
+
+@router.post(
+    "/signoffs",
+    response_model=SignoffWithPolicyOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR, 503: _ERR},
+    summary="Attest a cell (approver) under signoff-policy.v1; 409 false_q1_refused / signoff_refused",
+)
+def create_signoff(
+    body: SignoffCreateWithAttestationRequest, approver: ApproverDep, db: DbDep
+) -> SignoffWithPolicyOut:
+    if db.get(Repo, body.repo) is None:
+        raise ApiError(404, "not_found", f"no repo {body.repo!r}")
+    policy = effective_policy()
+    record = _record_from(
+        body.repo, body.cell, verifier=approver.id, tier=body.tier, note=body.note
+    )
     scope = record.scope()
 
     # 1. The floor, over the STORED belts — catches rows that bypassed the write path.
-    fq1, bad_ids = cell_false_q1(db, body.repo, scope)
-    if fq1 > 0:
-        raise _refuse(
-            db,
-            repo=body.repo,
-            actor=approver.id,
-            scope=scope,
-            reason=f"cell has false_q1={fq1} > 0 — untrusted, cannot be signed off",
-            detail={"false_q1": fq1, "rows": bad_ids},
-        )
-    # 2. Evidence: the cell must be measured.
+    _floor(db, repo=body.repo, actor=approver.id, scope=scope)
+    # 2. Evidence: the cell routed under the repo's latest controls verdict.
     rows = cell_rows(db, body.repo, scope)
-    if not rows:
+    controls = latest_controls_verdict(db, body.repo)
+    cell = measured_cell(rows, scope, controls)
+    # 3. The attestation: the named row must be an accepted row of THIS cell.
+    if body.attestation is not None:
+        att, _subject = resolve_attestation(db, body.repo, scope, body.attestation)
+        record = replace(record, attestation=att)
+    # 4. The policy.
+    refusals = evaluate_signoff(record, cell, controls=controls, policy=policy, repo=body.repo)
+    if refusals:
+        first = refusals[0]
         raise _refuse(
             db,
             repo=body.repo,
             actor=approver.id,
             scope=scope,
-            reason="cell has no measured evidence — nothing to sign off",
-            detail={"false_q1": 0, "reason": "not_measured"},
+            reason=redact(first.message),
+            code=CODE_FALSE_Q1 if first.code == REFUSAL_FALSE_Q1 else CODE_REFUSED,
+            detail={
+                "code": first.code,
+                "threshold": first.threshold,
+                "observed_value": first.observed,
+                "policy_version": policy.policy_version,
+                "thresholds": policy.thresholds(),
+                "observed": _observed(cell, controls, policy),
+                "refusals": [r.to_dict() for r in refusals],
+                "false_q1": cell.false_q1,
+            },
         )
-    cell = measure_cell(rows, _projection(scope))
-    # 3. The core's own write-boundary check (scope match, evidence, false-Q1).
-    try:
-        check_signable(record, cell, repo=body.repo)
-    except SignoffRefused as exc:
-        raise _refuse(
-            db,
-            repo=body.repo,
-            actor=approver.id,
-            scope=scope,
-            reason=redact(str(exc)),
-            detail={"false_q1": cell.false_q1},
-        ) from exc
-    stamped = stamp_evidence(record, cell)
-    assert cell.stats is not None  # guaranteed by check_signable
-
+    # 5. Stamp the decision and write.
+    stamped = stamp_evidence(record, cell, controls=controls, policy=policy)
+    assert cell.stats is not None and stamped.attestation is not None  # by the policy
     cell_json: dict[str, str] = {
         **scope.to_dict(),
         _EV_N: str(cell.stats.n),
@@ -422,6 +938,24 @@ def create_signoff(body: SignoffCreateRequest, approver: ApproverDep, db: DbDep)
         _EV_CI_HIGH: f"{cell.stats.ci.high:.6f}",
         _EV_FQ1: str(cell.stats.false_q1),
         _EV_APPARATUS: ",".join(cell.stats.apparatus_versions),
+        _EV_ORACLE: ""
+        if stamped.oracle_strength_at_signoff is None
+        else f"{stamped.oracle_strength_at_signoff:.6f}",
+        _POLICY_VERSION: stamped.policy_version,
+        _POLICY_THRESHOLDS: json.dumps(stamped.policy_thresholds, sort_keys=True),
+        _ROUTE: stamped.route_at_signoff,
+        _ROUTE_REASON: cell.reason,
+        _ROUTE_REASON_CODE: stamped.route_reason_code,
+        _CTL_VERDICT: stamped.controls_verdict,
+        _CTL_RUN: stamped.controls_run_id,
+        _CTL_CREATED: controls.created,
+        _CTL_K: str(stamped.controls_k),
+        _CTL_TOTAL: str(stamped.controls_total),
+        _CTL_ESCAPES: str(stamped.controls_escapes),
+        _ATT_TASK: stamped.attestation.reviewed_task_id,
+        _ATT_ROW: stamped.attestation.reviewed_row_hash,
+        _ATT_STATEMENT: stamped.attestation.statement,
+        _ATT_AT: stamped.attestation.at,
     }
     _lock(db)
     row = _chain_and_add(
@@ -450,6 +984,12 @@ def create_signoff(body: SignoffCreateRequest, approver: ApproverDep, db: DbDep)
             "tier": row.tier,
             "n": cell.stats.n,
             "point": round(cell.stats.point, 4),
+            "ci_low": round(cell.stats.ci.low, 4),
+            "policy_version": stamped.policy_version,
+            "route_reason_code": stamped.route_reason_code,
+            "controls_verdict": stamped.controls_verdict,
+            "controls_run_id": stamped.controls_run_id,
+            "reviewed_row_hash": stamped.attestation.reviewed_row_hash,
             "row_hash": row.row_hash,
         },
     )
@@ -459,7 +999,7 @@ def create_signoff(body: SignoffCreateRequest, approver: ApproverDep, db: DbDep)
 
 @router.post(
     "/signoffs/{signoff_id}/revoke",
-    response_model=SignoffOut,
+    response_model=SignoffWithPolicyOut,
     responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR},
     summary="Withdraw an attestation (appends a revocation row; never edits)",
 )
@@ -468,7 +1008,7 @@ def revoke_signoff(
     approver: ApproverDep,
     db: DbDep,
     body: SignoffRevokeRequest | None = None,
-) -> SignoffOut:
+) -> SignoffWithPolicyOut:
     row = db.execute(
         select(Signoff).where(Signoff.signoff_id == signoff_id, Signoff.revoke.is_(False))
     ).scalar_one_or_none()
@@ -506,11 +1046,19 @@ def revoke_signoff(
 
 
 __all__ = [
+    "ACCEPTED_ROWS_LIMIT",
+    "CODE_FALSE_Q1",
+    "CODE_POLICY_INVALID",
+    "CODE_REFUSED",
     "FALSE_Q1_PREDICATE",
+    "accepted_rows",
     "cell_false_q1",
     "cell_rows",
+    "effective_policy",
     "load_signoff_records",
     "load_signoff_rows",
+    "measured_cell",
+    "resolve_attestation",
     "router",
     "scope_of",
     "signoff_body",

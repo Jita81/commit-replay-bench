@@ -1,4 +1,13 @@
-"""``/signoffs`` — earned tiers: 201 on evidence, 409 on false-Q1 or no evidence, revoke, chain."""
+"""``/signoffs`` under ``signoff-policy.v1`` — a sign-off is a policy decision, refused at write.
+
+The seed's deliver cell (``bug.fix|S``, n = 40, point 0.95, Wilson lower 0.835) sits under a
+controls report with ONE escape, so it is REFUSED (409 ``signoff_refused`` /
+``controls_escapes``) until a clean controls run lands (``pass_controls``); then it signs —
+with an attestation naming an accepted row — and the record carries the whole snapshot.
+Also: the false-Q1 floor (first, non-overridable, its historical envelope code), the
+preview, attestation validation (422), the policy endpoint and the deployment knobs,
+revoke and the chain.
+"""
 
 from __future__ import annotations
 
@@ -15,9 +24,50 @@ from crb.core.version import APPARATUS_VERSION
 from crb.server.routes.runs import system_trace_id
 from crb.server.routes.signoffs import signoff_hash, verify_signoff_rows
 from crb.store.models import Event, Grade, Signoff
-from fixtures.server_seed import ALPHA, BETA, Env, assert_rbac, envelope, login, make_env
+from fixtures.server_seed import ALPHA, BETA, THIN_CELL, Env, assert_rbac, envelope, login, make_env
+from fixtures.signoff_seed import (
+    CLEAN_CONTROLS_RUN,
+    STATEMENT,
+    accepted_row,
+    attestation_for,
+    attested_body,
+    pass_controls,
+)
 
 DELIVER = {"capability_class": "bug.fix", "size": "S"}
+THIN = {"capability_class": THIN_CELL["capability_class"], "size": THIN_CELL["size"]}
+OUT_KEYS = {
+    "id",
+    "repo",
+    "cell",
+    "tier",
+    "note",
+    "approver",
+    "created",
+    "revoked",
+    "revoked_by",
+    "revoked_at",
+    "active",
+    "current_false_q1",
+    "evidence",
+    "prev_hash",
+    "row_hash",
+    "schema",
+    "policy_version",
+    "policy_thresholds",
+    "route",
+    "controls",
+    "attestation",
+}
+DEFAULT_THRESHOLDS = {
+    "n_min": 10,
+    "require_route_deliver": True,
+    "require_controls_passed": True,
+    "max_controls_escapes": 0,
+    "min_constructible_share": 0.5,
+    "min_oracle_strength": 0.8,
+    "require_attestation": True,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -71,35 +121,78 @@ def _signoffs(env: Env) -> list[Signoff]:
         return list(s.execute(select(Signoff).order_by(Signoff.seq)).scalars())
 
 
+def _events(env: Env, action: str) -> list[Event]:
+    with env.factory() as s:
+        return list(
+            s.execute(
+                select(Event)
+                .where(Event.trace_id == system_trace_id("signoffs", ALPHA), Event.action == action)
+                .order_by(Event.id)
+            ).scalars()
+        )
+
+
+def _codes(refusals: list[dict[str, Any]]) -> list[str]:
+    return [r["code"] for r in refusals]
+
+
+def _subject(env: Env, task_id: str) -> str:
+    return next(t.subject for t in env.info.tasks if t.task_id == task_id)
+
+
+def _preview(env: Env, cell: dict[str, str], **extra: str) -> Any:
+    q = "&".join(f"{k}={v}" for k, v in {"repo": ALPHA, **cell, **extra}.items())
+    return env.get(f"/signoffs/preview?{q}")
+
+
+# ---------------------------------------------------------------------------
+# POST — the policy decision
+# ---------------------------------------------------------------------------
+
+
 class TestCreate:
     def test_rbac_is_approver(self, env: Env) -> None:
         assert_rbac(
             env, "POST", "/signoffs", min_role="approver", json={"repo": ALPHA, "cell": DELIVER}
         )
 
-    def test_201_on_the_deliver_cell(self, env: Env) -> None:
-        r = env.post(
-            "/signoffs", json={"repo": ALPHA, "cell": DELIVER, "note": "reviewed 40 packs"}
-        )
+    def test_seeded_deliver_cell_is_refused_on_the_controls_escape(self, env: Env) -> None:
+        """The seed's controls report has one escape: the cell routes ``human`` and the
+        policy refuses it — with every failing clause, observed vs threshold, and the
+        refusal on the record. Nothing is written."""
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 409, r.text
+        e = envelope(r)
+        assert e["code"] == "signoff_refused"
+        d = e["detail"]
+        assert d["code"] == "controls_escapes" and d["threshold"] == 0 and d["observed_value"] == 1
+        assert "1 measurement control(s) graded clean" in e["message"]
+        assert "max_controls_escapes=0" in e["message"]
+        assert d["policy_version"] == "signoff-policy.v1" and d["thresholds"] == DEFAULT_THRESHOLDS
+        assert _codes(d["refusals"]) == ["controls_escapes", "route_not_deliver:controls_escapes"]
+        obs = d["observed"]
+        assert obs["n"] == 40 and obs["point"] == 0.95 and obs["false_q1"] == 0
+        assert obs["route"] == "human" and obs["reason_code"] == "controls_escapes"
+        assert obs["controls"] == {
+            "verdict": "escaped",
+            "run_id": "0" * 32,
+            "k": 12,
+            "total": 14,
+            "escapes": 1,
+        }
+        assert d["cell"]["capability_class"] == "bug.fix" and d["repo"] == ALPHA
+        assert _signoffs(env) == []
+        (ev,) = _events(env, "signoff.refused")
+        assert ev.status == "invalid" and ev.payload_json["code"] == "controls_escapes"
+        assert ev.payload_json["envelope_code"] == "signoff_refused"
+
+    def test_201_once_the_controls_gate_is_clean(self, env: Env) -> None:
+        pass_controls(env)
+        row = accepted_row(env, DELIVER)
+        r = env.post("/signoffs", json=attested_body(env, DELIVER, note="reviewed 40 packs"))
         assert r.status_code == 201, r.text
         d = r.json()
-        assert set(d) == {
-            "id",
-            "repo",
-            "cell",
-            "tier",
-            "note",
-            "approver",
-            "created",
-            "revoked",
-            "revoked_by",
-            "revoked_at",
-            "active",
-            "current_false_q1",
-            "evidence",
-            "prev_hash",
-            "row_hash",
-        }
+        assert set(d) == OUT_KEYS
         assert (
             d["repo"] == ALPHA
             and d["tier"] == "human-verified"
@@ -115,35 +208,60 @@ class TestCreate:
             "provider": "*",
         }
         assert d["revoked"] is False and d["active"] is True and d["current_false_q1"] == 0
-        assert d["evidence"]["n"] == 40 and d["evidence"]["point"] == 0.95
-        assert d["evidence"]["ci_low"] == pytest.approx(0.835, abs=0.001)
-        assert d["evidence"]["false_q1"] == 0 and d["evidence"]["apparatus_versions"] == [
-            APPARATUS_VERSION
-        ]
+        # the evidence snapshot: n, point, the interval, false-Q1, oracle, apparatus
+        ev = d["evidence"]
+        assert ev["n"] == 40 and ev["point"] == 0.95
+        assert ev["ci_low"] == pytest.approx(0.835, abs=0.001)
+        assert ev["false_q1"] == 0 and ev["apparatus_versions"] == [APPARATUS_VERSION]
+        assert ev["oracle_strength"] is None  # the seed's rows carry no strength — never 0
+        # the policy decision
+        assert d["schema"] == "crb.signoff.v2"
+        assert d["policy_version"] == "signoff-policy.v1"
+        assert d["policy_thresholds"] == DEFAULT_THRESHOLDS
+        assert d["route"]["route"] == "deliver" and d["route"]["reason_code"] == "deliver"
+        assert "n=40" in d["route"]["reason"]
+        assert d["controls"] == {
+            "verdict": "passed",
+            "run_id": CLEAN_CONTROLS_RUN,
+            "k": 12,
+            "total": 14,
+            "escapes": 0,
+            "created": d["controls"]["created"],
+        }
+        assert d["controls"]["created"]
+        # the attestation, resolved to the task the row graded
+        att = d["attestation"]
+        assert att["reviewed_row_hash"] == row.row_hash
+        assert att["reviewed_task_id"] == row.task_id
+        assert att["subject"] == _subject(env, row.task_id)
+        assert att["statement"] == STATEMENT and att["at"]
         assert d["prev_hash"] == GENESIS_HASH and len(d["row_hash"]) == 64
         assert d["approver"]  # the approver's principal id
-        # persisted, chained, evidence snapshot covered by the hash
+        # persisted, chained, the WHOLE snapshot covered by the hash
         rows = _signoffs(env)
         assert len(rows) == 1 and rows[0].row_hash == signoff_hash(rows[0])
-        assert rows[0].evidence_rows == 40 and rows[0].cell_json["evidence_n"] == "40"
+        cj = rows[0].cell_json
+        assert rows[0].evidence_rows == 40 and cj["evidence_n"] == "40"
+        assert cj["policy_version"] == "signoff-policy.v1"
+        assert cj["route_reason_code"] == "deliver" and cj["controls_verdict"] == "passed"
+        assert cj["controls_run_id"] == CLEAN_CONTROLS_RUN and cj["controls_escapes"] == "0"
+        assert cj["attestation_reviewed_row_hash"] == row.row_hash
         assert verify_signoff_rows(rows) == 1
         # ... and recorded as a system event on the repo's sign-off trace
-        with env.factory() as s:
-            ev = s.execute(
-                select(Event).where(Event.trace_id == system_trace_id("signoffs", ALPHA))
-            ).scalar_one()
-        assert ev.action == "signoff.created" and ev.payload_json["n"] == 40
+        (created,) = _events(env, "signoff.created")
+        assert created.payload_json["n"] == 40
+        assert created.payload_json["controls_verdict"] == "passed"
+        assert created.payload_json["reviewed_row_hash"] == row.row_hash
+        # served back by id
+        got = env.get(f"/signoffs/{d['id']}")
+        assert got.status_code == 200 and got.json() == d
 
     def test_full_cell_scope_and_second_attestation_chains(self, env: Env) -> None:
-        r1 = env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER})
+        pass_controls(env)
+        r1 = env.post("/signoffs", json=attested_body(env, DELIVER))
         r2 = env.post(
             "/signoffs",
-            json={
-                "repo": ALPHA,
-                "cell": env.info.deliver_cell,
-                "note": "full cell",
-                "tier": "ab-confirmed",
-            },
+            json=attested_body(env, env.info.deliver_cell, note="full cell", tier="ab-confirmed"),
         )
         assert r1.status_code == 201 and r2.status_code == 201, r2.text
         assert r2.json()["prev_hash"] == r1.json()["row_hash"]
@@ -151,20 +269,60 @@ class TestCreate:
         assert verify_signoff_rows(_signoffs(env)) == 2
         assert env.get(f"/signoffs?repo={ALPHA}").json()["total"] == 2
 
-    def test_409_unmeasured_cell(self, env: Env) -> None:
-        r = env.post(
-            "/signoffs",
-            json={"repo": ALPHA, "cell": {"capability_class": "docs.update", "size": "S"}},
-        )
-        assert r.status_code == 409
+    def test_409_thin_cell_lists_every_clause_with_observed_vs_threshold(self, env: Env) -> None:
+        pass_controls(env)
+        r = env.post("/signoffs", json=attested_body(env, THIN))
+        assert r.status_code == 409, r.text
         e = envelope(r)
-        assert e["code"] == "false_q1_refused" and e["detail"]["reason"] == "not_measured"
-        assert e["detail"]["cell"]["capability_class"] == "docs.update"
+        assert e["code"] == "signoff_refused"
+        d = e["detail"]
+        assert d["code"] == "thin_cell" and d["threshold"] == 10 and d["observed_value"] == 4
+        assert "n=4 < n_min=10" in e["message"]
+        assert _codes(d["refusals"]) == ["thin_cell", "route_not_deliver:n_below_min"]
+        route = d["refusals"][1]
+        assert route["threshold"] == "deliver" and route["observed"] == "calibrate"
+        assert all(r["overridable"] for r in d["refusals"])
         assert _signoffs(env) == []
-        r = env.post("/signoffs", json={"repo": BETA, "cell": DELIVER})
-        assert r.status_code == 409 and envelope(r)["code"] == "false_q1_refused"
 
-    def test_409_false_q1_row_inserted_around_the_ledger(self, env: Env) -> None:
+    def test_409_attestation_missing_is_not_overridable(self, env: Env) -> None:
+        pass_controls(env)
+        r = env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER, "note": "no row named"})
+        assert r.status_code == 409, r.text
+        d = envelope(r)["detail"]
+        assert d["code"] == "attestation_missing"
+        assert _codes(d["refusals"]) == ["attestation_missing"]
+        assert d["refusals"][0]["overridable"] is False
+        assert _signoffs(env) == []
+
+    def test_409_controls_unmeasured_failed_and_thin(self, env: Env) -> None:
+        # beta never ran controls: the cell is unmeasured AND the gate is unmeasured
+        r = env.post("/signoffs", json={"repo": BETA, "cell": DELIVER})
+        assert r.status_code == 409
+        d = envelope(r)["detail"]
+        assert d["code"] == "thin_cell" and d["observed_value"] == 0
+        assert _codes(d["refusals"]) == [
+            "thin_cell",
+            "controls_unmeasured",
+            "route_not_deliver:unrouted",
+            "attestation_missing",
+        ]
+        # a FAILED gate on alpha
+        pass_controls(env, passed=False, run_id="6" * 32)
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        d = envelope(r)["detail"]
+        assert r.status_code == 409 and d["code"] == "controls_failed"
+        assert _codes(d["refusals"]) == ["controls_failed", "route_not_deliver:controls_failed"]
+        assert d["observed"]["controls"]["verdict"] == "failed"
+        # a thin gate: only 4 of 14 constructible
+        pass_controls(env, not_constructible=10, run_id="7" * 32)
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        d = envelope(r)["detail"]
+        assert r.status_code == 409 and d["code"] == "controls_thin"
+        assert d["threshold"] == 0.5 and d["observed_value"] == pytest.approx(0.2857, abs=1e-4)
+        assert _codes(d["refusals"]) == ["controls_thin", "route_not_deliver:controls_thin"]
+
+    def test_409_false_q1_row_inserted_around_the_ledger_is_first(self, env: Env) -> None:
+        pass_controls(env)
         bad = _seed_false_q1_row(env)
         r = env.post(
             "/signoffs",
@@ -172,30 +330,32 @@ class TestCreate:
         )
         assert r.status_code == 409, r.text
         e = envelope(r)
-        assert e["code"] == "false_q1_refused"
-        assert e["detail"]["false_q1"] == 1 and e["detail"]["rows"] == [bad]
+        assert e["code"] == "false_q1_refused"  # the floor keeps its historical code
+        d = e["detail"]
+        assert d["code"] == "false_q1" and d["false_q1"] == 1 and d["rows"] == [bad]
+        assert d["thresholds"] == {"false_q1": 0} and d["observed"] == {"false_q1": 1}
+        assert _codes(d["refusals"]) == ["false_q1"] and d["refusals"][0]["overridable"] is False
         assert "false_q1=1" in e["message"]
         assert _signoffs(env) == []  # nothing written
         # the refusal is on the record
-        with env.factory() as s:
-            ev = s.execute(
-                select(Event).where(Event.trace_id == system_trace_id("signoffs", ALPHA))
-            ).scalar_one()
-        assert ev.action == "signoff.refused" and ev.status == "invalid"
-        assert ev.payload_json["rows"] == [bad]
+        (ev,) = _events(env, "signoff.refused")
+        assert ev.status == "invalid" and ev.payload_json["rows"] == [bad]
+        assert ev.payload_json["envelope_code"] == "false_q1_refused"
         # the unaffected deliver cell can still be signed (the check is scoped to the cell)
-        assert env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER}).status_code == 201
+        assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 201
 
     def test_read_time_check_invalidates_a_signed_cell(self, env: Env) -> None:
-        assert env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER}).status_code == 201
+        pass_controls(env)
+        assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 201
         _seed_false_q1_row(env, cls="bug.fix", size="S")  # the same cell, after the fact
         item = env.get(f"/signoffs?repo={ALPHA}&include_revoked=true").json()["items"][0]
         assert item["revoked"] is False
         assert item["current_false_q1"] == 1 and item["active"] is False  # self-healed
         assert env.get(f"/signoffs?repo={ALPHA}").json()["total"] == 1  # listed, flagged
-        # and a new attestation on that cell is refused
-        r = env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER})
-        assert r.status_code == 409 and envelope(r)["detail"]["false_q1"] == 1
+        # and a new attestation on that cell is refused — by the floor, before anything else
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 409 and envelope(r)["code"] == "false_q1_refused"
+        assert envelope(r)["detail"]["false_q1"] == 1
 
     @pytest.mark.parametrize(
         "body",
@@ -207,6 +367,27 @@ class TestCreate:
             {"repo": ALPHA, "cell": DELIVER, "tier": "automated-pass"},  # not an earned tier
             {"repo": ALPHA, "cell": DELIVER, "extra": 1},
             {"cell": DELIVER},
+            {
+                "repo": ALPHA,
+                "cell": DELIVER,
+                "attestation": {"reviewed_row_hash": "abc", "statement": "x"},
+            },
+            {
+                "repo": ALPHA,
+                "cell": DELIVER,
+                "attestation": {"reviewed_row_hash": "g" * 64, "statement": "x"},
+            },
+            {
+                "repo": ALPHA,
+                "cell": DELIVER,
+                "attestation": {"reviewed_row_hash": "a" * 64, "statement": "  "},
+            },
+            {"repo": ALPHA, "cell": DELIVER, "attestation": {"reviewed_row_hash": "a" * 64}},
+            {
+                "repo": ALPHA,
+                "cell": DELIVER,
+                "attestation": {"reviewed_row_hash": "a" * 64, "statement": "x", "at": "now"},
+            },
         ],
     )
     def test_422(self, env: Env, body: dict[str, Any]) -> None:
@@ -214,37 +395,322 @@ class TestCreate:
         assert r.status_code == 422, r.text
         assert envelope(r)["code"] == "validation_error"
 
+    def test_422_attestation_row_must_be_an_accepted_row_of_this_cell(self, env: Env) -> None:
+        pass_controls(env)
+        loc = ["body", "attestation", "reviewed_row_hash"]
+
+        def post(hash_: str) -> Any:
+            return env.post(
+                "/signoffs",
+                json={
+                    "repo": ALPHA,
+                    "cell": DELIVER,
+                    "attestation": {"reviewed_row_hash": hash_, "statement": STATEMENT},
+                },
+            )
+
+        # unknown row
+        r = post("a" * 64)
+        assert r.status_code == 422 and envelope(r)["detail"]["errors"][0]["loc"] == loc
+        assert "no ledger row" in envelope(r)["message"]
+        # a red row of the cell (T3's r1 attempt) — not accepted
+        red = accepted_row(env, DELIVER, clean=False)
+        r = post(red.row_hash)
+        assert r.status_code == 422 and "not an accepted row" in envelope(r)["message"]
+        # an accepted row of ANOTHER cell (the thin cell) — outside the attested scope
+        other = accepted_row(env, THIN)
+        r = post(other.row_hash)
+        assert r.status_code == 422 and "outside the attested scope" in envelope(r)["message"]
+        # a row of another repo: alpha's row named on beta
+        r = env.post(
+            "/signoffs",
+            json={"repo": BETA, "cell": DELIVER, "attestation": attestation_for(env, DELIVER)},
+        )
+        assert r.status_code == 422 and "belongs to repo" in envelope(r)["message"]
+        assert _signoffs(env) == []
+        # a class-wide scope covers the S row (the scope check is key_matches, not equality)
+        r = env.post(
+            "/signoffs",
+            json={**attested_body(env, DELIVER), "cell": {"capability_class": "bug.fix"}},
+        )
+        assert r.status_code == 201, r.text
+
     def test_unknown_repo_404(self, env: Env) -> None:
         assert env.post("/signoffs", json={"repo": "nope", "cell": DELIVER}).status_code == 404
 
-    def test_note_is_redacted(self, env: Env) -> None:
+    def test_note_and_statement_are_redacted(self, env: Env) -> None:
+        pass_controls(env)
+        secret = "sk-live-abcdefghijklmnopqrstuvwxyz0123"
         r = env.post(
             "/signoffs",
-            json={
-                "repo": ALPHA,
-                "cell": DELIVER,
-                "note": "key sk-live-abcdefghijklmnopqrstuvwxyz0123",
-            },
+            json=attested_body(
+                env, DELIVER, note=f"key {secret}", statement=f"read it; token {secret}"
+            ),
         )
-        assert r.status_code == 201 and "sk-live" not in r.json()["note"]
+        assert r.status_code == 201, r.text
+        assert (
+            "sk-live" not in r.json()["note"]
+            and "sk-live" not in r.json()["attestation"]["statement"]
+        )
+        assert "sk-live" not in str(_signoffs(env)[0].cell_json)
+
+
+# ---------------------------------------------------------------------------
+# The deployment's knobs
+# ---------------------------------------------------------------------------
+
+
+class TestPolicy:
+    def test_policy_endpoint_reports_the_defaults(self, env: Env) -> None:
+        login(env.client, "viewer")
+        d = env.get("/signoffs/policy").json()
+        assert d["policy_version"] == "signoff-policy.v1" and d["relaxed"] is False
+        assert {k: d[k] for k in DEFAULT_THRESHOLDS} == DEFAULT_THRESHOLDS
+        assert d["non_overridable"] == ["false_q1", "attestation_missing"]
+        assert d["bounds"]["n_min"] == [1, 10000]
+
+    def test_relaxed_thresholds_are_applied_and_stamped(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A deployment allowing one escape signs the seeded cell WITHOUT a clean re-run —
+        and the record says which bar it cleared."""
+        monkeypatch.setenv("CRB_SIGNOFF__MAX_CONTROLS_ESCAPES", "1")
+        monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_ROUTE_DELIVER", "false")  # the route is human
+        assert env.get("/signoffs/policy").json()["relaxed"] is True
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 201, r.text
+        d = r.json()
+        assert d["policy_thresholds"]["max_controls_escapes"] == 1
+        assert d["policy_thresholds"]["require_route_deliver"] is False
+        assert d["route"]["route"] == "human" and d["controls"]["verdict"] == "passed"
+        assert d["controls"]["escapes"] == 1  # the count is still the truth
+
+    def test_false_q1_and_attestation_cannot_be_relaxed(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_ATTESTATION", "false")
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 503 and envelope(r)["code"] == "signoff_policy_invalid"
+        assert "require_attestation cannot be relaxed" in envelope(r)["message"]
+        assert env.get("/signoffs/policy").status_code == 503
+        monkeypatch.delenv("CRB_SIGNOFF__REQUIRE_ATTESTATION")
+        # every numeric knob has bounds; outside them the policy is invalid, not lower
+        monkeypatch.setenv("CRB_SIGNOFF__N_MIN", "0")
+        assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 503
+        monkeypatch.setenv("CRB_SIGNOFF__N_MIN", "1")
+        monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_CONTROLS_PASSED", "false")
+        monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_ROUTE_DELIVER", "false")
+        # the most relaxed policy there is still refuses false-Q1 …
+        _seed_false_q1_row(env, cls="bug.fix", size="S")
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 409 and envelope(r)["code"] == "false_q1_refused"
+        # … and a missing attestation
+        r = env.post("/signoffs", json={"repo": ALPHA, "cell": THIN})
+        assert r.status_code == 409 and envelope(r)["detail"]["code"] == "attestation_missing"
+
+
+# ---------------------------------------------------------------------------
+# Preview — the bar, before the approver tries
+# ---------------------------------------------------------------------------
+
+
+class TestPreview:
+    def test_preview_is_a_viewer_read(self, env: Env) -> None:
+        assert_rbac(
+            env,
+            "GET",
+            f"/signoffs/preview?repo={ALPHA}&capability_class=bug.fix&size=S",
+            min_role="viewer",
+        )
+
+    def test_preview_of_the_seeded_deliver_cell_lists_the_refusals(self, env: Env) -> None:
+        login(env.client, "viewer")
+        r = _preview(env, DELIVER)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert (
+            d["repo"] == ALPHA
+            and d["cell"]["capability_class"] == "bug.fix"
+            and d["cell"]["size"] == "S"
+        )
+        assert d["signable"] is False
+        assert _codes(d["refusals"]) == [
+            "controls_escapes",
+            "route_not_deliver:controls_escapes",
+            "attestation_missing",
+        ]
+        esc = d["refusals"][0]
+        assert esc["threshold"] == 0 and esc["observed"] == 1 and esc["overridable"] is True
+        assert d["refusals"][2]["overridable"] is False
+        # what the approver must see: n / point / Wilson-low / false-Q1 / oracle / split
+        ev = d["evidence"]
+        assert (
+            ev["measured"] is True and ev["n"] == 40 and ev["clean"] == 38 and ev["point"] == 0.95
+        )
+        assert ev["ci_low"] == pytest.approx(0.835, abs=0.001) and ev["ci_high"] > 0.95
+        assert ev["false_q1"] == 0 and ev["oracle_strength"] is None
+        assert ev["apparatus_versions"] == [APPARATUS_VERSION] and ev["belt_sets"] == ["v4"]
+        assert ev["failure_split"] == {
+            "builder_red": 2,
+            "budget": 0,
+            "protocol": 0,
+            "harness": 0,
+            "disqualified": 0,
+        }
+        assert ev["model_n"] == 40 and ev["model_point"] == 0.95
+        # the controls verdict (k of N, escapes, run id, date) and the route + reason
+        assert d["controls"]["state"] == "escaped" and d["controls"]["escapes"] == 1
+        assert d["controls"]["constructible"] == 12 and d["controls"]["total"] == 14
+        assert d["controls"]["run_id"] == "0" * 32 and d["controls"]["created"]
+        assert d["route"] == {
+            "route": "human",
+            "reason": d["route"]["reason"],
+            "reason_code": "controls_escapes",
+        }
+        assert "graded clean" in d["route"]["reason"]
+        # the policy in force and what the record would carry
+        assert d["policy"]["policy_version"] == "signoff-policy.v1"
+        wr = d["would_record"]
+        assert wr["n_at_signoff"] == 40 and wr["route_reason_code"] == "controls_escapes"
+        assert wr["controls_verdict"] == "escaped" and wr["controls_escapes"] == 1
+        assert wr["policy_thresholds"] == DEFAULT_THRESHOLDS and wr["attestation"] is None
+        assert "row_hash" not in wr and "record_id" not in wr
+        # the accepted rows the approver may name: clean, newest first, with subjects
+        rows = d["accepted_rows"]
+        assert len(rows) == 38 and rows[0]["row_hash"] == accepted_row(env, DELIVER).row_hash
+        assert all(len(x["row_hash"]) == 64 and x["subject"].startswith("fix: task") for x in rows)
+        assert rows[0]["task_id"] == accepted_row(env, DELIVER).task_id
+        assert d["attestation"] is None
+
+    def test_preview_becomes_signable_with_a_clean_gate_and_a_named_row(self, env: Env) -> None:
+        pass_controls(env)
+        d = _preview(env, DELIVER).json()
+        assert _codes(d["refusals"]) == ["attestation_missing"] and d["signable"] is False
+        row = accepted_row(env, DELIVER)
+        d = _preview(env, DELIVER, reviewed_row_hash=row.row_hash, statement="read-it").json()
+        assert d["refusals"] == [] and d["signable"] is True
+        assert d["attestation"]["reviewed_task_id"] == row.task_id
+        assert d["attestation"]["subject"] == _subject(env, row.task_id)
+        assert d["attestation"]["statement"] == "read-it"
+        assert d["would_record"]["attestation"]["reviewed_row_hash"] == row.row_hash
+        assert d["would_record"]["route_at_signoff"] == "deliver"
+        assert d["controls"]["state"] == "passed" and d["controls"]["run_id"] == CLEAN_CONTROLS_RUN
+        # and the POST the UI then sends agrees with the preview
+        assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 201
+
+    def test_preview_thin_and_unmeasured_cells(self, env: Env) -> None:
+        pass_controls(env)
+        d = _preview(env, THIN).json()
+        assert d["evidence"]["n"] == 4 and d["refusals"][0]["code"] == "thin_cell"
+        assert d["refusals"][0]["observed"] == 4 and d["refusals"][0]["threshold"] == 10
+        assert d["route"]["reason_code"] == "n_below_min"
+        assert len(d["accepted_rows"]) == 2
+        d = _preview(env, {"capability_class": "docs.update", "size": "S"}).json()
+        assert d["evidence"]["measured"] is False and d["evidence"]["n"] == 0
+        assert d["evidence"]["point"] is None and d["route"]["route"] == "not_yet_measured"
+        assert _codes(d["refusals"])[0] == "thin_cell" and d["accepted_rows"] == []
+        assert d["would_record"]["policy_version"] == ""  # nothing stamped for an unmeasured cell
+
+    def test_preview_validates_the_named_row_like_the_post(self, env: Env) -> None:
+        pass_controls(env)
+        red = accepted_row(env, DELIVER, clean=False)
+        r = _preview(env, DELIVER, reviewed_row_hash=red.row_hash)
+        assert r.status_code == 422 and "not an accepted row" in envelope(r)["message"]
+        r = _preview(env, DELIVER, reviewed_row_hash="zz")
+        assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
+        r = _preview(env, DELIVER, reviewed_row_hash=accepted_row(env, THIN).row_hash)
+        assert r.status_code == 422 and "outside the attested scope" in envelope(r)["message"]
+
+    def test_preview_errors(self, env: Env) -> None:
+        assert env.get("/signoffs/preview?repo=nope&capability_class=bug.fix").status_code == 404
+        assert env.get(f"/signoffs/preview?repo={ALPHA}").status_code == 422
+        r = env.get(f"/signoffs/preview?repo={ALPHA}&capability_class=bug.fix&size=XXL")
+        assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
+        _seed_false_q1_row(env)
+        r = _preview(env, {"capability_class": "docs.update", "size": "S"})
+        assert r.status_code == 409 and envelope(r)["code"] == "false_q1_refused"
+        assert envelope(r)["detail"]["code"] == "false_q1"
+        assert _events(env, "signoff.refused") == []  # a preview is not an attempt
+
+
+# ---------------------------------------------------------------------------
+# List, get, revoke, chain
+# ---------------------------------------------------------------------------
 
 
 class TestListAndRevoke:
     def test_list_active_and_history(self, env: Env) -> None:
+        pass_controls(env)
         assert env.get("/signoffs").json() == {"items": [], "total": 0, "limit": 50, "offset": 0}
-        sid = env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER}).json()["id"]
+        sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
         login(env.client, "viewer")
         page = env.get(f"/signoffs?repo={ALPHA}").json()
         assert page["total"] == 1 and page["items"][0]["id"] == sid
+        assert (
+            page["items"][0]["attestation"]["reviewed_row_hash"]
+            == accepted_row(env, DELIVER).row_hash
+        )
         assert env.get("/signoffs").json()["total"] == 1
         assert env.get(f"/signoffs?repo={BETA}").json()["total"] == 0
+        assert env.get(f"/signoffs/{sid}").json()["id"] == sid
+        assert env.get("/signoffs/nope").status_code == 404
+
+    def test_legacy_row_without_the_snapshot_is_served_honestly(self, env: Env) -> None:
+        """A row written before the policy (no policy / attestation keys) lists as
+        ``crb.signoff.v1`` with empty route / controls and no attestation — never a
+        fabricated snapshot — and its chain still verifies."""
+        from crb.core.evidence import utc_now_iso
+        from crb.server.routes.signoffs import signoff_hash as _hash
+
+        with env.factory() as s:
+            row = Signoff(
+                signoff_id="legacy00" * 4,
+                repo=ALPHA,
+                cell_json={
+                    **dict.fromkeys(
+                        ("process_step", "language", "builder", "model", "provider"), "*"
+                    ),
+                    "capability_class": "bug.fix",
+                    "size": "S",
+                    "evidence_n": "40",
+                    "evidence_point": "0.950000",
+                    "evidence_ci_low": "0.835000",
+                    "evidence_ci_high": "0.985000",
+                    "evidence_false_q1": "0",
+                    "evidence_apparatus": "2.0",
+                },
+                tier="human-verified",
+                verifier="old-approver",
+                note="signed before the policy",
+                revoke=False,
+                evidence_rows=40,
+                created=utc_now_iso(),
+                prev_hash=GENESIS_HASH,
+            )
+            row.row_hash = _hash(row)
+            s.add(row)
+            s.commit()
+        item = env.get(f"/signoffs?repo={ALPHA}").json()["items"][0]
+        assert item["schema"] == "crb.signoff.v1" and item["policy_version"] == ""
+        assert item["policy_thresholds"] == {} and item["attestation"] is None
+        assert item["route"] == {"route": "", "reason": "", "reason_code": ""}
+        assert item["controls"]["verdict"] == "" and item["controls"]["k"] == 0
+        assert item["evidence"]["n"] == 40 and item["evidence"]["oracle_strength"] is None
+        assert item["active"] is True  # trust once given stands until revoked / false-Q1
+        assert verify_signoff_rows(_signoffs(env)) == 1
+        # a new attestation chains after it
+        pass_controls(env)
+        assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 201
+        assert verify_signoff_rows(_signoffs(env)) == 2
 
     def test_revoke_rbac(self, env: Env) -> None:
-        sid = env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER}).json()["id"]
+        pass_controls(env)
+        sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
         assert_rbac(env, "POST", f"/signoffs/{sid}/revoke", min_role="approver")
 
     def test_revoke_appends_and_hides(self, env: Env) -> None:
-        sid = env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER}).json()["id"]
+        pass_controls(env)
+        sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
         assert (
             env.get(f"/capability-map?repo={ALPHA}").json()["cells"][1]["verification_tier"]
             == "human-verified"
@@ -254,6 +720,7 @@ class TestListAndRevoke:
         d = r.json()
         assert d["id"] == sid and d["revoked"] is True and d["active"] is False
         assert d["revoked_by"] and d["revoked_at"]
+        assert d["attestation"] is not None  # the attestation that WAS made stays on the record
         rows = _signoffs(env)
         assert [x.revoke for x in rows] == [False, True]
         assert rows[1].prev_hash == rows[0].row_hash and rows[1].note == "evidence re-examined"
@@ -271,22 +738,40 @@ class TestListAndRevoke:
         assert r.status_code == 409 and envelope(r)["code"] == "already_revoked"
         assert env.post("/signoffs/nope/revoke").status_code == 404
         assert env.post(f"/signoffs/{rows[1].signoff_id}/revoke").status_code == 404
+        assert env.get(f"/signoffs/{rows[1].signoff_id}").status_code == 404
 
     def test_re_attest_after_revoke(self, env: Env) -> None:
-        sid = env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER}).json()["id"]
+        pass_controls(env)
+        sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
         env.post(f"/signoffs/{sid}/revoke")
-        r = env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER, "note": "again"})
+        r = env.post("/signoffs", json=attested_body(env, DELIVER, note="again"))
         assert r.status_code == 201 and r.json()["active"] is True
         page = env.get(f"/signoffs?repo={ALPHA}").json()
         assert page["total"] == 1 and page["items"][0]["note"] == "again"
         assert verify_signoff_rows(_signoffs(env)) == 3
 
-    def test_chain_detects_tampering(self, env: Env) -> None:
-        env.post("/signoffs", json={"repo": ALPHA, "cell": DELIVER})
-        env.post("/signoffs", json={"repo": ALPHA, "cell": env.info.deliver_cell})
+    def test_chain_detects_tampering_including_the_attestation(self, env: Env) -> None:
+        pass_controls(env)
+        env.post("/signoffs", json=attested_body(env, DELIVER))
+        env.post("/signoffs", json=attested_body(env, env.info.deliver_cell))
         with env.factory() as s:
             s.execute(text("DROP TRIGGER signoffs_no_update"))
             s.execute(text("UPDATE signoffs SET note = 'edited' WHERE seq = 1"))
             s.commit()
         with pytest.raises(LedgerIntegrityError, match="sign-off 1"):
+            verify_signoff_rows(_signoffs(env))
+        with env.factory() as s:
+            s.execute(
+                text(
+                    "UPDATE signoffs SET note = 'reviewed the packs and one accepted diff' WHERE seq = 1"
+                )
+            )
+            s.execute(
+                text(
+                    "UPDATE signoffs SET cell_json = json_set(cell_json, '$.attestation_reviewed_row_hash', :h) WHERE seq = 2"
+                ),
+                {"h": "f" * 64},
+            )
+            s.commit()
+        with pytest.raises(LedgerIntegrityError, match="sign-off 2"):
             verify_signoff_rows(_signoffs(env))
