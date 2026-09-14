@@ -72,10 +72,14 @@ jobs:
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
-      - name: Install (dev extras)
+      # mypy checks src/crb (server + store included): without the server and postgres
+      # extras every fastapi / sqlalchemy / pydantic import is `import-not-found` (95 of
+      # them, 277 errors with the cascades — measured 2026-09-14) and the gate measures
+      # the environment, not the types.
+      - name: Install (server + postgres + dev extras)
         run: |
           uv venv -q .venv --python 3.12
-          uv pip install -q -e '.[dev]' --python .venv/bin/python
+          uv pip install -q -e '.[server,postgres,dev]' --python .venv/bin/python
       - name: mypy
         run: .venv/bin/mypy
 
@@ -114,10 +118,12 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
-      - name: Install (dev extras)
+      # The suite covers the server routes and the store (SQLite here; PostgreSQL in
+      # test-postgres): the server and postgres extras are part of what is under test.
+      - name: Install (server + postgres + dev extras)
         run: |
           uv venv -q .venv --python ${{ matrix.python }}
-          uv pip install -q -e '.[dev]' --python .venv/bin/python
+          uv pip install -q -e '.[server,postgres,dev]' --python .venv/bin/python
       - name: Configure git identity for fixture repositories
         run: |
           git config --global user.email "ci@crb.invalid"
