@@ -1078,7 +1078,6 @@ def verify_login(
         env[CLI_OAUTH_TOKEN_ENV] = token
     version = cli_version(found)
     stats = StreamStats(GitArchaeologyGuard())
-    workdir = cwd or Path(tempfile.mkdtemp(prefix="crb-verify-"))
     spawn_fn = spawn or subprocess_spawn
 
     def finish(status: str, detail: str) -> LoginCheck:
@@ -1093,15 +1092,18 @@ def verify_login(
             cost_usd=stats.reported_cost(),
         )
 
-    try:
-        handle = spawn_fn(verify_argv(found, model=model), env, workdir, timeout_s)
-        for line in handle.lines():
-            stats.feed(line, keep=False)
-            if stats.auth_failed:
-                handle.kill()
-                break
-    except OSError as exc:
-        return finish(VERIFY_ERROR, f"{type(exc).__name__}: {exc}")
+    # An empty, throwaway cwd: no repository CLAUDE.md can be auto-discovered from it.
+    with tempfile.TemporaryDirectory(prefix="crb-verify-") as scratch:
+        workdir = cwd or Path(scratch)
+        try:
+            handle = spawn_fn(verify_argv(found, model=model), env, workdir, timeout_s)
+            for line in handle.lines():
+                stats.feed(line, keep=False)
+                if stats.auth_failed:
+                    handle.kill()
+                    break
+        except OSError as exc:
+            return finish(VERIFY_ERROR, f"{type(exc).__name__}: {exc}")
     if stats.auth_failed:
         code = stats.api_retries[-1] if stats.api_retries else 401
         return finish(VERIFY_INVALID, f"authentication failed (HTTP {code})")
