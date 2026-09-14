@@ -26,9 +26,9 @@ npm run walkthrough                 # (from ui/) against a stack YOU booted — 
 | Measured repo (04–06) | the fixture | `click` (the Python target) |
 | Builder (05) | `fixture_gold` — test-only, replays the commit's own source; **registered only under `CRB_ENABLE_FIXTURE_BUILDER=1`**, never in production | `fixture_gold` unless `CRB_E2E_BUILDER=claude_code`: then a REAL replay — `claude_code`, `claude-sonnet-5`, limit 2, `builder_config {"auth":"cli"}` (the worker must be able to run `claude` on the operator's CLI login) |
 | Model / cost | none / $0 | with `claude_code`: a few Sonnet turns per task |
-| Wall clock | **~35 s** for the 25 tests (+ ~10 s boot; + ~1 min if `ui/dist` must be built) on a laptop; budget 2–3 min in CI | 10–30 min: the first probe clones + installs each repo (minutes), mining click for 3 tasks runs its suite per candidate; a real replay adds a few minutes per task |
+| Wall clock | **~1.3 min** for the 34 tests (08 seeds and replays a second repo, ~30 s) (+ ~10 s boot; + ~1 min if `ui/dist` must be built) on a laptop; budget 2–3 min in CI | 10–30 min: the first probe clones + installs each repo (minutes), mining click for 3 tasks runs its suite per candidate; a real replay adds a few minutes per task |
 
-The tier is chosen at *spec load time* from the environment; the same seven files run
+The tier is chosen at *spec load time* from the environment; the same eight files run
 in both. Nothing in this repository runs tier 2 unattended — it costs network, time and
 (optionally) money, so it stays a deliberate `CRB_E2E_PUBLIC=1 scripts/walkthrough.sh`.
 
@@ -46,9 +46,10 @@ run page's status pill (`data-testid="run-status"`), never a fixed sleep.
 | `02-repo-onboard` | *Add repo* by URL with a preset (`python-src-layout` / `go`) plus runner-options JSON creates the repo and lands on its page (config tab shows what was typed). *Probe now* → run page; the live log shows `repo.clone.start` / `repo.clone.done` (with a head sha, never a credential), `setup.auto` → `setup.done` when the runner had to prepare the environment (a public clone; not the pinned-interpreter fixture), `probe.start` / `probe.done`; the run **succeeds**. Back on the repo page the probe pill is **OK** with the runner's own summary (`N passed`), and the Repos list agrees. |
 | `03-mine` | *Start run* (kind `mine`, task limit) succeeds; the log shows `mine.task` / `mine.done`; the progress bar reports found/target; the repo's **Tasks** tab lists ≥ 1 task with its size tier, capability class and gold pill (≥ 1 gold-clean); the Runs list shows the run succeeded. |
 | `04-oracle-and-controls` | An `oracle` run (limit 1) scores mutation strength; the **Oracle** page shows per-task strength, killed / mutants, the band and the gate it licenses, plus the per-cell roll-up and the policy version. A `controls` run (limit 1) renders the **negative-controls** gate OPEN with `0 violation(s)` and all seven controls with verdicts: `gold` → clean / ok, `noop` → red / ok, `test_tamper` → **disqualified** / ok (caught), and never a `VIOLATION`. |
-| `05-replay-fake` | A `replay` run (`fixture_gold:gold`, limit 2) succeeds with ledger rows, clean 100 %, cost $0.00; the task table shows all four belts ✓ and `$0.00`; the **Evidence drawer** opens with the belts, the Apparatus section (provenance `app 2.x`, grader) and the **verified** badge; the **Ledger** gate is OPEN (chain verifies, `false_q1_total = 0`) and lists the rows; the **Capability** page shows the graded task's (class × size) cell with `n`, its Wilson interval and route **calibrate** (`n < 10`), no false-Q1 alert, and the detail card's reason `n=N < 10`; the **Sign-off** page, with that cell chosen and a note typed, keeps the policy gate **CLOSED** on `n ≥ 10` and `Wilson lower ≥ 80%` with *Sign off* disabled and no attestation recorded; **Export JSONL** downloads a file whose rows carry `row_hash`/`prev_hash`, name the builder, and verify with `crb ledger verify --path … --json` (`ok`, `chain_ok`, `false_q1 = 0`, row count matches). With `CRB_E2E_BUILDER=claude_code` the same spec asserts ≥ 1 row and builder turns / tokens / cost > 0 on the pack instead of a clean grade. |
+| `05-replay-fake` | A `replay` run (`fixture_gold:gold`, limit 2) succeeds with ledger rows, clean 100 %, cost $0.00; the task table shows all four belts ✓ and `$0.00`; the **Evidence drawer** opens with the belts, the Apparatus section (provenance `app 2.x`, grader) and the **verified** badge; the **Ledger** gate is OPEN (chain verifies, `false_q1_total = 0`) and lists the rows; the **Capability** page shows the graded task's (class × size) cell with `n`, its Wilson interval and route **calibrate** (`n < 10`), no false-Q1 alert, and the detail card's reason `n=N < 10`; the **Sign-off** page, with that cell chosen, keeps the policy gate **CLOSED** — the server's preview lists `thin_cell` (observed 2 vs threshold 10) — with *Sign off* disabled and no attestation recorded (08 tells the whole story); **Export JSONL** downloads a file whose rows carry `row_hash`/`prev_hash`, name the builder, and verify with `crb ledger verify --path … --json` (`ok`, `chain_ok`, `false_q1 = 0`, row count matches). With `CRB_E2E_BUILDER=claude_code` the same spec asserts ≥ 1 row and builder turns / tokens / cost > 0 on the pack instead of a clean grade. |
 | `06-cancel` | A `mine` run with a large limit is cancelled from the run page **while running**: "cancel requested" appears, the Cancel button goes, the run ends **cancelled** (not failed) within 30 s — the executor's cancel token kills the in-flight test command — the log carries `mine.cancelled`, and the Runs list agrees. The fixture history is padded (`CRB_E2E_PAD`, default 40) so a full mine outlasts the click. |
 | `07-settings-and-a11y` | **Settings** lists every builder credential as configured / not configured (never a value — the page text is checked for key shapes), the sandbox mode, the ledger backend, and apparatus / policy versions that match the footer; the health probes are listed. The **Claude Code login** card round-trips a shape-valid fake `claude setup-token` value: a wrong shape is refused (422, not echoed), the real shape is stored and shown only as its last four characters with who/when, the password field is cleared, Verify is enabled (clicked only in tier 2 — tier 1 is offline; a fake token can only come back `invalid`/`cli_missing`), Remove returns it to absent; the page text never contains a key shape. Then **axe (WCAG 2.1 AA)** finds **0 violations** on Repos, the repo page, Runs, a Run detail with real rows and a scrolling log, Capability, Ledger, Sign-off, Oracle and Settings — against live data. |
+| `08-signoff` | **A sign-off is a policy decision, refused at write** (`signoff-policy.v1`). The primary repo's only measured cell (n = 2) is REFUSED before the approver tries: the Sign-off page shows n / point / Wilson-low / false-Q1 / oracle strength / the controls verdict (k of N, escapes, run id, date) / route + reason, and lists every failing clause with *observed vs threshold* — `thin_cell` (2 vs 10), `controls_escapes` (1 vs 0), `route_not_deliver:n_below_min`, `attestation_missing` (non-overridable) — the gate is CLOSED and the action disabled even with a row named and affirmed. The escape is a **real finding** of 04's controls run: the fixture's literal-assert tests let the `hardcode_cheat` control grade clean. Then a cell that clears the policy is seeded **through the API** (never by editing a seed): a second calculator repo whose tests are parametrised (the cheat is then `not_constructible` → 0 escapes) is built in the temp dir, served as a bare `file://` clone, onboarded, probed, mined (18), put through a `controls` run (passed, 5 of 7, 0 escapes) and replayed with `fixture_gold` (18 clean rows → point 100 %, Wilson lower 82 % → `deliver`); the approver picks the cell, names an accepted row (subject · row hash · date), ticks **I have read this accepted diff**, writes the statement, signs — and the attestations table shows the snapshot (evidence at signing, `signoff-policy.v1 · deliver · controls passed 5/7 esc 0`, the attested row); the API serves the same record hash-chained, and the Capability map lists the cell `human-verified` with its route unchanged. |
 
 A finding this suite made on its first live pass, fixed at the source: the virtualised
 live log (`LiveLog`) was a scrollable region with no keyboard access
@@ -57,15 +58,26 @@ never had enough events to scroll.
 
 ## The sign-off refusal, precisely
 
-The server's `409 false_q1_refused` fires for a cell with **false-Q1 > 0** or with **no
-measured evidence** (`cell has no measured evidence — nothing to sign off`). A thin but
-measured cell (n = 2) is **accepted** by the server; what stops it is the UI's policy gate
-(`n ≥ 10`, `point ≥ 90%`, `Wilson lower ≥ 80%`), which disables the action before any
-request is made — and the Sign-off form only offers measured cells, so an unmeasured
-cell cannot be submitted through the UI at all. 05 therefore asserts the CLOSED gate with
-exactly those two failing criteria; the 409 rendering as a REFUSED gate is covered by the
-mocked `SignoffPage.test.tsx`. (Whether the server should also enforce the policy bar at
-write is a product question for the server owners; it is noted, not changed, here.)
+Since `signoff-policy.v1` the server enforces the bar **at write** (`POST /signoffs`) and
+publishes it **before** the approver tries (`GET /signoffs/preview`): the Sign-off page
+fetches the preview for the chosen cell (and again for the named row) and derives the
+gate's rows from its `refusals[]` — nothing on the screen is asserted by the UI. The
+codes, in evaluation order: `false_q1` (**409 false_q1_refused**, first, never
+overridable), then **409 signoff_refused** for `thin_cell`, `controls_unmeasured` /
+`controls_failed` / `controls_escapes` / `controls_thin`, `oracle_weak`,
+`route_not_deliver:<reason_code>`, and `attestation_missing` (never overridable). Each
+refusal names the number that failed and the threshold it missed. The Sign-off form only
+offers measured cells and only accepted (clean) rows of the chosen cell, so the two 422s
+(a row that is not clean / not in the cell) cannot be produced through the UI; they are
+covered by `tests/test_server_routes_signoffs.py`. 05 asserts the CLOSED gate on the thin
+cell; 08 asserts every refusal on the live stack and a real sign-off with an attestation;
+the 409 rendering as a REFUSED gate (both codes) is covered by the mocked
+`SignoffPage.test.tsx`.
+
+Tier 1 cannot sign the fixture repo, by design: its padded tests are literal asserts, so
+04's `hardcode_cheat` control **escapes** (grades clean) and every cell of that repo is
+refused with `controls_escapes` until the tests are strengthened — exactly the product
+behaviour on a cheatable oracle. That is why 08 builds a second, parametrised fixture.
 
 ## `fixture_gold` — the instrument check, not a builder
 
@@ -133,7 +145,7 @@ Roles, labels and visible text first; `data-testid` where a role is not enough:
 `run-status`, `repo-probe`, `repo-probe-detail`, `live-log`, `tile-clean`, `tile-rows`,
 `tile-cost`, `tile-false-q1`, `tile-false-q1-total`, `cell-measured` / `cell-false-q1` /
 `cell-not-measured`, `evidence-drawer`, `pack-verified` / `pack-unverified`,
-`belt-<name>`, `provenance`, `ledger-gate`, `signoff-gate`, `gate-banner`, `user-chip`,
+`belt-<name>`, `provenance`, `ledger-gate`, `signoff-gate`, `signoff-evidence` / `signoff-tile-*` / `signoff-controls` / `signoff-route` / `signoff-refusals` / `refusal-<code>` / `attest-row` / `attest-read` / `attest-statement` / `signoff-recorded` / `signoff-row-*`, `gate-banner`, `user-chip`,
 `error-state`, `settings-*`. Required fields render their label as `Label *`;
 `field(scope, 'Label')` in `support.ts` matches that exactly (and never `Source` for
 `Source prefix`).

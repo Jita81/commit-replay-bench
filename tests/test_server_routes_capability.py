@@ -25,6 +25,7 @@ from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
 from fixtures import pyrepo as pr
 from fixtures.server_seed import ALPHA, BETA, RUN_IDS, Env, envelope, login, make_env
+from fixtures.signoff_seed import attested_body, pass_controls
 
 CELL_KEYS = {
     "n",
@@ -421,20 +422,21 @@ class TestCapabilityMap:
 
     def test_signoff_overlay_lifts_tier(self, env: Env) -> None:
         login(env.client, "approver")
-        r = env.post(
-            "/signoffs",
-            json={
-                "repo": ALPHA,
-                "cell": {"capability_class": "bug.fix", "size": "S"},
-                "note": "ok",
-            },
-        )
+        # under signoff-policy.v1 the seeded cell is REFUSED while the controls gate has
+        # an escape (its route is human) — the sign-off never lifts a route, so it can
+        # only be made once a clean controls run lands and the route is deliver
+        cell = {"capability_class": "bug.fix", "size": "S"}
+        r = env.post("/signoffs", json=attested_body(env, cell, note="ok"))
+        assert r.status_code == 409 and envelope(r)["detail"]["code"] == "controls_escapes"
+        assert _cells(env)["bug.fix|S"]["route"] == "human"
+        pass_controls(env)
+        r = env.post("/signoffs", json=attested_body(env, cell, note="ok"))
         assert r.status_code == 201, r.text
         cells = _cells(env)
         assert cells["bug.fix|S"]["verification_tier"] == "human-verified"
+        assert cells["bug.fix|S"]["route"] == "deliver"
         assert cells["backend.route.add|M"]["verification_tier"] == "automated-pass"
-        # a sign-off lifts the TIER; it never lifts the route past the controls gate
-        assert cells["bug.fix|S"]["route"] == "human"
+        assert cells["backend.route.add|M"]["route"] == "calibrate"  # a tier never moves a route
         summary = env.get(f"/capability-map?repo={ALPHA}").json()["summary"]
         assert summary["signoffs_applied"] == 1
         # the attestation is repo-scoped: beta's (empty) map does not borrow it

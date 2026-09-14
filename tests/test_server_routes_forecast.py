@@ -11,6 +11,7 @@ import pytest
 from crb.server.routes.forecast import parse_mix
 from fixtures import pyrepo as pr
 from fixtures.server_seed import ALPHA, BETA, Env, envelope, login, make_env
+from fixtures.signoff_seed import attested_body, pass_controls
 
 
 @pytest.fixture(autouse=True)
@@ -111,18 +112,14 @@ class TestReadiness:
         assert "under 5 trials" in gaps and "backend.route.add/M (n=4)" in gaps
         assert "not earned-trusted" in gaps and "bug.fix/S (automated-pass)" in gaps
         assert d["buildable_units"] == 4 and d["buildable_frac"] == 0.8  # ≥ 80%: no gap
-        # sign off the deliver cell → the earned-tier gap for it closes
+        # sign off the deliver cell → the earned-tier gap for it closes. Under
+        # signoff-policy.v1 that needs a clean controls gate (the seed's has an escape)
+        # and an attestation naming an accepted row of the cell.
         login(env.client, "approver")
+        pass_controls(env)
+        cell = {"capability_class": "bug.fix", "size": "S"}
         assert (
-            env.post(
-                "/signoffs",
-                json={
-                    "repo": ALPHA,
-                    "cell": {"capability_class": "bug.fix", "size": "S"},
-                    "note": "reviewed",
-                },
-            ).status_code
-            == 201
+            env.post("/signoffs", json=attested_body(env, cell, note="reviewed")).status_code == 201
         )
         d2 = env.get(f"/forecast/readiness?repo={ALPHA}&mix=bug.fix:S:4").json()
         assert d2["ok"] is True and d2["gaps"] == [] and d2["earned_units"] == 4
