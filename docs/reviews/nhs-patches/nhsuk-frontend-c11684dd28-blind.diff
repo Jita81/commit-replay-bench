@@ -1,0 +1,182 @@
+diff --git a/packages/nhsuk-frontend/src/nhsuk/component.jsdom.test.mjs b/packages/nhsuk-frontend/src/nhsuk/component.jsdom.test.mjs
+index 75aeec05f..6c131eacb 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/component.jsdom.test.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/component.jsdom.test.mjs
+@@ -30,15 +30,48 @@ describe('Component', () => {
+     })
+ 
+     describe('when overriden', () => {
+-      it('Allows child classes to define their own condition for support', () => {
++      let /** @type {HTMLElement} */ $root1
++      let /** @type {HTMLElement} */ $root2
++
++      beforeEach(() => {
++        $root1 = $root
++        $root2 = document.createElement('div')
++
++        document.body.appendChild($root2)
++      })
++
++      it('Allows child classes to define support checks', () => {
+         class ServiceComponent extends MockComponent {
+           static checkSupport() {
+-            throw new Error('Custom error')
++            throw new Error('Error thrown from support check')
++          }
++        }
++
++        expect(() => new ServiceComponent($root)).toThrow(
++          'Error thrown from support check'
++        )
++      })
++
++      it('Allows child classes to define conditional $root support checks', () => {
++        class ServiceComponent extends MockComponent {
++          /**
++           * @param {HTMLElement} [$root]
++           */
++          static checkSupport($root) {
++            if ($root?.dataset.throw === 'true') {
++              throw new Error('Error thrown from $root support check')
++            }
+           }
+         }
+ 
+-        // Use the message rather than the class as `SupportError` extends `Error`
+-        expect(() => new ServiceComponent($root)).toThrow('Custom error')
++        $root1.dataset.throw = 'false'
++        $root2.dataset.throw = 'true'
++
++        expect(() => new ServiceComponent($root1)).not.toThrow()
++
++        expect(() => new ServiceComponent($root2)).toThrow(
++          'Error thrown from $root support check'
++        )
+       })
+     })
+   })
+diff --git a/packages/nhsuk-frontend/src/nhsuk/component.mjs b/packages/nhsuk-frontend/src/nhsuk/component.mjs
+index 13055d983..ddbd7986f 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/component.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/component.mjs
+@@ -47,7 +47,7 @@ export class Component {
+ 
+     this.$root = /** @type {RootElementType} */ ($root)
+ 
+-    childConstructor.checkSupport()
++    childConstructor.checkSupport(this.$root)
+     this.setInitialised()
+   }
+ 
+@@ -83,11 +83,14 @@ export class Component {
+   /**
+    * Validate whether component is supported
+    *
++   * @param {Element} $root - HTML element to use for component
+    * @throws {SupportError} when component is not supported
+    */
+-  static checkSupport() {
+-    if (!isSupported()) {
+-      throw new SupportError()
++  static checkSupport($root) {
++    const $body = $root.ownerDocument.body
++
++    if (!isSupported($body)) {
++      throw new SupportError($body)
+     }
+   }
+ 
+diff --git a/packages/nhsuk-frontend/src/nhsuk/components/code/code.mjs b/packages/nhsuk-frontend/src/nhsuk/components/code/code.mjs
+index e26d21e15..4fb98c533 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/components/code/code.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/components/code/code.mjs
+@@ -208,9 +208,11 @@ export class Code extends ConfigurableComponent {
+ 
+   /**
+    * Validate whether components are supported
++   *
++   * @param {Element} $root - HTML element to use for component
+    */
+-  static checkSupport() {
+-    ConfigurableComponent.checkSupport()
++  static checkSupport($root) {
++    ConfigurableComponent.checkSupport($root)
+ 
+     if (!('clipboard' in navigator)) {
+       throw new SupportError(
+diff --git a/packages/nhsuk-frontend/src/nhsuk/configurable-component.jsdom.test.mjs b/packages/nhsuk-frontend/src/nhsuk/configurable-component.jsdom.test.mjs
+index 06223f3dd..cb6a1f8bf 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/configurable-component.jsdom.test.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/configurable-component.jsdom.test.mjs
+@@ -4,6 +4,7 @@ import {
+   MockConfigurableComponentNoSchema
+ } from '#lib/fixtures/configuration/mock-component.mjs'
+ 
++import { SupportError } from './errors/index.mjs'
+ import { ConfigError } from './errors/index.mjs'
+ 
+ describe('ConfigurableComponent', () => {
+@@ -76,4 +77,63 @@ describe('ConfigurableComponent', () => {
+       expect(component.config.aFunction('albatross')).toBe('albatross')
+     })
+   })
++
++  describe('checkSupport()', () => {
++    describe('default implementation', () => {
++      it('Makes initialisation throw if NHS.UK frontend is not supported', () => {
++        document.body.classList.remove('nhsuk-frontend-supported')
++        expect(() => new MockConfigurableComponent($root)).toThrow(SupportError)
++      })
++
++      it('Allows initialisation if NHS.UK frontend is supported', () => {
++        expect(() => new MockConfigurableComponent($root)).not.toThrow()
++      })
++    })
++
++    describe('when overriden', () => {
++      let /** @type {HTMLElement} */ $root1
++      let /** @type {HTMLElement} */ $root2
++
++      beforeEach(() => {
++        $root1 = $root
++        $root2 = document.createElement('div')
++
++        document.body.appendChild($root2)
++      })
++
++      it('Allows child classes to define support checks', () => {
++        class ServiceComponent extends MockConfigurableComponent {
++          static checkSupport() {
++            throw new Error('Error thrown from support check')
++          }
++        }
++
++        expect(() => new ServiceComponent($root)).toThrow(
++          'Error thrown from support check'
++        )
++      })
++
++      it('Allows child classes to define conditional $root support checks', () => {
++        class ServiceComponent extends MockConfigurableComponent {
++          /**
++           * @param {HTMLElement} [$root]
++           */
++          static checkSupport($root) {
++            if ($root?.dataset.throw === 'true') {
++              throw new Error('Error thrown from $root support check')
++            }
++          }
++        }
++
++        $root1.dataset.throw = 'false'
++        $root2.dataset.throw = 'true'
++
++        expect(() => new ServiceComponent($root1)).not.toThrow()
++
++        expect(() => new ServiceComponent($root2)).toThrow(
++          'Error thrown from $root support check'
++        )
++      })
++    })
++  })
+ })

@@ -1,0 +1,368 @@
+diff --git a/packages/nhsuk-frontend/src/nhsuk/components/components.unit.test.mjs b/packages/nhsuk-frontend/src/nhsuk/components/components.unit.test.mjs
+index 3e8b78b7d..aa154924f 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/components/components.unit.test.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/components/components.unit.test.mjs
+@@ -47,6 +47,7 @@ describe('Components', () => {
+         @forward "components/password-input/password-input";
+         @forward "components/checkboxes/checkboxes";
+         @forward "components/radios/radios";
++        @forward "components/scroll/scroll";
+         @forward "components/search-input/search-input";
+         @forward "components/select/select";
+         @forward "components/skip-link/skip-link";
+diff --git a/packages/nhsuk-frontend/src/nhsuk/components/index.mjs b/packages/nhsuk-frontend/src/nhsuk/components/index.mjs
+index b54584fd3..abfe39a9a 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/components/index.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/components/index.mjs
+@@ -8,6 +8,7 @@ export * from './header/header.mjs'
+ export * from './notification-banner/notification-banner.mjs'
+ export * from './password-input/password-input.mjs'
+ export * from './radios/radios.mjs'
++export * from './scroll/scroll.mjs'
+ export * from './skip-link/skip-link.mjs'
+ export * from './tables/table.mjs'
+ export * from './tabs/tabs.mjs'
+diff --git a/packages/nhsuk-frontend/src/nhsuk/components/scroll/scroll.jsdom.test.mjs b/packages/nhsuk-frontend/src/nhsuk/components/scroll/scroll.jsdom.test.mjs
+new file mode 100644
+index 000000000..d196859f1
+--- /dev/null
++++ b/packages/nhsuk-frontend/src/nhsuk/components/scroll/scroll.jsdom.test.mjs
+@@ -0,0 +1,101 @@
++import { components } from '#lib'
++
++import { examples } from './fixtures.mjs'
++import { Scroll, initScroll } from './scroll.mjs'
++
++describe('Scroll', () => {
++  /** @type {HTMLElement} */
++  let $root
++
++  /** @type {HTMLElement} */
++  let $content
++
++  beforeEach(() => {
++    document.body.innerHTML = components.render('scroll', examples['with HTML'])
++
++    $root = /** @type {HTMLElement} */ (
++      document.querySelector(`[data-module="${Scroll.moduleName}"]`)
++    )
++
++    $content = /** @type {HTMLElement} */ (
++      $root.querySelector(`.${Scroll.defaults.contentClass}`)
++    )
++
++    jest.spyOn($content, 'addEventListener')
++  })
++
++  describe('Initialisation via init function', () => {
++    it('should add event listeners', () => {
++      initScroll()
++
++      expect($content.addEventListener).toHaveBeenCalledWith(
++        'scroll',
++        expect.any(Function)
++      )
++    })
++
++    it('should not throw with missing scroll', () => {
++      $root.remove()
++      expect(() => initScroll()).not.toThrow()
++    })
++
++    it('should not throw with empty body', () => {
++      document.body.innerHTML = ''
++      expect(() => initScroll()).not.toThrow()
++    })
++
++    it('should not throw with empty scope', () => {
++      const scope = document.createElement('div')
++      expect(() => initScroll({ scope })).not.toThrow()
++    })
++  })
++
++  describe('Initialisation via class', () => {
++    it('should not throw with $root element', () => {
++      expect(() => new Scroll($root)).not.toThrow()
++    })
++
++    it('should throw with unsupported browser', () => {
++      document.body.classList.remove('nhsuk-frontend-supported')
++
++      expect(() => new Scroll($root)).toThrow(
++        'NHS.UK frontend initialised without `<body class="nhsuk-frontend-supported">` from template `<script>` snippet'
++      )
++    })
++
++    it('should throw with missing $root element', () => {
++      // @ts-expect-error Parameter '$root' not provided
++      expect(() => new Scroll()).toThrow(
++        `${Scroll.moduleName}: Root element (\`$root\`) not found`
++      )
++    })
++
++    it('should throw with wrong $root element type', () => {
++      const $svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
++
++      expect(() => new Scroll($svg)).toThrow(
++        `${Scroll.moduleName}: Root element (\`$root\`) is not of type HTMLElement`
++      )
++    })
++
++    it('should throw when initialised twice', () => {
++      expect(() => {
++        new Scroll($root)
++        new Scroll($root)
++      }).toThrow(
++        `${Scroll.moduleName}: Root element (\`$root\`) already initialised`
++      )
++    })
++  })
++
++  describe('Accessibility', () => {
++    beforeEach(() => {
++      initScroll()
++    })
++
++    it('should add accessible name and role', () => {
++      expect($content).toHaveAccessibleName('Example heading')
++      expect($content).toHaveRole('region')
++    })
++  })
++})
+diff --git a/packages/nhsuk-frontend/src/nhsuk/index.jsdom.test.mjs b/packages/nhsuk-frontend/src/nhsuk/index.jsdom.test.mjs
+index 313f30662..84512b8d9 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/index.jsdom.test.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/index.jsdom.test.mjs
+@@ -17,6 +17,7 @@ import {
+   NotificationBanner,
+   PasswordInput,
+   Radios,
++  Scroll,
+   SkipLink,
+   Table,
+   Tabs,
+@@ -35,6 +36,7 @@ jest.mock('./components/header/header.mjs')
+ jest.mock('./components/notification-banner/notification-banner.mjs')
+ jest.mock('./components/password-input/password-input.mjs')
+ jest.mock('./components/radios/radios.mjs')
++jest.mock('./components/scroll/scroll.mjs')
+ jest.mock('./components/skip-link/skip-link.mjs')
+ jest.mock('./components/tables/table.mjs')
+ jest.mock('./components/tabs/tabs.mjs')
+@@ -49,6 +51,7 @@ describe('NHS.UK frontend', () => {
+     'FileUpload',
+     'Header',
+     'Radios',
++    'Scroll',
+     'SkipLink',
+     'Table',
+     'Tabs',
+@@ -87,6 +90,7 @@ describe('NHS.UK frontend', () => {
+       expect(NHSUKFrontend).toHaveProperty('NotificationBanner')
+       expect(NHSUKFrontend).toHaveProperty('PasswordInput')
+       expect(NHSUKFrontend).toHaveProperty('Radios')
++      expect(NHSUKFrontend).toHaveProperty('Scroll')
+       expect(NHSUKFrontend).toHaveProperty('SkipLink')
+       expect(NHSUKFrontend).toHaveProperty('Table')
+       expect(NHSUKFrontend).toHaveProperty('Tabs')
+@@ -107,6 +111,7 @@ describe('NHS.UK frontend', () => {
+       expect(NHSUKFrontend).toHaveProperty('initNotificationBanners')
+       expect(NHSUKFrontend).toHaveProperty('initPasswordInputs')
+       expect(NHSUKFrontend).toHaveProperty('initRadios')
++      expect(NHSUKFrontend).toHaveProperty('initScroll')
+       expect(NHSUKFrontend).toHaveProperty('initSkipLinks')
+       expect(NHSUKFrontend).toHaveProperty('initTables')
+       expect(NHSUKFrontend).toHaveProperty('initTabs')
+@@ -127,6 +132,7 @@ describe('NHS.UK frontend', () => {
+         <div data-module="${NotificationBanner.moduleName}"></div>
+         <div data-module="${PasswordInput.moduleName}"></div>
+         <div data-module="${Radios.moduleName}"></div>
++        <div data-module="${Scroll.moduleName}"></div>
+         <div data-module="${SkipLink.moduleName}"></div>
+         <div data-module="${Table.moduleName}"></div>
+         <div data-module="${Tabs.moduleName}"></div>
+@@ -242,6 +248,7 @@ describe('NHS.UK frontend', () => {
+       expect(NotificationBanner).not.toHaveBeenCalled()
+       expect(PasswordInput).not.toHaveBeenCalled()
+       expect(Radios).not.toHaveBeenCalled()
++      expect(Scroll).not.toHaveBeenCalled()
+       expect(SkipLink).not.toHaveBeenCalled()
+       expect(Table).not.toHaveBeenCalled()
+       expect(Tabs).not.toHaveBeenCalled()
+@@ -268,6 +275,7 @@ describe('NHS.UK frontend', () => {
+       expect(NotificationBanner).not.toHaveBeenCalled()
+       expect(PasswordInput).not.toHaveBeenCalled()
+       expect(Radios).not.toHaveBeenCalled()
++      expect(Scroll).not.toHaveBeenCalled()
+       expect(SkipLink).not.toHaveBeenCalled()
+       expect(Table).not.toHaveBeenCalled()
+       expect(Tabs).not.toHaveBeenCalled()
+@@ -295,6 +303,7 @@ describe('NHS.UK frontend', () => {
+       expect(NotificationBanner).not.toHaveBeenCalled()
+       expect(PasswordInput).not.toHaveBeenCalled()
+       expect(Radios).not.toHaveBeenCalled()
++      expect(Scroll).not.toHaveBeenCalled()
+       expect(SkipLink).not.toHaveBeenCalled()
+       expect(Table).not.toHaveBeenCalled()
+       expect(Tabs).not.toHaveBeenCalled()
+diff --git a/packages/nhsuk-frontend/src/nhsuk/index.mjs b/packages/nhsuk-frontend/src/nhsuk/index.mjs
+index c14b3ae00..565aa27a8 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/index.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/index.mjs
+@@ -11,6 +11,7 @@ import {
+   NotificationBanner,
+   PasswordInput,
+   Radios,
++  Scroll,
+   SkipLink,
+   Table,
+   Tabs
+@@ -80,6 +81,7 @@ export function initAll(scopeOrConfig = {}) {
+     [NotificationBanner, config.notificationBanner],
+     [PasswordInput, config.passwordInput],
+     [Radios, config.radios],
++    [Scroll, config.scroll],
+     [SkipLink, config.skipLink],
+     [Table, config.table],
+     [Tabs, config.tabs]
+@@ -217,6 +219,7 @@ export * from './errors/index.mjs'
+  * @property {ComponentConfig<typeof NotificationBanner>} [notificationBanner] - Notification Banner config
+  * @property {ComponentConfig<typeof PasswordInput>} [passwordInput] - Password Input config
+  * @property {ComponentConfig<typeof Radios>} [radios] - Radios config
++ * @property {ComponentConfig<typeof Scroll>} [scroll] - Scroll config
+  * @property {ComponentConfig<typeof SkipLink>} [skipLink] - Skip Link config
+  * @property {ComponentConfig<typeof Table>} [table] - Table config
+  * @property {ComponentConfig<typeof Tabs>} [tabs] - Tabs config
+diff --git a/packages/nhsuk-frontend/src/nhsuk/components/scroll/scroll.mjs b/packages/nhsuk-frontend/src/nhsuk/components/scroll/scroll.mjs
+new file mode 100644
+index 000000000..a3b278ce7
+--- /dev/null
++++ b/packages/nhsuk-frontend/src/nhsuk/components/scroll/scroll.mjs
+@@ -0,0 +1,127 @@
++import { normaliseOptions } from '../../common/configuration/index.mjs'
++import { ConfigurableComponent } from '../../configurable-component.mjs'
++import { ElementError } from '../../errors/index.mjs'
++
++/**
++ * Scroll component
++ *
++ * Adds scrollable shadow classes for browsers that do not support the
++ * `scroll-state()` CSS container query, used to hide the shadow when there
++ * is no more content to scroll towards in that direction.
++ *
++ * @augments {ConfigurableComponent<ScrollConfig>}
++ */
++export class Scroll extends ConfigurableComponent {
++  /** @type {HTMLElement} */
++  $content
++
++  /**
++   * @param {Element | null} $root - HTML element to use for component
++   * @param {Partial<ScrollConfig>} [config] - Scroll config
++   */
++  constructor($root, config) {
++    super($root, config)
++
++    const { contentClass } = this.config
++
++    const $content = this.$root.querySelector(`.${contentClass}`)
++    if (!($content instanceof HTMLElement)) {
++      throw new ElementError({
++        component: Scroll,
++        element: $content,
++        identifier: `Scroll content (\`.${contentClass}\`)`
++      })
++    }
++
++    this.$content = $content
++
++    this.handleScroll = this.updateShadows.bind(this)
++    this.$content.addEventListener('scroll', this.handleScroll)
++
++    // ResizeObserver isn't supported by Safari < 13.1 so we need to fall back
++    // to window resize, checking whether the content is now scrollable
++    if ('ResizeObserver' in window) {
++      this.resizeObserver = new window.ResizeObserver(this.handleScroll)
++      this.resizeObserver.observe(this.$content)
++    } else {
++      window.addEventListener('resize', this.handleScroll)
++    }
++
++    this.updateShadows()
++  }
++
++  /**
++   * Update shadow classes to reflect whether content can be scrolled
++   * towards the left and/or right
++   */
++  updateShadows() {
++    const { $content } = this
++    const { scrollLeft, scrollWidth, clientWidth } = $content
++
++    $content.classList.toggle(
++      'nhsuk-scroll__content--scrollable-left',
++      scrollLeft > 0
++    )
++
++    $content.classList.toggle(
++      'nhsuk-scroll__content--scrollable-right',
++      Math.ceil(scrollLeft + clientWidth) < scrollWidth
++    )
++  }
++
++  static moduleName = 'nhsuk-scroll'
++
++  /**
++   * Scroll default config
++   *
++   * @see {@link ScrollConfig}
++   * @constant
++   * @type {ScrollConfig}
++   */
++  static defaults = Object.freeze({
++    contentClass: 'nhsuk-scroll__content'
++  })
++
++  /**
++   * Scroll config schema
++   *
++   * @constant
++   * @satisfies {Schema<ScrollConfig>}
++   */
++  static schema = Object.freeze({
++    properties: {
++      contentClass: { type: 'string' }
++    }
++  })
++}
++
++/**
++ * Initialise scroll component
++ *
++ * @deprecated Use {@link createAll | `createAll(Scroll, options)`} instead.
++ * @param {InitOptions & Partial<ScrollConfig>} [options]
++ */
++export function initScroll(options) {
++  const { scope: $scope } = normaliseOptions(options)
++
++  const $scrolls = $scope?.querySelectorAll(
++    `[data-module="${Scroll.moduleName}"]`
++  )
++
++  $scrolls?.forEach(($root) => {
++    new Scroll($root, options)
++  })
++}
++
++/**
++ * Scroll config
++ *
++ * @see {@link Scroll.defaults}
++ * @typedef {object} ScrollConfig
++ * @property {string} contentClass - Scroll content class for scrollable element
++ */
++
++/**
++ * @import { Schema } from '../../common/configuration/index.mjs'
++ * @import { createAll, InitOptions } from '../../index.mjs'
++ */

@@ -1,0 +1,30 @@
+diff --git a/mesh_client/__init__.py b/mesh_client/__init__.py
+index 0540a10..cce1a9e 100644
+--- a/mesh_client/__init__.py
++++ b/mesh_client/__init__.py
+@@ -504,6 +504,8 @@ class MeshClient:
+         self, url: Optional[str] = None, params: Optional[Dict[str, Any]] = None
+     ) -> ListMessageResponse_v2:
+         url = url or f"{self.mailbox_url}/inbox"
++        if url.startswith("/"):
++            url = f"{self._url}{url}"
+         response = self._session.get(url, timeout=self._timeout, params=params)
+         response.raise_for_status()
+ 
+diff --git a/tests/mesh_sandbox_tests.py b/tests/mesh_sandbox_tests.py
+index 5bb9af6..39fc70d 100644
+--- a/tests/mesh_sandbox_tests.py
++++ b/tests/mesh_sandbox_tests.py
+@@ -96,6 +96,12 @@ def test_send_receive(alice: MeshClient, bob: MeshClient):
+     assert bob.list_messages() == []
+ 
+ 
++def test_iteration_pages(alice: MeshClient, bob: MeshClient):
++    sent_message_ids = {alice.send_message(bob_mailbox, b"Hello Bob 1", workflow_id=uuid4().hex) for _ in range(25)}
++    captured_message_ids = set(bob.iterate_message_ids(batch_size=10))
++    assert sent_message_ids == captured_message_ids
++
++
+ def test_send_receive_combine_streams_part1_multiple_of_chunk_size(alice: MeshClient, bob: MeshClient):
+     part1_length = 10
+     part2_length = 23
