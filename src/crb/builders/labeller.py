@@ -15,7 +15,7 @@ Two transports, no new SDK code:
   :class:`~crb.builders.openai_client.OpenAIChat` (Cerebras, Azure OpenAI …); the
   same client, credentials-from-environment and retry policy as ``openai_agent``.
 * :class:`ClaudeCodeLabeller` — ``claude -p`` with **all tools disabled**
-  (``--tools ""``), one turn, structured output, run from an empty temporary
+  (``--tools ""``), up to three turns, structured output, run from an empty temporary
   directory (never the repository). Auth mirrors :mod:`crb.builders.claude_code`
   exactly — ``api_key`` (``--bare``, ``ANTHROPIC_API_KEY`` required) or ``cli``
   (the operator's own login; developer / evaluation only) — by reusing its
@@ -334,7 +334,7 @@ class ClaudeCodeLabeller:
             "builder": self.builder,
             "model": self.model,
             "provider": self.provider,
-            "process": "claude -p, tools disabled, 1 turn, json-schema output, no diff body",
+            "process": "claude -p, tools disabled, 3 turns, json-schema output, no diff body",
             "auth": self.auth,
             "bare": self.bare,
             "effort": self.effort or "default",
@@ -352,7 +352,8 @@ class ClaudeCodeLabeller:
             "--model",
             self.model,
             "--max-turns",
-            "1",
+            "3",  # structured output is delivered through an internal tool turn: at 1 the
+            # CLI answers `error_max_turns` before the JSON lands (live label runs, 2026-09-14)
             "--tools",
             "",
             "--permission-mode",

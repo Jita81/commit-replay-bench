@@ -266,7 +266,7 @@ def test_claude_labeller_argv_and_env_api_key_mode(api_key: None) -> None:
     for marker in _DIFF_MARKERS:
         assert marker not in prompt and marker not in " ".join(argv)
     a = " ".join(argv)
-    assert "--output-format stream-json" in a and "--max-turns 1" in a
+    assert "--output-format stream-json" in a and "--max-turns 3" in a
     assert argv[argv.index("--tools") + 1] == ""  # every tool disabled
     assert (
         "--json-schema" in argv
