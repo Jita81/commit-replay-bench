@@ -6,7 +6,7 @@ from pathlib import Path
 
 from crb.core.git import GitRepo
 from crb.core.spec import Language, RepoConfig
-from crb.core.workspace import DiffStats, Workspace, sha256_bytes
+from crb.core.workspace import HARNESS_SYMLINK, DiffStats, Workspace, sha256_bytes
 from fixtures import pyrepo as pr
 
 
@@ -187,3 +187,121 @@ def test_javascript_workspace_without_node_modules_is_fine(
     js_cfg = RepoConfig(name="jsfixture", language=Language.JAVASCRIPT, test_prefix="tests/")
     with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws", config=js_cfg) as ws:
         assert not (ws.root / "node_modules").exists()
+
+
+# ---------------------------------------------------------------------------
+# touched_files: every kind of change, ignore rules, harness-written files
+# ---------------------------------------------------------------------------
+
+
+def test_touched_files_reports_a_rename_as_delete_plus_add(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """git's rename detection would collapse `git mv pytest.ini x` into the new name
+    only; the deleted path is a change too (a deleted config is an oracle edit)."""
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        ws.repo.run("mv", "pytest.ini", "tests/pytest.ini", cwd=ws.root, check=True)
+        assert ws.touched_files() == ["pytest.ini", "tests/pytest.ini"]
+
+
+def test_touched_files_reports_deleted_and_staged_files(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        (ws.root / "pytest.ini").unlink()
+        (ws.root / "staged.py").write_text("S = 1\n")
+        ws.repo.run("add", "staged.py", cwd=ws.root, check=True)
+        (ws.root / "deep" / "er").mkdir(parents=True)
+        (ws.root / "deep" / "er" / "new.py").write_text("N = 1\n")
+        assert ws.touched_files() == ["deep/er/new.py", "pytest.ini", "staged.py"]
+
+
+def _repo_with_gitignore(pyrepo: pr.PyRepo) -> str:
+    """Commit a ``.gitignore`` (``build/``), then one more commit, so a trial of the
+    latter has the ignore file AT ITS PARENT."""
+    (pyrepo.path / ".gitignore").write_text("build/\n", encoding="utf-8")
+    pr.git(pyrepo.path, "add", "-A")
+    pr.git(pyrepo.path, "commit", "-q", "-m", "chore: ignore build/")
+    return pyrepo.add_pyproject_commit()
+
+
+def test_touched_files_honours_pre_existing_ignore_rules(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    sha = _repo_with_gitignore(pyrepo)
+    with Workspace.create(pyrepo.repo, sha, tmp_path / "ws") as ws:
+        (ws.root / "build").mkdir()
+        (ws.root / "build" / "out.txt").write_text("x")
+        assert ws.touched_files() == []
+        # the builder appends a rule: the OLD rule is still honoured, the new one is not
+        (ws.root / ".gitignore").write_text("build/\nconftest.py\n", encoding="utf-8")
+        (ws.root / "conftest.py").write_text("# hidden\n")
+        assert ws.touched_files() == [".gitignore", "conftest.py"]
+
+
+def test_touched_files_pierces_builder_authored_ignore_rules(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A new .gitignore (root or nested) cannot hide files; an ignored directory is
+    expanded to the files beneath it."""
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        pr.write_files(
+            ws,
+            [
+                (".gitignore", "hidden/\n"),
+                ("hidden/a.py", "A = 1\n"),
+                ("hidden/sub/b.py", "B = 1\n"),
+                ("tests/.gitignore", "pytest.ini\n"),
+                ("tests/pytest.ini", "[pytest]\n"),
+            ],
+        )
+        assert ws.repo.run("ls-files", "--others", "--exclude-standard", cwd=ws.root).lines == [
+            ".gitignore",
+            "tests/.gitignore",
+        ]
+        assert ws.touched_files() == [
+            ".gitignore",
+            "hidden/a.py",
+            "hidden/sub/b.py",
+            "tests/.gitignore",
+            "tests/pytest.ini",
+        ]
+
+
+def test_touched_files_excludes_harness_written_files_until_edited(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    shared = pyrepo.path / "shared-cache"
+    shared.mkdir()
+    cfg = pr.default_config(
+        runner_opts={
+            "post_create": [
+                {"write_if_missing": {"path": "conftest.py", "content": "# injected\n"}},
+                {"symlink": {"path": "cache", "target": "shared-cache"}},
+            ]
+        }
+    )
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws", config=cfg) as ws:
+        assert set(ws.harness_files) == {"conftest.py", "cache"}
+        assert ws.harness_files["cache"] == HARNESS_SYMLINK
+        assert ws.harness_unchanged("conftest.py") and ws.harness_unchanged("cache")
+        assert not ws.harness_unchanged("pytest.ini")
+        assert ws.touched_files() == []
+        (ws.root / "conftest.py").write_text("# injected\nimport calc\n")
+        assert not ws.harness_unchanged("conftest.py")
+        assert ws.touched_files() == ["conftest.py"]
+        (ws.root / "cache").unlink()
+        (ws.root / "cache").mkdir()
+        assert not ws.harness_unchanged("cache")  # replaced by a real directory
+
+
+def test_javascript_node_modules_link_is_harness_written(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    (pyrepo.path / "node_modules" / ".bin").mkdir(parents=True)
+    js_cfg = RepoConfig(
+        name="jsfixture", language=Language.JAVASCRIPT, runner="mocha", test_prefix="tests/"
+    )
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws", config=js_cfg) as ws:
+        assert ws.harness_files == {"node_modules": HARNESS_SYMLINK}
+        assert "node_modules" not in ws.touched_files()
+
+
+def test_parent_text(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        assert ws.parent_text(pr.SRC) == pr.SRC_INITIAL
+        assert ws.parent_text(pr.TEST_SUBTRACT) is None  # only exists at the commit

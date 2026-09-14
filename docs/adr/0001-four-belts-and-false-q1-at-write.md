@@ -83,3 +83,92 @@ checks, not judgement calls.
   failure means for delivery.
 - **Let a model judge borderline cases.** Rejected on principle: the product is not an AI
   opinion of AI work.
+
+---
+
+## Amendment — Belt 1 covers test infrastructure (2026-09-13)
+
+**Status:** Accepted (wave A, critical-friend review action #1)
+**Apparatus impact:** the meaning of `tests_unmodified` changes → `APPARATUS_VERSION`
+must be bumped when this lands (the wave lead bumps once for the whole wave).
+
+### Context
+
+Belt 1 protected the *test files*: byte-identical to the commit's own version (sighted),
+plus, in blind mode, no `config.is_test` file touched before the overlay. But the oracle
+is the test **run**, not the test **files**. For pytest that run executes every
+`conftest.py` between the rootdir and the target, reads the first `pytest.ini` /
+`pyproject.toml [tool.pytest]` / `tox.ini [pytest]` / `setup.cfg [tool:pytest]` it finds,
+and imports `sitecustomize` from anything on `PYTHONPATH` (the worktree root is). For
+jest the run loads `jest.config.*`, `package.json#jest` and the babel transform; for
+`go test`, `go.mod replace` and every sibling `_test.go` (a `TestMain` that calls
+`os.Exit(0)` is a green run); for Maven, `./mvnw`, `.mvn/maven.config` and everything
+under `src/test`; for cargo, `build.rs` and `Cargo.toml [[test]]`.
+
+`[measured]` The `env_poison` negative control — the source tree left as at the parent plus a
+new root `conftest.py` that `exec`s the gold source into the module under test at
+collection time — **escaped 3 of 7 times on click** (2026-09-13 review, §4.3). The
+product's own docstring called that "a measured oracle escape — a finding, never a
+violation". The reviewer disagreed, and was right: the control had modified the
+instrument, not exposed a weak test. A motivated or merely confused builder could earn a
+clean grade the same way, and the census `bug.fix` cells on Python repos would carry it.
+
+### Decision
+
+1. **Belt 1 = test files byte-identical AND no test-infrastructure file touched.** The
+   check runs in both modes on the pre-run worktree — alongside belt 0 in blind mode
+   (before the overlay), alongside the byte-identical check in sighted mode. Any touched
+   file (tracked or untracked; added, modified, deleted, or either half of a rename)
+   that `crb.core.test_infra.is_test_infra(path, language, runner=)` recognises fails the
+   belt: `tests_unmodified=False`, `disqualified=True`,
+   `dq_reason="test infrastructure modified: [...]"`, `tamper_files=[...]`, and a
+   `grade.tamper` event with `kind="test_infra"`. The task's own test files are excluded
+   from the check (the harness overlays them; belt 1a already holds them byte-for-byte).
+2. **The pattern table is `crb.core.test_infra.INFRA_RULES`** — one row per pattern, per
+   language, optionally per runner, each carrying the *reason* it is oracle-relevant.
+   Matching is glob-over-path, case-insensitive, fail-closed. `tests/test_test_infra.py`
+   holds a positive and a negative case for every row.
+3. **Section-aware files are tamper only when their oracle-relevant sections change.**
+   `pyproject.toml` (`tool.pytest`, `project.entry-points.pytest11`), `setup.cfg`
+   (`[tool:pytest]`), `tox.ini` (`[pytest]`), `package.json` (`jest`, `mocha`, `babel`,
+   `scripts.test|pretest|posttest`), `go.mod` (`replace`, `exclude`, `godebug`,
+   `toolchain`), `pom.xml` (`<build>`, `<profiles>`, `<properties>`, `<parent>`) and
+   `Cargo.toml` (`dev-dependencies`, `[[test]]`, `patch`, `replace`, `profile`,
+   `package.build`, `lib.*`). A version bump or a new runtime dependency is an honest
+   edit and grades on; `infra_sections_changed` decides. Unparsable, oversized or
+   DOCTYPE-bearing content on either side is *changed* (fail closed).
+4. **`Workspace.touched_files()` is "what the builder changed"**, and now guarantees:
+   renames reported as deletion + addition (`--no-renames`); untracked files at any depth;
+   git-ignored paths excluded *unless* the ignore rule is the builder's own (a rule added
+   to a `.gitignore` since the parent, or a `.gitignore` the builder created, is pierced
+   via `git check-ignore -v`); files the harness itself wrote at create time
+   (`post_create` hooks, the `node_modules` link) excluded while byte-identical to what
+   was written.
+5. **The false-Q1 invariant is untouched.** A disqualified row was never clean; the belt
+   is evaluated before any test runs, so a poisoned run is never executed at all.
+
+### Consequences
+
+- `env_poison` now grades `disqualified` on every constructible task; its verdict is
+  `ok` (caught), never `ESCAPE`. `[measured]` on the Python fixture: root conftest → DQ in
+  both modes; nested `tests/conftest.py`, `src/sitecustomize.py`, an edited, deleted or
+  renamed `pytest.ini` → DQ; an honest `pyproject.toml` version bump or extra → clean.
+  The same holds on the JavaScript (jest / mocha / vitest / node), Go, JVM and Rust
+  fixtures (`tests/test_grade.py`, belt-1b section). The click controls must be re-run
+  after the merge: the review's action #1 expects escapes → 0.
+- Three assertions in `tests/test_oracle_controls.py` that encoded the old reading
+  (env_poison = escape / regressed) must be updated to `disqualified` when this merges.
+- Honest edits to a *whole-file* infra path (a legitimate `conftest.py` fixture, a real
+  `jest.config.js` change) are lost observations, never false Q1s; a task whose commit
+  itself touches such a file carries it in `test_files` and is graded on the overlaid
+  bytes. Operators will see these as `disqualified` with the file named.
+- Per-runner narrowing (`jest.config.*` is not the oracle under mocha) keeps the lost
+  observations to files the configured runner actually reads; with no runner given the
+  table is applied as the fail-closed union.
+- Known residuals are listed in the module docstring: files a config *references*
+  (`setupFiles`, `--require`), `package.json` `exports`/`main`/`type`, the `go` directive,
+  module shadowing under `pythonpath_suffix` roots, and dependency trees (a sandbox
+  concern, ADR-0005). Sighted-mode edits to *other* test files of the same language
+  layout remain belt 3's problem unless a rule (Go `*_test.go`, JVM `src/test/**`, Rust
+  `tests/**`) names them; a "belt-scope test files unmodified" rule is a candidate
+  follow-up.

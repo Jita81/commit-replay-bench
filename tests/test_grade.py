@@ -16,11 +16,19 @@ import pytest
 
 from crb.core import grade as g
 from crb.core.execution import LocalExecutor, SandboxUnavailable
+from crb.core.git import GitRepo
+from crb.core.oracle import controls as nc  # read-only here: the env_poison transform
 from crb.core.runners import base as rb
+from crb.core.runners import get_runner
 from crb.core.runners.pytest_runner import PytestRunner
-from crb.core.spec import TaskSpec
+from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+
+try:  # tests/ is a package only if the conftest owner made it one
+    from tests import conftest_langs as langs
+except ImportError:  # pragma: no cover — layout-dependent
+    import conftest_langs as langs  # type: ignore[no-redef]
 
 Events = list[tuple[str, dict[str, Any]]]
 
@@ -558,3 +566,517 @@ def test_run_tails_are_redacted_in_the_result(
     assert "[REDACTED]" in res.target_run.tail
     assert res.target_run.tail.endswith("ok")
     assert res.belt_run.duration_s == 0.1  # everything else preserved
+
+
+# ---------------------------------------------------------------------------
+# Belt 1b: test INFRASTRUCTURE is part of the oracle (ADR-0001, 2026-09-13)
+# ---------------------------------------------------------------------------
+
+_INFRA_DQ = "test infrastructure modified"
+
+
+def _assert_infra_dq(res: g.GradeResult, *files: str) -> None:
+    assert res.disqualified is True and res.clean is False
+    assert res.belts.tests_unmodified is False
+    assert res.belts.target_green is None  # nothing was run
+    assert res.target_run is None and res.belt_run is None
+    assert res.dq_reason.startswith(_INFRA_DQ), res.dq_reason
+    assert res.tamper_files == tuple(files)
+    with pytest.raises(g.FalseQ1Violation):
+        g.GradeResult(res.task_id, res.repo, res.mode, clean=True, belts=res.belts)
+
+
+def test_new_root_conftest_is_disqualified_sighted(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    """An UNTRACKED new root conftest.py — the env_poison shape — fails belt 1 before
+    any test runs, even with the gold source in place."""
+    pr.apply_gold(trial)
+    pr.write_files(trial, [("conftest.py", "import os\nos.environ['X'] = '1'\n")])
+    events, on_event = _collector()
+    res = _grade(trial, feat_task, pyrepo, runner, executor, on_event=on_event)
+    _assert_infra_dq(res, "conftest.py")
+    assert events == [
+        (
+            "grade.tamper",
+            {"task": feat_task.task_id, "files": ["conftest.py"], "kind": "test_infra"},
+        ),
+        ("grade.belt", {"task": feat_task.task_id, "belt": "tests_unmodified", "value": False}),
+    ]
+
+
+def test_edited_pytest_ini_is_disqualified(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    pr.apply_gold(trial)
+    (trial.root / "pytest.ini").write_text(pr.PYTEST_INI + "pythonpath = shim\n", encoding="utf-8")
+    res = _grade(trial, feat_task, pyrepo, runner, executor)
+    _assert_infra_dq(res, "pytest.ini")
+
+
+def test_deleted_pytest_ini_is_disqualified(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    """Removing config (filterwarnings=error, required plugins…) is as much an edit
+    to the oracle as adding it."""
+    pr.apply_gold(trial)
+    (trial.root / "pytest.ini").unlink()
+    res = _grade(trial, feat_task, pyrepo, runner, executor)
+    _assert_infra_dq(res, "pytest.ini")
+
+
+def test_renamed_pytest_ini_is_disqualified_under_both_names(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    """git's rename detection would otherwise collapse the deletion into the new
+    name; touched_files reports both, and both are infra."""
+    pr.apply_gold(trial)
+    trial.repo.run("mv", "pytest.ini", "tests/pytest.ini", cwd=trial.root, check=True)
+    res = _grade(trial, feat_task, pyrepo, runner, executor)
+    _assert_infra_dq(res, "pytest.ini", "tests/pytest.ini")
+
+
+def test_nested_conftest_and_sitecustomize_are_disqualified(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    pr.apply_gold(trial)
+    pr.write_files(trial, [("tests/conftest.py", "# x\n"), ("src/sitecustomize.py", "# y\n")])
+    res = _grade(trial, feat_task, pyrepo, runner, executor)
+    _assert_infra_dq(res, "src/sitecustomize.py", "tests/conftest.py")
+
+
+def test_target_test_tamper_and_infra_report_both(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    pr.apply_tamper(trial)
+    pr.write_files(trial, [("conftest.py", "# x\n")])
+    res = _grade(trial, feat_task, pyrepo, runner, executor)
+    assert res.disqualified and res.belts.tests_unmodified is False
+    assert res.dq_reason == "target test file modified — disqualified"
+    assert res.tamper_files == (pr.TEST_SUBTRACT, "conftest.py")
+
+
+def test_env_poison_control_transform_is_disqualified(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    """The exact negative-control edit that escaped 3/7 on click: an identity source
+    tree plus a root conftest.py that execs the GOLD module at collection time. The
+    controls vocabulary already accepts ``disqualified`` for env_poison, so the
+    control's verdict becomes ``ok`` (caught) — never ``ESCAPE`` — from here on."""
+    gold_src = trial.repo.show_file(trial.sha, pr.SRC) or ""
+    assert "def subtract" in gold_src
+    conftest = nc.env_poison_conftest(nc.module_name_for(pr.SRC, pyrepo.config), pr.SRC, gold_src)
+    (trial.root / "conftest.py").write_text(conftest, encoding="utf-8")
+    assert trial.read(pr.SRC) == pr.SRC_INITIAL  # the graded source is untouched
+
+    res = _grade(trial, feat_task, pyrepo, runner, executor)
+    _assert_infra_dq(res, "conftest.py")
+    assert nc.observe(res) == nc.OBS_DISQUALIFIED
+    assert nc.OBS_DISQUALIFIED in nc.EXPECTED[nc.ENV_POISON]
+
+
+def test_builder_authored_gitignore_cannot_hide_a_conftest(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    """Ignoring the poison with a new .gitignore rule keeps it out of ``ls-files``;
+    touched_files pierces builder-authored ignore rules, so belt 1 still sees it."""
+    pr.apply_gold(trial)
+    pr.write_files(trial, [(".gitignore", "conftest.py\n"), ("conftest.py", "# hidden\n")])
+    assert (
+        "conftest.py"
+        not in trial.repo.run("ls-files", "--others", "--exclude-standard", cwd=trial.root).lines
+    )
+    res = _grade(trial, feat_task, pyrepo, runner, executor)
+    _assert_infra_dq(res, "conftest.py")
+
+
+def test_harness_written_conftest_is_not_a_builder_change_until_edited(
+    pyrepo: pr.PyRepo, feat_task: TaskSpec, executor: LocalExecutor, tmp_path: Path
+) -> None:
+    """A post_create hook that writes conftest.py is the operator's fixup, not the
+    builder's edit: gold grades clean. The builder editing that file IS tamper."""
+    cfg = pr.default_config(
+        runner_opts={
+            **pyrepo.config.runner_opts,
+            "post_create": [{"write_if_missing": {"path": "conftest.py", "content": "# op\n"}}],
+        }
+    )
+    runner = PytestRunner(cfg)
+    ws = Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws", config=cfg)
+    try:
+        ws.overlay_tests([pr.TEST_SUBTRACT])
+        pr.apply_gold(ws)
+        res = g.grade(ws, feat_task, config=cfg, runner=runner, executor=executor)
+        assert res.clean is True and res.changed_files == (pr.SRC,)
+        (ws.root / "conftest.py").write_text("# op\nimport calc\n", encoding="utf-8")
+        res = g.grade(ws, feat_task, config=cfg, runner=runner, executor=executor)
+        _assert_infra_dq(res, "conftest.py")
+    finally:
+        ws.remove()
+
+
+def _commit_pyproject_and_multiply(pyrepo: pr.PyRepo) -> str:
+    """Two extra commits: ``pyproject.toml`` (no pytest config), then ``multiply`` +
+    its test — a task whose PARENT carries a pyproject.toml the builder may edit."""
+    pyrepo.add_pyproject_commit()
+    (pyrepo.path / pr.SRC).write_text(
+        pr.SRC_FEAT + "\n\ndef multiply(a: int, b: int) -> int:\n    return a * b\n",
+        encoding="utf-8",
+    )
+    (pyrepo.path / pr.TEST_MULTIPLY).write_text(pr.TEST_MULTIPLY_SRC, encoding="utf-8")
+    pr.git(pyrepo.path, "add", "-A")
+    pr.git(pyrepo.path, "commit", "-q", "-m", "feat: add multiply")
+    return pr.git(pyrepo.path, "rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize(
+    ("edit", "tamper"),
+    [
+        (lambda t: t.replace('version = "0.1.0"', 'version = "0.2.0"'), False),
+        (lambda t: t.replace('test = ["pytest"]', 'test = ["pytest", "rich"]'), False),
+        (lambda t: t + '\n[tool.pytest.ini_options]\naddopts = "-p no:x"\n', True),
+        (lambda t: t + '\n[project.entry-points.pytest11]\nshim = "shim"\n', True),
+    ],
+    ids=["version-bump", "extra-add", "pytest-table", "plugin-entry-point"],
+)
+def test_pyproject_edit_is_tamper_only_when_pytest_sections_change(
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+    edit: Callable[[str], str],
+    tamper: bool,
+) -> None:
+    sha = _commit_pyproject_and_multiply(pyrepo)
+    task = pyrepo.feat_task(
+        task_id=sha,
+        subject="feat: add multiply",
+        test_files=[pr.TEST_MULTIPLY],
+        target_tests=[pr.TEST_MULTIPLY],
+        baseline_failing=[pr.TEST_MULTIPLY],
+    )
+    ws = Workspace.create(pyrepo.repo, sha, tmp_path / "ws", config=pyrepo.config)
+    try:
+        ws.overlay_tests([pr.TEST_MULTIPLY])
+        ws.overlay_sources([pr.SRC])  # gold
+        p = ws.root / pr.PYPROJECT
+        p.write_text(edit(p.read_text(encoding="utf-8")), encoding="utf-8")
+        res = _grade(ws, task, pyrepo, runner, executor)
+        if tamper:
+            _assert_infra_dq(res, pr.PYPROJECT)
+        else:
+            assert res.clean is True, res.to_dict()
+            assert res.belts == _ALL_TRUE
+            assert res.changed_files == (pr.PYPROJECT, pr.SRC)
+    finally:
+        ws.remove()
+
+
+def test_blind_root_conftest_pre_overlay_is_disqualified(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """Blind mode: the infra check runs alongside belt 0, before the oracle lands."""
+    ws = pyrepo.trial(tmp_path / "ws", overlay_tests=False)
+    try:
+        pr.apply_gold(ws)
+        pr.write_files(ws, [("conftest.py", "# x\n")])
+        events, on_event = _collector()
+        res = _grade(ws, feat_task, pyrepo, runner, executor, mode=g.MODE_BLIND, on_event=on_event)
+        _assert_infra_dq(res, "conftest.py")
+        assert res.mode == g.MODE_BLIND
+        assert events == [
+            (
+                "grade.tamper",
+                {"task": feat_task.task_id, "files": ["conftest.py"], "kind": "test_infra"},
+            )
+        ]
+        assert not ws.exists(pr.TEST_SUBTRACT)  # oracle never landed
+    finally:
+        ws.remove()
+
+
+def test_blind_test_file_and_infra_both_touched_reports_both(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    ws = pyrepo.trial(tmp_path / "ws", overlay_tests=False)
+    try:
+        pr.apply_test_only(ws, "tests/test_sneaky.py")
+        pr.write_files(ws, [("conftest.py", "# x\n")])
+        res = _grade(ws, feat_task, pyrepo, runner, executor, mode=g.MODE_BLIND)
+        assert res.disqualified and res.dq_reason.startswith("blind:")
+        assert res.tamper_files == ("conftest.py", "tests/test_sneaky.py")
+    finally:
+        ws.remove()
+
+
+# --- the other languages: belt 1b needs no toolchain (it fires before any run);
+#     the "honest edit proceeds" half runs the real runner where the tool is on PATH.
+
+
+def _lang_task(feat_sha: str, config: RepoConfig, test_file: str, src: str) -> TaskSpec:
+    r = get_runner(config)
+    target = r.target_scope([test_file])
+    return TaskSpec(
+        task_id=feat_sha,
+        repo=config.name,
+        subject="feat: add sub",
+        authored="2026-01-01T00:00:00+00:00",
+        test_files=(test_file,),
+        src_files=(src,),
+        target_tests=target,
+        belt_scope=r.belt_scope(target, [test_file]),
+        language=config.language.value,
+        red_checked=True,
+    )
+
+
+def _lang_trial(
+    tmp_path: Path, repo_path: Path, feat_sha: str, config: RepoConfig, test_file: str, src: str
+) -> Workspace:
+    ws = Workspace.create(GitRepo(repo_path), feat_sha, tmp_path / "trial", config=config)
+    ws.overlay_tests([test_file])
+    ws.overlay_sources([src])  # gold: every other belt would hold
+    return ws
+
+
+def _grade_lang(
+    ws: Workspace, task: TaskSpec, config: RepoConfig, executor: LocalExecutor
+) -> g.GradeResult:
+    return g.grade(ws, task, config=config, runner=get_runner(config), executor=executor)
+
+
+@pytest.mark.parametrize(
+    ("tool", "rel", "content"),
+    [
+        ("jest", "jest.config.js", "module.exports = { setupFiles: ['./shim.js'] };\n"),
+        ("jest", "src/__snapshots__/x.snap", "exports[`x`] = `1`;\n"),
+        ("mocha", ".mocharc.yml", "require: ./shim.js\n"),
+        ("vitest", "vite.config.ts", "export default { test: { setupFiles: ['./shim.ts'] } };\n"),
+        ("node", "node.config.json", '{"testRunner": {}}\n'),
+    ],
+)
+def test_javascript_new_test_config_is_disqualified(
+    tmp_path: Path, executor: LocalExecutor, tool: str, rel: str, content: str
+) -> None:
+    noderepo = langs.fixture_module("noderepo")
+    root, sha = noderepo.build(tmp_path, tool)
+    cfg = noderepo.config(tool)
+    test_file, src = noderepo.test_sub(tool), noderepo.SRC_SUB
+    ws = _lang_trial(tmp_path, root, sha, cfg, test_file, src)
+    try:
+        pr.write_files(ws, [(rel, content)])
+        res = _grade_lang(ws, _lang_task(sha, cfg, test_file, src), cfg, executor)
+        _assert_infra_dq(res, rel)
+    finally:
+        ws.remove()
+
+
+def test_javascript_package_json_test_script_is_disqualified_dependency_is_not(
+    tmp_path: Path, executor: LocalExecutor
+) -> None:
+    noderepo = langs.fixture_module("noderepo")
+    root, sha = noderepo.build(tmp_path, "node")
+    cfg = noderepo.config("node")
+    test_file, src = noderepo.test_sub("node"), noderepo.SRC_SUB
+    task = _lang_task(sha, cfg, test_file, src)
+    ws = _lang_trial(tmp_path, root, sha, cfg, test_file, src)
+    try:
+        p = ws.root / "package.json"
+        original = p.read_text(encoding="utf-8")
+        p.write_text(original.replace('"node --test"', '"true"'), encoding="utf-8")
+        _assert_infra_dq(_grade_lang(ws, task, cfg, executor), "package.json")
+        honest = original.replace('"private": true', '"private": true,\n  "dependencies": {}')
+        p.write_text(honest, encoding="utf-8")
+        res = _grade_lang(ws, task, cfg, executor)
+        assert res.belts.tests_unmodified is True and not res.disqualified
+        if langs.has_tool("node"):
+            assert res.clean is True, res.to_dict()
+            assert set(res.changed_files) == {"package.json", src}
+    finally:
+        ws.remove()
+
+
+_GO_TESTMAIN = (
+    'package calc\n\nimport (\n\t"os"\n\t"testing"\n)\n\n'
+    "func TestMain(m *testing.M) { os.Exit(0) }\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("rel", "edit"),
+    [
+        ("go.mod", lambda t: t + "\nreplace example.com/other => ../shim\n"),
+        ("calc/testdata/golden.txt", lambda t: "3\n"),
+        ("calc/helper_test.go", lambda t: _GO_TESTMAIN),
+    ],
+    ids=["go.mod-replace", "testdata", "sibling-TestMain"],
+)
+def test_go_infra_edit_is_disqualified(
+    tmp_path: Path, executor: LocalExecutor, rel: str, edit: Callable[[str], str]
+) -> None:
+    gorepo = langs.fixture_module("gorepo")
+    root, sha = gorepo.build(tmp_path)
+    cfg = gorepo.config()
+    ws = _lang_trial(tmp_path, root, sha, cfg, gorepo.TEST_SUB, gorepo.SRC_SUB)
+    try:
+        before = ws.read(rel) if ws.exists(rel) else ""
+        pr.write_files(ws, [(rel, edit(before))])
+        res = _grade_lang(ws, _lang_task(sha, cfg, gorepo.TEST_SUB, gorepo.SRC_SUB), cfg, executor)
+        _assert_infra_dq(res, rel)
+    finally:
+        ws.remove()
+
+
+@pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
+@pytest.mark.toolchain("go")
+def test_go_honest_go_mod_edit_proceeds_to_a_clean_grade(
+    tmp_path: Path, executor: LocalExecutor
+) -> None:
+    gorepo = langs.fixture_module("gorepo")
+    root, sha = gorepo.build(tmp_path)
+    cfg = gorepo.config()
+    ws = _lang_trial(tmp_path, root, sha, cfg, gorepo.TEST_SUB, gorepo.SRC_SUB)
+    try:
+        (ws.root / "go.mod").write_text(ws.read("go.mod") + "\n// honest\n", encoding="utf-8")
+        res = _grade_lang(ws, _lang_task(sha, cfg, gorepo.TEST_SUB, gorepo.SRC_SUB), cfg, executor)
+        assert res.clean is True, res.to_dict()
+        assert set(res.changed_files) == {"go.mod", gorepo.SRC_SUB}
+    finally:
+        ws.remove()
+
+
+@pytest.mark.parametrize(
+    ("rel", "edit"),
+    [
+        (
+            "src/test/resources/junit-platform.properties",
+            lambda t: "junit.jupiter.extensions.autodetection.enabled=true\n",
+        ),
+        ("mvnw", lambda t: "#!/bin/sh\nexit 0\n"),
+        (".mvn/maven.config", lambda t: "-DskipTests\n"),
+        (
+            "pom.xml",
+            lambda t: t.replace("</properties>", "<skipTests>true</skipTests></properties>"),
+        ),
+    ],
+    ids=["test-resource", "mvnw", "maven.config", "pom-properties"],
+)
+def test_jvm_infra_edit_is_disqualified(
+    tmp_path: Path, executor: LocalExecutor, rel: str, edit: Callable[[str], str]
+) -> None:
+    jvmrepo = langs.fixture_module("jvmrepo")
+    root, sha = jvmrepo.build(tmp_path)
+    cfg = jvmrepo.config()
+    ws = _lang_trial(tmp_path, root, sha, cfg, jvmrepo.TEST_SUB, jvmrepo.SRC_SUB)
+    try:
+        before = ws.read(rel) if ws.exists(rel) else ""
+        pr.write_files(ws, [(rel, edit(before))])
+        res = _grade_lang(
+            ws, _lang_task(sha, cfg, jvmrepo.TEST_SUB, jvmrepo.SRC_SUB), cfg, executor
+        )
+        _assert_infra_dq(res, rel)
+    finally:
+        ws.remove()
+
+
+@pytest.mark.skipif(not langs.has_tool("mvn"), reason="mvn not on PATH")
+@pytest.mark.toolchain("mvn")
+def test_jvm_honest_pom_version_bump_proceeds_to_a_clean_grade(
+    tmp_path: Path, executor: LocalExecutor
+) -> None:
+    langs.maven_warmup(tmp_path)
+    jvmrepo = langs.fixture_module("jvmrepo")
+    root, sha = jvmrepo.build(tmp_path)
+    cfg = jvmrepo.config(offline=True)
+    ws = _lang_trial(tmp_path, root, sha, cfg, jvmrepo.TEST_SUB, jvmrepo.SRC_SUB)
+    try:
+        pom = ws.read("pom.xml")
+        assert "<version>0.1.0</version>" in pom
+        (ws.root / "pom.xml").write_text(
+            pom.replace("<version>0.1.0</version>", "<version>0.2.0</version>"), encoding="utf-8"
+        )
+        res = _grade_lang(
+            ws, _lang_task(sha, cfg, jvmrepo.TEST_SUB, jvmrepo.SRC_SUB), cfg, executor
+        )
+        assert res.belts.tests_unmodified is True and not res.disqualified
+        assert res.clean is True, res.to_dict()
+    finally:
+        ws.remove()
+
+
+@pytest.mark.skipif(not langs.has_tool("cargo"), reason="cargo not on PATH")
+@pytest.mark.toolchain("cargo")
+@pytest.mark.parametrize(
+    ("rel", "edit", "tamper"),
+    [
+        ("build.rs", lambda t: 'fn main() { println!("cargo:rustc-cfg=shim"); }\n', True),
+        ("Cargo.toml", lambda t: t + '\n[[test]]\nname = "sub"\nharness = false\n', True),
+        ("tests/common/mod.rs", lambda t: "pub fn shim() {}\n", True),
+        ("Cargo.toml", lambda t: t.replace('version = "0.1.0"', 'version = "0.2.0"'), False),
+    ],
+    ids=["build.rs", "cargo-[[test]]", "tests-helper", "honest-version-bump"],
+)
+def test_rust_infra_edit_is_disqualified_honest_version_bump_is_clean(
+    tmp_path: Path,
+    executor: LocalExecutor,
+    rel: str,
+    edit: Callable[[str], str],
+    tamper: bool,
+) -> None:
+    rustrepo = langs.fixture_module("rustrepo")
+    root, sha = rustrepo.build(tmp_path)
+    cfg = rustrepo.config()
+    ws = _lang_trial(tmp_path, root, sha, cfg, rustrepo.TEST_SUB, rustrepo.SRC_SUB)
+    try:
+        ws.overlay_sources([rustrepo.SRC_LIB])  # the feat also edits lib.rs (pub mod sub)
+        before = ws.read(rel) if ws.exists(rel) else ""
+        pr.write_files(ws, [(rel, edit(before))])
+        task = _lang_task(sha, cfg, rustrepo.TEST_SUB, rustrepo.SRC_SUB)
+        res = _grade_lang(ws, task, cfg, executor)
+        if tamper:
+            _assert_infra_dq(res, rel)
+        else:
+            assert res.clean is True, res.to_dict()
+            assert "Cargo.toml" in res.changed_files
+    finally:
+        ws.remove()
