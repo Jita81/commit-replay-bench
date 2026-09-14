@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { useEvidence } from '../../api/hooks'
+import { useEffect, useMemo, useState } from 'react'
+import { useEvidence, useTask } from '../../api/hooks'
 import type { EvidencePack, LintRun, TestRun } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
 import { Button } from '../../components/Button'
@@ -8,11 +8,21 @@ import { JsonView } from '../../components/JsonView'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
 import { fmtDate, fmtInt, fmtSeconds, fmtUsd, shortId } from '../../lib/format'
+import { parseUnifiedDiff, useRetainedPatch, useRetainedStatus, useRetainedTranscript, useReviews, type RetainedPatch } from './contract'
+import { ReviewPanel, VerdictPill } from './ReviewPanel'
 
 interface Props {
   packHash: string | null
   onClose: () => void
+  /**
+   * The graded row's chain hash — what the Patch / Transcript / Review tabs are
+   * keyed by. Optional: when the opener only knows the pack, the drawer resolves it
+   * from the task's grade rows (the row whose `evidence_pack_hash` is this pack).
+   */
+  rowHash?: string | null
 }
+
+export type DrawerTab = 'pack' | 'patch' | 'transcript' | 'review'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -245,17 +255,195 @@ function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean })
   )
 }
 
-/** Side drawer for one evidence pack (`GET /evidence/{hash}`). */
-export function EvidenceDrawer({ packHash, onClose }: Props) {
+/**
+ * The retained patch: a syntax-neutral unified-diff view with +/− colouring, the
+ * file list with per-file counts, and the anchor check — sha256 of the SERVED bytes
+ * against the pack's `diff_sha256`. A mismatch is shown as a warning, never hidden.
+ */
+export function PatchView({ patch, pack }: { patch: RetainedPatch; pack: EvidencePack }) {
+  const packFiles = pack.grade.diff?.files
+  const parsed = useMemo(() => parseUnifiedDiff(patch.text, packFiles ?? []), [patch.text, packFiles])
+  const packAdds = pack.grade.diff?.additions ?? 0
+  const packDels = pack.grade.diff?.deletions ?? 0
+  const countsMatch = parsed.additions === packAdds && parsed.deletions === packDels
+  return (
+    <div className="space-y-4" data-testid="patch-view" data-state={patch.matches ? 'verified' : 'mismatch'}>
+      <div className="flex flex-wrap items-center gap-2">
+        {patch.matches ? (
+          <Pill tone="primary" glyph="✦" label="Served patch hashes to the pack's diff_sha256" data-testid="patch-verified">
+            hash matches pack
+          </Pill>
+        ) : (
+          <Pill tone="amber" glyph="⚠" label="Served patch does NOT hash to the pack's diff_sha256" data-testid="patch-mismatch">
+            hash mismatch
+          </Pill>
+        )}
+        {patch.redacted && (
+          <Pill tone="amber" glyph="⊘" size="xs" label="Secret-shaped content was redacted before serving" data-testid="patch-redacted">
+            redacted
+          </Pill>
+        )}
+        {patch.truncated && (
+          <Pill tone="amber" glyph="…" size="xs" label="The patch was capped at 1 MiB" data-testid="patch-truncated">
+            truncated
+          </Pill>
+        )}
+        <span className="font-mono text-[11px] text-on-surface-muted" title={`served ${patch.sha256} · pack ${patch.diffSha256}`}>
+          sha256 {shortId(patch.sha256, 16)}
+        </span>
+      </div>
+      {!patch.matches && (
+        <p className="rounded-[var(--radius-control)] border border-status-amber/40 bg-status-amber-soft p-3 text-xs" role="alert" data-testid="patch-warning">
+          {patch.redacted
+            ? 'The served bytes were redacted (secret-shaped content); they are not the bytes the instrument graded. '
+            : patch.truncated
+              ? 'The served bytes were capped; they are not the whole patch the instrument graded. '
+              : patch.serverVerified
+                ? 'The served bytes do not hash to the anchor although the worktree does — the transfer changed them. '
+                : 'The retained worktree no longer hashes to the pack’s diff_sha256 — it drifted since grading. '}
+          A review cannot attest to these bytes.
+        </p>
+      )}
+      <KV
+        rows={[
+          ['files', <span className="font-mono text-xs">{parsed.files.length}</span>],
+          [
+            '+ / −',
+            <span data-testid="patch-counts" data-state={countsMatch ? 'match' : 'mismatch'}>
+              {fmtInt(parsed.additions)} / {fmtInt(parsed.deletions)}
+              {countsMatch ? ' · matches the pack' : ` · pack says ${fmtInt(packAdds)} / ${fmtInt(packDels)}`}
+            </span>,
+          ],
+        ]}
+      />
+      <ul className="m-0 list-none space-y-1 p-0 text-xs" data-testid="patch-files">
+        {parsed.files.map((f, i) => (
+          <li key={`${f.path}-${i}`} className="flex items-center gap-2">
+            <a href={`#patch-file-${i}`} className="font-mono text-primary underline-offset-2 hover:underline">
+              {f.path || '(unnamed)'}
+            </a>
+            <span className="num text-status-green">+{f.additions}</span>
+            <span className="num text-status-red">−{f.deletions}</span>
+            {f.excluded && (
+              <span className="text-on-surface-muted" title="Not in the pack's diff.files (e.g. the overlaid oracle): shown, not counted">
+                (not counted)
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {parsed.files.map((f, i) => (
+        <section key={`${f.path}-${i}`} id={`patch-file-${i}`} className="rounded-[var(--radius-control)] border border-border" data-testid="patch-file">
+          <header className="flex items-center gap-2 border-b border-border bg-surface-high px-3 py-1.5 font-mono text-[11px]">
+            <span>{f.path || '(unnamed)'}</span>
+            <span className="num text-status-green">+{f.additions}</span>
+            <span className="num text-status-red">−{f.deletions}</span>
+          </header>
+          <pre className="m-0 max-h-[480px] overflow-auto bg-surface-container p-0 font-mono text-[11px] leading-4">
+            {f.lines.map((ln, j) => (
+              <div
+                key={j}
+                data-kind={ln.kind}
+                className={
+                  ln.kind === 'add'
+                    ? 'bg-status-green-soft text-status-green'
+                    : ln.kind === 'del'
+                      ? 'bg-status-red-soft text-status-red'
+                      : ln.kind === 'hunk'
+                        ? 'bg-surface-high text-primary'
+                        : ln.kind === 'meta'
+                          ? 'text-on-surface-muted'
+                          : 'text-on-surface-body'
+                }
+              >
+                <span className="whitespace-pre px-2">{ln.text || ' '}</span>
+              </div>
+            ))}
+          </pre>
+        </section>
+      ))}
+      <p className="text-[10px] text-on-surface-muted">Computed on demand from the retained worktree, redacted, never stored twice. The pack’s hash is the anchor.</p>
+    </div>
+  )
+}
+
+function TranscriptView({ rowHash }: { rowHash: string }) {
+  const q = useRetainedTranscript(rowHash, true)
+  if (q.isPending) {
+    return (
+      <p role="status" className="text-sm text-on-surface-muted">
+        Fetching the retained transcript…
+      </p>
+    )
+  }
+  if (q.isError) {
+    const reason = typeof q.error.detail.reason === 'string' ? q.error.detail.reason : q.error.message
+    return (
+      <p className="text-xs text-on-surface-muted" data-testid="transcript-unavailable">
+        Transcript unavailable: {reason}
+      </p>
+    )
+  }
+  return (
+    <div className="space-y-2" data-testid="transcript-view">
+      {q.data.json !== null ? (
+        <JsonView value={q.data.json} label="Builder transcript" />
+      ) : (
+        <pre className="max-h-[560px] overflow-auto whitespace-pre-wrap rounded bg-surface-container p-2 font-mono text-[11px] leading-4">{q.data.text}</pre>
+      )}
+      <p className="text-[10px] text-on-surface-muted">Redacted at write and again on read; served only from inside the transcripts directory.</p>
+    </div>
+  )
+}
+
+function Tab({ id, active, onClick, children, testId }: { id: DrawerTab; active: DrawerTab; onClick: (t: DrawerTab) => void; children: React.ReactNode; testId: string }) {
+  const on = id === active
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={on}
+      aria-controls={`evidence-tab-${id}`}
+      data-testid={testId}
+      onClick={() => onClick(id)}
+      className={`-mb-px border-b-2 px-3 py-2 text-xs font-semibold ${on ? 'border-primary text-primary' : 'border-transparent text-on-surface-muted hover:text-on-surface'}`}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** Side drawer for one evidence pack (`GET /evidence/{hash}`) and what stands behind it. */
+export function EvidenceDrawer({ packHash, onClose, rowHash: rowHashProp }: Props) {
   const q = useEvidence(packHash ?? '')
+  const [tab, setTab] = useState<DrawerTab>('pack')
+  const [patchOpened, setPatchOpened] = useState(false)
   useEffect(() => {
     if (!packHash) return
+    setTab('pack')
+    setPatchOpened(false)
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [packHash, onClose])
+
+  // Resolve the row when the opener did not pass it: the task's grade row whose pack this is.
+  const pack = q.data?.pack
+  const task = useTask(rowHashProp ? '' : (pack?.task.repo ?? ''), rowHashProp ? '' : (pack?.task.task_id ?? ''))
+  const rowHash = rowHashProp ?? task.data?.grades.find((g) => g.evidence_pack_hash === packHash)?.row_hash ?? ''
+  const retained = useRetainedStatus(rowHash)
+  const patchAvailable = retained.data?.patch_available ?? false
+  const patch = useRetainedPatch(rowHash, patchOpened && patchAvailable)
+  const reviews = useReviews({ grade_row_hash: rowHash }, rowHash.length > 0)
+  const latest = reviews.data?.items.length ? reviews.data.items[reviews.data.items.length - 1] : null
+  const hasDiff = Boolean(pack?.grade.diff?.diff_sha256)
+
+  function go(t: DrawerTab) {
+    if (t === 'patch') setPatchOpened(true)
+    setTab(t)
+  }
 
   if (!packHash) return null
   return (
@@ -266,7 +454,7 @@ export function EvidenceDrawer({ packHash, onClose }: Props) {
         aria-modal="true"
         aria-labelledby="evidence-title"
         data-testid="evidence-drawer"
-        className="absolute right-0 top-0 flex h-full w-[min(720px,100vw)] flex-col border-l border-border bg-surface-container shadow-[var(--shadow-card)]"
+        className="absolute right-0 top-0 flex h-full w-[min(760px,100vw)] flex-col border-l border-border bg-surface-container shadow-[var(--shadow-card)]"
       >
         <header className="flex items-center justify-between border-b border-border px-5 py-3">
           <div>
@@ -275,10 +463,29 @@ export function EvidenceDrawer({ packHash, onClose }: Props) {
               {q.data ? `Task ${shortId(q.data.pack.task.task_id)}` : 'Loading…'}
             </h2>
           </div>
-          <Button size="sm" onClick={onClose}>
-            Close
-          </Button>
+          <div className="flex items-center gap-2">
+            {latest && <VerdictPill verdict={latest.verdict} />}
+            <Button size="sm" onClick={onClose}>
+              Close
+            </Button>
+          </div>
         </header>
+        {q.data && (
+          <nav className="flex items-center gap-1 border-b border-border px-5" role="tablist" aria-label="Evidence sections">
+            <Tab id="pack" active={tab} onClick={go} testId="tab-pack">
+              Pack
+            </Tab>
+            <Tab id="patch" active={tab} onClick={go} testId="tab-patch">
+              Patch
+            </Tab>
+            <Tab id="transcript" active={tab} onClick={go} testId="tab-transcript">
+              Transcript
+            </Tab>
+            <Tab id="review" active={tab} onClick={go} testId="tab-review">
+              Review{reviews.data?.total ? ` (${reviews.data.total})` : ''}
+            </Tab>
+          </nav>
+        )}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {q.isPending && (
             <p role="status" className="text-sm text-on-surface-muted">
@@ -286,7 +493,62 @@ export function EvidenceDrawer({ packHash, onClose }: Props) {
             </p>
           )}
           {q.isError && <ErrorState error={q.error} onRetry={() => void q.refetch()} />}
-          {q.data && <PackBody pack={q.data.pack} verified={q.data.verified} />}
+          {q.data && tab === 'pack' && (
+            <div role="tabpanel" id="evidence-tab-pack">
+              <PackBody pack={q.data.pack} verified={q.data.verified} />
+            </div>
+          )}
+          {q.data && tab === 'patch' && (
+            <div role="tabpanel" id="evidence-tab-patch">
+              {!rowHash && (
+                <p className="text-xs text-on-surface-muted" data-testid="patch-unavailable">
+                  {task.isPending ? 'Resolving the graded row…' : 'No ledger row found for this pack.'}
+                </p>
+              )}
+              {rowHash && retained.isPending && (
+                <p role="status" className="text-xs text-on-surface-muted">
+                  Checking what was retained…
+                </p>
+              )}
+              {rowHash && retained.isError && <ErrorState error={retained.error} onRetry={() => void retained.refetch()} />}
+              {retained.data && !retained.data.patch_available && (
+                <p className="text-xs text-on-surface-muted" data-testid="patch-unavailable">
+                  Patch unavailable: {retained.data.patch_reason}
+                </p>
+              )}
+              {retained.data?.patch_available && patch.isPending && (
+                <p role="status" className="text-xs text-on-surface-muted">
+                  Fetching the retained patch and hashing it…
+                </p>
+              )}
+              {patch.isError && (
+                <p className="text-xs text-on-surface-muted" data-testid="patch-unavailable">
+                  Patch unavailable: {typeof patch.error.detail.reason === 'string' ? patch.error.detail.reason : patch.error.message}
+                </p>
+              )}
+              {patch.data && <PatchView patch={patch.data} pack={q.data.pack} />}
+            </div>
+          )}
+          {q.data && tab === 'transcript' && (
+            <div role="tabpanel" id="evidence-tab-transcript">
+              {rowHash ? (
+                <TranscriptView rowHash={rowHash} />
+              ) : (
+                <p className="text-xs text-on-surface-muted" data-testid="transcript-unavailable">
+                  No ledger row found for this pack.
+                </p>
+              )}
+            </div>
+          )}
+          {q.data && tab === 'review' && (
+            <div role="tabpanel" id="evidence-tab-review">
+              {rowHash ? (
+                <ReviewPanel rowHash={rowHash} repo={q.data.pack.task.repo} taskId={q.data.pack.task.task_id} patch={patch.data ?? null} hasDiff={hasDiff} onOpenPatch={() => go('patch')} />
+              ) : (
+                <p className="text-xs text-on-surface-muted">No ledger row found for this pack — nothing to review.</p>
+              )}
+            </div>
+          )}
         </div>
       </aside>
     </div>

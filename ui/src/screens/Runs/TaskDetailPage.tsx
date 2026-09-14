@@ -12,13 +12,22 @@ import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { fmtDate, fmtSeconds, fmtUsd, shortId } from '../../lib/format'
+import { useReviews, type Review } from './contract'
 import { EvidenceDrawer } from './EvidenceDrawer'
+import { VerdictPill } from './ReviewPanel'
 
 /** `GET /tasks/{repo}/{task_id}` — the spec and every grade row for it. */
 export function TaskDetailPage() {
   const { repo = '', taskId = '' } = useParams()
   const q = useTask(repo, taskId)
-  const [pack, setPack] = useState<string | null>(null)
+  const [open, setOpen] = useState<{ pack: string; row: string } | null>(null)
+  const reviews = useReviews({ repo, task_id: taskId }, repo.length > 0 && taskId.length > 0)
+  // the standing (latest) review per graded row — chain order, last wins
+  const standing = useMemo(() => {
+    const m = new Map<string, Review>()
+    for (const r of reviews.data?.items ?? []) m.set(r.grade_row_hash, r)
+    return m
+  }, [reviews.data])
 
   const columns = useMemo<Column<GradeRow>[]>(
     () => [
@@ -37,11 +46,28 @@ export function TaskDetailPage() {
       { key: 'latency', header: 'Latency', numeric: true, sortValue: (r) => r.latency_s, cell: (r) => fmtSeconds(r.latency_s) },
       { key: 'prov', header: 'Provenance', cell: (r) => <Provenance apparatus={r.apparatus_version} beltSet={r.belt_set} provenance={r.provenance} />, hideBelowMd: true },
       {
+        key: 'review',
+        header: 'Review',
+        sortValue: (r) => standing.get(r.row_hash)?.verdict ?? '',
+        cell: (r) => {
+          const rev = standing.get(r.row_hash)
+          return rev ? (
+            <button type="button" className="inline-flex" onClick={() => r.evidence_pack_hash && setOpen({ pack: r.evidence_pack_hash, row: r.row_hash })} title={rev.statement} data-testid="row-review">
+              <VerdictPill verdict={rev.verdict} />
+            </button>
+          ) : (
+            <span className="text-xs text-on-surface-muted" data-testid="row-unreviewed">
+              not reviewed
+            </span>
+          )
+        },
+      },
+      {
         key: 'pack',
         header: 'Evidence',
         cell: (r) =>
           r.evidence_pack_hash ? (
-            <button type="button" className="font-mono text-xs text-primary underline-offset-2 hover:underline" onClick={() => setPack(r.evidence_pack_hash)} title={r.evidence_pack_hash}>
+            <button type="button" className="font-mono text-xs text-primary underline-offset-2 hover:underline" onClick={() => setOpen({ pack: r.evidence_pack_hash, row: r.row_hash })} title={r.evidence_pack_hash}>
               {shortId(r.evidence_pack_hash, 10)}
             </button>
           ) : (
@@ -49,7 +75,7 @@ export function TaskDetailPage() {
           ),
       },
     ],
-    [],
+    [standing],
   )
 
   return (
@@ -104,7 +130,7 @@ export function TaskDetailPage() {
           </div>
         )}
       </QueryBoundary>
-      <EvidenceDrawer packHash={pack} onClose={() => setPack(null)} />
+      <EvidenceDrawer packHash={open?.pack ?? null} rowHash={open?.row ?? null} onClose={() => setOpen(null)} />
     </>
   )
 }
