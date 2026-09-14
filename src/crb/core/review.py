@@ -21,6 +21,17 @@ anchor: a retained worktree is *served* against it and never stored twice
 the worktree is gone, or redaction changed them — cannot be written. Only a
 ``not_reviewed`` record (the reviewer looked and could not review) carries no hash.
 
+**Whose pack.** The pack is the REVIEWED ROW's — resolved from the row named by
+``grade_row_hash``, never from the record's own ``evidence_pack_hash`` field. The
+independent review pass (2026-09-14, finding 5) wrote a review of row A carrying
+row B's pack hash and B's diff hash: the store looked the pack up by the record's
+field and accepted it. :func:`check_review_anchor` is the one rule both ledgers
+apply: the record's ``evidence_pack_hash`` must equal the row's; a pack handed in
+by a caller must be *self-certifying* (its ``pack_hash`` recomputes and equals the
+row's); a record with a verdict is never appended without that pack. The JSONL
+ledger cannot look the row up itself, so its ``append`` requires the pack (and
+takes the row when the caller has it); the DB ledger resolves both.
+
 Verdicts and findings
 ---------------------
 ``findings`` is the list of what the reviewer saw, each ``{kind, note, file, line}``
@@ -48,7 +59,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
+from crb.core.evidence import canonical_json, sha256_text, utc_now_iso, verify_pack
 from crb.core.ledger import CELL_FIELDS, GENESIS_HASH, CellKey, GradeRow, LedgerIntegrityError
 from crb.core.redact import redact
 from crb.core.version import APPARATUS_VERSION
@@ -99,7 +110,11 @@ class ReviewRefused(ValueError):
     ``code`` names the rule that failed: ``patch_hash_mismatch`` (the reviewer's hash
     is not the pack's), ``patch_hash_missing`` (a verdict without a hash),
     ``no_diff_in_pack`` (the graded row's pack recorded no diff — there is no patch
-    to attest to), ``row_hash_missing`` (no graded row named).
+    to attest to), ``row_hash_missing`` (no graded row named), ``row_not_found`` (the
+    named row is not in the grade ledger), ``row_mismatch`` (the row handed in is not
+    the one the record names), ``pack_hash_mismatch`` (the record's — or the caller's
+    — pack is not the reviewed row's), ``pack_required`` (a verdict with no pack to
+    anchor it to).
     """
 
     def __init__(self, message: str, *, code: str, expected: Any = None, observed: Any = None):
@@ -113,6 +128,10 @@ REFUSAL_PATCH_HASH_MISMATCH = "patch_hash_mismatch"
 REFUSAL_PATCH_HASH_MISSING = "patch_hash_missing"
 REFUSAL_NO_DIFF_IN_PACK = "no_diff_in_pack"
 REFUSAL_ROW_HASH_MISSING = "row_hash_missing"
+REFUSAL_ROW_NOT_FOUND = "row_not_found"
+REFUSAL_ROW_MISMATCH = "row_mismatch"
+REFUSAL_PACK_MISMATCH = "pack_hash_mismatch"
+REFUSAL_PACK_REQUIRED = "pack_required"
 
 
 def is_sha256(value: str) -> bool:
@@ -327,6 +346,66 @@ def check_patch_anchor(record: ReviewRecord, pack: Mapping[str, Any]) -> None:
         )
 
 
+def pack_is_authentic(pack: Mapping[str, Any], pack_hash: str) -> bool:
+    """``pack`` is the pack ``pack_hash`` names: its ``pack_hash`` recomputes from its
+    own body (:func:`~crb.core.evidence.verify_pack`) and equals ``pack_hash``. A pack
+    is content-addressed, so a caller's copy proves itself or it does not count."""
+    return bool(pack_hash) and pack.get("pack_hash") == pack_hash and verify_pack(pack)
+
+
+def check_review_anchor(
+    record: ReviewRecord,
+    *,
+    pack: Mapping[str, Any] | None,
+    row: GradeRow | None = None,
+) -> None:
+    """THE anchor rule both ledgers apply before chaining a review (module docstring).
+
+    * ``row`` (the reviewed :class:`~crb.core.ledger.GradeRow`, when the caller has
+      it) must be the row the record names, and the record's ``evidence_pack_hash``
+      must be the row's — a record cannot borrow another row's pack.
+    * A record with a verdict needs ``pack``; the pack must be self-certifying for the
+      record's ``evidence_pack_hash`` (:func:`pack_is_authentic`); then the patch
+      anchor (:func:`check_patch_anchor`) must hold.
+    * A ``not_reviewed`` record needs no pack; one handed in must still be the row's.
+    """
+    if row is not None:
+        if row.row_hash != record.grade_row_hash:
+            raise ReviewRefused(
+                "the graded row handed in is not the row the review names",
+                code=REFUSAL_ROW_MISMATCH,
+                expected=record.grade_row_hash,
+                observed=row.row_hash,
+            )
+        if row.evidence_pack_hash != record.evidence_pack_hash:
+            raise ReviewRefused(
+                "the review's evidence_pack_hash is not the reviewed row's — a review is "
+                "anchored to its own row's pack, never another's",
+                code=REFUSAL_PACK_MISMATCH,
+                expected=row.evidence_pack_hash,
+                observed=record.evidence_pack_hash,
+            )
+    if pack is not None and not pack_is_authentic(pack, record.evidence_pack_hash):
+        raise ReviewRefused(
+            "the evidence pack handed in is not the reviewed row's (its hash does not "
+            "recompute to the record's evidence_pack_hash)",
+            code=REFUSAL_PACK_MISMATCH,
+            expected=record.evidence_pack_hash,
+            observed=str(pack.get("pack_hash", "") or ""),
+        )
+    if not record.reviewed:
+        return
+    if pack is None:
+        raise ReviewRefused(
+            "a review with a verdict cannot be appended without the reviewed row's "
+            "evidence pack — there is nothing to anchor it to",
+            code=REFUSAL_PACK_REQUIRED,
+            expected=record.evidence_pack_hash,
+            observed=record.patch_sha256_reviewed,
+        )
+    check_patch_anchor(record, pack)
+
+
 # ---------------------------------------------------------------------------
 # JSONL ledger (append-only, hash-chained)
 # ---------------------------------------------------------------------------
@@ -360,13 +439,22 @@ class JsonlReviewLedger:
         return row_hash
 
     def append(
-        self, record: ReviewRecord, *, pack: Mapping[str, Any] | None = None
+        self,
+        record: ReviewRecord,
+        *,
+        pack: Mapping[str, Any] | None = None,
+        row: GradeRow | None = None,
     ) -> ReviewRecord:
-        """Anchor-check (when the caller has the pack), chain and append. Returns the
-        chained record. A caller that has the pack MUST pass it; the JSONL ledger is
-        the portable reference and cannot look the pack up itself."""
-        if pack is not None:
-            check_patch_anchor(record, pack)
+        """Anchor-check (:func:`check_review_anchor`), chain and append. Returns the
+        chained record.
+
+        The JSONL ledger is the portable reference and cannot look the reviewed row or
+        its pack up itself, so the caller supplies them: ``pack`` is REQUIRED for a
+        record with a verdict (a self-certifying copy of the row's pack — refused
+        otherwise), and ``row`` is checked whenever the caller has it. There is no
+        unchecked path: a verdict without its pack is refused, never chained.
+        """
+        check_review_anchor(record, pack=pack, row=row)
         chained = record.chained(self._last_hash())
         self.path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(chained.to_dict(), sort_keys=True, ensure_ascii=False)
@@ -535,9 +623,13 @@ __all__ = [
     "DEFECT_VERDICTS",
     "FINDING_KINDS",
     "REFUSAL_NO_DIFF_IN_PACK",
+    "REFUSAL_PACK_MISMATCH",
+    "REFUSAL_PACK_REQUIRED",
     "REFUSAL_PATCH_HASH_MISMATCH",
     "REFUSAL_PATCH_HASH_MISSING",
     "REFUSAL_ROW_HASH_MISSING",
+    "REFUSAL_ROW_MISMATCH",
+    "REFUSAL_ROW_NOT_FOUND",
     "REVIEW_SCHEMA",
     "SEVERITY",
     "VERDICTS",
@@ -553,10 +645,12 @@ __all__ = [
     "ReviewRecord",
     "ReviewRefused",
     "check_patch_anchor",
+    "check_review_anchor",
     "derive_verdict",
     "is_sha256",
     "latest_reviews",
     "pack_diff_sha256",
+    "pack_is_authentic",
     "review_cell_stats",
     "verify_review_chain",
 ]

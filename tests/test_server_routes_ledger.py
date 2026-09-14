@@ -250,6 +250,7 @@ class TestImport:
                 "repo": "delta",
                 "row_id": "delta-v4",
                 "belt_set": "v4",
+                "apparatus_version": "2.1",  # the pre-belt-5 apparatus that wrote v4 rows
                 "repo_lint_clean": None,
                 "evidence_pack_hash": "a" * 64,
                 "prev_hash": "",

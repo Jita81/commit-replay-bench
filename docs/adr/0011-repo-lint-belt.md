@@ -1,10 +1,32 @@
 # ADR-0011 — Belt 5: the repository's own formatter/linter (`repo_lint_clean`)
 
 **Status:** Accepted · amended 2026-09-14 (JavaScript / TypeScript: `tsc`, see
-"Amendment — the type checker")
+"Amendment — the type checker"; lint configuration is test infrastructure, see the
+amendment below)
 **Date:** 2026-09-14
 **Apparatus impact:** bumps `APPARATUS_VERSION` to `2.2`; new ledger belt set `v5`; new
 failure kind `lint`; amends ADR-0001 (belt list) and ADR-0002 rule 2 (the hashed body)
+
+**Amendment (2026-09-14, independent AI review pass, finding 2).** Belt 5 read its
+definition of acceptable from the worktree the builder controls: with the parent's
+`[tool.ruff.lint] select = ["E", "F"]` an unused import was `repo_lint_clean=False`;
+writing `select = []` into `pyproject.toml`, or a nested `pkg/ruff.toml` with the same,
+graded `CLEAN` with `repo_lint_clean=True`. The definition is the repository's, never the
+builder's, so **lint configuration is test infrastructure** (belt 1b, `core/test_infra.py`):
+whole-file `ruff.toml` / `.ruff.toml` / `.flake8` / `.pre-commit-config.yaml` (the
+ruff-format evidence), `.eslintrc*` / `eslint.config.*` / `.eslintignore` / `.prettierrc*`
+/ `prettier.config.*` / `.prettierignore`, `.golangci.*`, `rustfmt.toml` / `.rustfmt.toml`
+/ `clippy.toml` / `.clippy.toml`, `*checkstyle*.xml`; section-aware `pyproject.toml
+[tool.ruff*]`, `setup.cfg` / `tox.ini` `[flake8]`, `package.json` `eslintConfig` /
+`prettier` / `scripts.lint`, `Cargo.toml [lints]` / `[workspace.lints]`; spotless and
+checkstyle plugin configuration is `pom.xml <build>`, already covered. Touching any of them
+disqualifies before a test runs — the same rule as `pytest.ini`. `.editorconfig` is in the
+table for JavaScript only: prettier resolves it by default (`indent_size`,
+`max_line_length` change its verdict); ruff, gofmt, cargo fmt and spotless do not read it,
+so for other languages it stays an honest edit. A `# noqa` / `eslint-disable` in the
+source is the repository's own mechanism and is not touched by this amendment. Cost: a
+gold commit that edits its lint configuration alongside code is now gold-dirty at mine
+time (a lost task, fail-closed), exactly as one that edits `pytest.ini` already was.
 
 ## Context
 

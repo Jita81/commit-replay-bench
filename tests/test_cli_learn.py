@@ -18,7 +18,13 @@ import pytest
 from crb.cli.commands import CliError
 from crb.cli.main import main
 from crb.core.learn import CORPUS_HONEST_FILE, CORPUS_REFUSED_FILE
-from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND, GradeRow, JsonlLedger
+from crb.core.ledger import (
+    FAILURE_PROTOCOL,
+    LABEL_FAILURE_KIND,
+    GradeRow,
+    JsonlLedger,
+    expected_belt_sets,
+)
 from crb.core.spec import TaskSpec
 from crb.factory.backlog import Backlog
 
@@ -60,6 +66,8 @@ def _row(**kw: Any) -> GradeRow:
         "apparatus_version": "2.1",
     }
     base.update(kw)
+    # the belt set is what the stamped apparatus recorded (ledger invariant, review finding 4)
+    base.setdefault("belt_set", expected_belt_sets(base["apparatus_version"], "measured")[0])
     return GradeRow(**base)
 
 

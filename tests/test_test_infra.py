@@ -64,6 +64,31 @@ POSITIVE: list[tuple[str, str]] = [
     ("python", "tests/__snapshots__/test_x.ambr"),
     ("javascript", "src/__tests__/__snapshots__/app.test.js.snap"),
     ("go", "pkg/__snapshots__/x"),
+    # belt 5 lint configuration (ADR-0011 amendment; 2026-09-14 independent review pass, finding 2)
+    ("python", "ruff.toml"),
+    ("python", "pkg/ruff.toml"),
+    ("python", ".ruff.toml"),
+    ("python", ".flake8"),
+    ("python", ".pre-commit-config.yaml"),
+    ("javascript", ".eslintrc"),
+    ("javascript", ".eslintrc.json"),
+    ("javascript", "eslint.config.mjs"),
+    ("javascript", ".eslintignore"),
+    ("javascript", ".prettierrc"),
+    ("javascript", ".prettierrc.yaml"),
+    ("javascript", "prettier.config.cjs"),
+    ("javascript", ".prettierignore"),
+    ("javascript", "packages/ui/.editorconfig"),
+    ("go", ".golangci.yml"),
+    ("go", ".golangci.yaml"),
+    ("go", ".golangci.toml"),
+    ("jvm", "src/checkstyle/nohttp-checkstyle.xml"),
+    ("jvm", "src/checkstyle/nohttp-checkstyle-suppressions.xml"),
+    ("jvm", "config/checkstyle.xml"),
+    ("rust", "rustfmt.toml"),
+    ("rust", ".rustfmt.toml"),
+    ("rust", "clippy.toml"),
+    ("rust", "crates/a/.clippy.toml"),
     # python
     ("python", "conftest.py"),
     ("python", "tests/conftest.py"),
@@ -169,8 +194,10 @@ NEGATIVE: list[tuple[str, str]] = [
     ("python", "src/pytest_plugin_thing.py"),
     ("python", "src/_pytest/main.py"),  # the pytest repo itself: src layout is not the root
     ("python", "docs/pytest.rst"),
-    ("python", ".pre-commit-config.yaml"),
     ("python", "src/site.py"),
+    ("python", ".editorconfig"),  # only prettier (JS) reads it — see the JS lint rule
+    ("go", ".editorconfig"),
+    ("rust", ".editorconfig"),
     # javascript
     ("javascript", "src/calc.js"),
     ("javascript", "__tests__/calc.test.js"),
@@ -179,8 +206,6 @@ NEGATIVE: list[tuple[str, str]] = [
     ("javascript", "src/jest.helpers.js"),
     ("javascript", "webpack.config.js"),
     ("javascript", "rollup.config.js"),
-    ("javascript", ".eslintrc.json"),
-    ("javascript", ".prettierrc"),
     ("javascript", "index.d.ts"),
     # go
     ("go", "calc/calc.go"),
@@ -295,8 +320,22 @@ class TestPyprojectToml:
         )
         assert not ti.infra_sections_changed("pyproject.toml", PYPROJECT, after, "python")
 
-    def test_ruff_or_formatting_change_is_honest(self) -> None:
-        after = PYPROJECT.replace("line-length = 100", "line-length = 88") + "\n# trailing\n"
+    def test_comment_or_whitespace_change_is_honest(self) -> None:
+        after = PYPROJECT + "\n# trailing\n"
+        assert not ti.infra_sections_changed("pyproject.toml", PYPROJECT, after, "python")
+
+    def test_ruff_config_change_is_tamper(self) -> None:
+        """2026-09-14 independent review pass, finding 2: ``[tool.ruff.lint] select = []``
+        turned a ``repo_lint_clean=False`` row CLEAN. The whole ``[tool.ruff*]`` tree
+        is belt 5's definition of acceptable (ADR-0011 amendment)."""
+        after = PYPROJECT.replace("line-length = 100", "line-length = 88")
+        assert ti.infra_sections_changed("pyproject.toml", PYPROJECT, after, "python")
+        after = PYPROJECT + "\n[tool.ruff.lint]\nselect = []\n"
+        assert ti.infra_sections_changed("pyproject.toml", PYPROJECT, after, "python")
+        after = PYPROJECT.replace("[tool.ruff]\nline-length = 100\n", "")
+        assert ti.infra_sections_changed("pyproject.toml", PYPROJECT, after, "python")
+        # a [tool.*] table belt 5 never reads is still an honest edit
+        after = PYPROJECT + "\n[tool.hatch.build]\ninclude = ['src']\n"
         assert not ti.infra_sections_changed("pyproject.toml", PYPROJECT, after, "python")
 
     def test_relaxing_filterwarnings_is_tamper(self) -> None:
@@ -372,6 +411,18 @@ class TestSetupCfgAndToxIni:
         after = SETUP_CFG.split("[tool:pytest]")[0] + "[flake8]\nmax-line-length = 100\n"
         assert ti.infra_sections_changed("setup.cfg", SETUP_CFG, after, "python")
 
+    def test_flake8_section_is_lint_config(self) -> None:
+        """ADR-0011 amendment (2026-09-14): ``[flake8]`` is belt 5's definition of
+        acceptable; ``[options]`` is packaging."""
+        after = SETUP_CFG.replace("max-line-length = 100", "max-line-length = 200")
+        assert ti.infra_sections_changed("setup.cfg", SETUP_CFG, after, "python")
+        after = SETUP_CFG.replace("packages = find:", "packages = calc")
+        assert not ti.infra_sections_changed("setup.cfg", SETUP_CFG, after, "python")
+        tox = "[tox]\nenvlist = py312\n\n[flake8]\nmax-line-length = 100\n"
+        assert ti.infra_sections_changed(
+            "tox.ini", tox, tox.replace("max-line-length = 100", "extend-ignore = E501"), "python"
+        )
+
     def test_tox_ini_environments_are_honest_pytest_section_is_not(self) -> None:
         tox = "[tox]\nenvlist = py312\n\n[testenv]\ncommands = pytest\n\n[pytest]\ntestpaths = tests\n"
         assert not ti.infra_sections_changed(
@@ -443,6 +494,21 @@ class TestPackageJson:
         assert not ti.infra_sections_changed(
             "package.json", PACKAGE_JSON, after, "javascript", runner="vitest"
         )
+
+    def test_lint_keys_are_tamper_for_every_runner(self) -> None:
+        """ADR-0011 amendment (2026-09-14): ``eslintConfig``, ``prettier`` and
+        ``scripts.lint`` are belt 5's config; belt 5 is orthogonal to the test runner."""
+        for key in ('"eslintConfig": { "rules": {} }', '"prettier": { "semi": false }'):
+            after = PACKAGE_JSON.replace('"private": true,', f'"private": true, {key},')
+            for runner in ("", "jest", "mocha", "vitest", "node"):
+                assert ti.infra_sections_changed(
+                    "package.json", PACKAGE_JSON, after, "javascript", runner=runner
+                ), (key, runner)
+        after = PACKAGE_JSON.replace('"build": "tsc"', '"build": "tsc", "lint": "standard"')
+        assert ti.infra_sections_changed("package.json", PACKAGE_JSON, after, "javascript")
+        # a script belt 5 never reads is still honest
+        after = PACKAGE_JSON.replace('"build": "tsc"', '"build": "tsc", "docs": "typedoc"')
+        assert not ti.infra_sections_changed("package.json", PACKAGE_JSON, after, "javascript")
 
     def test_unparsable_or_non_object_fails_closed(self) -> None:
         assert ti.infra_sections_changed("package.json", PACKAGE_JSON, "{ oops", "javascript")
@@ -598,6 +664,15 @@ class TestCargoToml:
             CARGO,
             CARGO.replace('insta = "1"', 'insta = "1"\nshim = { path = "shim" }'),
             "rust",
+        )
+
+    def test_lints_table_is_belt_five_config(self) -> None:
+        """ADR-0011 amendment (2026-09-14): clippy reads ``[lints]`` / ``[workspace.lints]``."""
+        assert ti.infra_sections_changed(
+            "Cargo.toml", CARGO, CARGO + '\n[lints.clippy]\nall = "allow"\n', "rust"
+        )
+        assert ti.infra_sections_changed(
+            "Cargo.toml", CARGO, CARGO + '\n[workspace.lints.rust]\nunused = "allow"\n', "rust"
         )
 
     @pytest.mark.parametrize(

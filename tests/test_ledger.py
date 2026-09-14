@@ -38,6 +38,14 @@ def row(**kw: Any) -> lg.GradeRow:
         "gold_clean": True,
     }
     base.update(kw)
+    # a belt set implies the apparatus that recorded it (review finding 4): a test that
+    # names v4 / v3-legacy without a stamp gets the consistent one, never a contradiction
+    if "apparatus_version" not in kw:
+        if base.get("belt_set") == lg.BELT_SET_V4:
+            base["apparatus_version"] = "2.1"
+        elif base.get("belt_set") == lg.BELT_SET_V3_LEGACY:
+            base["apparatus_version"] = "1.0-census"
+            base.setdefault("provenance", "imported:census")
     return lg.GradeRow(**base)
 
 
@@ -109,6 +117,138 @@ def test_v3_legacy_belt_set_ignores_source_changed() -> None:
         row(belt_set=lg.BELT_SET_V3_LEGACY, no_new_failures=False)
     with pytest.raises(ValueError, match="belt_set"):
         row(belt_set="v6")
+
+
+# ---------------------------------------------------------------------------
+# belt_set must agree with the apparatus (independent review pass 2026-09-14, finding 4)
+# ---------------------------------------------------------------------------
+
+
+def test_measured_row_cannot_claim_a_belt_set_older_than_its_apparatus(tmp_path: Path) -> None:
+    """The sign-off's reproduction: a MEASURED 2.2 row claiming ``v3-legacy`` so that
+    ``source_changed=False`` is not a recorded belt — constructed, appended, and
+    ``false_q1_total == 0`` on 842875b. Refused at construction now, so at write and
+    on read alike."""
+    fields: dict[str, Any] = {
+        "repo": "demo",
+        "task_id": "deadbeef",
+        "clean": True,
+        "tests_unmodified": True,
+        "target_green": True,
+        "no_new_failures": True,
+        "source_changed": False,
+        "evidence_pack_hash": "x" * 64,
+        "belt_set": lg.BELT_SET_V3_LEGACY,
+    }
+    with pytest.raises(lg.LedgerIntegrityError, match="belt_set='v3-legacy' is not what"):
+        lg.GradeRow(**fields)
+    with pytest.raises(lg.LedgerIntegrityError):
+        lg.GradeRow(**{**fields, "source_changed": None})  # still measured 2.2
+    with pytest.raises(lg.LedgerIntegrityError):
+        lg.GradeRow.from_dict({**fields, "apparatus_version": "2.2", "provenance": "measured"})
+    # on read: a hand-written ledger line with the contradiction does not verify
+    honest = lg.JsonlLedger(tmp_path / "g.jsonl").append(row())
+    forged = {**honest.to_dict(), "belt_set": "v3-legacy", "source_changed": None}
+    (tmp_path / "forged.jsonl").write_text(json.dumps(forged) + "\n")
+    with pytest.raises(lg.LedgerIntegrityError, match="v3-legacy"):
+        lg.JsonlLedger(tmp_path / "forged.jsonl").verify()
+
+
+@pytest.mark.parametrize(
+    ("apparatus", "provenance", "expected"),
+    [
+        ("1.0-census", "imported:expansion-bench-census-2026-07-08", ("v3-legacy", "v4")),
+        ("1.0-census", "measured", ()),
+        ("2.0", "measured", ("v4",)),
+        ("2.1", "measured", ("v4",)),
+        ("2.1.3", "measured", ("v4",)),
+        ("2.2", "measured", ("v5",)),
+        ("2.10", "measured", ("v5",)),
+        ("3.0", "measured", ("v5",)),
+        ("2.2", "imported:other-crb", ("v5",)),  # a federated import keeps its meaning
+        ("2.0", "imported:other-crb", ("v4",)),
+        ("1.9", "measured", ()),
+        ("v3-legacy", "measured", ()),
+        ("", "measured", ()),
+        ("2.2-rc1", "measured", ()),
+    ],
+)
+def test_expected_belt_sets_table(
+    apparatus: str, provenance: str, expected: tuple[str, ...]
+) -> None:
+    assert lg.expected_belt_sets(apparatus, provenance) == expected
+    assert lg.parse_apparatus_version("2.2") == (2, 2)
+    assert lg.parse_apparatus_version("1.0-census") is None
+    assert frozenset({"1.0-census"}) == lg.LEGACY_APPARATUS_VERSIONS
+
+
+@pytest.mark.parametrize(
+    ("apparatus", "provenance", "belt_set", "ok"),
+    [
+        ("2.2", "measured", "v5", True),
+        ("2.2", "measured", "v4", False),
+        ("2.2", "measured", "v3-legacy", False),
+        ("2.1", "measured", "v4", True),
+        ("2.1", "measured", "v5", False),
+        ("2.0", "measured", "v3-legacy", False),
+        ("1.0-census", "imported:census", "v4", True),
+        ("1.0-census", "imported:census", "v3-legacy", True),
+        ("1.0-census", "imported:census", "v5", False),
+        ("1.0-census", "measured", "v4", False),
+        ("1.0-census", "measured", "v3-legacy", False),
+        ("2.5", "measured", "v4", False),
+    ],
+)
+def test_belt_set_apparatus_coupling_at_construction(
+    apparatus: str, provenance: str, belt_set: str, ok: bool
+) -> None:
+    kw: dict[str, Any] = {
+        "apparatus_version": apparatus,
+        "provenance": provenance,
+        "belt_set": belt_set,
+    }
+    if belt_set == lg.BELT_SET_V3_LEGACY:
+        kw["source_changed"] = None
+    if ok:
+        r = row(**kw)
+        assert r.belt_set == belt_set
+        assert lg.GradeRow.from_dict(r.chained(lg.GENESIS_HASH).to_dict()).belt_set == belt_set
+    else:
+        with pytest.raises(lg.LedgerIntegrityError, match="is not what apparatus"):
+            row(**kw)
+
+
+def test_v3_legacy_row_records_no_belt_four() -> None:
+    with pytest.raises(lg.LedgerIntegrityError, match="records no belt 4"):
+        row(belt_set=lg.BELT_SET_V3_LEGACY, source_changed=True)
+    with pytest.raises(lg.LedgerIntegrityError, match="records no belt 4"):
+        row(belt_set=lg.BELT_SET_V3_LEGACY, source_changed=False, clean=False)
+    assert row(belt_set=lg.BELT_SET_V3_LEGACY, source_changed=None).recorded_belts() == (
+        "tests_unmodified",
+        "target_green",
+        "no_new_failures",
+    )
+
+
+def test_grade_row_from_result_stamps_the_current_apparatus_as_v5() -> None:
+    """The product's own write path is consistent with the coupling by construction."""
+    from crb.core.grade import Belts, GradeResult
+    from crb.core.spec import TaskSpec
+
+    task = TaskSpec(
+        task_id=SHA,
+        repo="r",
+        subject="s",
+        authored="2026-01-01T00:00:00+00:00",
+        test_files=("tests/test_a.py",),
+        src_files=("src/a.py",),
+        target_tests=("tests/test_a.py",),
+        belt_scope=("tests/",),
+    )
+    res = GradeResult(SHA, "r", "sighted", clean=True, belts=Belts(True, True, True, True))
+    r = lg.grade_row_from_result(res, task, pack_hash=PACK)
+    assert (r.belt_set, r.apparatus_version, r.provenance) == ("v5", APPARATUS_VERSION, "measured")
+    assert lg.expected_belt_sets(APPARATUS_VERSION, "measured") == ("v5",)
 
 
 # ---------------------------------------------------------------------------
@@ -343,13 +483,13 @@ def _cell_rows() -> list[lg.GradeRow]:
         row(clean=False, disqualified=True, dq_reason="tamper", tests_unmodified=False),
         row(clean=False, error="sandbox", target_green=None),
         row(clean=True, gold_clean=False),  # judged on a weak oracle: excluded from n
-        row(apparatus_version="1.9"),
+        row(apparatus_version="2.1", belt_set=lg.BELT_SET_V4),  # an older-apparatus row
     ]
 
 
 def test_cell_stats_numbers() -> None:
     s = lg.cell_stats(_cell_rows())
-    # 14 rows: DQ (1) and gold_clean=False (1) are excluded → n=12; clean = 8 + 1 (v1.9) = 9
+    # 14 rows: DQ (1) and gold_clean=False (1) are excluded → n=12; clean = 8 + 1 (v2.1) = 9
     assert s.n == 12
     assert s.clean == 9
     assert s.disqualified == 1
@@ -360,7 +500,7 @@ def test_cell_stats_numbers() -> None:
     assert s.cost_usd_mean == pytest.approx((0.02 * 8 + 0.04) / 9)
     assert s.latency_s_mean == pytest.approx((10.0 * 8 + 20.0) / 9)
     assert s.oracle_strength_mean == pytest.approx((0.9 * 8 + 0.7) / 9)
-    assert s.apparatus_versions == ("1.9", APPARATUS_VERSION)
+    assert s.apparatus_versions == ("2.1", APPARATUS_VERSION)
     d = s.to_dict()
     assert d["process_step"] == "replay" and d["n"] == 12 and d["point"] == round(9 / 12, 4)
     assert d["ci_low"] == round(s.ci.low, 4) and d["oracle_strength_mean"] == round(

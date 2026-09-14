@@ -23,6 +23,16 @@ written before belt 5 existed still verifies byte-for-byte) and is never shown
 as a belt. The invariant applies to the belts the row recorded; the capability
 layer reports each belt set as its own apparatus.
 
+**``belt_set`` must agree with the apparatus** (:func:`expected_belt_sets`): a row
+may claim only the belt set its ``apparatus_version`` could have recorded. A
+measured row stamped ``2.0``/``2.1`` is ``v4``; ``2.2`` and later is ``v5``;
+``v3-legacy`` (and a four-belt ``v4`` stamped ``1.0-census``) exist only for rows
+``provenance="imported:…"`` carrying a census stamp, and a ``v3-legacy`` row
+records no ``source_changed``. Anything else — a measured ``2.2`` row claiming
+``v3-legacy`` to have its ``source_changed=False`` ignored (independent review
+pass 2026-09-14, finding 4) — is a :class:`LedgerIntegrityError` at construction,
+so at write (``append``) and at read (``from_dict`` → ``verify_chain``) alike.
+
 Every non-clean row also says **why** it is not clean, in one word
 (:attr:`GradeRow.failure_kind`, vocabulary :data:`FAILURE_KINDS`), so a rate can
 be split into "the model failed", "the model wrote working but non-conforming
@@ -48,6 +58,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -84,6 +95,44 @@ PROCESS_REPLAY = "replay"
 PROCESS_FACTORY = "factory"
 
 GENESIS_HASH = "0" * 64
+
+#: ``provenance`` prefix of every row that was imported rather than measured here.
+IMPORTED_PROVENANCE_PREFIX = "imported:"
+#: The apparatus stamps a census import carries (``crb.core.legacy.CENSUS_APPARATUS_VERSION``
+#: mirrors this — the core cannot import ``legacy``, which imports this module). Only
+#: rows with one of these may claim ``v3-legacy``, or ``v4`` without a ``2.x`` stamp.
+LEGACY_APPARATUS_VERSIONS: frozenset[str] = frozenset({"1.0-census"})
+#: The first apparatus that recorded belt 4 / belt 5 (ADR-0001 / ADR-0011).
+_FIRST_V4_APPARATUS = (2, 0)
+_FIRST_V5_APPARATUS = (2, 2)
+_APPARATUS_RE = re.compile(r"^(\d+)\.(\d+)(?:\.\d+)?$")
+
+
+def parse_apparatus_version(version: str) -> tuple[int, int] | None:
+    """``"2.2"`` → ``(2, 2)``; ``None`` for a stamp that is not ``major.minor[.patch]``
+    (a census stamp, free text)."""
+    m = _APPARATUS_RE.match(version.strip())
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def expected_belt_sets(apparatus_version: str, provenance: str) -> tuple[str, ...]:
+    """The belt sets a row stamped ``apparatus_version`` under ``provenance`` may
+    claim (empty = no belt set is consistent with that stamp; the row is refused).
+
+    * ``imported:…`` with a census stamp → ``v3-legacy`` or ``v4`` (the census recorded
+      three belts, later four);
+    * any row with a ``2.x`` stamp → ``v4`` for ``2.0``–``2.1``, ``v5`` from ``2.2`` — a
+      federated import keeps its source's meaning;
+    * a measured row with a census stamp, or any unparsable stamp → nothing.
+    """
+    imported = provenance.startswith(IMPORTED_PROVENANCE_PREFIX)
+    if apparatus_version in LEGACY_APPARATUS_VERSIONS:
+        return (BELT_SET_V3_LEGACY, BELT_SET_V4) if imported else ()
+    parsed = parse_apparatus_version(apparatus_version)
+    if parsed is None or parsed < _FIRST_V4_APPARATUS:
+        return ()
+    return (BELT_SET_V5,) if parsed >= _FIRST_V5_APPARATUS else (BELT_SET_V4,)
+
 
 # --- failure kinds -------------------------------------------------------------
 #: A clean row has no failure kind.
@@ -390,6 +439,25 @@ class GradeRow:
         ck = self.labels.get(LABEL_COST_KNOWN)
         if ck is not None and ck not in ("true", "false"):
             raise ValueError(f"cost_known label must be 'true' or 'false', got {ck!r}")
+        self.assert_belt_set_matches_apparatus()
+
+    def assert_belt_set_matches_apparatus(self) -> None:
+        """``belt_set`` is the one the row's apparatus could have recorded (module
+        docstring). Refused with :class:`LedgerIntegrityError` — at construction, so
+        at write and on read alike — never re-interpreted."""
+        allowed = expected_belt_sets(self.apparatus_version, self.provenance)
+        if self.belt_set not in allowed:
+            raise LedgerIntegrityError(
+                f"ledger refuses row {self.task_id[:10]} ({self.repo}): belt_set="
+                f"{self.belt_set!r} is not what apparatus {self.apparatus_version!r} "
+                f"(provenance {self.provenance!r}) records — expected "
+                f"{' or '.join(allowed) if allowed else 'no belt set at all'}"
+            )
+        if self.belt_set == BELT_SET_V3_LEGACY and self.source_changed is not None:
+            raise LedgerIntegrityError(
+                f"ledger refuses row {self.task_id[:10]} ({self.repo}): a v3-legacy row "
+                f"records no belt 4, got source_changed={self.source_changed!r}"
+            )
 
     # --- derived classification --------------------------------------------------
     @property

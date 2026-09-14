@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from crb.core.git import GitRepo
 from crb.core.spec import Language, RepoConfig
-from crb.core.workspace import HARNESS_SYMLINK, DiffStats, Workspace, sha256_bytes
+from crb.core.workspace import (
+    HARNESS_SYMLINK,
+    DiffStats,
+    Workspace,
+    git_blob_oid,
+    sha256_bytes,
+)
 from fixtures import pyrepo as pr
 
 
@@ -326,3 +333,258 @@ def test_parent_text(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
         assert ws.parent_text(pr.SRC) == pr.SRC_INITIAL
         assert ws.parent_text(pr.TEST_SUBTRACT) is None  # only exists at the commit
+
+
+# ---------------------------------------------------------------------------
+# The grader's view is independent of the builder's git (independent review pass,
+# 2026-09-14, finding 1): info/exclude, a moved HEAD, index bits, a forged index —
+# and the honest paths still read the same.
+# ---------------------------------------------------------------------------
+
+
+def _exclude_path(ws: Workspace) -> Path:
+    rel = ws.repo.run(
+        "rev-parse", "--path-format=absolute", "--git-path", "info/exclude", cwd=ws.root
+    ).stdout.strip()
+    return Path(rel)
+
+
+def _others(ws: Workspace) -> list[str]:
+    """git's own (exclude-honouring) view of untracked files — what the old code read."""
+    return ws.repo.run("ls-files", "--others", "--exclude-standard", cwd=ws.root).lines
+
+
+def test_touched_files_ignores_info_exclude_and_the_grader_restores_it(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """Sign-off finding 1(a): appending ``conftest.py`` to the worktree's
+    ``info/exclude`` hid the poison from ``ls-files --exclude-standard``. The exclude
+    file of a linked worktree is the MAIN CLONE's, so the line also hid it from every
+    other worktree of the repo. The tree walk never reads the file; the pre-flight
+    removes the builder's line and reports it."""
+    with Workspace.create(
+        pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws", config=pyrepo.config
+    ) as ws:
+        exclude = _exclude_path(ws)
+        assert exclude == pyrepo.path / ".git" / "info" / "exclude"  # shared, not per-worktree
+        baseline = ws.exclude_baseline
+        assert baseline is not None
+        (ws.root / "conftest.py").write_text("# poison\n")
+        with exclude.open("a", encoding="utf-8") as fh:
+            fh.write("conftest.py\n")
+        assert "conftest.py" not in _others(ws)
+        assert ws.touched_files() == ["conftest.py"]
+        violations = ws.enforce_integrity()
+        assert [v.kind for v in violations] == ["exclude_edited"]
+        assert violations[0].files == (".git/info/exclude",)
+        assert "conftest.py" in violations[0].detail
+        assert violations[0].to_dict()["kind"] == "exclude_edited"
+        assert exclude.read_text(encoding="utf-8").splitlines() == baseline
+        assert ws.enforce_integrity() == []  # restored: nothing left to report
+        assert ws.touched_files() == ["conftest.py"]
+
+
+def test_touched_files_ignores_core_excludesfile(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    """``core.excludesFile`` is git config the builder can reach; the walk never asks."""
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        global_ignore = tmp_path / "global-ignore"
+        global_ignore.write_text("conftest.py\n", encoding="utf-8")
+        pr.git(pyrepo.path, "config", "core.excludesFile", str(global_ignore))
+        (ws.root / "conftest.py").write_text("# poison\n")
+        assert "conftest.py" not in _others(ws)
+        assert ws.touched_files() == ["conftest.py"]
+        assert ws.enforce_integrity() == []
+
+
+def test_a_bound_workspace_leaves_the_exclude_file_alone_but_still_sees_the_file(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The CLI binds a Workspace to an existing worktree (no create-time baseline):
+    the pre-flight cannot know what the file held, so it does not rewrite it — and
+    the grader does not need it to, because the walk never reads it."""
+    created = Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws", config=pyrepo.config)
+    try:
+        exclude = _exclude_path(created)
+        with exclude.open("a", encoding="utf-8") as fh:
+            fh.write("conftest.py\n")
+        (created.root / "conftest.py").write_text("# poison\n")
+        bound = Workspace(pyrepo.repo, created.root, sha=pyrepo.feat_sha, parent=pyrepo.initial_sha)
+        assert bound.exclude_baseline is None
+        assert bound.enforce_integrity() == []
+        assert "conftest.py" in exclude.read_text(encoding="utf-8")
+        assert bound.touched_files() == ["conftest.py"]
+    finally:
+        created.remove()
+
+
+def test_restore_exclude_tolerates_a_concurrent_trials_harness_line(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """Two JS trials of one repo both append ``/node_modules`` to the shared file; the
+    second's line is not the first's builder's doing. Membership is by line, not
+    byte position."""
+    (pyrepo.path / "node_modules" / ".bin").mkdir(parents=True)
+    js_cfg = RepoConfig(
+        name="jsfixture", language=Language.JAVASCRIPT, runner="mocha", test_prefix="tests/"
+    )
+    with (
+        Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "a", config=js_cfg) as a,
+        Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "b", config=js_cfg) as b,
+    ):
+        assert a.exclude_patterns == ["/node_modules"] and b.exclude_patterns == ["/node_modules"]
+        assert _exclude_path(a).read_text(encoding="utf-8").count("/node_modules") == 2
+        assert a.enforce_integrity() == [] and b.enforce_integrity() == []
+        assert a.touched_files() == [] and b.touched_files() == []
+
+
+def test_a_commit_inside_the_worktree_is_an_integrity_violation(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """Sign-off finding 1(b): staging and committing the poison inside the worktree
+    moved HEAD so ``git diff HEAD`` saw nothing. The walk compares against the
+    recorded parent by sha; the pre-flight reports the moved HEAD."""
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        (ws.root / "conftest.py").write_text("# poison\n")
+        pr.git(ws.root, "add", "-f", "conftest.py")
+        pr.git(ws.root, "commit", "-q", "-m", "x")
+        assert ws.repo.run("diff", "--name-only", "HEAD", cwd=ws.root).lines == []
+        assert ws.touched_files() == ["conftest.py"]
+        violations = ws.enforce_integrity()
+        assert [v.kind for v in violations] == ["head_moved"]
+        assert violations[0].files == (".git/HEAD",)
+        assert ws.parent[:10] in violations[0].detail
+
+
+def test_skip_worktree_and_assume_unchanged_are_integrity_violations(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """Sign-off finding 1(c): a tracked file flagged ``--skip-worktree`` or
+    ``--assume-unchanged`` vanished from ``git diff``. The walk hashes the file; the
+    pre-flight names the flagged path."""
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        (ws.root / "pytest.ini").write_text("[pytest]\ntestpaths = nowhere\n", encoding="utf-8")
+        for flag, undo in (
+            ("--skip-worktree", "--no-skip-worktree"),
+            ("--assume-unchanged", "--no-assume-unchanged"),
+        ):
+            ws.repo.run("update-index", flag, "pytest.ini", cwd=ws.root, check=True)
+            assert ws.repo.run("diff", "--name-only", "HEAD", cwd=ws.root).lines == []
+            assert ws.touched_files() == ["pytest.ini"]
+            violations = ws.enforce_integrity()
+            assert [v.kind for v in violations] == ["index_bits"], flag
+            assert violations[0].files == ("pytest.ini",)
+            ws.repo.run("update-index", undo, "pytest.ini", cwd=ws.root, check=True)
+        assert ws.enforce_integrity() == []
+        assert ws.touched_files() == ["pytest.ini"]
+
+
+def test_a_redirected_gitdir_is_an_integrity_violation(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    """The worktree's ``.git`` file is a pointer; pointed at another repository whose
+    HEAD happens to be the parent, git inside the worktree answers for that repo."""
+    other = pr.build(tmp_path / "other")
+    # give the other repo the very same parent commit (a fetch, so the sha is identical
+    # whatever the fixture's commit timestamps were) and check it out there
+    pr.git(other.path, "fetch", "-q", str(pyrepo.path), pyrepo.initial_sha)
+    pr.git(other.path, "checkout", "-q", pyrepo.initial_sha)
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        (ws.root / ".git").write_text(f"gitdir: {other.path / '.git'}\n", encoding="utf-8")
+        assert ws._head() == ws.parent  # HEAD alone would not tell the two apart
+        violations = ws.enforce_integrity()
+        assert [v.kind for v in violations] == ["foreign_gitdir"]
+        assert violations[0].files == (".git",)
+
+
+def test_a_forged_index_cannot_hide_a_tracked_edit(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    """``update-index --cacheinfo`` re-points the index entry at the parent's blob
+    while the file on disk is the poison; the walk hashes the bytes on disk."""
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        oid = ws.repo.run("rev-parse", f"{ws.parent}:pytest.ini", check=True).stdout.strip()
+        (ws.root / "pytest.ini").write_text("[pytest]\ntestpaths = nowhere\n", encoding="utf-8")
+        ws.repo.run("add", "pytest.ini", cwd=ws.root, check=True)
+        ws.repo.run(
+            "update-index", "--cacheinfo", f"100644,{oid},pytest.ini", cwd=ws.root, check=True
+        )
+        assert ws.repo.run("diff", "--name-only", "--cached", "HEAD", cwd=ws.root).lines == []
+        assert ws.touched_files() == ["pytest.ini"]
+
+
+def test_a_self_hiding_gitignore_cannot_hide_itself_or_its_rules(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A new ``.gitignore`` that lists ``.gitignore`` was invisible to the old
+    ``ls-files``-based view, so its other rules were trusted as pre-existing."""
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        pr.write_files(ws, [(".gitignore", ".gitignore\nconftest.py\n"), ("conftest.py", "# x\n")])
+        assert _others(ws) == []
+        assert ws.touched_files() == [".gitignore", "conftest.py"]
+
+
+def test_touched_files_reports_type_changes_and_symlinks(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    """A tracked file replaced by a symlink (to poison elsewhere), a new symlink, and a
+    tracked directory replaced by a symlink are all changes."""
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        (ws.root / "poison.ini").write_text("[pytest]\n", encoding="utf-8")
+        (ws.root / "pytest.ini").unlink()
+        (ws.root / "pytest.ini").symlink_to("poison.ini")
+        (ws.root / "link.py").symlink_to(pr.SRC)
+        assert ws.touched_files() == ["link.py", "poison.ini", "pytest.ini"]
+        (ws.root / "pytest.ini").unlink()
+        ws.restore_from_parent(["pytest.ini"])
+        (ws.root / "link.py").unlink()
+        (ws.root / "poison.ini").unlink()
+        assert ws.touched_files() == []
+        # a tracked directory replaced by a symlink: every file under it is gone
+        shutil.rmtree(ws.root / "tests")
+        (ws.root / "tests").symlink_to("src")
+        assert ws.touched_files() == ["tests", pr.TEST_CALC]
+
+
+def test_touched_files_ignores_the_executable_bit(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        p = ws.root / "pytest.ini"
+        p.chmod(p.stat().st_mode | 0o111)
+        assert ws.touched_files() == []
+
+
+def test_touched_files_prunes_directories_ignored_by_the_parents_rules(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A wholly-untracked directory the parent's ``.gitignore`` hides is not walked
+    (``node_modules``, ``.venv``); a nested new ``.gitignore`` inside a walked
+    directory cannot hide its siblings; a rule the builder wrote into the parent's
+    file is not honoured even though the rest of that file is."""
+    sha = _repo_with_gitignore(pyrepo)
+    with Workspace.create(pyrepo.repo, sha, tmp_path / "ws") as ws:
+        pr.write_files(
+            ws,
+            [
+                ("build/deep/out.txt", "x"),
+                ("build/.gitignore", "*\n"),
+                ("vendor/.gitignore", "lib.py\n"),
+                ("vendor/lib.py", "L = 1\n"),
+            ],
+        )
+        assert ws.touched_files() == ["vendor/.gitignore", "vendor/lib.py"]
+        (ws.root / ".gitignore").write_text("build/\nvendor/\n", encoding="utf-8")
+        assert ws.touched_files() == [".gitignore", "vendor/.gitignore", "vendor/lib.py"]
+        (ws.root / ".gitignore").unlink()  # deleting the parent's rules un-hides build/
+        assert ws.touched_files() == [
+            ".gitignore",
+            "build/.gitignore",
+            "build/deep/out.txt",
+            "vendor/.gitignore",
+            "vendor/lib.py",
+        ]
+
+
+def test_parent_tree_and_blob_oids(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        tree = ws.parent_tree()
+        assert set(tree) == {"pytest.ini", pr.SRC, pr.TEST_CALC}
+        entry = tree["pytest.ini"]
+        assert entry.mode == "100644" and entry.size == len(pr.PYTEST_INI)
+        assert entry.oid == ws.repo.run("rev-parse", f"{ws.parent}:pytest.ini").stdout.strip()
+        assert git_blob_oid(pr.PYTEST_INI.encode()) == entry.oid
+        assert git_blob_oid(b"", algorithm="sha256") == (
+            "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"
+        )

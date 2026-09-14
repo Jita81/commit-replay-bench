@@ -533,15 +533,19 @@ class TestFileGuard:
 
     * any path that is absolute, contains ``..`` after normalisation, or resolves
       (following symlinks) outside the worktree root;
-    * any path with a ``.git`` component (the worktree's ``.git`` file points at
-      the main repository — writing there, or reading its objects, is archaeology);
+    * any path with a ``.git`` component — as written OR once resolved (a symlink
+      ``gitlink -> .git`` reads the main clone's location and, written to, rewrites
+      the worktree's gitdir pointer; independent review pass 2026-09-14, finding 6c).
+      The worktree's ``.git`` file points at the main repository — writing there, or
+      reading its objects, is archaeology;
     * every path in ``protected`` (the task's target test files);
-    * every path the repo config classifies as a test (``RepoConfig.is_test``).
-      In blind mode this is the belt-0 rule (any pre-overlay test touch is a
-      DQ); in sighted mode it is stricter than the grader requires, and kept so
-      because the gold patch never touches a test — a builder never needs to.
+    * every path the repo config classifies as a test (``RepoConfig.is_test``) — the
+      path as written and the path it RESOLVES to (``t2 -> tests``: ``t2/test_x.py``
+      is a test write). In blind mode this is the belt-0 rule (any pre-overlay test
+      touch is a DQ); in sighted mode it is stricter than the grader requires, and
+      kept so because the gold patch never touches a test — a builder never needs to.
 
-    Reads are refused only for traversal and ``.git``.
+    Reads are refused only for traversal and ``.git`` (as written or resolved).
     """
 
     def __init__(
@@ -573,31 +577,56 @@ class TestFileGuard:
             return f"path escapes the worktree: {rel!r}"
         if ".git" in parts:
             return f"'.git' is off limits: {rel!r}"
+        resolved_rel = self.resolved_rel(norm)
+        if resolved_rel is None:
+            return f"path resolves outside the worktree: {rel!r}"
+        if ".git" in resolved_rel.split("/"):
+            return f"'.git' is off limits: {rel!r} resolves to {resolved_rel!r}"
+        return ""
+
+    def resolved_rel(self, norm: str) -> str | None:
+        """``norm`` with every symlink followed, as a worktree-relative POSIX path —
+        ``""`` for the root itself, ``None`` when it resolves outside the worktree (or
+        cannot be resolved)."""
         try:
             resolved = (self.root / norm).resolve()
-        except OSError as e:
-            return f"cannot resolve {rel!r}: {type(e).__name__}"
-        if resolved != self.root and self.root not in resolved.parents:
-            return f"path resolves outside the worktree: {rel!r}"
-        return ""
+        except (OSError, RuntimeError):
+            return None
+        if resolved == self.root:
+            return ""
+        if self.root not in resolved.parents:
+            return None
+        return resolved.relative_to(self.root).as_posix()
 
     def check_read(self, rel: str) -> str:
         return self.check_path(rel)
 
     def is_protected(self, rel: str) -> bool:
+        """Is ``rel`` — as written, or as it resolves through symlinks — a target test
+        file or a test-classified path?"""
         norm = _norm_rel(rel)
-        return norm in self.protected or self.config.is_test(norm)
+        if norm in self.protected or self.config.is_test(norm):
+            return True
+        resolved = self.resolved_rel(norm)
+        if not resolved or resolved == norm:
+            return False
+        return resolved in self.protected or self.config.is_test(resolved)
 
     def check_write(self, rel: str) -> str:
-        """Returns a reason the write is refused, or ``""`` if allowed."""
+        """Returns a reason the write is refused, or ``""`` if allowed. Classified on the
+        path as written AND on what it resolves to (a symlinked directory into the
+        test layout is the test layout)."""
         reason = self.check_path(rel)
         if reason:
             return reason
         norm = _norm_rel(rel)
-        if norm in self.protected:
-            return f"REFUSED: {norm} is a target test file and is immutable"
-        if self.config.is_test(norm):
-            return f"REFUSED: {norm} is a test file — test files may not be edited or added"
+        for candidate in (norm, self.resolved_rel(norm) or norm):
+            if candidate in self.protected:
+                return f"REFUSED: {candidate} is a target test file and is immutable"
+            if self.config.is_test(candidate):
+                return (
+                    f"REFUSED: {candidate} is a test file — test files may not be edited or added"
+                )
         return ""
 
     def resolve_read(self, rel: str) -> Path:
@@ -1029,6 +1058,22 @@ def _heredoc_body_inners(body: str) -> list[str] | None:
     return inners
 
 
+#: Private-use stand-ins for a QUOTED (or backslash-escaped) ``(`` / ``)`` / backtick.
+#: :func:`_hoist_substitutions` emits them so that, after ``shlex`` has stripped the
+#: quotes, a paren token can only ever be an UNQUOTED one — ``grep '('`` was refused as a
+#: "stray sub-shell token" (independent review pass, 2026-09-14, finding 7) because
+#: ``shlex`` returns ``(`` for both ``'('`` and a bare ``(``. Restored by
+#: :func:`_unsentinel` once the token stream has been classified.
+_LITERAL_PUNCT: dict[str, str] = {"(": "", ")": "", "`": ""}
+_LITERAL_PUNCT_BACK: dict[str, str] = {v: k for k, v in _LITERAL_PUNCT.items()}
+_LITERAL_PUNCT_RE = re.compile("[]")
+
+
+def _unsentinel(token: str) -> str:
+    """A token with its quoted-punctuation stand-ins turned back into the characters."""
+    return _LITERAL_PUNCT_RE.sub(lambda m: _LITERAL_PUNCT_BACK[m.group(0)], token)
+
+
 def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
     """Replace every ``$( … )``, backtick and ``( … )`` sub-shell with a numbered
     placeholder ``__SUBST_k__`` and return the inner commands for recursive
@@ -1038,7 +1083,11 @@ def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
     inside double quotes only ``$( … )`` and backticks open a substitution, a bare
     ``(`` is literal (``grep "preRun(ctx"`` is an ordinary search, not a sub-shell);
     a backslash escapes the next character outside single quotes. Treating quoted
-    parentheses as sub-shells refused an honest build on spf13/cobra."""
+    parentheses as sub-shells refused an honest build on spf13/cobra.
+
+    A quoted or escaped ``(`` / ``)`` / backtick is emitted as its :data:`_LITERAL_PUNCT`
+    stand-in (the quotes themselves are kept), so the tokeniser downstream never sees a
+    literal paren as punctuation — a lone ``'('`` argument is text, not a sub-shell."""
     inners: list[str] = []
     out: list[str] = []
     i, n = 0, len(command)
@@ -1048,11 +1097,12 @@ def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
         if quote == "'":
             if ch == "'":
                 quote = ""
-            out.append(ch)
+            out.append(_LITERAL_PUNCT.get(ch, ch))
             i += 1
             continue
         if ch == "\\" and i + 1 < n:
-            out.append(command[i : i + 2])
+            nxt = command[i + 1]
+            out.append(ch + (_LITERAL_PUNCT.get(nxt, nxt) if not quote else nxt))
             i += 2
             continue
         if ch == "'" and not quote:
@@ -1063,6 +1113,10 @@ def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
         if ch == '"':
             quote = "" if quote == '"' else '"'
             out.append(ch)
+            i += 1
+            continue
+        if quote == '"' and ch in "()":
+            out.append(_LITERAL_PUNCT[ch])  # literal inside double quotes
             i += 1
             continue
         if ch == "`":
@@ -1310,6 +1364,66 @@ def _git_dir_arg(args: Sequence[str]) -> str:
     return ""
 
 
+#: Redirection operators whose next word is a FILE the shell opens (``2>&1`` and
+#: ``<<<word`` are not: an fd and a here-string). ``>&`` / ``<&`` take an fd — or, with
+#: a non-numeric word, a file (bash treats ``>&file`` as ``&>file``).
+_FILE_REDIRECTS: frozenset[str] = frozenset({"<", ">", ">>", "<>", ">|", "&>", "&>>", ">>|"})
+_FD_REDIRECTS: frozenset[str] = frozenset({">&", "<&"})
+#: Commands whose positional arguments are paths they WRITE (copy / move / link / tee):
+#: a target that resolves into ``.git`` — through a symlink or not — is off limits.
+_WRITE_PATH_COMMANDS: frozenset[str] = _words("tee cp mv install ln")
+
+
+def _resolves_into_git_dir(target: str, here: Path | None) -> bool:
+    """Does ``target`` name ``.git`` (or a path under one) — literally, or once resolved
+    against ``here`` with symlinks followed (``ln -s .git gitlink; … >> gitlink/info/
+    exclude``)? Without a cwd only the literal form can be judged. The worktree's own
+    ``.git`` is a FILE pointing at the main clone; ``Path.resolve`` (non-strict) keeps
+    the ``.git`` component when a path leads through it, which is what is checked."""
+    if not target or target.startswith(("-", "/dev/")):
+        return False
+    if _is_git_dir_path(target):
+        return True
+    if here is None or target.startswith("~") or _REGEX_META.search(target):
+        return False
+    try:
+        p = Path(target) if target.startswith("/") else here / target
+        resolved = p.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return True  # cannot be resolved safely: fail closed
+    return ".git" in resolved.parts
+
+
+def _redirect_target(target: str, here: Path | None) -> str:
+    """A redirection whose file resolves into ``.git`` is refused — ``echo conftest.py
+    >> .git/info/exclude`` hid a poison file from the grader on the host posture
+    (independent review pass, 2026-09-14, findings 1(a) / 6(a))."""
+    if _resolves_into_git_dir(target, here):
+        return f"archaeology: '.git' is off limits ({target})"
+    return ""
+
+
+def _write_target_arg(args: Sequence[str], here: Path | None) -> str:
+    """``tee`` / ``cp`` / ``mv`` / ``install`` / ``ln`` positional paths and ``dd of=``
+    that resolve into ``.git`` (literal paths are already caught by :func:`_git_dir_arg`;
+    this adds symlink resolution against the cwd and the ``of=`` form)."""
+    exe = Path(args[0]).name if args else ""
+    if exe == "dd":
+        for a in args[1:]:
+            if a.startswith("of=") and _resolves_into_git_dir(a[3:], here):
+                return f"archaeology: '.git' is off limits ({a})"
+        return ""
+    if exe not in _WRITE_PATH_COMMANDS:
+        return ""
+    for i in range(1, len(args)):
+        a = args[i]
+        if a.startswith("-") or args[i - 1] in _PATH_EXCLUDE_OPTS:
+            continue
+        if _resolves_into_git_dir(a, here):
+            return f"archaeology: '.git' is off limits ({a})"
+    return ""
+
+
 def _inline_code(exe: str, args: Sequence[str], stdin: str | None) -> list[str]:
     """The code strings an interpreter invocation would execute: every ``-c``/``-e``
     value (separate or attached) plus a here-document when the script is stdin
@@ -1471,6 +1585,15 @@ class GitArchaeologyGuard:
       passed. Closed by the inline-code scan, the ``GIT_*`` redirect rule and the
       ``parallel`` wrapper; the honest counterparts (``subprocess.run(['git',
       'status'])``, ``open('.gitignore')``) are corpus lines.
+    * 2026-09-14 — the independent review pass: ``echo "a (b" | grep '('`` was
+      refused as a stray sub-shell token (finding 7: the tokeniser strips the quotes;
+      quoted punctuation is now a sentinel through tokenisation), and redirection
+      targets were never inspected (finding 6a: ``>> .git/info/exclude`` hid a
+      poison file from the grader — finding 1a). Every file-opening redirection,
+      ``dd of=`` and tee/cp/mv/install/ln targets are now checked, symlinks followed
+      when a cwd is known; :class:`TestFileGuard` classifies by what a path resolves
+      to (finding 6c). Inline-code string concatenation (``'gi'+'t'``, finding 6b)
+      and script files stay documented gaps: the sealed container is that belt.
     """
 
     def __init__(self, cwd: Path | str | None = None) -> None:
@@ -1518,8 +1641,11 @@ class GitArchaeologyGuard:
         segments: list[list[str]] = [[]]
         piped: list[bool] = [False]
         heredocs: list[int] = [0]
+        redirects: list[list[str]] = [[]]  # file targets of `<` `>` `>>` … per segment
         checked: set[int] = set()
         skip_next = False
+        file_target_next = False
+        fd_target_next = False
         for idx, tok in enumerate(tokens):
             # every substitution is checked wherever it sits — as an argument, a
             # redirection target, an assignment value or an exe name
@@ -1532,12 +1658,19 @@ class GitArchaeologyGuard:
                         return r
             if skip_next:
                 skip_next = False
+                word = _unsentinel(tok)
+                if file_target_next or (fd_target_next and word != "-" and not word.isdigit()):
+                    redirects[-1].append(word)  # a file the shell opens: checked below
+                file_target_next = fd_target_next = False
                 continue
             if tok in _SEPARATORS:
                 segments.append([])
                 piped.append(tok in _PIPES)
                 heredocs.append(0)
+                redirects.append([])
                 continue
+            # a quoted paren is a sentinel by now (finding 7); a bare one here escaped
+            # the hoist and cannot be reasoned about
             if tok in {"(", "`", "$"}:
                 return "archaeology: could not parse the command safely (stray sub-shell token)"
             if tok.startswith("<<") and not tok.startswith("<<<"):
@@ -1545,11 +1678,13 @@ class GitArchaeologyGuard:
                 skip_next = True  # the tag
                 continue
             if tok.startswith(("<", ">")) or tok in {"&>", "&>>"}:
-                skip_next = True  # the redirection target is not a command
+                skip_next = True  # the redirection target is not a command …
+                file_target_next = tok in _FILE_REDIRECTS  # … but it may be a file
+                fd_target_next = tok in _FD_REDIRECTS
                 continue
             if tok.isdigit() and idx + 1 < len(tokens) and tokens[idx + 1].startswith(("<", ">")):
                 continue  # a file descriptor: `2>/dev/null git log` still runs git log
-            segments[-1].append(tok)
+            segments[-1].append(_unsentinel(tok))
         for k, inner in enumerate(inners):  # defensive: a placeholder can never vanish
             if k not in checked:
                 r = self.check_shell(inner, cwd=here, _depth=_depth + 1)
@@ -1560,6 +1695,10 @@ class GitArchaeologyGuard:
             stdin: str | None = None
             for _ in range(heredocs[i]):
                 stdin = next(body_iter, None)
+            for target in redirects[i]:
+                r = _redirect_target(target, here)
+                if r:
+                    return r
             r = self._segment(seg, here, stdin=stdin, piped=piped[i], depth=_depth)
             if r:
                 return r
@@ -1619,7 +1758,7 @@ class GitArchaeologyGuard:
             return f"network: '{exe}' is not allowed (no network access)"
         if exe == "git" or exe.startswith("git-"):
             return self._check_git(args[1:] if exe == "git" else [exe[4:], *args[1:]], here)
-        r = _git_dir_arg(args)
+        r = _git_dir_arg(args) or _write_target_arg(args, here)
         if r:
             return r
         for code in _inline_code(exe, args, stdin):

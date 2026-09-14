@@ -497,3 +497,21 @@ npx jest --testPathPatterns='jsdom' 2>&1 | tail -30
 npx jest component.jsdom.test.mjs code.jsdom.test.mjs 2>&1 | tail -60
 # decided 2026-09-14 by fable-decider from nhsuk-frontend/c11684dd28 (group a27fad976a8bbd34): honest — tsc is in node_modules/.bin and lint:types is the repo's own CI gate
 npx tsc --build 2>&1 | tail -60
+
+# 2026-09-14 independent review pass (finding 7): a quoted or backslash-escaped paren is
+# text, not a sub-shell — `grep '('` was refused as a "stray sub-shell token" because the
+# tokeniser returns `(` for both `'('` and a bare `(`; quoted punctuation is now a sentinel
+echo "a (b" | grep '('
+grep -c ')' src/click/core.py
+find . -name '*.py' \( -path './build' -prune \) -o -print
+printf '%s\n' 'x (y' | wc -l
+echo 'don`t'
+# 2026-09-14 independent review pass (finding 6a): redirection targets are now inspected;
+# these honest ones (a file outside .git, an fd, a here-string, /dev/null) stay honest
+echo x > out.txt
+cat < in.txt
+cmd > /dev/null 2>&1
+echo x 2>&1 | tail -5
+cat <<< "a (b"
+echo x > "out (1).txt"
+cd src && echo x > out.txt

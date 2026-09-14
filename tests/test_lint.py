@@ -724,6 +724,60 @@ def test_python_ruff_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
     ws.remove()
 
 
+@pytest.mark.skipif(_ruff_binary() is None, reason="ruff not available")
+def test_builder_cannot_rewrite_the_linters_configuration(tmp_path: Path) -> None:
+    """Independent review pass (2026-09-14), finding 2: with the parent's
+    ``[tool.ruff.lint] select = ["E", "F"]`` an unused import is ``repo_lint_clean=False``;
+    writing ``select = []`` into ``pyproject.toml``, or a nested ``pkg/ruff.toml`` with
+    ``[lint] select = []``, graded CLEAN with ``repo_lint_clean=True`` on 842875b. Lint
+    configuration is test infrastructure: both now disqualify under belt 1b before any
+    test runs, and an honest ``[project]`` edit still grades clean."""
+    extra = {
+        "pyproject.toml": "[tool.ruff]\nline-length = 88\n[tool.ruff.lint]\nselect = ['E', 'F']\n"
+    }
+    root, feat_sha = pyrepo_min.build(tmp_path, extra=extra)
+    repo = GitRepo(root)
+    config = pyrepo_min.config(runner_opts={"python": sys.executable})
+    task = _mine(repo, config, feat_sha, tmp_path)
+    ugly = "import os\n\n\ndef sub(a: int, b: int) -> int:\n    return a - b\n"
+
+    ws = _trial(repo, config, task, tmp_path / "ugly")
+    ws.overlay_sources(task.src_files)
+    (ws.root / pyrepo_min.SRC_SUB).write_text(ugly)
+    res = _grade(ws, task, config)
+    assert res.clean is False and res.belts.repo_lint_clean is False
+    ws.remove()
+
+    ws = _trial(repo, config, task, tmp_path / "select-empty")
+    ws.overlay_sources(task.src_files)
+    (ws.root / pyrepo_min.SRC_SUB).write_text(ugly)
+    pp = ws.root / "pyproject.toml"
+    pp.write_text(pp.read_text().replace("select = ['E', 'F']", "select = []"))
+    res = _grade(ws, task, config)
+    assert res.disqualified and res.clean is False and res.belts.repo_lint_clean is None
+    assert res.dq_reason == "test infrastructure modified: ['pyproject.toml']"
+    assert res.tamper_files == ("pyproject.toml",) and res.target_run is None
+    ws.remove()
+
+    ws = _trial(repo, config, task, tmp_path / "nested-ruff-toml")
+    ws.overlay_sources(task.src_files)
+    (ws.root / pyrepo_min.SRC_SUB).write_text(ugly)
+    (ws.root / "pkg" / "ruff.toml").write_text("[lint]\nselect = []\n")
+    res = _grade(ws, task, config)
+    assert res.disqualified and res.clean is False
+    assert res.dq_reason == "test infrastructure modified: ['pkg/ruff.toml']"
+    ws.remove()
+
+    ws = _trial(repo, config, task, tmp_path / "honest")
+    ws.overlay_sources(task.src_files)
+    pp = ws.root / "pyproject.toml"
+    pp.write_text(pp.read_text() + '\n[project]\nname = "pkg"\nversion = "0.2.0"\n')
+    res = _grade(ws, task, config)
+    assert res.clean is True and res.belts.repo_lint_clean is True
+    assert "pyproject.toml" in res.changed_files
+    ws.remove()
+
+
 @pytest.mark.toolchain("cargo")
 @pytest.mark.skipif(not langs.has_tool("cargo"), reason="cargo not on PATH")
 def test_rust_missing_rustfmt_component_is_a_harness_error_not_a_verdict(tmp_path: Path) -> None:
