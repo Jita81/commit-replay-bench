@@ -803,7 +803,7 @@ class ClaudeCodeBuilder:
         started = time.monotonic()
         config = brief.repo_config()
         guard = TestFileGuard(workspace.root, config, brief.test_files, mode=brief.mode)
-        stats = StreamStats(GitArchaeologyGuard(), guard)
+        stats = StreamStats(GitArchaeologyGuard(cwd=workspace.root), guard)
         meter = CostMeter(price_for(self.model), model=self.model)
         errors: list[str] = []
 

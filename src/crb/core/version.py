@@ -15,4 +15,8 @@ __version__ = "2.0.0a0"
 #: Semantic version of the grading apparatus. Changing belt semantics, the
 #: size-tier table, the change-class taxonomy or the routing rule MUST bump
 #: this and be recorded in an ADR.
-APPARATUS_VERSION = "2.0"
+#: History: 2.0 (reboot) → 2.1 (2026-09-14, Wave A: belt 1 covers test infrastructure and
+#: every non-target test file [ADR-0001 amendment]; routing gated on the negative-controls
+#: verdict [ADR-0003 amendment]; intent-resolved change class [ARCHITECTURE §7.5];
+#: polyglot controls.v2 [ADR-0010]). Rows stamped 2.0 are never blended with 2.1.
+APPARATUS_VERSION = "2.1"

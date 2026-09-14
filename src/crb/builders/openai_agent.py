@@ -213,7 +213,7 @@ class _Tools:
         self.ws = ws
         self.brief = brief
         self.guard = guard
-        self.git_guard = GitArchaeologyGuard()
+        self.git_guard = GitArchaeologyGuard(cwd=ws.root)
         self.runner = runner
         self.executor = executor
         self.remaining_s = remaining_s
