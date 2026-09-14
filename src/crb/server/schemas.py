@@ -23,8 +23,18 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 from fastapi import Depends, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    Tag,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
+from crb.builders.base import Budget
 from crb.core.capability import TIERS
 from crb.core.git import CloneUrlError, validate_clone_url
 from crb.core.grade import MODES
@@ -73,6 +83,21 @@ BUILDER_CONFIG_SECRET_MARKERS: tuple[str, ...] = (
 )
 BUILDER_CONFIG_MAX_KEYS = 32
 BUILDER_CONFIG_MAX_BYTES = 8192
+
+#: Upper bounds on a request's :class:`RunBudget`. A run is one operator's click; a cap
+#: that would let a single attempt run for a day, or spend four figures, is a typo.
+#: ``max_tokens`` / ``max_cost_usd`` accept ``0`` = "no cap" (the builder's own meaning).
+BUDGET_MAX_TURNS = 1000
+BUDGET_MAX_TOOL_CALLS = 5000
+BUDGET_MAX_TOKENS = 50_000_000
+BUDGET_MAX_COST_USD = 1000.0
+BUDGET_MAX_WALL_CLOCK_S = 24 * 3600
+#: The builder's defaults (``crb.builders.base.Budget``) — what a run gets when the request
+#: names no ``budget``; served so the UI shows the same numbers the worker applies.
+BUDGET_DEFAULTS: dict[str, Any] = Budget().to_dict()
+#: The rung fields a ladder object may carry. Anything else — a builder kwarg, an identity
+#: override, a credential — is refused: a rung IS the recorded identity plus its budget.
+LADDER_RUNG_FIELDS: frozenset[str] = frozenset({"builder", "model", "provider", "budget"})
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +328,112 @@ class RunProgress(BaseModel):
     current_task_id: str | None
 
 
+class RunBudget(BaseModel):
+    """Per-attempt caps (``crb.builders.base.Budget``): turns, tool calls, tokens, dollars,
+    wall clock. Every field is optional — an absent field keeps the next level's value
+    (rung → run → the builder's default), so ``{"max_tool_calls": 50}`` on a rung changes
+    ONE cap and inherits the rest. ``max_tokens`` / ``max_cost_usd`` accept ``0`` = no cap;
+    turns, tool calls and wall clock are always bounded (a loop with no bound is a bug)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_turns: int | None = Field(default=None, ge=1, le=BUDGET_MAX_TURNS)
+    max_tool_calls: int | None = Field(default=None, ge=1, le=BUDGET_MAX_TOOL_CALLS)
+    max_tokens: int | None = Field(default=None, ge=0, le=BUDGET_MAX_TOKENS)
+    max_cost_usd: float | None = Field(default=None, ge=0.0, le=BUDGET_MAX_COST_USD)
+    wall_clock_s: int | None = Field(default=None, ge=1, le=BUDGET_MAX_WALL_CLOCK_S)
+
+    def overrides(self) -> dict[str, Any]:
+        """Only the fields the request set — what is stored and what overrides."""
+        return {k: v for k, v in self.__dict__.items() if v is not None}
+
+    @model_serializer
+    def _serialize(self) -> dict[str, Any]:
+        """Serialised as :meth:`overrides` — a response echoes what was declared, not a
+        ``null`` for every cap the rung inherits."""
+        return self.overrides()
+
+
+class LadderRung(BaseModel):
+    """An object rung of a ladder: ``{builder, model, provider?, budget?}``. The identity
+    (``builder:model[:provider]``) is what the ledger row will name; ``budget`` overrides
+    the run's ``budget`` for THIS rung only. Nothing else is accepted on a rung — builder
+    kwargs go in ``builder_config`` (every rung), identity is the rung itself, and a
+    credential is never a request field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    builder: str = Field(min_length=1, max_length=64)
+    model: str = Field(min_length=1, max_length=128)
+    provider: str = Field(default="", max_length=64)
+    budget: RunBudget | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_foreign_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for key in data:
+                k = str(key)
+                if k in LADDER_RUNG_FIELDS:
+                    continue
+                if any(marker in k for marker in BUILDER_CONFIG_SECRET_MARKERS):
+                    raise ValueError(
+                        f"a ladder rung must not carry credentials ({k!r}); "
+                        "provider keys come from the worker's environment"
+                    )
+                if k in BUILDER_CONFIG_IDENTITY_KEYS or k == "config":
+                    raise ValueError(
+                        f"a ladder rung must not set {k!r}: the rung's builder/model/provider "
+                        "IS the recorded identity; builder kwargs go in builder_config"
+                    )
+                raise ValueError(
+                    f"unknown rung field {k!r} (a rung is {{builder, model, provider?, budget?}})"
+                )
+        return data
+
+    @field_validator("builder")
+    @classmethod
+    def _builder_name(cls, v: str) -> str:
+        if not _KWARG_RE.match(v):
+            raise ValueError(f"rung builder {v!r} is not a builder name (lowercase identifier)")
+        return v
+
+    @field_validator("model", "provider")
+    @classmethod
+    def _identity_chars(cls, v: str) -> str:
+        if v and not _LADDER_RE.match(v):
+            raise ValueError(f"rung identity {v!r} must match {_LADDER_RE.pattern}")
+        return v
+
+    def stored(self) -> dict[str, Any]:
+        """The shape ``ladder_json`` keeps: identity + only the budget fields that were set."""
+        d: dict[str, Any] = {"builder": self.builder, "model": self.model}
+        if self.provider:
+            d["provider"] = self.provider
+        if self.budget is not None and self.budget.overrides():
+            d["budget"] = self.budget.overrides()
+        return d
+
+    @model_serializer
+    def _serialize(self) -> dict[str, Any]:
+        """Serialised as :meth:`stored`, so ``GET /runs/{id}.ladder`` is ``ladder_json``."""
+        return self.stored()
+
+
+def _ladder_entry_kind(value: Any) -> str:
+    """Route a ladder entry to ONE branch by shape, so a malformed object rung reports the
+    rung's own error (``a ladder rung must not carry credentials …``) instead of pydantic's
+    "not a string / not a rung" pair."""
+    return "rung" if isinstance(value, dict | LadderRung) else "label"
+
+
+#: A ladder entry: a rung label (``r1``, ``builder:model[:provider]``) or an object rung.
+LadderEntry = Annotated[
+    Annotated[str, Tag("label")] | Annotated[LadderRung, Tag("rung")],
+    Discriminator(_ladder_entry_kind),
+]
+
+
 class RunOut(BaseModel):
     id: str
     repo: str
@@ -312,7 +443,10 @@ class RunOut(BaseModel):
     builder: str
     model: str
     provider: str
-    ladder: list[str]
+    #: What was declared: rung labels and/or object rungs, as sent (``ladder_json``).
+    ladder: list[LadderEntry]
+    #: Run-level budget overrides (``params.budget``; ``{}`` when the defaults apply).
+    budget: dict[str, Any]
     executor: str
     timeout: int
     pool: str
@@ -353,7 +487,16 @@ class RunCreateRequest(BaseModel):
     builder: str = Field(default="", max_length=64)
     model: str = Field(default="", max_length=128)
     provider: str = Field(default="", max_length=64)
-    ladder: list[str] = Field(default_factory=list, max_length=16)
+    #: The escalation ladder — one attempt per rung until an attempt grades clean. Each
+    #: entry is a rung LABEL (``r1`` = the run's own builder:model, or
+    #: ``builder:model[:provider]``) or a rung OBJECT ``{builder, model, provider?, budget?}``
+    #: whose ``budget`` overrides the run's for that rung. The same model at an escalating
+    #: budget (25 → 50 → 100 tool calls) is a ladder; so is a cheap model then a strong one.
+    ladder: list[LadderEntry] = Field(default_factory=list, max_length=16)
+    #: Run-level per-attempt caps. Absent fields keep the builder's defaults
+    #: (:data:`BUDGET_DEFAULTS`); a rung's own ``budget`` overrides these for that rung.
+    #: Stored as ``params.budget`` (only the fields set) and stamped into the apparatus.
+    budget: RunBudget | None = None
     task_ids: list[str] = Field(default_factory=list, max_length=5000)
     limit: int | None = Field(default=None, ge=1)
     pool: str = ""
@@ -411,18 +554,31 @@ class RunCreateRequest(BaseModel):
 
     @field_validator("ladder")
     @classmethod
-    def _ladder_labels(cls, v: list[str]) -> list[str]:
+    def _ladder_rungs(cls, v: list[LadderEntry]) -> list[LadderEntry]:
+        """Labels must be well-formed and unique; object rungs must not repeat exactly
+        (the same identity at DIFFERENT budgets is the point of a budget ladder; the
+        same identity at the same budget twice is a repeated label by another name)."""
         seen: set[str] = set()
-        for label in v:
-            if not _LADDER_RE.match(label):
+        for entry in v:
+            if isinstance(entry, LadderRung):
+                key = json.dumps(entry.stored(), sort_keys=True)
+                if key in seen:
+                    raise ValueError(f"ladder rung {entry.stored()} repeated")
+                seen.add(key)
+                continue
+            if not _LADDER_RE.match(entry):
                 raise ValueError(
-                    f"ladder label {label!r} must match {_LADDER_RE.pattern} "
+                    f"ladder label {entry!r} must match {_LADDER_RE.pattern} "
                     "(a rung label like 'r1' or 'builder:model[:provider]')"
                 )
-            if label in seen:
-                raise ValueError(f"ladder label {label!r} repeated")
-            seen.add(label)
+            if entry in seen:
+                raise ValueError(f"ladder label {entry!r} repeated")
+            seen.add(entry)
         return v
+
+    def stored_ladder(self) -> list[Any]:
+        """``ladder_json``: labels as written, object rungs as :meth:`LadderRung.stored`."""
+        return [e.stored() if isinstance(e, LadderRung) else e for e in self.ladder]
 
     @field_validator("task_ids")
     @classmethod
@@ -455,9 +611,17 @@ class RunCreateRequest(BaseModel):
                 raise ValueError("kind 'blind' implies mode 'blind'")
         elif self.mode is None:
             self.mode = "sighted"
-        if self.kind in BUILD_KINDS and not self.builder:
-            raise ValueError(f"kind {self.kind!r} needs a builder")
+        if self.kind in BUILD_KINDS and not self.builder and not self.object_rungs_only:
+            raise ValueError(
+                f"kind {self.kind!r} needs a builder (or a ladder of object rungs "
+                "{builder, model, …}, whose first rung names the run's builder)"
+            )
         return self
+
+    @property
+    def object_rungs_only(self) -> bool:
+        """Every ladder entry is an object rung — the ladder carries the identity itself."""
+        return bool(self.ladder) and all(isinstance(e, LadderRung) for e in self.ladder)
 
 
 class Belts(BaseModel):
@@ -491,6 +655,12 @@ class RunTaskRow(BaseModel):
     latency_s: float
     pack_hashes: list[str]
     row_ids: list[str]
+    #: The decisive attempt's budget tier (``labels.budget_tier``, e.g. ``25/25/900`` =
+    #: tool calls / turns / wall-clock seconds); ``""`` on rows written before the label.
+    budget_tier: str = ""
+    #: One tier per attempt, aligned with ``row_ids`` — how far up the budget ladder the
+    #: task went. A blind rate quoted without its tier is not a claim.
+    budget_tiers: list[str] = Field(default_factory=list)
 
 
 class StepEventOut(BaseModel):
@@ -930,12 +1100,19 @@ class OracleReportOut(BaseModel):
 
 
 __all__ = [
+    "BUDGET_DEFAULTS",
+    "BUDGET_MAX_COST_USD",
+    "BUDGET_MAX_TOKENS",
+    "BUDGET_MAX_TOOL_CALLS",
+    "BUDGET_MAX_TURNS",
+    "BUDGET_MAX_WALL_CLOCK_S",
     "BUILDER_CONFIG_IDENTITY_KEYS",
     "BUILDER_CONFIG_MAX_BYTES",
     "BUILDER_CONFIG_MAX_KEYS",
     "BUILDER_CONFIG_SECRET_MARKERS",
     "BUILD_KINDS",
     "EXECUTORS",
+    "LADDER_RUNG_FIELDS",
     "PAGE_DEFAULT",
     "PAGE_MAX",
     "RUN_KINDS",
@@ -952,6 +1129,8 @@ __all__ = [
     "ForecastMixItem",
     "ForecastReadinessOut",
     "GradeRowOut",
+    "LadderEntry",
+    "LadderRung",
     "LedgerImportOut",
     "LedgerVerifyOut",
     "OracleCellOut",
@@ -973,6 +1152,7 @@ __all__ = [
     "RouteDecisionOut",
     "RoutesResponse",
     "RoutingPolicyOut",
+    "RunBudget",
     "RunCounts",
     "RunCreateRequest",
     "RunOut",

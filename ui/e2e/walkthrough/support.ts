@@ -227,7 +227,19 @@ export interface StartRunOptions {
   builder?: string
   model?: string
   builderConfig?: Record<string, unknown>
+  /** Click the dialog's "Blind budget sweep 25 → 50 → 100 tool calls" preset (replaces the ladder with three object rungs). */
+  blindSweep?: boolean
+  /** Run-level caps typed into the Budget section (blank fields keep the builder's defaults). */
+  budget?: Partial<Record<'max_turns' | 'max_tool_calls' | 'max_tokens' | 'max_cost_usd' | 'wall_clock_s', number>>
 }
+
+const BUDGET_FIELD_LABELS = {
+  max_turns: 'Max turns',
+  max_tool_calls: 'Max tool calls',
+  max_tokens: 'Max tokens',
+  max_cost_usd: 'Max cost (USD)',
+  wall_clock_s: 'Wall clock (s)',
+} as const
 
 /**
  * Open the repo page, click "Start a run", fill the dialog and queue it. Resolves
@@ -243,6 +255,10 @@ export async function startRun(page: Page, repo: string, opts: StartRunOptions):
     await field(dialog, 'Builder').fill(opts.builder ?? '')
     if (opts.model) await field(dialog, 'Model').fill(opts.model)
     if (opts.builderConfig) await field(dialog, 'Builder config (JSON, optional)').fill(JSON.stringify(opts.builderConfig, null, 2))
+    for (const [key, value] of Object.entries(opts.budget ?? {})) {
+      if (value !== undefined) await dialog.getByTestId('run-budget').getByLabel(BUDGET_FIELD_LABELS[key as keyof typeof BUDGET_FIELD_LABELS]).fill(String(value))
+    }
+    if (opts.blindSweep) await dialog.getByRole('button', { name: 'Blind budget sweep 25 → 50 → 100 tool calls' }).click()
   }
   if (opts.limit !== undefined) await field(dialog, 'Task limit').fill(String(opts.limit))
   await dialog.getByRole('button', { name: 'Queue run' }).click()

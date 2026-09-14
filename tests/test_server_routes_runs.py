@@ -13,12 +13,24 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
+from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
+from crb.core.ledger import GradeRow, grade_row_from_result
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.app import API_PREFIX
 from crb.server.routes import runs as runs_mod
 from crb.server.routes.runs import event_stream, event_to_model
+from crb.store.ledger import DbLedger
 from crb.store.models import Run
-from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_env, task_id
+from fixtures.server_seed import (
+    ALPHA,
+    Env,
+    assert_rbac,
+    envelope,
+    login,
+    make_env,
+    task_id,
+)
+from fixtures.server_seed import _result as seed_result
 
 
 @pytest.fixture(autouse=True)
@@ -320,6 +332,240 @@ class TestCreate:
         r = env.post(f"/runs/{seen[0].id}/cancel")
         assert r.status_code == 200 and r.json()["cancel_requested"] is True
         assert env.get("/runs?limit=2").json()["total"] == 9
+
+
+# --- budget + object rungs (C8) ------------------------------------------------------------
+
+
+SONNET = {"builder": "claude_code", "model": "claude-sonnet-5"}
+SWEEP = [
+    {**SONNET, "budget": {"max_tool_calls": 25}},
+    {**SONNET, "budget": {"max_tool_calls": 50}},
+    {**SONNET, "budget": {"max_tool_calls": 100}},
+]
+
+
+class TestBudgetLadder:
+    """``POST /runs`` carries a run-level ``budget`` (forwarded as ``params.budget``, only
+    the fields set) and a ``ladder`` whose entries may be OBJECT rungs
+    ``{builder, model, provider?, budget?}`` (stored in ``ladder_json`` as sent, echoed on
+    the run). The worker applies rung > run > default per field; the schema's job is to
+    bound every cap, refuse anything on a rung that is not identity + budget, and keep a
+    mixed string/object ladder well-formed."""
+
+    def test_budget_forwarded_only_as_set_and_echoed(self, env: Env, jobs: FakeJobs) -> None:
+        login(env.client, "operator")
+        r = env.post(
+            "/runs",
+            json={
+                "repo": ALPHA,
+                "kind": "blind",
+                **SONNET,
+                "budget": {"max_tool_calls": 50, "wall_clock_s": 1800},
+            },
+        )
+        assert r.status_code == 201, r.text
+        run = jobs.enqueued[-1]
+        assert run.params_json["budget"] == {"max_tool_calls": 50, "wall_clock_s": 1800}
+        assert run.ladder_json == ["r1"]
+        out = r.json()
+        assert out["budget"] == {"max_tool_calls": 50, "wall_clock_s": 1800}
+        assert out["ladder"] == ["r1"] and out["mode"] == "blind"
+        # a budget with nothing set is not stored (the worker applies the defaults)
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", **SONNET, "budget": {}})
+        assert r.status_code == 201 and "budget" not in jobs.enqueued[-1].params_json
+        assert r.json()["budget"] == {}
+
+    def test_object_rungs_stored_as_sent_and_echoed(self, env: Env, jobs: FakeJobs) -> None:
+        """The blind budget sweep: one model, 25 → 50 → 100 tool calls, one attempt per
+        rung until clean. ``ladder_json`` is the declaration; the response echoes it."""
+        login(env.client, "operator")
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", **SONNET, "ladder": SWEEP})
+        assert r.status_code == 201, r.text
+        run = jobs.enqueued[-1]
+        assert run.ladder_json == SWEEP
+        assert run.builder == "claude_code" and run.model == "claude-sonnet-5"
+        assert r.json()["ladder"] == SWEEP  # echoed as declared: no null for an inherited cap
+        assert env.get(f"/runs/{run.id}").json()["ladder"] == r.json()["ladder"]
+        listed = env.get("/runs?kind=blind").json()["items"]
+        assert any(x["id"] == run.id and x["ladder"] == r.json()["ladder"] for x in listed)
+
+    def test_mixed_string_and_object_ladder(self, env: Env, jobs: FakeJobs) -> None:
+        login(env.client, "operator")
+        ladder = [
+            "r1",
+            {**SONNET, "budget": {"max_tool_calls": 50}},
+            "claude_code:claude-opus-5:anthropic",
+            {"builder": "claude_code", "model": "claude-opus-5", "provider": "anthropic"},
+        ]
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", **SONNET, "ladder": ladder})
+        assert r.status_code == 201, r.text
+        assert jobs.enqueued[-1].ladder_json == ladder
+        assert [e if isinstance(e, str) else e["model"] for e in r.json()["ladder"]] == [
+            "r1",
+            "claude-sonnet-5",
+            "claude_code:claude-opus-5:anthropic",
+            "claude-opus-5",
+        ]
+
+    def test_object_rungs_only_fill_the_runs_builder_from_the_first_rung(
+        self, env: Env, jobs: FakeJobs
+    ) -> None:
+        """No run-level ``builder`` is needed when every entry is an object rung: the
+        first rung names what climbs first (each ledger row names its own rung)."""
+        login(env.client, "operator")
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", "ladder": SWEEP})
+        assert r.status_code == 201, r.text
+        run = jobs.enqueued[-1]
+        assert (run.builder, run.model, run.provider) == ("claude_code", "claude-sonnet-5", "")
+        r = env.post(
+            "/runs",
+            json={
+                "repo": ALPHA,
+                "kind": "replay",
+                "ladder": [
+                    {"builder": "editblock", "model": "gpt-oss-120b", "provider": "cerebras"}
+                ],
+            },
+        )
+        assert r.status_code == 201, r.text
+        assert (jobs.enqueued[-1].builder, jobs.enqueued[-1].provider) == ("editblock", "cerebras")
+        # a bare label still needs the run's builder — the worker would have nothing to resolve
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", "ladder": ["r1", SWEEP[0]]})
+        assert r.status_code == 422 and "needs a builder" in r.text
+
+    @pytest.mark.parametrize(
+        ("field", "value", "why"),
+        [
+            ("max_turns", 0, "greater than or equal to 1"),
+            ("max_turns", 1001, "less than or equal to 1000"),
+            ("max_tool_calls", 0, "greater than or equal to 1"),
+            ("max_tool_calls", 5001, "less than or equal to 5000"),
+            ("max_tokens", -1, "greater than or equal to 0"),
+            ("max_tokens", 50_000_001, "less than or equal to 50000000"),
+            ("max_cost_usd", -0.01, "greater than or equal to 0"),
+            ("max_cost_usd", 1000.5, "less than or equal to 1000"),
+            ("wall_clock_s", 0, "greater than or equal to 1"),
+            ("wall_clock_s", 24 * 3600 + 1, "less than or equal to 86400"),
+            ("max_cost", 1, "Extra inputs are not permitted"),
+            ("max_turns", "many", "valid integer"),
+        ],
+    )
+    def test_budget_bounds_422(
+        self, env: Env, jobs: FakeJobs, field: str, value: Any, why: str
+    ) -> None:
+        """Every cap is bounded at the request — on the run and on a rung alike."""
+        for body in (
+            {"repo": ALPHA, "kind": "blind", **SONNET, "budget": {field: value}},
+            {
+                "repo": ALPHA,
+                "kind": "blind",
+                **SONNET,
+                "ladder": [{**SONNET, "budget": {field: value}}],
+            },
+        ):
+            r = env.post("/runs", json=body)
+            assert r.status_code == 422, r.text
+            env_ = envelope(r)
+            assert env_["code"] == "validation_error"
+            assert any(why in e["msg"] for e in env_["detail"]["errors"]), env_
+        assert jobs.enqueued == []
+
+    @pytest.mark.parametrize(
+        ("rung", "why"),
+        [
+            ({**SONNET, "api_key": "sk-x"}, "must not carry credentials"),
+            ({**SONNET, "anthropic_token": "t"}, "must not carry credentials"),
+            ({**SONNET, "name": "other"}, "must not set 'name'"),
+            ({**SONNET, "config": {"effort": "high"}}, "must not set 'config'"),
+            ({**SONNET, "effort": "high"}, "unknown rung field 'effort'"),
+            ({"model": "claude-sonnet-5"}, "Field required"),
+            ({"builder": "claude_code"}, "Field required"),
+            ({"builder": "Claude Code", "model": "m"}, "not a builder name"),
+            ({"builder": "claude_code", "model": "has space"}, "must match"),
+            ({"builder": "claude_code", "model": "m", "provider": "bad provider"}, "must match"),
+            ({**SONNET, "budget": "lots"}, "valid dictionary"),
+        ],
+    )
+    def test_rung_shape_422(self, env: Env, jobs: FakeJobs, rung: dict[str, Any], why: str) -> None:
+        """A rung is identity + budget and nothing else: identity overrides and credentials
+        are refused like ``builder_config``; the error names the rung's own reason."""
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", **SONNET, "ladder": [rung]})
+        assert r.status_code == 422, r.text
+        errors = envelope(r)["detail"]["errors"]
+        assert any(why in e["msg"] for e in errors), errors
+        assert jobs.enqueued == []
+
+    def test_repeated_object_rung_422_but_a_different_budget_is_a_ladder(
+        self, env: Env, jobs: FakeJobs
+    ) -> None:
+        login(env.client, "operator")
+        twice = [SWEEP[0], SWEEP[0]]
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", **SONNET, "ladder": twice})
+        assert r.status_code == 422 and "repeated" in r.text
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", **SONNET, "ladder": SWEEP[:2]})
+        assert r.status_code == 201, r.text
+        r = env.post(
+            "/runs",
+            json={"repo": ALPHA, "kind": "blind", **SONNET, "ladder": [SWEEP[0]] * 17},
+        )
+        assert r.status_code == 422  # max 16 rungs, objects included
+
+    def test_task_rows_carry_the_budget_tier(self, env: Env) -> None:
+        """``/runs/{id}/tasks`` surfaces ``labels.budget_tier`` per attempt (and the
+        decisive attempt's) so a blind rate is read next to the budget it ran under. The
+        seed's rows predate the label (``""``); a budget-sweep run is appended here through
+        ``DbLedger`` (pack first, rows chained — ``grades`` is append-only, so nothing can be
+        stamped after the fact). The worker's own stamping is proved in
+        ``test_worker_budget_ladder``."""
+        ok = env.info.run_ids["succeeded"]
+        before = {t["task_id"]: t for t in env.get(f"/runs/{ok}/tasks").json()["items"]}
+        assert before[task_id(3)]["budget_tier"] == "" and before[task_id(3)]["budget_tiers"] == [
+            "",
+            "",
+        ]
+        run_id = "c8sweep0" * 4
+        task = env.info.tasks[2]
+        with env.factory() as s:
+            s.add(Run(id=run_id, repo=ALPHA, kind="blind", mode="blind", status="succeeded"))
+            s.commit()
+        ledger = DbLedger(env.factory)
+        rows: list[GradeRow] = []
+        for i, clean in enumerate((False, False, True)):
+            trial = f"r{i + 1}"
+            result = seed_result(task, clean=clean)
+            pack = EvidencePack(
+                task=task,
+                grade=result,
+                apparatus=ApparatusStamp(runner="pytest", executor={"kind": "local"}),
+                builder=BuilderRef(name="claude_code", model="claude-sonnet-5", mode="blind"),
+                run_id=run_id,
+                trial=trial,
+            )
+            ledger.store_pack(pack)
+            rows.append(
+                grade_row_from_result(
+                    result,
+                    task,
+                    pack_hash=pack.pack_hash,
+                    builder=pack.builder,
+                    run_id=run_id,
+                    trial=trial,
+                    labels={"budget_tier": f"{25 * 2**i}/25/900", "rung_index": str(i)},
+                )
+            )
+        ledger.append_many(rows)
+        (t3,) = env.get(f"/runs/{run_id}/tasks").json()["items"]
+        assert t3["task_id"] == task.task_id and t3["trials"] == 3 and t3["clean"] is True
+        assert t3["budget_tiers"] == ["25/25/900", "50/25/900", "100/25/900"]
+        assert t3["budget_tier"] == "100/25/900"  # the decisive (clean) attempt: r3
+        # the label is part of every served row too
+        served = env.get(f"/grades?repo={ALPHA}&run_id={run_id}").json()["items"]
+        assert sorted(g["labels"]["budget_tier"] for g in served) == [
+            "100/25/900",
+            "25/25/900",
+            "50/25/900",
+        ]
 
 
 # --- cancel ---------------------------------------------------------------------------

@@ -56,6 +56,13 @@ Honesty properties
 * **Builder config is recorded.** ``params.builder_config`` (from ``POST /runs``)
   is passed to every builder as constructor overrides AND stamped into the run's
   apparatus (``extra.builder_config``) so a row's method can be read back.
+* **The budget is a measured variable, not a fixed cap.** A ladder entry may be an
+  object rung ``{builder, model, provider?, budget?}``; its budget overrides the
+  run's ``params.budget``, which overrides the builder's defaults (rung > run >
+  default, per field). Every ledger row is stamped ``labels.budget_tier``
+  (``<max_tool_calls>/<max_turns>/<wall_clock_s>``, see :func:`budget_tier`) and
+  ``labels.rung_index`` so a sweep over budgets can be split after the fact — a
+  blind rate quoted without its budget tier is not a claim.
 """
 
 from __future__ import annotations
@@ -77,10 +84,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from crb.builders.adapter import (
     as_run_ledger,
     build_fn_for,
-    ladder_from_spec,
     ladder_labels,
+    parse_rung_label,
 )
-from crb.builders.base import Budget, EscalationLadder
+from crb.builders.base import Budget, EscalationLadder, Rung
+from crb.builders.budget import budget_for_rung
 from crb.builders.labeller import make_labeller
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
 from crb.core.execution import DockerSettings, Executor, SandboxUnavailable, make_executor
@@ -165,6 +173,46 @@ _STAGE_FOR_PREFIX: dict[str, str] = {
 def stage_for(action: str) -> str:
     """``grade.belt`` → ``grade``; unknown prefixes land in ``system``."""
     return _STAGE_FOR_PREFIX.get(action.split(".", 1)[0], "system")
+
+
+#: Row labels the worker stamps per rung (``_RunLedger``). Hashed like every label.
+LABEL_BUDGET_TIER = "budget_tier"
+LABEL_RUNG_INDEX = "rung_index"
+
+
+def budget_tier(budget: Budget) -> str:
+    """The compact canonical tier of a budget: ``<max_tool_calls>/<max_turns>/<wall_clock_s>``
+    (``25/25/900`` is the builder default). When a token or dollar cap is ALSO engaged it
+    is appended (``…/tok=<n>`` / ``…/usd=<x>``) — two attempts that differ only in a cost
+    cap were not the same experiment, and the label must not say they were."""
+    tier = f"{budget.max_tool_calls}/{budget.max_turns}/{budget.wall_clock_s}"
+    if budget.max_tokens:
+        tier += f"/tok={budget.max_tokens}"
+    if budget.max_cost_usd:
+        tier += f"/usd={budget.max_cost_usd:g}"
+    return tier
+
+
+def rung_from_object(entry: Mapping[str, Any], *, default_provider: str = "") -> Rung:
+    """An object rung ``{builder, model, provider?, budget?}`` → :class:`Rung` whose
+    ``config`` carries ONLY the budget fields the rung set. ``builder_for_rung`` strips
+    those before constructing the builder and :func:`budget_for_rung` overlays them on the
+    run's budget — so a rung's budget overrides the run's, field by field, and nothing else
+    on the rung reaches a builder constructor (the API refuses other keys; the worker
+    refuses them again here because ``ladder_json`` is a stored document, not a request)."""
+    unknown = set(entry) - {"builder", "model", "provider", "budget"}
+    if unknown:
+        raise ValueError(f"object rung carries unknown field(s) {sorted(unknown)}")
+    budget = dict(entry.get("budget") or {})
+    foreign = set(budget) - set(Budget.__dataclass_fields__)
+    if foreign:
+        raise ValueError(f"rung budget carries unknown field(s) {sorted(foreign)}")
+    return Rung(
+        builder=str(entry.get("builder") or ""),
+        model=str(entry.get("model") or ""),
+        provider=str(entry.get("provider") or "") or default_provider,
+        config=budget,
+    )
 
 
 def default_worker_id() -> str:
@@ -265,12 +313,26 @@ class _RunLedger:
         evidence_dir: Path,
         ctx: RunContext,
         runner_name: str,
+        *,
+        trial_labels: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         self._ledger = ledger
         self._factory = factory
         self._evidence_dir = evidence_dir
         self._ctx = ctx
         self._runner_name = runner_name
+        self._trial_labels = {k: dict(v) for k, v in (trial_labels or {}).items()}
+
+    def _stamp(self, row: GradeRow) -> GradeRow:
+        """Add the run-declared labels for this row's trial (``budget_tier``,
+        ``rung_index`` — see :func:`trial_labels_for`) BEFORE the row is chained, so the
+        hash commits to them. Only labels change: the verdict fields are copied verbatim
+        and :class:`GradeRow` re-runs its invariants on the copy, so a stamp can never
+        turn a red row clean. A trial the ladder does not know is left untouched."""
+        extra = self._trial_labels.get(row.trial)
+        if not extra:
+            return row
+        return GradeRow(**{**row.fields(), "labels": {**row.labels, **extra}})
 
     def _pack_body(self, pack_hash: str) -> dict[str, Any] | None:
         try:
@@ -314,6 +376,7 @@ class _RunLedger:
             )
 
     def append(self, row: GradeRow) -> GradeRow:
+        row = self._stamp(row)
         body = self._pack_body(row.evidence_pack_hash) if row.evidence_pack_hash else None
         if body is not None:
             self._store_pack(row, body)
@@ -867,26 +930,64 @@ class Worker:
         return STATUS_SUCCEEDED, counts, ""
 
     def _ladder(self, ctx: RunContext) -> EscalationLadder:
-        """The run's escalation ladder. A bare rung label (``r1``, ``r2`` … — no ``:``; the
-        API's default ladder is ``["r1"]``) means one attempt with the run's own
-        ``builder:model[@provider]``; a ``builder:model[:provider]`` label is a rung as
-        written. The stored ``ladder_json`` stays what the operator declared."""
+        """The run's escalation ladder. Each entry of ``params.ladder`` / ``ladder_json`` is
+        one of:
+
+        * a bare rung label (``r1``, ``r2`` … — no ``:``; the API's default ladder is
+          ``["r1"]``): one attempt with the run's own ``builder:model[@provider]``;
+        * a ``builder:model[:provider]`` label: a rung as written;
+        * an object rung ``{builder, model, provider?, budget?}``: a rung whose ``budget``
+          fields override the run's ``params.budget`` for that rung only
+          (:func:`rung_from_object`; the same model at 25 → 50 → 100 tool calls is a
+          budget ladder).
+
+        Every rung's effective budget is validated HERE, before any task runs, so a bad
+        cap fails the run closed with its reason instead of erroring every attempt. The
+        stored ``ladder_json`` stays what the operator declared."""
         run = ctx.run
-        labels: list[str] = [str(x) for x in (ctx.params.get("ladder") or run.ladder_json or [])]
+        entries: list[Any] = list(ctx.params.get("ladder") or run.ladder_json or [])
         own = ""
         if run.builder and run.model:
             own = f"{run.builder}:{run.model}" + (f"@{run.provider}" if run.provider else "")
-        if not labels and own:
-            labels = [own]
-        if not labels:
+        if not entries and own:
+            entries = [own]
+        if not entries:
             raise ValueError("a replay run needs a ladder (rung labels) or builder + model")
-        if any(":" not in lbl for lbl in labels) and not own:
-            raise ValueError(
-                "a replay run with bare rung labels (r1, r2 …) needs builder + model on the run"
-            )
-        labels = [own if ":" not in lbl else lbl for lbl in labels]
         provider = str(run.provider or ctx.params.get("provider") or "")
-        return ladder_from_spec(labels, default_provider=provider)
+        rungs: list[Rung] = []
+        for entry in entries:
+            if isinstance(entry, Mapping):
+                rungs.append(rung_from_object(entry, default_provider=provider))
+                continue
+            label = str(entry)
+            if not label.strip():
+                continue
+            if ":" not in label:
+                if not own:
+                    raise ValueError(
+                        "a replay run with bare rung labels (r1, r2 …) needs builder + model "
+                        "on the run"
+                    )
+                label = own
+            rungs.append(parse_rung_label(label, default_provider=provider))
+        if not rungs:
+            raise ValueError("a replay run needs at least one rung")
+        ladder = EscalationLadder(tuple(rungs))
+        try:
+            base = self._budget(ctx)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"the run's budget is invalid: {exc}") from exc
+        for i, rung in enumerate(ladder):
+            try:
+                budget_for_rung(rung, base)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"rung {i} ({rung.label}) has an invalid budget: {exc}") from exc
+        return ladder
+
+    @staticmethod
+    def _budget(ctx: RunContext) -> Budget:
+        """The run-level budget: the builder's defaults overlaid with ``params.budget``."""
+        return Budget.from_dict(dict(ctx.params.get("budget") or {}))
 
     def _run_replay(self, ctx: RunContext, *, mode: str) -> tuple[str, dict[str, Any], str]:
         run = ctx.run
@@ -895,11 +996,19 @@ class Worker:
         total = len(tasks)
         ctx.counts.update({"tasks": 0, "total": total, "rows": 0, "clean": 0})
         ladder = self._ladder(ctx)
-        budget = Budget.from_dict(dict(p.get("budget") or {}))
+        budget = self._budget(ctx)
+        rungs = trial_labels_for(ladder, budget)
         retain = dict(p.get("retain") or {})
         runner = self._runner(ctx)
         executor = self._executor(ctx)
-        run_ledger = _RunLedger(self.ledger, self.factory, self.evidence_dir, ctx, runner.name)
+        run_ledger = _RunLedger(
+            self.ledger,
+            self.factory,
+            self.evidence_dir,
+            ctx,
+            runner.name,
+            trial_labels=rungs,
+        )
         spec = RunSpec(
             run_id=run.id,
             config=ctx.config,
@@ -921,6 +1030,16 @@ class Worker:
                 "worker": self.worker_id,
                 "budget": budget.to_dict(),
                 "builder_config": dict(p.get("builder_config") or {}),
+                # one entry per rung, in order: what climbed, under which tier
+                "ladder": [
+                    {
+                        "builder": r.builder,
+                        "model": r.model,
+                        "provider": r.provider,
+                        LABEL_BUDGET_TIER: rungs[f"r{i + 1}"][LABEL_BUDGET_TIER],
+                    }
+                    for i, r in enumerate(ladder)
+                ],
             },
         )
         self.queue.set_apparatus(run.id, spec.apparatus().to_dict(), worker_id=self.worker_id)
@@ -1224,6 +1343,22 @@ class Worker:
             first = next((x.rationale for x in labels if x.rationale), "")
             return STATUS_FAILED, counts, f"all {len(labels)} label call(s) errored: {first}"[:1000]
         return STATUS_SUCCEEDED, counts, ""
+
+
+def trial_labels_for(ladder: EscalationLadder, base: Budget) -> dict[str, dict[str, str]]:
+    """``trial → labels`` for every rung of ``ladder``: the core names attempts ``r1``,
+    ``r2`` … positionally (:func:`crb.core.run.run_task`), so trial ``r<i+1>`` is rung
+    ``i``. Each gets ``rung_index`` (0-based, the ladder array index) and ``budget_tier``
+    of its EFFECTIVE budget — :func:`budget_for_rung` over the run's ``base``, the same
+    call the build adapter makes, so the label and the cap the builder ran under cannot
+    disagree."""
+    return {
+        f"r{i + 1}": {
+            LABEL_RUNG_INDEX: str(i),
+            LABEL_BUDGET_TIER: budget_tier(budget_for_rung(rung, base)),
+        }
+        for i, rung in enumerate(ladder)
+    }
 
 
 def docker_settings_for(

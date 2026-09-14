@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
 import { useCancelRun, useRun, useRunEvents, useRunTasks } from '../../api/hooks'
 import type { EventSourceFactory } from '../../api/sse'
-import { isRunTerminal, type Run, type RunTaskRow } from '../../api/types'
+import { isRunTerminal, ladderEntryLabel, type Run, type RunTaskRow } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -44,7 +44,7 @@ function Header({ run }: { run: Run }) {
             </Pill>
           )}
           <span className="font-mono text-xs">
-            {run.kind === 'replay' || run.kind === 'blind' ? `${run.mode} · ${run.builder || '—'}${run.model ? ` · ${run.model}` : ''}${run.provider ? ` · ${run.provider}` : ''} · ladder ${run.ladder.join(',') || 'r1'}` : run.kind}
+            {run.kind === 'replay' || run.kind === 'blind' ? `${run.mode} · ${run.builder || '—'}${run.model ? ` · ${run.model}` : ''}${run.provider ? ` · ${run.provider}` : ''} · ladder ${run.ladder.map(ladderEntryLabel).join(',') || 'r1'}` : run.kind}
           </span>
           <span className="text-xs text-on-surface-muted">
             created {fmtDate(run.created)}

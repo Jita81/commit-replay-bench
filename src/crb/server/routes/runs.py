@@ -53,6 +53,7 @@ from crb.server.schemas import (
     BUILD_KINDS,
     TERMINAL_STATUSES,
     Belts,
+    LadderRung,
     Page,
     PageDep,
     PageQuery,
@@ -319,7 +320,8 @@ def _current_task(session: Session, run: Run) -> str | None:
 def run_out(session: Session, run: Run) -> RunOut:
     """The API's view of a run: the row + ``counts`` + ``progress`` + the params it was
     created with (``executor``, ``timeout``, ``pool``, ``limit``, ``task_ids``,
-    ``builder_config``)."""
+    ``builder_config``, ``budget``). ``ladder`` is ``ladder_json`` as declared — labels
+    and/or object rungs."""
     params = dict(run.params_json or {})
     apparatus = dict(run.apparatus_json or {})
     cost = session.execute(
@@ -336,6 +338,7 @@ def run_out(session: Session, run: Run) -> RunOut:
         model=run.model,
         provider=run.provider,
         ladder=list(run.ladder_json or []),
+        budget=dict(params.get("budget") or {}),
         executor=str(params.get("executor", "") or ""),
         timeout=int(params.get("timeout", 0) or 0),
         pool=str(params.get("pool", "") or ""),
@@ -432,10 +435,20 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     """A ``queued`` Run row from a validated request (id assigned here so the response
     can name it even if the queue does not). A build kind without a model gets the
     builder's default (see :func:`default_model_for`) so the stored row — and every
-    ledger row it produces — names the model that actually ran."""
-    model = body.model
-    if body.kind in BUILD_KINDS and body.builder and not model:
-        model = default_model_for(body.builder)
+    ledger row it produces — names the model that actually ran. A ladder made only of
+    object rungs may omit the run's ``builder``/``model``: the FIRST rung fills them, so
+    the run listing names what climbed first (each ledger row names its own rung).
+
+    ``ladder_json`` keeps the ladder as declared (labels as written, object rungs as
+    ``{builder, model, provider?, budget?}`` with only the budget fields that were set);
+    ``params.budget`` keeps only the run-level caps the request set — the worker overlays
+    them on the builder's defaults, and a rung's own budget on top of those."""
+    builder, model, provider = body.builder, body.model, body.provider
+    if body.kind in BUILD_KINDS and not builder:
+        first = next(e for e in body.ladder if isinstance(e, LadderRung))
+        builder, model, provider = first.builder, first.model, first.provider
+    if body.kind in BUILD_KINDS and builder and not model:
+        model = default_model_for(builder)
     params: dict[str, Any] = {
         "task_ids": list(body.task_ids),
         "limit": body.limit,
@@ -445,18 +458,21 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     }
     if body.builder_config:
         params["builder_config"] = dict(body.builder_config)
+    if body.budget is not None and body.budget.overrides():
+        params["budget"] = body.budget.overrides()
     if body.retain.worktrees or body.retain.transcripts:
         params["retain"] = body.retain.model_dump()
+    ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,
         repo=body.repo,
         kind=body.kind,
         mode=body.mode or "sighted",
         status="queued",
-        builder=body.builder,
+        builder=builder,
         model=model,
-        provider=body.provider,
-        ladder_json=list(body.ladder) or ["r1"],
+        provider=provider,
+        ladder_json=ladder or ["r1"],
         params_json=params,
         actor=actor,
     )
@@ -554,9 +570,16 @@ def run_task_rows(session: Session, run_id: str) -> list[RunTaskRow]:
                 latency_s=round(sum(g.latency_s for g in rs), 3),
                 pack_hashes=[g.evidence_pack_hash for g in rs if g.evidence_pack_hash],
                 row_ids=[g.row_id for g in rs],
+                budget_tier=_budget_tier(decisive),
+                budget_tiers=[_budget_tier(g) for g in rs],
             )
         )
     return out
+
+
+def _budget_tier(g: Grade) -> str:
+    """``labels.budget_tier`` as the worker stamped it (``""`` on rows without one)."""
+    return str((g.labels_json or {}).get("budget_tier", "") or "")
 
 
 @router.get(
