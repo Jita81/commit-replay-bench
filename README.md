@@ -2,7 +2,7 @@
 
 **Commit Replay Bench** grades an AI builder against a repository's **own held-out tests**.
 Its verdicts do not come from a model's opinion of a model's work: every verdict is the
-result of four **mechanical belts** run over the repository's real test suite, and the
+result of five **mechanical belts** run over the repository's real test suite and its own lint gate, and the
 product refuses — at the moment of writing — to record a pass that any belt contradicts
 (**false-Q1 = 0**, enforced in `GradeResult.__post_init__` and `GradeRow.assert_invariants`).
 Every verdict is written to an **append-only, hash-chained ledger** with a per-task
@@ -11,13 +11,26 @@ Wilson 95% interval, and the version of the apparatus that produced it. On that 
 it **routes** each class of change to `deliver` / `calibrate` / `granularize` / `human`, and
 — in a later phase — manufactures new work under the same governance.
 
-> Status: **v2 reboot in progress** on branch `reboot/v2`. Phase P0 (skeleton + core engine)
-> is complete; phase P1 (core hardening, fixtures, gates) is in progress. See
-> [Status by phase](#status-by-phase). The June 2026 v1 contents are tagged `v1.0.0-legacy`.
+> Status: **2.0.0a1 — release candidate** on branch `reboot/v2` (apparatus **2.2**, belt set
+> v5). Every phase of the product plan has shipped (P0–P7: engine, oracle, builders, store,
+> server, UI, factory, deployment); the `v2.0.0a1` tag follows the licence text and a human
+> review of the pinned commit. See [Status by phase](#status-by-phase) and the
+> [Changelog](CHANGELOG.md). The June 2026 v1 contents are tagged `v1.0.0-legacy`.
+
+## Start here
+
+| You are… | Read, in this order |
+|---|---|
+| **Anyone** — what is this and what does it claim? | this page → [Evidence & claims](docs/EVIDENCE-AND-CLAIMS.md) → the [NHS measurement](docs/reviews/2026-09-14-nhs-public-repos.md) |
+| **A developer** taking it to a client's repository | [Onboarding a repository](docs/ONBOARDING-A-REPO.md) → [Operator guide](docs/OPERATOR.md) → [API](docs/API.md) → [Code map](docs/CODE-MAP.md) |
+| **A developer** changing the product | [Architecture](docs/ARCHITECTURE.md) → [ADRs](docs/adr/README.md) → [Code map](docs/CODE-MAP.md) (every file's header says what it is, what proves it, when you touch it) → [Contributing](docs/CONTRIBUTING.md) |
+| **Governance / assurance** | [Evidence & claims](docs/EVIDENCE-AND-CLAIMS.md) → [Security](docs/SECURITY.md) → [Data retention](docs/DATA-RETENTION.md) → [Licensing](docs/LICENSING.md) → the [decision log](docs/DECISION-LOG.md) and the [reviews](docs/reviews/) (an independent critical-friend review and two independent decider passes are on record) |
+| **An operator** deploying it | [Deployment](docs/DEPLOYMENT.md) → [Operator guide](docs/OPERATOR.md) |
 
 Related documents: [Architecture](docs/ARCHITECTURE.md) ·
 [Evidence & claims policy](docs/EVIDENCE-AND-CLAIMS.md) · [ADRs](docs/adr/README.md) ·
-[Operator guide](docs/OPERATOR.md) · [Contributing](docs/CONTRIBUTING.md) ·
+[Operator guide](docs/OPERATOR.md) · [Onboarding a repository](docs/ONBOARDING-A-REPO.md) ·
+[Code map](docs/CODE-MAP.md) · [Contributing](docs/CONTRIBUTING.md) ·
 [Decision log](docs/DECISION-LOG.md) · [Changelog](CHANGELOG.md)
 
 ---
@@ -47,10 +60,10 @@ default**.
 
 ---
 
-## The four belts
+## The belts (four core, plus the repository's own gate)
 
-A trial (the commit's parent plus the builder's edits) is `clean` **only if all four hold**
-(`crb.core.grade.BELT_NAMES`):
+A trial (the commit's parent plus the builder's edits) is `clean` **only if every evaluated
+belt holds** (`crb.core.grade.BELT_NAMES`; apparatus 2.2 = belt set v5):
 
 | # | Belt | What it checks | How |
 |---|------|----------------|-----|
@@ -58,6 +71,7 @@ A trial (the commit's parent plus the builder's edits) is `clean` **only if all 
 | 2 | `target_green` | The previously-RED target tests now pass. | The runner executes the target scope; timeouts are failures. |
 | 3 | `no_new_failures` | Nothing else broke. | The regression belt scope is run and compared with the **baseline failing set** captured at the parent; unattributable output (compile error, crash) fails the belt. |
 | 4 | `source_changed` | The pass is real, not a build-cache ghost. | The diff against the parent touches at least one non-test file. |
+| 5 | `repo_lint_clean` | The repository's **own** formatter / linter / type checker accepts the changed files. | `prettier`, `eslint`, `tsc`, `ruff`, `gofmt`, `spotless`, `cargo fmt` … at the version the commit pins ([ADR-0011](docs/adr/0011-repo-lint-belt.md)); *not evaluated* when the repository configures none — never a silent pass. Belt 1 also covers test infrastructure (`conftest.py`, `jest.config.*`, lockfiles). |
 
 Everything else **fails closed**: a harness error, sandbox failure or timeout is recorded as
 a non-pass, never a silent pass; a malformed oracle (a "test" file with no tests) or a
@@ -88,7 +102,7 @@ In **neither** mode does the builder see the regression belt or the grader. See
    excluded from statistics (`gold_clean=False`).
 4. **Build** — the configured builder edits a fresh worktree (sighted or blind) under a
    turn/token/cost budget. It never receives the grader.
-5. **Grade** — the four belts run inside the sandbox; the result is a `GradeResult` that
+5. **Grade** — the belts run inside the sandbox; the result is a `GradeResult` that
    cannot be `clean` with a failed belt.
 6. **Ledger** — the evidence pack is hashed; a `GradeRow` carrying that hash is chained to
    the previous row and appended (no pack ⇒ no Q1). Cell statistics and the routing rule
@@ -109,7 +123,7 @@ crb repo add   myrepo --path /srv/repos/myrepo --language python --runner pytest
                --sandbox-image ghcr.io/example/myrepo-toolchain:2026-09
 crb repo probe myrepo              # proves the toolchain: runs a known-green scope in the sandbox
 crb mine       myrepo --pool standard --target 25    # RED-check, baseline, gold-check → tasks
-crb grade      myrepo --builder editblock --mode sighted   # build + four belts → evidence packs + ledger rows
+crb grade      myrepo --builder editblock --mode sighted   # build + the belts → evidence packs + ledger rows
 crb ledger verify                  # walks the hash chain; exit 1 on any break
 crb ledger stats --repo myrepo     # per-cell n, clean, point, Wilson CI, false-Q1 (must be 0), cost, latency
 crb route      --repo myrepo       # the ONE routing rule applied to each measured cell, with its reason
@@ -194,21 +208,48 @@ for false-Q1, the apparatus stamp, the legacy-belt caveat on the census ledger, 
 permitted claim shapes at each maturity — is in
 [docs/EVIDENCE-AND-CLAIMS.md](docs/EVIDENCE-AND-CLAIMS.md).
 
+## What has been measured (2026-09-15) — and what it licenses
+
+Everything below is `[measured]`, re-derivable from the ledger, on the **host executor
+posture** (see the evidence caveat in the [Changelog](CHANGELOG.md)); nothing here is a
+per-repository or per-model capability claim.
+
+- **The instrument holds on real code.** Four public libraries (cobra, click, koa,
+  SQLAlchemy census) and three NHS repositories (nhsuk-frontend, nhsuk-react-components,
+  mesh-client) mined, oracle-scored and negative-controlled; **false-Q1 = 0** across every
+  ledger row; controls **passed with 0 escapes** on every repository they were run on
+  ([NHS measurement](docs/reviews/2026-09-14-nhs-public-repos.md), [critical-friend review](docs/reviews/2026-09-13-critical-friend.md)).
+- **The first `deliver` routes exist** — cobra `bug.fix` XS and S: 16/16 clean, Wilson-low
+  0.81, controls 31/56 constructible, 0 escapes — on **3 tasks each**, which the map now
+  says next to `n` (`n_tasks`). No sign-off has been made: the policy requires a human
+  attestation and a task minimum the operator has not yet set.
+- **NHS, sighted, Sonnet 5, 18 gold-clean tasks:** 12 clean, 4 failed the repository's own
+  formatter/linter, 2 exhausted the budget; two service refusals were an instrument gap,
+  fixed and re-measured clean. The dominant non-test miss is *the maintainers' formatter*,
+  now addressed by an opt-in belt-5 pre-flight (a distinct, labelled arm).
+- **Blind mode is not a capability measurement yet** — its rows measure the budget, not the
+  model; the re-shaped ladder is staged and priced in the decision log (DL-027).
+
 ## Status by phase
 
-Phases are those of the approved product plan; each phase is a set of PRs with CI green
-before the next begins.
+Phases are those of the approved product plan ([plan](docs/DECISION-LOG.md) DL-001..004);
+each shipped as a set of PRs with the gates green.
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| P0 | Reboot the repo: `crb` skeleton, `pyproject` (py ≥ 3.12), ruff / mypy / import-linter config, CI skeleton, README, ADR-0001..0003; tag `v1.0.0-legacy` on the old head | **Done** |
-| P1 | Core engine (stdlib): spec / mine / workspace / runners / grade / sandbox / ledger (JSONL) / stats; per-language fixture repos; negative-controls gate; census-ledger re-derivation gate | **In progress** |
-| P2 | Oracle (mutation strength, adequacy, negative controls), routing, forecast, federated export, evidence; `crb` CLI end-to-end with the `editblock` builder; `crb ledger verify` | Planned |
-| P3 | Builders: `openai_agent` (Azure OpenAI, Cerebras, local), `claude_code`; budgets / escalation ladder / cost meter; sighted vs blind; tamper guard | Planned |
-| P4 | Store (SQLAlchemy + Alembic, append-only triggers, hash chain, census import), FastAPI server, OIDC + local admin, RBAC, SSE, `/metrics`, JSON logs, `crb worker` | Planned |
-| P5 | Observability UI (Vite / React), evidence drill-down, capability map, ledger verify / export, sign-off; builder-in-container with egress allowlist | Planned |
-| P6 | Forward-mode factory: backlog freeze, DoR gate, RED proof, build under belts, branch + PR delivery, independent review with verdict-before-edit | Planned |
-| P7 | Deployment (Dockerfile, compose, Helm, Azure notes), SECURITY / THREAT-MODEL, DATA-RETENTION, OPERATOR runbook, REPRODUCING-THE-CENSUS; release `v2.0.0` | Planned |
+| P0 | Reboot: `crb` skeleton, gates, ADR-0001..0003, `v1.0.0-legacy` tag | Done |
+| P1 | Core engine (stdlib): spec / mine / workspace / runners / grade / ledger / stats; fixture repos per language; negative-controls gate; census re-derivation gate | Done |
+| P2 | Oracle (mutation strength, adequacy, controls), routing, forecast, federated export, evidence packs; `crb` CLI end to end | Done |
+| P3 | Builders: `claude_code`, `openai_agent`, `editblock`; budget ladders; sighted / blind; tamper and archaeology guards | Done |
+| P4 | Store (SQLAlchemy + Alembic, append-only triggers, hash chain, census import), FastAPI, OIDC + local admin, RBAC, SSE, `/metrics`, worker | Done |
+| P5 | Observability UI (12 screens), evidence drill-down, capability map, sign-off, reviews; sealed builder container (ADR-0012) | Done |
+| P6 | Forward-mode factory: frozen backlog, DoR gate, RED proof, build under belts, opt-in PR delivery, review-before-edit — as a run kind with its API | Done (no model-backed test author yet; delivery credentials operator-provisioned) |
+| P7 | Dockerfile, compose, Helm, SECURITY / DATA-RETENTION / OPERATOR / DEPLOYMENT / REPRODUCING-THE-CENSUS; `2.0.0a1-rc1` | Done; `v2.0.0a1` tag pending (DL-026) |
+
+**Open, honestly:** every measurement to date is on the host executor posture; the sealed
+posture is built and tested but not yet measured on. A human has not yet signed a cell. The
+file-header programme ([FILE-HEADER-STANDARD](docs/FILE-HEADER-STANDARD.md), CI job
+`code-map`) is landing across the 337 source files.
 
 ## Licence
 
