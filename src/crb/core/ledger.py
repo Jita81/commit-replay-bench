@@ -52,6 +52,43 @@ written only when the builder's report contradicts what the row alone implies
 
 The JSONL implementation here is the portable, stdlib reference. The server
 stores the same rows in a database with the same chain (see ``crb.store``).
+
+Navigation
+----------
+What it is:   The ledger — the append-only, hash-chained record of every graded trial
+              (``GradeRow``), its portable JSONL implementation, and the per-cell statistics
+              read back from it.
+What it does: Constructs rows that cannot be clean with a failed belt, without an evidence
+              pack, or under a belt set their apparatus could not have recorded; chains each
+              row to the previous one by SHA-256 and verifies a chain; names why every
+              non-clean row failed by ONE rule; reduces rows to a cell's ``n``, clean count,
+              Wilson interval, failure split and false-Q1 count (which must read 0).
+How:          ``grade_row_from_result`` reduces a ``GradeResult`` + pack hash to a row and
+              pins its failure kind and cost-known labels → ``GradeRow.__post_init__``
+              asserts the invariants → ``JsonlLedger.append`` chains on the last row's hash
+              and fsyncs the line → ``verify_chain`` re-hashes every row in order →
+              ``failure_split`` / ``cell_stats`` group eligible rows by ``CellKey``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
+              src/crb/core/evidence.py (pack hash, canonical JSON, sha256, timestamps),
+              src/crb/store/ledger.py (the database ledger — same rows, same chain),
+              src/crb/core/routing.py (consumes CellStats), src/crb/core/capability.py (the
+              map built from the rows), src/crb/core/legacy.py (census import — the only
+              writer of v3-legacy rows), src/crb/core/stats.py (the Wilson interval)
+Tested by:    tests/test_ledger.py, tests/test_store_ledger.py, tests/test_census_gate.py,
+              tests/test_run.py
+Touch when:   never for a new repository; adding a belt, a failure kind, a cell-key field or a
+              hashed label changes what the chain commits to — needs an ADR, an apparatus bump
+              (src/crb/core/version.py), a store migration (as
+              src/crb/store/migrations/versions/v0002_belt5_repo_lint_clean.py was for belt 5)
+              and a docs/EVIDENCE-AND-CLAIMS.md update; a new builder stop reason must be
+              mirrored in ``BUDGET_STOP_REASONS`` (tests/test_ledger.py pins the mirror).
+Claims:       ``point`` is the fail-closed all-rows rate; ``model_point`` may be shown only
+              next to it (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method);
+              false-Q1 = 0 here is the mechanical sense only
+              (docs/EVIDENCE-AND-CLAIMS.md#2-clean-semantic-q1-and-false-q1).
 """
 
 from __future__ import annotations
@@ -241,7 +278,12 @@ class LedgerIntegrityError(RuntimeError):
 
 @dataclass(frozen=True)
 class CellKey:
-    """The unit of measurement. Carries NO task id, NO repo, NO free text."""
+    """The unit of measurement. Carries NO task id, NO repo, NO free text.
+
+    Every statistic the product shows is a statement about one cell, and the cell is
+    also the abstraction boundary of the federated export (ADR-0007): a key that named
+    a task or a repository could not leave the tenant.
+    """
 
     process_step: str
     capability_class: str
@@ -252,6 +294,7 @@ class CellKey:
     provider: str
 
     def to_tuple(self) -> tuple[str, ...]:
+        """The key as a tuple in :data:`CELL_FIELDS` order (the grouping key)."""
         return (
             self.process_step,
             self.capability_class,
@@ -263,13 +306,17 @@ class CellKey:
         )
 
     def to_dict(self) -> dict[str, str]:
+        """The key as ``{field: value}`` — the shape exports and the API carry."""
         return dict(zip(CELL_FIELDS, self.to_tuple(), strict=True))
 
     @property
     def label(self) -> str:
+        """The key as one ``|``-joined string, for log lines and map headings."""
         return "|".join(self.to_tuple())
 
 
+#: The cell-key fields in key order. Adding one changes every cell's identity
+#: (rows written before it cannot be regrouped), so it is an apparatus change.
 CELL_FIELDS: tuple[str, ...] = (
     "process_step",
     "capability_class",
@@ -376,11 +423,23 @@ def builder_stop_reason(builder: BuilderRef | None) -> str:
 
 
 def _bool_label(v: bool) -> str:
+    """Labels are ``str → str`` (hashed as such), so a boolean label is spelt out."""
     return "true" if v else "false"
 
 
 @dataclass(frozen=True)
 class GradeRow:
+    """One graded trial as the ledger records it — the row every statistic is built from.
+
+    Immutable once constructed; ``__post_init__`` runs :meth:`assert_invariants`, so a row
+    that would be a false-Q1, that lacks its evidence pack, or whose ``belt_set``
+    contradicts its ``apparatus_version`` cannot exist in memory, let alone on disk.
+    ``prev_hash`` / ``row_hash`` are empty until :meth:`chained` (the ledger's ``append``
+    fills them). Field order is the constructor shape ``from_dict`` relies on; the hashed
+    body (:meth:`body`) is every field but ``row_hash``, minus belts the row's belt set
+    does not record.
+    """
+
     repo: str
     task_id: str
     clean: bool
@@ -424,6 +483,7 @@ class GradeRow:
     row_hash: str = ""
 
     def __post_init__(self) -> None:
+        # a private copy: the caller's mapping must not be able to change a hashed body
         object.__setattr__(self, "labels", dict(self.labels))
         if not self.row_id:
             object.__setattr__(self, "row_id", uuid.uuid4().hex)
@@ -459,6 +519,10 @@ class GradeRow:
         return lint_only_failure({b: getattr(self, b) for b in self.recorded_belts()})
 
     def assert_invariants(self) -> None:
+        """The write-time gate (ADR-0001, ADR-0002): false-Q1 = 0, no pack ⇒ no Q1, a
+        pinned ``failure_kind`` that agrees with ``clean`` / ``disqualified``, a
+        well-formed ``cost_known`` label, and a belt set the apparatus could record.
+        Called at construction and again by the ledger before chaining."""
         if self.clean:
             if not self.belts_all_true():
                 raise FalseQ1Violation(
@@ -477,6 +541,8 @@ class GradeRow:
         if kind is not None:
             if kind not in FAILURE_KINDS:
                 raise ValueError(f"failure_kind label {kind!r} not in {FAILURE_KINDS}")
+            # a clean row has the empty kind and a non-clean row a named one: a label
+            # that says otherwise is a false-Q1 by another route
             if bool(kind) == self.clean:
                 raise FalseQ1Violation(
                     f"ledger refuses row {self.task_id[:10]}: failure_kind={kind!r} "
@@ -559,6 +625,7 @@ class GradeRow:
     # --- keys ------------------------------------------------------------------
     @property
     def cell(self) -> CellKey:
+        """The cell this row is an observation of (the grouping key of every statistic)."""
         return CellKey(
             self.process_step,
             self.capability_class,
@@ -599,6 +666,8 @@ class GradeRow:
         return {k: v for k, v in self.fields().items() if k not in unrecorded}
 
     def compute_hash(self) -> str:
+        """SHA-256 of the canonical JSON of :meth:`body` — includes ``prev_hash``, which
+        is what makes the rows a chain rather than a list of checksums."""
         return sha256_text(canonical_json(self.body()))
 
     def chained(self, prev_hash: str) -> GradeRow:
@@ -606,10 +675,13 @@ class GradeRow:
         d = self.fields()
         d["prev_hash"] = prev_hash
         row = GradeRow(**d)
+        # the only place row_hash is ever set; the dataclass is frozen so it cannot drift
         object.__setattr__(row, "row_hash", row.compute_hash())
         return row
 
     def verify_hash(self) -> bool:
+        """``True`` iff the stored ``row_hash`` is the hash of the body as read back.
+        An unchained row (empty hash) never verifies."""
         return bool(self.row_hash) and self.row_hash == self.compute_hash()
 
     # --- serialisation -----------------------------------------------------------
@@ -627,6 +699,10 @@ class GradeRow:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> GradeRow:
+        """Rebuild a row from its stored dict. Keys that are not constructor fields —
+        the derived top-level ``failure_kind`` / ``cost_known`` that :meth:`to_dict`
+        writes for readers — are dropped, never re-trusted; the invariants run again
+        on the way in, so a stored row that contradicts itself is refused on read."""
         known = {k: d[k] for k in cls.__dataclass_fields__ if k in d}
         return cls(**known)
 
@@ -666,6 +742,8 @@ def grade_row_from_result(
     ``labels['stop_reason']`` so the ``budget`` kind stays re-derivable.
     """
     b = builder or BuilderRef(mode=result.mode)
+    # the grader's own error always wins; the builder's trouble surfaces as `error`
+    # only on a non-clean row (on a clean row it is a label — the belts judged the tree)
     error = result.error or ("" if result.clean else builder_error)
     stop_reason = builder_stop_reason(builder)
     kind = derive_failure_kind(
@@ -748,10 +826,17 @@ def grade_row_from_result(
 
 
 class JsonlLedger:
+    """The portable ledger: one JSON object per line, appended and fsynced, chained on
+    the previous line's ``row_hash``. Stdlib only, so an export can be verified anywhere
+    (``crb ledger verify``); the store keeps the identical chain in a database."""
+
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
 
     def _last_hash(self) -> str:
+        """The ``row_hash`` of the last non-blank line, or :data:`GENESIS_HASH` for an
+        empty or absent file. Reads only the tail of the file (a row is far smaller
+        than 64 KiB) so appending stays O(1) however long the ledger grows."""
         if not self.path.exists() or self.path.stat().st_size == 0:
             return GENESIS_HASH
         last = ""
@@ -781,13 +866,16 @@ class JsonlLedger:
         with self.path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
             f.flush()
-            os.fsync(f.fileno())
+            os.fsync(f.fileno())  # a row that was returned is a row that is on disk
         return chained
 
     def append_many(self, rows: Iterable[GradeRow]) -> list[GradeRow]:
+        """Append in order; each row chains on the one before it."""
         return [self.append(r) for r in rows]
 
     def rows(self) -> Iterator[GradeRow]:
+        """Every row in file order (each re-validated by ``from_dict``); nothing for
+        an absent file."""
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as f:
@@ -801,6 +889,10 @@ class JsonlLedger:
 
 
 def verify_chain(rows: Iterable[GradeRow]) -> int:
+    """Prove ``rows`` is an unbroken chain from genesis: every ``prev_hash`` is the
+    previous ``row_hash`` and every ``row_hash`` re-computes. Returns the row count;
+    raises :class:`LedgerIntegrityError` naming the first bad row. Shared by the JSONL
+    ledger, the store and ``crb ledger verify`` so there is one notion of "verifies"."""
     prev = GENESIS_HASH
     n = 0
     for row in rows:
@@ -855,28 +947,35 @@ class FailureSplit:
     outage: int = 0
 
     def __post_init__(self) -> None:
+        # the split must partition n exactly: a kind that is dropped or double-counted
+        # would let a rate be quoted over a denominator nobody can reconstruct
         kinds = self.clean + self.builder_red + self.lint + self.budget + self.protocol
         if self.n != kinds + self.harness:
             raise ValueError("a FailureSplit's n must equal the sum of its eligible kinds")
 
     @property
     def point(self) -> float:
+        """The fail-closed rate: clean over every eligible row."""
         return self.clean / self.n if self.n else 0.0
 
     @property
     def ci(self) -> Interval:
+        """Wilson 95% interval of :attr:`point`."""
         return wilson_interval(self.clean, self.n)
 
     @property
     def model_n(self) -> int:
+        """Rows where the model finished and was judged on its own terms."""
         return self.clean + self.builder_red + self.lint
 
     @property
     def model_point(self) -> float:
+        """Clean over :attr:`model_n` — shown next to :attr:`point`, never instead."""
         return self.clean / self.model_n if self.model_n else 0.0
 
     @property
     def model_ci(self) -> Interval:
+        """Wilson 95% interval of :attr:`model_point`."""
         return wilson_interval(self.clean, self.model_n)
 
     @property
@@ -965,10 +1064,12 @@ class CellStats:
 
     @property
     def n_disqualified(self) -> int:
+        """Alias of ``disqualified`` under the ``n_*`` naming the API and UI use."""
         return self.disqualified
 
     @property
     def n_instrument(self) -> int:
+        """Rows the instrument, not the model, failed (``protocol`` + ``harness``)."""
         return self.n_protocol + self.n_harness
 
     def to_dict(self) -> dict[str, Any]:
@@ -1004,6 +1105,9 @@ class CellStats:
 
 
 def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
+    """Reduce the rows of ONE cell (the caller groups; the first row's key is taken as
+    the cell's) to :class:`CellStats`. Pure and re-derivable from any export: the router,
+    the capability map and the API all read the same numbers."""
     rs = list(rows)
     if not rs:
         raise ValueError("cell_stats needs at least one row")
@@ -1011,7 +1115,11 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
     eligible = [r for r in rs if r.eligible]
     n = len(eligible)
     clean = sum(1 for r in eligible if r.clean)
+    # re-checked at read time over ALL rows, not just eligible ones: the write-time
+    # gate should make this 0, and a reader must be able to see that it is
     fq1 = sum(1 for r in rs if r.clean and not r.belts_all_true())
+    # means over the rows that carry a value — a $0 / 0 s is "not measured" here, not
+    # a free, instant trial (cost_known tells the two apart per row)
     costs = [r.cost_usd for r in eligible if r.cost_usd]
     lats = [r.latency_s for r in eligible if r.latency_s]
     strengths = [r.oracle_strength for r in eligible if r.oracle_strength is not None]
@@ -1055,6 +1163,7 @@ def group_by_cell(
 
 
 def all_cell_stats(rows: Iterable[GradeRow]) -> list[CellStats]:
+    """One :class:`CellStats` per full cell key present in ``rows``."""
     return [cell_stats(g) for g in group_by_cell(rows).values()]
 
 

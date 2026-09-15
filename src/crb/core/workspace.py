@@ -52,6 +52,39 @@ pass (2026-09-14, finding 1) graded three such worktrees ``clean``. So:
 Known residual: a file whose checkout differs from its blob (``eol=crlf`` /
 ``filter=lfs`` attributes) reads as touched — fail-closed, and the same rule
 belt 1a's raw hash compare already applies to the oracle files.
+
+Navigation
+----------
+What it is:   The trial worktree — ``Workspace``, the disposable checkout of a commit's parent
+              that the builder edits and the grader reads, plus the ground-truth views the
+              belts need (touched files, byte-identical tests, diff stats, git integrity).
+What it does: Creates and removes a worktree from the main clone; overlays the commit's test
+              or source files; enumerates what the builder changed from the filesystem
+              against the parent tree so nothing the builder does to git's own views
+              (index bits, a moved HEAD, an exclude rule) can hide a file; proves the target
+              tests are byte-identical to the commit's; reports every git-view violation as
+              tamper evidence rather than a verdict.
+How:          ``create`` → ``git worktree add`` at the parent + per-language fixups recorded
+              in ``harness_files`` → the builder edits → ``enforce_integrity`` (HEAD, gitdir,
+              index bits, ``info/exclude``) → ``touched_files`` walks the tree hashing every
+              file as a git blob and honours only ignore rules tracked at the parent →
+              ``tests_byte_identical`` / ``diff_stats`` → ``remove``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
+              docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/core/grade.py (the belts that read every view here), src/crb/core/git.py
+              (the argv-only git wrapper), src/crb/core/mine.py (RED / baseline / gold on a
+              workspace), src/crb/core/run.py (creates one per attempt), src/crb/core/spec.py
+              (RepoConfig: language fixups and ``post_create`` hooks),
+              src/crb/builders/base.py (the builder is confined to ``root``)
+Tested by:    tests/test_workspace.py, tests/test_grade.py, tests/test_mine.py,
+              tests/test_test_infra.py
+Touch when:   onboarding a repository whose worktree needs a fixup before its tests run — add
+              a ``post_create`` hook in the repo config (``write_if_missing`` / ``symlink``,
+              docs/OPERATOR.md#2-configure-a-repository) rather than code here; a new way for a
+              builder to hide a change from git is a belt-1 gap: fix it in ``touched_files`` /
+              ``enforce_integrity``, add the regression to tests/test_workspace.py and record
+              it in docs/reviews/human-review-guide.md.
 """
 
 from __future__ import annotations
@@ -71,6 +104,7 @@ from crb.core.spec import Language, RepoConfig
 
 
 def sha256_bytes(data: bytes) -> str:
+    """Hex SHA-256 of ``data`` — the content identity belt 1 and the diff hash use."""
     return hashlib.sha256(data).hexdigest()
 
 
@@ -143,6 +177,11 @@ class IntegrityViolation:
 
 @dataclass(frozen=True)
 class DiffStats:
+    """What the evidence pack keeps of a builder's diff: the non-test files it touched,
+    the line counts, and the SHA-256 of the full diff text. The diff itself is not
+    retained by default (ADR-0006); the hash lets an auditor who holds it prove it is
+    the one that was graded."""
+
     files: tuple[str, ...]
     additions: int
     deletions: int
@@ -162,6 +201,12 @@ HARNESS_SYMLINK = "symlink"
 
 
 class Workspace:
+    """One trial's worktree (see the module docstring). ``sha`` is the commit being
+    replayed and ``parent`` the commit checked out; in forward mode (:meth:`at_ref`)
+    they are the same. Construct through :meth:`create` / :meth:`at_ref`; the bare
+    constructor binds to a worktree that already exists (the CLI's ``crb grade``) and
+    then records no exclude baseline."""
+
     def __init__(self, repo: GitRepo, root: Path, *, sha: str, parent: str) -> None:
         self.repo = repo
         self.root = Path(root)
@@ -234,6 +279,8 @@ class Workspace:
         return ws
 
     def remove(self) -> None:
+        """Unregister the worktree from the clone and delete the directory. Best effort
+        on the delete: a worktree is never reused, so leftovers cost disk, not truth."""
         self.repo.worktree_remove(self.root)
         shutil.rmtree(self.root, ignore_errors=True)
 
@@ -246,6 +293,8 @@ class Workspace:
     def _post_create(self, config: RepoConfig) -> None:
         """Per-language fixups a raw worktree needs before its tests can run."""
         if config.language is Language.JAVASCRIPT:
+            # node_modules is installed once in the main clone (the only network
+            # phase); every worktree links to it rather than installing again
             link = self.root / "node_modules"
             main_nm = self.repo.path / "node_modules"
             if not link.exists() and main_nm.is_dir():
@@ -266,6 +315,7 @@ class Workspace:
         return path
 
     def _exclude_lines(self) -> list[str]:
+        """The current lines of ``info/exclude``; ``[]`` when the file does not exist."""
         try:
             return self._exclude_path().read_text(encoding="utf-8").splitlines()
         except OSError:
@@ -412,6 +462,11 @@ class Workspace:
         return sorted(flagged)
 
     def _apply_hook(self, hook: Mapping[str, Any]) -> None:
+        """One ``post_create`` hook from the repo config: ``write_if_missing`` (a file
+        the tests need that the repository does not track — a local settings file) or
+        ``symlink`` (to something provisioned once in the main clone). Whatever is
+        written is recorded in :attr:`harness_files` so it never reads as a builder
+        change while it stays as written."""
         if "write_if_missing" in hook:
             spec = hook["write_if_missing"]
             rel = str(spec["path"])
@@ -451,10 +506,12 @@ class Workspace:
         self.repo.checkout_paths(self.sha, list(src_files), cwd=self.root)
 
     def restore_from_parent(self, paths: Sequence[str]) -> None:
+        """Put ``paths`` back to their parent-commit content (undo an overlay or an edit)."""
         self.repo.checkout_paths(self.parent, list(paths), cwd=self.root)
 
     # --- integrity ---------------------------------------------------------------
     def file_hash(self, rel: str) -> str | None:
+        """SHA-256 of ``rel`` as it is on disk now; ``None`` if absent or unreadable."""
         p = self.root / rel
         try:
             return sha256_bytes(p.read_bytes())
@@ -462,6 +519,8 @@ class Workspace:
             return None
 
     def commit_file_hash(self, rel: str) -> str | None:
+        """SHA-256 of ``rel`` as the replayed commit has it (from the object store, which
+        the builder cannot write); ``None`` if the commit has no such file."""
         content = self.repo.show_file(self.sha, rel)
         return None if content is None else sha256_bytes(content.encode("utf-8"))
 
@@ -479,6 +538,8 @@ class Workspace:
             for f in files:
                 if f"a/{f}" in diff or f"b/{f}" in diff:
                     offending.append(f)
+        # the raw hash catches what a diff cannot see: a missing file, and an index
+        # the builder has told git to skip (the hash reads the disk, not the index)
         for f in files:
             if f in offending:
                 continue
@@ -529,6 +590,8 @@ class Workspace:
         Nested ``.git`` entries are never entered or reported.
         """
         tracked = self.parent_tree()
+        # a sha256 repository has 64-char oids; hash files the way its git does so the
+        # blob ids compare (a sha1 hash of a sha256 repo's file would read as touched)
         algorithm = (
             _OID_ALGORITHMS.get(len(next(iter(tracked.values())).oid), "sha1")
             if tracked
@@ -598,6 +661,9 @@ class Workspace:
     def _entry_unchanged(
         self, rel: str, entry: TreeEntry, *, is_link: bool, algorithm: str
     ) -> bool:
+        """Is the on-disk ``rel`` the same object the parent tree records? Compares
+        entry type first (file vs symlink), then size as a cheap pre-check, then the
+        blob oid. The executable bit is not a content change and is not compared."""
         p = self.root / rel
         if entry.mode == _SYMLINK_MODE:
             if not is_link:
@@ -655,6 +721,9 @@ class Workspace:
 
     @staticmethod
     def _is_parent_gitignore(source: str, tracked: Mapping[str, TreeEntry]) -> bool:
+        """Is ``source`` (as ``check-ignore -v`` names it) a ``.gitignore`` tracked as a
+        regular file at the parent? Anything absolute, outside the tree, under ``.git/``
+        or not named ``.gitignore`` (``info/exclude``, ``core.excludesFile``) is not."""
         s = source.replace("\\", "/")
         while s.startswith("./"):
             s = s[2:]
@@ -746,10 +815,13 @@ class Workspace:
         return DiffStats(tuple(files), adds, dels, sha256_bytes(text.encode("utf-8")))
 
     def read(self, rel: str) -> str:
+        """``rel``'s text as it is on disk now (undecodable bytes replaced, never raised)."""
         return (self.root / rel).read_text(encoding="utf-8", errors="replace")
 
     def exists(self, rel: str) -> bool:
+        """Does ``rel`` exist in the worktree now (a deleted file cannot be linted)?"""
         return (self.root / rel).exists()
 
     def relpath(self, p: Path) -> str:
+        """``p`` as a path relative to the worktree root."""
         return os.path.relpath(p, self.root)

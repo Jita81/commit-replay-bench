@@ -21,6 +21,37 @@ Design rules
 * **Repo config is data.** :class:`RepoConfig` says how to tell source from test,
   which runner to use, and what the regression belt covers. It round-trips to JSON
   and can load the census ``configs.json`` shape unchanged.
+
+Navigation
+----------
+What it is:   The shared vocabulary of the engine — ``Language``, the one size table, the
+              deterministic path classifier, ``RepoConfig`` (how to replay one repository)
+              and ``TaskSpec`` (one replayable commit).
+What it does: Turns churn into a size tier and paths into a change class by fixed rules; tells
+              source from test exactly for a configured layout; validates a repository
+              configuration at construction (runner, belt scope, lint shape); derives a
+              task's resolved ``capability_class`` from its path class and intent label so no
+              consumer can key on a stale or contradictory class. Nothing here touches git or
+              the filesystem.
+How:          Frozen dataclasses with ``__post_init__`` validation and ``to_dict`` /
+              ``from_dict`` round-trips that also accept the census shapes; ``classify_path``
+              is an ordered most-specific-first match over path role and extension;
+              ``classify_commit`` takes the modal class of the source files.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0008-stdlib-core-and-downward-layers.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/taxonomy.py (the closed class vocabulary), src/crb/core/classify.py
+              (IntentLabel and the human > intent > path resolution), src/crb/core/mine.py
+              (builds TaskSpecs from history under this config), src/crb/core/lint.py
+              (validates the ``lint`` block), src/crb/core/runners/base.py (the runner a
+              config names), src/crb/core/ledger.py (the row that copies a task's class, size
+              and pool), src/crb/core/version.py (stamps the size table and taxonomy)
+Tested by:    tests/test_spec.py, tests/test_classify.py, tests/test_mine.py,
+              tests/test_cli_repo_setup.py
+Touch when:   onboarding a repository whose layout no preset fits — extend ``is_test`` /
+              ``is_src`` or add a ``Language`` (with its default runner and extension), and
+              document the option in docs/OPERATOR.md#2-configure-a-repository; changing
+              ``SIZE_TIERS`` or a class rule changes every cell's identity — bump
+              src/crb/core/version.py and record it (docs/adr/README.md).
 """
 
 from __future__ import annotations
@@ -42,6 +73,9 @@ from crb.core.taxonomy import ALL_CLASSES, CLASS_VOCABULARY, INTENT_CLASSES, UNC
 
 
 class Language(enum.StrEnum):
+    """The languages the engine has a runner and a layout rule for. The value is the
+    ``language`` axis of every cell key, so a new member is an apparatus change."""
+
     PYTHON = "python"
     GO = "go"
     JAVASCRIPT = "javascript"
@@ -76,7 +110,9 @@ class Language(enum.StrEnum):
 # Size tiers (ONE table)
 # ---------------------------------------------------------------------------
 
-#: ``(upper_exclusive_churn, tier)`` — churn is added+deleted source lines.
+#: ``(upper_exclusive_churn, tier)`` — churn is added+deleted source lines. The census
+#: table; every size stamped in the ledger was computed from it, so a change here
+#: re-keys every cell (bump ``APPARATUS_VERSION``).
 SIZE_TIERS: tuple[tuple[int, str], ...] = (
     (10, "XS"),
     (40, "S"),
@@ -87,7 +123,8 @@ SIZE_TIER_NAMES: tuple[str, ...] = ("XS", "S", "M", "L", "XL")
 
 
 def size_tier(src_churn: int) -> str:
-    """Map source churn (added + deleted lines) to a size tier."""
+    """Map source churn (added + deleted lines) to a size tier. Size measures the
+    *diff*, not the difficulty — an XS change can be the hardest in the corpus."""
     if src_churn < 0:
         raise ValueError("churn cannot be negative")
     for upper, tier in SIZE_TIERS:
@@ -131,6 +168,8 @@ _CODE_EXTS = frozenset(
 _FRONTEND_EXTS = frozenset({".tsx", ".jsx", ".vue", ".svelte", ".razor", ".cshtml"})
 _DOC_EXTS = frozenset({".md", ".rst", ".txt", ".mdx", ".adoc"})
 
+#: ``test`` / ``tests`` as a whole path token (``test_x.py``, ``x.test.js``, ``x_tests``),
+#: not as a substring (``contest.py``, ``latest/``).
 _TEST_NAME_RE = re.compile(r"(^|[./_-])tests?([./_-]|$)")
 
 
@@ -139,6 +178,7 @@ def _has(haystack: str, *needles: str) -> bool:
 
 
 def _ext_of(name: str) -> str:
+    """``"a.b.c"`` → ``".c"``; ``""`` for a name with no dot."""
     return "." + name.rsplit(".", 1)[-1] if "." in name else ""
 
 
@@ -173,6 +213,8 @@ def classify_path(rel: str) -> str:
     name = pl.rsplit("/", 1)[-1]
     ext = _ext_of(name)
 
+    # order matters: CI and IaC before docs, docs before tests, tests before code — a
+    # workflow file under tests/ is still CI, a README under tests/ is still docs
     if _has(
         pl, ".github/workflows/", ".gitlab-ci", "azure-pipelines", ".circleci/", ".buildkite/"
     ) or name in {
@@ -219,6 +261,8 @@ def classify_path(rel: str) -> str:
         )
     ) and ext in _CODE_EXTS:
         return "backend.route.add"
+    # every other code file: the path says nothing about intent, so it is the generic
+    # class — on a library repository this is most tasks (hence the intent label)
     if ext in _CODE_EXTS:
         return "bug.fix"
     return UNCLASSIFIED
@@ -244,6 +288,9 @@ def classify_commit(src_files: Sequence[str]) -> str:
 # Repo config
 # ---------------------------------------------------------------------------
 
+#: The symbolic regression-belt scopes (belt 3). ``TARGET_ONLY`` is the weakest: belt 3
+#: then adds nothing to belt 2 and a regression elsewhere goes unseen — use it only
+#: while calibrating a very large suite (docs/OPERATOR.md).
 BELT_TARGET_ONLY = "TARGET_ONLY"
 BELT_AFFECTED_DIRS = "AFFECTED_DIRS"
 BELT_BARE = "BARE"
@@ -251,6 +298,8 @@ BELT_BARE = "BARE"
 #: Runner names. Each maps to a class in :mod:`crb.core.runners`.
 RUNNERS: tuple[str, ...] = ("pytest", "go", "node", "vitest", "jest", "mocha", "maven", "cargo")
 
+#: The runner a config gets when it names none (``mocha`` for JavaScript: the census
+#: default; ``node`` / ``vitest`` / ``jest`` must be chosen explicitly).
 _DEFAULT_RUNNER_FOR_LANGUAGE: dict[Language, str] = {
     Language.PYTHON: "pytest",
     Language.GO: "go",
@@ -325,6 +374,7 @@ class RepoConfig:
     lint: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        # the name is a ledger key, a directory name and a URL segment: one safe charset
         if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", self.name):
             raise ValueError(f"repo name {self.name!r} must be lowercase [a-z0-9._-], ≤64 chars")
         if not self.runner:
@@ -365,12 +415,19 @@ class RepoConfig:
         return tuple(x for x in self.test_suffix.split("|") if x)
 
     def has_ext(self, rel: str) -> bool:
+        """Does ``rel`` carry one of the configured language extensions?"""
         return rel.endswith(self.exts)
 
     def has_test_suffix(self, rel: str) -> bool:
+        """Does ``rel`` end in one of the configured test suffixes (suffix mode only)?"""
         return bool(self.test_suffixes) and rel.endswith(self.test_suffixes)
 
     def is_test(self, rel: str) -> bool:
+        """Is ``rel`` a test file under THIS layout? Exact, not heuristic — it decides
+        what the miner treats as the oracle and what belts 1 and 4 treat as off-limits
+        to the builder, so it must agree with how the repository's runner discovers
+        tests. Language conventions (Go ``_test.go``, Rust ``tests/``) override the
+        prefix rule."""
         if self.test_mode == "suffix":
             return self.has_test_suffix(rel)
         if self.language is Language.RUST:
@@ -380,11 +437,16 @@ class RepoConfig:
         if self.language is Language.GO:
             return rel.endswith("_test.go")
         if self.language is Language.JAVASCRIPT:
+            # <test_prefix>/support/ holds fixtures and helpers, not tests: a commit
+            # touching only those has no oracle and must not be mined as one
             tp = self.test_prefix
             return rel.startswith(tp) and not rel.startswith(tp + "support/")
         return bool(self.test_prefix) and rel.startswith(self.test_prefix)
 
     def is_src(self, rel: str) -> bool:
+        """Is ``rel`` a source file under THIS layout — the files whose churn sizes a
+        task and whose change belt 4 requires? The complement of :meth:`is_test`
+        within the configured extensions, with the same language overrides."""
         if self.test_mode == "suffix":
             return (
                 self.has_ext(rel)
@@ -415,6 +477,7 @@ class RepoConfig:
 
     # --- serialisation ----------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
+        """The native JSON shape (``language`` as its string, ``belt_scope`` as a list)."""
         d = asdict(self)
         d["language"] = self.language.value
         d["belt_scope"] = (
@@ -427,6 +490,7 @@ class RepoConfig:
         """Load from the native shape OR the census ``configs.json`` shape."""
         lang = Language.parse(str(d.get("language") or d.get("lang") or ""))
         runner = str(d.get("runner") or "")
+        # census shape: the JS runner was `js_tool`, and runner options sat at top level
         if not runner and "js_tool" in d:
             runner = {"node": "node", "vitest": "vitest", "jest": "jest", "mocha": "mocha"}[
                 d["js_tool"]
@@ -476,6 +540,9 @@ _DEFAULT_EXT: dict[Language, str] = {
 # Task spec
 # ---------------------------------------------------------------------------
 
+#: Mining pools, by how many files a commit touches (``crb.core.mine.pool_caps``):
+#: ``standard`` = 1–3 source files (the census caps), ``hard`` = 4–8. A task carries its
+#: pool so the two are never blended in a statistic.
 POOL_STANDARD = "standard"
 POOL_HARD = "hard"
 
@@ -531,10 +598,13 @@ class TaskSpec:
             raise ValueError("a task needs at least one test file (the oracle)")
         if not self.src_files:
             raise ValueError("a task needs at least one source file")
+        # lists from JSON become tuples so the spec is hashable and truly frozen
         for attr in ("test_files", "src_files", "target_tests", "belt_scope", "baseline_failing"):
             object.__setattr__(self, attr, tuple(getattr(self, attr)))
         object.__setattr__(self, "labels", dict(self.labels))
         # Class axes → the resolved class (the invariant every consumer relies on).
+        # A caller can only SET the path class; whatever it passed as capability_class
+        # is overwritten by the resolution, so the two can never disagree.
         if not self.path_class:
             object.__setattr__(self, "path_class", self.capability_class or UNCLASSIFIED)
         object.__setattr__(
@@ -543,6 +613,7 @@ class TaskSpec:
 
     @property
     def short_id(self) -> str:
+        """The first ten characters of the sha — what logs, events and errors show."""
         return self.task_id[:10]
 
     @property
@@ -552,9 +623,12 @@ class TaskSpec:
 
     @property
     def class_reason(self) -> str:
+        """One line saying why that axis won (for the review table and the UI)."""
         return resolve(self.path_class, self.intent).reason
 
     def to_dict(self) -> dict[str, Any]:
+        """The native JSON shape; ``class_source`` is included for readers and ignored
+        on load because it is derived."""
         return {
             "task_id": self.task_id,
             "repo": self.repo,
@@ -611,6 +685,8 @@ class TaskSpec:
             ),
             language=str(d.get("language", "")),
             baseline_failing=tuple(d.get("baseline_failing", ())),
+            # census records had no red_checked flag: a recorded baseline implies the
+            # RED check ran (the baseline is captured in the same pass)
             red_checked=bool(d.get("red_checked", "baseline_failing" in d)),
             gold_clean=d.get("gold_clean"),
             gold_note=str(d.get("gold_note", "")),
