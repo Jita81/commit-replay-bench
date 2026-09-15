@@ -1,3 +1,29 @@
+/**
+ * Login — the local-account form and the OIDC button (/login).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /login, outside the shell.
+ * What it does: Signs in with `POST /auth/login` (the local bootstrap account) or hands off to
+ *               `GET /auth/oidc/start` (the organisation's identity provider); renders the
+ *               error envelope on a wrong password (never a blank form), and returns the user
+ *               to the `?next=` path — same-origin paths only, so a crafted link cannot bounce
+ *               a session to another host. An already-authenticated visitor is redirected
+ *               straight to `next`.
+ * How:          `useAuth` (redirect if logged in) → `useLogin` mutation on submit → the auth
+ *               query is seeded with the principal; `safeNext` validates the return path.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/lib/auth.tsx (`RequireAuth` sends people here with `?next=`),
+ *               ui/src/api/hooks.ts (`useLogin`), ui/src/components/ErrorState.tsx (the 401
+ *               envelope), src/crb/server/routes/auth.py (login and the OIDC start URL),
+ *               src/crb/server/auth.py (the session and CSRF cookies the login sets)
+ * Tested by:    ui/e2e/smoke.spec.ts (renders against a mocked API, OIDC button href, axe),
+ *               ui/e2e/walkthrough/01-login.spec.ts (wrong password → envelope; right one →
+ *               the role chip)
+ * Touch when:   the OIDC start path or the login body changes (docs/API.md "Auth"); never for
+ *               a new repository.
+ */
 import { useState, type FormEvent } from 'react'
 import { Navigate, useSearchParams } from 'react-router'
 import { useLogin } from '../../api/hooks'
@@ -15,6 +41,7 @@ function safeNext(raw: string | null): string {
   return decoded.startsWith('/') && !decoded.startsWith('//') ? decoded : '/repos'
 }
 
+/** The screen; redirects to `next` once a session exists. */
 export function LoginPage() {
   const { me, loading } = useAuth()
   const [params] = useSearchParams()

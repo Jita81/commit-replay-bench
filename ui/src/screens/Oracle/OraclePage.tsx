@@ -1,3 +1,36 @@
+/**
+ * Oracle — how much a green is worth: mutation strength per task and per cell, and the negative-controls report (/oracle).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /oracle: strength tiles, per-cell and per-task tables, and the
+ *               controls section with its gate.
+ * What it does: Renders `GET /oracle/{repo}` (the latest mutation score per task — strength,
+ *               band, the gate a clean grade licenses) and `GET /oracle/{repo}/controls` (the
+ *               seven negative controls through the real grader). The controls gate is green
+ *               only with zero VIOLATION rows; an ESCAPE is shown as a finding (the repo's
+ *               tests could not tell a cheat from an implementation), not as an instrument
+ *               failure. A 404 on controls is the designed "not measured yet" state with the
+ *               run button.
+ * How:          `useOracle` → tiles computed from the tasks (mean over scored tasks only;
+ *               unscoreable never averaged in) → two `DataTable`s; `ControlsSection` reads the
+ *               latest report and builds the `GateBanner` criteria from its counts.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0009-text-level-mutators.md, docs/adr/0010-polyglot-negative-controls.md
+ * Works with:   ui/src/api/hooks.ts (`useOracle`, `useOracleControls`), ui/src/api/types.ts
+ *               (`OracleReport`, `ControlsReport`, `ControlRow`), ui/src/lib/verdict.ts
+ *               (`bandDisplay`, `gateDisplay`), src/crb/server/routes/oracle.py (the routes),
+ *               src/crb/core/oracle/adequacy.py (bands and gates), src/crb/core/oracle/controls.py
+ *               (the control matrix and verdict vocabulary)
+ * Tested by:    ui/e2e/walkthrough/04-oracle-and-controls.spec.ts (strength, band and gate per
+ *               task; every control with its verdict; no VIOLATION), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ * Touch when:   a control or a verdict word is added (src/crb/core/oracle/controls.py — add it
+ *               to `VERDICT_TONE` and `ControlName` in ui/src/api/types.ts); never for a new
+ *               repository.
+ * Claims:       A green on a weak or unscored oracle licenses nothing; the gate column is what
+ *               a clean grade may be claimed to mean
+ *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
+ */
 import { useMemo } from 'react'
 import { Link } from 'react-router'
 import { useOracle, useOracleControls } from '../../api/hooks'
@@ -16,8 +49,10 @@ import { StatTile } from '../../components/StatTile'
 import { fmtInt, fmtRatio, fmtSeconds, shortId } from '../../lib/format'
 import { bandDisplay, gateDisplay } from '../../lib/verdict'
 
+/** Sort order for the size column. */
 const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL']
 
+/** An oracle band as a pill. */
 function BandPill({ band }: { band: string }) {
   const d = bandDisplay(band)
   return (
@@ -27,6 +62,7 @@ function BandPill({ band }: { band: string }) {
   )
 }
 
+/** An oracle gate (what a clean grade licenses) as a pill. */
 function GatePill({ gate }: { gate: string }) {
   const d = gateDisplay(gate)
   return (
@@ -36,6 +72,7 @@ function GatePill({ gate }: { gate: string }) {
   )
 }
 
+/** Control verdicts: `VIOLATION` red (the grader passed what it must refuse — an instrument bug); `ESCAPE` amber (the repo's own tests could not tell — a finding about the oracle, not the grader). */
 const VERDICT_TONE: Record<string, { tone: 'green' | 'red' | 'amber' | 'muted'; glyph: string }> = {
   ok: { tone: 'green', glyph: '✓' },
   VIOLATION: { tone: 'red', glyph: '✗' },
@@ -44,6 +81,7 @@ const VERDICT_TONE: Record<string, { tone: 'green' | 'red' | 'amber' | 'muted'; 
   skip: { tone: 'muted', glyph: '–' },
 }
 
+/** The latest negative-controls report as a gate plus the rows; a 404 is "never run", with the button to run it. */
 function ControlsSection({ repo }: { repo: string }) {
   const q = useOracleControls(repo)
   const columns = useMemo<Column<ControlRow>[]>(
@@ -100,6 +138,7 @@ function ControlsSection({ repo }: { repo: string }) {
   )
 }
 
+/** The screen. Tiles are computed client-side from the tasks; `unscoreable` tasks are counted but never averaged. */
 export function OraclePage() {
   const [repo, setRepo] = useRepoParam()
   const oracle = useOracle(repo)
