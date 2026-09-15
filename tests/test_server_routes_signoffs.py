@@ -686,6 +686,7 @@ class TestPreview:
             "disqualified": 0,
             "lint": 0,
             "lint_evaluated": 0,
+            "outage": 0,
         }
         assert ev["model_n"] == 40 and ev["model_point"] == 0.95
         # the controls verdict (k of N, escapes, run id, date) and the route + reason

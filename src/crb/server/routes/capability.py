@@ -25,7 +25,7 @@ profile to weight the cells by.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from fastapi import APIRouter, Query
 from sqlalchemy.orm import Session
@@ -80,6 +80,18 @@ BY_ALIASES: dict[str, str] = {
 DEFAULT_BY = "class,size"
 
 
+def rows_for_mode(rows: Iterable[GradeRow], mode: str) -> list[GradeRow]:
+    """Sighted and blind attempts are different measurements of the same task — the
+    oracle is visible in one and held out in the other — and ``mode`` is not part of
+    the cell key, so a map must never pool them: a blind budget ladder diluted every
+    sighted cell on the live stack (2026-09-15). Default ``sighted``; ``blind`` for the
+    blind map; ``all`` only when a reader asks for the pooled view explicitly."""
+    rs = list(rows)
+    if mode == "all":
+        return rs
+    return [r for r in rs if r.mode == mode]
+
+
 def parse_by(by: str | None) -> tuple[str, ...]:
     """``"class,size,language"`` → the cell-key projection, in :data:`CELL_FIELDS` order."""
     tokens = [t.strip().lower() for t in (by or DEFAULT_BY).split(",") if t.strip()]
@@ -128,6 +140,7 @@ def split_out(c: CapabilityCell) -> FailureSplitOut:
         budget=c.n_budget,
         protocol=c.n_protocol,
         harness=c.n_harness,
+        outage=c.n_outage,
         disqualified=c.n_disqualified,
         lint=c.stats.n_lint if c.stats is not None else 0,
         lint_evaluated=c.stats.n_lint_evaluated if c.stats is not None else 0,
@@ -169,6 +182,7 @@ def cell_out(c: CapabilityCell) -> CapabilityCellSplitOut:
         n_budget=s.n_budget,
         n_protocol=s.n_protocol,
         n_harness=s.n_harness,
+        n_outage=s.n_outage,
         n_disqualified=s.n_disqualified,
         n_lint=s.n_lint,
         n_lint_evaluated=s.n_lint_evaluated,
@@ -206,17 +220,18 @@ def _coverage(
     responses={401: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
     summary="Measured cells of one repo under the routing rule + controls verdict, sign-offs overlaid",
 )
-def capability_map(
+def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
     repo: str = Query(min_length=1, max_length=64),
     by: str | None = Query(default=None, max_length=128),
+    mode: str = Query(default="sighted", pattern="^(sighted|blind|all)$"),
 ) -> CapabilityMapWithControlsOut:
     del viewer
     get_repo_or_404(db, repo)
     projection = parse_by(by)
-    rows = list(DbLedger(factory).rows(repo=repo))
+    rows = rows_for_mode(DbLedger(factory).rows(repo=repo), mode)
     controls = latest_controls_verdict(db, repo)
     cmap, n_signoffs = signed_map(rows, projection, db, repo, controls=controls)
     cells = [c for c in cmap.cells if c.measured]
@@ -258,17 +273,18 @@ def capability_map(
     responses={401: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
     summary="Route decisions per (full) cell with reasons, reason codes, the controls verdict and the policy in force",
 )
-def routes(
+def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
     repo: str = Query(min_length=1, max_length=64),
     by: str | None = Query(default=None, max_length=128),
+    mode: str = Query(default="sighted", pattern="^(sighted|blind|all)$"),
 ) -> RoutesWithControlsResponse:
     del viewer
     get_repo_or_404(db, repo)
     projection = parse_by(by) if by else PROJECTION_CELL
-    rows = list(DbLedger(factory).rows(repo=repo))
+    rows = rows_for_mode(DbLedger(factory).rows(repo=repo), mode)
     controls = latest_controls_verdict(db, repo)
     cmap, _ = signed_map(rows, projection, db, repo, controls=controls)
     decisions: list[RouteDecisionWithControlsOut] = []

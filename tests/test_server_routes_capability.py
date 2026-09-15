@@ -184,6 +184,7 @@ class TestCapabilityMap:
                 "harness",
                 "disqualified",
                 "lint_evaluated",
+                "outage",
             }
             assert c["capability_class"] != "*" and c["size"] != "*" and c["language"] == "*"
 
@@ -227,6 +228,7 @@ class TestCapabilityMap:
             "protocol": 0,
             "harness": 0,
             "disqualified": 0,
+            "outage": 0,
             "lint_evaluated": 0,  # the seed's repo configures no linter: belt 5 never evaluated
         }
         assert c["n_builder_red"] == 2 and c["model_n"] == 40 and c["model_point"] == 0.95
@@ -360,6 +362,7 @@ class TestCapabilityMap:
             "protocol": 0,
             "harness": 1,
             "disqualified": 0,
+            "outage": 0,
             "lint_evaluated": 0,
         }
         assert c["point"] == 0.5 and c["model_n"] == 3 and c["model_point"] == round(2 / 3, 4)
@@ -568,6 +571,7 @@ class TestFailureSplit:
             "budget",
             "protocol",
             "harness",
+            "outage",
             "disqualified",
         ]
 
@@ -589,3 +593,20 @@ class TestFailureSplit:
         assert env.get("/failure-split").status_code == 422
         assert env.get(f"/failure-split?repo={ALPHA}&run_id={'x' * 40}").status_code == 422
         assert env.get(f"/failure-split?repo={BETA}").json()["rows"] == 0
+
+
+class TestModeFilter:
+    """Sighted and blind rows are different measurements; the map never pools them
+    unless asked (`mode=all`). A blind budget ladder diluted every sighted cell on the
+    live stack, 2026-09-15."""
+
+    def test_default_is_sighted_and_blind_is_separate(self, env: Env) -> None:
+        d = env.get(f"/capability-map?repo={ALPHA}&by=class,size").json()
+        a = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=all").json()
+        s = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=sighted").json()
+        assert d["cells"] == s["cells"]
+        n_default = sum(c["n"] for c in d["cells"])
+        n_all = sum(c["n"] for c in a["cells"])
+        assert n_all >= n_default
+        r = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=other")
+        assert r.status_code == 422

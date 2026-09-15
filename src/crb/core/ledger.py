@@ -154,6 +154,13 @@ FAILURE_PROTOCOL = "protocol"
 FAILURE_HARNESS = "harness"
 #: Tamper or malformed oracle — the observation is excluded, not counted either way.
 FAILURE_DISQUALIFIED = "disqualified"
+#: The model provider refused the CALL itself — a usage limit, a quota, a 429/5xx, a
+#: dead credential: the builder never ran, so the row is not an observation of the
+#: builder, the oracle or the harness. Excluded from every rate (``n``) and counted
+#: separately; 237 such rows landed in one evening when the operator's Claude Code
+#: quota ran out mid-campaign (2026-09-14) and read as ``harness`` — a harness that
+#: worked perfectly.
+FAILURE_OUTAGE = "outage"
 FAILURE_KINDS: tuple[str, ...] = (
     FAILURE_CLEAN,
     FAILURE_BUILDER_RED,
@@ -161,8 +168,40 @@ FAILURE_KINDS: tuple[str, ...] = (
     FAILURE_BUDGET,
     FAILURE_PROTOCOL,
     FAILURE_HARNESS,
+    FAILURE_OUTAGE,
     FAILURE_DISQUALIFIED,
 )
+#: Error texts that identify a provider outage (the builders record the provider's own
+#: words after ``model_error:``). Matched case-insensitively; kept narrow on purpose —
+#: an unknown error stays ``harness`` (fail-closed).
+OUTAGE_ERROR_MARKERS: tuple[str, ...] = (
+    "hit your limit",
+    "usage limit",
+    "rate_limit",
+    "rate limit",
+    "429",
+    "overloaded",
+    "quota",
+    "insufficient credit",
+    "credit balance",
+    "authentication failed",
+    "oauth access token is invalid",
+    "402",
+    "503",
+    "529",
+)
+
+
+def is_outage_error(error: str) -> bool:
+    """``True`` when ``error`` is the provider refusing the call (see
+    :data:`OUTAGE_ERROR_MARKERS`) — only for ``model_error:`` texts, so a grader
+    timeout that happens to say "429" in a test log is not an outage."""
+    e = error.lower()
+    if not e.startswith("model_error"):
+        return False
+    return any(m in e for m in OUTAGE_ERROR_MARKERS)
+
+
 #: The kinds where the model finished and was judged on its own terms (the
 #: denominator of ``model_point`` together with clean).
 MODEL_FAILURE_KINDS: tuple[str, ...] = (FAILURE_BUILDER_RED, FAILURE_LINT)
@@ -254,8 +293,11 @@ def derive_failure_kind(
     3. ``error`` or ``builder_error`` starts with
        ``protocol violation:``                              → ``protocol``
        (the builder was refused by a guard; the belts then judge an empty patch)
-    4. any other non-empty ``error``                        → ``harness``
-       (grader exception, sandbox, parse, timeout, setup, ``model_error: …``,
+    4. a ``model_error: …`` naming a provider refusal (usage
+       limit, 429, quota, dead credential)                   → ``outage``
+       (the call never happened: no observation of anything; excluded from ``n``)
+    4b. any other non-empty ``error``                       → ``harness``
+       (grader exception, sandbox, parse, timeout, setup, other ``model_error: …``,
        a linter that could not run)
     5. ``stop_reason`` in :data:`BUDGET_STOP_REASONS`       → ``budget``
        (the attempt was cut short by its own Budget; the belts judged a partial patch)
@@ -282,7 +324,7 @@ def derive_failure_kind(
     ):
         return FAILURE_PROTOCOL
     if error:
-        return FAILURE_HARNESS
+        return FAILURE_OUTAGE if is_outage_error(error) else FAILURE_HARNESS
     if stop_reason in BUDGET_STOP_REASONS:
         return FAILURE_BUDGET
     if lint_only:
@@ -476,6 +518,10 @@ class GradeRow:
         """
         pinned = self.labels.get(LABEL_FAILURE_KIND)
         if pinned is not None:
+            # a row pinned ``harness`` before ``outage`` existed reads as the outage it
+            # was — the error text is hashed into the row, so the re-reading is honest
+            if pinned == FAILURE_HARNESS and is_outage_error(self.error):
+                return FAILURE_OUTAGE
             return pinned
         return derive_failure_kind(
             clean=self.clean,
@@ -517,8 +563,13 @@ class GradeRow:
 
     @property
     def eligible(self) -> bool:
-        """Counts toward a cell's denominator: graded (not DQ) on a judgeable oracle."""
-        return not self.disqualified and self.gold_clean is not False
+        """Counts toward a cell's denominator: graded (not DQ) on a judgeable oracle,
+        and the call actually happened (an ``outage`` row observed nothing)."""
+        return (
+            not self.disqualified
+            and self.gold_clean is not False
+            and self.failure_kind != FAILURE_OUTAGE
+        )
 
     # --- hashing ---------------------------------------------------------------
     def fields(self) -> dict[str, Any]:
@@ -766,8 +817,8 @@ class FailureSplit:
 
     ``n`` counts ELIGIBLE rows (not disqualified, oracle not known-bad) — the same
     denominator :class:`CellStats` routes on — so ``n == clean + builder_red +
-    lint + budget + protocol + harness``; ``disqualified`` is counted over all rows
-    and sits outside ``n``. ``point`` is the all-rows rate (``clean / n``): the
+    lint + budget + protocol + harness``; ``disqualified`` and ``outage`` are counted
+    over all rows and sit outside ``n``. ``point`` is the all-rows rate (``clean / n``): the
     fail-closed number, where every instrument error counts against autonomy.
     ``model_point`` is ``clean / (clean + builder_red + lint)`` — how often the
     model succeeded when it got a fair, finished attempt (``lint`` is such an
@@ -791,6 +842,9 @@ class FailureSplit:
     cost_unknown: int
     lint: int = 0
     lint_evaluated: int = 0
+    #: Provider outages (usage limit, 429, dead credential): the call never happened.
+    #: Counted over all rows, outside ``n`` — like ``disqualified``.
+    outage: int = 0
 
     def __post_init__(self) -> None:
         kinds = self.clean + self.builder_red + self.lint + self.budget + self.protocol
@@ -832,6 +886,7 @@ class FailureSplit:
             "protocol": self.protocol,
             "harness": self.harness,
             "disqualified": self.disqualified,
+            "outage": self.outage,
             "rows": self.rows,
             "lint_evaluated": self.lint_evaluated,
             "point": round(self.point, 4),
@@ -866,6 +921,7 @@ def failure_split(rows: Iterable[GradeRow]) -> FailureSplit:
         cost_unknown=sum(1 for r in eligible if not r.cost_known),
         lint=kinds[FAILURE_LINT],
         lint_evaluated=sum(1 for r in eligible if r.repo_lint_clean is not None),
+        outage=sum(1 for r in rs if r.failure_kind == FAILURE_OUTAGE),
     )
 
 
@@ -892,6 +948,7 @@ class CellStats:
     n_budget: int = 0
     n_protocol: int = 0
     n_harness: int = 0
+    n_outage: int = 0  # provider outages: outside n, reported so a reader sees the gap
     model_n: int = 0
     model_point: float = 0.0
     model_ci: Interval = field(default_factory=lambda: Interval(0.0, 1.0))
@@ -928,6 +985,7 @@ class CellStats:
             "n_budget": self.n_budget,
             "n_protocol": self.n_protocol,
             "n_harness": self.n_harness,
+            "n_outage": self.n_outage,
             "n_disqualified": self.n_disqualified,
             "n_lint_evaluated": self.n_lint_evaluated,
             "model_n": self.model_n,
@@ -967,6 +1025,7 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         n_budget=split.budget,
         n_protocol=split.protocol,
         n_harness=split.harness,
+        n_outage=split.outage,
         model_n=split.model_n,
         model_point=split.model_point,
         model_ci=split.model_ci,

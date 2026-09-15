@@ -998,3 +998,40 @@ def test_cell_stats_carries_the_split_next_to_the_point() -> None:
     assert only_harness.n == 3 and only_harness.point == 0.0
     assert only_harness.model_n == 0 and only_harness.model_point == 0.0
     assert only_harness.model_ci == wilson_interval(0, 0)
+
+
+def test_outage_rows_are_not_observations() -> None:
+    """237 rows landed in one evening reading 'model_error: … You've hit your limit' and
+    were counted as harness failures — a harness that worked. A provider refusing the
+    CALL is `outage`: outside n, reported separately; a pinned `harness` row with
+    outage text re-reads as `outage` (the text is hashed into the row)."""
+    limit = "model_error: success: You've hit your limit · resets 9:10pm"
+    assert lg.derive_failure_kind(clean=False, disqualified=False, error=limit) == lg.FAILURE_OUTAGE
+    assert (
+        lg.derive_failure_kind(
+            clean=False, disqualified=False, error="model_error: HTTP 429 rate_limit"
+        )
+        == lg.FAILURE_OUTAGE
+    )
+    assert (
+        lg.derive_failure_kind(clean=False, disqualified=False, error="model_error: something else")
+        == lg.FAILURE_HARNESS
+    )
+    assert (
+        lg.derive_failure_kind(
+            clean=False, disqualified=False, error="pytest: collection timed out after 429s"
+        )
+        == lg.FAILURE_HARNESS
+    )
+    assert not lg.is_outage_error("FileNotFoundError: 429")
+    outage = row(
+        clean=False,
+        target_green=False,
+        no_new_failures=None,
+        source_changed=None,
+        error=limit,
+        labels={"failure_kind": "harness"},
+    )
+    assert outage.failure_kind == lg.FAILURE_OUTAGE and outage.eligible is False
+    split = lg.failure_split([outage, row()])
+    assert split.n == 1 and split.outage == 1 and split.rows == 2

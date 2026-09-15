@@ -19,7 +19,7 @@ import type { Tone } from '../../lib/verdict'
 // ---------------------------------------------------------------------------
 
 /** `crb.core.ledger.GradeRow.failure_kind` — `''` is clean; `lint` = belts 1–4 held, belt 5 rejected (ADR-0011). */
-export type FailureKind = '' | 'builder_red' | 'lint' | 'budget' | 'protocol' | 'harness' | 'disqualified'
+export type FailureKind = '' | 'builder_red' | 'lint' | 'budget' | 'protocol' | 'harness' | 'outage' | 'disqualified'
 
 /** `crb.core.routing.REASON_CODES`, in evaluation order. */
 export type ReasonCode =
@@ -63,6 +63,8 @@ export interface FailureSplit {
   disqualified: number
   /** How many of the n rows carried belt 5 at all — the denominator `lint` needs. */
   lint_evaluated?: number
+  /** Provider outages (usage limit / 429 / dead credential): the call never happened; outside n. */
+  outage?: number
 }
 
 export interface RoutingPolicyWithControls extends RoutingPolicy {
@@ -158,7 +160,7 @@ export function useFailureSplit(repo: string, runId = ''): UseQueryResult<Failur
 // ---------------------------------------------------------------------------
 
 export interface KindDisplay {
-  key: 'builder_red' | 'lint' | 'budget' | 'protocol' | 'harness' | 'disqualified'
+  key: 'builder_red' | 'lint' | 'budget' | 'protocol' | 'harness' | 'outage' | 'disqualified'
   short: string
   long: string
   tone: Tone
@@ -171,6 +173,7 @@ export const KIND_DISPLAY: readonly KindDisplay[] = [
   { key: 'budget', short: 'budget', long: 'budget — the builder hit its own cap (wall clock, turns, tool calls, tokens or cost) before it finished', tone: 'amber' },
   { key: 'protocol', short: 'protocol', long: 'protocol — a guard refused the builder (tamper / archaeology / network); an instrument decision', tone: 'violet' },
   { key: 'harness', short: 'harness', long: 'harness — executor / sandbox / parse / timeout / setup / model-API error; the instrument, not the model', tone: 'violet' },
+  { key: 'outage', short: 'outage', long: 'outage — the model provider refused the call (usage limit, 429, dead credential); nothing was observed; outside n', tone: 'muted' },
   { key: 'disqualified', short: 'DQ', long: 'disqualified — tamper or malformed oracle; excluded, not counted either way', tone: 'muted' },
 ]
 

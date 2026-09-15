@@ -238,6 +238,10 @@ class CapabilityCell:
         return self.stats.n_harness if self.stats is not None else 0
 
     @property
+    def n_outage(self) -> int:
+        return self.stats.n_outage if self.stats is not None else 0
+
+    @property
     def n_disqualified(self) -> int:
         return self.stats.n_disqualified if self.stats is not None else 0
 
@@ -295,6 +299,7 @@ class CapabilityCell:
                 "protocol": self.n_protocol,
                 "harness": self.n_harness,
                 "disqualified": self.n_disqualified,
+                "outage": self.n_outage,
             },
             "model_n": self.model_n,
             "model_point": None if self.model_point is None else round(self.model_point, 4),
