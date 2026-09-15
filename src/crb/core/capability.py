@@ -65,7 +65,7 @@ from crb.core.routing import (
     route,
 )
 from crb.core.spec import RepoConfig, classify_commit, size_tier
-from crb.core.stats import stddev
+from crb.core.stats import mean, stddev
 
 # ---------------------------------------------------------------------------
 # Vocabulary
@@ -324,20 +324,42 @@ def empty_cell(key: CellKey, projection: Sequence[str] = PROJECTION_CELL) -> Cap
     )
 
 
+OracleByTask = Mapping[str, float | None]
+
+
+def task_oracle_strength(
+    rows: Iterable[GradeRow], oracle_by_task: OracleByTask | None
+) -> float | None:
+    """The oracle strength of a group of rows as the repo's oracle ledger knows it: the
+    mean of the latest task-level mutation score over the group's DISTINCT tasks that
+    have a scoreable one (``None`` = no task scored — *unmeasured*, never 0.0). One
+    reduction, shared by the capability map's route and the sign-off's evidence, so
+    the two can never disagree about a cell's oracle."""
+    if not oracle_by_task:
+        return None
+    task_ids = {r.task_id for r in rows if r.task_id}
+    strengths = [s for tid in task_ids if (s := oracle_by_task.get(tid)) is not None]
+    return mean(strengths) if strengths else None
+
+
 def measure_cell(
     rows: Sequence[GradeRow],
     projection: Sequence[str] = PROJECTION_CELL,
     *,
     policy: RoutingPolicy = DEFAULT_POLICY,
     controls: ControlsVerdict | None = None,
+    oracle_by_task: OracleByTask | None = None,
 ) -> CapabilityCell:
     """Reduce one group of rows (all sharing the projected key) to a cell.
 
     The route is ``route(stats, controls=controls, policy=policy)`` — nothing
     else. ``controls`` is the repo's negative-controls verdict (``None`` = not
-    evaluated by this caller; the decision records the absence). The tier is
-    ``untrusted`` iff ``false_q1 > 0`` (structurally impossible for rows written
-    through :class:`~crb.core.ledger.GradeRow`, re-checked here anyway) and
+    evaluated by this caller; the decision records the absence). ``oracle_by_task``
+    is the repo's latest mutation score per task (:func:`task_oracle_strength`); the
+    cell is routed under that measured strength, else under the rows' own
+    ``oracle_strength`` mean, else unmeasured. The tier is ``untrusted`` iff
+    ``false_q1 > 0`` (structurally impossible for rows written through
+    :class:`~crb.core.ledger.GradeRow`, re-checked here anyway) and
     ``automated-pass`` otherwise; earned tiers are overlaid by
     :mod:`crb.core.signoff`, never granted here.
     """
@@ -346,7 +368,12 @@ def measure_cell(
         raise ValueError("measure_cell needs at least one row; use empty_cell for none")
     stats = projected_stats(rows, proj)
     eligible = [r for r in rows if r.eligible]
-    decision = route(stats, controls=controls, policy=policy)
+    decision = route(
+        stats,
+        oracle_strength=task_oracle_strength(rows, oracle_by_task),
+        controls=controls,
+        policy=policy,
+    )
     tier = TIER_UNTRUSTED if stats.false_q1 > 0 else TIER_AUTOMATED_PASS
     return CapabilityCell(
         key=stats.cell,
@@ -439,13 +466,18 @@ def build_capability_map(
     projection: Sequence[str] = PROJECTION_CLASS_SIZE,
     policy: RoutingPolicy = DEFAULT_POLICY,
     controls: ControlsVerdict | None = None,
+    oracle_by_task: OracleByTask | None = None,
 ) -> CapabilityMap:
     """Group ``rows`` by ``projection`` and route every group under ``controls``
-    (the repo's negative-controls verdict; ``None`` = not evaluated). Pure; no I/O."""
+    (the repo's negative-controls verdict; ``None`` = not evaluated) and
+    ``oracle_by_task`` (the repo's latest mutation score per task). Pure; no I/O."""
     proj = _check_projection(projection)
     rs = list(rows)
     groups = group_by_cell(rs, key_fields=proj)
-    cells = [measure_cell(g, proj, policy=policy, controls=controls) for g in groups.values()]
+    cells = [
+        measure_cell(g, proj, policy=policy, controls=controls, oracle_by_task=oracle_by_task)
+        for g in groups.values()
+    ]
     cells.sort(key=lambda c: c.key.to_tuple())
     return CapabilityMap(
         projection=proj,

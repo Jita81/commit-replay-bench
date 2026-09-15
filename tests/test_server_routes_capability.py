@@ -25,7 +25,7 @@ from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
 from fixtures import pyrepo as pr
 from fixtures.server_seed import ALPHA, BETA, RUN_IDS, Env, envelope, login, make_env
-from fixtures.signoff_seed import attested_body, clear_policy
+from fixtures.signoff_seed import attested_body, clear_policy, score_oracle
 
 CELL_KEYS = {
     "n",
@@ -216,14 +216,22 @@ class TestCapabilityMap:
         c = _cells(env)["bug.fix|S"]
         assert c["n"] == 40 and c["clean"] == 38 and c["point"] == 0.95
         assert c["ci_low"] == pytest.approx(0.835, abs=0.001)
-        # the numbers deliver; the repo's oracle let a cheat through → human, and it says why
-        assert c["route"] == "human" and c["reason_code"] == "controls_escapes"
-        assert "1 measurement control(s) graded clean" in str(c["reason"])
-        assert f"(controls run {RUN_IDS['controls'][:8]})" in str(c["reason"])
+        # the numbers deliver; the repo's oracle measures weak (0.58 over 3 of its 4
+        # tasks, the seed's task-level scores — the same strength the sign-off evidences)
+        # → human, and it says why; behind it the controls let a cheat through
+        assert c["route"] == "human" and c["reason_code"] == "oracle_weak"
+        assert "oracle strength 0.58" in str(c["reason"])
+        assert c["oracle_strength_mean"] == pytest.approx(0.5778, abs=1e-4)
         assert c["false_q1"] == 0 and c["verification_tier"] == "automated-pass"
         assert c["apparatus_versions"] == [APPARATUS_VERSION] and c["belt_set"] == "v5"
         assert c["cost_usd_mean"] == pytest.approx(0.012) and c["latency_s_mean"] == 42.0
-        assert c["cost_known"] is True and c["oracle_strength_mean"] is None
+        assert c["cost_known"] is True
+        # with a strong oracle scored, the controls escape is the reason, and it says why
+        score_oracle(env)
+        c = _cells(env)["bug.fix|S"]
+        assert c["route"] == "human" and c["reason_code"] == "controls_escapes"
+        assert "1 measurement control(s) graded clean" in str(c["reason"])
+        assert f"(controls run {RUN_IDS['controls'][:8]})" in str(c["reason"])
         # the split: 2 builder_red rows, no instrument rows → model point = all-rows point
         assert c["failure_split"] == {
             "builder_red": 2,
@@ -241,6 +249,7 @@ class TestCapabilityMap:
     def test_deliver_only_with_passed_majority_constructible_and_zero_escapes(
         self, env: Env
     ) -> None:
+        score_oracle(env)  # strong: the seed's own 0.58 would refuse first (oracle_weak)
         controls_report(env, escapes=0)
         body = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()
         assert body["controls"]["state"] == "passed" and body["controls"]["run_id"] == "9" * 32
@@ -267,6 +276,7 @@ class TestCapabilityMap:
         assert body["summary"]["cells_by_route"]["human"] == 3
 
     def test_thin_controls_withhold_deliver(self, env: Env) -> None:
+        score_oracle(env)  # strong: the seed's own 0.58 would refuse first (oracle_weak)
         controls_report(env, n_rows=56, not_constructible=32)  # 24/56: cobra / koa
         body = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()
         v = body["controls"]
@@ -503,6 +513,7 @@ class TestCapabilityMap:
 
 class TestRoutes:
     def test_decisions_per_full_cell(self, env: Env) -> None:
+        score_oracle(env)  # strong: the seed's own 0.58 would refuse first (oracle_weak)
         r = env.get(
             f"/routes?repo={ALPHA}&apparatus=all"
         )  # the seed mixes a census-era legacy cell in
@@ -541,7 +552,10 @@ class TestRoutes:
             for d in env.get(f"/routes?repo={ALPHA}&apparatus=all").json()["decisions"]
         }
         green = by_label["replay|bug.fix|S|python|editblock|gpt-oss-120b|cerebras"]
-        assert green["route"] == "deliver" and green["reason_code"] == "deliver"
+        # routed under the seed's task-level oracle (0.58 over 3 of 4 tasks) — the same
+        # strength the sign-off evidences — the rule says human before it says deliver
+        assert green["route"] == "human" and green["reason_code"] == "oracle_weak"
+        assert green["oracle_strength"] == pytest.approx(0.58, abs=0.01)
         controls_report(env, passed=False, run_id="8" * 32)
         r = env.get(f"/routes?repo={ALPHA}&apparatus=all").json()
         assert r["controls"]["run_id"] == "8" * 32 and r["controls"]["state"] == "failed"

@@ -52,7 +52,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -61,7 +61,14 @@ from pydantic import ValidationError
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
-from crb.core.capability import WILDCARD, CapabilityCell, empty_cell, key_matches, measure_cell
+from crb.core.capability import (
+    WILDCARD,
+    CapabilityCell,
+    empty_cell,
+    key_matches,
+    measure_cell,
+    task_oracle_strength,
+)
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.ledger import (
     BELT_SET_V3_LEGACY,
@@ -87,13 +94,16 @@ from crb.core.signoff import (
     resolve_oracle_strength,
     stamp_evidence,
 )
-from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepStatus
 from crb.server.auth import ApproverDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope
 from crb.server.routes.grades import grade_to_dict
-from crb.server.routes.oracle import latest_controls_verdict, oracle_report, verdict_dict
+from crb.server.routes.oracle import (
+    latest_controls_verdict,
+    oracle_by_task,
+    verdict_dict,
+)
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.schemas import Page, PageDep, SignoffCreateRequest, SignoffRevokeRequest
 from crb.server.schemas_capability import ControlsVerdictOut, FailureSplitOut
@@ -394,14 +404,18 @@ def _projection(scope: CellKey) -> tuple[str, ...]:
 
 
 def measured_cell(
-    rows: Sequence[GradeRow], scope: CellKey, controls: ControlsVerdict
+    rows: Sequence[GradeRow],
+    scope: CellKey,
+    controls: ControlsVerdict,
+    oracle_by_task: Mapping[str, float | None] | None = None,
 ) -> CapabilityCell:
-    """The scope's cell routed under the repo's controls verdict; the honest-empty cell
+    """The scope's cell routed under the repo's controls verdict and its task-level
+    oracle scores — exactly as the capability map routes it; the honest-empty cell
     when there are no rows."""
     proj = _projection(scope)
     if not rows:
         return empty_cell(scope, proj)
-    return measure_cell(rows, proj, controls=controls)
+    return measure_cell(rows, proj, controls=controls, oracle_by_task=oracle_by_task)
 
 
 def _grade_key(g: Grade) -> CellKey:
@@ -427,7 +441,13 @@ class CellOracle:
         }
 
 
-def cell_oracle_strength(session: Session, repo: str, rows: Sequence[GradeRow]) -> CellOracle:
+def cell_oracle_strength(
+    session: Session,
+    repo: str,
+    rows: Sequence[GradeRow],
+    *,
+    by_task: Mapping[str, float | None] | None = None,
+) -> CellOracle:
     """Measure the cell's oracle from the repo's ``oracle.score`` events — the same
     latest-per-task reduction ``GET /oracle/{repo}`` serves (:func:`oracle_report`), so
     the Oracle page and the sign-off can never disagree about a task's strength.
@@ -438,11 +458,10 @@ def cell_oracle_strength(session: Session, repo: str, rows: Sequence[GradeRow]) 
     task_ids = {r.task_id for r in rows if r.task_id}
     if not task_ids:
         return CellOracle(None, 0, 0)
-    by_task = {t.task_id: t.strength for t in oracle_report(session, repo).tasks}
-    strengths = [
-        s for tid in task_ids if (s := by_task.get(tid)) is not None
-    ]  # unscoreable = None, never averaged
-    return CellOracle(mean(strengths) if strengths else None, len(strengths), len(task_ids))
+    if by_task is None:
+        by_task = oracle_by_task(session, repo)
+    scored = sum(1 for tid in task_ids if by_task.get(tid) is not None)  # unscoreable = None
+    return CellOracle(task_oracle_strength(rows, by_task), scored, len(task_ids))
 
 
 def _subjects(session: Session, repo: str, task_ids: Iterable[str]) -> dict[str, str]:
@@ -863,8 +882,9 @@ def preview_signoff(
         )
     rows = cell_rows(db, repo, scope)
     controls = latest_controls_verdict(db, repo)
-    cell = measured_cell(rows, scope, controls)
-    oracle = cell_oracle_strength(db, repo, rows)
+    by_task = oracle_by_task(db, repo)
+    cell = measured_cell(rows, scope, controls, by_task)
+    oracle = cell_oracle_strength(db, repo, rows, by_task=by_task)
     strength = resolve_oracle_strength(cell, oracle_strength=oracle.strength)
     attestation_out: AttestationOut | None = None
     if reviewed_row_hash:
@@ -972,8 +992,9 @@ def create_signoff(
     #    oracle strength from the repo's task-level mutation scores.
     rows = cell_rows(db, body.repo, scope)
     controls = latest_controls_verdict(db, body.repo)
-    cell = measured_cell(rows, scope, controls)
-    oracle = cell_oracle_strength(db, body.repo, rows)
+    by_task = oracle_by_task(db, body.repo)
+    cell = measured_cell(rows, scope, controls, by_task)
+    oracle = cell_oracle_strength(db, body.repo, rows, by_task=by_task)
     # 3. The attestation: the named row must be an accepted row of THIS cell.
     if body.attestation is not None:
         att, _subject = resolve_attestation(db, body.repo, scope, body.attestation)

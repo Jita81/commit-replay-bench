@@ -46,7 +46,7 @@ from crb.core.spec import SIZE_TIER_NAMES
 from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
-from crb.server.routes.oracle import latest_controls_verdict, verdict_dict
+from crb.server.routes.oracle import latest_controls_verdict, oracle_by_task, verdict_dict
 from crb.server.routes.repos import cached_profile, get_repo_or_404
 from crb.server.routes.signoffs import load_signoff_records
 from crb.server.schemas import CapabilitySummary
@@ -139,7 +139,11 @@ def signed_map(
     under (``None`` = not evaluated — the forecast/sign-off callers' contract today)."""
     records = load_signoff_records(session, repo)
     cmap = build_capability_map(
-        rows, projection=projection, policy=DEFAULT_POLICY, controls=controls
+        rows,
+        projection=projection,
+        policy=DEFAULT_POLICY,
+        controls=controls,
+        oracle_by_task=oracle_by_task(session, repo),
     )
     return apply_signoffs_to_map(cmap, records, repo=repo), len(records)
 
@@ -182,8 +186,10 @@ def cell_out(c: CapabilityCell) -> CapabilityCellSplitOut:
         latency_s_mean=round(s.latency_s_mean, 3),
         cost_known=c.cost_known,
         latency_known=c.latency_known,
+        # the strength the cell was ROUTED under: the repo's task-level mutation scores
+        # (the sign-off's evidence), else the rows' own
         oracle_strength_mean=(
-            None if s.oracle_strength_mean is None else round(s.oracle_strength_mean, 4)
+            None if c.decision.oracle_strength is None else round(c.decision.oracle_strength, 4)
         ),
         route=c.route,
         reason=c.decision.reason,

@@ -171,6 +171,14 @@ def _apparatus_of(payload: Mapping[str, Any]) -> str:
     return str(payload.get("apparatus_version", "") or "")
 
 
+def oracle_by_task(session: Session, repo: str) -> dict[str, float | None]:
+    """The repo's latest ``oracle.score`` per task — the reduction ``GET /oracle/{repo}``
+    serves (:func:`oracle_report`) — so the capability map routes every cell under the
+    same oracle strength the sign-off evidences
+    (:func:`~crb.core.capability.task_oracle_strength`)."""
+    return {t.task_id: t.strength for t in oracle_report(session, repo).tasks}
+
+
 def oracle_report(session: Session, repo: str) -> OracleReportOut:
     events = _score_events(session, repo)
     payloads = [(ev, dict(ev.payload_json or {})) for ev in events]

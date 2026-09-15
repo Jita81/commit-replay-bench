@@ -188,17 +188,19 @@ class TestCreate:
         assert "1 measurement control(s) graded clean" in e["message"]
         assert "max_controls_escapes=0" in e["message"]
         assert d["policy_version"] == "signoff-policy.v2" and d["thresholds"] == DEFAULT_THRESHOLDS
+        # the map routes the cell under the seed's task-level oracle (0.58): the routing
+        # rule's first refusal is the weak oracle, before the controls escape
         assert _codes(d["refusals"]) == [
             "controls_escapes",
             "oracle_weak",
-            "route_not_deliver:controls_escapes",
+            "route_not_deliver:oracle_weak",
         ]
         obs = d["observed"]
         assert obs["n"] == 40 and obs["point"] == 0.95 and obs["false_q1"] == 0
         # the oracle as the seed's task-level scores measure it: 3 of the cell's 4 tasks
         assert obs["oracle_strength"] == SEED_ORACLE
         assert obs["oracle"] == {"strength": SEED_ORACLE, "scored": 3, "tasks": 4}
-        assert obs["route"] == "human" and obs["reason_code"] == "controls_escapes"
+        assert obs["route"] == "human" and obs["reason_code"] == "oracle_weak"
         assert obs["controls"] == {
             "verdict": "escaped",
             "run_id": "0" * 32,
@@ -293,17 +295,18 @@ class TestCreate:
     def test_409_oracle_weak_is_the_seed_s_measurement(self, env: Env) -> None:
         """With the controls gate clean the seed's cell is still refused: its oracle IS
         measured — 0.58 over 3 of 4 tasks — and below the bar. A deployment may lower
-        the numeric bar (the clause is overridable); the route is untouched by it."""
+        the numeric bar (the clause is overridable); the route — the capability map's,
+        routed under the same task-level strength — refuses independently."""
         pass_controls(env)
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
         assert r.status_code == 409, r.text
         d = envelope(r)["detail"]
         assert d["code"] == "oracle_weak" and d["threshold"] == 0.8
         assert d["observed_value"] == SEED_ORACLE
-        assert _codes(d["refusals"]) == ["oracle_weak"]
+        assert _codes(d["refusals"]) == ["oracle_weak", "route_not_deliver:oracle_weak"]
         assert d["refusals"][0]["overridable"] is True
         assert d["observed"]["oracle"] == {"strength": SEED_ORACLE, "scored": 3, "tasks": 4}
-        assert d["observed"]["route"] == "deliver"  # the map's route; the oracle is a clause
+        assert d["observed"]["route"] == "human"  # the map's route, under the same oracle
         assert _signoffs(env) == []
 
     def test_409_oracle_unmeasured_is_not_overridable(
@@ -661,7 +664,7 @@ class TestPreview:
         assert _codes(d["refusals"]) == [
             "controls_escapes",
             "oracle_weak",
-            "route_not_deliver:controls_escapes",
+            "route_not_deliver:oracle_weak",
             "attestation_missing",
         ]
         esc = d["refusals"][0]
@@ -696,14 +699,14 @@ class TestPreview:
         assert d["route"] == {
             "route": "human",
             "reason": d["route"]["reason"],
-            "reason_code": "controls_escapes",
+            "reason_code": "oracle_weak",
         }
-        assert "graded clean" in d["route"]["reason"]
+        assert "oracle strength 0.58" in d["route"]["reason"]
         # the policy in force and what the record would carry
         assert d["policy"]["policy_version"] == "signoff-policy.v2"
         assert d["policy"]["require_oracle_measured"] is True
         wr = d["would_record"]
-        assert wr["n_at_signoff"] == 40 and wr["route_reason_code"] == "controls_escapes"
+        assert wr["n_at_signoff"] == 40 and wr["route_reason_code"] == "oracle_weak"
         assert wr["controls_verdict"] == "escaped" and wr["controls_escapes"] == 1
         assert wr["oracle_strength_at_signoff"] == pytest.approx(SEED_ORACLE, abs=1e-4)
         assert wr["policy_version"] == "signoff-policy.v2"

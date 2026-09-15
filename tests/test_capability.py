@@ -740,6 +740,7 @@ def test_cell_carries_the_failure_split_and_model_point_next_to_the_point() -> N
         "budget": 1,
         "protocol": 1,
         "harness": 2,
+        "outage": 0,
         "disqualified": 1,
     }
     assert d["model_n"] == 9 and d["model_point"] == round(8 / 9, 4)
