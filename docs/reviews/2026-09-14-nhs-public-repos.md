@@ -83,14 +83,14 @@ Sighted, Sonnet 5, one attempt per task (latest attempt where a task was re-run 
 |---|---|---|---|---|---|---|---|---|---|
 | nhsuk-frontend | 6 of 8 | 6 | **4** | 1 (`feature.add` S) | 1 (`component.add` L, 25 turns) | 0 | 0 | 0.15–0.56 | 33–900 |
 | nhsuk-react-components | 8 of 14 (was 3: eras recovered 4, one hard-pool task re-qualified) | 8 | **5** | 2 (prettier, `feature.add` M+L) | 1 (`component.add` L) | 0 | 0 | 0.40–0.61 | 87–199 |
-| mesh-client | 4 of 14 | 4 | **1** | 1 (`ruff@0.1.15`, XS) | 0 | 1 (builder ran `docker ps` / `curl :8701` — refused) | 1 (same refusal, recorded before the head-first cap fix) | 0.11–0.58 | 21–177 |
-| **all** | 18 | **18** | **10** | **4** | **2** | **1** | **1** | | |
+| mesh-client | 4 of 14 | 4 | **3** | 1 (`ruff@0.1.15`, XS) | 0 | 0 (two refusals superseded — see below) | 0 | 0.11–0.40 | 21–102 |
+| **all** | 18 | **18** | **12** | **4** | **2** | **0** | **0** | | |
 
 Controls on 2.2: nhsuk-frontend passed 42 rows / 0 escapes / 19 not-constructible; nhsuk-react-components
 passed 21 / 0 / 11; **mesh-client passed 28 / 0 / 5** (was FAILED with 3 violations before the support-file
 rule). Oracle strength (task-level, the number the map and the sign-off now share): frontend 0.62 over 2 of 6
 scoreable tasks, react-components 0.64 over 3 (the 5 newly gold-clean tasks are not yet scored), mesh-client
-0.64 over 5. NHS spend to date, every row: **91 rows, $24.64**; 2.2 build rows $9.46. Ledger false-Q1: **0 of 532**.
+0.64 over 5. NHS spend to date, every row: **93 rows, $24.92**; 2.2 build rows $9.74. Ledger false-Q1: **0 of 532**.
 
 Readings:
 - **The tests pass more often than the repository would accept the patch.** Of the 8 non-clean attempts, 4 are
@@ -98,16 +98,17 @@ Readings:
   react-components twice, ruff on mesh-client, one on nhsuk-frontend). This is the cobra `gofmt` finding again,
   now measured on three NHS repositories with the maintainers' own tool at the commit's own pin. It is the
   cheapest lever there is (run the formatter before finishing) and it is the builder's, not the model's.
-- **Two protocol/harness rows on mesh-client are one finding:** the builder tried to reach the MESH sandbox
-  (`docker ps`, `curl localhost:8701`) to run the integration tests it was pointed at, and the sealed posture
-  refused it. The grader gets the service; the builder does not. For service-backed repositories the builder's
-  test loop is broken by design today — a product gap (the harness command should reach the runner's services),
-  not a model reading. Both rows sit outside `n`.
+- **Two refusals on mesh-client were one instrument finding, now fixed and re-measured:** the builder tried to
+  reach the MESH sandbox (`docker ps`, `curl localhost:8701`) to run the integration tests it was pointed at,
+  and the sealed posture refused it — the grader had the service, the builder did not. A sighted build now
+  brings the task's era services up first and exports their environment in the test command (`321287a`);
+  re-run, both tasks graded **clean at $0.13 and $0.15** (the refused attempts had cost $0.55–0.58 each,
+  spent on floundering). The refused rows stay in the ledger as `protocol` / `harness`, outside `n`.
 - **Budget rows are both L `frontend.component.add`** — a 25-turn / 25-tool-call cap on a component that ships
   with stories, types and docs. The blind budget ladder (25 → 50 → 100) is the priced next step and it is
   the operator's call (DL-019).
 - **Cells:** the largest is react-components `frontend.component.add` XS (3 of 3 clean) — n = 3, nothing
-  routes. mesh-client's `bug.fix` XS is 0 of 3 fair attempts clean once the lint row is counted, from 3 rows.
+  routes. mesh-client's `bug.fix` XS is 2 of 3 clean (the miss is `ruff`), from 3 fair rows.
   No per-class or per-repo claim is licensed by n this small; §6's licence stands, restated on 2.2.
 
 **Two re-qualification residues, deliberately left:** nhsuk-frontend `f3b6316d25` / `6aaae56e4f` and
