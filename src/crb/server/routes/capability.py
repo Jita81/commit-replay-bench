@@ -43,6 +43,7 @@ from crb.core.ledger import CELL_FIELDS, GradeRow, failure_split
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DELIVER, ControlsVerdict
 from crb.core.signoff import apply_signoffs_to_map
 from crb.core.spec import SIZE_TIER_NAMES
+from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
 from crb.server.routes.oracle import latest_controls_verdict, verdict_dict
@@ -78,6 +79,19 @@ BY_ALIASES: dict[str, str] = {
     "process_step": "process_step",
 }
 DEFAULT_BY = "class,size"
+
+
+def rows_for_apparatus(rows: Iterable[GradeRow], apparatus: str) -> list[GradeRow]:
+    """``EVIDENCE-AND-CLAIMS`` §5: no claim blends apparatus versions. The map defaults
+    to the CURRENT apparatus (``crb.core.version.APPARATUS_VERSION``); an explicit
+    version selects that one; ``all`` pools them for a reader who asks (the cell still
+    lists ``apparatus_versions``). Rows measured under an older belt set (no belt 5,
+    the pre-2.1 belt 1) must not lift a current cell toward ``deliver``."""
+    rs = list(rows)
+    if apparatus == "all":
+        return rs
+    want = APPARATUS_VERSION if apparatus in ("", "current") else apparatus
+    return [r for r in rs if r.apparatus_version == want]
 
 
 def rows_for_mode(rows: Iterable[GradeRow], mode: str) -> list[GradeRow]:
@@ -227,11 +241,12 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
     repo: str = Query(min_length=1, max_length=64),
     by: str | None = Query(default=None, max_length=128),
     mode: str = Query(default="sighted", pattern="^(sighted|blind|all)$"),
+    apparatus: str = Query(default="current", max_length=32),
 ) -> CapabilityMapWithControlsOut:
     del viewer
     get_repo_or_404(db, repo)
     projection = parse_by(by)
-    rows = rows_for_mode(DbLedger(factory).rows(repo=repo), mode)
+    rows = rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus)
     controls = latest_controls_verdict(db, repo)
     cmap, n_signoffs = signed_map(rows, projection, db, repo, controls=controls)
     cells = [c for c in cmap.cells if c.measured]
@@ -280,11 +295,12 @@ def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
     repo: str = Query(min_length=1, max_length=64),
     by: str | None = Query(default=None, max_length=128),
     mode: str = Query(default="sighted", pattern="^(sighted|blind|all)$"),
+    apparatus: str = Query(default="current", max_length=32),
 ) -> RoutesWithControlsResponse:
     del viewer
     get_repo_or_404(db, repo)
     projection = parse_by(by) if by else PROJECTION_CELL
-    rows = rows_for_mode(DbLedger(factory).rows(repo=repo), mode)
+    rows = rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus)
     controls = latest_controls_verdict(db, repo)
     cmap, _ = signed_map(rows, projection, db, repo, controls=controls)
     decisions: list[RouteDecisionWithControlsOut] = []

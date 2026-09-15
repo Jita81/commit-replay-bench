@@ -88,6 +88,7 @@ from crb.core.signoff import (
     stamp_evidence,
 )
 from crb.core.stats import mean
+from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepStatus
 from crb.server.auth import ApproverDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope
@@ -375,9 +376,16 @@ def cell_false_q1(session: Session, repo: str, scope: CellKey) -> tuple[int, lis
 
 
 def cell_rows(session: Session, repo: str, scope: CellKey) -> list[GradeRow]:
-    """The scope's rows as :class:`GradeRow` (raises ``FalseQ1Violation`` on a bad row —
-    call :func:`cell_false_q1` first so the refusal is explicit, not incidental)."""
-    q = _scope_where(select(Grade), repo, scope).order_by(Grade.seq)
+    """The scope's SIGHTED rows on the CURRENT apparatus as :class:`GradeRow` (raises
+    ``FalseQ1Violation`` on a bad row — call :func:`cell_false_q1` first so the refusal
+    is explicit, not incidental). A sign-off is a claim about the current instrument on
+    the sighted measurement: rows from an older belt set, or blind attempts, never lift
+    the cell (EVIDENCE-AND-CLAIMS §5; the capability map applies the same defaults)."""
+    q = (
+        _scope_where(select(Grade), repo, scope)
+        .where(Grade.mode == "sighted", Grade.apparatus_version == APPARATUS_VERSION)
+        .order_by(Grade.seq)
+    )
     return [GradeRow.from_dict(grade_to_dict(g)) for g in session.execute(q).scalars()]
 
 

@@ -70,6 +70,10 @@ def env(tmp_path: Path) -> Iterator[Env]:
 
 
 def _cells(env: Env, query: str = "") -> dict[str, dict[str, Any]]:
+    # the seed deliberately mixes census-era (1.0) rows with current ones; these tests
+    # read the pooled view unless a test asks for the current-apparatus default itself
+    if "apparatus=" not in query:
+        query += "&apparatus=all"
     r = env.get(f"/capability-map?repo={ALPHA}{query}")
     assert r.status_code == 200, r.text
     return {str(c["label"]): c for c in r.json()["cells"]}
@@ -147,7 +151,7 @@ def seed_beta_rows(env: Env, n: int = 40, clean: int = 39) -> None:
 
 class TestCapabilityMap:
     def test_shape_measured_cells_only(self, env: Env) -> None:
-        r = env.get(f"/capability-map?repo={ALPHA}")
+        r = env.get(f"/capability-map?repo={ALPHA}&apparatus=all")
         assert r.status_code == 200
         body = r.json()
         assert set(body) == {
@@ -189,7 +193,7 @@ class TestCapabilityMap:
             assert c["capability_class"] != "*" and c["size"] != "*" and c["language"] == "*"
 
     def test_the_seeds_controls_verdict_is_on_the_map(self, env: Env) -> None:
-        body = env.get(f"/capability-map?repo={ALPHA}").json()
+        body = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()
         v = body["controls"]
         assert v == {
             "measured": True,
@@ -238,7 +242,7 @@ class TestCapabilityMap:
         self, env: Env
     ) -> None:
         controls_report(env, escapes=0)
-        body = env.get(f"/capability-map?repo={ALPHA}").json()
+        body = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()
         assert body["controls"]["state"] == "passed" and body["controls"]["run_id"] == "9" * 32
         c = {x["label"]: x for x in body["cells"]}["bug.fix|S"]
         assert c["route"] == "deliver" and c["reason_code"] == "deliver"
@@ -254,7 +258,7 @@ class TestCapabilityMap:
 
     def test_failed_gate_routes_every_cell_human(self, env: Env) -> None:
         controls_report(env, passed=False)
-        body = env.get(f"/capability-map?repo={ALPHA}").json()
+        body = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()
         assert body["controls"]["state"] == "failed" and body["controls"]["passed"] is False
         for c in body["cells"]:
             assert c["route"] == "human" and c["reason_code"] == "controls_failed", c["label"]
@@ -264,7 +268,7 @@ class TestCapabilityMap:
 
     def test_thin_controls_withhold_deliver(self, env: Env) -> None:
         controls_report(env, n_rows=56, not_constructible=32)  # 24/56: cobra / koa
-        body = env.get(f"/capability-map?repo={ALPHA}").json()
+        body = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()
         v = body["controls"]
         assert v["state"] == "thin" and v["constructible"] == 24 and v["total"] == 56
         assert v["share"] == round(24 / 56, 4)
@@ -296,7 +300,10 @@ class TestCapabilityMap:
         assert "run a 'controls' run" in str(c["reason"])
         assert body["summary"]["deliver_cells"] == 0
         # alpha's verdict is alpha's: nothing leaks across repos
-        assert env.get(f"/capability-map?repo={ALPHA}").json()["controls"]["measured"] is True
+        assert (
+            env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()["controls"]["measured"]
+            is True
+        )
 
     def test_verdict_falls_back_to_the_runs_counts_when_no_event(self, env: Env) -> None:
         """A finished controls RUN with counts but no report event (pruned) still counts."""
@@ -378,7 +385,7 @@ class TestCapabilityMap:
         assert c["failure_split"]["builder_red"] == 1 and c["failure_split"]["harness"] == 0
 
     def test_summary_without_profile(self, env: Env) -> None:
-        s = env.get(f"/capability-map?repo={ALPHA}").json()["summary"]
+        s = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()["summary"]
         assert s["trusted_autonomy_coverage"] is None  # no profile → not fabricated
         assert s["earned_coverage"] is None and s["profile_commits"] is None
         assert s["measured_cells"] == 3 and s["deliver_cells"] == 0  # the seed's escape
@@ -392,7 +399,7 @@ class TestCapabilityMap:
         repo = pr.build(tmp_path / "pyrepo")
         with make_env(tmp_path, clone_path=str(repo.path)) as env:
             assert env.get(f"/repos/{ALPHA}/profile").status_code == 200
-            s = env.get(f"/capability-map?repo={ALPHA}").json()["summary"]
+            s = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()["summary"]
             # the fixture repo's change mix is bug.fix/XS — unmeasured here → 0.0 coverage, not null
             assert s["trusted_autonomy_coverage"] == 0.0 and s["earned_coverage"] == 0.0
             assert s["profile_commits"] == 1
@@ -407,14 +414,14 @@ class TestCapabilityMap:
         assert by_lang["bug.fix|S|python"]["language"] == "python"
         by_model = _cells(env, "&by=class,size,model")
         assert by_model["bug.fix|S|gpt-oss-120b"]["route"] == "human"  # the seed's escape
-        by_class = env.get(f"/capability-map?repo={ALPHA}&by=class").json()
+        by_class = env.get(f"/capability-map?repo={ALPHA}&by=class&apparatus=all").json()
         assert by_class["by"] == ["capability_class"]
         assert {c["label"] for c in by_class["cells"]} == {
             "backend.route.add",
             "bug.fix",
             "test.add",
         }
-        full = env.get(f"/capability-map?repo={ALPHA}&by=cell").status_code
+        full = env.get(f"/capability-map?repo={ALPHA}&by=cell&apparatus=all").status_code
         assert full == 422  # 'cell' is not a field alias
         r = env.get(f"/capability-map?repo={ALPHA}&by=class,colour")
         assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
@@ -483,20 +490,22 @@ class TestCapabilityMap:
         assert r.status_code == 409
         e = envelope(r)
         assert e["code"] == "false_q1_refused" and e["detail"] == {"exception": "FalseQ1Violation"}
-        assert env.get(f"/routes?repo={ALPHA}").status_code == 409
+        assert env.get(f"/routes?repo={ALPHA}&apparatus=all").status_code == 409
         assert env.get(f"/failure-split?repo={ALPHA}").status_code == 409
         assert env.get(f"/capability-map?repo={BETA}").status_code == 200  # other repos unaffected
 
     def test_viewer_reads(self, env: Env) -> None:
         login(env.client, "viewer")
         assert env.get(f"/capability-map?repo={ALPHA}").status_code == 200
-        assert env.get(f"/routes?repo={ALPHA}").status_code == 200
+        assert env.get(f"/routes?repo={ALPHA}&apparatus=all").status_code == 200
         assert env.get(f"/failure-split?repo={ALPHA}").status_code == 200
 
 
 class TestRoutes:
     def test_decisions_per_full_cell(self, env: Env) -> None:
-        r = env.get(f"/routes?repo={ALPHA}")
+        r = env.get(
+            f"/routes?repo={ALPHA}&apparatus=all"
+        )  # the seed mixes a census-era legacy cell in
         assert r.status_code == 200
         body = r.json()
         assert set(body) == {"repo", "by", "policy", "decisions", "controls"}
@@ -527,22 +536,29 @@ class TestRoutes:
 
     def test_decisions_follow_the_latest_verdict(self, env: Env) -> None:
         controls_report(env, escapes=0)
-        by_label = {d["label"]: d for d in env.get(f"/routes?repo={ALPHA}").json()["decisions"]}
+        by_label = {
+            d["label"]: d
+            for d in env.get(f"/routes?repo={ALPHA}&apparatus=all").json()["decisions"]
+        }
         green = by_label["replay|bug.fix|S|python|editblock|gpt-oss-120b|cerebras"]
         assert green["route"] == "deliver" and green["reason_code"] == "deliver"
         controls_report(env, passed=False, run_id="8" * 32)
-        r = env.get(f"/routes?repo={ALPHA}").json()
+        r = env.get(f"/routes?repo={ALPHA}&apparatus=all").json()
         assert r["controls"]["run_id"] == "8" * 32 and r["controls"]["state"] == "failed"
         assert {d["reason_code"] for d in r["decisions"]} == {"controls_failed"}
 
     def test_projection_and_empty(self, env: Env) -> None:
-        r = env.get(f"/routes?repo={ALPHA}&by=class")
+        r = env.get(f"/routes?repo={ALPHA}&by=class&apparatus=all")
         assert r.json()["by"] == ["capability_class"]
         assert {d["label"] for d in r.json()["decisions"]} == {
             "backend.route.add",
             "bug.fix",
             "test.add",
         }
+        # the default is the CURRENT apparatus: the seed's census-era test.add rows do not
+        # lift a current cell (EVIDENCE-AND-CLAIMS §5 — no claim blends apparatus versions)
+        cur = env.get(f"/routes?repo={ALPHA}&by=class")
+        assert "test.add" not in {d["label"] for d in cur.json()["decisions"]}
         assert env.get(f"/routes?repo={BETA}").json()["decisions"] == []
         assert env.get(f"/routes?repo={BETA}").json()["controls"]["state"] == "unmeasured"
         assert env.get("/routes?repo=nope").status_code == 404
