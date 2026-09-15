@@ -476,17 +476,19 @@ def make_chat(model: str, endpoint: EndpointConfig | None = None, **kw: Any) -> 
     ep = endpoint or EndpointConfig()
     client = make_client(ep.base_url, ep.api_key_env, ep.azure, timeout_s=ep.timeout_s)
     pricing = price_for(f"azure:{model}" if ep.azure else model)
-    return OpenAIChat(
-        client,
-        model,
-        deployment=ep.azure.deployment if ep.azure else "",
-        temperature=ep.temperature,
-        max_tokens=ep.max_tokens,
-        timeout_s=ep.timeout_s,
-        max_retries=ep.max_retries,
-        pricing=pricing,
+    # a caller's keyword (the labeller's max_tokens / temperature) overrides the endpoint's
+    # default of the same name — passing both raised TypeError and every live
+    # OpenAI-compatible label read `unclassified` (found by the header pass, 2026-09-15)
+    settings: dict[str, Any] = {
+        "deployment": ep.azure.deployment if ep.azure else "",
+        "temperature": ep.temperature,
+        "max_tokens": ep.max_tokens,
+        "timeout_s": ep.timeout_s,
+        "max_retries": ep.max_retries,
+        "pricing": pricing,
         **kw,
-    )
+    }
+    return OpenAIChat(client, model, **settings)
 
 
 __all__ = [

@@ -238,9 +238,9 @@ export function useSignoffPolicy(enabled = true): UseQueryResult<SignoffPolicy, 
 
 /**
  * `POST /signoffs` with the attestation; a 409 arrives as `ApiError` for the gate to render.
- * Invalidates the sign-offs and the preview. It also names `['capability-map', repo]`, but
- * the map is keyed `['capability', repo, by]` (`keys.capability`), so that invalidation
- * matches nothing — the map refreshes on its own stale time (30 s) or a remount.
+ * Invalidates the sign-offs, the preview and the capability map (`['capability', repo]`
+ * prefix — every projection), so the lifted tier shows without waiting for the map's
+ * stale time (a wrong key left the tier stale for 30 s until 2026-09-15).
  */
 export function useCreateSignoffWithAttestation(): UseMutationResult<SignoffWithPolicy, ApiError, SignoffCreateWithAttestation> {
   const qc = useQueryClient()
@@ -249,7 +249,7 @@ export function useCreateSignoffWithAttestation(): UseMutationResult<SignoffWith
     onSuccess: (s) => {
       qc.invalidateQueries({ queryKey: ['signoffs', s.repo] })
       qc.invalidateQueries({ queryKey: ['signoff-preview', s.repo] })
-      qc.invalidateQueries({ queryKey: ['capability-map', s.repo] })
+      qc.invalidateQueries({ queryKey: ['capability', s.repo] })
     },
   })
 }

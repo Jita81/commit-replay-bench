@@ -516,3 +516,18 @@ def test_live_cerebras_agent(tmp_path: Path) -> None:
         )
         assert res.belts.tests_unmodified is True
     ws.remove()
+
+
+def test_make_chat_lets_a_caller_keyword_override_the_endpoint_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The labeller passes max_tokens/temperature; the endpoint has defaults of the same
+    name. Passing both to OpenAIChat raised TypeError and every live OpenAI-compatible
+    label read `unclassified` (found by the header pass, 2026-09-15)."""
+    monkeypatch.setattr(oc, "make_client", lambda *a, **k: object())
+    chat = oc.make_chat(
+        "m", oc.EndpointConfig(max_tokens=4000, temperature=0.2), max_tokens=64, temperature=0.0
+    )
+    assert chat.max_tokens == 64 and chat.temperature == 0.0
+    plain = oc.make_chat("m", oc.EndpointConfig(max_tokens=4000))
+    assert plain.max_tokens == 4000
