@@ -8,6 +8,31 @@ the real registry share one API.
 The one metric that matters most is ``crb_false_q1_total``: it is a gauge set
 from the ledger and it must read 0. An alert on it is the operator's cheapest
 guarantee that the honesty invariant still holds.
+
+Navigation
+----------
+What it is:   The Prometheus metric definitions and the three recording helpers the worker
+              and the server call, behind a no-op fallback when ``prometheus_client`` is
+              not installed.
+What it does: Counts runs, graded tasks by outcome, belt failures, builder tokens and cost;
+              times grades and builds; exposes ``crb_false_q1_total`` (must stay 0) and the
+              ledger row count as gauges; renders the exposition for ``/metrics``.
+How:          Import-time try/except picks the real registry or ``_Noop``; every metric is
+              a module-level object created through ``_counter``/``_gauge``/``_histogram``;
+              call-sites use ``record_grade``/``record_build``/``set_ledger_health``.
+Layer:        observability — docs/ARCHITECTURE.md#72-observability
+ADRs:         none
+Works with:   src/crb/server/worker.py (calls the recorders after each grade and build),
+              src/crb/server/routes/system.py (``/metrics`` renders ``render()``),
+              src/crb/server/http_metrics.py (the HTTP-level metrics on the same registry),
+              src/crb/core/ledger.py (the source of the false-Q1 count the gauge reflects),
+              deploy/helm/crb/values.yaml (the optional Prometheus scrape of ``/metrics``)
+Tested by:    tests/test_server_system.py
+Touch when:   never for a new repository; a new metric is defined here with a helper, named
+              ``crb_*``, and documented in docs/ARCHITECTURE.md; never change what
+              ``crb_false_q1_total`` means (docs/EVIDENCE-AND-CLAIMS.md).
+Claims:       ``crb_builder_cost_usd_total`` sums metered cost only — unpriced models
+              contribute zero, so it is a floor, not a bill (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -23,6 +48,8 @@ except ImportError:  # pragma: no cover
 
 
 class _Noop:
+    """Stands in for every metric when the client is absent; accepts any call, does nothing."""
+
     def labels(self, *_: Any, **__: Any) -> _Noop:
         return self
 
@@ -109,6 +136,8 @@ def record_grade(
     belts: dict[str, Any],
     duration_s: float,
 ) -> None:
+    """One graded trial: outcome counter, a failure counter per belt that is ``False``
+    (``None`` — not evaluated — is not a failure), and the grade latency."""
     outcome = (
         "error" if error else "disqualified" if disqualified else "clean" if clean else "not_clean"
     )
@@ -122,6 +151,7 @@ def record_grade(
 def record_build(
     *, builder: str, model: str, tokens_in: int, tokens_out: int, cost_usd: float, latency_s: float
 ) -> None:
+    """One builder attempt: tokens by direction, metered cost, and its latency."""
     builder_tokens_total.labels(builder, model, "in").inc(tokens_in)
     builder_tokens_total.labels(builder, model, "out").inc(tokens_out)
     builder_cost_usd_total.labels(builder, model).inc(cost_usd)
@@ -129,6 +159,7 @@ def record_build(
 
 
 def set_ledger_health(*, rows: int, false_q1: int) -> None:
+    """Refresh the two ledger gauges from a verification pass (``false_q1`` must be 0)."""
     ledger_rows.set(rows)
     false_q1_total.set(false_q1)
 
@@ -141,4 +172,5 @@ def render() -> bytes:
 
 
 def available() -> bool:
+    """``True`` iff ``prometheus_client`` is installed (``/metrics`` is real, not empty)."""
     return _AVAILABLE
