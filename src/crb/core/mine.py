@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from crb.core.execution import Executor
+from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.lint import LintRun, run_plan
 from crb.core.runners.base import BaseRunner
@@ -308,6 +308,10 @@ def _read_gold_lint(lint_run: LintRun | None) -> tuple[bool, str]:
     return False, note[:300]
 
 
+#: A run stops after this many candidates IN A ROW fail on a harness error.
+MAX_CONSECUTIVE_HARNESS_ERRORS = 3
+
+
 def mine(
     repo: GitRepo,
     config: RepoConfig,
@@ -331,23 +335,43 @@ def mine(
         config.mining.get("target_valid" if pool == POOL_STANDARD else "hard_target", 25)
     )
     cap = max_candidates or int(config.mining.get("max_candidates", 1000))
-    found = examined = 0
+    found = examined = consecutive_errors = 0
     for cand in iter_candidates(repo, config, pool=pool, ref=ref, skip=known, only=only):
         if found >= want or examined >= cap:
             break
         examined += 1
-        outcome = qualify(
-            repo,
-            config,
-            cand,
-            runner=runner,
-            executor=executor,
-            scratch=scratch,
-            pool=pool,
-            gold=gold,
-            timeout=timeout,
-            on_event=on_event,
-        )
+        started = time.monotonic()
+        try:
+            outcome = qualify(
+                repo,
+                config,
+                cand,
+                runner=runner,
+                executor=executor,
+                scratch=scratch,
+                pool=pool,
+                gold=gold,
+                timeout=timeout,
+                on_event=on_event,
+            )
+        except SandboxUnavailable:
+            raise  # infrastructure: nothing else will qualify either
+        except Exception as exc:
+            # a harness error on ONE candidate (its dependency era would not install,
+            # its service is missing) skips that candidate; MAX_CONSECUTIVE_HARNESS_ERRORS
+            # in a row means the instrument itself is broken (a full disk, a dead
+            # toolchain) and the run stops with that reason instead of skipping history
+            consecutive_errors += 1
+            reason = f"harness error: {type(exc).__name__}: {exc}"[:300]
+            _emit(on_event, "mine.skip", sha=cand.sha, reason=reason)
+            if consecutive_errors >= MAX_CONSECUTIVE_HARNESS_ERRORS:
+                raise RuntimeError(
+                    f"{consecutive_errors} candidates in a row failed on a harness error; "
+                    f"last: {reason}"
+                ) from exc
+            yield MineOutcome(cand.sha, None, reason, time.monotonic() - started)
+            continue
+        consecutive_errors = 0
         if outcome.task is not None:
             found += 1
         yield outcome

@@ -817,3 +817,59 @@ def test_support_file_under_the_test_layout_is_overlaid_but_never_a_target(
     sha2 = _fx.commit_all(root, "chore: helper tweak")
     out2, _ = _qualify_sha(repo, config, sha2, tmp_path / "mine-support-only")
     assert out2.task is None and "support only" in (out2.skipped_reason or "")
+
+
+def test_mine_skips_a_candidate_whose_harness_errored_and_stops_after_three_in_a_row(
+    pyrepo: pr.PyRepo, executor: LocalExecutor, tmp_path: Path
+) -> None:
+    """A dependency era that would not install failed the WHOLE re-qualification run at
+    0/11 (nhsuk-react-components, 2026-09-15). One candidate's harness error is that
+    candidate's skip; three in a row is a broken instrument and stops the run."""
+
+    class Flaky(PytestRunner):
+        calls = 0
+
+        def run_for(self, executor, root, scope, *, timeout=0, authored):  # type: ignore[override]
+            Flaky.calls += 1
+            raise RuntimeError("node era x: npm install rc=1")
+
+    runner = Flaky(pyrepo.config)
+    events, on_event = _collector()
+    # one candidate on its own: skipped with the reason, the loop finishes normally
+    outcomes = list(
+        m.mine(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=runner,
+            executor=executor,
+            scratch=tmp_path / "one",
+            max_candidates=1,
+            on_event=on_event,
+        )
+    )
+    assert len(outcomes) == 1 and outcomes[0].task is None
+    assert outcomes[0].skipped_reason.startswith("harness error: RuntimeError: node era x")
+    assert ("mine.skip", {"sha": pyrepo.feat_sha, "reason": outcomes[0].skipped_reason}) in events
+    assert events[-1][0] == "mine.done"
+    # three in a row (three candidates, every one erroring) → the run stops with the reason
+    shas = [pyrepo.feat_sha]
+    for i in range(2):
+        (pyrepo.path / "src" / "calc" / f"extra{i}.py").write_text(
+            f"X{i} = {i}\n", encoding="utf-8"
+        )
+        (pyrepo.path / "tests" / f"test_extra{i}.py").write_text(
+            f"from calc.extra{i} import X{i}\n\n\ndef test_x{i}():\n    assert X{i} == {i}\n",
+            encoding="utf-8",
+        )
+        shas.append(pr._commit(pyrepo.path, f"feat: extra {i}"))
+    with pytest.raises(RuntimeError, match=r"3 candidates in a row failed on a harness error"):
+        list(
+            m.mine(
+                pyrepo.repo,
+                pyrepo.config,
+                runner=runner,
+                executor=executor,
+                scratch=tmp_path / "three",
+                only=frozenset(shas),
+            )
+        )
