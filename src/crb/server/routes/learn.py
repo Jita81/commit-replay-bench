@@ -148,7 +148,15 @@ def learn_remeasure(
     del viewer
     get_repo_or_404(db, repo)
     rows = list(DbLedger(factory).rows(repo=repo))
-    plan = remeasure_plan(rows, current_apparatus=apparatus, policy=DEFAULT_POLICY)
+    # each task's CURRENT label: a stale task that was relabelled since would put its new
+    # rows in another cell, so the plan leaves it out and names it (decider pass 2, §3)
+    labels = {
+        str(t.task_id): (str(t.capability_class or ""), str(t.size or ""))
+        for t in db.execute(select(Task).where(Task.repo == repo)).scalars()
+    }
+    plan = remeasure_plan(
+        rows, current_apparatus=apparatus, policy=DEFAULT_POLICY, task_labels=labels
+    )
     return {"repo": repo, **plan.to_dict()}
 
 

@@ -844,54 +844,59 @@ def _stale_ledger(tmp_path: Path) -> list[GradeRow]:
 
 class TestRemeasure:
     def test_cells_n_needed_cost_and_requests(self, tmp_path: Path) -> None:
+        """One entry per (cell, MODE) — sighted and blind never pool (a blended rate hid
+        koa's sighted cell, 2026-09-15); a blind request is priced at the ladder's rungs."""
         plan = learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")
         assert plan.rows_stale == 16 and plan.min_n == 10
-        by = {c.cell.label: c for c in plan.cells}
-        assert set(by) == {
-            "replay|bug.fix|XS|go|claude_code|claude-sonnet-5|anthropic",
-            "replay|bug.fix|XS|python|claude_code|claude-sonnet-5|anthropic",
-        }
+        by = {(c.cell.label, c.mode): c for c in plan.cells}
+        go = "replay|bug.fix|XS|go|claude_code|claude-sonnet-5|anthropic"
+        py = "replay|bug.fix|XS|python|claude_code|claude-sonnet-5|anthropic"
+        assert set(by) == {(go, "sighted"), (go, "blind"), (py, "sighted")}
         assert plan.up_to_date == (
-            "replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic",
+            "replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic|sighted",
         )
-        a = by["replay|bug.fix|XS|go|claude_code|claude-sonnet-5|anthropic"]
-        assert (a.n_stale, a.n_current, a.n_needed) == (
-            8,
-            0,
-            16,
-        )  # unmeasured: the Wilson minimum at 1.0
+        a = by[(go, "sighted")]
+        assert (a.n_stale, a.n_current, a.n_needed) == (7, 0, 16)  # unmeasured: Wilson min at 1.0
         assert a.stale_versions == ("2.0",) and a.repos == ("cobra",)
-        assert a.cost_usd_mean == pytest.approx((0.24 * 7 + 0.39) / 8)
-        assert a.est_cost_usd == pytest.approx(a.cost_usd_mean * 16) and a.cost_known
-        assert a.est_minutes == pytest.approx(((62 * 7 + 122) / 8) * 16 / 60)
-        reqs = [r.to_dict() for r in a.requests]
-        # (cobra, blind): 1 known task, needs 16 → a task_ids request + a limit-only remainder
-        blind = [r for r in reqs if r["mode"] == "blind"]
-        assert (
-            blind[0]["kind"] == "blind"
-            and blind[0]["task_ids"] == ["9" * 40]
-            and blind[0]["limit"] == 1
-        )
-        assert (
-            blind[1]["task_ids"] == []
-            and blind[1]["limit"] == 15
-            and "remainder" in blind[1]["note"]
-        )
-        sighted = [r for r in reqs if r["mode"] == "sighted"]
-        assert (
-            sighted[0]["kind"] == "replay"
-            and len(sighted[0]["task_ids"]) == 7
-            and sighted[0]["limit"] == 7
-        )
-        assert sighted[1]["limit"] == 9  # 16 − 7 named stale tasks
-        for r in reqs:
-            assert r["repo"] == "cobra" and r["builder"] == "claude_code"
-            assert r["model"] == "claude-sonnet-5" and r["provider"] == "anthropic"
-        b = by["replay|bug.fix|XS|python|claude_code|claude-sonnet-5|anthropic"]
+        assert (a.tasks_stale, a.tasks_current, a.relabelled) == (7, 0, ())
+        assert a.cost_usd_mean == pytest.approx(0.24) and a.cost_known
+        assert a.est_cost_usd == pytest.approx(0.24 * 16)  # sighted: one attempt per row
+        assert a.est_minutes == pytest.approx(62 * 16 / 60)
+        (req, rest) = a.requests
+        assert req.kind == "replay" and req.mode == "sighted" and len(req.task_ids) == 7
+        assert req.limit == 7 and rest.limit == 9 and rest.task_ids == ()  # 16 − 7 named
+        bl = by[(go, "blind")]
+        assert (bl.n_stale, bl.n_needed, bl.tasks_stale) == (1, 16, 1)
+        assert bl.cost_usd_mean == pytest.approx(0.39)
+        assert bl.est_cost_usd == pytest.approx(0.39 * 16 * 3)  # blind: up to 3 rungs per row
+        (breq, brest) = bl.requests
+        assert breq.kind == "blind" and breq.task_ids == ("9" * 40,) and breq.limit == 1
+        assert brest.limit == 15 and "remainder" in brest.note
+        for c in (a, bl):
+            for r in c.requests:
+                assert r.repo == "cobra" and r.builder == "claude_code"
+                assert r.model == "claude-sonnet-5" and r.provider == "anthropic"
+        b = by[(py, "sighted")]
         assert (b.n_stale, b.n_current, b.n_needed) == (5, 8, 8)  # 8/8 clean: 16 clears the bar
+        assert (b.tasks_stale, b.tasks_current) == (5, 8)
         req, rest = b.requests  # 5 named stale tasks + a limit-only remainder of 3
         assert req.limit == 5 and len(req.task_ids) == 5 and req.kind == "replay"
         assert rest.limit == 3 and rest.task_ids == ()
+
+    def test_relabelled_stale_tasks_are_left_out_and_named(self, tmp_path: Path) -> None:
+        """A stale task whose CURRENT label moved (an intent relabel) would put its new
+        rows in another cell: the request skips it and the plan names it."""
+        rows = _stale_ledger(tmp_path)
+        moved = f"{3:040x}"  # one of cobra's 7 sighted stale tasks
+        plan = learn.remeasure_plan(
+            rows,
+            current_apparatus="2.1",
+            task_labels={moved: ("feature.add", "XS")},
+        )
+        go = next(c for c in plan.cells if c.cell.language == "go" and c.mode == "sighted")
+        assert go.relabelled == (moved,)
+        req = go.requests[0]
+        assert moved not in req.task_ids and len(req.task_ids) == 6 and go.requests[1].limit == 10
 
     def test_requests_are_valid_post_runs_bodies(self, tmp_path: Path) -> None:
         pydantic = pytest.importorskip("pydantic")
@@ -938,11 +943,10 @@ class TestRemeasure:
         plan = learn.remeasure_plan(
             _stale_ledger(tmp_path), current_apparatus="2.1", policy=RoutingPolicy(min_n=20)
         )
-        by = {c.cell.label: c for c in plan.cells}
+        by = {(c.cell.label, c.mode): c for c in plan.cells}
         # koa has 16 current rows; min_n 20 outranks the Wilson minimum (16) → 4 more
-        assert (
-            by["replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic"].n_needed == 4
-        )
+        koa = "replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic"
+        assert by[(koa, "sighted")].n_needed == 4
 
     def test_deterministic(self, tmp_path: Path) -> None:
         rows = _stale_ledger(tmp_path)
@@ -959,7 +963,7 @@ class TestRemeasure:
             learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")
         )
         assert (
-            "apparatus 2.1" in text and "cells to renew: 2" in text and "nothing was sent" in text
+            "apparatus 2.1" in text and "cells to renew: 3" in text and "nothing was sent" in text
         )
 
 

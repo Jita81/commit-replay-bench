@@ -1148,6 +1148,17 @@ class RemeasureCell:
     n_stale: int
     n_current: int
     n_needed: int
+    #: the MODE this cell is planned for (sighted / blind): the map never pools the two,
+    #: so neither does the plan — one entry per (cell, mode)
+    mode: str
+    #: distinct tasks the stale rows name (what a request can ask for by id) and distinct
+    #: tasks behind the current rows — `n` counts attempts; both are shown so an operator
+    #: sees when "more rows" would mean "the same commits again"
+    tasks_stale: int
+    tasks_current: int
+    #: stale task ids whose CURRENT label differs from this cell (their new rows would land
+    #: elsewhere); left out of the requests, listed here
+    relabelled: tuple[str, ...]
     cost_usd_mean: float
     latency_s_mean: float
     est_cost_usd: float
@@ -1164,6 +1175,10 @@ class RemeasureCell:
             "n_stale": self.n_stale,
             "n_current": self.n_current,
             "n_needed": self.n_needed,
+            "mode": self.mode,
+            "tasks_stale": self.tasks_stale,
+            "tasks_current": self.tasks_current,
+            "relabelled": list(self.relabelled),
             "cost_usd_mean": round(self.cost_usd_mean, 6),
             "latency_s_mean": round(self.latency_s_mean, 3),
             "est_cost_usd": round(self.est_cost_usd, 4),
@@ -1221,8 +1236,11 @@ class RemeasurePlan:
             },
             "note": (
                 "requests are POST /runs bodies for an operator to queue; nothing here "
-                "was sent. Costs are that cell's own mean row cost x n needed (an estimate, "
-                "unknown where no row recorded a cost)."
+                "was sent. One entry per (cell, mode) — sighted and blind are never pooled. "
+                "Costs are that cell's own mean row cost x rows needed x attempts per row "
+                "(1 sighted; the ladder's rungs blind) — an estimate, unknown where no row "
+                "recorded a cost. tasks_stale / tasks_current say how many DISTINCT commits "
+                "stand behind the rows: more rows on the same commits is not more evidence."
             ),
         }
 
@@ -1251,6 +1269,8 @@ def remeasure_plan(
     *,
     current_apparatus: str = APPARATUS_VERSION,
     policy: RoutingPolicy = DEFAULT_POLICY,
+    task_labels: Mapping[str, tuple[str, str]] | None = None,
+    blind_rungs: int = 3,
 ) -> RemeasurePlan:
     """Cells whose evidence predates ``current_apparatus``, and what it takes to renew it.
 
@@ -1263,13 +1283,28 @@ def remeasure_plan(
     rows' task ids (oldest-first ordering is the worker's), capped by ``limit``;
     when the known tasks are fewer than needed a second request asks for the
     remainder by ``limit`` alone. Pure; deterministic; queues nothing.
+
+    Three defects the second decider pass found (2026-09-15) are closed here: the plan
+    groups by **(cell, mode)** like the map (a blended sighted+blind rate hid koa's
+    sighted cell under ``up_to_date``); a blind request is priced at **``blind_rungs``
+    attempts** per task (a blind ladder climbs 25 → 50 → 100 tool calls; the old estimate
+    of $26.53 was $50–76 in the ledger); and with ``task_labels`` — each task's CURRENT
+    ``(capability_class, size)`` — a stale task whose label moved is left out of the
+    request (its new rows would land in another cell) and named in ``relabelled``.
     """
     rs = list(rows)
     cur = _version_key(current_apparatus)
     plan: list[RemeasureCell] = []
     fresh: list[str] = []
     stale_rows = 0
-    for key, group in sorted(group_by_cell(rs, key_fields=CELL_FIELDS).items()):
+    by_mode: dict[str, list[GradeRow]] = {}
+    for r in rs:
+        by_mode.setdefault(r.mode, []).append(r)
+    groups: list[tuple[str, tuple[str, ...], list[GradeRow]]] = []
+    for mode_name in sorted(by_mode):
+        for key, group in sorted(group_by_cell(by_mode[mode_name], key_fields=CELL_FIELDS).items()):
+            groups.append((mode_name, key, group))
+    for mode_name, key, group in groups:
         cell = CellKey(**dict(zip(CELL_FIELDS, key, strict=True)))
         # "stale" is by apparatus version, never by date: evidence expires when the
         # instrument changes (EVIDENCE-AND-CLAIMS §4), not when it gets old
@@ -1282,18 +1317,28 @@ def remeasure_plan(
         clean_current = sum(1 for r in current if r.eligible and r.clean)
         target = rows_to_clear_bar(clean_current, n_current, policy)
         if n_current >= target:
-            fresh.append(cell.label)
+            fresh.append(f"{cell.label}|{mode_name}")
             continue
         n_needed = target - n_current
         costs = [r.cost_usd for r in group if r.cost_usd > 0 and r.cost_known]
         lats = [r.latency_s for r in group if r.latency_s > 0]
         cost_mean = mean(costs)
         lat_mean = mean(lats)
+        # a blind request climbs the ladder: every needed row may cost up to `blind_rungs`
+        # attempts (each an attempt row of its own) — price what will actually be written
+        attempts_per_row = blind_rungs if mode_name == "blind" else 1
+        relabelled: list[str] = []
         requests: list[RunRequest] = []
-        by_repo_mode: dict[tuple[str, str], list[str]] = {}
+        by_repo: dict[str, list[str]] = {}
         for r in stale:
-            by_repo_mode.setdefault((r.repo, r.mode), []).append(r.task_id)
-        for (repo, mode), ids in sorted(by_repo_mode.items()):
+            if task_labels is not None and r.task_id in task_labels:
+                now_cls, now_size = task_labels[r.task_id]
+                if (now_cls, now_size) != (cell.capability_class, cell.size):
+                    relabelled.append(r.task_id)
+                    continue
+            by_repo.setdefault(r.repo, []).append(r.task_id)
+        mode = mode_name
+        for repo, ids in sorted(by_repo.items()):
             task_ids = tuple(sorted(set(ids)))[:n_needed]
             kind = RUN_KIND_BY_MODE.get(mode, "replay")
             requests.append(
@@ -1333,10 +1378,14 @@ def remeasure_plan(
                 n_stale=len(stale),
                 n_current=n_current,
                 n_needed=n_needed,
+                mode=mode_name,
+                tasks_stale=len({r.task_id for r in stale if r.task_id}),
+                tasks_current=len({r.task_id for r in current if r.eligible and r.task_id}),
+                relabelled=tuple(sorted(set(relabelled))),
                 cost_usd_mean=cost_mean,
                 latency_s_mean=lat_mean,
-                est_cost_usd=cost_mean * n_needed,
-                est_minutes=lat_mean * n_needed / 60.0,
+                est_cost_usd=cost_mean * n_needed * attempts_per_row,
+                est_minutes=lat_mean * n_needed * attempts_per_row / 60.0,
                 cost_known=bool(costs),
                 repos=tuple(sorted({r.repo for r in stale})),
                 requests=tuple(requests),
@@ -1419,18 +1468,20 @@ def render_remeasure(plan: RemeasurePlan) -> str:
         f"n needed: {plan.n_needed_total} · est ${plan.est_cost_usd_total:.2f} · "
         f"est {plan.est_minutes_total:.0f} min · rule n≥{plan.min_n} ({plan.policy_version})",
         "",
-        "| cell | stale | current | needed | $/row | est $ | requests |",
-        "|---|---|---|---|---|---|---|",
+        "| cell | mode | stale (tasks) | current (tasks) | needed | $/row | est $ | requests |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for c in plan.cells:
         per = f"{c.cost_usd_mean:.2f}" if c.cost_known else "?"
         est = f"{c.est_cost_usd:.2f}" if c.cost_known else "?"
+        moved = f" −{len(c.relabelled)} relabelled" if c.relabelled else ""
         lines.append(
-            f"| {c.cell.label} | {c.n_stale} ({','.join(c.stale_versions)}) | {c.n_current} | "
+            f"| {c.cell.label} | {c.mode} | {c.n_stale} ({','.join(c.stale_versions)}; "
+            f"{c.tasks_stale} tasks{moved}) | {c.n_current} ({c.tasks_current} tasks) | "
             f"{c.n_needed} | {per} | {est} | {len(c.requests)} |"
         )
     if not plan.cells:
-        lines.append("| _(nothing stale)_ | | | | | | |")
+        lines.append("| _(nothing stale)_ | | | | | | | |")
     if plan.up_to_date:
         lines += ["", "already renewed: " + ", ".join(plan.up_to_date)]
     lines += ["", "requests are POST /runs bodies for an operator to queue; nothing was sent"]
