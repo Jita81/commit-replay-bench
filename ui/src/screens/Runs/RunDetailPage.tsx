@@ -69,8 +69,31 @@ function Header({ run }: { run: Run }) {
   )
 }
 
+/** A mine / setup / label run's own counters (`counts.detail`), served verbatim. */
+function DetailTiles({ detail }: { detail: Record<string, number | string> }) {
+  const entries = Object.entries(detail).filter(([, v]) => typeof v === 'number' || typeof v === 'string')
+  if (!entries.length) return null
+  const examined = typeof detail.examined === 'number' ? detail.examined : null
+  return (
+    <div className="flex flex-wrap gap-3" data-testid="tiles-detail">
+      {entries.map(([k, v]) => (
+        <StatTile
+          key={k}
+          label={k.replace(/_/g, ' ')}
+          value={typeof v === 'number' ? fmtInt(v) : String(v)}
+          n={typeof v === 'number' ? (examined ?? v) : null}
+          apparatus="this run kind's own counter · n = candidates examined"
+        />
+      ))}
+    </div>
+  )
+}
+
 function Tiles({ run }: { run: Run }) {
   const c = run.counts
+  if (c.detail && Object.keys(c.detail).length && !c.tasks && !c.rows) {
+    return <DetailTiles detail={c.detail} />
+  }
   const graded = c.tasks
   const cleanCi = graded > 0 ? wilson(c.clean, graded) : null
   const fpCi = graded > 0 ? wilson(c.first_pass_clean, graded) : null

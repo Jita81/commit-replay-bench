@@ -246,6 +246,9 @@ export interface RunCounts {
   errors: number
   first_pass_clean: number
   rows: number
+  /** A non-build kind's own counters, verbatim (a mine run's examined / found /
+   *  gold_clean / gold_dirty / skipped / known / pool); `{}` for build kinds. */
+  detail?: Record<string, number | string>
 }
 
 export interface RunProgress {

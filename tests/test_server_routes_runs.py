@@ -177,8 +177,25 @@ class TestList:
             "rows": 5,
             "duration_s": 210.5,
             "stopped_reason": "",
+            "detail": {},
         }
         assert run["progress"] == {"done": 4, "total": 4, "current_task_id": None}
+        # a non-build kind keeps its own counters: served verbatim as counts.detail
+        with env.factory() as s:
+            mine = Run(
+                id="m" * 32,
+                repo=ALPHA,
+                kind="mine",
+                status="succeeded",
+                params_json={},
+                counts_json={"examined": 9, "found": 4, "gold_clean": 3, "pool": "standard"},
+                actor="worker",
+            )
+            s.add(mine)
+            s.commit()
+        d = env.get(f"/runs/{'m' * 32}").json()["counts"]
+        assert d["detail"] == {"examined": 9, "found": 4, "gold_clean": 3, "pool": "standard"}
+        assert d["tasks"] == 0 and d["rows"] == 0
         assert run["cost_usd"] == pytest.approx(5 * 0.012)
         assert run["apparatus_version"] == "2.0" and run["ladder"] == ["r1", "r2"]
         assert run["executor"] == "local" and run["timeout"] == 600 and run["limit"] is None

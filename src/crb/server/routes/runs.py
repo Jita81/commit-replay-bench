@@ -296,9 +296,13 @@ def derive_counts(session: Session, run_id: str) -> RunCounts:
 def _counts(session: Session, run: Run) -> RunCounts:
     cj = dict(run.counts_json or {})
     if "tasks" in cj or "rows" in cj:
-        known = {k: cj[k] for k in RunCounts.model_fields if k in cj}
+        known = {k: cj[k] for k in RunCounts.model_fields if k in cj and k != "detail"}
         return RunCounts(**known)
-    return derive_counts(session, run.id)
+    derived = derive_counts(session, run.id)
+    # a mine / setup / label run keeps its own counters: serve them next to the derived
+    # RunSummary instead of dropping them (a mine run read as "tasks: 0", 2026-09-15)
+    derived.detail = {k: v for k, v in cj.items() if k != "current_task_id"}
+    return derived
 
 
 def _current_task(session: Session, run: Run) -> str | None:

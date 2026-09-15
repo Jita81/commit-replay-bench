@@ -320,6 +320,10 @@ class RunCounts(BaseModel):
     rows: int = 0
     duration_s: float = 0.0
     stopped_reason: str = ""
+    #: The run kind's OWN counters when they are not a RunSummary — a mine run's
+    #: ``{examined, found, gold_clean, gold_dirty, skipped, known, pool}``, a setup run's
+    #: steps — served verbatim from the worker's ``counts_json`` (``{}`` otherwise).
+    detail: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunProgress(BaseModel):
