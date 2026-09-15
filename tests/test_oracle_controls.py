@@ -269,6 +269,14 @@ def test_regression_poison_target_selection_is_deterministic(fixture_repo, fix_t
         ws.overlay_tests(fix_task.test_files)
         assert nc.pick_regression_poison_target(ws, fix_task, config) == "helper.py"
         assert nc.pick_regression_poison_target(ws, fix_task, config) == "helper.py"
+        # the poison must be a module the BELT's tests import: with a belt scope that
+        # excludes tests/test_helper.py there is no valid target — choosing helper.py
+        # anyway read `clean` and failed the gate with a blank note (click, 8 tasks,
+        # 2026-09-15)
+        narrow = fix_task.with_(belt_scope=("tests/test_smoke.py",))
+        assert nc.pick_regression_poison_target(ws, narrow, config) is None
+        bare = fix_task.with_(belt_scope=())
+        assert nc.pick_regression_poison_target(ws, bare, config) == "helper.py"
 
 
 # --- the report is the CI gate -----------------------------------------------------------------
