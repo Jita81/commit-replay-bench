@@ -27,7 +27,7 @@ Works with:   src/crb/core/ledger.py (``JsonlLedger``, ``cell_stats``, ``false_q
 Tested by:    tests/test_cli.py
 Touch when:   never for a new repository; when a ``stats`` grouping field is added
               (``GROUP_ALIASES`` here and ``BY_ALIASES`` in
-              src/crb/server/routes/capability.py); ``export --abstract`` is still a stub —
+              src/crb/server/routes/capability.py); ``export --abstract`` is the same export the API serves —
               see FINDINGS.
 Claims:       ``verify`` exit 0 = chain intact and false-Q1 = 0 over the rows on disk; the
               census rows it imports carry ``v3-legacy`` and are never blended with
@@ -55,6 +55,7 @@ from crb.cli.commands import (
     table,
     workdir_of,
 )
+from crb.core.federated import export_abstract
 from crb.core.ledger import (
     CELL_FIELDS,
     GradeRow,
@@ -443,23 +444,25 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
-    """Rows as JSON lines to stdout or ``--out``; ``--abstract`` is not wired yet."""
+    """Rows as JSON lines to stdout or ``--out``; ``--abstract`` writes the allowlisted
+    cell-level export instead (no ids, no code — ADR-0007; the same
+    :func:`crb.core.federated.export_abstract` the API serves at ``/ledger/export/abstract``)."""
     ledger = _ledger(args)
-    if args.abstract:
-        raise NotImplementedError(
-            "abstract (cell-level, id-free) export lives in crb.core.federated; "
-            "wire `crb ledger export --abstract` to it once that module lands"
-        )
     rows: list[GradeRow] = list(ledger.rows())
-    lines = [json.dumps(r.to_dict(), sort_keys=True, ensure_ascii=False) for r in rows]
+    if args.abstract:
+        cells = export_abstract(rows)
+        lines = [json.dumps(c, sort_keys=True, ensure_ascii=False) for c in cells]
+        rows = []  # nothing row-level leaves an abstract export
+    else:
+        lines = [json.dumps(r.to_dict(), sort_keys=True, ensure_ascii=False) for r in rows]
     if args.out:
         out_path = Path(args.out).expanduser()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         if args.json:
-            print_json({"ledger": str(ledger.path), "rows": len(rows), "out": str(out_path)})
+            print_json({"ledger": str(ledger.path), "lines": len(lines), "out": str(out_path)})
         else:
-            print_lines([f"exported {len(rows)} row(s) -> {out_path}"])
+            print_lines([f"exported {len(lines)} line(s) -> {out_path}"])
     else:
         print_lines(lines)
     return EXIT_OK

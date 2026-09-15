@@ -601,8 +601,12 @@ def test_ledger_verify_stats_export(
     code, d2 = run_json(run, ["ledger", "export", "--out", str(out_file)])
     assert code == 0 and d2["out"] == str(out_file)
     assert len(out_file.read_text().splitlines()) == len(lines)
-    code, _, err = run(["ledger", "export", "--abstract"])
-    assert code == 2 and "crb.core.federated" in err
+    # --abstract: the allowlisted cell-level export (ADR-0007) — no ids, no code, no repo
+    code, out, _ = run(["ledger", "export", "--abstract"])
+    assert code == 0
+    cells = [json.loads(ln) for ln in out.splitlines() if ln.strip()]
+    assert cells and all("task_id" not in c and "row_hash" not in c for c in cells)
+    assert all("n" in c and "capability_class" in c for c in cells)
 
 
 def test_ledger_verify_detects_tampering(run: Run, tmp_path: Path, workdir: Path) -> None:

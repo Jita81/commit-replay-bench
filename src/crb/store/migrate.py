@@ -1,7 +1,10 @@
 """Programmatic Alembic for crb.store: ``upgrade`` / ``current`` / ``check``.
 
 Used by the container entrypoint (``python -m crb.store.migrate upgrade``), the compose
-``migrate`` one-shot, the Helm pre-upgrade Job, and ``crb serve`` on boot.
+``migrate`` one-shot and the Helm pre-upgrade Job. ``crb serve`` itself does NOT migrate: its
+lifespan runs ``init_db`` (``create_all`` + the append-only triggers), which is complete for a
+fresh database and a no-op on a migrated one — a store behind by a revision must be migrated
+by the entrypoint/Job before ``serve`` (``migrate check`` exits 1 when it is).
 
 Invariants
 ----------

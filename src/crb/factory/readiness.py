@@ -89,7 +89,7 @@ ROUTE_HUMAN = "human"
 ROUTE_HINTS: tuple[str, ...] = (ROUTE_BUILD, ROUTE_TEST_FIRST, ROUTE_HUMAN)
 
 #: Classes whose oracle typically proves only the build; green cannot license
-#: auto-delivery on the test alone — they route ``human`` (the DL-011 lesson).
+#: auto-delivery on the test alone — they route ``human`` (EVIDENCE-AND-CLAIMS §7).
 WEAK_ORACLE_CLASSES: frozenset[str] = frozenset(
     {"docs.update", "ci.workflow.edit", "infra.helm.edit", "infra.terraform.edit"}
 )

@@ -113,7 +113,7 @@ class DbLedger:
         if dialect == "sqlite":
             s.execute(text("BEGIN IMMEDIATE"))
         elif dialect == "postgresql":
-            s.execute(text("SELECT pg_advisory_xact_lock(7331)"))
+            s.execute(text("SELECT pg_advisory_xact_lock(7331)"))  # grades
 
     def _last_hash(self, s: Session) -> str:
         """The chain head: the newest row's ``row_hash``, or the genesis hash when empty."""
@@ -252,7 +252,7 @@ class DbReviewLedger:
         if dialect == "sqlite":
             s.execute(text("BEGIN IMMEDIATE"))
         elif dialect == "postgresql":
-            s.execute(text("SELECT pg_advisory_xact_lock(7333)"))
+            s.execute(text("SELECT pg_advisory_xact_lock(7333)"))  # reviews
 
     def _last_hash(self, s: Session) -> str:
         """The review chain's head, or the genesis hash when empty."""

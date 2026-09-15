@@ -169,7 +169,7 @@ class JobQueue:
         if dialect == "sqlite":
             s.execute(text("BEGIN IMMEDIATE"))
         elif dialect == "postgresql":
-            s.execute(text("SELECT pg_advisory_xact_lock(7333)"))
+            s.execute(text("SELECT pg_advisory_xact_lock(7334)"))  # runs (jobs) — one id per table
 
     def _get_owned(self, s: Session, run_id: str, worker_id: str) -> Run:
         """The run, or ``StaleClaim`` when ``worker_id`` is given and no longer owns it."""

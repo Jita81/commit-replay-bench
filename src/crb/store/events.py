@@ -118,7 +118,7 @@ def _lock(s: Session) -> None:
     if dialect == "sqlite":
         s.execute(text("BEGIN IMMEDIATE"))
     elif dialect == "postgresql":
-        s.execute(text("SELECT pg_advisory_xact_lock(7332)"))
+        s.execute(text("SELECT pg_advisory_xact_lock(7332)"))  # events
 
 
 class DbEventSink:

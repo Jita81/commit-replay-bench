@@ -104,7 +104,7 @@ class Run(Base):
     )
     kind: Mapped[str] = mapped_column(
         String(16), nullable=False, default="replay"
-    )  # replay|blind|oracle|factory|mine
+    )  # one of crb.store.jobs.RUN_KINDS (setup|probe|mine|label|replay|blind|oracle|controls|factory)
     mode: Mapped[str] = mapped_column(String(16), nullable=False, default="sighted")
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued", index=True)
     builder: Mapped[str] = mapped_column(String(64), nullable=False, default="")

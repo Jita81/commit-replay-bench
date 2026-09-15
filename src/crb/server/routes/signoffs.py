@@ -274,7 +274,7 @@ def _lock(session: Session) -> None:
     if dialect == "sqlite":
         session.execute(text("BEGIN IMMEDIATE"))
     elif dialect == "postgresql":
-        session.execute(text("SELECT pg_advisory_xact_lock(7332)"))
+        session.execute(text("SELECT pg_advisory_xact_lock(7335)"))  # signoffs — one id per table
 
 
 def _last_hash(session: Session) -> str:
