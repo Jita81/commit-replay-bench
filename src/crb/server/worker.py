@@ -102,7 +102,7 @@ from crb.core.git import (
     redact_url,
 )
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED
-from crb.core.ledger import GradeRow, false_q1_total
+from crb.core.ledger import GradeRow, false_q1_total, is_outage_error
 from crb.core.mine import MineOutcome, mine
 from crb.core.oracle.controls import (
     CONTROLS,
@@ -119,7 +119,7 @@ from crb.core.oracle.mutation import (
     score_task,
 )
 from crb.core.redact import redact_and_cap
-from crb.core.run import RunSpec, RunSummary
+from crb.core.run import BuildAttempt, RunSpec, RunSummary
 from crb.core.run import run as core_run
 from crb.core.runners import get_runner
 from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
@@ -148,6 +148,10 @@ from crb.store.jobs import (
 )
 from crb.store.ledger import DbLedger
 from crb.store.models import EvidencePackRow, Repo, Run, Task
+
+#: Stop a build run after this many consecutive attempts the provider refused
+#: (``failure_kind == outage``); ``params.outage_stop`` overrides, 0 disables.
+DEFAULT_OUTAGE_STOP = 3
 
 _LOG = logging.getLogger(__name__)
 
@@ -1093,13 +1097,33 @@ class Worker:
                 self._progress(ctx, i, total)
                 yield t
 
+        # Circuit breaker: a provider that refuses the call (usage limit, 429, dead
+        # credential) refuses every call; 263 of the first 534 rows on the dev stack were
+        # such `outage` rows written in seconds (2026-09-15). After `outage_stop` consecutive
+        # refused attempts the run stops with the reason instead of burning the queue.
+        outage_stop = int(p.get("outage_stop", DEFAULT_OUTAGE_STOP) or 0)
+        streak: dict[str, Any] = {"n": 0, "last": ""}
+        inner_build = build_fn
+
+        def metered_build(ws: Workspace, task: TaskSpec, mode_: str, rung: str) -> BuildAttempt:
+            attempt = inner_build(ws, task, mode_, rung)
+            if is_outage_error(attempt.error):
+                streak["n"] += 1
+                streak["last"] = attempt.error
+            else:
+                streak["n"] = 0
+            return attempt
+
+        def tripped() -> bool:
+            return outage_stop > 0 and streak["n"] >= outage_stop
+
         summary: RunSummary = core_run(
             spec,
             ctx.git,
             tracked(),
-            build_fn,
+            metered_build,
             on_event=ctx.on_event,
-            stop=lambda: self._cancelled(ctx),
+            stop=lambda: self._cancelled(ctx) or tripped(),
         )
         counts = summary.to_dict()
         counts["total"] = total
@@ -1107,6 +1131,14 @@ class Worker:
         ctx.counts.update(counts)
         self._progress(ctx, summary.tasks, total)
         self._ledger_health()
+        if tripped() and not self._cancelled(ctx):
+            reason = (
+                f"provider outage: {streak['n']} consecutive attempts refused; "
+                f"last: {str(streak['last'])[:200]}"
+            )
+            counts["stopped_reason"] = reason
+            ctx.emit("system", "run.outage_stop", status=StepStatus.ERROR, reason=reason)
+            return STATUS_FAILED, counts, reason
         if summary.stopped_reason == "cancelled":
             return STATUS_CANCELLED, counts, ""
         if summary.stopped_reason:

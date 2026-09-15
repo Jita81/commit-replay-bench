@@ -16,7 +16,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 import crb.builders as builders_pkg
-from crb.builders.base import STOP_DONE, STOP_MAX_TURNS, Budget, BuildBrief, BuildOutcome
+from crb.builders.base import (
+    STOP_DONE,
+    STOP_MAX_TURNS,
+    STOP_MODEL_ERROR,
+    Budget,
+    BuildBrief,
+    BuildOutcome,
+)
 from crb.core.evidence import verify_pack
 from crb.core.execution import SandboxUnavailable
 from crb.core.ledger import verify_chain
@@ -85,6 +92,14 @@ class FakeBuilder:
                 tokens_out=5,
                 cost_usd=0.01,
                 latency_s=0.1,
+                budget=budget,
+            )
+        if self.behaviour == "outage":
+            return BuildOutcome(
+                **base,
+                done=False,
+                stop_reason=STOP_MODEL_ERROR,
+                errors=("model_error: You've hit your limit · resets 3pm",),
                 budget=budget,
             )
         return BuildOutcome(**base, done=False, stop_reason=STOP_MAX_TURNS, turns=1, budget=budget)
@@ -274,6 +289,27 @@ def test_replay_not_clean_and_ladder_climb(h: Harness) -> None:
     assert [(r.trial, r.model, r.clean) for r in rows] == [("r1", "m0", False), ("r2", "m1", True)]
     assert rows[0].labels["rung"] == "r1"
     assert done.apparatus_json["extra"]["budget"]["max_turns"] == 2
+
+
+def test_replay_stops_after_consecutive_provider_outages(h: Harness) -> None:
+    """263 of the first 534 rows on the dev stack were usage-limit refusals written in
+    seconds (2026-09-15): after `outage_stop` (default 3) consecutive refused attempts the run
+    stops FAILED with the reason, instead of burning the queue one refused row at a time."""
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="outage", **cfg)
+    run = h.enqueue("replay", ladder_json=["fake:m0", "fake:m1", "fake:m2"])
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith(
+        "provider outage: 3 consecutive attempts refused; last: model_error"
+    )
+    rows = list(h.worker.ledger.rows(run_id=run.id))
+    assert len(rows) == 3 and {r.failure_kind for r in rows} == {"outage"}
+    assert done.counts_json["stopped_reason"].startswith("provider outage")
+    assert any(e.action == "run.outage_stop" for e in h.events(run.id))
+    # `outage_stop: 0` disables the breaker: every task is attempted, the all-errored rule applies
+    h.enqueue("replay", ladder_json=["fake:m0"], params_json={"outage_stop": 0})
+    again = h.run_one()
+    assert again.status == STATUS_FAILED and again.error.startswith("all 1 attempt(s) errored")
 
 
 def test_ladder_from_builder_columns_and_task_ids(h: Harness) -> None:

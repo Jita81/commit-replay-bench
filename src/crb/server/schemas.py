@@ -517,6 +517,10 @@ class RunCreateRequest(BaseModel):
     #: the builder transcript (redacted, referenced from the evidence pack). Stored under
     #: ``params.retain`` and served on the run.
     retain: RunRetention = Field(default_factory=RunRetention)
+    #: Provider circuit breaker for build kinds: stop the run after this many consecutive
+    #: attempts the provider refused (``failure_kind: outage``); ``0`` disables; ``None`` =
+    #: the worker's default (3). Stored as ``params.outage_stop`` only when set.
+    outage_stop: int | None = Field(default=None, ge=0, le=1000)
 
     @field_validator("kind")
     @classmethod

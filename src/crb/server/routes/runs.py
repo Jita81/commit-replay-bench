@@ -466,6 +466,8 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["budget"] = body.budget.overrides()
     if body.retain.worktrees or body.retain.transcripts:
         params["retain"] = body.retain.model_dump()
+    if body.outage_stop is not None:
+        params["outage_stop"] = body.outage_stop
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,
