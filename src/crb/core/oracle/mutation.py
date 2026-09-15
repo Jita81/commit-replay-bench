@@ -690,6 +690,20 @@ def _refuse_test_targets(task: TaskSpec, config: RepoConfig, paths: Sequence[str
         )
 
 
+#: A mutant's run is capped at this multiple of the green baseline's duration …
+MUTANT_TIMEOUT_FACTOR = 4.0
+#: … but never below this many seconds (a fast baseline still gets a fair run) …
+MUTANT_TIMEOUT_MIN_S = 30
+#: … and never above the runner's own timeout.
+
+
+def mutant_wall_clock(baseline_s: float, runner_timeout: int) -> int:
+    """The per-mutant wall clock: ``clamp(4 × baseline, 30 s, runner timeout)``."""
+    cap = int(runner_timeout) if runner_timeout and runner_timeout > 0 else 0
+    want = max(MUTANT_TIMEOUT_MIN_S, int(baseline_s * MUTANT_TIMEOUT_FACTOR) + 1)
+    return min(want, cap) if cap else want
+
+
 def score_task(
     ws: Workspace,
     task: TaskSpec,
@@ -808,6 +822,15 @@ def score_task(
     # The mtime clock starts at the newest file so every version written is strictly newer
     # than what any build cache has already seen (see _write_version).
     tick = max(int(p.stat().st_mtime) for p in files.values())
+    # A mutant that turns a loop condition or a guard into an infinite loop runs to the
+    # runner's full wall clock (900 s) — one such mutant held click's oracle run for 15
+    # minutes per task (2026-09-15). A mutant gets a bounded multiple of the GREEN
+    # baseline's own duration: a timeout is a kill either way (the tests did not pass),
+    # so the bound never changes a verdict, only how long it takes to record.
+    effective = timeout or int(
+        getattr(runner, "opts", {}).get("timeout", getattr(runner, "default_timeout", 0))
+    )
+    mutant_timeout = mutant_wall_clock(baseline.duration_s, effective)
     try:
         for m in mutants:
             original_text = originals[m.path].decode("utf-8")
@@ -816,7 +839,11 @@ def score_task(
             _write_version(files[m.path], m.mutated_source.encode("utf-8"), tick)
             try:
                 run = runner.run_for(
-                    executor, ws.root, task.target_tests, timeout=timeout, authored=task.authored
+                    executor,
+                    ws.root,
+                    task.target_tests,
+                    timeout=mutant_timeout,
+                    authored=task.authored,
                 )
             except SandboxUnavailable:
                 raise

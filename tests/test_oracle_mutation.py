@@ -481,3 +481,14 @@ def test_strength_number_is_what_routing_consumes(weak):
         weak.oracle_strength is not None
         and weak.oracle_strength < ROUTING_POLICY.min_oracle_strength
     )
+
+
+def test_mutant_wall_clock_is_a_bounded_multiple_of_the_baseline() -> None:
+    """A mutant that loops forever held click's oracle run for the runner's full 900 s per
+    task (2026-09-15); a timeout is a kill either way, so the bound changes no verdict."""
+    from crb.core.oracle.mutation import mutant_wall_clock
+
+    assert mutant_wall_clock(2.0, 900) == 30  # never below the floor
+    assert mutant_wall_clock(20.0, 900) == 81  # 4 × baseline + 1
+    assert mutant_wall_clock(400.0, 900) == 900  # never above the runner's own clock
+    assert mutant_wall_clock(400.0, 0) == 1601  # no runner cap known: the multiple stands
