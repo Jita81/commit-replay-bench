@@ -15,6 +15,35 @@
  *
  * `post_create` (workspace hooks) is read by `crb.core.workspace`, not a runner; it
  * stays editable through the raw JSON view only.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `runner_opts` key table (`RUNNER_OPTS`, `COMMON_OPTS`), the language →
+ *               runner map, and the coercion / validation helpers the options editor uses.
+ * What it does: Offers an operator only the keys `crb.core.runners.<runner>` actually reads,
+ *               each with the runner's behaviour as its hint; keeps any other key untouched
+ *               and lists it as "not read by this runner" so a hand-written key never
+ *               disappears; and refuses at edit time what the runner would choke on at run
+ *               time (the API accepts any object — validation lives in the runner).
+ * How:          One `OptSpec[]` per runner (kind: path / text / int / bool / choice / list /
+ *               env) plus the `BaseRunner` common keys; `specsFor`, `unknownKeys`, `as*`
+ *               coercions and `validateRunnerOpts` are pure.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   src/crb/core/runners/base.py (`timeout`, `setup_timeout`),
+ *               src/crb/core/runners/pytest_runner.py, src/crb/core/runners/node_runners.py,
+ *               src/crb/core/runners/go_runner.py, src/crb/core/runners/cargo_runner.py,
+ *               src/crb/core/runners/jvm_runner.py (the source of truth, key by key),
+ *               ui/src/screens/Repos/RunnerOptsEditor.tsx (renders the specs),
+ *               ui/src/lib/repoPresets.ts (presets must use keys from this table)
+ * Tested by:    ui/src/screens/Repos/runnerOpts.test.ts (the key table mirrors the runners;
+ *               coercions invent nothing; validation flags the right shapes),
+ *               ui/src/screens/Repos/RepoConfigTab.test.tsx
+ * Touch when:   a runner starts reading a new `runner_opts` key (src/crb/core/runners/*) —
+ *               add its `OptSpec` here in the same commit, or the form cannot offer it; a
+ *               new runner needs its entry in `RUNNER_OPTS` and `RUNNERS_BY_LANGUAGE`. For a
+ *               new repository: nothing here — set its options through the form
+ *               (docs/OPERATOR.md#2-configure-a-repository).
  */
 
 import type { Language, Runner } from '../../api/types'
@@ -37,10 +66,12 @@ export const DEFAULT_RUNNER: Record<Language, Runner> = {
   rust: 'cargo',
 }
 
+/** The runners a language allows (empty for an unknown language). */
 export function runnersFor(language: Language): readonly Runner[] {
   return RUNNERS_BY_LANGUAGE[language] ?? []
 }
 
+/** How an option is edited and validated; mirrors the type the runner reads from `runner_opts`. */
 export type OptKind =
   /** A host path or binary name (string). */
   | 'path'
@@ -57,6 +88,7 @@ export type OptKind =
   /** A string → string map (environment variables). */
   | 'env'
 
+/** One `runner_opts` key: its kind, label, the runner's behaviour as hint, and the docker-only flag. */
 export interface OptSpec {
   key: string
   kind: OptKind
@@ -90,6 +122,7 @@ export const COMMON_OPTS: readonly OptSpec[] = [
   },
 ]
 
+/** Shared `env` spec: every runner exports these into the test command. */
 const ENV: OptSpec = {
   key: 'env',
   kind: 'env',
@@ -97,6 +130,7 @@ const ENV: OptSpec = {
   hint: 'Added to the test command’s environment (and, for the node runners, to npm setup). Put a pinned toolchain first on PATH here, e.g. PATH=/opt/node@24/bin:/usr/bin:/bin.',
 }
 
+/** Shared `npm` spec for the four node runners. */
 const NPM: OptSpec = {
   key: 'npm',
   kind: 'path',
@@ -105,6 +139,7 @@ const NPM: OptSpec = {
   placeholder: '/opt/node@24/bin/npm',
 }
 
+/** Shared `extra_args` spec (jest / vitest / mocha, not `node --test`). */
 const EXTRA_ARGS = (runner: string): OptSpec => ({
   key: 'extra_args',
   kind: 'list',
@@ -113,6 +148,7 @@ const EXTRA_ARGS = (runner: string): OptSpec => ({
   placeholder: '--selectProjects',
 })
 
+/** Shared tri-state `offline` spec (cargo, maven) with the runner's flags named in the hint. */
 const OFFLINE = (tool: string, flagOn: string, flagOff: string): OptSpec => ({
   key: 'offline',
   kind: 'bool',
@@ -121,6 +157,7 @@ const OFFLINE = (tool: string, flagOn: string, flagOff: string): OptSpec => ({
   defaultBool: true,
 })
 
+/** The key table: exactly what each runner module reads, nothing more. */
 export const RUNNER_OPTS: Record<Runner, readonly OptSpec[]> = {
   pytest: [
     {
@@ -308,6 +345,7 @@ export function asBool(v: unknown): '' | 'true' | 'false' {
   return ''
 }
 
+/** A non-negative integer, as a number or as digit text (what an `int` input can hold). */
 const isInt = (v: unknown): boolean => (typeof v === 'number' && Number.isInteger(v) && v >= 0) || (typeof v === 'string' && /^\d+$/.test(v))
 
 /**

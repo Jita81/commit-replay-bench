@@ -1,3 +1,32 @@
+/**
+ * Repository detail — the repository as an instrument: probe, change profile, mined tasks, configuration (/repos/:name).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /repos/:name with four tabs: Overview (task counts, probe,
+ *               next steps), Change profile (class × size histogram), Tasks (the mined
+ *               `TaskSpec`s) and Configuration.
+ * What it does: Shows what the instrument knows about one repository: whether it can run the
+ *               repo's tests (the probe pill with the runner's own summary), how many
+ *               replayable commits were mined and how many are gold-clean, and how the repo's
+ *               real commits distribute over (class × size) — the denominator behind coverage.
+ *               Operators can probe now or start a run from here.
+ * How:          `useRepo` / `useRepoProfile` / `useRepoTasks`; tab state is local;
+ *               `RunNewDialog` is mounted for "Start a run"; the Configuration tab is keyed by
+ *               repo name so it remounts per repo.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/hooks.ts (`useRepo`, `useRepoProfile`, `useRepoTasks`,
+ *               `useProbeRepo`), ui/src/api/types.ts (`RepoDetail`, `TaskSpec`,
+ *               `ProfileCell`), ui/src/screens/Repos/RepoConfigTab.tsx (the fourth tab),
+ *               ui/src/screens/Runs/RunNewDialog.tsx (start a run), src/crb/server/routes/repos.py
+ *               (detail, profile, tasks, probe)
+ * Tested by:    ui/e2e/walkthrough/02-repo-onboard.spec.ts (probe pill reads OK with the
+ *               runner's summary), ui/e2e/walkthrough/03-mine.spec.ts (the Tasks tab lists a
+ *               mined task), ui/e2e/walkthrough/repo-config.spec.ts
+ * Touch when:   a field is added to `GET /repos/{name}` or the profile (docs/API.md "Repos")
+ *               — type it in ui/src/api/types.ts first; never for a new repository.
+ */
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useProbeRepo, useRepo, useRepoProfile, useRepoTasks } from '../../api/hooks'
@@ -17,10 +46,12 @@ import { probeDisplay } from '../../lib/verdict'
 import { RunNewDialog } from '../Runs/RunNewDialog'
 import { RepoConfigTab } from './RepoConfigTab'
 
+/** The four tabs. */
 type Tab = 'overview' | 'profile' | 'tasks' | 'config'
 
 const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL']
 
+/** The change profile as a heat-mapped class × size table with row / column totals and shares. */
 function ProfileTable({ cells, classes, sizes, total }: { cells: ProfileCell[]; classes: string[]; sizes: string[]; total: number }) {
   const idx = new Map(cells.map((c) => [`${c.capability_class}|${c.size}`, c]))
   const sizeList = sizes.length ? [...sizes].sort((a, b) => SIZE_ORDER.indexOf(a) - SIZE_ORDER.indexOf(b)) : SIZE_ORDER
@@ -92,6 +123,7 @@ function ProfileTable({ cells, classes, sizes, total }: { cells: ProfileCell[]; 
   )
 }
 
+/** Task-count tiles, the probe card (with "Probe now" for operators) and the next-step links. */
 function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => void }) {
   const { can } = useAuth()
   const probe = useProbeRepo()
@@ -151,6 +183,7 @@ function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => v
   )
 }
 
+/** The mined tasks with class, size, pool, churn, gold status and RED-checked. */
 function TasksTab({ name }: { name: string }) {
   const tasks = useRepoTasks(name, { limit: 500 })
   const columns = useMemo<Column<TaskSpec>[]>(
@@ -197,6 +230,7 @@ function TasksTab({ name }: { name: string }) {
   )
 }
 
+/** The screen: tab state is local; the config tab is keyed by repo name. */
 export function RepoDetail() {
   const { name = '' } = useParams()
   const repo = useRepo(name)

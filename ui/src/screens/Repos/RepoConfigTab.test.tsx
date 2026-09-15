@@ -1,3 +1,28 @@
+/**
+ * ui/src/screens/Repos/RepoConfigTab.tsx — only the changed fields are sent, validation mirrors the API, the probe result is shown inline.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Screen tests for the Configuration tab against a mocked API.
+ * What it does: Pins that every stored field renders and Save stays disabled until something
+ *               changes; that a viewer gets a read-only form with no actions; that switching
+ *               the language limits the runner and swaps the options sub-form; that a save
+ *               sends ONLY the changed fields (asserted on the PUT body), shows the toast and
+ *               adds the diff event to the trail; that raw JSON round-trips with the form and
+ *               a parse error blocks saving; that validation speaks the API's words; that a
+ *               422 envelope renders; and that a probe after a save is followed to green or
+ *               red with the run's reason.
+ * How:          `mockApi` with the `REPO` fixture, `userEvent` interactions, assertions on
+ *               the `repo-config-*` test ids and the recorded request bodies.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Repos/RepoConfigTab.tsx (the code under test),
+ *               ui/src/screens/Repos/repoConfigModel.test.ts (`REPO`), ui/src/test/utils.tsx
+ *               (`mockApi`, `renderApp`, `envelope`, `json`)
+ * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx
+ * Touch when:   a field, a validation message or the audit payload changes — extend the
+ *               matching case.
+ */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'

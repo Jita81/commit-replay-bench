@@ -1,3 +1,32 @@
+/**
+ * runner_opts as a runner-specific sub-form with a raw-JSON view that round-trips.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `RunnerOptsEditor`: Form mode (one control per key the runner reads) and
+ *               Raw JSON mode (the whole object), sharing one value.
+ * What it does: Offers exactly the runner's keys as typed controls, lists any other stored key
+ *               as "not read by this runner" (kept on save, removable, editable in JSON), and
+ *               lets the operator edit the raw object with live parsing — a parse error is
+ *               reported and blocks the switch back to Form, never applied. Keys set to empty
+ *               are removed, so a saved config carries no phantom keys.
+ * How:          The object is the single source of truth; JSON text is derived from it on
+ *               external change (a preset, a reset) but not on the editor's own emissions, so
+ *               the operator's formatting survives while they type; `OptControl` renders by
+ *               `OptSpec.kind`.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Repos/runnerOpts.ts (the specs, coercions and validation),
+ *               ui/src/screens/Repos/ListEditors.tsx (list and env kinds),
+ *               ui/src/lib/jsonObject.ts (`parseJsonObject`, `formatJsonObject`),
+ *               ui/src/screens/Repos/repoConfigModel.ts (`sameJson`),
+ *               ui/src/screens/Repos/RepoConfigForm.tsx and ui/src/screens/Repos/RepoNewDialog.tsx
+ *               (the two hosts)
+ * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx (round-trip, parse error blocks
+ *               save), ui/src/screens/Repos/RepoNewDialog.test.tsx, ui/e2e/walkthrough/repo-config.spec.ts
+ * Touch when:   an `OptKind` is added to ui/src/screens/Repos/runnerOpts.ts — add its control
+ *               in `OptControl`; never for a new repository.
+ */
 import { useEffect, useRef, useState } from 'react'
 import type { Runner } from '../../api/types'
 import { Button } from '../../components/Button'
@@ -7,6 +36,7 @@ import { KeyValueEditor, ListEditor } from './ListEditors'
 import { sameJson } from './repoConfigModel'
 import { asBool, asEnv, asList, asText, specsFor, unknownKeys, type OptSpec } from './runnerOpts'
 
+/** Form (typed controls) or Raw JSON (the whole object). */
 export type OptsMode = 'form' | 'json'
 
 interface Props {
@@ -25,6 +55,7 @@ interface Props {
   jsonRows?: number
 }
 
+/** The one-line explanation shown above the form view. */
 const KIND_HELP = 'Only the keys this runner reads are offered; anything else stays untouched and is listed below.'
 
 /**
@@ -163,6 +194,7 @@ export function RunnerOptsEditor({ runner, value, onChange, errors = {}, onJsonE
   )
 }
 
+/** One control per `OptKind`; an emptied control removes the key rather than storing `''`. */
 function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec; value: unknown; error?: string; disabled?: boolean; onChange: (v: unknown) => void }) {
   const hint = spec.dockerOnly ? `${spec.hint} (docker executor only)` : spec.hint
   const testid = `runner-opt-${spec.key}`

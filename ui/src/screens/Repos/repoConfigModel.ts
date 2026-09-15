@@ -6,6 +6,34 @@
  * and the audit event lists exactly what was sent).
  *
  * Pure functions, no React — the create dialog and the Configuration tab share them.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Pure functions behind the Configuration tab and the Add-repo dialog:
+ *               `formFromRepo`, `requestOf`, `changedFields`, `validateForm`, and the belt /
+ *               mining vocabularies with their help text.
+ * What it does: Turns `GET /repos/{name}` into form state, validates it with the server's own
+ *               messages (`RepoConfig.__post_init__`, the pydantic field limits) so the form
+ *               refuses what the API would 422, and computes the CHANGED fields only — compared
+ *               in wire vocabulary, so a re-ordered `runner_opts` or a trimmed string is not a
+ *               change. `PUT /repos/{name}` is partial and the audit event lists exactly what
+ *               was sent, so this diff is what the trail records.
+ * How:          Stored → form (belt scope split into policy + list, mining ints to text) →
+ *               form → wire (`requestOf`) → `changedFields` diffs `requestOf(form)` against
+ *               `requestOf(formFromRepo(repo))` with order-insensitive JSON equality.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   src/crb/core/spec.py (`RepoConfig` and its validation messages),
+ *               src/crb/server/schemas.py (`_RepoConfigFields` limits mirrored in
+ *               `FIELD_LIMITS`), ui/src/api/repoConfig.ts (`RepoUpdateRequest`),
+ *               ui/src/screens/Repos/runnerOpts.ts (`runnersFor` — which runners a language
+ *               allows), ui/src/screens/Repos/RepoConfigTab.tsx and
+ *               ui/src/screens/Repos/RepoNewDialog.tsx (the two consumers)
+ * Tested by:    ui/src/screens/Repos/repoConfigModel.test.ts, ui/src/screens/Repos/RepoConfigTab.test.tsx
+ * Touch when:   `RepoConfig` gains a field (src/crb/core/spec.py) — add it to `RepoConfigForm`,
+ *               `formFromRepo`, `requestOf` and (if bounded) `FIELD_LIMITS`, with the server's
+ *               message in `validateForm`; a new belt policy or mining cap gets its help text
+ *               here. Never for a new repository (its config is edited, not coded).
  */
 
 import type { RepoUpdateRequest } from '../../api/repoConfig'
@@ -13,8 +41,10 @@ import type { BeltScope, Language, MiningConfig, RepoDetail, Runner } from '../.
 import { LANGUAGES, RUNNERS } from '../../api/types'
 import { runnersFor } from './runnerOpts'
 
+/** The three named scopes plus `LIST` (an explicit runner-scope list) — the form's view of `BeltScope`. */
 export type BeltPolicy = 'TARGET_ONLY' | 'AFFECTED_DIRS' | 'BARE' | 'LIST'
 
+/** What each belt policy makes belt 3 (no new failures) run; wider = a green means more. */
 export const BELT_HELP: Record<BeltPolicy, string> = {
   TARGET_ONLY: 'Regression belt runs only the target tests (weakest; while calibrating a large suite).',
   AFFECTED_DIRS: 'Regression belt runs every test in the target tests’ directories.',
@@ -22,9 +52,11 @@ export const BELT_HELP: Record<BeltPolicy, string> = {
   LIST: 'Regression belt runs exactly these runner scopes (paths or patterns the runner accepts).',
 }
 
+/** The `MiningConfig` fields, in form order. */
 export const MINING_KEYS = ['log_n', 'max_candidates', 'target_valid', 'hard_target'] as const
 export type MiningKey = (typeof MINING_KEYS)[number]
 
+/** Label, hint and the miner's default per cap. */
 export const MINING_HELP: Record<MiningKey, { label: string; hint: string; placeholder: string }> = {
   log_n: { label: 'History depth (commits)', hint: 'How many commits back a mine run walks. Empty = 3000.', placeholder: '3000' },
   max_candidates: { label: 'Max candidates examined', hint: 'Stop after this many candidate commits, even if the target is not met. Empty = 1000.', placeholder: '1000' },
@@ -45,6 +77,7 @@ export const FIELD_LIMITS = {
   sandbox_image: 512,
 } as const
 
+/** Editable state: strings for every field (an empty mining cap = unset), belt scope as policy + list. */
 export interface RepoConfigForm {
   language: Language
   runner: Runner
@@ -65,12 +98,14 @@ export interface RepoConfigForm {
   runner_opts: Record<string, unknown>
 }
 
+/** One message per field (or `mining.<key>` / the runner-opts JSON), in the server's words. */
 export type FormErrors = Partial<Record<keyof RepoConfigForm | `mining.${MiningKey}` | 'runner_opts_json', string>>
 
 // ---------------------------------------------------------------------------
 // Stored → form
 // ---------------------------------------------------------------------------
 
+/** Comma- or newline-separated scopes → trimmed, non-empty list. */
 export function parseScopeList(text: string): string[] {
   return text
     .split(/[,\n]/)
@@ -78,11 +113,13 @@ export function parseScopeList(text: string): string[] {
     .filter(Boolean)
 }
 
+/** A stored `belt_scope` → policy + list (an array is `LIST`). */
 function beltPolicyOf(scope: BeltScope): { policy: BeltPolicy; list: string[] } {
   if (Array.isArray(scope)) return { policy: 'LIST', list: scope.map(String) }
   return { policy: scope, list: [] }
 }
 
+/** Stored mining ints → the text the form edits (`''` = unset). */
 function miningText(mining: Partial<MiningConfig> | undefined): Record<MiningKey, string> {
   const out = {} as Record<MiningKey, string>
   for (const k of MINING_KEYS) {
@@ -162,6 +199,7 @@ export function sameJson(a: unknown, b: unknown): boolean {
   return canonical(a) === canonical(b)
 }
 
+/** Stable JSON with sorted object keys — the equality `sameJson` compares. */
 function canonical(v: unknown): string {
   if (v === null || typeof v !== 'object') return JSON.stringify(v)
   if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`
@@ -191,11 +229,13 @@ export function changedFields(form: RepoConfigForm, repo: RepoDetail): RepoUpdat
 // Validation (the server's messages, so the form refuses what the API would 422)
 // ---------------------------------------------------------------------------
 
+/** The pydantic `max_length` message, verbatim, for a bounded field. */
 function tooLong(field: keyof typeof FIELD_LIMITS, value: string): string | undefined {
   const max = FIELD_LIMITS[field]
   return value.length > max ? `String should have at most ${max} characters` : undefined
 }
 
+/** Every check the server would make, with its message — so the Save button refuses what the API would 422. */
 export function validateForm(form: RepoConfigForm): FormErrors {
   const errors: FormErrors = {}
   if (!(LANGUAGES as readonly string[]).includes(form.language)) errors.language = `unknown language '${form.language}'`
@@ -221,6 +261,7 @@ export function validateForm(form: RepoConfigForm): FormErrors {
   return errors
 }
 
+/** Any error at all. */
 export function hasErrors(errors: FormErrors): boolean {
   return Object.keys(errors).length > 0
 }

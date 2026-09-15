@@ -1,3 +1,28 @@
+/**
+ * Repos — every repository under measurement: probe status, mined tasks, last run (/repos).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /repos — the first screen a new deployment shows — and the
+ *               host of the Add-repo dialog.
+ * What it does: Lists `GET /repos` with the probe pill (can the instrument run this repo's
+ *               tests?), task counts, gold-clean and hard-pool counts and the last run's kind
+ *               and status; rows open the repo page. Operators get "Add repo"; a viewer's
+ *               empty state says to ask an operator rather than offering a button that would
+ *               403.
+ * How:          `useRepos` → `DataTable`; `can('operator')` gates the action; the dialog
+ *               navigates to the new repo on success.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/hooks.ts (`useRepos`), ui/src/api/types.ts (`RepoSummary`),
+ *               ui/src/screens/Repos/RepoNewDialog.tsx, ui/src/screens/Repos/RepoDetail.tsx
+ *               (where a row leads), ui/src/lib/verdict.ts (`probeDisplay`,
+ *               `runStatusDisplay`), src/crb/server/routes/repos.py
+ * Tested by:    ui/e2e/walkthrough/02-repo-onboard.spec.ts (Add repo → the repo page),
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe)
+ * Touch when:   a column is worth adding from `GET /repos` (docs/API.md); never for a new
+ *               repository — it appears here once added.
+ */
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useRepos } from '../../api/hooks'
@@ -14,6 +39,7 @@ import { fmtDate, fmtInt } from '../../lib/format'
 import { probeDisplay, runStatusDisplay } from '../../lib/verdict'
 import { RepoNewDialog } from './RepoNewDialog'
 
+/** The screen; "Add repo" only for operators. */
 export function ReposPage() {
   const repos = useRepos()
   const { can } = useAuth()
