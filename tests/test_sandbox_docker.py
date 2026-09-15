@@ -15,6 +15,29 @@ that is :class:`~crb.core.execution.SandboxUnavailable`'s job.
 Worktrees live under ``tests/.cache/sandbox`` rather than pytest's ``tmp_path``:
 on macOS the VM behind docker (colima / Docker Desktop) shares ``/Users`` but
 not ``/private/var/folders``, so a bind mount from there would be empty.
+
+Navigation
+----------
+What it is:   The sandbox suite — the instrument inside ``DockerExecutor`` against a real daemon,
+              and proof that the walls hold.
+What it does: Pins that the executor is hardened, that ``qualify`` and ``grade`` run and parse
+              under ``--network=none`` (gold → clean), that a test opening ``https://example.com``
+              FAILS, that a test writing ``/work/hacked.txt`` FAILS (read-only worktree), and that
+              the host worktree is byte-identical after a sandboxed run. Never falls back to
+              in-process execution — that is ``SandboxUnavailable``'s job.
+How:          ``crb-test-py:local`` built once per session from an inline Dockerfile
+              (``python:3.12-slim`` + pytest); worktrees under the tests cache because the VM
+              behind colima / Docker Desktop cannot bind-mount pytest's ``tmp_path``; skipped
+              with the probe's reason when no daemon answers.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/core/execution.py (``DockerExecutor`` under test),
+              tests/fixtures/langs/pyrepo_min.py (the fixture), tests/conftest_langs.py
+              (``ensure_docker_image`` and the probes), tests/test_execution.py (the same
+              executor without a daemon), docs/SECURITY.md (sandboxed test execution, §3.1)
+Tested by:    tests/test_sandbox_docker.py
+Touch when:   a hardening flag is added (a wall test that proves it holds from INSIDE the
+              container, not only that the flag is on argv); the sandbox image changes.
 """
 
 from __future__ import annotations
@@ -69,6 +92,9 @@ def _sandbox_ready() -> None:
 
 @pytest.fixture(scope="module")
 def sandbox_root() -> Iterator[Path]:
+    """A bind-mountable scratch root under the tests cache (the VM cannot mount ``tmp_path``);
+    removed after the module.
+    """
     root = langs.CACHE_DIR / "sandbox" / f"run-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     root.mkdir(parents=True, exist_ok=True)
     yield root
@@ -93,6 +119,7 @@ def runner(config: RepoConfig) -> BaseRunner:
 
 @pytest.fixture(scope="module")
 def executor() -> DockerExecutor:
+    """The hardened ``DockerExecutor`` on the session-built test image."""
     return DockerExecutor(DockerSettings(image=IMAGE))
 
 
@@ -111,6 +138,7 @@ def task(
     candidate: Candidate,
     sandbox_root: Path,
 ) -> TaskSpec:
+    """The feat task qualified once INSIDE the sandbox; a skip reason here is a fixture failure."""
     repo, _ = built
     outcome = qualify(
         repo, config, candidate, runner=runner, executor=executor, scratch=sandbox_root / "mine"
@@ -123,6 +151,7 @@ def task(
 def trial(
     built: tuple[GitRepo, str], config: RepoConfig, candidate: Candidate, sandbox_root: Path
 ) -> Iterator[Workspace]:
+    """A fresh worktree per test under ``sandbox_root`` with the feat tests overlaid, removed afterwards."""
     repo, _ = built
     ws = langs.trial_worktree(
         repo, candidate, sandbox_root / f"trial-{uuid.uuid4().hex[:8]}", config

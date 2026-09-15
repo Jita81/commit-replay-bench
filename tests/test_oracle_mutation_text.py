@@ -16,6 +16,32 @@ Three layers:
    the negated condition) are killed, the untested branch escapes, and — in the
    compiled languages — a deleted declaration is rejected by the toolchain and
    excluded, never counted as a kill.
+
+Navigation
+----------
+What it is:   The C-family text mutator's test suite (``crb.core.oracle.mutators_text``) and its
+              wiring into the scorer.
+What it does: Pins the scanner (strings, comments, regex, template literals, lifetimes and raw
+              strings are opaque; ``<=`` is one token), each operator on per-language snippets,
+              confinement, determinism, boundedness, structural well-formedness, the operator
+              table and hash, registration for Go / JavaScript / JVM / Rust (Python keeps the AST
+              mutator); that an unattributed build failure on a mutant is ``uncompilable`` and
+              leaves the denominator (never a kill) while on the baseline it stays
+              ``unscoreable``; the mtime-ordered build-cache regression caught by the Maven
+              end-to-end; and, per toolchain, that the obvious mutants die, the untested branch
+              escapes and a deleted declaration is rejected by the compiler.
+How:          Pure ``generate`` calls for layer 1; a scripted runner on the Go fixture for layer
+              2; PATH-gated real toolchains on richer feat commits for layer 3.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0009-text-level-mutators.md
+Works with:   src/crb/core/oracle/mutators_text.py (under test), src/crb/core/oracle/mutation.py
+              (the scorer it registers with), tests/fixtures/langs/gorepo.py,
+              tests/fixtures/langs/noderepo.py, tests/fixtures/langs/jvmrepo.py and
+              tests/fixtures/langs/rustrepo.py (the per-language end-to-ends)
+Tested by:    tests/test_oracle_mutation_text.py
+Touch when:   a language is added to the text mutator (a scanner case for its literal syntax,
+              an operator case per family, the registration case and an end-to-end); an operator
+              is added (the table hash changes — an apparatus consequence).
 """
 
 from __future__ import annotations
@@ -374,6 +400,8 @@ def test_compile_failure_rule():
 
 
 class _StubRunner:
+    """A runner whose verdicts are scripted: first the baseline, then one per mutant."""
+
     name = "stub"
 
     def __init__(self, runs):
@@ -400,6 +428,7 @@ BUILD_FAILED = Run(
 
 @pytest.fixture(scope="module")
 def go_fixture(tmp_path_factory) -> tuple[GitRepo, str]:
+    """The Go fixture as ``(repo, feat_sha)`` for the hermetic scoring layer (no toolchain runs)."""
     root, feat_sha = gorepo.build(tmp_path_factory.mktemp("go-hermetic"))
     return GitRepo(root), feat_sha
 

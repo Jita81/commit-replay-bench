@@ -11,6 +11,31 @@ Unit tests need no toolchain. The end-to-end matrix runs only when ``go`` is on 
   all ``not_constructible``].
 * :mod:`fixtures.langs.negctrl.gorepo_funcvar` (feat CHANGES ``var Scale``) — 7/7
   constructible, including the ``init()`` re-assignment vector.
+
+Navigation
+----------
+What it is:   The Go negative-controls suite (ADR-0010): the four Python-only controls ported as
+              text transforms, then the end-to-end matrix on the real ``go`` toolchain.
+What it does: Pins the pure transforms (function and func-var discovery, zero values per type
+              shape, hollowing changed bodies while keeping imports compiling, literal-assert
+              extraction, the hardcode cheat with the gold signature, ``init()`` re-assignment of
+              changed package vars, adjacent-package selection under the belt scope) and, with
+              ``go`` on PATH, that ``gorepo`` is 6/7 constructible (``env_poison`` honestly not —
+              was 4/7 before the port) and ``gorepo_funcvar`` 7/7 with no violation, the stub
+              going red on an assertion not a build failure, and the report stamping
+              ``controls_v2``.
+How:          Inline Go source for the unit half; ``qualify`` + ``controls_for_task`` on the two
+              fixtures for the matrix half (module-scoped fixtures).
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0010-polyglot-negative-controls.md
+Works with:   src/crb/core/oracle/controls_go.py (under test), src/crb/core/oracle/controls.py
+              (the dispatcher and the report), tests/fixtures/langs/gorepo.py and
+              tests/fixtures/langs/negctrl/gorepo_funcvar.py (the fixtures),
+              src/crb/core/runners/go_runner.py (the toolchain)
+Tested by:    tests/test_oracle_controls_go.py
+Touch when:   a Go construct the scanner misses is found in a client repository (a discovery
+              case on the snippet); a control's constructibility on Go changes (update the
+              per-fixture count and say why in the class docstring).
 """
 
 from __future__ import annotations
@@ -339,6 +364,7 @@ def _matrix(repo, task, config, scratch, controls=nc.CONTROLS) -> dict[str, nc.C
 
 @pytest.fixture(scope="module")
 def base(tmp_path_factory: pytest.TempPathFactory):
+    """``gorepo`` (feat ADDS ``Sub``) as ``(repo, task, config, scratch)``, qualified once."""
     root, sha = gorepo.build(tmp_path_factory.mktemp("go"))
     config = gorepo.config()
     repo = GitRepo(root)
@@ -348,12 +374,14 @@ def base(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(scope="module")
 def base_matrix(base):
+    """The seven controls on ``base``, keyed by control name."""
     repo, task, config, scratch = base
     return _matrix(repo, task, config, scratch)
 
 
 @pytest.fixture(scope="module")
 def fv(tmp_path_factory: pytest.TempPathFactory):
+    """``gorepo_funcvar`` (feat CHANGES ``var Scale``) as ``(repo, task, config, scratch)``."""
     root, sha = funcvar.build(tmp_path_factory.mktemp("gofv"))
     config = funcvar.config()
     repo = GitRepo(root)
@@ -363,6 +391,7 @@ def fv(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(scope="module")
 def fv_matrix(fv):
+    """The seven controls on ``fv``, keyed by control name."""
     repo, task, config, scratch = fv
     return _matrix(repo, task, config, scratch)
 

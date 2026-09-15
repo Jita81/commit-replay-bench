@@ -5,6 +5,39 @@ the REAL code path (real throwaway git repo + real pytest subprocess via the crb
 A control violation = instrument bug -> the report does not pass. A measured oracle
 escape = a finding about the target tests -> the report still passes, with the
 escape reported prominently. Every transform is also unit-tested as a pure function.
+
+Navigation
+----------
+What it is:   The Python negative-controls suite — the instrument proven to reject what it must,
+              through the REAL code path.
+What it does: Pins, per control on the fixture's ``fix`` task: gold goes green without
+              regression, noop stays red, tamper is disqualified, stub fails, regression lands in
+              ``regressed`` (never clean), the hardcode cheat slipping through is a MEASURED
+              ESCAPE (a finding, not an instrument bug — the report still passes and shows it),
+              and ``env_poison`` is disqualified by belt 1's test-infrastructure check (before
+              belt 3 when the parent has a root conftest). Also: the poly task catches the cheat,
+              a new-file commit grades gold clean, honest ``not_constructible`` outcomes, a task
+              without a RED oracle skips every control, a bad gold is a VIOLATION that fails the
+              gate, harness errors are violations never passes, deterministic poison-target
+              selection, the tamper guard re-hashes the oracle, JVM / Rust refused honestly, and
+              every transform as a pure function.
+How:          ``fixtures.oracle_repo`` (module-scoped) → ``make_task`` through the real miner →
+              ``controls_for_task`` with a real ``PytestRunner`` + ``LocalExecutor``; no docker,
+              no network, no model.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0010-polyglot-negative-controls.md,
+              docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/core/oracle/controls.py (under test), tests/fixtures/oracle_repo.py (one
+              commit per shape), src/crb/core/grade.py (the belts each control is graded under),
+              src/crb/core/routing.py (``ControlsVerdict`` the report becomes),
+              tests/test_oracle_controls_go.py and tests/test_oracle_controls_js.py (the ports)
+Tested by:    tests/test_oracle_controls.py
+Touch when:   a control is added (a matrix case with its expected label, a pure-transform case,
+              and an ``expected_labels`` entry); a belt changes what catches a control (the
+              ``caught`` note must name the belt).
+Claims:       A passing report licenses "the instrument rejects these transforms on this
+              repository"; a measured escape is a statement about the target tests, never about
+              a builder (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -31,22 +64,26 @@ from fixtures.oracle_repo import (
 # --- fixtures -------------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def fixture_repo(tmp_path_factory):
+    """The oracle fixture repository, built once for the module (never mutated; tasks come from shas)."""
     return build_controls_repo(tmp_path_factory.mktemp("ncrepo"))
 
 
 @pytest.fixture(scope="module")
 def scratch(tmp_path_factory) -> Path:
+    """One scratch directory for the module's miner runs and control worktrees."""
     return tmp_path_factory.mktemp("scratch")
 
 
 @pytest.fixture(scope="module")
 def harness():
+    """The real instrument as keyword arguments: config, ``PytestRunner`` and ``LocalExecutor``."""
     config = fixture_config()
     return {"config": config, "runner": PytestRunner(config), "executor": LocalExecutor()}
 
 
 @pytest.fixture(scope="module")
 def fix_task(fixture_repo, scratch):
+    """The ``fix`` task through the REAL miner path (RED-checked, baseline measured)."""
     return make_task(fixture_repo, fixture_repo.fix, ("mod.py",), ("tests/test_mod.py",), scratch)
 
 
@@ -58,6 +95,9 @@ def _run(fixture_repo, task, harness, scratch, controls=nc.CONTROLS):
 
 @pytest.fixture(scope="module")
 def control_matrix(fixture_repo, fix_task, harness, scratch):
+    """All seven controls run once on the fix task, keyed by control name — the matrix every
+    per-control case reads.
+    """
     rows = _run(fixture_repo, fix_task, harness, scratch)
     assert [r.control for r in rows] == list(nc.CONTROLS)
     return {r.control: r for r in rows}

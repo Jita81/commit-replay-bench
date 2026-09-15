@@ -16,6 +16,31 @@ session into ``tests/.cache/node_modules_<tool>`` and symlinked into the
 fixture; a failed install (no network) skips that tool with npm's reason.
 
 Runs only when ``node`` is on PATH (``@pytest.mark.toolchain("node")``).
+
+Navigation
+----------
+What it is:   The JavaScript toolchain suite — the full instrument on the four real runners,
+              parametrised over ``fixtures.langs.noderepo``.
+What it does: Pins, per tool, that the miner finds the feat commit, RED at the parent
+              (``sub.test.js`` cannot load ``../src/sub``) with the baseline captured and the gold
+              GREEN, that gold grades clean, the worktree gets ``node_modules``, noop is not
+              green, tamper is disqualified, a regression in ``add`` fails belt 3 with
+              ``"add works"``, that the test files ARE the scope, the belt-scope policies, the
+              command shape, ``parse`` of the real reporter output (JUnit XML for node, JSON for
+              the rest) including a load failure failing closed, and that the planted
+              ``node_modules`` link is git-ignored in a repo whose ``.gitignore`` lacks it.
+How:          ``npm_cache`` per tool once per session (skipped with npm's reason offline) →
+              per-tool module-scoped fixture → ``qualify`` / ``grade`` with a ``LocalExecutor``;
+              skipped without ``node`` on PATH.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   src/crb/core/runners/node_runners.py (under test), tests/fixtures/langs/noderepo.py
+              (the fixture in four flavours), tests/conftest_langs.py (``npm_cache``),
+              src/crb/core/workspace.py (the ``node_modules`` link), tests/test_node_eras.py
+              (dependency eras on the same runners), docs/CONTRIBUTING.md (how to add a runner)
+Tested by:    tests/test_runners_node.py
+Touch when:   a fifth JavaScript runner is added (its flavour in the fixture, its cache, and
+              the ``tool`` parametrisation here); a reporter's output format changes.
 """
 
 from __future__ import annotations
@@ -53,6 +78,7 @@ pytestmark = [
 
 @pytest.fixture(scope="module", params=noderepo.TOOLS)
 def tool(request: pytest.FixtureRequest) -> str:
+    """The runner flavour under test (``node`` / ``vitest`` / ``jest`` / ``mocha``), module-scoped."""
     return str(request.param)
 
 
@@ -93,6 +119,7 @@ def task(
     candidate: Candidate,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> TaskSpec:
+    """The feat task qualified once through the real miner; a skip reason here is a fixture failure."""
     repo, _ = built
     outcome = qualify(
         repo,
@@ -108,6 +135,7 @@ def task(
 
 @pytest.fixture
 def trial(built: tuple[GitRepo, str], config: RepoConfig, candidate: Candidate, tmp_path: Path):
+    """A fresh worktree per test at the parent with the feat tests overlaid (RED), removed afterwards."""
     repo, _ = built
     ws = langs.trial_worktree(repo, candidate, tmp_path / "trial", config)
     yield ws

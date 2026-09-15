@@ -13,6 +13,27 @@ Proves, on :mod:`tests.fixtures.langs.gorepo` with a :class:`LocalExecutor`:
    ``-json`` stream, including the unattributed build-failure path.
 
 Runs only when ``go`` is on PATH (``@pytest.mark.toolchain("go")``).
+
+Navigation
+----------
+What it is:   The Go toolchain suite — the full instrument on a real ``go test -json``.
+What it does: Pins, on ``fixtures.langs.gorepo``, that the miner finds the feat commit, RED at the
+              parent with the baseline captured and the gold GREEN, that gold grades clean, noop
+              is not green, tamper is disqualified, a regression in the other package fails belt
+              3 and in the target package fails belt 2 (Go's target scope is the whole package),
+              the scope mapping (``calc/x_test.go`` → ``./calc``), the belt-scope policies, the
+              command shape, and ``parse`` on the real JSON stream including the unattributed
+              build-failure path.
+How:          Module-scoped fixture build → ``iter_candidates`` / ``qualify`` / ``grade`` with a
+              ``LocalExecutor``; skipped without ``go`` on PATH.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   src/crb/core/runners/go_runner.py (under test), tests/fixtures/langs/gorepo.py
+              (the fixture), tests/conftest_langs.py (the probes), tests/test_runners_parsers.py
+              (the parser on canned output), docs/CONTRIBUTING.md (how to add a runner)
+Tested by:    tests/test_runners_go.py
+Touch when:   the go runner's argv or parser changes; onboarding a Go module whose package
+              layout the scope mapping cannot address.
 """
 
 from __future__ import annotations
@@ -84,6 +105,7 @@ def task(
     candidate: Candidate,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> TaskSpec:
+    """The feat task qualified once through the real miner; a skip reason here is a fixture failure."""
     repo, _ = built
     outcome = qualify(
         repo,
@@ -99,6 +121,7 @@ def task(
 
 @pytest.fixture
 def trial(built: tuple[GitRepo, str], config: RepoConfig, candidate: Candidate, tmp_path: Path):
+    """A fresh worktree per test at the parent with the feat tests overlaid (RED), removed afterwards."""
     repo, _ = built
     ws = langs.trial_worktree(repo, candidate, tmp_path / "trial", config)
     yield ws

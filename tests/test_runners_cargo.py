@@ -16,6 +16,30 @@ Two CargoRunner defects are pinned as strict xfails (see the reasons): the
 and without ``--no-fail-fast`` cargo stops at the first failing binary.
 
 Runs only when ``cargo`` is on PATH (``@pytest.mark.toolchain("cargo")``).
+
+Navigation
+----------
+What it is:   The Rust toolchain suite — the full instrument on a real ``cargo test``.
+What it does: Pins, on ``fixtures.langs.rustrepo``, that the miner finds the feat commit, that
+              ``qualify`` sees RED at the parent (``tests/sub.rs`` does not compile) with the
+              baseline captured and the gold GREEN, that gold grades clean, noop is not green,
+              tamper is disqualified, a regression in ``add`` fails belt 3 naming the broken
+              tests, the scope mapping (``tests/sub.rs`` → ``--test sub``), the belt-scope
+              policies (``AFFECTED_DIRS`` fails closed), the command shape, and ``parse`` on the
+              real harness output including every failing binary. Two ``CargoRunner`` defects
+              are pinned as strict xfails (``--quiet`` hides the lines the parser needs; no
+              ``--no-fail-fast`` stops at the first failing binary).
+How:          Module-scoped fixture build → ``iter_candidates`` / ``qualify`` / ``grade`` with a
+              ``LocalExecutor``; skipped without ``cargo`` on PATH.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   src/crb/core/runners/cargo_runner.py (under test), tests/fixtures/langs/rustrepo.py
+              (the fixture), tests/conftest_langs.py (the probes), tests/test_runners_parsers.py
+              (the parser on canned output), docs/CONTRIBUTING.md (how to add a runner)
+Tested by:    tests/test_runners_cargo.py
+Touch when:   the cargo runner's argv or parser changes (an xfail here turning into a pass is
+              the signal to remove the marker); onboarding a Rust workspace whose layout the
+              scope mapping cannot address.
 """
 
 from __future__ import annotations
@@ -100,6 +124,7 @@ def task(
     candidate: Candidate,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> TaskSpec:
+    """The feat task qualified once through the real miner; a skip reason here is a fixture failure."""
     repo, _ = built
     outcome = qualify(
         repo,
@@ -115,6 +140,7 @@ def task(
 
 @pytest.fixture
 def trial(built: tuple[GitRepo, str], config: RepoConfig, candidate: Candidate, tmp_path: Path):
+    """A fresh worktree per test at the parent with the feat tests overlaid (RED), removed afterwards."""
     repo, _ = built
     ws = langs.trial_worktree(repo, candidate, tmp_path / "trial", config)
     yield ws
