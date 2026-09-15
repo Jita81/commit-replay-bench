@@ -6,13 +6,20 @@ workspace layer symlinks the main clone's (local) or the image ships it (docker)
 
 Setup therefore installs into the *clone* (``npm ci`` when a lockfile is
 committed, ``npm install`` otherwise) and every worktree inherits it through
-that symlink. ``env_dir`` is unused: ``node_modules`` has to sit next to
-``package.json`` for Node's resolver to find it.
+that symlink — **while its lockfile matches the clone's**. A task commit whose
+``package-lock.json`` differs (nhsuk-react-components: the commit's eslint config
+needs ``@eslint/compat``, absent from HEAD's tree — belt 5 ``rc=2``, 2026-09-15)
+gets a **dependency era**: ``<env_dir>/node_eras/<lock hash>/node_modules``,
+installed once from that commit's manifest and re-pointed for every worktree
+sharing the lockfile. A failed era install is a harness error (the row is
+``harness``, outside ``n``), never a silent fall-back to HEAD's tree.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -75,11 +82,93 @@ def snapshot_to_test(path: str) -> str:
     return path
 
 
+_LOCKFILES: tuple[str, ...] = ("package-lock.json", "npm-shrinkwrap.json", "package.json")
+
+
+def lock_key(root: Path) -> str | None:
+    """Identity of a tree's dependency manifest: the hash of its lockfile (else
+    ``package.json``) — two trees with the same key resolve the same ``node_modules``."""
+    for name in _LOCKFILES:
+        p = Path(root) / name
+        if p.is_file():
+            return hashlib.sha256(p.read_bytes()).hexdigest()[:16]
+    return None
+
+
+class NodeEraError(RuntimeError):
+    """A dependency era could not be installed: a harness error, never a verdict."""
+
+
 class _NodeBase(BaseRunner):
     default_timeout = 420
 
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
         return tuple(sorted({snapshot_to_test(f) for f in test_files}))
+
+    # --- dependency eras -----------------------------------------------------------
+    def ensure_era(self, root: Path, executor: Executor) -> Path | None:
+        """Point the worktree's ``node_modules`` at a tree that matches ITS lockfile.
+
+        The workspace links every worktree to the clone's ``node_modules``. When the
+        worktree's lockfile hashes differently, the era ``<env_dir>/node_eras/<key>``
+        is installed once (``npm ci`` from that manifest, network on, like setup) and
+        the link is re-pointed. Returns the era root used, ``None`` when the clone's
+        tree already matches (or under docker, where the image ships the tree).
+        """
+        if executor.name == "docker" or self.env_dir is None:
+            return None
+        root = Path(root)
+        link = root / "node_modules"
+        if not link.is_symlink():
+            return None  # the worktree owns a real tree (or has none to re-point)
+        clone_nm = link.resolve()
+        key, clone_key = lock_key(root), lock_key(clone_nm.parent)
+        if key is None or key == clone_key:
+            return None
+        era = self.env_dir / "node_eras" / key
+        era_nm = era / "node_modules"
+        if not (era_nm / ".bin").is_dir():
+            self._install_era(root, era, executor)
+        if link.resolve() != era_nm.resolve():
+            link.unlink()
+            link.symlink_to(era_nm)
+        return era
+
+    def _install_era(self, root: Path, era: Path, executor: Executor) -> None:
+        era.mkdir(parents=True, exist_ok=True)
+        for name in (*_LOCKFILES, ".npmrc"):
+            src = root / name
+            if src.is_file():
+                shutil.copyfile(src, era / name)
+        npm = executor.tool("npm", self.opts.get("npm"))
+        verb = "ci" if (era / "package-lock.json").is_file() else "install"
+        env = {"NODE_ENV": "development", "npm_config_update_notifier": "false"}
+        env.update({str(k): str(v) for k, v in dict(self.opts.get("env", {})).items()})
+        # scripts off: an era is a dependency tree, not a build (husky/prepare hooks
+        # expect the repository checkout around them)
+        cmd = Command(
+            (npm, verb, *_NPM_FLAGS, "--ignore-scripts"),
+            era,
+            env=env,
+            timeout=self.setup_timeout(0),
+            writable_paths=("node_modules",),
+            network=True,
+        )
+        try:
+            res = executor.run(cmd)
+        except OSError as exc:
+            raise NodeEraError(f"node era {era.name}: {type(exc).__name__}: {exc}") from exc
+        if res.returncode != 0 or not (era / "node_modules" / ".bin").is_dir():
+            shutil.rmtree(era / "node_modules", ignore_errors=True)
+            raise NodeEraError(
+                f"node era {era.name}: npm {verb} rc={res.returncode}: {tail_of(res.combined)[-400:]}"
+            )
+
+    def run(
+        self, executor: Executor, root: Path, scope: Sequence[str], *, timeout: int = 0
+    ) -> TestRun:
+        self.ensure_era(root, executor)
+        return super().run(executor, root, scope, timeout=timeout)
 
     # --- environment -------------------------------------------------------------
     def environment_ready(self, root: Path, env_dir: Path) -> bool:
@@ -134,6 +223,7 @@ class _NodeBase(BaseRunner):
         project with the rejection attributed to the changed files. Tools resolve from
         ``node_modules/.bin`` (the image's PATH under docker); a binary without its
         config is not evidence."""
+        self.ensure_era(root, executor)
         bin_dir = None if executor.name == "docker" else Path(root) / "node_modules" / ".bin"
         return js_plan(root, bin_dir)
 

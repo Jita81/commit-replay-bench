@@ -280,3 +280,17 @@ range translated to PEP 440) into the runner's environment before planning, and 
 `detected` names the version that ran (`ruff@0.2.2+ruff-format`). No pin ⇒ the environment's
 ruff, recorded as such. JS tools already come from the repository's own `node_modules`
 (lockfile-pinned); `gofmt` is the toolchain's; Rust/JVM pins are a follow-up.
+
+## Amendment 2026-09-15 (c) — JavaScript dependencies come from the commit's lockfile
+
+"JS tools already come from the repository's own `node_modules`" held only while the task
+commit's lockfile matched HEAD's: every worktree was linked to the clone's tree. On
+NHSDigital/nhsuk-react-components the task commits' flat eslint config imports
+`@eslint/compat`, which HEAD's tree no longer carries — eslint exited 2 and all three sighted
+rows were `harness`. The JavaScript runners now keep **dependency eras**: when a worktree's
+lockfile (else `package.json`) hashes differently from the clone's, `<env_dir>/node_eras/<hash>`
+is installed once from that commit's manifest (`npm ci --ignore-scripts`, network on as in
+setup) and the worktree's `node_modules` link is re-pointed to it, before the tests and before
+belt 5. An era that fails to install is a harness error on the row (outside `n`), never a
+silent fall-back to HEAD's tree. Under a docker executor the image's tree is used as before
+(an era-aware image is a follow-up).
