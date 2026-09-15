@@ -5,6 +5,28 @@ ledgered against the row's chain hash and anchored to the exact patch bytes the
 reviewer read (``patch_sha256`` must equal the row's evidence pack ``diff_sha256``).
 Lives beside :mod:`crb.server.schemas` (another workstream's file this wave); every
 field here is a core ``to_dict`` value re-typed so the OpenAPI document is honest.
+
+Navigation
+----------
+What it is:   The request / response models for ``/reviews`` and the retained-artefact
+              status behind ``/grades/{row_hash}/retained``.
+What it does: Validates a review body at the edge — finding kinds and verdicts from the
+              core's closed sets, 64-hex hashes, non-blank notes, ``not_reviewed`` with no
+              findings — and re-types the stored review and the per-cell review stats so
+              the OpenAPI document is exact. Carries no logic beyond validation.
+How:          Pydantic models with ``extra="forbid"`` on inputs and field validators that
+              call the core's ``is_sha256`` / vocabularies.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/server/routes/reviews.py (the producer and consumer),
+              src/crb/core/review.py (``FINDING_KINDS``, ``VERDICTS``, ``is_sha256``),
+              src/crb/server/routes/grades.py (``RetainedArtefactStatus``),
+              ui/src/api/types.ts (the TypeScript twin),
+              docs/API.md#reviews-human-verdicts-on-graded-rows
+Tested by:    tests/test_server_routes_reviews.py
+Touch when:   never for a new repository; when ``ReviewRecord`` or ``Finding`` gains a
+              field or kind in src/crb/core/review.py (mirror it here, then the UI type and
+              docs/API.md).
 """
 
 from __future__ import annotations

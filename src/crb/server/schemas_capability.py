@@ -15,6 +15,27 @@ carry (action #4):
 
 Nothing here is computed: every field is a core ``to_dict`` value re-typed so the
 OpenAPI document is honest and a drift is a diff.
+
+Navigation
+----------
+What it is:   The response models for ``/capability-map``, ``/routes`` and
+              ``/failure-split`` — the base shapes extended with the failure split, the
+              model point and the controls verdict.
+What it does: Re-types the core's ``to_dict`` values (``CapabilityCell``, ``RouteDecision``,
+              ``ControlsVerdict``, ``FailureSplit``) so the OpenAPI document is exact and a
+              drift between core and API is a diff; validators pin ``state`` /
+              ``reason_code`` / failure kinds to the core's closed vocabularies.
+How:          Pydantic subclasses of the shapes in src/crb/server/schemas.py; no arithmetic.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/server/routes/capability.py (the only producer), src/crb/server/schemas.py
+              (the base shapes), src/crb/core/routing.py (``REASON_CODES``,
+              ``CONTROLS_STATES``), src/crb/core/ledger.py (``FAILURE_KINDS``),
+              ui/src/api/types.ts (the TypeScript twin),
+              docs/API.md#capability-routing-forecast-sign-off
+Tested by:    tests/test_server_routes_capability.py
+Touch when:   never for a new repository; whenever a core ``to_dict`` here gains a field —
+              add it in the same change, then ui/src/api/types.ts and docs/API.md.
 """
 
 from __future__ import annotations

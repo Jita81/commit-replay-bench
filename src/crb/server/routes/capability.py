@@ -21,6 +21,37 @@ Honest-empty: only MEASURED cells are returned. A (class × size) the ledger has
 never seen is absent — the UI renders absence as ``NOT_YET_MEASURED`` — and
 ``summary.trusted_autonomy_coverage`` is ``null`` until the repo has a change
 profile to weight the cells by.
+
+Navigation
+----------
+What it is:   The ``/capability-map``, ``/routes`` and ``/failure-split`` route module — the
+              product's central read: what the ledger licenses per cell.
+What it does: Loads the repo's rows as ``GradeRow`` (a false-Q1 row refuses to load →
+              409), filters to one mode and one apparatus (never pooled by default),
+              reduces them under the ONE routing rule with the repo's latest controls
+              verdict and task-level oracle scores, overlays active sign-offs at read time,
+              and returns only MEASURED cells — absence is honest-empty.
+How:          ``rows_for_mode`` → ``rows_for_apparatus`` → ``signed_map`` (=
+              ``build_capability_map`` + ``apply_signoffs_to_map``) → ``cell_out`` per
+              measured cell; ``parse_by`` maps the ``?by=`` aliases onto ``CELL_FIELDS``.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/core/capability.py (``build_capability_map``, ``CapabilityCell``),
+              src/crb/core/routing.py (``DEFAULT_POLICY``, ``ControlsVerdict``),
+              src/crb/server/routes/oracle.py (``latest_controls_verdict`` /
+              ``oracle_by_task`` — the one source shared with sign-off),
+              src/crb/server/routes/signoffs.py (``load_signoff_records`` for the overlay),
+              src/crb/server/schemas_capability.py (the response shapes),
+              ui/src/screens/Capability (the map screen),
+              docs/API.md#capability-routing-forecast-sign-off
+Tested by:    tests/test_server_routes_capability.py, tests/test_server_routes_signoffs.py
+Touch when:   never for a new repository; adding a cell-key field means ``BY_ALIASES`` here,
+              ``CELL_FIELDS`` in src/crb/core/ledger.py, the schema and the UI type; changing
+              the default ``mode`` / ``apparatus`` filter is a claims decision
+              (docs/EVIDENCE-AND-CLAIMS.md#5-the-legacy-belt-caveat-on-the-census-ledger).
+Claims:       A ``deliver`` cell here is the routing rule's output over measured rows with
+              the controls gate applied — a licence to auto-deliver THAT cell, nothing wider
+              (docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity).
 """
 
 from __future__ import annotations
@@ -149,10 +180,12 @@ def signed_map(
 
 
 def controls_out(verdict: ControlsVerdict) -> ControlsVerdictOut:
+    """The verdict plus its ``state`` word under the default routing policy."""
     return ControlsVerdictOut(**verdict_dict(verdict, DEFAULT_POLICY))
 
 
 def split_out(c: CapabilityCell) -> FailureSplitOut:
+    """The cell's non-clean rows by ``failure_kind`` (lint counts come from the stats)."""
     return FailureSplitOut(
         builder_red=c.n_builder_red,
         budget=c.n_budget,
@@ -166,6 +199,7 @@ def split_out(c: CapabilityCell) -> FailureSplitOut:
 
 
 def cell_out(c: CapabilityCell) -> CapabilityCellSplitOut:
+    """A MEASURED cell as the API serves it: key, stats, decision, split, tier, apparatus."""
     assert c.stats is not None and c.decision is not None  # only measured cells are serialised
     s = c.stats
     return CapabilityCellSplitOut(
@@ -215,6 +249,7 @@ def cell_out(c: CapabilityCell) -> CapabilityCellSplitOut:
 
 
 def _distinct(rows: Sequence[GradeRow], field: str) -> list[str]:
+    """The distinct values of a cell field over ``rows`` (sizes in tier order)."""
     values = {getattr(r, field) for r in rows}
     if field == "size":
         return [s for s in SIZE_TIER_NAMES if s in values]
@@ -257,6 +292,8 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
     cmap, n_signoffs = signed_map(rows, projection, db, repo, controls=controls)
     cells = [c for c in cmap.cells if c.measured]
     by_route = {route: len(cs) for route, cs in cmap.by_route().items()}
+    # total_cells = the grid the projection spans over values SEEN in the rows, so the UI
+    # can say "12 of 20 measured" without inventing cells the repo never produces.
     grid = 1
     for f in projection:
         grid *= max(1, len(_distinct(rows, f)))

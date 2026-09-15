@@ -20,6 +20,28 @@ matching :mod:`crb.core.learn` derivation and returns its ``to_dict()``:
   the ``POST /runs`` bodies an operator can queue. Nothing is queued.
 
 All three are viewer-readable and pure. See ``docs/LEARNING-LOOP.md``.
+
+Navigation
+----------
+What it is:   The ``/learn/*`` route module — the read-only half of the learning loop
+              (refusal triage, oracle-strengthening backlog, re-measurement plan).
+What it does: Reduces the repo's rows with the matching ``crb.core.learn`` derivation and
+              returns its ``to_dict``; joins the latest ``oracle.score`` event per task so
+              the strengthening items carry the same strengths ``/oracle/{repo}`` shows.
+              Never writes: decisions are applied by the CLI against the repository, and
+              re-measurement runs are queued by an operator, not here.
+How:          ``DbLedger.rows(repo)`` → ``triage_refusals`` | ``build_capability_map`` +
+              ``strengthening_backlog`` (scores from the events table) | ``remeasure_plan``.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/learn.py (the three derivations), src/crb/server/routes/oracle.py
+              (``SCORE_ACTIONS``, ``latest_controls_verdict``), src/crb/cli/commands/learn.py
+              (the CLI twin that can ``--apply``), docs/LEARNING-LOOP.md (what loops
+              mechanically and what a human still does), ui/src/screens/Learn
+Tested by:    tests/test_server_routes_learn.py, tests/test_cli_learn.py
+Touch when:   never for a new repository; adding a derivation means a function in
+              src/crb/core/learn.py, a route here, a CLI verb, and a section in
+              docs/LEARNING-LOOP.md.
 """
 
 from __future__ import annotations
@@ -72,6 +94,7 @@ def _scores(session: Session, repo: str) -> list[dict[str, Any]]:
 
 
 def _subjects(session: Session, repo: str) -> dict[str, str]:
+    """``task_id → commit subject`` so a strengthening item reads as a sentence."""
     return {
         t.task_id: t.subject
         for t in session.execute(select(Task).where(Task.repo == repo)).scalars()
@@ -92,6 +115,7 @@ def learn_refusals(
     del viewer
     get_repo_or_404(db, repo)
     rows = list(DbLedger(factory).rows(repo=repo))
+    # Every verdict comes back "unsure" by design: the API proposes, a human decides.
     return {"repo": repo, **triage_refusals(rows).to_dict()}
 
 

@@ -9,6 +9,30 @@ at nothing — no number is fabricated for it.
 ``/forecast/readiness`` without ``mix`` uses the repo's cached change profile as
 the mix ("is the evidence ready for what this repo actually changes?"); a repo with
 neither a profile nor an explicit mix answers ``409 no_profile``.
+
+Navigation
+----------
+What it is:   The ``/forecast/build`` and ``/forecast/readiness`` route module — ex-ante
+              pricing and the readiness gate for a mix of work.
+What it does: Parses a ``class:size:count`` mix (422 on a malformed item), resolves each
+              component against the repo's rows with sign-offs overlaid exactly as the
+              factory would route it, and answers cost / minutes / routed counts /
+              expected clean — an unmeasured component is listed, never priced. Readiness
+              defaults the mix to the repo's cached change profile (409 when neither).
+How:          ``parse_mix`` → ``DbLedger.rows(repo)`` → ``forecast_build`` /
+              ``assess_readiness`` from the core → the ``to_dict`` re-typed into the schema.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/forecast.py (all the arithmetic), src/crb/server/routes/repos.py
+              (``cached_profile`` for the default mix), src/crb/server/routes/signoffs.py
+              (``load_signoff_records``), src/crb/server/schemas.py (the ``Forecast*Out``
+              shapes), src/crb/cli/commands/route.py (``crb forecast`` — the same core call),
+              docs/API.md#capability-routing-forecast-sign-off
+Tested by:    tests/test_server_routes_forecast.py
+Touch when:   never for a new repository; when a readiness threshold changes (that is
+              ``DEFAULT_THRESHOLDS`` in src/crb/core/forecast.py and an EVIDENCE-AND-CLAIMS
+              note, not this file); when the mix grammar grows (update ``parse_mix``, the
+              CLI's parser and docs/API.md together).
 """
 
 from __future__ import annotations
@@ -83,6 +107,7 @@ def parse_mix(mix: str) -> dict[ComponentKey, int]:
 
 
 def _mix_items(mix: dict[ComponentKey, int]) -> list[ForecastMixItem]:
+    """The parsed mix echoed back in the response, so a caller sees what was priced."""
     out: list[ForecastMixItem] = []
     for key, n in mix.items():
         cls, size = parse_component_key(key)
@@ -106,6 +131,8 @@ def forecast_build_route(
     del viewer
     get_repo_or_404(db, repo)
     parsed = parse_mix(mix)
+    # All rows, every mode and apparatus: the core forecast applies its own filters and
+    # reports ``unmeasured`` for what it cannot price.
     rows = list(DbLedger(factory).rows(repo=repo))
     f = forecast_build(
         parsed, rows, policy=DEFAULT_POLICY, signoffs=load_signoff_records(db, repo), repo=repo

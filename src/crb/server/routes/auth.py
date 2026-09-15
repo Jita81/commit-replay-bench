@@ -4,6 +4,30 @@ Local login is rate limited per ``(username, client ip)``; a failure never says
 which half was wrong. OIDC state, nonce and the PKCE verifier travel in a signed,
 short-lived, HttpOnly cookie, so the callback can only complete a login this
 browser started. ``next`` is constrained to a same-origin path.
+
+Navigation
+----------
+What it is:   The ``/auth/*`` route module — local login / logout / me / csrf and the OIDC
+              start + callback pair.
+What it does: Rate-limits local login per ``(username, ip)`` and answers one indistinct
+              401 for any failure; sets the session and CSRF cookies on success; drives the
+              authorization-code + PKCE flow with the state kept in a signed short-lived
+              cookie; maps IdP claims to a role and upserts the user; refuses a disabled
+              account and any ``next`` that is not a same-origin path.
+How:          Thin handlers over src/crb/server/auth.py — ``authenticate_local`` →
+              cookies; ``OidcState.fresh`` → provider URL → cookie; callback: cookie →
+              ``exchange`` → ``map_role`` → ``upsert_oidc_user`` → cookies → redirect.
+Layer:        server — docs/ARCHITECTURE.md#71-security
+ADRs:         none
+Works with:   src/crb/server/auth.py (every primitive used here), src/crb/server/app.py
+              (``/auth/login`` is CSRF-exempt; the limiter lives on ``app.state``),
+              src/crb/server/settings.py (``OidcSettings``, ``local_auth_enabled``),
+              ui/src/api/client.ts (the UI's login and CSRF echo), docs/API.md#auth
+Tested by:    tests/test_server_auth.py
+Touch when:   never for a new repository; when the IdP's claim layout changes (that is
+              ``CRB_OIDC__ROLE_CLAIM`` / ``ROLE_MAP`` configuration, not code); adding a
+              login method needs docs/SECURITY.md#34-authentication-and-authorisation--crbserverauth
+              updated and a test in tests/test_server_auth.py.
 """
 
 from __future__ import annotations
@@ -51,11 +75,15 @@ def _now() -> str:
 
 
 class LoginRequest(BaseModel):
+    """``POST /auth/login`` body. Bounds only; the real checks are in ``authenticate_local``."""
+
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=1024)
 
 
 class CsrfToken(BaseModel):
+    """``GET /auth/csrf`` body: the token the UI must echo as ``X-CSRF-Token``."""
+
     token: str
 
 
@@ -87,6 +115,7 @@ def login(
         )
     user = authenticate_local(db, body.username, body.password)
     if user is None:
+        # One message for every failure: an attacker must not learn which half was wrong.
         limiter.record_failure(body.username, ip)
         log.info("login failed", extra={"username": body.username, "client": ip})
         raise ApiError(401, "invalid_credentials", "username or password is incorrect")
@@ -133,6 +162,7 @@ def csrf(
 
 
 def _oidc_client(request: Request) -> OidcClient:
+    """The app's OIDC client, or 404 when OIDC is not configured for this deployment."""
     client: OidcClient | None = request.app.state.oidc_client
     if client is None:
         raise ApiError(404, "oidc_not_configured", "OIDC login is not configured")
@@ -140,6 +170,8 @@ def _oidc_client(request: Request) -> OidcClient:
 
 
 def _redirect_uri(request: Request, settings: Settings) -> str:
+    """The callback URL registered with the IdP: the configured one, else derived from
+    this request (behind a proxy that means ``CRB_TRUSTED_PROXIES`` must be set)."""
     if settings.oidc.redirect_url:
         return settings.oidc.redirect_url
     root = str(request.scope.get("root_path", "")).rstrip("/")
@@ -197,6 +229,8 @@ def oidc_callback(
             "the identity provider refused the login",
             detail={"error": redact(error), "description": redact(error_description or "")},
         )
+    # The state in the query must be the one THIS browser's cookie carries: that is the
+    # CSRF defence of the code flow (a forged callback has no matching cookie).
     if not code or not state or not hmac.compare_digest(state, pending.state):
         raise ApiError(400, "oidc_state_mismatch", "OIDC state does not match this browser")
     try:
