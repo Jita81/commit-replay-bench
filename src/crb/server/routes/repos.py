@@ -58,7 +58,7 @@ from crb.core.capability import RepoChangeProfile, profile_repo
 from crb.core.git import GitError, GitRepo
 from crb.core.redact import redact
 from crb.core.spec import SIZE_TIER_NAMES, RepoConfig, TaskSpec
-from crb.server.auth import OperatorDep, ViewerDep
+from crb.server.auth import OperatorDep, ViewerDep, require_role_now
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
 from crb.server.routes.runs import (
     append_system_event,
@@ -472,7 +472,11 @@ def get_profile(
     refresh: bool = Query(default=False),
     log_n: int = Query(default=0, ge=0, le=100_000),
 ) -> RepoProfile:
-    del viewer
+    # Reading the cached histogram is a viewer action; forcing a recompute is a git walk
+    # plus a write to the config row, so ``?refresh=true`` needs operator (CodeRabbit on
+    # PR #4, 2026-09-15 — a viewer could otherwise hammer the walk).
+    if refresh:
+        require_role_now(viewer, "operator")
     repo = get_repo_or_404(db, name)
     cached = cached_profile(repo)
     # Computed on demand (a git walk) and cached in the config row; only ?refresh redoes it.

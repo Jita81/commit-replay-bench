@@ -5,11 +5,16 @@ Revises: ${down_revision | comma,n}
 Create Date: ${create_date}
 
 Rules for crb migrations (docs/ARCHITECTURE.md §7.3, ADR-0002):
-* append-only tables (``grades``, ``events``, ``signoffs``, ``evidence``) are never
-  rewritten — a migration may ADD nullable columns or indexes, never drop or alter rows;
+* append-only tables (``grades``, ``events``, ``signoffs``, ``evidence``, ``reviews``) are
+  never rewritten — a migration may ADD nullable columns or indexes, never drop or alter
+  rows;
 * after any change to an append-only table, re-run
-  ``crb.store.migrate.install_append_only_triggers_on(op.get_bind())``;
-* ``downgrade`` must be real or must raise — never a silent ``pass`` on a data table.
+  ``crb.store.migrate.install_append_only_triggers_on(op.get_bind(), <tables>)`` with the
+  tuple of append-only tables that exist AT THIS REVISION (pinned, not the live constant);
+* ``downgrade`` must be real or must raise — never a silent ``pass`` on a data table
+  (the template below raises until you write it; a revision that adds a column or table
+  also appends its marker to ``crb.store.migrate.REVISION_MARKERS`` / ``REVISION_TABLES``
+  / ``REVISION_INDEXES`` so an ``init_db`` database adopts at the right revision).
 """
 
 from __future__ import annotations
@@ -31,4 +36,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    ${downgrades if downgrades else "pass"}
+    ${downgrades if downgrades else 'raise NotImplementedError("write a real downgrade or a reasoned refusal — never pass")'}

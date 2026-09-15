@@ -81,6 +81,17 @@ class OidcSettings(BaseModel):
     def enabled(self) -> bool:
         return bool(self.issuer and self.client_id)
 
+    @field_validator("issuer")
+    @classmethod
+    def _issuer_is_https(cls, v: str) -> str:
+        # OIDC discovery, token exchange and the JWKS fetch all hang off the issuer;
+        # a plain-http issuer would let an on-path attacker mint the ID token that
+        # grants a role (CodeRabbit on PR #4, 2026-09-15). Empty = OIDC disabled.
+        raw = v.strip()
+        if raw and not raw.lower().startswith("https://"):
+            raise ValueError(f"oidc issuer must be an https:// URL, got {raw!r}")
+        return raw
+
     @field_validator("role_map")
     @classmethod
     def _roles_are_known(cls, v: dict[str, str]) -> dict[str, str]:
@@ -223,6 +234,24 @@ class Settings(BaseSettings):
             if raw.startswith("["):
                 return json.loads(raw)
             return [p.strip() for p in raw.split(",") if p.strip()]
+        return v
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _cors_origins_are_explicit(cls, v: list[str]) -> list[str]:
+        # The middleware always sends ``Access-Control-Allow-Credentials``; with ``*``
+        # every site could drive the session cookie (CodeRabbit on PR #4, 2026-09-15).
+        # Starlette also refuses to echo an origin for ``*`` + credentials, so a wildcard
+        # is both unsafe in intent and silently broken — fail at start-up instead.
+        bad = [
+            o
+            for o in v
+            if o.strip() in {"*", "null"} or not o.strip().startswith(("http://", "https://"))
+        ]
+        if bad:
+            raise ValueError(
+                f"cors_origins must be explicit http(s) origins (no '*' / 'null'), got {bad}"
+            )
         return v
 
     @model_validator(mode="after")

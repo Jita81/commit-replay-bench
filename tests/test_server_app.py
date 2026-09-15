@@ -320,6 +320,14 @@ class TestMiddleware:
                 headers={"Origin": "https://ui.example", "Access-Control-Request-Method": "GET"},
             )
             assert r.headers["access-control-allow-origin"] == "https://ui.example"
+        # credentials are always allowed, so a wildcard origin is refused at start-up
+        # (CodeRabbit on PR #4, 2026-09-15); so is a non-http(s) "origin"
+        for bad in (["*"], ["https://ui.example", "*"], ["null"], ["ui.example"]):
+            with pytest.raises(ValidationError, match="explicit http"):
+                make_settings(tmp_path, cors_origins=bad)
+        # an OIDC issuer must be https (discovery, token exchange and JWKS hang off it)
+        with pytest.raises(ValidationError, match="https://"):
+            make_settings(tmp_path, oidc={"issuer": "http://login.example", "client_id": "c"})
             assert r.headers["access-control-allow-credentials"] == "true"
 
 

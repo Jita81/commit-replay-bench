@@ -46,6 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from crb.factory.backlog import KINDS, LEVELS, BacklogError, BacklogItem
+from crb.factory.evidence import verify_events
 from crb.factory.readiness import SLOT_VALUE, sign, slots_for
 from crb.factory.testfirst import AuthoredTest
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
@@ -379,8 +380,8 @@ def get_evidence(  # noqa: PLR0917 — FastAPI dependencies + query params
     events = home.events()
     verified = True
     try:
-        if events:
-            home.evidence().verify()
+        # verify the chain we already materialised — one read of evidence.jsonl, not two
+        verify_events(events)
     except Exception:  # a broken chain is reported, never hidden
         verified = False
     if item_id:

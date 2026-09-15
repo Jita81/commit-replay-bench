@@ -66,7 +66,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any
 
 from fastapi import APIRouter, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from crb.core.evidence import canonical_json, sha256_text
@@ -240,9 +240,12 @@ def list_reviews(
     ):
         if value:
             q = q.where(column == value)
-    rows = list(db.execute(q.order_by(Review.seq)).scalars())
-    total = len(rows)
-    window = rows[page.offset : page.offset + page.limit]
+    # Count and page in SQL — the review table grows with every graded attempt and was
+    # loaded whole per request (CodeRabbit on PR #4, 2026-09-15).
+    total = int(db.execute(select(func.count()).select_from(q.subquery())).scalar_one())
+    window = list(
+        db.execute(q.order_by(Review.seq).offset(page.offset).limit(page.limit)).scalars()
+    )
     return Page[ReviewOut](
         items=_outs(db, window), total=total, limit=page.limit, offset=page.offset
     )

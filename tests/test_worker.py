@@ -1128,6 +1128,11 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     # the run's StepEvents carry stage=factory and the item id
     actions = [e.action for e in h.events(run.id) if e.stage == "factory"]
     assert "item.start" in actions and "review.verdict" in actions and "item.done" in actions
+    # a run queued against a backlog that was re-registered before the worker claimed it
+    # fails closed on the pinned hash (the API stamps params.backlog_hash at enqueue)
+    h.enqueue("factory", ladder_json=["fake:m0"], params_json={"backlog_hash": "f" * 64})
+    stale = h.run_one()
+    assert stale.status == STATUS_FAILED and "backlog changed since" in stale.error
     # no backlog → the run fails closed with the instruction
     home2 = FactoryHome(h.home, "nope")
     assert home2.load_backlog() is None

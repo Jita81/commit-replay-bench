@@ -315,7 +315,7 @@ def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
 
     migrate.upgrade(backend.url)  # stamps 0001, applies 0002 (and every later revision)
 
-    assert migrate.current(backend.url) == migrate.head_revision() == "0003"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0004"
     assert migrate.check(backend.url) is True
     assert _autogen_diff(backend.engine) == []
     assert "repo_lint_clean" in {c["name"] for c in inspect(backend.engine).get_columns("grades")}
@@ -404,9 +404,9 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0001")
-    # the refusal rolls the whole downgrade back — 0003's drop of the (empty) reviews
-    # table included — so the database stays exactly where it was
-    assert migrate.current(backend.url) == "0003"
+    # the refusal rolls the whole downgrade back — 0004's index swap and 0003's drop of
+    # the (empty) reviews table included — so the database stays exactly where it was
+    assert migrate.current(backend.url) == "0004"
 
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -421,7 +421,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     with pytest.raises(DBAPIError, match="append-only"), fresh.begin() as c:
         c.execute(text("DELETE FROM grades"))
     migrate.upgrade(backend.url)  # and back up again
-    assert migrate.current(backend.url) == "0003" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0004" and _autogen_diff(fresh) == []
 
 
 def test_downgrade_of_an_empty_database_drops_the_schema(backend: Backend) -> None:
@@ -506,3 +506,33 @@ def test_module_is_runnable_as_main(backend: Backend) -> None:
     assert r.returncode == 0, r.stderr
     assert migrate.check(backend.url) is True
     make_session_factory(backend.engine)  # engine still usable after the subprocess migrated
+
+
+def test_0004_refuses_a_database_holding_duplicate_trace_seq_pairs(backend: Backend) -> None:
+    """Revision 0004 adds the unique ``(trace_id, seq)`` index. Rows are append-only, so a
+    database that already holds a duplicate pair cannot be repaired by the migration: it
+    refuses with the offending traces instead of guessing (CodeRabbit on PR #4)."""
+    migrate.upgrade(backend.url, revision="0003")
+    assert migrate.current(backend.url) == "0003"
+    cols = (
+        "event_id, trace_id, seq, timestamp, stage, action, status, step_id, parent_step_id, "
+        "actor, repo, task_id, input_ref, output_ref, error_code, error_message, payload_json"
+    )
+    with backend.engine.begin() as c:
+        for eid in ("e1", "e2"):
+            c.execute(
+                text(
+                    f"INSERT INTO events ({cols}) VALUES (:eid, 'trace-a', 7, 'ts', 'system', "
+                    "'a', 'ok', '', '', '', '', '', '', '', '', '', '{}')"
+                ),
+                {"eid": eid},
+            )
+    with pytest.raises(RuntimeError, match=r"refusing to upgrade 0004.*trace-a.*#7 x2"):
+        migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == "0003"  # nothing moved
+    # a clean pre-0004 database takes the index and lands at head
+    fresh = _reset(backend)
+    migrate.upgrade(backend.url, revision="0003")
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == "0004" and _autogen_diff(fresh) == []
+    assert "uq_events_trace_seq" in {ix["name"] for ix in inspect(fresh).get_indexes("events")}

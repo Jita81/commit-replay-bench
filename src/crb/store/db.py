@@ -40,6 +40,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.store.models import APPEND_ONLY_TABLES, Base
@@ -65,8 +66,12 @@ def make_engine(url: str | None = None, *, echo: bool = False) -> Engine:
     gets ``pool_pre_ping`` so a connection dropped by the server is replaced, not raised.
     """
     resolved = database_url(url)
-    if resolved.startswith("sqlite"):
-        path = resolved.removeprefix("sqlite:///")
+    parsed = make_url(resolved)
+    if parsed.get_backend_name() == "sqlite":
+        # ``make_url`` rather than string-stripping: ``sqlite+pysqlite:///``, ``sqlite://``
+        # (memory) and ``?mode=…`` query forms all parse; the old prefix strip left the
+        # driver in the path and created a directory named after it (CodeRabbit, PR #4).
+        path = parsed.database or ""
         if path and path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: the API serves requests from a thread pool and the worker

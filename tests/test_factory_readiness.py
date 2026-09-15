@@ -145,10 +145,14 @@ def test_signoff_fills_structural_gap_and_is_ledgered(tmp_path: Path) -> None:
     assert r.ready and r.signed_slots == ("error_contract", "request_shape", "response_shape")
     assert r.facts["response_shape"] == "200 {status}"
     assert ledger.verify() == 3
-    # value-kind sign-off is recorded with its kind
+    # a value-kind sign-off is recorded with its kind — and NEVER fills readiness: the
+    # value lives in the test an independent author writes, so the route stays test-first
+    # (before 2026-09-15 a signed value slot routed `build`; CodeRabbit on PR #4)
     rd.sign(ledger, item, "example_payload", "{status: ok}", verifier="po@example")
     assert ledger.for_item(item.id)[-1].kind == rd.SLOT_VALUE
-    assert rd.assess(item, ledger.for_item(item.id)).route_hint == rd.ROUTE_BUILD
+    after = rd.assess(item, ledger.for_item(item.id))
+    assert after.route_hint == rd.ROUTE_TEST_FIRST and "example_payload" not in after.facts
+    assert "example_payload" in [g.slot for g in after.gaps]
 
 
 def test_revocation_reopens_gap_latest_wins(tmp_path: Path) -> None:

@@ -8,7 +8,66 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
-Nothing yet — everything on `reboot/v2` up to the rc pin is in 2.0.0a1 below.
+### 2026-09-16 — CodeRabbit batch 2 (server / store / factory / deploy; PR #4's findings)
+
+Third-party review of the server, store, factory and deployment slices (ADR-0013: advisory,
+never an input to a verdict). Every item below is a finding CodeRabbit raised on the review
+slice and that was confirmed against the code; each fix carries its test.
+
+- **Cross-process JSONL locks.** `JsonlLedger`, `JsonlFactoryStore` and
+  `JsonlGapSignoffLedger` now hold an OS `flock` on `<file>.lock` across read-head + append
+  (`crb.core.ledger.jsonl_append_lock`); the API and the worker append to the same factory
+  evidence file, and a thread lock cannot order two processes. The tail reader that grows to
+  a line boundary is shared (`jsonl_last_line`) — a record longer than 64 KiB no longer
+  breaks the next append.
+- **Delivery refuses clear-text remotes.** `GitCredentials` rejects any remote that is not
+  `https://`, `ssh://` or `git@host:path` at construction, so a push token can never travel
+  over `http://` / `git://`.
+- **OIDC and CORS fail at start-up, not at login.** `oidc.issuer` must be `https://`; the
+  discovery document's `authorization_endpoint`, `token_endpoint` and `jwks_uri` must be
+  too (502 `oidc_discovery_failed` otherwise). `cors_origins` refuses `*` / `null` / a
+  non-http(s) value: the middleware always allows credentials, so a wildcard would let any
+  site drive the session cookie (and Starlette silently refuses to echo it anyway).
+- **Last-admin guard is serialised.** `PUT /admin/users/{id}/role` counts and updates under
+  the users write lock (`BEGIN IMMEDIATE` / advisory 7336): two concurrent demotions of the
+  last two admins can no longer leave none.
+- **`GET /repos/{name}/profile?refresh=true` needs operator** — a viewer can read the cached
+  histogram but not force the git walk and config write.
+- **Factory runs pin their backlog.** `POST /runs {kind: factory}` stamps the ACTIVE
+  backlog's hash into `params.backlog_hash` at enqueue (409 `no_frozen_backlog` when there
+  is none; `backlog_hash` in the request must match — 409 `backlog_hash_mismatch`) and the
+  worker re-verifies it on claim (the run fails closed if the backlog was re-registered in
+  between). `register_backlog` writes the history file and the freeze EVENT before moving
+  the active pointer (atomic rename), so a failed append never leaves an active backlog the
+  chain does not cover. The evidence route verifies the chain it already read (one file
+  read, not two).
+- **`(trace_id, seq)` is UNIQUE on `events`** (revision `0004`) — `seq` is the SSE resume
+  cursor and a duplicate silently lost an event on `?after=`. `DbEventSink` re-allocates
+  under the write lock on a collision instead of dropping (`realloc` counter). The upgrade
+  REFUSES a database that already holds a duplicate pair (rows are append-only; the
+  operator exports and decides). `crb.store.migrate.REVISION_INDEXES` lets an `init_db`
+  database adopt at an index-only revision.
+- **Paging in SQL.** `GET /reviews` counts and slices in the query; `GET /signoffs` filters
+  and slices on the chain before serialising (the live false-Q1 query runs for the page,
+  not the table); the ledger import dedupes `row_id` / pack hashes in chunks of 500.
+- **Store hygiene.** `make_engine` parses the SQLite URL with `make_url` (driver forms and
+  `?mode=` queries no longer leave the driver name in the path); the migration template's
+  `downgrade` raises until written, and its rules name every append-only table and the
+  adoption markers.
+- **Helm refuses two silent misconfigurations.** `postgresql.mode=external` with empty
+  `networkPolicy.postgres.cidrs` (every pod would be denied its database under default
+  deny); `worker.replicaCount > 1` on a `ReadWriteOnce` work volume. `extraEgress` applies
+  to every crb pod (api, worker, migrate, embedded postgres) as its comment always said.
+  `CRB_FORWARDED_ALLOW_IPS` defaults to empty (believe nobody), never `*`.
+- **Release hygiene.** `release.yml` smokes the PUSHED digest (uid, read-only root, migrate,
+  imports) after the push — what a user pulls is what was tested; every `actions/checkout`
+  in both workflows sets `persist-credentials: false`; `hatchling>=1.27` (PEP 639
+  `license-files` array) and the deprecated licence classifier is dropped.
+- README: the P5 row says 14 routed screens (`ui/src/App.tsx`), the file-header programme
+  is marked complete; `scripts/code_map.py` describes the real `EXEMPT` rule (explicit
+  paths only — no size-based exemption).
+- `crb.core.services.authored_of` normalises git ≥ 2.5x's `Z` suffix like
+  `Repo.author_date` (the one CI failure on PR #7).
 
 ## [2.0.0a1] — 2026-09-15 — first releasable v2 (pinned as `2.0.0a1-rc1`; the `v` tag follows the licence text)
 
@@ -309,7 +368,7 @@ grouped by area.
   grade; the ADR-0006 default (keep nothing) is unchanged.
 
 ### UI and walkthrough
-- Vite / React observability front end (Ledger v2 tokens, 16 screens, SSE live log,
+- Vite / React observability front end (Ledger v2 tokens, 14 routed screens, SSE live log,
   evidence drawer, repo / run dialogs with presets and editors); unit tests + axe smoke.
 - Full-browser walkthrough against a live temp stack (`scripts/walkthrough.sh`, 25
   Playwright specs; hermetic tier 1 in CI).

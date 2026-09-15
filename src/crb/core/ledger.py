@@ -93,6 +93,7 @@ Claims:       ``point`` is the fail-closed all-rows rate; ``model_point`` may be
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -825,6 +826,56 @@ def grade_row_from_result(
 # ---------------------------------------------------------------------------
 
 
+@contextlib.contextmanager
+def jsonl_append_lock(path: Path) -> Iterator[None]:
+    """An OS-level exclusive lock on ``<path>.lock`` for the read-head-then-append of a
+    hash-chained JSONL file. A ``threading.Lock`` covers one interpreter; the API and the
+    worker open the same factory evidence file from two processes, and two appenders that
+    both read the same head write two records with the same ``prev_hash`` — a permanent
+    chain break (CodeRabbit on PR #4, 2026-09-15). POSIX ``flock``; a platform without it
+    gets the in-process lock only."""
+    lock_path = path.with_name(path.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as fh:
+        locked = False
+        try:
+            import fcntl  # noqa: PLC0415 — POSIX only; guarded
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            locked = True
+        except (ImportError, OSError):
+            pass
+        try:
+            yield
+        finally:
+            if locked:
+                with contextlib.suppress(OSError):
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def jsonl_last_line(path: Path) -> str:
+    """The last non-blank line of a JSONL file, read from the tail. The window starts at
+    64 KiB and doubles until it holds a line boundary before the last line (or the whole
+    file): a last row longer than the window used to be parsed from its middle and every
+    later append failed (CodeRabbit on PR #3, 2026-09-15). ``""`` for an empty file."""
+    if not path.exists() or path.stat().st_size == 0:
+        return ""
+    with path.open("rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        step = min(size, 65536)
+        f.seek(size - step)
+        chunk = f.read()
+        while step < size and b"\n" not in chunk.rstrip(b"\n"):
+            step = min(size, step * 2)
+            f.seek(size - step)
+            chunk = f.read()
+    for line in reversed(chunk.decode("utf-8", errors="replace").splitlines()):
+        if line.strip():
+            return line
+    return ""
+
+
 class JsonlLedger:
     """The portable ledger: one JSON object per line, appended and fsynced, chained on
     the previous line's ``row_hash``. Stdlib only, so an export can be verified anywhere
@@ -835,30 +886,8 @@ class JsonlLedger:
 
     def _last_hash(self) -> str:
         """The ``row_hash`` of the last non-blank line, or :data:`GENESIS_HASH` for an
-        empty or absent file. Reads only the tail of the file (a row is far smaller
-        than 64 KiB) so appending stays O(1) however long the ledger grows."""
-        if not self.path.exists() or self.path.stat().st_size == 0:
-            return GENESIS_HASH
-        last = ""
-        with self.path.open("rb") as f:
-            f.seek(0, os.SEEK_END)
-            size = f.tell()
-            step = min(size, 65536)
-            f.seek(size - step)
-            chunk = f.read()
-            # a row is normally far smaller than 64 KiB, but labels are unbounded: widen the
-            # window until it contains a line boundary before the last line (or the whole
-            # file), so a long last row is never parsed from its middle (CodeRabbit on
-            # PR #3, 2026-09-15)
-            while step < size and b"\n" not in chunk.rstrip(b"\n"):
-                step = min(size, step * 2)
-                f.seek(size - step)
-                chunk = f.read()
-        text = chunk.decode("utf-8", errors="replace")
-        for line in reversed(text.splitlines()):
-            if line.strip():
-                last = line
-                break
+        empty or absent file (:func:`jsonl_last_line` reads only the tail)."""
+        last = jsonl_last_line(self.path)
         if not last:
             return GENESIS_HASH
         row_hash = str(json.loads(last).get("row_hash", ""))
@@ -869,13 +898,14 @@ class JsonlLedger:
     def append(self, row: GradeRow) -> GradeRow:
         """Chain, validate and append. Returns the chained row (with hashes)."""
         row.assert_invariants()
-        chained = row.chained(self._last_hash())
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(chained.to_dict(), sort_keys=True, ensure_ascii=False)
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-            f.flush()
-            os.fsync(f.fileno())  # a row that was returned is a row that is on disk
+        with jsonl_append_lock(self.path):
+            chained = row.chained(self._last_hash())
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            line = json.dumps(chained.to_dict(), sort_keys=True, ensure_ascii=False)
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+                f.flush()
+                os.fsync(f.fileno())  # a row that was returned is a row that is on disk
         return chained
 
     def append_many(self, rows: Iterable[GradeRow]) -> list[GradeRow]:

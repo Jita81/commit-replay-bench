@@ -73,7 +73,12 @@ from pathlib import Path
 from typing import Any
 
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
-from crb.core.ledger import GENESIS_HASH, LedgerIntegrityError
+from crb.core.ledger import (
+    GENESIS_HASH,
+    LedgerIntegrityError,
+    jsonl_append_lock,
+    jsonl_last_line,
+)
 from crb.core.redact import redact
 from crb.factory.backlog import KIND_OPERATOR, BacklogItem
 
@@ -285,21 +290,9 @@ class JsonlGapSignoffLedger:
         self.path = Path(path)
 
     def _last_hash(self) -> str:
-        """The chain head from the file's last line (reads only the tail, so appending to a
-        long ledger stays O(1))."""
-        if not self.path.exists() or self.path.stat().st_size == 0:
-            return GENESIS_HASH
-        last = ""
-        with self.path.open("rb") as f:
-            f.seek(0, os.SEEK_END)
-            size = f.tell()
-            step = min(size, 65536)
-            f.seek(size - step)
-            chunk = f.read().decode("utf-8", errors="replace")
-        for line in reversed(chunk.splitlines()):
-            if line.strip():
-                last = line
-                break
+        """The ``row_hash`` of the last non-blank line (tail read via
+        :func:`crb.core.ledger.jsonl_last_line`), or :data:`GENESIS_HASH`."""
+        last = jsonl_last_line(self.path)
         if not last:
             return GENESIS_HASH
         row_hash = str(json.loads(last).get("row_hash", ""))
@@ -308,14 +301,17 @@ class JsonlGapSignoffLedger:
         return row_hash
 
     def append(self, record: GapSignoff) -> GapSignoff:
-        """Chain ``record`` onto the head and append one fsync'd line."""
-        chained = record.chained(self._last_hash())
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(chained.to_dict(), sort_keys=True, ensure_ascii=False)
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        """Chain ``record`` onto the head and append one fsync'd line, under an OS file
+        lock so two processes (the API signing, the worker reading-then-signing) cannot
+        both chain on the same head (CodeRabbit on PR #4, 2026-09-15)."""
+        with jsonl_append_lock(self.path):
+            chained = record.chained(self._last_hash())
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            line = json.dumps(chained.to_dict(), sort_keys=True, ensure_ascii=False)
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+                f.flush()
+                os.fsync(f.fileno())
         return chained
 
     def records(self) -> Iterator[GapSignoff]:
@@ -442,7 +438,13 @@ def assess(item: BacklogItem, signoffs: Iterable[GapSignoff] = ()) -> Readiness:
     catalogued = bool(slots)
     active = {k[1]: r for k, r in active_signoffs(signoffs).items() if k[0] == item.id}
     facts = parse_facts(item.structural_facts)
+    kinds = {s.name: s.kind for s in slots}
     for slot, rec in active.items():
+        # a VALUE slot is never signed into readiness: its value lives in the test an
+        # independent author writes (the API refuses such a sign-off; the library must
+        # too — CodeRabbit on PR #4, 2026-09-15). A signed value slot is ignored here.
+        if kinds.get(slot, rec.kind) != SLOT_STRUCTURAL:
+            continue
         facts.setdefault(slot, rec.answer)
     gaps = tuple(Gap(s.name, s.question, s.kind) for s in slots if s.name not in facts)
     blocking = [g for g in gaps if g.blocking]

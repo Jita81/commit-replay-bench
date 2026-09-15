@@ -66,7 +66,8 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from fastapi import Depends, Request, Response
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.server.deps import ApiError, DbDep, Principal, SettingsDep
@@ -225,6 +226,23 @@ def authenticate_local(db: Session, username: str, password: str) -> User | None
 def count_users(db: Session) -> int:
     """All accounts (active or not) — the bootstrap gate counts every row."""
     return int(db.execute(select(func.count(User.id))).scalar_one())
+
+
+def lock_users_table(db: Session) -> None:
+    """Serialise a read-then-write on ``users`` for the rest of this transaction: SQLite
+    takes its write lock now (``BEGIN IMMEDIATE``), Postgres a transaction-scoped advisory
+    lock (id 7336 — one id per table, see ``crb.store.jobs``). Other dialects: no-op."""
+    dialect = db.get_bind().dialect.name
+    if dialect == "sqlite":
+        # pysqlite defers BEGIN until the first write, so this is safe after the auth
+        # lookup's SELECTs; if a write already happened the write lock is already held.
+        try:
+            db.execute(text("BEGIN IMMEDIATE"))
+        except OperationalError as exc:
+            if "within a transaction" not in str(exc):
+                raise
+    elif dialect == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(7336)"))
 
 
 def count_active_admins(db: Session) -> int:
@@ -390,6 +408,19 @@ def require_role(role: str) -> Callable[[Principal], Principal]:
 
     _dep.__name__ = f"require_{role}"
     return _dep
+
+
+def require_role_now(user: Principal, role: str) -> None:
+    """The same check as :func:`require_role`, applied inside a handler — for a route whose
+    read is open to viewers but whose *side effect* (a query flag that recomputes and
+    writes) needs a higher rung."""
+    if ROLE_RANK.get(user.role, -1) < ROLE_RANK[validate_role(role)]:
+        raise ApiError(
+            403,
+            "forbidden",
+            f"role {role!r} required",
+            detail={"required": role, "actual": user.role},
+        )
 
 
 ViewerDep = Annotated[Principal, Depends(require_role("viewer"))]
@@ -614,6 +645,14 @@ class AuthlibOidcClient:
         doc = r.json()
         if not isinstance(doc, dict):
             raise ApiError(502, "oidc_discovery_failed", "discovery document is not an object")
+        # Every endpoint we will later call must be TLS: a discovery document that points
+        # the token exchange or the JWKS fetch at http:// is refused, not followed.
+        for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
+            value = str(doc.get(key) or "")
+            if not value.lower().startswith("https://"):
+                raise ApiError(
+                    502, "oidc_discovery_failed", f"discovery {key} is not an https:// URL"
+                )
         self._discovery = doc
         return doc
 

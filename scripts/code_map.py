@@ -15,8 +15,9 @@ with every path rendered as a link.
 in ``Layer``/``ADRs``/``Works with``/``Tested by``/``Touch when``/``Claims`` that does not exist
 in the repository (anchors are stripped before the check); a ``Tested by`` that is blank;
 a ``docs/CODE-MAP.md`` that differs from what the headers generate. Files listed in
-``EXEMPT`` (generated code, vendored files, ``__init__.py`` re-exports under 5 lines) are skipped
-and listed at the end of the map so the exemption is visible.
+``EXEMPT`` (an explicit path → reason map; today only Vite's generated ambient types) are
+skipped and listed at the end of the map so the exemption is visible. There is no size- or
+name-based exemption: a thin ``__init__.py`` needs a block like every other file.
 
 Navigation
 ----------
