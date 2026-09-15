@@ -1,3 +1,25 @@
+/**
+ * ui/src/api/client.ts — the fetch wrapper's contract, against a stubbed `fetch`.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Unit tests for the API client (`api`, `ApiError`, `qs`, `readCookie`).
+ * What it does: Pins that every call is prefixed `/api/v1` with credentials, that unsafe
+ *               methods carry the CSRF cookie as `X-CSRF-Token` (and nothing when the cookie
+ *               is absent), that the error envelope becomes `ApiError` with 401 / 403 / 409
+ *               `false_q1_refused` distinguishable, that a non-envelope body, a timeout and a
+ *               network failure map to `invalid_response` / `timeout` / `network`, that an
+ *               upstream abort is re-thrown untouched, and that 204 resolves to undefined.
+ * How:          `vi.stubGlobal('fetch', …)` with `Response` objects per case; fake timers for
+ *               the timeout; the cookie set on `document.cookie` in `beforeEach`.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/client.ts (the code under test), docs/API.md (the conventions these
+ *               cases pin), ui/src/test/setup.ts (jest-dom matchers, jsdom environment)
+ * Tested by:    ui/src/api/client.test.ts
+ * Touch when:   a convention in docs/API.md changes (envelope, cookie, header, timeout) —
+ *               update ui/src/api/client.ts and the matching case together.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { API_TIMEOUT_MS, ApiError, api, qs, readCookie } from './client'
 

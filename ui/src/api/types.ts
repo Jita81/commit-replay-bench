@@ -13,6 +13,34 @@
  *   - a capability cell is either measured (numbers + `n`) or `NOT_YET_MEASURED`;
  *     there is no third state and no "empty row";
  *   - `false_q1` is a count that must read 0 — the UI renders it red otherwise.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The UI's reading of docs/API.md — every response and request type, the closed
+ *               vocabularies (roles, run kinds, belts, routes, oracle bands) and the few pure
+ *               helpers on them (`roleAtLeast`, `isRunTerminal`, `beltNamesFor`,
+ *               `ladderEntryLabel`, `beltsOf`).
+ * What it does: Names each field exactly as the server serialises it (`to_dict()` of the core
+ *               dataclass, cited above each interface) so drift is a type error, not a runtime
+ *               surprise; encodes the invariants the screens rely on — a belt is
+ *               `true | false | null`, a cell is measured or `NOT_YET_MEASURED`, `false_q1` is
+ *               a count that must read 0.
+ * How:          Hand-written interfaces grouped by API.md section; `@contract` marks a shape
+ *               derived from prose rather than a named field.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+ * Works with:   docs/API.md (the contract this file mirrors), ui/src/api/hooks.ts (types every
+ *               hook), src/crb/core/ledger.py (`GradeRow` — the flat belts on a row),
+ *               src/crb/core/evidence.py (`EvidencePack`, `ApparatusStamp`, `BuilderRef`),
+ *               src/crb/core/spec.py (`RepoConfig`, `TaskSpec`), src/crb/core/routing.py
+ *               (`RoutingPolicy`, `RouteDecision`), src/crb/server/schemas.py (the server's
+ *               Pydantic side of the same shapes)
+ * Tested by:    ui/src/api/types.test.ts (`ladderEntryLabel`), ui/src/components/BeltPills.test.tsx
+ *               (`beltNamesFor`), and every screen test through the fixtures it types
+ * Touch when:   docs/API.md changes a response (a new field, a new run kind, a fifth belt set)
+ *               — change this file first, then the hook and the screen; a new `Runner` or
+ *               `Language` value here must match src/crb/core/spec.py; never for a new
+ *               repository.
  */
 
 // ---------------------------------------------------------------------------
@@ -40,6 +68,7 @@ export interface Page<T> {
   offset: number
 }
 
+/** `?limit=&offset=` (server default 50, max 500). */
 export interface PageParams {
   limit?: number
   offset?: number
@@ -49,6 +78,7 @@ export interface PageParams {
 // Health / metrics / version
 // ---------------------------------------------------------------------------
 
+/** A health probe's verdict; `skipped` = not applicable in this deployment (e.g. no docker configured). */
 export type ProbeStatus = 'ok' | 'degraded' | 'down' | 'skipped'
 
 /** `crb.observability.probes.ProbeResult.to_dict()` */
@@ -59,11 +89,13 @@ export interface Probe {
   data: Record<string, unknown>
 }
 
+/** `GET /health` — overall status is the worst probe. */
 export interface Health {
   status: ProbeStatus
   probes: Probe[]
 }
 
+/** `GET /version` — the package, the apparatus (the instrument's version, ADR-0001) and the routing policy. */
 export interface Version {
   crb: string
   apparatus: string
@@ -74,15 +106,19 @@ export interface Version {
 // Auth
 // ---------------------------------------------------------------------------
 
+/** The RBAC ladder, ascending (docs/API.md "Conventions"). */
 export type Role = 'viewer' | 'operator' | 'approver' | 'admin'
 
+/** Ascending order, so `roleAtLeast` is an index comparison. */
 export const ROLE_ORDER: readonly Role[] = ['viewer', 'operator', 'approver', 'admin']
 
+/** `true` when `role` is `min` or higher; `undefined` (not logged in) is never enough. */
 export function roleAtLeast(role: Role | undefined, min: Role): boolean {
   if (!role) return false
   return ROLE_ORDER.indexOf(role) >= ROLE_ORDER.indexOf(min)
 }
 
+/** `GET /auth/me` — who is logged in; `issuer` names the OIDC provider or the local bootstrap. */
 export interface Principal {
   id: string
   display_name: string
@@ -91,11 +127,13 @@ export interface Principal {
   issuer: string
 }
 
+/** `POST /auth/login` body (the local bootstrap account; OIDC goes through a redirect). */
 export interface LoginRequest {
   username: string
   password: string
 }
 
+/** `GET /auth/csrf`. */
 export interface CsrfToken {
   token: string
 }
@@ -104,15 +142,18 @@ export interface CsrfToken {
 // Repos
 // ---------------------------------------------------------------------------
 
+/** The languages the miner and runners know (`crb.core.spec`); must match the server's set. */
 export type Language = 'python' | 'go' | 'javascript' | 'jvm' | 'rust'
 export const LANGUAGES: readonly Language[] = ['python', 'go', 'javascript', 'jvm', 'rust']
 
+/** The test runners (`crb.core.runners`); `''` on a repo = not yet chosen. */
 export type Runner = 'pytest' | 'go' | 'node' | 'vitest' | 'jest' | 'mocha' | 'maven' | 'cargo'
 export const RUNNERS: readonly Runner[] = ['pytest', 'go', 'node', 'vitest', 'jest', 'mocha', 'maven', 'cargo']
 
 /** Regression-belt scope policy (`crb.core.spec`). A list = explicit runner scopes. */
 export type BeltScope = 'TARGET_ONLY' | 'AFFECTED_DIRS' | 'BARE' | string[]
 
+/** The miner's shape caps for one repo (`crb.core.mine`). */
 export interface MiningConfig {
   log_n: number
   max_candidates: number
@@ -214,6 +255,7 @@ export interface ProfileCell {
   share: number
 }
 
+/** `GET /repos/{name}/profile` — how the repo's real commits distribute over (class × size); the denominator of coverage. */
 export interface RepoProfile {
   repo: string
   n_commits: number
@@ -226,16 +268,21 @@ export interface RepoProfile {
 // Runs
 // ---------------------------------------------------------------------------
 
+/** What a run does; `probe` is queued from the repo page, the rest from the run dialog. */
 export type RunKind = 'mine' | 'replay' | 'blind' | 'oracle' | 'controls' | 'probe'
+/** The kinds an operator can start from the run dialog (a probe has its own button). */
 export const RUN_KINDS: readonly RunKind[] = ['mine', 'replay', 'blind', 'oracle', 'controls']
 
+/** Queue lifecycle; the three in `RUN_TERMINAL` are final. */
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export const RUN_TERMINAL: readonly RunStatus[] = ['succeeded', 'failed', 'cancelled']
 
+/** `true` once a run can no longer change — polling and the SSE stream stop on it. */
 export function isRunTerminal(status: RunStatus | undefined): boolean {
   return status !== undefined && RUN_TERMINAL.includes(status)
 }
 
+/** `sighted` = the builder saw the target tests; `blind` = it did not (ADR-0004). */
 export type GradeMode = 'sighted' | 'blind'
 
 /** `crb.core.run.RunSummary.to_dict()` (live counts while running). */
@@ -251,6 +298,7 @@ export interface RunCounts {
   detail?: Record<string, number | string>
 }
 
+/** Tasks done of total, and the task in flight (the run page's progress bar). */
 export interface RunProgress {
   done: number
   total: number
@@ -355,6 +403,7 @@ export interface RunCreateRequest {
   builder_config?: Record<string, unknown>
 }
 
+/** `GET /runs` filters. */
 export interface RunListParams extends PageParams {
   repo?: string
   kind?: RunKind
@@ -422,9 +471,12 @@ export interface RunTaskRow {
 // Step events (SSE) — crb.observability.events.StepEvent.to_dict()
 // ---------------------------------------------------------------------------
 
+/** Where in the pipeline a StepEvent was emitted (`crb.observability.events`). */
 export type Stage = 'mine' | 'prep' | 'build' | 'grade' | 'ledger' | 'oracle' | 'factory' | 'system'
+/** The event's own verdict; `error` / `invalid` are rendered red in the live log. */
 export type StepStatus = 'ok' | 'error' | 'invalid' | 'skipped' | 'in_progress'
 
+/** `crb.observability.events.StepEvent.to_dict()` — one line of the live log / audit trail. */
 export interface StepEvent {
   event_id: string
   seq: number
@@ -513,6 +565,7 @@ export interface GradeRow extends Belts {
   row_hash: string
 }
 
+/** The belts of a flat `GradeRow` as a `Belts` object (for `BeltPills`); belt 5 defaults to `null` = not recorded. */
 export function beltsOf(row: Belts): Belts {
   return {
     tests_unmodified: row.tests_unmodified,
@@ -552,6 +605,7 @@ export interface TaskDetail {
   grades: GradeRow[]
 }
 
+/** `GET /grades` filters (the ledger screen's). */
 export interface GradeListParams extends PageParams {
   repo?: string
   run_id?: string
@@ -659,12 +713,17 @@ export interface EvidenceResponse {
 // Capability, routing, forecast, sign-off
 // ---------------------------------------------------------------------------
 
+/** The five routes the ONE routing rule can return (ADR-0003); `deliver` is the only one that licenses autonomy. */
 export type Route = 'deliver' | 'calibrate' | 'granularize' | 'human' | 'do_not_ship'
+/** Display order on the routing screen. */
 export const ROUTES: readonly Route[] = ['deliver', 'calibrate', 'granularize', 'human', 'do_not_ship']
 
+/** What the UI renders for a cell absent from the map — never a zero-filled row. */
 export const NOT_YET_MEASURED = 'NOT_YET_MEASURED'
+/** A cell's route, or `NOT_YET_MEASURED` when it has no rows. */
 export type CellVerdict = Route | typeof NOT_YET_MEASURED
 
+/** How far a cell's evidence has been checked by a person; a sign-off lifts the tier, never the route. */
 export type VerificationTier = 'automated-pass' | 'human-verified' | 'ab-confirmed' | 'untrusted' | ''
 
 /** Cell-key projection fields (`crb.core.ledger.CELL_FIELDS`). */
@@ -701,6 +760,7 @@ export interface CapabilityCell {
   belt_set?: string
 }
 
+/** Headline numbers of one map; `false_q1_total` must read 0. */
 export interface CapabilitySummary {
   trusted_autonomy_coverage: number
   total_cells: number
@@ -711,6 +771,7 @@ export interface CapabilitySummary {
   apparatus_versions: string[]
 }
 
+/** `GET /capability-map` — only MEASURED cells are listed; absence is `NOT_YET_MEASURED`. */
 export interface CapabilityMap {
   repo: string
   by: CellField[]
@@ -746,12 +807,14 @@ export interface RouteDecision {
   policy_version: string
 }
 
+/** `GET /routes?repo=` — one decision per cell. */
 export interface RoutesResponse {
   repo: string
   policy: RoutingPolicy
   decisions: RouteDecision[]
 }
 
+/** One `class:size:count` term of a forecast mix. */
 export interface ForecastMixItem {
   capability_class: string
   size: string
@@ -779,6 +842,7 @@ export interface ForecastReadiness {
   gaps: string[]
 }
 
+/** `GET /signoffs` item — an attestation with the evidence snapshot stamped at write time. */
 export interface Signoff {
   id: string
   repo: string
@@ -798,6 +862,7 @@ export interface Signoff {
   }
 }
 
+/** `POST /signoffs` body (the older shape; the Sign-off screen's fuller request lives in ui/src/screens/Signoff/contract.ts). */
 export interface SignoffCreateRequest {
   repo: string
   cell: Record<string, string>
@@ -808,6 +873,7 @@ export interface SignoffCreateRequest {
 // Ledger
 // ---------------------------------------------------------------------------
 
+/** `GET /ledger/verify` — chain walk result; `broken_at` is the first bad seq. */
 export interface LedgerVerify {
   rows: number
   ok: boolean
@@ -815,13 +881,16 @@ export interface LedgerVerify {
   broken_at?: number | null
 }
 
+/** `GET /ledger/export?format=`. */
 export type ExportFormat = 'jsonl' | 'csv'
 
 // ---------------------------------------------------------------------------
 // Oracle adequacy
 // ---------------------------------------------------------------------------
 
+/** Mutation-strength band per the adequacy policy; `unscoreable` oracles are never averaged in. */
 export type OracleBand = 'strong' | 'adequate' | 'weak' | 'unscoreable'
+/** What a CLEAN grade on that oracle licenses. */
 export type OracleGate = 'auto_ship' | 'human_review' | 'needs_human'
 
 /** `crb.core.oracle.adequacy.AdequacyPolicy.to_dict()` */
@@ -831,6 +900,7 @@ export interface AdequacyPolicy {
   version: string
 }
 
+/** One task's latest mutation score (`GET /oracle/{repo}`). */
 export interface OracleTask {
   task_id: string
   capability_class: string
@@ -842,6 +912,7 @@ export interface OracleTask {
   gate: OracleGate
 }
 
+/** The per-cell reduction of task scores. */
 export interface OracleCell {
   capability_class: string
   size: string
@@ -851,6 +922,7 @@ export interface OracleCell {
   gate: OracleGate
 }
 
+/** `GET /oracle/{repo}`. */
 export interface OracleReport {
   repo: string
   policy: AdequacyPolicy
@@ -859,6 +931,7 @@ export interface OracleReport {
   apparatus_versions: string[]
 }
 
+/** The seven negative controls (ADR-0010) — each is a known-bad patch the grader must refuse. */
 export type ControlName =
   | 'gold'
   | 'noop'
@@ -867,6 +940,7 @@ export type ControlName =
   | 'regression'
   | 'hardcode_cheat'
   | 'env_poison'
+/** `VIOLATION` = the instrument passed a control it must refuse (a bug in the grader); `ESCAPE` = the repo's own tests could not tell (a weak oracle, not an instrument bug). */
 export type ControlVerdict = 'ok' | 'VIOLATION' | 'ESCAPE' | 'not_constructible' | 'skip'
 
 /** `crb.core.oracle.controls.ControlRow.to_dict()` (grade omitted from the list view). */
@@ -900,6 +974,7 @@ export interface ControlsReport {
 // Factory (phase P6) — shapes are provisional; the UI only renders lists.
 // ---------------------------------------------------------------------------
 
+/** `GET /factory/{repo}/backlog` (P6 — 501 until it lands). */
 export interface FactoryBacklog {
   repo: string
   hash: string
@@ -907,6 +982,7 @@ export interface FactoryBacklog {
   items: Array<{ id: string; title: string; capability_class: string; size: string }>
 }
 
+/** `GET /factory/{repo}/tasks` item (P6). */
 export interface FactoryTask {
   id: string
   title: string
@@ -921,6 +997,7 @@ export interface FactoryTask {
 // Admin
 // ---------------------------------------------------------------------------
 
+/** `GET /users` item (admin). */
 export interface User {
   id: string
   username: string
@@ -931,6 +1008,7 @@ export interface User {
   created: string
 }
 
+/** `POST /users` body — a local account; the password never comes back. */
 export interface UserCreateRequest {
   username: string
   display_name: string
@@ -939,6 +1017,7 @@ export interface UserCreateRequest {
   password: string
 }
 
+/** Whether a builder's credential is present — never its value. */
 export interface BuilderConfigured {
   name: string
   configured: boolean

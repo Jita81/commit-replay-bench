@@ -9,6 +9,31 @@
  *     with `code: 'timeout'`, never an infinite spinner.
  *
  * Nothing here knows about React. Pure I/O with typed failures.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The single fetch wrapper (`api<T>`) behind every hook, with `ApiError`, `qs`
+ *               and `readCookie`.
+ * What it does: Prefixes `/api/v1`, sends the cookie session, adds `X-CSRF-Token` on unsafe
+ *               methods, JSON-encodes bodies, aborts after 25 s and turns every failure into
+ *               one typed `ApiError {status, code, message, detail}` — a timeout, a network
+ *               failure and a non-envelope body are `timeout` / `network` /
+ *               `invalid_response`, never a hang or a fabricated body. An upstream abort
+ *               (React Query cancelling) is re-thrown untouched so it never reads as a failure.
+ * How:          Arm a timeout on an AbortController and chain the caller's signal to it → fetch
+ *               with `credentials: 'include'` → on non-2xx parse the error envelope → on 2xx
+ *               parse JSON (204 / empty body → undefined).
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/hooks.ts (every query and mutation calls `api`), ui/src/api/types.ts
+ *               (`ApiErrorEnvelope`), ui/src/api/sse.ts (shares `API_BASE` for the stream URL),
+ *               ui/src/components/ErrorState.tsx (renders an `ApiError` by status and code),
+ *               src/crb/server/auth.py (the cookie and CSRF names this file mirrors),
+ *               src/crb/server/app.py (emits the error envelope)
+ * Tested by:    ui/src/api/client.test.ts
+ * Touch when:   the error envelope, the cookie names or the CSRF header change (docs/API.md
+ *               "Conventions") — change src/crb/server/auth.py and this file together; never
+ *               for a new repository.
  */
 
 import type { ApiErrorEnvelope } from './types'
@@ -52,6 +77,7 @@ export class ApiError extends Error {
   }
 }
 
+/** Type guard for `catch (err: unknown)` blocks — the only sanctioned way to branch on a failure. */
 export function isApiError(err: unknown): err is ApiError {
   return err instanceof ApiError
 }
@@ -67,6 +93,11 @@ export function readCookie(name: string, source?: string): string | null {
   return null
 }
 
+/**
+ * The contract's error envelope, or `null` when the body is not one (a proxy's HTML page,
+ * an empty body). Strict on `code` and `message` being strings so a half-shaped body is
+ * reported as `invalid_response` rather than as a fabricated code.
+ */
 function parseEnvelope(body: unknown): ApiErrorEnvelope['error'] | null {
   if (!body || typeof body !== 'object') return null
   const err = (body as { error?: unknown }).error
@@ -112,6 +143,9 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     controller.abort()
   }, timeoutMs)
 
+  // One controller aborts the fetch for either reason: our timeout, or the caller's
+  // signal (React Query cancels a query when its component unmounts). `timedOut`
+  // tells the two apart in the catch below.
   const upstream = options.signal
   let onUpstreamAbort: (() => void) | undefined
   if (upstream) {
@@ -130,6 +164,9 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     headers['Content-Type'] = 'application/json'
     body = JSON.stringify(options.body)
   }
+  // CSRF double-submit: the server compares this header with the (JS-readable) cookie.
+  // Without the cookie the header is left off and the server answers 403 — the UI
+  // never invents a token.
   if (UNSAFE_METHODS.has(method)) {
     const token = readCookie(CSRF_COOKIE)
     if (token) headers[CSRF_HEADER] = token
@@ -151,6 +188,8 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
         timeout_ms: timeoutMs,
       })
     }
+    // A caller-initiated abort is not a failure: rethrow the raw AbortError so React
+    // Query treats it as a cancellation, not an error to render.
     if (upstream?.aborted) throw err
     throw new ApiError(0, 'network', 'Could not reach the server.', {
       path,
