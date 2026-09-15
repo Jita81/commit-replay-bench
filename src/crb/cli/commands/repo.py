@@ -6,6 +6,34 @@ dependencies through the runner (a venv under ``<workdir>/envs/<name>`` for
 Python, ``node_modules`` in the clone, warm module caches for Go / Maven /
 Cargo) and records every step. ``crb repo probe`` runs it first whenever the
 environment is not ready.
+
+Navigation
+----------
+What it is:   ``crb repo add | setup | probe | import-configs | list`` — register a
+              repository, build its test environment, prove its toolchain.
+What it does: ``add`` validates the config (belt scope, runner, probe scope …) and records
+              the clone path — or clones by URL under the same policy the worker uses;
+              ``setup`` is the ONE network phase (installs test dependencies into
+              ``<workdir>/envs/<name>`` through the runner and records it); ``probe`` runs
+              the known-green scope in the executor (auto-running setup when the
+              environment is not ready) and exits 1 when it is red; ``bound_runner`` is how
+              every other verb gets a runner on that environment.
+How:          ``parse_kv`` for ``--runner-opts``; ``RepoConfig`` → ``Workdir.save_repo``;
+              ``get_runner(config)`` with ``env_dir`` bound → ``runner.setup`` /
+              ``runner.run`` under ``build_executor``.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/core/spec.py (``RepoConfig`` and the belt-scope vocabulary),
+              src/crb/core/runners/base.py (``setup`` / ``environment_ready`` / ``run``),
+              src/crb/core/git.py (``clone_repo`` and the URL policy), src/crb/core/legacy.py
+              (``import_repo_configs``), src/crb/cli/commands/mine.py +
+              src/crb/cli/commands/grade.py (call ``bound_runner``),
+              docs/OPERATOR.md#2-configure-a-repository (the flags, per language)
+Tested by:    tests/test_cli.py, tests/test_cli_repo_setup.py, tests/test_cli_repo_url.py
+Touch when:   THIS is the verb a new repository starts with — as configuration
+              (docs/OPERATOR.md#21-environment-setup--the-only-network-phase), not code;
+              edit the file when ``RepoConfig`` gains a field (add the flag and the
+              OPERATOR entry) or a runner gains a setup step worth surfacing.
 """
 
 from __future__ import annotations
@@ -55,6 +83,8 @@ _BELT_POLICIES = (BELT_TARGET_ONLY, BELT_AFFECTED_DIRS, BELT_BARE)
 
 
 def _parse_belt_scope(value: str | None) -> str | tuple[str, ...]:
+    """``--belt-scope``: a named policy (``BARE`` / ``TARGET_ONLY`` / ``AFFECTED_DIRS``,
+    case-insensitive; default ``TARGET_ONLY``) or a comma-separated list of directories."""
     if not value:
         return BELT_TARGET_ONLY
     v = value.strip()
@@ -64,6 +94,7 @@ def _parse_belt_scope(value: str | None) -> str | tuple[str, ...]:
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add ``crb repo add | setup | probe | import-configs | list``."""
     p = sub.add_parser("repo", help="register repos, probe toolchains, import configs")
     rs = p.add_subparsers(dest="repo_cmd", metavar="<subcommand>")
 
@@ -152,6 +183,7 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 
 
 def _usage(p: argparse.ArgumentParser) -> int:
+    """``crb repo`` with no subcommand: help + usage-error exit."""
     p.print_help()
     return 2
 
@@ -178,6 +210,8 @@ def _clone_for_add(args: argparse.Namespace, wd: Workdir) -> tuple[Path, str]:
 
 
 def cmd_add(args: argparse.Namespace) -> int:
+    """Register a repo from ``--path`` (an existing clone) or ``--url`` (cloned now);
+    the config is validated by ``RepoConfig`` before anything is written."""
     wd = workdir_of(args)
     head = ""
     if args.path:
@@ -263,6 +297,7 @@ def bound_runner(config: RepoConfig, env_dir: Path) -> BaseRunner:
 
 
 def _setup_lines(name: str, result: SetupResult) -> list[str]:
+    """The human rendering of a setup result: one line per step, tails on failure."""
     lines = [
         f"{name}: setup -> {'READY' if result.ok else 'FAILED'} ({result.note}; "
         f"{len(result.steps)} step(s), {result.duration_s:.1f}s)"
@@ -276,6 +311,7 @@ def _setup_lines(name: str, result: SetupResult) -> list[str]:
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
+    """Build the repo's test environment through its runner; exit 1 when a step failed."""
     wd = workdir_of(args)
     config, clone = wd.require_clone(args.name)
     env_dir = env_dir_of(wd, args.name)
@@ -299,6 +335,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_probe(args: argparse.Namespace) -> int:
+    """Run the known-green probe scope; auto-setup first (host executor only — a docker
+    sandbox carries its own toolchain); exit 1 when red or setup failed."""
     wd = workdir_of(args)
     config, clone = wd.require_clone(args.name)
     if not config.probe:
@@ -358,6 +396,8 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
 
 def cmd_import_configs(args: argparse.Namespace) -> int:
+    """Register every repo of a census ``configs.json`` (clone paths from ``--repos-dir``
+    when present); existing configs are skipped unless ``--force``."""
     wd = workdir_of(args)
     src = Path(args.configs).expanduser()
     if not src.is_file():
@@ -386,6 +426,7 @@ def cmd_import_configs(args: argparse.Namespace) -> int:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
+    """Registered repos with language, runner, clone path and task count."""
     wd = workdir_of(args)
     rows: list[dict[str, Any]] = []
     for name in wd.repo_names():

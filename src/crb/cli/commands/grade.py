@@ -9,6 +9,32 @@ The lifecycle of one trial is::
 ``grade`` never writes a clean row without an evidence pack: with ``--ledger`` the
 pack is written under ``<workdir>/evidence/<pack_hash>.json`` first and the row
 carries its hash.
+
+Navigation
+----------
+What it is:   ``crb prep`` / ``crb grade`` — the manual trial lifecycle: make a worktree at
+              the task's parent, let a builder edit it, grade it under the belts.
+What it does: ``prep`` creates the worktree and overlays the target tests only in sighted
+              mode; ``grade`` refuses any worktree whose HEAD is not the task's parent (a
+              harness error, never a verdict), runs the core grader, and with ``--ledger``
+              writes the evidence pack FIRST and then the row that carries its hash. Exit
+              0 clean, 1 not clean / disqualified, 2 harness error.
+How:          ``_load`` → ``_worktree_for`` (integrity) → ``grade`` → ``EvidencePack`` →
+              ``write_pack`` → ``grade_row_from_result`` → ``JsonlLedger.append``.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
+              docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/core/grade.py (the grader), src/crb/core/workspace.py (``Workspace``
+              create / overlay), src/crb/core/evidence.py (``EvidencePack`` / stamps),
+              src/crb/core/ledger.py (``grade_row_from_result`` — the ONE row mapping),
+              src/crb/cli/commands/repo.py (``bound_runner``), src/crb/core/run.py (the
+              automated equivalent the worker uses)
+Tested by:    tests/test_cli.py
+Touch when:   never for a new repository; when the ledger row or pack gains a field (the
+              mapping lives in the core — this file only passes flags through).
+Claims:       A clean exit here is one trial's mechanical verdict; a claim about a cell
+              needs the ledger and ``crb route``
+              (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
 """
 
 from __future__ import annotations
@@ -41,6 +67,7 @@ from crb.core.workspace import Workspace
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add ``crb prep`` and ``crb grade``."""
     pp = sub.add_parser("prep", help="create a trial worktree at the task's parent")
     pp.add_argument("name", help="registered repo")
     pp.add_argument("task_id", help="task sha (or unique prefix ≥7)")
@@ -76,6 +103,7 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 
 
 def _load(args: argparse.Namespace) -> tuple[RepoConfig, Path, TaskSpec]:
+    """The repo config, its clone and the named task (prefix-resolved), or ``CliError``."""
     wd = workdir_of(args)
     config, clone = wd.require_clone(args.name)
     task = wd.find_task(args.name, args.task_id)
@@ -83,6 +111,7 @@ def _load(args: argparse.Namespace) -> tuple[RepoConfig, Path, TaskSpec]:
 
 
 def cmd_prep(args: argparse.Namespace) -> int:
+    """Create the trial worktree; overlay the tests only when sighted."""
     config, clone, task = _load(args)
     dest = Path(args.dest).expanduser().resolve()
     if dest.exists() and not args.force:
@@ -158,6 +187,7 @@ def row_from_result(
 
 
 def cmd_grade(args: argparse.Namespace) -> int:
+    """Grade the worktree; with ``--ledger`` write the pack, then the row."""
     wd = workdir_of(args)
     config, clone, task = _load(args)
     repo = GitRepo(clone)
@@ -192,6 +222,7 @@ def cmd_grade(args: argparse.Namespace) -> int:
             trial=args.trial,
             actor=args.actor,
         )
+        # Pack before row: a row that cites a hash must never exist without the pack.
         pack_path = wd.write_pack(pack.pack_hash, pack.to_dict())
         row = row_from_result(
             result,

@@ -3,6 +3,29 @@
 These import the server layer lazily: the core CLI must keep working on a host
 that has only the base package installed (``pip install commit-replay-bench``
 without the ``[server]`` extra).
+
+Navigation
+----------
+What it is:   ``crb serve | worker | migrate | doctor`` — the service verbs, importing the
+              server layer lazily so the base CLI works without the ``[server]`` extra.
+What it does: ``serve`` hands off to uvicorn; ``worker`` forwards its flags to the worker
+              entry point; ``migrate`` runs Alembic to head; ``doctor`` aggregates the
+              toolchain, docker, builder, Claude Code login and database probes into one
+              report (exit 1 only on ``down``). ``probe_claude_code`` never prints a token
+              — a fingerprint of at most four characters.
+How:          Each ``cmd_*`` imports inside the function and turns ``ImportError`` into a
+              ``CliError`` naming the extra; ``doctor`` = ``probes.aggregate`` over the
+              observability probes plus the store's ``assert_append_only``.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/server/main.py (``serve``), src/crb/server/worker_main.py (``main``),
+              src/crb/store/migrate.py (``upgrade``), src/crb/observability/probes.py (the
+              probe vocabulary and ``aggregate``), src/crb/builders/claude_code.py
+              (``auth_status`` / ``verify_login``), docs/OPERATOR.md#1-install
+Tested by:    tests/test_cli_doctor.py, tests/test_cli.py
+Touch when:   never for a new repository; when a worker flag is added (mirror it in the
+              forwarding table and in src/crb/server/worker_main.py); when a new probe
+              should appear in ``doctor``.
 """
 
 from __future__ import annotations
@@ -23,6 +46,7 @@ _SERVER_HINT = "the server layer is not installed — `pip install 'commit-repla
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add ``crb serve``, ``crb worker``, ``crb migrate`` and ``crb doctor``."""
     serve = sub.add_parser("serve", help="run the HTTP API (+ the UI when built)")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
@@ -57,6 +81,7 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
+    """Block in uvicorn (``--database-url`` becomes ``CRB_DATABASE_URL`` for the app)."""
     if args.database_url:
         os.environ["CRB_DATABASE_URL"] = args.database_url
     try:
@@ -68,6 +93,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_worker(args: argparse.Namespace) -> int:
+    """Forward the flags to the worker entry point (which owns the defaults)."""
     try:
         import crb.server.worker_main as worker_main_mod
     except ImportError as e:
@@ -89,6 +115,7 @@ def cmd_worker(args: argparse.Namespace) -> int:
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
+    """Alembic to head (plus the append-only triggers) on the resolved URL."""
     try:
         import crb.store.migrate as migrate_mod
         from crb.store.db import database_url
@@ -159,6 +186,7 @@ def probe_claude_code(*, verify: bool = False) -> ProbeResult:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    """One report over every readiness probe; exit 1 only when something is ``down``."""
     from crb.observability import probes
 
     results = [
@@ -197,6 +225,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def _redact_url(url: str) -> str:
+    """A database URL with its password replaced (the user name is kept)."""
     if "@" in url and "://" in url:
         scheme, rest = url.split("://", 1)
         creds, host = rest.rsplit("@", 1)

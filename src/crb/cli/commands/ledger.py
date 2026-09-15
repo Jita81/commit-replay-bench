@@ -4,6 +4,35 @@ Every number printed here carries its ``n`` and its method: ``point = clean/n``
 over *eligible* trials (graded, not disqualified, oracle judgeable), the interval
 is the Wilson 95% score interval, and the apparatus versions present in the cell
 are listed so a reader can see when a cell mixes instruments.
+
+Navigation
+----------
+What it is:   ``crb ledger import-census | import-aggregates | verify | stats | export`` —
+              the JSONL ledger's import, integrity and roll-up verbs.
+What it does: Imports the June-2026 census with honest classification (needs the task
+              files and repo configs; packs are stored and rows re-chained); imports
+              aggregate rows for reference only; walks the chain and re-derives false-Q1 =
+              0 (exit 1 on any break or violation); prints per-cell n / point / Wilson
+              interval / false-Q1 with the apparatus versions present; exports rows.
+How:          ``JsonlLedger`` reads; ``crb.core.legacy`` importers; ``group_by_cell`` +
+              ``cell_stats`` for ``stats``; every command prints JSON or a plain table.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0007-abstract-cell-export-only.md
+Works with:   src/crb/core/ledger.py (``JsonlLedger``, ``cell_stats``, ``false_q1_total``),
+              src/crb/core/legacy.py (the census importers and their provenance stamp),
+              src/crb/server/routes/ledger.py (the HTTP twin over the database),
+              docs/REPRODUCING-THE-CENSUS.md (the procedure these verbs implement),
+              docs/EVIDENCE-AND-CLAIMS.md#5-the-legacy-belt-caveat-on-the-census-ledger
+Tested by:    tests/test_cli.py
+Touch when:   never for a new repository; when a ``stats`` grouping field is added
+              (``GROUP_ALIASES`` here and ``BY_ALIASES`` in
+              src/crb/server/routes/capability.py); ``export --abstract`` is still a stub —
+              see FINDINGS.
+Claims:       ``verify`` exit 0 = chain intact and false-Q1 = 0 over the rows on disk; the
+              census rows it imports carry ``v3-legacy`` and are never blended with
+              current-apparatus rows in a claim
+              (docs/EVIDENCE-AND-CLAIMS.md#4-the-apparatus-stamp--evidence-expires).
 """
 
 from __future__ import annotations
@@ -68,6 +97,7 @@ GROUP_ALIASES: dict[str, str] = {
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add ``crb ledger import-census | import-aggregates | verify | stats | export``."""
     p = sub.add_parser("ledger", help="import, verify, summarise and export the grade ledger")
     ls = p.add_subparsers(dest="ledger_cmd", metavar="<subcommand>")
 
@@ -121,21 +151,26 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 
 
 def _usage(p: argparse.ArgumentParser) -> int:
+    """``crb ledger`` with no subcommand: help + usage-error exit."""
     p.print_help()
     return 2
 
 
 def _ledger(args: argparse.Namespace) -> JsonlLedger:
+    """The ledger at ``--path``, else ``<workdir>/ledger.jsonl``."""
     wd = workdir_of(args)
     path = Path(args.path).expanduser() if getattr(args, "path", "") else wd.ledger_path
     return JsonlLedger(path)
 
 
 def _existing_pack_hashes(ledger: JsonlLedger) -> set[str]:
+    """Pack hashes already cited by the ledger (an import skips their rows)."""
     return {r.evidence_pack_hash for r in ledger.rows() if r.evidence_pack_hash}
 
 
 def cmd_import_census(args: argparse.Namespace) -> int:
+    """Import the census: configs → tasks → grades (classified from the task files),
+    packs written under their hash, rows re-chained, the chain verified afterwards."""
     wd = workdir_of(args)
     grades, tasks_dir, configs = (
         Path(args.grades).expanduser(),
@@ -226,6 +261,7 @@ def cmd_import_census(args: argparse.Namespace) -> int:
 
 
 def cmd_import_aggregates(args: argparse.Namespace) -> int:
+    """Import aggregate rows for reference only — they never enter the graded ledger."""
     wd = workdir_of(args)
     src = Path(args.source).expanduser()
     if not src.is_file():
@@ -270,6 +306,7 @@ def cmd_import_aggregates(args: argparse.Namespace) -> int:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
+    """Walk the chain and re-derive false-Q1 = 0; exit 1 on a break or a violation."""
     ledger = _ledger(args)
     out: dict[str, Any] = {"ledger": str(ledger.path)}
     try:
@@ -306,6 +343,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _group_fields(by: str) -> tuple[str, ...]:
+    """``--by`` aliases → cell fields; empty means the full cell key."""
     fields: list[str] = []
     for token in by.split(","):
         t = token.strip().lower()
@@ -318,6 +356,7 @@ def _group_fields(by: str) -> tuple[str, ...]:
 
 
 def cmd_stats(args: argparse.Namespace) -> int:
+    """Per-cell statistics (n, point, Wilson CI, false-Q1, apparatus versions)."""
     ledger = _ledger(args)
     rows = list(ledger.rows())
     fields = _group_fields(args.by)
@@ -404,6 +443,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
+    """Rows as JSON lines to stdout or ``--out``; ``--abstract`` is not wired yet."""
     ledger = _ledger(args)
     if args.abstract:
         raise NotImplementedError(

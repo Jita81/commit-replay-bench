@@ -1,4 +1,26 @@
-"""``crb mine`` — find replayable commits, prove them RED, capture baselines, gold-check."""
+"""``crb mine`` — find replayable commits, prove them RED, capture baselines, gold-check.
+
+Navigation
+----------
+What it is:   ``crb mine`` — walk a registered repo's history for replayable commits and
+              write the qualified ones as tasks.
+What it does: Streams the core's ``mine`` outcomes (RED check → baseline → gold check),
+              appends each qualified task to ``<workdir>/tasks/<repo>.jsonl`` AS IT IS
+              FOUND so an interrupted run keeps what it proved, and reports what was
+              examined, found and skipped by reason. Never re-mines a task already on file.
+How:          ``require_clone`` → ``bound_runner`` + ``build_executor`` → ``mine(...)``
+              generator → ``append_tasks`` per outcome → summary.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/core/mine.py (the qualification pipeline), src/crb/cli/commands/repo.py
+              (``bound_runner`` / ``env_dir_of`` — the runner on the set-up environment),
+              src/crb/cli/commands/__init__.py (``Workdir.append_tasks``, ``known_task_ids``),
+              src/crb/cli/commands/grade.py (consumes the task file), docs/OPERATOR.md#3-run-a-sweep
+Tested by:    tests/test_cli.py
+Touch when:   never for a new repository (pool caps and candidate limits are repo config —
+              docs/OPERATOR.md#2-configure-a-repository); when ``mine`` gains a parameter
+              worth exposing as a flag.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +47,7 @@ from crb.core.spec import POOL_HARD, POOL_STANDARD
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add ``crb mine``."""
     p = sub.add_parser("mine", help="mine replayable commits into <workdir>/tasks/<name>.jsonl")
     p.add_argument("name", help="registered repo")
     p.add_argument("--pool", choices=(POOL_STANDARD, POOL_HARD), default=POOL_STANDARD)
@@ -45,6 +68,7 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 
 
 def cmd_mine(args: argparse.Namespace) -> int:
+    """Run the miner and append qualified tasks as they are proved."""
     wd = workdir_of(args)
     config, clone = wd.require_clone(args.name)
     repo = GitRepo(clone)
