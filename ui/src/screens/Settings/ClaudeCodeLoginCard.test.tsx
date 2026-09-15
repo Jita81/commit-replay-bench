@@ -1,3 +1,28 @@
+/**
+ * ui/src/screens/Settings/ClaudeCodeLoginCard.tsx — a token value never appears in the page, in any state.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Screen tests for the Claude Code login card against a mocked API.
+ * What it does: Pins the operator instruction and the absent status; presence with the
+ *               ≤ 4-char fingerprint and provenance and never a value; a viewer sees status
+ *               only (no form, no buttons, no host path); the paste field is a password input
+ *               that is never echoed and is cleared after a save; a shape rejection renders
+ *               without the token; Verify shows ok / invalid and the 429 when rate-limited;
+ *               Remove returns the status to absent.
+ * How:          `mockApi` with `SecretsStatusList` / `LoginCheck` fixtures; `userEvent` for
+ *               the paste and clicks; assertions that the fake token string is absent from
+ *               the DOM after every step.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Settings/ClaudeCodeLoginCard.tsx and
+ *               ui/src/screens/Settings/claudeCodeLogin.ts (the code under test),
+ *               ui/src/test/utils.tsx, tests/test_server_routes_admin_secrets.py (the
+ *               server-side half of the same property)
+ * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx
+ * Touch when:   a status field or a verify outcome is added — extend the fixtures and keep
+ *               the "never a value" assertion on every case.
+ */
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'

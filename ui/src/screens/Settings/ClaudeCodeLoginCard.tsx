@@ -1,3 +1,29 @@
+/**
+ * The "Claude Code login" card — status for every role; paste, verify and remove for admins; the value is never shown.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The Settings card for the `claude setup-token` value the `auth: cli` builder
+ *               mode uses.
+ * What it does: Shows presence, the ≤ 4-character fingerprint and provenance (who set it,
+ *               when) to any signed-in role; admins can paste a token (a `type="password"`
+ *               field, cleared the moment the server accepts it — the value is not kept in
+ *               state), verify it (the probe's status, model, CLI version and duration) and
+ *               remove it. A shape rejection or a rate limit renders as the envelope without
+ *               echoing the token.
+ * How:          `useSecrets` → `StatusLine`; the form calls `useSaveClaudeCodeToken`;
+ *               `CHECK_DISPLAY` maps a `LoginCheck` status to tone / glyph / wording.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Settings/claudeCodeLogin.ts (the hooks and types),
+ *               ui/src/screens/Settings/SettingsPage.tsx (the host), ui/src/lib/auth.tsx
+ *               (`can('admin')`), src/crb/server/routes/admin.py (the routes and their 422 /
+ *               409 / 429 answers), src/crb/builders/claude_code.py (the `cli` auth mode
+ *               that consumes the stored token)
+ * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx, ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ * Touch when:   a `LoginCheckStatus` is added on the server (src/crb/server/secrets.py) —
+ *               add its `CHECK_DISPLAY` row; never for a new repository.
+ */
 import { useState, type FormEvent } from 'react'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -19,6 +45,7 @@ import {
   type SecretStatus,
 } from './claudeCodeLogin'
 
+/** Tone / glyph / wording per verify outcome; only `ok` is green. */
 const CHECK_DISPLAY: Record<LoginCheckStatus, { tone: Tone; glyph: string; label: string }> = {
   ok: { tone: 'green', glyph: '✓', label: 'ok — the login works' },
   invalid: { tone: 'red', glyph: '✕', label: 'invalid — the token was rejected (401)' },
@@ -27,6 +54,7 @@ const CHECK_DISPLAY: Record<LoginCheckStatus, { tone: Tone; glyph: string; label
   error: { tone: 'amber', glyph: '!', label: 'error' },
 }
 
+/** Presence pill with the fingerprint and provenance, or "no token stored" with what `auth: cli` falls back to. */
 function StatusLine({ status }: { status: SecretStatus | undefined }) {
   if (!status?.present) {
     return (
@@ -52,6 +80,7 @@ function StatusLine({ status }: { status: SecretStatus | undefined }) {
   )
 }
 
+/** The verify probe's result line: status pill, detail, model, CLI version, duration. */
 function CheckResult({ check }: { check: LoginCheck }) {
   const d = CHECK_DISPLAY[check.status] ?? CHECK_DISPLAY.error
   return (
