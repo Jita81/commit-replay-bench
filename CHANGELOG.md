@@ -39,6 +39,31 @@ Nothing yet — everything on `reboot/v2` up to the rc pin is in 2.0.0a1 below.
 - **Licence**: BSL 1.1 adopted (DL-015/DL-025); `LICENSE` is a reservation of rights until
   the text lands; the image label is `NOASSERTION`; `docs/LICENSING.md`.
 
+### 2026-09-15 (later) — forward mode wired, the builder's own gate, honest counts
+- **Factory P6 wired** (`45c2f99`): the forward-mode loop is a run kind (`kind: factory`)
+  over a frozen, hashed backlog registered through `POST /factory/{repo}/backlog`; task
+  view, structural-gap sign-offs (value slots refused) and the hash-chained evidence chain
+  are served; delivery opt-in and fail-closed. Not yet: a model-backed test author.
+- **Belt-5 pre-flight** (`36f7949`, `44bd380`): `POST /runs.preflight` applies the
+  repository's own fixers after an honest build and, if still rejected, gives the builder
+  ONE bounded repair call with the findings; recorded as the builder `<name>+preflight`
+  (a distinct arm) with `labels.preflight`. Stage A offline: fixers alone flip 2 of the 4
+  NHS lint misses.
+- **Provider circuit breaker** (`12bec2a`): a build run stops after `outage_stop` (3)
+  consecutive refused attempts instead of writing a refused row per remaining attempt.
+- **`n_tasks`** (`adc42b1`): distinct tasks behind `n` on every cell, the sign-off preview
+  and the map ("16 rows on 4 commits is a statement about 4 commits").
+- **Re-measurement plan** (`cf851ef`): one entry per (cell, mode); blind rows priced at the
+  ladder's rungs; relabelled tasks left out and named; task counts shown.
+- **Mutant wall clock** (`196fdb6`): a mutant's run is capped at 4× the green baseline —
+  an infinite-loop mutant no longer holds an oracle run for the full 900 s.
+- **Licence: Apache-2.0** (`8d8bceb`, DL-028) — LICENSE, NOTICE, SPDX, image label.
+- **File headers + code map**: every source file carries a `Navigation` block
+  (docs/FILE-HEADER-STANDARD.md); `scripts/code_map.py` generates docs/CODE-MAP.md and
+  gates it in CI; README rewritten as the front door; docs/ONBOARDING-A-REPO.md for a
+  delivery team; two defects the header pass found are fixed (`74ee888`).
+- CI green on `reboot/v2` for the first time since the reboot (`d03f8eb`, `fd25f2d`).
+
 ### Evidence caveat for this release
 Every ledger row to date was measured on the **host executor posture** (`executor: local`)
 — including the rows graded after the independent review's finding 1 (the builder
