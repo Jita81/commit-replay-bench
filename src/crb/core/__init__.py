@@ -33,6 +33,33 @@ The engine is deliberately small and mechanical:
 * :mod:`crb.core.legacy`    — importers for the census and Athena ledgers.
 * :mod:`crb.core.secrets_file` — owner-only secrets at rest (0700 dir / 0600 files,
   atomic writes, fingerprint-only status); shared by the builders and the server.
+* :mod:`crb.core.lint`      — belt 5: the repository's own formatter/linter.
+* :mod:`crb.core.test_infra`— belt 1b: which files are the oracle's execution environment.
+* :mod:`crb.core.services`  — services the oracle needs (era-selected, fail-closed).
+* :mod:`crb.core.review`    — human review ledger, anchored to the patch hash.
+* :mod:`crb.core.learn`     — refusal triage, strengthening backlog, re-measurement plan.
+* :mod:`crb.core.redact`    — credential redaction for everything that leaves the sandbox.
+* :mod:`crb.core.version`   — ``__version__`` and ``APPARATUS_VERSION``.
+
+Navigation
+----------
+What it is:   The package marker and index of the engine — the module list above is the
+              map a reader walks.
+What it does: Re-exports the two version constants; imports nothing else, so importing
+              ``crb.core`` never pulls in a subsystem (the layering is enforced by
+              import-linter, not by this file).
+How:          One import from ``crb.core.version``; ``__all__`` names the two constants.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0008-stdlib-core-and-downward-layers.md
+Works with:   src/crb/core/version.py (the only import), src/crb/core/grade.py (the module
+              the package exists for), src/crb/core/ledger.py, src/crb/core/run.py
+              (the orchestrator that ties the engine together), pyproject.toml (the
+              import-linter contract)
+Tested by:    tests/test_version_consistency.py (the re-export), tests/test_grade.py and the
+              rest of tests/ through the modules listed above
+Touch when:   a module is added to or removed from ``crb.core`` — keep the list above in
+              step (docs/CODE-MAP.md is generated; this list is hand-kept); never add an
+              import here.
 """
 
 from crb.core.version import APPARATUS_VERSION, __version__

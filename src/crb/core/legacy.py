@@ -25,6 +25,42 @@ Two legacy sources exist and they are **not** the same kind of evidence:
 Everything here is deterministic: the same input files produce byte-identical
 rows (fixed import timestamp, content-derived ids), so a re-import is detectable
 by evidence-pack hash rather than by wall clock.
+
+Navigation
+----------
+What it is:   The legacy importers — the 2026-07-08 census (configs, tasks and per-trial
+              verdicts → ``RepoConfig`` / ``TaskSpec`` / ``GradeRow`` with an imported
+              evidence pack) and Athena's aggregate benchmark ledger (→ ``AggregateRow``,
+              reference only).
+What it does: Maps every census verdict to a ledger row under ``provenance="imported:…"``
+              and the ``1.0-census`` apparatus, with ``belt_set`` ``v3-legacy`` or ``v4``
+              by what the row actually recorded — a belt never measured stays ``None``;
+              hashes the raw row into an imported pack so "no pack ⇒ no Q1" holds; skips a
+              verdict whose task record is missing rather than guessing its class or
+              size; labels exact-duplicate lines; refuses to turn an aggregate mean into
+              per-trial rows.
+How:          ``import_repo_configs`` (census ``configs.json``) → ``import_census_tasks``
+              (``<repo>_tasks.json``, belt scope resolved through the repo's runner) →
+              ``import_census`` (``grades.jsonl`` line by line → ``_census_grade`` →
+              ``ImportedGrade``); ``import_benchmark_ledger`` → ``AggregateRow``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/core/ledger.py (the row invariants an imported row must still pass;
+              ``expected_belt_sets`` admits ``v3-legacy`` only with a census stamp),
+              src/crb/core/spec.py (``RepoConfig.from_dict`` / ``TaskSpec.from_dict`` accept
+              the census shapes), src/crb/core/runners/base.py (belt-scope resolution),
+              src/crb/cli/commands/ledger.py (``crb ledger import-census`` /
+              ``import-aggregates``), data/census-2026-07-08/README.md (the artefact and
+              its manifest)
+Tested by:    tests/test_legacy.py, tests/test_census_gate.py
+Touch when:   never for a new repository (a client's history is MINED, not imported);
+              the census is a fixed artefact, so a change here is a change to what its
+              rows mean — re-run docs/REPRODUCING-THE-CENSUS.md end to end and keep
+              docs/EVIDENCE-AND-CLAIMS.md#5-the-legacy-belt-caveat-on-the-census-ledger true.
+Claims:       Census rows are a separate apparatus (``1.0-census``, three or four belts) and
+              are never blended with measured rows
+              (docs/EVIDENCE-AND-CLAIMS.md#5-the-legacy-belt-caveat-on-the-census-ledger).
 """
 
 from __future__ import annotations
@@ -100,6 +136,7 @@ def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
 
 
 def _read_json(path: str | Path) -> Any:
+    """Load one JSON file (a malformed census file raises: it is a fixed artefact)."""
     with Path(path).open("r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -132,6 +169,7 @@ def import_repo_configs(configs_json: str | Path) -> dict[str, RepoConfig]:
 
 
 def _task_files(tasks_dir: str | Path) -> list[Path]:
+    """Every ``<repo>_tasks.json`` in the census directory, sorted for determinism."""
     return sorted(
         p
         for p in Path(tasks_dir).glob("*_tasks.json")
@@ -199,6 +237,7 @@ def import_census_tasks(
 
 
 def _task_index(tasks_dir: str | Path, configs_json: str | Path) -> dict[tuple[str, str], TaskSpec]:
+    """Every census task keyed by ``(repo, sha)`` — what a verdict is joined to."""
     return {(t.repo, t.task_id): t for t in import_census_tasks(tasks_dir, configs_json)}
 
 
@@ -224,6 +263,7 @@ class ImportedGrade:
 
     @property
     def pack_hash(self) -> str:
+        """The row's ``evidence_pack_hash`` — the canonical hash of ``pack``."""
         return self.row.evidence_pack_hash
 
 
@@ -233,6 +273,7 @@ def imported_pack(raw: Mapping[str, Any], *, source: Mapping[str, Any]) -> dict[
 
 
 def imported_pack_hash(pack: Mapping[str, Any]) -> str:
+    """SHA-256 of the canonical envelope (the same form ``verify_pack`` recomputes)."""
     return sha256_text(canonical_json(pack))
 
 
@@ -254,10 +295,15 @@ def _census_grade(
     config: RepoConfig,
     source_file: str,
 ) -> ImportedGrade:
+    """One census verdict → row + pack. The row's class, size (when unrecorded) and
+    gold verdict come from the joined task record; everything else is the raw row,
+    and the ``GradeRow`` constructor re-checks false-Q1 over the recorded belts."""
     for key in ("repo", "task", "clean"):
         if key not in raw:
             raise LegacyImportError(f"line {line}: census row has no {key!r}")
     source_changed = _belt(raw, "source_changed")
+    # the belt set is what the row RECORDED, never what the census could have: a
+    # row without a source_changed key was graded before belt 4 existed
     belt_set = BELT_SET_V4 if "source_changed" in raw else BELT_SET_V3_LEGACY
     pack = imported_pack(
         raw, source={"provenance": CENSUS_SOURCE, "file": source_file, "line": line}
@@ -300,6 +346,7 @@ def _census_grade(
         belt_set=belt_set,
         provenance=CENSUS_PROVENANCE,
         labels=labels,
+        # content-derived id (not a uuid): the same source line imports to the same row
         row_id=sha256_text(f"{CENSUS_PROVENANCE}:{pack_hash}")[:32],
     )
     return ImportedGrade(row=row, pack=pack, line=line)
@@ -541,6 +588,7 @@ class AggregateRow:
             latency_s_mean=_opt_float(d.get("latency_s_mean")),
             human_verified=None if d.get("human_verified") is None else bool(d["human_verified"]),
             human_corrections=_opt_int(d.get("human_corrections")),
+            # the source line's own hash: a re-import of the same ledger is detectable
             raw_hash=sha256_text(canonical_json(dict(d))),
         )
 
