@@ -24,6 +24,36 @@ a reviewer may always be stricter.
 The verdict is appended to the factory evidence ledger with
 ``recorded_before_edit=True`` **before** it is returned — and the ledger refuses
 to record an edit for a build that has no verdict (:class:`EditBeforeVerdict`).
+
+Navigation
+----------
+What it is:   Independent review — mechanical probes first, then a different identity's
+              opinion that can only tighten the verdict; recorded BEFORE any edit.
+What it does: Re-proves RED from a pristine worktree using the oracle COMMIT's bytes,
+              replays the delivered edits into a fresh tree and re-grades the belts, plants
+              deterministic mutants and requires the oracle to kill them; a failed required
+              probe is ``reject`` whatever the reviewer says, a major finding caps the
+              verdict at ``accept_with_edit``; the verdict is appended to the evidence
+              ledger before it is returned, and ``permit_edit`` refuses without one.
+How:          ``review`` = identity check → ``default_probes`` over a ``ReviewContext`` →
+              ``Reviewer.assess`` → ``derive_verdict`` (the floor) → ``record_verdict``.
+Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0009-text-level-mutators.md,
+              docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/factory/evidence.py (the verdict-before-edit gate),
+              src/crb/factory/build.py (``BuildResult`` — the edits and the oracle commit),
+              src/crb/factory/testfirst.py (``RedProof`` and the identity rule),
+              src/crb/core/oracle/mutation.py (``score_task`` for the strength probe),
+              src/crb/core/grade.py (the belt re-run), src/crb/factory/loop.py (``_review``
+              and the rework cycle)
+Tested by:    tests/test_factory_review.py, tests/test_factory_loop.py
+Touch when:   never for a new repository; adding a probe means a ``Probe`` class, a place in
+              ``default_probes`` and a decision whether it is ``required`` (a required probe
+              that cannot run FAILS); a new reviewer must carry a rung label distinct from
+              every builder and test author.
+Claims:       ``accept`` is the probes' licence plus one identity's opinion — a second
+              mechanical observation, not a proof of semantic correctness
+              (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
 """
 
 from __future__ import annotations
@@ -69,12 +99,16 @@ EditBeforeVerdict = VerdictBeforeEditViolation
 
 
 def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
+    """Call the optional event callback (no-op when none was given)."""
     if on_event is not None:
         on_event(action, payload)
 
 
 @dataclass(frozen=True)
 class ReviewFinding:
+    """One observation from a probe or the reviewer, with the severity that drives the
+    mechanical floor (``blocking`` → reject, ``major`` → at least accept_with_edit)."""
+
     kind: str
     severity: str
     detail: str
@@ -113,6 +147,7 @@ class ProbeResult:
 
     @property
     def failed(self) -> bool:
+        """A required probe that did not PASS — ``None`` (could not run) counts as failed."""
         return self.required and self.passed is not True
 
     def to_dict(self) -> dict[str, Any]:
@@ -129,6 +164,9 @@ class ProbeResult:
 
 @dataclass(frozen=True)
 class ReviewContext:
+    """Everything a probe needs: the build, its proof, the repo config and the runner /
+    executor to re-run tests with, plus a scratch dir for fresh worktrees."""
+
     repo: GitRepo
     item: BacklogItem
     build: BuildResult
@@ -144,6 +182,8 @@ class ReviewContext:
 
 @runtime_checkable
 class Probe(Protocol):
+    """A mechanical check over a delivered change; ``run`` never raises for a finding."""
+
     name: str
 
     def run(self, ctx: ReviewContext) -> ProbeResult: ...
@@ -174,6 +214,8 @@ def replay_edits(build: BuildResult, dest: Workspace) -> list[str]:
 
 
 def _fresh(ctx: ReviewContext, tag: str) -> Workspace:
+    """A pristine worktree at the oracle commit's PARENT (what ``Workspace.create`` gives
+    for a sha) — never the builder's tree."""
     dest = ctx.scratch / f"review-{tag}-{ctx.config.name}-{ctx.item.id}-{ctx.build.oracle.sha[:10]}"
     return Workspace.create(ctx.repo, ctx.build.oracle.sha, dest, config=ctx.config)
 
@@ -390,6 +432,7 @@ class MutationStrengthProbe:
 
 
 def default_probes() -> tuple[Probe, ...]:
+    """The three probes every review runs unless the spec overrides them."""
     return (RedReproductionProbe(), BeltRerunProbe(), MutationStrengthProbe())
 
 
@@ -400,6 +443,8 @@ def default_probes() -> tuple[Probe, ...]:
 
 @dataclass(frozen=True)
 class ReviewOpinion:
+    """What a reviewer says — combined with the probes by ``derive_verdict``."""
+
     verdict: str
     findings: tuple[ReviewFinding, ...] = ()
     summary: str = ""
@@ -425,6 +470,7 @@ class Reviewer(Protocol):
 
 
 def reviewer_label(reviewer: Reviewer) -> str:
+    """The rung-style label compared against the builder's and the test author's."""
     return f"{reviewer.name}:{reviewer.model}"
 
 
@@ -444,6 +490,9 @@ class MechanicalReviewer:
 
 @dataclass(frozen=True)
 class ReviewVerdict:
+    """The recorded verdict: who reviewed what (builder, author, pack, PR), every probe
+    and finding, and ``event_id`` of the ledger row it was written as."""
+
     item_id: str
     verdict: str
     reviewer: str
@@ -466,10 +515,12 @@ class ReviewVerdict:
 
     @property
     def accepted(self) -> bool:
+        """Accepted outright — no edit required."""
         return self.verdict == VERDICT_ACCEPT
 
     @property
     def rework_required(self) -> bool:
+        """Accepted only with an edit — the loop re-enters RED proof → build → verdict."""
         return self.verdict == VERDICT_ACCEPT_WITH_EDIT
 
     def to_dict(self) -> dict[str, Any]:

@@ -21,6 +21,34 @@ identity from every builder that will build the source. The proof is mechanical:
 Identity separation is enforced here: :func:`assert_distinct_identity` compares
 rung labels (``builder:model``) and refuses a build whose builder authored the
 oracle it is graded against.
+
+Navigation
+----------
+What it is:   The RED proof and the test-first authoring seam — the oracle is manufactured
+              and proven to fail on the base before anything is built.
+What it does: Writes the authored test into a fresh worktree at HEAD, runs its target
+              scope, and requires RED with attributable failing ids — green, a timeout or
+              an unattributable failure is ``NotRed`` (fail closed); records the test's
+              SHA-256 as the immutable oracle; refuses a build or review by the identity
+              that authored the oracle; runs a ``TestAuthor`` in a disposable worktree so
+              a stray source edit can never leak into the proof.
+How:          ``author_test`` (optional) → ``prove_red`` = ``worktree_at`` →
+              ``write_authored`` → ``runner.run`` → ``RedProof``;
+              ``assert_distinct_identity`` compares normalised rung labels.
+Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/factory/build.py (stages the proven bytes as the oracle commit),
+              src/crb/factory/review.py (re-runs this exact proof from a pristine tree),
+              src/crb/core/workspace.py (``Workspace.at_ref``), src/crb/core/runners/base.py
+              (the run whose failing ids are the proof), src/crb/builders/base.py (the
+              builder contract that cannot author tests — hence ``TestAuthor``),
+              src/crb/factory/loop.py (``_oracle`` / ``_prove``)
+Tested by:    tests/test_factory_testfirst.py, tests/test_factory_loop.py
+Touch when:   never for a new repository (the runner and its scope come from the repo
+              config); when a new test-author rung is added (it must carry a label
+              distinct from every builder rung); when the proof's recorded fields change
+              (bump ``RED_PROOF_SCHEMA``).
 """
 
 from __future__ import annotations
@@ -77,6 +105,7 @@ def assert_distinct_identity(author: str, other: str, *, role: str = "builder") 
 
 
 def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
+    """Call the optional event callback (no-op when none was given)."""
     if on_event is not None:
         on_event(action, payload)
 
@@ -104,10 +133,12 @@ class AuthoredTest:
 
     @property
     def sha256(self) -> str:
+        """The oracle's identity: the hash the proof, the commit and the review all cite."""
         return hashlib.sha256(self.content.encode("utf-8")).hexdigest()
 
     @property
     def operator_authored(self) -> bool:
+        """Whether a human (not a rung) wrote the oracle."""
         return self.author.startswith(OPERATOR_AUTHOR_PREFIX)
 
     def to_dict(self) -> dict[str, Any]:
@@ -165,6 +196,7 @@ class RedProof:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> RedProof:
+        """Inverse of :meth:`to_dict` (a proof with no failing ids still raises ``NotRed``)."""
         return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
 
 
@@ -176,6 +208,7 @@ def worktree_at(
 
 
 def write_authored(ws: Workspace, authored: AuthoredTest) -> Path:
+    """Write the authored test into the worktree (parents created); returns its path."""
     p = ws.root / authored.path
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(authored.content, encoding="utf-8")
@@ -299,11 +332,14 @@ class TestAuthor(Protocol):
 
 
 def author_label(author: TestAuthor) -> str:
+    """The rung-style label (``name:model``) compared by ``assert_distinct_identity``."""
     return f"{author.name}:{author.model}"
 
 
 @dataclass(frozen=True)
 class AuthoringResult:
+    """What a test author produced, who it was, and how long it took."""
+
     authored: AuthoredTest
     author: str
     duration_s: float

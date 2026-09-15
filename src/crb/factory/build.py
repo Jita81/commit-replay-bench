@@ -22,6 +22,36 @@ this module manufactures the smallest honest one:
 
 Identity: the builder that builds the source is refused if it is the identity
 that authored the oracle (:func:`crb.factory.testfirst.assert_distinct_identity`).
+
+Navigation
+----------
+What it is:   Build under the four belts in forward mode — the smallest honest commit that
+              lets the unchanged replay grader judge new work.
+What it does: Commits ONLY the RED-proven test on a throwaway branch parented at HEAD
+              (refusing any bytes that differ from the proof — ``OracleTampered``), builds
+              at the parent with the test overlaid exactly as replay does, grades with the
+              ordinary grader so belt 1 is the real belt 1, writes the evidence pack and a
+              ``process_step="factory"`` ledger row; ``build_ladder`` climbs the escalation
+              rungs until clean or disqualified, refusing any rung that authored the oracle.
+How:          ``stage_oracle_commit`` → ``Workspace.create(repo, oracle_sha)`` +
+              ``overlay_tests`` → baseline → ``factory_brief`` → builder → ``grade`` →
+              ``EvidencePack`` + ``write_pack`` → ``factory_row`` → ``JsonlLedger.append``.
+Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
+              docs/adr/0004-builder-registry-sighted-and-blind.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/grade.py (the grader, unchanged), src/crb/core/workspace.py (the
+              trial tree), src/crb/factory/testfirst.py (``RedProof`` / identity check),
+              src/crb/builders/base.py (``Builder``, ``BuildBrief``, ``Rung``),
+              src/crb/core/ledger.py (``GradeRow`` with ``PROCESS_FACTORY``),
+              src/crb/factory/delivery.py (commits the kept workspace),
+              src/crb/factory/review.py (replays the edits it recorded)
+Tested by:    tests/test_factory_build.py, tests/test_factory_loop.py
+Touch when:   never for a new repository; when ``GradeRow`` gains a field (``factory_row``
+              maps it — keep it in step with ``grade_row_from_result`` in the core); when
+              the oracle-commit convention changes (the review probes read the same branch).
+Claims:       A clean factory row is the same mechanical observation as a replay row, on an
+              oracle the factory manufactured — the oracle's strength is a separate
+              measurement (docs/EVIDENCE-AND-CLAIMS.md#2-clean-semantic-q1-and-false-q1).
 """
 
 from __future__ import annotations
@@ -77,15 +107,18 @@ class OracleTampered(ValueError):
 
 
 def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
+    """Call the optional event callback (no-op when none was given)."""
     if on_event is not None:
         on_event(action, payload)
 
 
 def builder_label(builder: Builder) -> str:
+    """The rung label (``name:model``) compared against the oracle author's."""
     return f"{builder.name}:{builder.model}"
 
 
 def oracle_branch(item_id: str) -> str:
+    """The throwaway branch that carries an item's oracle commit."""
     return f"{FACTORY_BRANCH_PREFIX}{item_id}/test"
 
 
@@ -96,6 +129,9 @@ def oracle_branch(item_id: str) -> str:
 
 @dataclass(frozen=True)
 class OracleCommit:
+    """The staged oracle: the synthetic task id (``sha``), its parent (HEAD at staging),
+    the branch, and the test path + hash the commit was verified to carry."""
+
     sha: str
     parent: str
     branch: str
@@ -161,6 +197,8 @@ def stage_oracle_commit(
         shutil.rmtree(dest, ignore_errors=True)
     branch = oracle_branch(item.id)
     repo.run("branch", "-f", branch, sha, check=True)
+    # Verify the commit from git's own view, not from what we think we wrote: belt 1
+    # will later compare against ``git show <sha>:<path>``, so THAT must be the proof.
     changed = repo.changed_files(sha)
     if changed != [authored.path]:
         raise OracleTampered(f"oracle commit touches {changed}, expected only {authored.path!r}")
@@ -227,25 +265,31 @@ class BuildResult:
 
     @property
     def clean(self) -> bool:
+        """The grader's verdict (all evaluated belts held)."""
         return self.grade.clean
 
     @property
     def disqualified(self) -> bool:
+        """The grader excluded the attempt (tampering, malformed oracle, integrity)."""
         return self.grade.disqualified
 
     @property
     def pack_hash(self) -> str:
+        """The evidence pack's hash — the row's anchor and the review's key."""
         return self.pack.pack_hash
 
     @property
     def closed(self) -> bool:
+        """Whether the build worktree is gone (no delivery or review can use it)."""
         return self.workspace is None or not self.workspace.root.exists()
 
     def close(self) -> None:
+        """Remove the build worktree (idempotent)."""
         if self.workspace is not None and not self.closed:
             self.workspace.remove()
 
     def summary(self) -> dict[str, Any]:
+        """What the factory evidence ledger and the loop's outcome record per build."""
         return {
             "item_id": self.item_id,
             "rung": self.rung,
@@ -276,6 +320,8 @@ def factory_row(
     actor: str,
     labels: Mapping[str, str],
 ) -> GradeRow:
+    """The ledger row for a factory grade — the same fields as a replay row with
+    ``process_step=factory`` and the belt-5 set; ``GradeRow`` enforces false-Q1 = 0."""
     return GradeRow(
         repo=task.repo,
         task_id=task.task_id,
@@ -371,7 +417,7 @@ def build_item(
         try:
             outcome = builder.build(ws, brief, budget, on_event=on_event)
         except SandboxUnavailable:
-            raise
+            raise  # the one exception that must stop a run: no isolation, no measurement
         except Exception as exc:  # builder infrastructure failure — recorded, graded anyway
             error = redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=500)
         bref = (

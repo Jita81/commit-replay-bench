@@ -19,6 +19,32 @@ DevOps seam plugs in the same way.
 The PR body is the evidence summary — belts, pack hash, apparatus, route
 decision, RED proof — and a link to the pack. It carries no secrets: every
 string passes through :mod:`crb.core.redact`.
+
+Navigation
+----------
+What it is:   Delivery — a clean build becomes a branch + pull request in the customer's
+              repository, never a write to its default branch.
+What it does: Enforces the hard invariant first (``assert_not_default_branch``, before any
+              credential is read), then resolves BYOK credentials (the default provider
+              refuses — fail closed), commits the source diff plus the oracle on
+              ``crb/<item>-<slug>``, pushes with a one-shot auth header (the token never
+              touches ``.git/config``), and opens the PR whose body is the redacted evidence
+              summary. Push and PR are injectable seams.
+How:          ``deliver`` = invariant → credentials → deliverability → ``commit_on_branch``
+              → ``push_fn`` → ``open_pr_fn`` → ``DeliveryResult``.
+Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md (the PR body is a
+              summary, never raw output)
+Works with:   src/crb/factory/build.py (``BuildResult`` and its kept workspace),
+              src/crb/core/git.py (``GitRepo.run`` for checkout / commit / push),
+              src/crb/core/redact.py (every string in the PR body), src/crb/factory/loop.py
+              (``_deliver`` — opt-in, default off), src/crb/factory/evidence.py
+              (``record_delivery`` / ``record_delivery_refused``), docs/SECURITY.md#33-credentials
+Tested by:    tests/test_factory_delivery.py, tests/test_factory_loop.py
+Touch when:   onboarding a repository hosted somewhere other than GitHub — add an
+              ``open_pr_fn`` seam (Azure DevOps, GitLab) and a credentials provider; NEVER
+              relax ``ALWAYS_PROTECTED_BRANCHES`` or the invariant's order (its test is a
+              ratchet — docs/CONTRIBUTING.md#the-never-weaken-a-gate-rule).
 """
 
 from __future__ import annotations
@@ -84,15 +110,19 @@ class GitCredentials:
             raise ValueError("credentials need a non-empty token")
 
     def basic_auth_header(self) -> str:
+        """The one-shot ``Authorization`` header value the push seam passes to git."""
         raw = f"{self.username}:{self.token}".encode()
         return "Authorization: Basic " + base64.b64encode(raw).decode("ascii")
 
     def to_dict(self) -> dict[str, Any]:
+        """Loggable form: the token is always ``[REDACTED]``."""
         return {"remote": self.remote, "username": self.username, "token": "[REDACTED]"}
 
 
 @runtime_checkable
 class GitCredentialsProvider(Protocol):
+    """BYOK seam: how delivery obtains a push token for ``repo``."""
+
     def resolve(self, repo: str) -> GitCredentials: ...
 
 
@@ -106,6 +136,8 @@ class NullProvider:
 
 
 class StaticProvider:
+    """Credentials handed in by the caller (tests, a one-off run)."""
+
     def __init__(self, credentials: GitCredentials) -> None:
         self._creds = credentials
 
@@ -145,6 +177,7 @@ class EnvProvider:
 
 
 def _norm_branch(name: str) -> str:
+    """Strip ``refs/heads/`` and surrounding slashes so aliases of a branch compare equal."""
     n = (name or "").strip()
     while n.startswith("refs/heads/"):
         n = n[len("refs/heads/") :]
@@ -174,11 +207,13 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 def slugify(text: str, *, max_len: int = 40) -> str:
+    """A branch-safe slug of a title (lower-case, hyphenated, capped)."""
     s = _SLUG_RE.sub("-", text.lower()).strip("-")
     return s[:max_len].rstrip("-") or "change"
 
 
 def delivery_branch_name(item: BacklogItem) -> str:
+    """``crb/<item id>-<title slug>`` — the branch a delivery opens."""
     return f"{DELIVERY_BRANCH_PREFIX}{item.id}-{slugify(item.title)}"
 
 
@@ -194,6 +229,7 @@ def pr_body(
     pack_link: str = "",
     route_decision: Mapping[str, Any] | None = None,
 ) -> str:
+    """The PR description: the evidence summary a reviewer needs, every string redacted."""
     belts = build.grade.belts.to_dict()
     proof = build.pack.notes.get("red_proof", {})
     lines = [
@@ -260,6 +296,7 @@ def git_push_fn(repo: GitRepo, *, branch: str, refspec: str, credentials: GitCre
 
 
 def owner_repo_from_remote(remote: str) -> tuple[str, str]:
+    """``(owner, name)`` from an https or ``git@`` remote URL (``.git`` stripped)."""
     r = remote.strip()
     path = (
         r.split(":", 1)[1] if r.startswith("git@") and ":" in r else urllib.parse.urlparse(r).path
@@ -324,6 +361,9 @@ def github_open_pr_fn(
 
 @dataclass(frozen=True)
 class DeliveryResult:
+    """What a delivery produced: the branch, its commit, the PR (url + number) and the
+    hash of the body that was posted."""
+
     item_id: str
     branch: str
     base: str
@@ -336,6 +376,7 @@ class DeliveryResult:
 
     @property
     def pr_ref(self) -> str:
+        """The reference the review records: the PR URL, or branch@sha when no PR opened."""
         return self.pr_url or f"{self.branch}@{self.commit_sha[:12]}"
 
     def to_dict(self) -> dict[str, Any]:

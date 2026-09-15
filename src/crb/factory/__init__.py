@@ -20,6 +20,28 @@ The governed loop, per backlog item (the T9 pilot charter):
 Layering: this package imports ``crb.core``, ``crb.builders`` and
 ``crb.observability`` only. Store integration (``crb.store``) is a later
 workstream; persistence here is JSONL behind the :class:`FactoryStore` protocol.
+
+Navigation
+----------
+What it is:   The ``crb.factory`` package — forward mode's public surface and the map of its
+              governed loop.
+What it does: Re-exports the types and functions of each step (backlog, readiness, RED
+              proof, build, delivery, review, evidence, loop) so a caller wires the loop
+              from one import; the docstring above is the step order and the layering rule
+              (core + builders + observability only, JSONL persistence).
+How:          Plain re-exports; ``review()`` is deliberately not re-exported (it would
+              shadow the submodule).
+Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0008-stdlib-core-and-downward-layers.md,
+              docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/factory/loop.py (the orchestrator), src/crb/factory/backlog.py (step
+              1), src/crb/factory/readiness.py (step 2), src/crb/factory/testfirst.py (step
+              3), src/crb/factory/build.py (step 4), src/crb/factory/delivery.py (step 5),
+              src/crb/factory/review.py (step 6), src/crb/factory/evidence.py (the ledger
+              every step appends to), docs/API.md#factory-phase-p6
+Tested by:    tests/test_factory_loop.py
+Touch when:   never for a new repository; only when a new step type becomes part of the
+              public surface (re-export it and extend the docstring's table).
 """
 
 from __future__ import annotations

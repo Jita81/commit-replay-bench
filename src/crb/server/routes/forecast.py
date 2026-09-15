@@ -26,7 +26,7 @@ ADRs:         docs/adr/0003-one-routing-rule.md
 Works with:   src/crb/core/forecast.py (all the arithmetic), src/crb/server/routes/repos.py
               (``cached_profile`` for the default mix), src/crb/server/routes/signoffs.py
               (``load_signoff_records``), src/crb/server/schemas.py (the ``Forecast*Out``
-              shapes), src/crb/cli/commands/route.py (``crb forecast`` — the same core call),
+              shapes), ui/src/api/hooks.ts (the UI's forecast queries),
               docs/API.md#capability-routing-forecast-sign-off
 Tested by:    tests/test_server_routes_forecast.py
 Touch when:   never for a new repository; when a readiness threshold changes (that is
