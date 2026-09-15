@@ -79,7 +79,7 @@ from crb.core.evidence import BuilderRef
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.grade import MODE_SIGHTED
 from crb.core.ledger import GradeRow, JsonlLedger
-from crb.core.redact import redact_and_cap
+from crb.core.redact import redact_and_cap_head
 from crb.core.run import BuildAttempt, BuildFn
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
@@ -222,13 +222,19 @@ def attempt_error(outcome: BuildOutcome) -> str:
     """
     if outcome.violated:
         found = [e for e in outcome.errors if e.startswith(_VIOLATION_PREFIXES)]
-        return redact_and_cap("protocol violation: " + "; ".join(found), max_chars=500)
+        return _prefixed("protocol violation: ", "; ".join(found))
     if outcome.stop_reason == STOP_MODEL_ERROR:
         detail = "; ".join(outcome.errors) or "builder reported a model error"
         if detail.startswith(f"{STOP_MODEL_ERROR}:"):
-            return redact_and_cap(detail, max_chars=500)
-        return redact_and_cap(f"{STOP_MODEL_ERROR}: {detail}", max_chars=500)
+            detail = detail[len(STOP_MODEL_ERROR) + 1 :].lstrip()
+        return _prefixed(f"{STOP_MODEL_ERROR}: ", detail)
     return ""
+
+
+def _prefixed(prefix: str, detail: str, *, max_chars: int = 500) -> str:
+    """``prefix + detail`` with the *detail* capped head-first, never the prefix: the
+    ledger reads an error's kind off its head (``protocol violation:`` / ``model_error:``)."""
+    return prefix + redact_and_cap_head(detail, max_chars=max(1, max_chars - len(prefix)))
 
 
 def discard_source_edits(ws: Workspace, config: RepoConfig, protected: Sequence[str]) -> list[str]:
@@ -256,9 +262,7 @@ def discard_source_edits(ws: Workspace, config: RepoConfig, protected: Sequence[
 
 
 def _failed_attempt(rung_label: str, mode: str, error: str) -> BuildAttempt:
-    return BuildAttempt(
-        BuilderRef(name=rung_label, mode=mode), error=redact_and_cap(error, max_chars=500)
-    )
+    return BuildAttempt(BuilderRef(name=rung_label, mode=mode), error=_prefixed("", error))
 
 
 def _write_transcript(
@@ -479,7 +483,7 @@ def build_fn_for(
                     mode=mode,
                     budget=rung_budget.to_dict(),
                 ),
-                error=redact_and_cap(f"builder raised {type(exc).__name__}: {exc}", max_chars=500),
+                error=_prefixed(f"builder raised {type(exc).__name__}: ", str(exc)),
             )
             return discard(ws, task, failed)
         ref = _write_transcript(tdir, task, rung, outcome) if tdir is not None else ""

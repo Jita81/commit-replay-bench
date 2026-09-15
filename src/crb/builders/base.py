@@ -41,7 +41,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from crb.core.evidence import BuilderRef
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED, MODES
-from crb.core.redact import redact_and_cap
+from crb.core.redact import redact_and_cap, redact_and_cap_head
 from crb.core.spec import Language, RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 
@@ -424,7 +424,7 @@ class BuildOutcome:
             raise ValueError(f"stop_reason {self.stop_reason!r} not in {STOP_REASONS}")
         object.__setattr__(self, "summary", redact_and_cap(self.summary, max_chars=4000))
         object.__setattr__(
-            self, "errors", tuple(redact_and_cap(e, max_chars=2000) for e in self.errors)
+            self, "errors", tuple(redact_and_cap_head(e, max_chars=2000) for e in self.errors)
         )
         object.__setattr__(self, "transcript", tuple(dict(e) for e in self.transcript))
         object.__setattr__(self, "extra", dict(self.extra))

@@ -140,7 +140,9 @@ def qualify(
         # oracle" (2026-09-15)
         oracles = [t for t in cand.test_files if runner.is_valid_oracle(ws.root, t)]
         if not oracles:
-            _emit(on_event, "mine.skip", sha=sha, reason="no test file defines a test (support only)")
+            _emit(
+                on_event, "mine.skip", sha=sha, reason="no test file defines a test (support only)"
+            )
             return MineOutcome(
                 sha, None, "no test file defines a test (support only)", time.monotonic() - started
             )

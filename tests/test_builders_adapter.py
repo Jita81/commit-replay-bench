@@ -214,6 +214,23 @@ def test_attempt_error_rules() -> None:
     assert both.startswith("protocol violation")
 
 
+def test_attempt_error_caps_the_detail_never_the_prefix() -> None:
+    """A long docker refusal capped tail-first lost its ``protocol violation:`` head and
+    the ledger read the row as ``harness`` (mesh-client, 2026-09-15)."""
+    long = "network: docker " + "x" * 3000  # over BuildOutcome's own 2000-char cap too
+    out = _outcome(stop_reason=STOP_DONE, errors=(long,))
+    assert out.violated  # the outcome keeps the head of each error
+    v = adapter.attempt_error(out)
+    assert v.startswith("protocol violation: network: docker x") and v.endswith(" …")
+    assert len(v) <= 500
+    m = adapter.attempt_error(
+        _outcome(stop_reason=STOP_MODEL_ERROR, errors=("model_error: " + "y" * 2000,))
+    )
+    assert (
+        m.startswith("model_error: yyy") and len(m) <= 500 and "model_error: model_error" not in m
+    )
+
+
 # --- build_fn: briefs -----------------------------------------------------------------------
 
 

@@ -49,7 +49,20 @@ def redact(text: str) -> str:
 
 
 def redact_and_cap(text: str, *, max_chars: int = 8000) -> str:
+    """Redact, then keep the *tail* — right for test output, where the verdict is last."""
     out = redact(text)
     if len(out) > max_chars:
         return out[-max_chars:]
+    return out
+
+
+def redact_and_cap_head(text: str, *, max_chars: int = 2000) -> str:
+    """Redact, then keep the *head* — for error strings whose kind is read off their
+    prefix (``network:``, ``protocol violation:``, ``model_error:``). A docker refusal
+    longer than the cap, capped tail-first, lost its ``network:`` head: the outcome no
+    longer counted as violated and the ledger read the row as ``harness``
+    (mesh-client, 2026-09-15)."""
+    out = redact(text)
+    if len(out) > max_chars:
+        return out[: max(1, max_chars - 2)].rstrip() + " …"
     return out
