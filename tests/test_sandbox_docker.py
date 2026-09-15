@@ -151,7 +151,9 @@ def task(
 def trial(
     built: tuple[GitRepo, str], config: RepoConfig, candidate: Candidate, sandbox_root: Path
 ) -> Iterator[Workspace]:
-    """A fresh worktree per test under ``sandbox_root`` with the feat tests overlaid, removed afterwards."""
+    """A fresh worktree per test under ``sandbox_root`` with the feat tests overlaid, removed
+    afterwards.
+    """
     repo, _ = built
     ws = langs.trial_worktree(
         repo, candidate, sandbox_root / f"trial-{uuid.uuid4().hex[:8]}", config

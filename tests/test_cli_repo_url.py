@@ -40,7 +40,9 @@ Run = Callable[[Sequence[str]], tuple[int, str, str]]
 
 @pytest.fixture
 def workdir(tmp_path: Path) -> Path:
-    """A fresh ``--workdir`` per test (``repos/<name>`` is created under it by a URL registration)."""
+    """A fresh ``--workdir`` per test (``repos/<name>`` is created under it by
+    a URL registration).
+    """
     return tmp_path / ".crb"
 
 

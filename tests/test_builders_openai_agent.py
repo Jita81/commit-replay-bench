@@ -68,7 +68,9 @@ def call(name: str, **args: Any) -> oc.ToolCall:
 def turn(
     *calls: oc.ToolCall, content: str = "", tokens: tuple[int, int] = (100, 20)
 ) -> oc.ModelTurn:
-    """A scripted ``ModelTurn``: tool calls, optional content, and the token counts the meter sums."""
+    """A scripted ``ModelTurn``: tool calls, optional content, and the token
+    counts the meter sums.
+    """
     return oc.ModelTurn(
         content=content, tool_calls=calls, tokens_in=tokens[0], tokens_out=tokens[1]
     )

@@ -148,7 +148,9 @@ def _register(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def harness(pyrepo: pr.PyRepo) -> dict[str, Any]:
-    """The real instrument as keyword arguments: ``PytestRunner``, ``LocalExecutor`` and the config."""
+    """The real instrument as keyword arguments: ``PytestRunner``,
+    ``LocalExecutor`` and the config.
+    """
     return {
         "runner": PytestRunner(pyrepo.config),
         "executor": LocalExecutor(),

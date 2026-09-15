@@ -194,7 +194,9 @@ class Retained:
         return self.env.get(f"/grades/{self.row.row_hash}/patch")
 
     def review_body(self, **over: Any) -> dict[str, Any]:
-        """A valid ``POST /reviews`` body anchored to the row's diff hash; ``over`` overrides fields."""
+        """A valid ``POST /reviews`` body anchored to the row's diff hash; ``over`` overrides
+        fields.
+        """
         body: dict[str, Any] = {
             "grade_row_hash": self.row.row_hash,
             "statement": "read every hunk; the extra module is dead code",

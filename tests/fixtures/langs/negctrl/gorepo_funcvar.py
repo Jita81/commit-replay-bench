@@ -93,7 +93,9 @@ _FEAT = {
 
 
 def build(tmp_path: Path) -> tuple[Path, str]:
-    """The two-commit fixture under ``tmp_path / "gorepo-funcvar"``; returns ``(root, feat_sha)``."""
+    """The two-commit fixture under ``tmp_path / "gorepo-funcvar"``; returns
+    ``(root, feat_sha)``.
+    """
     return two_commit_repo(Path(tmp_path) / "gorepo-funcvar", _INITIAL, _FEAT)
 
 

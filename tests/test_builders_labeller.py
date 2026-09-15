@@ -227,7 +227,9 @@ def ev_init() -> str:
 
 
 def ev_retry(status: int) -> str:
-    """A ``system/api_retry`` line with the given HTTP status (an auth failure surfaces this way)."""
+    """A ``system/api_retry`` line with the given HTTP status (an auth failure
+    surfaces this way).
+    """
     return json.dumps({"type": "system", "subtype": "api_retry", "error_status": status})
 
 

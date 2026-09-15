@@ -61,8 +61,8 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
-    """Dev ``Settings`` on ``tmp_path`` (local sandbox, fixed secret, bootstrap admin, no UI dist so a
-    built bundle in the cwd can never shadow a router); ``overrides`` win.
+    """Dev ``Settings`` on ``tmp_path`` (local sandbox, fixed secret, bootstrap admin, no UI dist so
+    a built bundle in the cwd can never shadow a router); ``overrides`` win.
     """
     base: dict[str, Any] = {
         "env": "dev",

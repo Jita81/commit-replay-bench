@@ -64,7 +64,9 @@ from fixtures.oracle_repo import (
 # --- fixtures -------------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def fixture_repo(tmp_path_factory):
-    """The oracle fixture repository, built once for the module (never mutated; tasks come from shas)."""
+    """The oracle fixture repository, built once for the module (never mutated; tasks come from
+    shas).
+    """
     return build_controls_repo(tmp_path_factory.mktemp("ncrepo"))
 
 

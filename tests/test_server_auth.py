@@ -71,8 +71,8 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
-    """Dev ``Settings`` on ``tmp_path`` with the bootstrap admin; ``overrides`` win (``oidc``, cookie
-    security, ``local_auth``).
+    """Dev ``Settings`` on ``tmp_path`` with the bootstrap admin; ``overrides`` win (``oidc``,
+    cookie security, ``local_auth``).
     """
     base: dict[str, Any] = {
         "env": "dev",
@@ -118,7 +118,9 @@ def err(r: Any) -> dict[str, Any]:
 
 
 class TestPrimitives:
-    """The building blocks below the routes: hashing, sessions, the limiter, redirects, role mapping."""
+    """The building blocks below the routes: hashing, sessions, the limiter, redirects, role
+    mapping.
+    """
 
     def test_password_hash_roundtrip(self) -> None:
         h = hash_password(USER_PW)

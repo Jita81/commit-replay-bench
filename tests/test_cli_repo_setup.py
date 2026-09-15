@@ -114,7 +114,9 @@ class ScriptedRunner(PytestRunner):
 
 @pytest.fixture
 def scripted(monkeypatch: pytest.MonkeyPatch) -> type[ScriptedRunner]:
-    """Install ``ScriptedRunner`` as the ``pytest`` runner for the test; returns it for scripting."""
+    """Install ``ScriptedRunner`` as the ``pytest`` runner for the test;
+    returns it for scripting.
+    """
     ScriptedRunner.ready = [True]
     ScriptedRunner.outcome = SetupResult(True, (), "scripted", 0.0)
     ScriptedRunner.calls = []

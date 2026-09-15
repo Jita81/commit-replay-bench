@@ -409,7 +409,9 @@ def corpus(tmp_path: Path) -> Path:
 
 
 class TestApply:
-    """``apply_triage``: appends only a named human's decisions, idempotently, refusing contradictions."""
+    """``apply_triage``: appends only a named human's decisions, idempotently, refusing
+    contradictions.
+    """
 
     def test_appends_only_the_decided_lines_with_provenance(
         self, tmp_path: Path, corpus: Path
@@ -645,7 +647,9 @@ def _score(
 
 
 class TestStrengthen:
-    """``strengthening_backlog``: oracle-weak cells become ``test.add`` proposals the DoR gate accepts."""
+    """``strengthening_backlog``: oracle-weak cells become ``test.add`` proposals the DoR gate
+    accepts.
+    """
 
     def test_oracle_weak_cell_becomes_test_add_items(self) -> None:
         rows = _weak_cell_rows()
@@ -878,7 +882,9 @@ def _stale_ledger(tmp_path: Path) -> list[GradeRow]:
 
 
 class TestRemeasure:
-    """``remeasure_plan``: stale cells, rows needed, cost, and valid ``POST /runs`` bodies — nothing queued."""
+    """``remeasure_plan``: stale cells, rows needed, cost, and valid ``POST /runs`` bodies — nothing
+    queued.
+    """
 
     def test_cells_n_needed_cost_and_requests(self, tmp_path: Path) -> None:
         plan = learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")

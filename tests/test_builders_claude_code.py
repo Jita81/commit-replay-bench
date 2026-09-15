@@ -74,7 +74,9 @@ def ev_init(model: str = "claude-opus-5") -> str:
 
 
 def ev_assistant(*blocks: dict[str, Any], tin: int = 100, tout: int = 30, cached: int = 0) -> str:
-    """One ``assistant`` line carrying ``blocks`` and a usage record (input / output / cached tokens)."""
+    """One ``assistant`` line carrying ``blocks`` and a usage record (input / output / cached
+    tokens).
+    """
     return json.dumps(
         {
             "type": "assistant",
@@ -127,7 +129,9 @@ def ev_result(
     result: str = "",
     denials: list[dict[str, Any]] | None = None,
 ) -> str:
-    """The terminal ``result`` line: subtype, error flag, turns, cost and usage as the CLI reports them."""
+    """The terminal ``result`` line: subtype, error flag, turns, cost and usage as the CLI reports
+    them.
+    """
     ev: dict[str, Any] = {
         "type": "result",
         "subtype": subtype,

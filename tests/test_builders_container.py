@@ -500,7 +500,9 @@ def upstream() -> Iterator[int]:
 
 @pytest.fixture
 def proxy(upstream: int) -> Iterator[tuple[int, list[str]]]:
-    """An ``EgressProxy`` allowing only ``127.0.0.1:<upstream>``; yields its port and captured log lines."""
+    """An ``EgressProxy`` allowing only ``127.0.0.1:<upstream>``; yields its port and captured log
+    lines.
+    """
     lines: list[str] = []
     server = egress_proxy.EgressProxy(("127.0.0.1", 0), {"127.0.0.1": upstream})
     server.log = lines.append  # type: ignore[method-assign]

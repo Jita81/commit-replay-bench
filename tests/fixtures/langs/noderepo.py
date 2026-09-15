@@ -67,7 +67,9 @@ _TEST_SCRIPT = {
 
 
 def test_dir(tool: str) -> str:
-    """The test directory each runner discovers by default: ``test`` for mocha, else ``__tests__``."""
+    """The test directory each runner discovers by default: ``test`` for mocha,
+    else ``__tests__``.
+    """
     return "test" if tool == "mocha" else "__tests__"
 
 
@@ -130,7 +132,9 @@ def test_sub(tool: str) -> str:
 
 
 def add_source(tool: str, *, broken: bool = False) -> str:
-    """``src/calc.js`` in the flavour's module system; ``broken=True`` is the belt 3 regression edit."""
+    """``src/calc.js`` in the flavour's module system; ``broken=True`` is the belt 3 regression
+    edit.
+    """
     return src_module("add", "a + b + 1" if broken else "a + b", tool)
 
 
@@ -219,7 +223,9 @@ def build(
 
 
 def config(tool: str = "node", belt_scope: str | tuple[str, ...] = BELT_BARE) -> RepoConfig:
-    """The ``RepoConfig`` for the flavour: ``runner=tool`` and the test prefix that tool discovers."""
+    """The ``RepoConfig`` for the flavour: ``runner=tool`` and the test prefix
+    that tool discovers.
+    """
     if tool not in TOOLS:
         raise ValueError(f"tool must be one of {TOOLS}, got {tool!r}")
     return RepoConfig(

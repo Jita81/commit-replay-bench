@@ -44,7 +44,9 @@ def pyrepo(tmp_path: Path) -> pr.PyRepo:
 
 @pytest.fixture
 def runner(pyrepo: pr.PyRepo) -> PytestRunner:
-    """The real ``PytestRunner`` over the fixture's config — the belts are judged by pytest itself."""
+    """The real ``PytestRunner`` over the fixture's config — the belts are
+    judged by pytest itself.
+    """
     return PytestRunner(pyrepo.config)
 
 

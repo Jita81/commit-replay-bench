@@ -91,7 +91,9 @@ class Backend:
 
     @property
     def dialect(self) -> str:
-        """``"sqlite"`` or ``"postgresql"`` — the tests branch on it only for dialect-specific SQL."""
+        """``"sqlite"`` or ``"postgresql"`` — the tests branch on it only for
+        dialect-specific SQL.
+        """
         return self.engine.dialect.name
 
     def new_engine(self) -> Engine:
@@ -99,7 +101,9 @@ class Backend:
         return make_engine(self.url)
 
     def trigger_names(self) -> set[str]:
-        """The append-only triggers present on this database, read from the catalogue of the dialect."""
+        """The append-only triggers present on this database, read from the catalogue of the
+        dialect.
+        """
         with self.engine.connect() as c:
             if self.dialect == "sqlite":
                 q = "SELECT name FROM sqlite_master WHERE type = 'trigger'"

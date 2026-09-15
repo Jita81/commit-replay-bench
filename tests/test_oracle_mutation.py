@@ -118,7 +118,9 @@ def strong(gold_ws, task, harness):
 
 @pytest.fixture(scope="module")
 def weak(gold_ws, task, harness):
-    """The score confined to ``discount``'s lines — the WEAK oracle (the untested branch escapes)."""
+    """The score confined to ``discount``'s lines — the WEAK oracle (the
+    untested branch escapes).
+    """
     return _score(gold_ws, task, harness, MUT_DISCOUNT_LINES)
 
 

@@ -85,7 +85,9 @@ PACK_HASH = pack()["pack_hash"]
 
 
 def record(**kw: Any) -> ReviewRecord:
-    """A valid ``ReviewRecord`` anchored to the module's fixed row and pack hashes, unless overridden."""
+    """A valid ``ReviewRecord`` anchored to the module's fixed row and pack hashes, unless
+    overridden.
+    """
     base: dict[str, Any] = {
         "grade_row_hash": ROW_HASH,
         "repo": "alpha",

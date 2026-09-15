@@ -75,7 +75,9 @@ def _review(row_hash: str, pack_hash: str, diff_sha: str, **kw: Any) -> ReviewRe
 
 
 def _graded(store: tuple[DbLedger, DbReviewLedger]) -> tuple[str, str, str]:
-    """A stored pack WITH a diff, and a clean row pointing at it → (row_hash, pack_hash, diff_sha)."""
+    """A stored pack WITH a diff, and a clean row pointing at it → (row_hash,
+    pack_hash, diff_sha).
+    """
     ledger, _ = store
     diff_sha = "d" * 64
     result = GradeResult(

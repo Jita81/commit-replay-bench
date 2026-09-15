@@ -173,7 +173,9 @@ class Harness:
         self.worker = Worker(self.settings, engine=engine)
 
     def add_repo(self, **overrides: Any) -> None:
-        """Register ``pyrepo`` as the fixture repository (its config, with ``overrides`` merged in)."""
+        """Register ``pyrepo`` as the fixture repository (its config, with
+        ``overrides`` merged in).
+        """
         cfg = self.pyrepo.config.to_dict()
         cfg.update(overrides)
         with self.factory() as s:

@@ -78,7 +78,9 @@ pytestmark = [
 
 @pytest.fixture(scope="module", params=noderepo.TOOLS)
 def tool(request: pytest.FixtureRequest) -> str:
-    """The runner flavour under test (``node`` / ``vitest`` / ``jest`` / ``mocha``), module-scoped."""
+    """The runner flavour under test (``node`` / ``vitest`` / ``jest`` /
+    ``mocha``), module-scoped.
+    """
     return str(request.param)
 
 
@@ -119,7 +121,9 @@ def task(
     candidate: Candidate,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> TaskSpec:
-    """The feat task qualified once through the real miner; a skip reason here is a fixture failure."""
+    """The feat task qualified once through the real miner; a skip reason here
+    is a fixture failure.
+    """
     repo, _ = built
     outcome = qualify(
         repo,
@@ -135,7 +139,9 @@ def task(
 
 @pytest.fixture
 def trial(built: tuple[GitRepo, str], config: RepoConfig, candidate: Candidate, tmp_path: Path):
-    """A fresh worktree per test at the parent with the feat tests overlaid (RED), removed afterwards."""
+    """A fresh worktree per test at the parent with the feat tests overlaid (RED), removed
+    afterwards.
+    """
     repo, _ = built
     ws = langs.trial_worktree(repo, candidate, tmp_path / "trial", config)
     yield ws

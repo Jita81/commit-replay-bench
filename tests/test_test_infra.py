@@ -340,7 +340,9 @@ line-length = 100
 
 
 class TestPyprojectToml:
-    """``pyproject.toml``: only the pytest tables, plugin entry points and lint config are the oracle."""
+    """``pyproject.toml``: only the pytest tables, plugin entry points and lint config are the
+    oracle.
+    """
 
     def test_version_bump_and_dependency_add_are_honest(self) -> None:
         after = PYPROJECT.replace('version = "0.1.0"', 'version = "0.2.0"').replace(
@@ -568,8 +570,8 @@ require (
 
 
 class TestGoMod:
-    """``go.mod``: ``replace`` / ``exclude`` / ``godebug`` / ``toolchain`` redirect what the tests run
-    against; ``require`` and ``go`` directives are honest.
+    """``go.mod``: ``replace`` / ``exclude`` / ``godebug`` / ``toolchain`` redirect what the tests
+    run against; ``require`` and ``go`` directives are honest.
     """
 
     def test_require_and_go_directive_edits_are_honest(self) -> None:

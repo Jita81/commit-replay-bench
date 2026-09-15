@@ -59,7 +59,9 @@ def env(tmp_path: Path) -> Iterator[Env]:
 
 @pytest.fixture
 def jobs(monkeypatch: pytest.MonkeyPatch) -> list[Run]:
-    """A recording ``enqueue`` installed as ``crb.store.jobs``; returns the list of enqueued runs."""
+    """A recording ``enqueue`` installed as ``crb.store.jobs``; returns the
+    list of enqueued runs.
+    """
     calls: list[Run] = []
 
     def enqueue(factory: Any, run: Run) -> Run:

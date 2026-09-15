@@ -52,7 +52,9 @@ __all__ = ["harness"]
 
 @dataclass
 class OpinionReviewer:
-    """A reviewer that answers a fixed verdict and findings (and records the probes it was shown)."""
+    """A reviewer that answers a fixed verdict and findings (and records the
+    probes it was shown).
+    """
 
     verdict: str = rv.VERDICT_ACCEPT
     name: str = "reviewer"

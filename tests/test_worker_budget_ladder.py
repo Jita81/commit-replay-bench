@@ -87,7 +87,9 @@ def ctx_for(h: Harness, **fields: Any) -> RunContext:
 
 
 def tiers(rows: list[GradeRow]) -> list[tuple[str, str, str]]:
-    """``(trial, rung_index, budget_tier)`` per row — what a blind sweep is split by after the fact."""
+    """``(trial, rung_index, budget_tier)`` per row — what a blind sweep is
+    split by after the fact.
+    """
     return [(r.trial, r.labels[LABEL_RUNG_INDEX], r.labels[LABEL_BUDGET_TIER]) for r in rows]
 
 

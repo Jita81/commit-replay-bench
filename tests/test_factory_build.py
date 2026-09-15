@@ -147,7 +147,9 @@ class FakeBuilder:
 
 
 def multiply_item(**kw: object) -> BacklogItem:
-    """The forward-mode item: "add multiply to calc", with the structural facts the DoR gate needs."""
+    """The forward-mode item: "add multiply to calc", with the structural facts
+    the DoR gate needs.
+    """
     base: dict[str, object] = {
         "id": "I-1",
         "title": "Add multiply to calc",
@@ -167,7 +169,9 @@ def multiply_item(**kw: object) -> BacklogItem:
 
 
 def authored_multiply(content: str = TEST_MULTIPLY_SRC, author: str = OPERATOR) -> AuthoredTest:
-    """The authored oracle for ``multiply_item`` (content and author overridable for the refusals)."""
+    """The authored oracle for ``multiply_item`` (content and author
+    overridable for the refusals).
+    """
     return AuthoredTest(TEST_MULTIPLY, content, author)
 
 
@@ -212,8 +216,8 @@ class Harness:
         trial: str = "r1",
         ledger: bool = True,
     ) -> fb.BuildResult:
-        """``build`` for ``item`` under ``builder`` with the rig's instrument; ``events`` collects the
-        emitted ``(kind, payload)`` pairs when given.
+        """``build`` for ``item`` under ``builder`` with the rig's instrument; ``events`` collects
+        the emitted ``(kind, payload)`` pairs when given.
         """
         return fb.build_item(
             self.repo.repo,

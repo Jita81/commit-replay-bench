@@ -375,8 +375,8 @@ def tool(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture(scope="module")
 def node_modules(tool: str):
-    """The session dependency cache for the flavour (``None`` for the dependency-free ``node --test``);
-    skips with npm's reason when it cannot be installed.
+    """The session dependency cache for the flavour (``None`` for the dependency-free ``node
+    --test``); skips with npm's reason when it cannot be installed.
     """
     return None if tool == "node" else langs.npm_cache(tool)
 
@@ -400,7 +400,9 @@ def base_matrix(base):
 
 @pytest.fixture(scope="module")
 def fix(tool: str, node_modules, tmp_path_factory: pytest.TempPathFactory):
-    """``noderepo_fix`` for the flavour (feat FIXES ``mul``) as ``(repo, task, config, scratch)``."""
+    """``noderepo_fix`` for the flavour (feat FIXES ``mul``) as ``(repo, task,
+    config, scratch)``.
+    """
     root, sha = nodefix.build(
         tmp_path_factory.mktemp(f"fix-{tool}"), tool, node_modules=node_modules
     )

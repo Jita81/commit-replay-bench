@@ -181,7 +181,9 @@ def accepted_row(env: Env, cell: dict[str, str], *, clean: bool = True) -> Grade
 def attestation_for(
     env: Env, cell: dict[str, str], *, statement: str = STATEMENT
 ) -> dict[str, str]:
-    """The attestation the policy validates: an accepted row of ``cell`` plus the human statement."""
+    """The attestation the policy validates: an accepted row of ``cell`` plus
+    the human statement.
+    """
     return {"reviewed_row_hash": accepted_row(env, cell).row_hash, "statement": statement}
 
 

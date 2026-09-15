@@ -229,7 +229,9 @@ def default_config(**overrides: object) -> RepoConfig:
 
 @dataclass(frozen=True)
 class PyRepo:
-    """The built repository: its path, the three base shas and the ``RepoConfig`` that describes it."""
+    """The built repository: its path, the three base shas and the
+    ``RepoConfig`` that describes it.
+    """
 
     path: Path
     initial_sha: str
