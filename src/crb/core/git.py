@@ -12,6 +12,35 @@ every string that could reach a log, an event or an exception) and atomic (the
 clone lands in a sibling temp directory and is renamed into place only once
 ``git clone`` exits 0, so a killed or timed-out clone never leaves a half-repo
 that a later call would mistake for the real thing).
+
+Navigation
+----------
+What it is:   The git wrapper — ``GitRepo`` (every query and worktree mutation the engine
+              makes, as argv) and ``clone_repo`` (the one network operation, policy-checked
+              and atomic).
+What it does: Runs ``git -C <path> …`` with captured output and a wall clock; raises
+              ``GitError`` (argv and stderr preserved) on ``check=True`` failures; reads
+              history, changed files, churn, author dates and file contents from the
+              object store; adds and removes worktrees. Refuses clone sources that are not
+              ``https://`` / ssh (``file://`` only under the test-only switch) and never
+              lets a credential reach a log or an exception.
+How:          ``run`` → ``subprocess.run(["git", "-C", path, …])`` (no shell, timeout →
+              ``GitError`` rc 124); ``clone_repo`` → ``validate_clone_url`` → clone into a
+              sibling temp dir with ``GIT_TERMINAL_PROMPT=0`` → rename into place on exit 0;
+              ``redact_url`` / ``redact_urls_in`` strip userinfo from every message.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0008-stdlib-core-and-downward-layers.md
+Works with:   src/crb/core/workspace.py (creates worktrees and reads the parent tree through
+              it), src/crb/core/mine.py (log, changed files, churn, subject, author date),
+              src/crb/core/capability.py (the change-profile walk), src/crb/server/worker.py
+              (clones a URL-registered repository on its first run),
+              src/crb/cli/commands/repo.py (``crb repo add --url``)
+Tested by:    tests/test_git.py, tests/test_git_clone.py, tests/test_cli_repo_url.py,
+              tests/test_worker_clone.py
+Touch when:   never for a new repository (register a local clone with ``--path`` or a URL
+              with ``--url`` — docs/OPERATOR.md#2-configure-a-repository); a new git query
+              belongs here as argv, never as a shell string, and a clone-policy change
+              (a new scheme) is a security decision recorded in docs/SECURITY.md.
 """
 
 from __future__ import annotations
@@ -58,6 +87,8 @@ class GitError(RuntimeError):
 
 @dataclass(frozen=True)
 class GitResult:
+    """One git command's exit code and captured output."""
+
     returncode: int
     stdout: str
     stderr: str
@@ -68,11 +99,13 @@ class GitResult:
 
     @property
     def lines(self) -> list[str]:
+        """Non-blank stdout lines (the shape of ``--name-only`` style output)."""
         return [ln for ln in self.stdout.split("\n") if ln.strip()]
 
 
 class GitRepo:
-    """Handle on a local clone (or a worktree of one)."""
+    """Handle on a local clone (or a worktree of one). ``cwd`` on a method points a
+    call at a worktree of this clone; the object store queried is the same."""
 
     def __init__(self, path: str | Path, *, git_binary: str = "git", timeout: int = 300) -> None:
         self.path = Path(path)
@@ -81,6 +114,8 @@ class GitRepo:
 
     # --- plumbing ----------------------------------------------------------------
     def run(self, *args: str, check: bool = False, cwd: str | Path | None = None) -> GitResult:
+        """``git -C <cwd or path> <args>``. A timeout is a ``GitError`` (rc 124) always;
+        a non-zero exit is one only with ``check=True``."""
         argv = [self.git_binary, "-C", str(cwd or self.path), *args]
         try:
             p = subprocess.run(
@@ -95,12 +130,16 @@ class GitRepo:
 
     # --- queries -----------------------------------------------------------------
     def rev_parse(self, ref: str = "HEAD") -> str:
+        """The full sha ``ref`` names (``^{commit}``: a tag is peeled, a blob refused)."""
         return self.run("rev-parse", "--verify", ref + "^{commit}", check=True).stdout.strip()
 
     def is_repo(self) -> bool:
+        """Is ``path`` inside a git working tree?"""
         return self.run("rev-parse", "--is-inside-work-tree").ok
 
     def log_shas(self, n: int, *, ref: str = "HEAD", no_merges: bool = True) -> list[str]:
+        """The newest ``n`` commit shas from ``ref`` (merges skipped by default: a
+        merge's diff against its first parent is the whole branch, not a change)."""
         args = ["log", "--format=%H", "-n", str(n)]
         if no_merges:
             args.append("--no-merges")
@@ -135,12 +174,15 @@ class GitRepo:
         return raw[:-1] + "+00:00" if raw.endswith("Z") else raw
 
     def subject(self, sha: str) -> str:
+        """The commit's subject line."""
         return self.run("show", "-s", "--format=%s", sha, check=True).stdout.strip()
 
     def message(self, sha: str) -> str:
+        """The full commit message (what the intent labeller is shown — never the diff)."""
         return self.run("show", "-s", "--format=%B", sha, check=True).stdout.strip()
 
     def parent(self, sha: str) -> str:
+        """The first parent's sha — the commit every trial is replayed from."""
         return self.rev_parse(f"{sha}~1")
 
     def diff_names(self, ref: str, *, cwd: str | Path | None = None) -> list[str]:
@@ -156,12 +198,17 @@ class GitRepo:
         return self.run("diff", ref, "--", *paths, cwd=cwd, check=True).stdout
 
     def diff_stat(self, ref: str, *, cwd: str | Path | None = None) -> str:
+        """``git diff --stat <ref>`` of the working tree."""
         return self.run("diff", "--stat", ref, cwd=cwd, check=True).stdout
 
     def diff_text(self, ref: str, *, cwd: str | Path | None = None) -> str:
+        """The full unified diff of the working tree against ``ref`` (tracked files
+        only — the workspace adds untracked additions itself)."""
         return self.run("diff", ref, cwd=cwd, check=True).stdout
 
     def show_file(self, sha: str, path: str) -> str | None:
+        """``path``'s content at ``sha`` from the object store, or ``None`` if the
+        commit has no such file."""
         r = self.run("show", f"{sha}:{path}")
         return r.stdout if r.ok else None
 
@@ -173,9 +220,12 @@ class GitRepo:
         self.run("checkout", sha, "--", *paths, cwd=cwd, check=True)
 
     def worktree_add(self, dest: Path, ref: str) -> None:
+        """A detached worktree at ``ref`` (``-f``: reuse a registration a crashed run
+        left behind)."""
         self.run("worktree", "add", "-f", "--detach", str(dest), ref, check=True)
 
     def worktree_remove(self, dest: Path) -> None:
+        """Remove the worktree and prune its registration; best effort (not checked)."""
         self.run("worktree", "remove", "--force", str(dest))
         self.run("worktree", "prune")
 
@@ -311,6 +361,7 @@ def clone_repo(
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.parent / f"{target.name}.tmp-{os.getpid()}-{time.monotonic_ns()}"
     argv = [git_binary, "clone", "--quiet", "--no-tags", src, str(tmp)]
+    # the real argv (may carry a token) runs; the redacted one is what any error shows
     safe_argv = [git_binary, "clone", "--quiet", "--no-tags", safe, str(tmp)]
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
     try:

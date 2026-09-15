@@ -22,6 +22,36 @@ Honest by construction
   though the routing rule already refuses such cells.
 
 Pure aggregation over :mod:`crb.core.capability`; no I/O, no model calls.
+
+Navigation
+----------
+What it is:   The forecast and the readiness gate — ``forecast_build`` prices a mix of
+              (class × size) components from the ledger before any model is called;
+              ``assess_readiness`` says whether the evidence is good enough to build it.
+What it does: Routes every component exactly as the factory would (the class × size cell,
+              sign-offs applied), prices a deliverable one at its cheapest passing config,
+              propagates cost variance and the Bernoulli clean band across units, lists
+              unmeasured components rather than inventing numbers for them, and turns the
+              frozen ``ReadinessThresholds`` (coverage, reps, earned tier, false-Q1 = 0,
+              buildable share) into a deterministic punch-list.
+How:          ``parse_component_key`` → ``_resolve`` (``build_capability_map`` at class × size
+              and class, ``apply_signoffs_to_map``, ``best_config``, the cost / latency axis
+              of the routed rows) → ``forecast_build`` sums per unit → ``Forecast``;
+              ``assess_readiness`` checks each gate over the same resolution →
+              ``ReadinessReport`` with its gaps.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/capability.py (the cells, the config pick, the tiers),
+              src/crb/core/signoff.py (earned tiers the readiness gate requires),
+              src/crb/core/routing.py (the rule and its policy version),
+              src/crb/core/ledger.py (rows and cell grouping), src/crb/server/routes/forecast.py
+              (``POST /forecast`` and ``/readiness``), src/crb/factory/readiness.py (the
+              per-item Definition-of-Ready gate that complements this mix-level one)
+Tested by:    tests/test_forecast.py, tests/test_server_routes_forecast.py
+Touch when:   never for a new repository (its cells appear in the forecast as they are
+              measured); a threshold is tightened by a new ``ReadinessThresholds.version``,
+              never loosened in place — record it in docs/EVIDENCE-AND-CLAIMS.md and the
+              API doc (docs/API.md#capability-routing-forecast-sign-off).
 """
 
 from __future__ import annotations
@@ -78,6 +108,7 @@ def parse_component_key(key: ComponentKey) -> tuple[str, str]:
 
 
 def component_label(cls: str, size: str) -> str:
+    """``class/size``, or the bare class for a size-less component."""
     return f"{cls}/{size}" if size else cls
 
 
@@ -88,12 +119,15 @@ def component_label(cls: str, size: str) -> str:
 
 @dataclass(frozen=True)
 class _Axis:
+    """The economics of one component's rows: ``None`` where no row recorded the axis."""
+
     cost_mean: float | None
     cost_sigma: float | None
     latency_mean: float | None
 
 
 def _axis(rows: Sequence[GradeRow]) -> _Axis:
+    """Mean and spread over the eligible rows that carry a positive value."""
     costs = [r.cost_usd for r in rows if r.eligible and r.cost_usd > 0]
     lats = [r.latency_s for r in rows if r.eligible and r.latency_s > 0]
     return _Axis(
@@ -105,6 +139,9 @@ def _axis(rows: Sequence[GradeRow]) -> _Axis:
 
 @dataclass(frozen=True)
 class _Resolved:
+    """One component joined to the cell it routes through, the config it would be
+    built with (when deliverable) and the economics of the rows that priced it."""
+
     cls: str
     size: str
     count: int
@@ -118,10 +155,13 @@ class _Resolved:
 
     @property
     def deliverable(self) -> bool:
+        """Routes ``deliver`` AND a passing config exists to route to."""
         return self.cell.route == ROUTE_DELIVER and self.pick is not None
 
     @property
     def p_clean(self) -> float | None:
+        """The per-unit clean probability: the chosen config's point when there is
+        one (that is what would run), else the cell's."""
         if self.pick is not None:
             return self.pick.cell.point
         return self.cell.point
@@ -136,6 +176,8 @@ def _resolve(
     repo: str,
     language: str | None,
 ) -> list[_Resolved]:
+    """The ONE resolution both the forecast and the readiness gate use, so they can
+    never disagree about how a component is routed or priced."""
     rs = list(rows)
     cs_map = build_capability_map(rs, projection=PROJECTION_CLASS_SIZE, policy=policy)
     c_map = build_capability_map(rs, projection=PROJECTION_CLASS, policy=policy)
@@ -173,6 +215,7 @@ def _resolve(
             if cell.route == ROUTE_DELIVER
             else None
         )
+        # price at the rows of the config that would actually run, not the whole cell
         if pick is not None:
             proj = pick.cell.projection
             axis_rows = rows_for(proj, tuple(getattr(pick.cell.key, f) for f in proj))
@@ -236,6 +279,9 @@ class ComponentForecast:
 
 @dataclass(frozen=True)
 class Forecast:
+    """The priced mix. Every total names the units it covers (``measured`` / ``costed``
+    / ``timed``) so a reader sees what was left out; ``unmeasured`` lists it."""
+
     components: int
     measured_components: int
     costed_components: int
@@ -256,18 +302,22 @@ class Forecast:
 
     @property
     def coverage(self) -> float:
+        """The share of units the ledger could route at all."""
         return self.measured_components / self.components if self.components else 0.0
 
     @property
     def deliver(self) -> int:
+        """Units the rule would auto-deliver."""
         return self.units_by_route.get(ROUTE_DELIVER, 0)
 
     @property
     def human(self) -> int:
+        """Units the rule hands to a human."""
         return self.units_by_route.get(ROUTE_HUMAN, 0)
 
     @property
     def calibrate(self) -> int:
+        """Units whose cell needs more evidence first."""
         return self.units_by_route.get(ROUTE_CALIBRATE, 0)
 
     @property
@@ -437,6 +487,9 @@ DEFAULT_THRESHOLDS = ReadinessThresholds()
 
 @dataclass(frozen=True)
 class ReadinessReport:
+    """The gate's answer: ``ok`` iff ``gaps`` is empty, with the numbers each gate
+    was judged on and the thresholds in force."""
+
     ok: bool
     total: int
     measured: int
@@ -450,10 +503,12 @@ class ReadinessReport:
 
     @property
     def coverage(self) -> float:
+        """The share of units the ledger could route at all."""
         return self.measured / self.total if self.total else 0.0
 
     @property
     def buildable_frac(self) -> float:
+        """The share of MEASURED units that route ``deliver`` with a passing config."""
         return self.buildable_units / self.measured if self.measured else 0.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -570,6 +625,8 @@ def assess_readiness(
 
 
 def render_forecast(f: Forecast) -> str:
+    """The forecast as markdown: totals with their denominators, the unmeasured list,
+    then one row per component."""
     lines = [
         f"# Build forecast — {f.components} unit(s) · policy={f.policy_version}",
         "",
@@ -611,6 +668,7 @@ def render_forecast(f: Forecast) -> str:
 
 
 def render_readiness(r: ReadinessReport) -> str:
+    """The gate's answer as markdown: GO / NOT READY, the numbers, then the gaps."""
     head = "GO — evidence is ready" if r.ok else "NOT READY"
     lines = [
         f"# Readiness — {head}",

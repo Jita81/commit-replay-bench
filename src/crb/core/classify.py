@@ -28,6 +28,36 @@ Vocabulary is closed (:mod:`crb.core.taxonomy`): a label names a member of
 :data:`~crb.core.taxonomy.CLASS_VOCABULARY` or :data:`~crb.core.taxonomy.UNCLASSIFIED`.
 Nothing here calls a model; :mod:`crb.builders.labeller` does, through
 :class:`Labeller`.
+
+Navigation
+----------
+What it is:   The intent axis — ``LabelEvidence`` (exactly what a labeller sees, hashed),
+              ``IntentLabel`` (one judgement), the ``Labeller`` contract and shared reply
+              parser / prompt, and ``resolve`` (human > confident intent > path).
+What it does: Reads a commit's subject, message and per-path numstat — never the diff — as
+              evidence and stamps its sha256 on every label; turns any model reply into a
+              vocabulary member or ``(unclassified)`` with confidence 0, never raising;
+              resolves the class every cell key uses by one total rule and records which
+              axis won. A human label wins outright; a model never overwrites one.
+How:          ``commit_evidence`` (git subject / message / numstat) → ``LabelEvidence.digest``
+              → a ``Labeller`` renders ``render_label_prompt`` and calls a model →
+              ``parse_label_reply`` (JSON object, fenced or embedded; ``normalise_class``) →
+              ``IntentLabel`` → ``resolve(path_class, intent)`` → ``Resolution``.
+Layer:        core — docs/ARCHITECTURE.md#75-change-class-two-axes-one-resolved-value
+ADRs:         none
+Works with:   src/crb/core/taxonomy.py (the closed vocabulary and definitions),
+              src/crb/core/spec.py (TaskSpec derives ``capability_class`` through
+              ``resolve``), src/crb/builders/labeller.py (the two transports that implement
+              ``Labeller``), src/crb/core/git.py (subject, message, numstat),
+              src/crb/cli/commands/tasks.py (``crb tasks label`` / ``classes``),
+              src/crb/server/worker.py (the ``label`` run)
+Tested by:    tests/test_classify.py, tests/test_builders_labeller.py, tests/test_cli_tasks.py,
+              tests/test_worker_label.py
+Touch when:   never for a new repository (run a ``label`` run, or audit a sample with
+              ``crb tasks label … --by <name>``); changing ``DEFAULT_MIN_CONFIDENCE`` or
+              the precedence changes which class every task resolves to — bump
+              src/crb/core/version.py and re-measure; the prompt must never gain the diff
+              body (the leakage rule in the module docstring).
 """
 
 from __future__ import annotations
@@ -75,6 +105,8 @@ PATHS_CAP = 200
 
 
 def _canonical(obj: Any) -> str:
+    """Canonical JSON (the same form ``crb.core.evidence`` hashes; repeated here so
+    this module stays below ``evidence`` in the import order)."""
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
@@ -83,6 +115,7 @@ def _sha256(text: str) -> str:
 
 
 def utc_now_iso() -> str:
+    """Now in UTC to the second, ISO-8601 (a label's ``labelled_at``)."""
     return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()
 
 
@@ -138,6 +171,7 @@ class LabelEvidence:
 
     @property
     def churn(self) -> int:
+        """Added + deleted lines over every changed path."""
         return sum(s.added + s.deleted for s in self.diff_stats)
 
     def to_dict(self) -> dict[str, Any]:
@@ -160,6 +194,7 @@ class LabelEvidence:
         )
 
     def digest(self) -> str:
+        """The ``evidence_hash`` a label made from this evidence must carry."""
         return _sha256(_canonical(self.to_dict()))
 
 
@@ -246,13 +281,16 @@ class IntentLabel:
 
     @property
     def is_human(self) -> bool:
+        """A person's judgement (``human:<name>``) — outranks every model label."""
         return self.labeller.startswith(HUMAN_LABELLER_PREFIX)
 
     @property
     def unclassified(self) -> bool:
+        """The labeller said none-of-these, or failed; the path class stands."""
         return self.intent_class == UNCLASSIFIED
 
     def confident(self, min_confidence: float = DEFAULT_MIN_CONFIDENCE) -> bool:
+        """Would this label displace the path class under ``min_confidence``?"""
         return not self.unclassified and self.confidence >= min_confidence
 
     def to_dict(self) -> dict[str, Any]:
@@ -268,6 +306,8 @@ class IntentLabel:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> IntentLabel:
+        """Rebuild a stored label; the class is normalised so a record written under an
+        alias still loads (the vocabulary is closed on the way in, too)."""
         return cls(
             intent_class=normalise_class(d.get("intent_class")),
             confidence=float(d.get("confidence", 0.0) or 0.0),
@@ -356,6 +396,8 @@ def parse_label_reply(text: str, *, labeller: str, evidence_hash: str) -> Intent
     """
     raw = (text or "").strip()
     obj: Any = None
+    # the whole reply first (a bare object), then the widest {…} span (fenced or
+    # embedded in prose); the first that parses to a dict wins
     candidates = [raw]
     m = _JSON_OBJECT_RE.search(raw)
     if m:
