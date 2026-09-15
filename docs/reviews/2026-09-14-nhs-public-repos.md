@@ -115,3 +115,33 @@ Readings:
 react-components `97f19db5e3` are "gold target not green (rc=1)" even under their own dependency era — the
 oracle needs something the worktree does not provide (a built asset, a browser); they stay out of the pool
 with the note on the task. `35a4fdc306` is green at its parent (not RED) and was dropped.
+
+## 9. Stage B (2026-09-15 evening) — the builder's own gate, re-measured: $3.68
+
+The decider's staged plan (DL-027): before any blind spend, re-run the six sighted misses
+with the **belt-5 pre-flight** on (DL-030: the repository's own fixers after an honest build,
+then ONE bounded repair call — a distinct arm, `claude_code+preflight`), the two L
+`component.add` budget misses at the reshaped rung `60/60/1800/$2`.
+
+| Task | Was | Now | Pre-flight record | $ |
+|---|---|---|---|---|
+| react `2da48ca336` M feature.add | lint (prettier) | **clean** | fixers alone (`eslint:0+prettier:0`) | 0.53 |
+| react `ad8131a6f9` L feature.add | lint (prettier) | **clean** | fixers left eslint rc=1 → repair turn → clean | 0.91 |
+| mesh `632e2de319` XS bug.fix | lint (ruff UP038) | **clean** | ruff `--fix` could not → repair turn → clean | 0.23 |
+| frontend `b65ca47124` S feature.add | lint (tsc type error) | builder_red | lint clean this time; the tests failed — the model's miss | 0.19 |
+| react `15758d0587` L component.add | budget (25 turns) | protocol | refused: a computed command name (`$cmd …`) — the archaeology guard's fail-closed rule, before any pre-flight | 1.18 |
+| frontend `b1e02b4e81` L component.add | budget (25 turns) | builder_red | 60 turns, lint clean, tests failed — not a budget question | 0.64 |
+
+Readings:
+- **The formatter lever is real and cheap: 3 of the 4 lint misses are clean under the
+  pre-flight**, one by the fixers alone, two needing the single repair call ($0.23–0.91 per
+  task, all-in). Recorded as its own arm, so the plain `claude_code` cells keep their meaning.
+- **The two "budget" misses were not budget.** With 60 turns and 30 minutes neither task
+  passed: one is the model's (tests red with clean lint), one a guard refusal of a computed
+  command name. By the decider's own stop rule ("fewer than 3 budget-kind misses at the
+  reshaped rung → cancel D"), **Stage D (rungs 1–2) is cancelled**; Stage C (blind rung 0,
+  14 non-mesh tasks, pre-flight on, ≤ $8) is queued.
+- NHS sighted on 2.2, latest attempt per task, counting the pre-flight arm: **15 of 18 clean**
+  (frontend 4/6, react-components 7/8, mesh-client 4/4); the three misses are two
+  `builder_red` (both L `frontend.component.add` on nhsuk-frontend) and one `protocol`.
+  Cells are still ≤ 8 tasks; nothing here reaches the sign-off bar.
