@@ -70,6 +70,39 @@ Transport is injected (``spawn``) so tests replay canned stream-json lines.
 Note: the skill's Claude *API* surface (Messages/Tool Runner) is deliberately
 not used here — the Claude *Agent SDK* / Claude Code CLI is a separate product
 with its own harness, and the CLI is what the census measured.
+
+Navigation
+----------
+What it is:   The Claude Code adapter — ``ClaudeCodeBuilder`` drives ``claude -p`` as a
+              subprocess and ``StreamStats`` reads its stream-json — plus the login probes
+              ``crb doctor`` and the admin route use.
+What it does: Runs the census's measured agentic path with a restricted, pre-approved tool
+              set, deny rules, a minimal child environment and no session persistence;
+              meters turns, tool uses, tokens and reported cost from the stream; applies the
+              test-file and shell guards post hoc (a hit is a recorded ``tamper:`` /
+              ``archaeology:`` / ``network:`` error, never silently dropped); stops early on
+              an authentication failure the CLI would otherwise retry for minutes.
+How:          ``argv`` (prompt + flags) → ``env`` (``api_key``: key required and forwarded;
+              ``cli``: the operator's login via env / secrets file / keychain) → ``spawn`` →
+              ``StreamStats.feed`` per line (usage, tool uses, bash commands through the
+              guard, container-path translation) → ``finish``: tamper scan → outcome.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0012-builder-in-a-sealed-container.md
+Works with:   src/crb/builders/base.py (brief, budget, outcome and the two guards),
+              src/crb/builders/budget.py (``CostMeter``/``price_for``),
+              src/crb/builders/container.py (sets ``workdir_alias`` and the spawn for the
+              sealed path), src/crb/core/secrets_file.py (the owner-only token file),
+              src/crb/builders/__init__.py (registered as ``"claude_code"``),
+              src/crb/server/routes/admin.py (the verify-login route)
+Tested by:    tests/test_builders_claude_code.py, tests/test_builders_container.py
+Touch when:   never for a new repository (``auth``, ``model`` and ``bare`` are per-run or
+              per-worker settings — docs/OPERATOR.md); a new CLI flag or a changed stream
+              event shape is a change to ``argv``/``StreamStats.feed`` with a canned-stream
+              test; a new model id goes in ``KNOWN_MODELS`` AND the price table in
+              src/crb/builders/budget.py.
+Claims:       ``done`` is the CLI's own claim and is never trusted; ``cost_usd`` is the
+              CLI-reported figure when present (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -389,6 +422,9 @@ class SubprocessHandle:
         self._watchdog.start()
 
     def lines(self) -> Iterator[str]:
+        """Yield stdout lines; on exhaustion (or an early stop) reap the child and capture
+        the stderr tail. Always runs the ``finally`` — a consumer that breaks out of the
+        loop still leaves no zombie."""
         assert self._proc.stdout is not None
         try:
             for line in self._proc.stdout:
@@ -413,6 +449,8 @@ class SubprocessHandle:
         self.kill()
 
     def kill(self) -> None:
+        """SIGKILL the whole process group (the CLI spawns its own children), falling back
+        to the process alone when the group is already gone."""
         try:
             os.killpg(self._proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
@@ -420,20 +458,24 @@ class SubprocessHandle:
 
     @property
     def returncode(self) -> int | None:
+        """The child's exit code once reaped (``None`` while it runs)."""
         return self._proc.returncode
 
     @property
     def timed_out(self) -> bool:
+        """``True`` iff the watchdog killed it."""
         return self._timed_out
 
     @property
     def stderr_tail(self) -> str:
+        """The last 4000 characters of stderr, available after ``lines()`` finished."""
         return self._stderr
 
 
 def subprocess_spawn(
     argv: list[str], env: Mapping[str, str], cwd: Path, timeout_s: int
 ) -> SpawnHandle:
+    """The default ``SpawnFn``: a real ``claude`` child process."""
     return SubprocessHandle(argv, env, cwd, timeout_s)
 
 
@@ -480,6 +522,8 @@ class StreamStats:
         self.auth_failed = False
 
     def feed(self, line: str, *, keep: bool) -> dict[str, Any] | None:
+        """Consume one stream-json line; returns a small summary event (or ``None`` for a
+        blank/unparseable line). ``keep`` retains message text in the transcript."""
         line = line.strip()
         if not line:
             return None
@@ -557,6 +601,7 @@ class StreamStats:
         return summary
 
     def _usage(self, usage: Any) -> None:
+        """Accumulate one message's ``usage`` block."""
         if not isinstance(usage, dict):
             return
         # cache CREATION is real input (billed at a premium); cache READS are recorded
@@ -576,6 +621,10 @@ class StreamStats:
         return re.sub(rf"{re.escape(self.workdir_alias)}(?=/|$|[\s'\"`;&|)])", root, text)
 
     def _inspect_tool_use(self, name: str, inp: Any, summary: dict[str, Any] | None) -> None:
+        """Run the guards over a tool call as the CLI reports it: Bash commands through the
+        shell guard (recorded as a violation even when the CLI's deny rule refused them),
+        file-writing tools through the path guard; paths translated from the container
+        alias first."""
         if not isinstance(inp, dict):
             return
         if name == "Bash":
@@ -605,6 +654,8 @@ class StreamStats:
 
     # --- totals ---------------------------------------------------------------
     def totals(self) -> tuple[int, int, int]:
+        """``(tokens_in, tokens_out, cached_in)`` — the result event's totals when it has
+        them (authoritative), else the running sums from the per-message usage."""
         r = self.result or {}
         usage = r.get("usage")
         if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
@@ -617,6 +668,7 @@ class StreamStats:
         return self.tokens_in, self.tokens_out, self.cached_in
 
     def reported_cost(self) -> float | None:
+        """The CLI's own ``total_cost_usd`` from the result event, if it gave one."""
         r = self.result or {}
         v = r.get("total_cost_usd")
         if isinstance(v, int | float) and not isinstance(v, bool):
@@ -624,6 +676,7 @@ class StreamStats:
         return None
 
     def turns(self) -> int:
+        """``num_turns`` from the result event, else the assistant messages counted."""
         r = self.result or {}
         v = r.get("num_turns")
         if isinstance(v, int) and not isinstance(v, bool) and v > 0:
@@ -650,6 +703,8 @@ class StreamStats:
 
 
 def _stop_reason(stats: StreamStats, *, timed_out: bool) -> str:
+    """Map the run's end to a stop reason: watchdog → wall clock; the result's subtype →
+    max turns / cost; an error or no result at all → model error; else done."""
     if timed_out:
         return STOP_WALL_CLOCK
     r = stats.result or {}
@@ -725,6 +780,7 @@ class ClaudeCodeBuilder:
         self.workdir_alias = workdir_alias.rstrip("/")
 
     def describe(self) -> dict[str, Any]:
+        """The apparatus stamp: model, tool set, effort, ``bare``/``auth`` posture."""
         d = {
             "builder": self.name,
             "model": self.model,
@@ -739,6 +795,7 @@ class ClaudeCodeBuilder:
         return d
 
     def _binary(self) -> str:
+        """The configured binary, else ``claude`` on PATH; missing is a model error."""
         if self.claude_binary:
             return self.claude_binary
         found = shutil.which("claude")
@@ -829,6 +886,9 @@ class ClaudeCodeBuilder:
         *,
         on_event: EventFn | None = None,
     ) -> BuildOutcome:
+        """One headless ``claude -p`` run in the worktree (the module docstring has the
+        posture). Never raises for a model or CLI failure — ``model_error`` outcome;
+        ``SandboxUnavailable`` from a container spawn propagates."""
         started = time.monotonic()
         config = brief.repo_config()
         guard = TestFileGuard(workspace.root, config, brief.test_files, mode=brief.mode)
@@ -972,6 +1032,7 @@ class LoginCheck:
     cost_usd: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        """The admin route's response body."""
         return {
             "status": self.status,
             "detail": self.detail,

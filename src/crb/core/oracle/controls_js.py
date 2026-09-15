@@ -39,6 +39,35 @@ four transforms, and what each honestly is:
 Every function here is pure over text (no I/O); the runner in
 :mod:`crb.core.oracle.controls` writes the files and runs the syntax check. A
 transform that cannot be built raises :class:`NotConstructible` with the reason.
+
+Navigation
+----------
+What it is:   The JavaScript/TypeScript negative-control transforms — pure text functions over
+              the shared scanner's tokens, a small parser for function-shaped units, and the
+              per-runner env-poison planner.
+What it does: Builds ``stub`` (``return undefined;`` bodies, gold export wiring),
+              ``regression`` (a top-level ``throw`` in an adjacent belt-scope module),
+              ``hardcode_cheat`` (literal guards from expect/assert/t assertions) and
+              ``env_poison`` (the runner's own setup hook loading a gold copy) for one task;
+              raises ``NotConstructible`` with the reason when a cheat cannot honestly be
+              built — an existing JS-format config is never rewritten by guesswork.
+How:          ``tokenize`` (JS profile) → ``js_functions`` (function/arrow/method units with
+              exact spans) → splices last-first; ``js_imports`` resolves relative specifiers
+              for the poison selector; ``env_poison_plan`` returns ``{path: text}`` per tool.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0010-polyglot-negative-controls.md, docs/adr/0008-stdlib-core-and-downward-layers.md
+Works with:   src/crb/core/oracle/controls.py (the I/O shell that dispatches here and runs
+              ``node --check``), src/crb/core/oracle/mutators_text.py (the scanner and the
+              JavaScript profile), src/crb/core/oracle/controls_go.py (the sibling family),
+              src/crb/core/runners/node_runners.py (whose tool names key ``env_poison_plan``),
+              src/crb/core/test_infra.py (the config files this writes are exactly what
+              belt 1b disqualifies — the expected ``caught by belt 1``)
+Tested by:    tests/test_oracle_controls_js.py
+Touch when:   never for a new repository; a test framework whose assertions are not parsed
+              (``_EXPECT_VERBS``/``_ASSERT_VERBS``/``_T_VERBS``) or a runner without a hook
+              is extended here with a pure snippet test first; ``describe()`` is part of the
+              apparatus stamp, so a changed transform is a ``CONTROLS_VERSION`` bump in
+              src/crb/core/oracle/controls.py.
 """
 
 from __future__ import annotations
@@ -144,10 +173,12 @@ def structurally_sound(src: str) -> bool:
 
 
 def _is(tok: Token | None, text: str, kind: str | None = None) -> bool:
+    """``tok`` exists and has this text (and kind, when given)."""
     return tok is not None and tok.text == text and (kind is None or tok.kind == kind)
 
 
 def _at(toks: Sequence[Token], i: int) -> Token | None:
+    """``toks[i]`` or ``None`` past either end — every lookahead goes through this."""
     return toks[i] if 0 <= i < len(toks) else None
 
 
@@ -155,6 +186,7 @@ _OPEN = {"(": ")", "[": "]", "{": "}"}
 
 
 def _match(toks: Sequence[Token], i: int) -> int:
+    """Index of the bracket token closing the one at ``i``; ``-1`` if unbalanced."""
     opener = toks[i].text
     closer = _OPEN[opener]
     depth = 0
@@ -172,6 +204,7 @@ def _match(toks: Sequence[Token], i: int) -> int:
 
 
 def _split_commas(toks: Sequence[Token]) -> list[list[Token]]:
+    """Split a token run on depth-0 commas (an argument or parameter list)."""
     out: list[list[Token]] = []
     cur: list[Token] = []
     depth = 0
@@ -214,6 +247,7 @@ class JsFunc:
     generator: bool = False
 
     def segment(self, src: str) -> str:
+        """The whole unit's text — what "changed by the commit" compares."""
         return src[self.start : self.end]
 
 
@@ -306,6 +340,7 @@ def js_functions(src: str) -> dict[str, JsFunc]:
 
 
 def _index_at(toks: Sequence[Token], offset: int, lo: int) -> int:
+    """Index of the first token at or past ``offset`` (searching from ``lo``)."""
     j = lo
     while j < len(toks) and toks[j].start < offset:
         j += 1
@@ -472,6 +507,7 @@ def is_esm(src: str) -> bool:
 
 
 def has_cjs_exports(src: str) -> bool:
+    """``module.exports`` / ``exports.x`` present → CommonJS export wiring exists."""
     return re.search(r"\bmodule\.exports\b|(^|[^.\w])exports\.", src) is not None
 
 
@@ -529,6 +565,7 @@ STUB_BODY = "{\n  return undefined;\n}"
 
 
 def _replace_bodies(src: str, funcs: Iterable[JsFunc], body: str) -> str:
+    """Each unit's body → ``body``, spliced last-first so earlier offsets stay valid."""
     out = src
     for fn in sorted(funcs, key=lambda f: f.body_open, reverse=True):
         out = out[: fn.body_open] + body + out[fn.body_close + 1 :]
@@ -571,6 +608,7 @@ _SPECIFIER_RE = re.compile(
 
 
 def strip_ext(path: str) -> str:
+    """``a/b.test.js`` → ``a/b.test`` (longest known suffix first, so ``.d.ts`` is safe)."""
     for suf in sorted((*JS_SUFFIXES, ".json"), key=len, reverse=True):
         if path.endswith(suf):
             return path[: -len(suf)]
@@ -649,10 +687,13 @@ def poison_module(text: str) -> str:
 # hardcode cheat
 # ---------------------------------------------------------------------------
 
+#: ``(function name, literal arg texts, expected literal text)`` — one pinned input/output.
 Fact = tuple[str, tuple[str, ...], str]
 
 
 def _scalar_at(src: str, toks: Sequence[Token], i: int) -> tuple[str, int] | None:
+    """A number, string, ``true``/``false``/``null``/``undefined`` or negative number at
+    ``i`` → ``(text, next)``."""
     t = _at(toks, i)
     if t is None:
         return None
@@ -890,6 +931,8 @@ def env_poison_setup_esm(target: str, gold_copy: str) -> str:
 
 
 def _merge_json_list(doc: dict[str, Any], *keys: str, value: str) -> None:
+    """Append ``value`` to the list at ``doc[keys…]`` in place (a scalar becomes a list;
+    missing objects are created; a value already present is not duplicated)."""
     node = doc
     for k in keys[:-1]:
         nxt = node.get(k)
@@ -1011,6 +1054,7 @@ def env_poison_plan(
 
 
 def _load_json(text: str | None, name: str) -> dict[str, Any]:
+    """Parse a config file's JSON; an unparseable one is ``NotConstructible`` (never guessed)."""
     if not text:
         return {}
     try:
@@ -1021,6 +1065,7 @@ def _load_json(text: str | None, name: str) -> dict[str, Any]:
 
 
 def describe() -> dict[str, Any]:
+    """What this transform family is (for an apparatus stamp)."""
     return {
         "language": LANG_JAVASCRIPT,
         "family": "text",

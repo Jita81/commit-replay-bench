@@ -19,6 +19,25 @@ the harder question the belts cannot: *is the green worth anything?*
 * :mod:`~crb.core.oracle.sealed_corpus` — commitment before measurement:
   stratified, hash-split, sealed manifests with a commitment hash; authored dates
   recorded for contamination reasoning.
+
+Navigation
+----------
+What it is:   The public surface of the oracle-adequacy package — one import point for the
+              scorer, the mutator families, the adequacy gate, the negative controls and the
+              sealed corpus.
+What it does: Re-exports the names the worker, the oracle routes, the router and the factory
+              review consume; holds no logic of its own.
+How:          Plain re-exports; ``__all__`` is the contract the layers above may rely on.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0009-text-level-mutators.md, docs/adr/0010-polyglot-negative-controls.md
+Works with:   src/crb/core/oracle/mutation.py (the scorer), src/crb/core/oracle/adequacy.py
+              (the gate), src/crb/core/oracle/controls.py (the seven controls),
+              src/crb/core/oracle/sealed_corpus.py (commitment), src/crb/server/worker.py and
+              src/crb/server/routes/oracle.py (the consumers)
+Tested by:    tests/test_oracle_mutation.py, tests/test_oracle_adequacy.py,
+              tests/test_oracle_controls.py, tests/test_oracle_sealed_corpus.py
+Touch when:   never for a new repository; a new public name in any oracle module is added
+              here and to ``__all__`` together (the server imports only from this package).
 """
 
 from __future__ import annotations

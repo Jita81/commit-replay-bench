@@ -39,6 +39,34 @@ running one — merges the session's exported environment into the test command,
 and stamps the :class:`TestRun` with which service version answered. A service
 that cannot be provided is :class:`~crb.core.services.ServiceUnavailable`: the
 run stops, nothing is graded against a missing oracle.
+
+Navigation
+----------
+What it is:   The runner contract (``TestRunner`` protocol, ``BaseRunner`` plumbing) and the
+              records every language runner returns: ``TestRun``, ``SetupStep``, ``SetupResult``.
+What it does: Resolves target and belt scopes from the repo config; runs one scope through an
+              executor and fails closed when a non-zero exit carries no attributable test id;
+              runs the one network-permitted setup phase on the host (refused under docker) and
+              keeps its redacted record; starts and stamps the oracle's services. It never
+              decides a verdict — it reports what the toolchain said.
+How:          ``run``: services for the task's era → ``command`` → execute → ``parse`` →
+              ``parse_error`` when rc≠0 and nothing parsed. ``setup``: a ``SetupSession``
+              records each ``network=True`` step → ``finish_setup`` checks the last step,
+              ``environment_ready`` and the services.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/runners/pytest_runner.py (the reference subclass),
+              src/crb/core/execution.py (the ``Command``/``Executor`` it drives),
+              src/crb/core/services.py (the oracle's services and era selection),
+              src/crb/core/grade.py (consumes ``TestRun`` for belts 2 and 3),
+              src/crb/core/lint.py (belt 5 plans), src/crb/core/spec.py (``RepoConfig.belt_scope``
+              and ``runner_opts``), src/crb/core/runners/__init__.py (the registry)
+Tested by:    tests/test_runners_parsers.py, tests/test_runners_setup.py, tests/test_services.py
+Touch when:   never for a new repository — set ``runner``, ``belt_scope``, ``runner_opts`` and
+              ``lint`` in the repo config instead (docs/OPERATOR.md); adding a language means a
+              new subclass registered in src/crb/core/runners/__init__.py; changing ``TestRun``
+              or the fail-closed rule needs an ADR and an apparatus bump
+              (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -106,13 +134,16 @@ class TestRun:
 
     @property
     def green(self) -> bool:
+        """Exit 0, within the clock, and parseable — all three, or it is not green."""
         return self.returncode == 0 and not self.timed_out and not self.parse_error
 
     @property
     def red(self) -> bool:
+        """Anything that is not :attr:`green` (a timeout or parse error is red, not unknown)."""
         return not self.green
 
     def to_dict(self) -> dict[str, Any]:
+        """The evidence-pack shape (sorted ids, rounded duration — stable for hashing)."""
         d: dict[str, Any] = {
             "returncode": self.returncode,
             "failing": sorted(self.failing),
@@ -129,6 +160,7 @@ class TestRun:
 
 
 def tail_of(text: str, n: int = TAIL_LINES) -> str:
+    """The last ``n`` lines of toolchain output — what an operator reads on a failure."""
     lines = text.strip().splitlines()
     return "\n".join(lines[-n:])
 
@@ -155,9 +187,11 @@ class SetupStep:
 
     @property
     def ok(self) -> bool:
+        """Exited 0 within the clock."""
         return self.rc == 0 and not self.timed_out
 
     def to_dict(self) -> dict[str, Any]:
+        """The shape a ``setup.step`` event and a stored ``SetupResult`` carry."""
         return {
             "argv": list(self.argv),
             "rc": self.rc,
@@ -195,6 +229,7 @@ class SetupResult:
         return self.steps[-1].tail if self.steps else ""
 
     def to_dict(self) -> dict[str, Any]:
+        """The shape the worker stores and the API returns for a setup phase."""
         d: dict[str, Any] = {
             "ok": self.ok,
             "steps": [s.to_dict() for s in self.steps],
@@ -225,9 +260,12 @@ class SetupSession:
 
     @property
     def executor(self) -> Executor:
+        """The executor the steps run through (``finish_setup`` reuses it for services)."""
         return self._executor
 
     def run(self, cmd: Command) -> SetupStep:
+        """Execute one setup command and record it; a missing binary is a step, not a crash."""
+        # Every setup command is the network phase by definition, whatever the caller marked.
         net = cmd if cmd.network else _with_network(cmd)
         started = time.monotonic()
         try:
@@ -252,15 +290,18 @@ class SetupSession:
 
     @property
     def all_ok(self) -> bool:
+        """Every step passed (a recovered failure makes this ``False`` while ``ok`` can be ``True``)."""
         return all(s.ok for s in self.steps)
 
     def result(self, ok: bool, note: str, services: Sequence[ServiceRecord] = ()) -> SetupResult:
+        """Close the session into a :class:`SetupResult` with the wall clock since it opened."""
         return SetupResult(
             ok, tuple(self.steps), note, time.monotonic() - self._started, tuple(services)
         )
 
 
 def _with_network(cmd: Command) -> Command:
+    # Command is frozen; rebuild it with the network flag set so a sandbox executor can see it.
     return Command(
         cmd.argv,
         cmd.root,
@@ -314,6 +355,13 @@ def failed_step_note(steps: Sequence[SetupStep]) -> str:
 
 
 class TestRunner(Protocol):
+    """The structural contract the grader, miner and worker programme against.
+
+    :class:`BaseRunner` satisfies it; the protocol exists so a test double (or a
+    future runner that does not inherit) can be substituted without the core
+    importing it.
+    """
+
     name: str
     config: RepoConfig
 
@@ -374,11 +422,17 @@ class BaseRunner:
 
     # --- scopes ------------------------------------------------------------------
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
+        """The commit's test files as the toolchain addresses them (belt 2). Default:
+        the files themselves, de-duplicated and sorted so the command is stable."""
         return tuple(sorted(set(test_files)))
 
     def belt_scope(self, target_tests: Sequence[str], test_files: Sequence[str]) -> tuple[str, ...]:
+        """The regression surface belt 3 runs, from ``RepoConfig.belt_scope``: an explicit
+        tuple of paths, ``target_only``, ``affected_dirs`` (the directories of the target
+        tests, else ``test_prefix``) or ``bare`` (the toolchain's default discovery)."""
         policy = self.config.belt_scope
         if isinstance(policy, tuple):
+            # ("BARE",) is the census-era spelling of the empty scope; both mean default discovery.
             return BARE if policy in {("BARE",), ()} else policy
         if policy == BELT_TARGET_ONLY:
             return tuple(target_tests)
@@ -393,9 +447,13 @@ class BaseRunner:
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
+        """The argv that runs ``scope`` in ``root``; ``executor`` lets a runner pick the
+        sandbox-side interpreter over the host one. Subclasses must implement."""
         raise NotImplementedError
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
+        """Turn raw toolchain output into failing test ids. Subclasses must implement;
+        set ``parse_error`` when the reporter's shape was not recognised."""
         raise NotImplementedError
 
     def run(
@@ -420,6 +478,7 @@ class BaseRunner:
             cmd = _with_env(cmd, service_env)
         result = executor.run(cmd)
         if result.timed_out:
+            # 124 is coreutils `timeout`'s exit code; the grader reads timed_out, not the rc.
             return TestRun(
                 124,
                 frozenset(),
@@ -476,6 +535,7 @@ class BaseRunner:
 
     # --- services the oracle needs (runner_opts.services) --------------------------
     def has_services(self) -> bool:
+        """``True`` iff the repo config declares ``runner_opts.services``."""
         return bool(self.opts.get("services"))
 
     def service_specs(self) -> tuple[ServiceSpec, ...]:
@@ -513,6 +573,7 @@ class BaseRunner:
             raise ServiceUnavailable(SERVICES_SANDBOX_REFUSED)
         clone = clone_root_of(Path(root))
         session = self._services
+        # One session per clone: a runner re-bound to another repository's clone starts afresh.
         if session is None or session.clone != clone:
             if session is not None:
                 session.close()
@@ -541,6 +602,7 @@ class BaseRunner:
         return dict(self._services.env) if self._services is not None else {}
 
     def service_records(self) -> tuple[ServiceRecord, ...]:
+        """The service instances currently answering (what a ``TestRun`` is stamped with)."""
         return self._services.records if self._services is not None else ()
 
     def service_logs(self) -> dict[str, str]:
@@ -618,6 +680,7 @@ class BaseRunner:
         return True
 
     def setup_timeout(self, timeout: int) -> int:
+        """Per-step wall clock: the caller's, else ``runner_opts.setup_timeout``, else the default."""
         return int(timeout or self.opts.get("setup_timeout", DEFAULT_SETUP_TIMEOUT_S))
 
     @staticmethod
@@ -659,6 +722,8 @@ class BaseRunner:
         return session.result(True, f"{note}; services: {named}", records)
 
 
+#: One ``-rfE`` short-summary line: ``FAILED tests/x.py::test_a - AssertionError``. ERROR
+#: (a fixture or collection error) counts as a failing id too — it is not a pass.
 _FAIL_LINE = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.M)
 
 

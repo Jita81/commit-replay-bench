@@ -20,6 +20,32 @@ back to a plain ``-e .``, followed by ``pytest``.
 setup venv can be ready. The interpreter running crb is the last resort for
 ``command()`` (hermetic tests, dev boxes) but never *counts* as the repository's
 environment — it does not carry the repository's dependencies.
+
+Navigation
+----------
+What it is:   The Python runner — ``PytestRunner`` — and the reference implementation every
+              other language runner mirrors.
+What it does: Builds a deterministic ``python -m pytest -rfE`` command for a scope, parses the
+              short summary into failing ids, checks a target file really defines tests
+              (malformed-oracle guard), installs the repository's test dependencies into a venv
+              under ``env_dir`` (the network phase), and detects ruff for belt 5.
+How:          ``command``: resolve the interpreter (opts → venv → crb's own) → pin ``PYTHONPATH``
+              to the worktree (``/work`` under docker) → pytest argv. ``setup``: venv → install
+              (``runner_opts.pip`` / fallback, else ``-e .[test]``) → uninstall the repo's own
+              distribution → dist-info stubs → ``finish_setup``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/runners/base.py (the contract and the setup records),
+              src/crb/core/lint.py (``python_plan``, ``pinned_ruff_spec``),
+              src/crb/core/execution.py (``Executor.tool`` picks the sandbox interpreter),
+              src/crb/core/runners/__init__.py (registered as ``"pytest"``),
+              tests/fixtures/pyrepo.py (the fixture repository the tests drive it on)
+Tested by:    tests/test_runners_parsers.py, tests/test_runners_setup.py, tests/test_lint.py
+Touch when:   a Python repository needs a different install recipe — prefer ``runner_opts``
+              (``pip``, ``pip_fallback``, ``uninstall``, ``python``, ``env``,
+              ``dist_info_stubs``; docs/OPERATOR.md) over editing this file; a new pytest
+              reporter shape or a new interpreter source changes ``parse``/``python_for`` and
+              needs a parser test.
 """
 
 from __future__ import annotations
@@ -100,6 +126,10 @@ def declared_extras(root: Path) -> frozenset[str]:
 
 
 class PytestRunner(BaseRunner):
+    """``RepoConfig.runner == "pytest"``. Scopes are file paths (pytest addresses files
+    directly, so the base ``target_scope`` is exact); belt 5 is ruff when the repository
+    configures it."""
+
     name = "pytest"
     default_timeout = 900
 
@@ -128,6 +158,10 @@ class PytestRunner(BaseRunner):
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
+        """``python -m pytest -q -rfE … <scope>`` with the repository's ``addopts`` and
+        random-ordering plugins neutralised, so two runs of the same tree produce the
+        same summary and the parser sees exactly the ``-rfE`` shape it expects."""
+        # Under docker the image's interpreter must be used; the host venv is not mounted.
         host_default = self.python_for(root, self.env_dir) if executor.name != "docker" else None
         python = executor.tool("python", host_default)
         argv = [
@@ -142,16 +176,18 @@ class PytestRunner(BaseRunner):
             "-p",
             "no:randomly",
             "-o",
-            "addopts=",
-            "--continue-on-collection-errors",
+            "addopts=",  # the repo's own addopts could change the reporter or add -x / coverage
+            "--continue-on-collection-errors",  # one broken file must not hide the others' ids
             *scope,
         ]
         env = {
+            # The worktree first on the path: the trial's edits, not an installed wheel, run.
             "PYTHONPATH": str(root) + str(self.opts.get("pythonpath_suffix", "")),
             "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTHONHASHSEED": "0",
+            "PYTHONHASHSEED": "0",  # set-ordering-dependent tests behave the same every run
         }
         if executor.name == "docker":
+            # The sandbox mounts the worktree at /work; a host-absolute suffix is remapped too.
             env["PYTHONPATH"] = "/work" + str(self.opts.get("pythonpath_suffix", "")).replace(
                 str(root), "/work"
             )
@@ -162,12 +198,16 @@ class PytestRunner(BaseRunner):
         )
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
+        """Failing ids from the ``-rfE`` short summary; the base ``run`` adds the
+        fail-closed ``parse_error`` when rc≠0 and nothing was parsed."""
         failing = parse_pytest_failures(result.combined)
         return TestRun(
             result.returncode, failing, tail_of(result.combined), duration_s=result.duration_s
         )
 
     def is_valid_oracle(self, root: Path, test_file: str) -> bool:
+        """Tighter than the base rule: the file must define at least one ``def test``
+        or ``class Test`` (see ``_PYTEST_DEF_RE``), else it is a malformed oracle."""
         p = root / test_file
         try:
             text = p.read_text(encoding="utf-8", errors="ignore")
@@ -240,6 +280,8 @@ class PytestRunner(BaseRunner):
         timeout: int,
         on_step: Callable[[SetupStep], None] | None = None,
     ) -> SetupResult:
+        """Build the venv and install the test dependencies (the module docstring has the
+        recipe). Stops at the first unrecovered failure; every command is on record."""
         refusal = self.sandbox_refusal(executor)
         if refusal is not None:
             return refusal
@@ -257,6 +299,7 @@ class PytestRunner(BaseRunner):
                 "test dependencies there, or unset it so setup can build a venv",
             )
         python = venv_python(env_dir)
+        # uv only when running natively; any other executor gets the portable pip path.
         uv = shutil.which("uv") if executor.name == "local" else None
 
         def pip(*args: str) -> Command:

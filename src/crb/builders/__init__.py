@@ -24,6 +24,30 @@ Test-only
   hermetic walkthrough / CI). Registered ONLY when ``CRB_ENABLE_FIXTURE_BUILDER=1``
   is set in the process environment; never in production. See
   :mod:`crb.builders.fixture_gold`.
+
+Navigation
+----------
+What it is:   The builder registry — name → adapter class — and the package's public
+              re-exports (contract, budgets, ladder helpers).
+What it does: ``get_builder`` instantiates a registered adapter by name (a typo is a
+              ``ValueError`` at construction, never a silent default); ``builder_for_rung``
+              turns a ladder rung into an instance, passing the rung's config through minus
+              the budget keys; the test-only fixture builder joins the table only under its
+              environment switch.
+How:          A module-level ``dict``; the third-party SDKs stay lazy inside the adapters so
+              importing this package needs nothing beyond the standard library.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/base.py (the contract every entry honours),
+              src/crb/builders/adapter.py (the caller of ``builder_for_rung``),
+              src/crb/builders/claude_code.py, src/crb/builders/openai_agent.py and
+              src/crb/builders/editblock.py (the three production adapters),
+              src/crb/builders/fixture_gold.py (the opt-in test builder)
+Tested by:    tests/test_builders_base.py, tests/test_builders_fixture_gold.py
+Touch when:   never for a new repository (pick a rung from ``builder_names()``); adding an
+              adapter means one entry here, an ``__all__`` export, a note in docs/OPERATOR.md
+              and — if it must run sealed — ``SEALABLE_BUILDERS`` in
+              src/crb/builders/container.py.
 """
 
 from __future__ import annotations
@@ -72,6 +96,7 @@ if fixture_builder_enabled():
 
 
 def builder_names() -> tuple[str, ...]:
+    """Every registered name (the fixture only when its switch is set)."""
     return tuple(_REGISTRY)
 
 

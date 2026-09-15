@@ -26,6 +26,34 @@ Deterministic end-to-end (no randomness anywhere):
   compact separators, UTF-8) of the public manifest, written to
   ``corpus_commitment.txt`` for the operator to timestamp and commit BEFORE any
   model run. :func:`verify_outputs` re-derives every hash from the written files.
+
+Navigation
+----------
+What it is:   The sealed-corpus builder — pure functions from mined ``TaskSpec``s to a
+              stratified, hash-split, sealed pair of manifests and a commitment hash.
+What it does: Samples ``per_cell`` tasks per (class × size) cell in ``sha256(task_id)``
+              order, assigns dev/val/sealed by hash of the id, redacts sealed tasks in the
+              public manifest to id + split + detail hash, writes both manifests and a
+              commitment file, and re-verifies every hash from disk. No randomness, so
+              anyone can recompute the split. Refuses to seal an empty corpus.
+How:          ``sample_per_cell`` → ``build_task_record`` (authored date from the task or
+              the repo; ``detail_hash`` over the record) → ``split_for_sha`` →
+              ``build_manifests`` → ``write_outputs`` / ``verify_outputs``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   src/crb/core/spec.py (``TaskSpec.authored`` and the cell fields),
+              src/crb/core/evidence.py (``canonical_json``/``sha256_text`` — the same hashing
+              as evidence packs), src/crb/core/git.py (``author_date`` fallback),
+              src/crb/core/version.py (the apparatus stamped into every manifest),
+              src/crb/core/oracle/__init__.py (the only current entry point — no CLI verb
+              or route consumes this yet)
+Tested by:    tests/test_oracle_sealed_corpus.py
+Touch when:   never for a new repository; a new field in a task record changes every
+              ``detail_hash`` and the public manifest — bump ``CORPUS_SCHEMA`` and say so in
+              docs/EVIDENCE-AND-CLAIMS.md (a re-sealed corpus is a new commitment).
+Claims:       A commitment proves the task set was fixed before a run, not that the model
+              never saw the code — exposure is per-model reasoning on authored dates
+              (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -103,6 +131,7 @@ class SplitFractions:
         return cls(**fractions)
 
     def to_dict(self) -> dict[str, float]:
+        """``{"dev": …, "val": …, "sealed": …}`` in split order (stored in every manifest)."""
         return {name: getattr(self, name) for name in SPLITS}
 
 
@@ -110,11 +139,13 @@ DEFAULT_FRACTIONS = SplitFractions()
 
 
 def parse_split(text: str) -> SplitFractions:
+    """Module-level alias of :meth:`SplitFractions.parse` for CLI argument parsing."""
     return SplitFractions.parse(text)
 
 
 def split_for_sha(sha: str, fractions: SplitFractions = DEFAULT_FRACTIONS) -> str:
     """Deterministic dev/val/sealed assignment: hash of the sha, no randomness."""
+    # 64 bits of the digest as a uniform u in [0, 1); cumulative fractions bucket it.
     u = int(hashlib.sha256(sha.encode("utf-8")).hexdigest()[:16], 16) / 2**64
     cumulative = 0.0
     for name in SPLITS:
@@ -152,6 +183,7 @@ def sample_per_cell(tasks: Iterable[TaskSpec], per_cell: int) -> list[TaskSpec]:
 
 
 def _parse_iso(text: str) -> _dt.datetime | None:
+    """An aware datetime from ISO-8601 text (naive → UTC), or ``None`` when unparseable."""
     try:
         d = _dt.datetime.fromisoformat(text.strip())
     except (ValueError, TypeError):
@@ -213,6 +245,7 @@ def build_task_record(
         "suspected_exposure": None,
         "split": split_for_sha(task.task_id, fractions),
     }
+    # The hash binds every field above; verify_outputs recomputes it without this key.
     record["detail_hash"] = sha256_text(canonical_json(record))
     return record
 
@@ -231,14 +264,17 @@ class CorpusManifests:
 
     @property
     def manifest_hash(self) -> str:
+        """The commitment hash (over the PUBLIC manifest)."""
         return manifest_hash(self.public)
 
     @property
     def private_hash(self) -> str:
+        """Hash of the operator-held manifest, recorded in the commitment file too."""
         return manifest_hash(self.private)
 
     @property
     def split_counts(self) -> dict[str, int]:
+        """Tasks per split, from the public manifest."""
         counts = dict.fromkeys(SPLITS, 0)
         for task in self.public["tasks"]:
             counts[str(task["split"])] += 1
@@ -293,6 +329,8 @@ def build_manifests(
 
 
 def commitment_text(manifests: CorpusManifests) -> str:
+    """The ``corpus_commitment.txt`` body: both hashes, the method, the counts and the
+    UNSEALED placeholder the operator replaces with a timestamp before any model run."""
     counts = manifests.split_counts
     return (
         "\n".join(
@@ -343,6 +381,7 @@ def write_outputs(out_dir: str | Path, manifests: CorpusManifests) -> dict[str, 
 
 
 def _committed_hash(commitment: str, key: str) -> str:
+    """The ``sha256:`` value on the ``<key>:`` line of a commitment file, else ``""``."""
     for line in commitment.splitlines():
         if line.startswith(key + ": sha256:"):
             return line.split("sha256:", 1)[1].strip()

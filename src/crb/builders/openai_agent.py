@@ -15,6 +15,34 @@ does not exist: the held-out oracle is never shown to the builder.
 
 The model is reached through a ``model_fn(messages, tools) -> ModelTurn`` seam;
 tests inject a scripted fake, production uses :class:`OpenAIChat`.
+
+Navigation
+----------
+What it is:   The in-process agentic builder — ``OpenAIAgentBuilder`` — with its tool surface
+              (``_Tools``) and the function-calling schema the model is offered.
+What it does: Runs a read / search / edit / run loop against any OpenAI-compatible
+              function-calling model under the budget tracker; every write passes the
+              ``TestFileGuard``, every command the ``GitArchaeologyGuard`` plus an executable
+              allowlist, and runs through the injected executor (a docker executor sandboxes
+              the model's commands like the grader's). ``run_target_tests`` exists only in
+              sighted mode; a tool crash or refusal is a tool result, never a loop crash.
+How:          task text + method → ``model_fn(messages, schema)`` → ``ModelTurn`` → for each
+              tool call: ``tracker.can_call_tool`` → ``_Tools.dispatch`` → result message →
+              repeat; a turn with no tool call is the summary (or a nudge, up to
+              ``MAX_NUDGES``) → ``finish``: tamper scan → outcome.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0012-builder-in-a-sealed-container.md
+Works with:   src/crb/builders/base.py (brief, budget, outcome, both guards),
+              src/crb/builders/openai_client.py (``ModelFn``/``ModelTurn``/``ToolCall``),
+              src/crb/builders/editblock.py (shares ``apply_edit_blocks``/``compile_check``),
+              src/crb/builders/budget.py (``BudgetTracker``), src/crb/core/execution.py (the
+              executor the commands run through), src/crb/core/runners/base.py (the sighted
+              test tool), src/crb/builders/container.py (supplies a sealed executor)
+Tested by:    tests/test_builders_openai_agent.py
+Touch when:   never for a new repository; a build/test tool a repository needs that is not
+              in ``RUN_COMMAND_ALLOWLIST`` is added there with a test; a new tool means a
+              schema entry, a ``_Tools`` method and a ``dispatch`` branch together.
 """
 
 from __future__ import annotations
@@ -115,6 +143,8 @@ lint, existing tests) where cheap; then stop with a summary."""
 
 
 def tool_schema(*, sighted: bool) -> list[dict[str, Any]]:
+    """The OpenAI function-calling tool list; ``run_target_tests`` only when sighted."""
+
     def fn(
         name: str, desc: str, props: Mapping[str, Any], required: Sequence[str]
     ) -> dict[str, Any]:
@@ -223,6 +253,7 @@ class _Tools:
 
     # --- read side ---------------------------------------------------------------
     def list_files(self, glob: str = "") -> str:
+        """Tracked files (git's view), optionally filtered by a glob; capped at ``LIST_MAX``."""
         entries = [
             e
             for e in self.ws.repo.run("ls-files", cwd=self.ws.root).lines
@@ -235,6 +266,7 @@ class _Tools:
         return "\n".join(entries) if entries else "(no files match)"
 
     def read_file(self, path: str, start_line: Any = None, end_line: Any = None) -> str:
+        """A numbered window of a file (tests may be read; ``.git`` and traversal may not)."""
         reason = self.guard.check_read(path)
         if reason:
             return f"ERROR: {reason}"
@@ -303,6 +335,8 @@ class _Tools:
 
     # --- write side ----------------------------------------------------------------
     def apply_edit(self, path: str, search: str, replace: str) -> str:
+        """One SEARCH/REPLACE on an existing file through the guard; a non-compiling
+        result is written AND warned about (the model must fix it before testing)."""
         reason = self.guard.check_write(path)
         if reason:
             self.refused.append(f"apply_edit {path}: {reason}")
@@ -327,6 +361,7 @@ class _Tools:
         return f"OK: edited {path}.{note}"
 
     def write_file(self, path: str, content: str) -> str:
+        """Create or overwrite a non-test file through the guard."""
         reason = self.guard.check_write(path)
         if reason:
             self.refused.append(f"write_file {path}: {reason}")
@@ -343,6 +378,8 @@ class _Tools:
 
     # --- execution -----------------------------------------------------------------
     def run_target_tests(self) -> str:
+        """The sighted target scope through the injected runner — the builder's feedback,
+        never the belt; records a green so the outcome's ``done`` can be claimed."""
         if not self.brief.sighted or self.runner is None:
             return "ERROR: the target tests are held out in blind mode"
         timeout = max(1, min(int(self.remaining_s()), self.runner.default_timeout))
@@ -357,6 +394,8 @@ class _Tools:
         return f"TESTS STILL FAILING (rc={run.returncode}) failing={failing or 'unattributed'}:\n{tail}"
 
     def run_command(self, argv: Any) -> str:
+        """An allowlisted build/test tool, checked by the shell guard first (a hit is a
+        recorded violation), then run through the executor with a scratch-only write path."""
         if isinstance(argv, str):
             argv = argv.split()
         if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
@@ -386,6 +425,7 @@ class _Tools:
 
     # --- dispatch --------------------------------------------------------------------
     def dispatch(self, call: ToolCall) -> str:
+        """Route one tool call by name; arguments are coerced, never trusted."""
         if call.parse_error:
             return f"ERROR: {call.parse_error}"
         a = call.arguments
@@ -414,6 +454,7 @@ class _Tools:
 
 
 def _clamp_int(value: Any, default: int, lo: int, hi: int) -> int:
+    """An int from model-supplied JSON, defaulted and clamped (models send strings, floats)."""
     try:
         v = int(value) if value is not None else default
     except (TypeError, ValueError):
@@ -451,6 +492,7 @@ class OpenAIAgentBuilder:
         self.keep_transcript = keep_transcript
 
     def describe(self) -> dict[str, Any]:
+        """The apparatus stamp (the executor's posture included)."""
         return {
             "builder": self.name,
             "model": self.model,
@@ -460,6 +502,7 @@ class OpenAIAgentBuilder:
         }
 
     def _model(self) -> ModelFn:
+        """The model callable, built lazily so construction needs no credential."""
         if self._model_fn is not None:
             return self._model_fn
         chat = make_chat(self.model, self.endpoint)  # needs the openai extra + credential
@@ -474,11 +517,14 @@ class OpenAIAgentBuilder:
         *,
         on_event: EventFn | None = None,
     ) -> BuildOutcome:
+        """The tool loop (module docstring). ``done`` is the model's green claim from
+        ``run_target_tests`` and is untrusted; never raises for a model failure."""
         started = time.monotonic()
         config = brief.repo_config()
         guard = TestFileGuard(workspace.root, config, brief.test_files, mode=brief.mode)
         meter = CostMeter(price_for(self.model), model=self.model)
         tracker = BudgetTracker(budget, meter)
+        # No runner in blind mode: the tool must not exist, not merely refuse.
         runner = self.runner_factory(config) if brief.sighted else None
         tools = _Tools(
             workspace,

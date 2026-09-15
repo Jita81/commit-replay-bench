@@ -53,6 +53,36 @@ Java/Kotlin and Rust use the token-level
 provenance stamp records the family and the operator-set hash, so a strength is
 comparable only within a language and an instrument. Adding a language means adding
 a mutator, not touching the scorer.
+
+Navigation
+----------
+What it is:   The mutation scorer (``score_task``) and the Python AST mutator family, plus the
+              per-cell aggregation and the reports built on their output.
+What it does: At a task's GOLD state, plants deterministic faults on the changed lines of the
+              source files, re-runs the target tests per mutant, and reports
+              ``oracle_strength = killed / total`` with every escape's diff. Refuses to mutate
+              a test file; a RED baseline, a harness error or a toolchain-rejected mutant is
+              never a number; the source is restored byte-exact and verified by hash.
+How:          baseline run (must be GREEN) → ``changed_lines_for`` (``git diff -U0``) →
+              ``mutator.generate`` (pure, sorted, bounded) → per mutant: write with a fresh
+              mtime → ``runner.run_for`` → killed / escaped / uncompilable / error → restore →
+              ``CommitOracleScore`` → ``aggregate_by_cell`` / ``to_report``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0009-text-level-mutators.md
+Works with:   src/crb/core/oracle/mutant.py (the ``Mutant``/``Mutator`` contract),
+              src/crb/core/oracle/mutators_text.py (the other family, registered here),
+              src/crb/core/runners/base.py (``run_for`` and the ``parse_error`` that marks
+              ``uncompilable``), src/crb/core/workspace.py (the gold worktree and its git
+              view), src/crb/core/oracle/adequacy.py (turns the number into a decision),
+              src/crb/server/worker.py (the oracle run kind)
+Tested by:    tests/test_oracle_mutation.py, tests/test_oracle_mutation_text.py
+Touch when:   never for a new repository (an oracle run needs only a configured runner —
+              docs/OPERATOR.md); adding an operator changes ``PYTHON_OPERATORS``, the rank
+              table and therefore the operator-set hash — a ``MUTATION_VERSION`` bump and a
+              note in docs/EVIDENCE-AND-CLAIMS.md; a new language is a mutator in
+              src/crb/core/oracle/mutators_text.py, not an edit here.
+Claims:       A strength is comparable only within one language and one operator-set hash;
+              it measures the target tests, not the patch (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -131,6 +161,7 @@ _Located = ast.expr | ast.stmt
 
 
 def _line_starts(src_bytes: bytes) -> list[int]:
+    """Byte offset of the start of every line (index 0 = line 1)."""
     starts = [0]
     for i, b in enumerate(src_bytes):
         if b == 0x0A:  # "\n"
@@ -139,6 +170,7 @@ def _line_starts(src_bytes: bytes) -> list[int]:
 
 
 def _abs_span(starts: list[int], node: _Located) -> tuple[int, int]:
+    """``(start, end)`` absolute byte offsets of ``node`` — ast columns are UTF-8 bytes."""
     end_line = node.end_lineno or node.lineno
     end_col = node.end_col_offset if node.end_col_offset is not None else node.col_offset
     return starts[node.lineno - 1] + node.col_offset, starts[end_line - 1] + end_col
@@ -152,6 +184,7 @@ def _splice(source: str, node: _Located, replacement: str) -> str:
 
 
 def _segment(source: str, node: _Located) -> str:
+    """The exact source text of ``node`` (byte-precise, unlike ``ast.get_source_segment``)."""
     src_bytes = source.encode("utf-8")
     s, e = _abs_span(_line_starts(src_bytes), node)
     return src_bytes[s:e].decode("utf-8")
@@ -214,6 +247,8 @@ def changed_lines_for(ws: Workspace, path: str) -> set[int]:
 
 @dataclass(frozen=True)
 class _Candidate:
+    """A mutant before compile-check, de-duplication and id assignment."""
+
     line: int
     col: int
     op: str
@@ -222,10 +257,13 @@ class _Candidate:
 
     @property
     def sort_key(self) -> tuple[int, int, int, str]:
+        """The total order that makes generation seed-free (see the module docstring)."""
         return (self.line, self.col, _OP_RANK[self.op], self.description)
 
 
 def _collect_candidates(source: str, tree: ast.Module, lines: Set[int]) -> list[_Candidate]:
+    """Every operator's candidates on nodes whose first line is eligible, in AST walk order
+    (sorted by the caller). One operator per node shape — the ``elif`` chain is deliberate."""
     out: list[_Candidate] = []
 
     def add(node: _Located, op: str, description: str, mutated: str) -> None:
@@ -315,6 +353,7 @@ class PythonAstMutator:
     suffixes: tuple[str, ...] = (".py",)
 
     def accepts(self, path: str) -> bool:
+        """``True`` for a ``.py`` source path."""
         return path.endswith(self.suffixes)
 
     def generate(
@@ -342,6 +381,8 @@ class PythonAstMutator:
         mutants: list[Mutant] = []
         seen: set[str] = set()
         for cand in candidates:
+            # An equivalent-text or duplicate mutant would be counted twice; a non-compiling
+            # one would be "killed" by a collection error and inflate the strength.
             if cand.mutated_source == source or cand.mutated_source in seen:
                 continue
             try:
@@ -453,11 +494,13 @@ class MutantOutcome:
     uncompilable: bool = False
 
     def __post_init__(self) -> None:
+        # Poka-yoke: an outcome cannot be both excluded and graded.
         if self.uncompilable and self.killed is not None:
             raise ValueError("an uncompilable mutant cannot also be killed/escaped")
 
     @property
     def status(self) -> str:
+        """``killed`` | ``escaped`` | ``error`` | ``uncompilable`` — the one-word fate."""
         if self.uncompilable:
             return OUTCOME_UNCOMPILABLE
         if self.killed is None:
@@ -465,6 +508,7 @@ class MutantOutcome:
         return OUTCOME_KILLED if self.killed else OUTCOME_ESCAPED
 
     def to_dict(self) -> dict[str, Any]:
+        """The per-mutant row in a score's JSON (tail and error already redacted)."""
         return {
             "mutant_id": self.mutant_id,
             "op": self.op,
@@ -500,6 +544,7 @@ class MutationProvenance:
         object.__setattr__(self, "executor", dict(self.executor))
 
     def to_dict(self) -> dict[str, Any]:
+        """The stamp as stored with every score and report."""
         return {
             "apparatus_version": self.apparatus_version,
             "mutation_version": self.mutation_version,
@@ -540,6 +585,7 @@ class CommitOracleScore:
     uncompilable: int = 0
 
     def __post_init__(self) -> None:
+        # Poka-yoke: a strength without a denominator, or more kills than mutants, cannot exist.
         if self.oracle_strength is not None and self.total == 0:
             raise ValueError("a score with no mutants cannot carry a strength")
         if self.killed > self.total:
@@ -552,13 +598,16 @@ class CommitOracleScore:
 
     @property
     def scoreable(self) -> bool:
+        """At least one mutant reached a verdict — only these enter an aggregate."""
         return self.total > 0
 
     @property
     def escaped(self) -> tuple[MutantOutcome, ...]:
+        """The blind spots: mutants the target tests stayed GREEN on."""
         return tuple(o for o in self.outcomes if o.killed is False)
 
     def to_dict(self) -> dict[str, Any]:
+        """The full per-task JSON (schema-stamped; every outcome and the baseline run)."""
         return {
             "schema": MUTATION_SCHEMA,
             "task_id": self.task_id,
@@ -613,6 +662,7 @@ def _next_tick(tick: int) -> int:
 
 
 def _unified_diff(original: str, mutated: str, src_path: str) -> str:
+    """``a/<path>`` → ``b/<path>`` with two lines of context — the evidence an escape carries."""
     return "".join(
         difflib.unified_diff(
             original.splitlines(keepends=True),
@@ -625,11 +675,14 @@ def _unified_diff(original: str, mutated: str, src_path: str) -> str:
 
 
 def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
+    """Fire an ``oracle.mutation.*`` event when a sink is attached (no-op otherwise)."""
     if on_event is not None:
         on_event(action, payload)
 
 
 def _refuse_test_targets(task: TaskSpec, config: RepoConfig, paths: Sequence[str]) -> None:
+    """``ValueError`` if any mutation target is a test file — mutating the oracle is
+    self-grading, so this is refused before a single byte is written."""
     bad = [p for p in paths if p in task.test_files or config.is_test(p)]
     if bad:
         raise ValueError(
@@ -752,6 +805,8 @@ def score_task(
     # --- run each mutant against the TARGET tests only; restore after each ------
     outcomes: list[MutantOutcome] = []
     files = {rel: ws.root / rel for rel in originals}
+    # The mtime clock starts at the newest file so every version written is strictly newer
+    # than what any build cache has already seen (see _write_version).
     tick = max(int(p.stat().st_mtime) for p in files.values())
     try:
         for m in mutants:
@@ -833,6 +888,8 @@ def score_task(
                 timed_out=run.timed_out,
             )
     finally:
+        # Belt-and-braces restore: the per-mutant finally already restored, but a crash between
+        # iterations must still leave the worktree at the gold bytes — verified, not assumed.
         tick = _next_tick(tick)
         for rel, raw in originals.items():
             _write_version(files[rel], raw, tick)

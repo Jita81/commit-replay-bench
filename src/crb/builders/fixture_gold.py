@@ -30,6 +30,31 @@ impossible to do by accident:
 The abstract-cell export (``/ledger/export/abstract``) and any federated
 learning MUST exclude ``builder == "fixture_gold"`` rows; they measure the
 instrument, not a model.
+
+Navigation
+----------
+What it is:   The test-only ``fixture_gold`` builder — an instrument check that replays the
+              commit's own source change so the whole pipeline can be driven with no model.
+What it does: Overlays the commit's non-test files onto the parent worktree and returns an
+              outcome that names itself unmistakably (builder ``fixture_gold``, model
+              ``gold``, provider ``fixture``, ``extra.fixture: true``), spends nothing and
+              claims nothing (``done=False``). It is registered only under
+              ``CRB_ENABLE_FIXTURE_BUILDER=1``.
+How:          ``source_files``: the commit's changed files minus tests and deletions →
+              ``Workspace.overlay_sources`` → a zero-cost ``BuildOutcome``.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/__init__.py (the opt-in registration), src/crb/core/workspace.py
+              (``overlay_sources``), src/crb/core/oracle/controls.py (the ``gold`` control
+              does the same overlay — the two must agree), scripts/walkthrough.sh and
+              tests/fixtures/builders_repo.py (the hermetic drivers), src/crb/core/federated.py
+              (the abstract export that must never carry these rows)
+Tested by:    tests/test_builders_fixture_gold.py
+Touch when:   never for a new repository and never in production — the switch stays unset
+              in deploy/ (docs/DEPLOYMENT.md); a change to what ``gold`` means is a change
+              to the negative control first.
+Claims:       A ``fixture_gold`` row measures the instrument; it must never be read, summed
+              or exported as a builder result (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -82,6 +107,7 @@ class FixtureGoldBuilder:
         self.provider = PROVIDER
 
     def describe(self) -> dict[str, Any]:
+        """The apparatus stamp — carries ``fixture: true`` and the warning on purpose."""
         return {
             "builder": self.name,
             "model": self.model,
@@ -115,6 +141,7 @@ class FixtureGoldBuilder:
         *,
         on_event: EventFn | None = None,
     ) -> BuildOutcome:
+        """Overlay the gold sources; the budget is ignored (nothing is spent)."""
         started = time.monotonic()
         files = self.source_files(workspace, brief)
         emit(on_event, "build.attempt", builder=self.name, files=files, fixture=True)

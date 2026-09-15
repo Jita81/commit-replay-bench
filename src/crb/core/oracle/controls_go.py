@@ -42,6 +42,34 @@ Every function here is pure over source text (no I/O, no toolchain); the runner 
 :mod:`crb.core.oracle.controls` is the I/O shell that writes files and runs the
 compile check. A transform that cannot be built raises :class:`NotConstructible`
 with the reason that becomes the row's note.
+
+Navigation
+----------
+What it is:   The Go negative-control transforms — pure text functions over the tokens of the
+              shared scanner, plus a small declaration parser (functions, methods, func-typed
+              vars, imports, package vars) they rest on.
+What it does: Builds ``stub`` (zero-value bodies), ``regression`` (an ``init()`` panic in an
+              adjacent belt package), ``hardcode_cheat`` (literal guards from the test's
+              assertions) and ``env_poison`` (an ``init()`` re-assigning changed package
+              variables) for one task; raises ``NotConstructible`` with the reason when a
+              cheat cannot honestly be built. Never runs a toolchain — the caller
+              compile-checks.
+How:          ``tokenize`` (Go profile) → ``go_functions``/``go_imports``/``package_vars`` →
+              span-exact splices (bodies replaced from the end backwards so offsets hold) →
+              ``blank_unused_imports``/``add_imports`` so the result still compiles.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0010-polyglot-negative-controls.md, docs/adr/0008-stdlib-core-and-downward-layers.md
+Works with:   src/crb/core/oracle/controls.py (the I/O shell that dispatches here and runs
+              ``go test -run '^$'`` on the result), src/crb/core/oracle/mutators_text.py (the
+              scanner and the Go profile), src/crb/core/oracle/controls_js.py (the sibling
+              family for JavaScript), src/crb/core/runners/go_runner.py (whose package scopes
+              ``scope_dirs`` interprets)
+Tested by:    tests/test_oracle_controls_go.py
+Touch when:   never for a new repository; a Go idiom the parser misreads (a new assertion
+              library, generics in a shape ``_parse_func`` rejects) is fixed here with a
+              pure test on a snippet first; ``describe()`` is part of the report's apparatus
+              stamp, so a changed transform is a ``CONTROLS_VERSION`` bump in
+              src/crb/core/oracle/controls.py.
 """
 
 from __future__ import annotations
@@ -121,10 +149,12 @@ def sig_tokens(src: str) -> list[Token]:
 
 
 def _is(tok: Token | None, text: str, kind: str | None = None) -> bool:
+    """``tok`` exists and has this text (and kind, when given)."""
     return tok is not None and tok.text == text and (kind is None or tok.kind == kind)
 
 
 def _at(toks: Sequence[Token], i: int) -> Token | None:
+    """``toks[i]`` or ``None`` past either end — every lookahead goes through this."""
     return toks[i] if 0 <= i < len(toks) else None
 
 
@@ -170,6 +200,7 @@ def _split_commas(toks: Sequence[Token]) -> list[list[Token]]:
 
 
 def _text(src: str, toks: Sequence[Token]) -> str:
+    """The source text spanned by a token run (whitespace between tokens preserved)."""
     return src[toks[0].start : toks[-1].end] if toks else ""
 
 
@@ -180,6 +211,8 @@ def _text(src: str, toks: Sequence[Token]) -> str:
 
 @dataclass(frozen=True)
 class GoParam:
+    """One parameter (or result) as ``(name, type text)``."""
+
     name: str  # "" when unnamed (``func f(int, string)``)
     type: str
 
@@ -200,6 +233,7 @@ class GoFunc:
     signature: str  # ``func Name(a, b int) int``; for a var, the literal's ``func(a int) int``
 
     def segment(self, src: str) -> str:
+        """The whole declaration text — what "changed by the commit" compares."""
         return src[self.start : self.end]
 
     def stub_body(self) -> str:
@@ -444,12 +478,15 @@ def package_clause(src: str) -> str:
 
 
 def package_name(src: str) -> str:
+    """The bare package identifier (``""`` if the clause is absent)."""
     pc = package_clause(src)
     return pc.split()[1] if pc else ""
 
 
 @dataclass(frozen=True)
 class GoImport:
+    """One import spec with its exact span, so it can be re-aliased in place."""
+
     alias: str  # "" when none; "_" / "." kept verbatim
     path: str
     start: int  # span of the import SPEC (alias + path) in the source
@@ -580,6 +617,8 @@ def imports_needed(text: str, *, gold_src: str, parent_src: str) -> list[GoImpor
 
 
 def _replace_bodies(src: str, funcs: Iterable[GoFunc]) -> str:
+    """Each function's body → its zero-value stub, spliced last-first so earlier offsets
+    stay valid."""
     out = src
     for fn in sorted(funcs, key=lambda f: f.body_open, reverse=True):
         out = out[: fn.body_open] + fn.stub_body() + out[fn.body_close + 1 :]
@@ -587,6 +626,7 @@ def _replace_bodies(src: str, funcs: Iterable[GoFunc]) -> str:
 
 
 def _decl_stub(fn: GoFunc) -> str:
+    """A whole stub declaration for a function the gold ADDS (appended to the file)."""
     if fn.kind == KIND_VAR:
         return f"var {fn.name} = {fn.signature} {fn.stub_body()}"
     return f"{fn.signature} {fn.stub_body()}"
@@ -628,11 +668,13 @@ def stub_changed_functions(parent_src: str, gold_src: str) -> str | None:
 
 
 def module_path(go_mod: str) -> str:
+    """The ``module`` directive of a ``go.mod`` (``""`` if absent)."""
     m = re.search(r"^[ \t]*module[ \t]+(\S+)", go_mod, re.M)
     return m.group(1).strip('"') if m else ""
 
 
 def package_dir(path: str) -> str:
+    """The package directory of a file path (``""`` for the module root)."""
     return path.rsplit("/", 1)[0] if "/" in path else ""
 
 
@@ -936,6 +978,8 @@ def build_hardcode_cheat(parent_src: str, gold_src: str, facts: Sequence[Fact]) 
 
 @dataclass(frozen=True)
 class GoVar:
+    """One package-level ``var`` spec; ``decl`` is compared to detect a changed initialiser."""
+
     name: str
     decl: str  # the whole ``Name [T] = expr`` spec text
     rhs: str  # the initialiser expression text (``""`` when declared without one)

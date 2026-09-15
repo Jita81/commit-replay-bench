@@ -38,6 +38,30 @@ Honesty properties (correct-by-construction, same as the AST mutator)
 * **Every mutant differs from the source** and duplicates are dropped by content.
 
 Standard library only (``re`` + a state machine); no I/O.
+
+Navigation
+----------
+What it is:   The token-level mutator family (``TextLineMutator``) for Go, JavaScript/
+              TypeScript, Java/Kotlin and Rust, with its per-language scanner and profiles.
+What it does: Generates deterministic, bounded, structurally well-formed mutants on exactly the
+              changed lines of a source file using the same seven-operator taxonomy as the
+              AST family; never looks inside a literal or comment; never reasons about types
+              (the toolchain rejects, the scorer excludes).
+How:          ``tokenize`` (comment/string state machine + longest-match operators) →
+              ``_collect`` (one candidate per eligible token or statement) → sort on
+              ``(line, col, rank, description)`` → splice → re-scan and bracket-balance check →
+              de-duplicate → stable prefix of ``max_mutants``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0009-text-level-mutators.md
+Works with:   src/crb/core/oracle/mutant.py (the contract it implements),
+              src/crb/core/oracle/mutation.py (registers it per language and scores its
+              output; marks toolchain-rejected mutants ``uncompilable``),
+              src/crb/core/spec.py (the ``Language`` values that key ``PROFILES``)
+Tested by:    tests/test_oracle_mutation_text.py
+Touch when:   never for a new repository; a new C-family language is one ``LanguageProfile``
+              entry in ``PROFILES`` plus a pure-scanner test; a new operator or a changed
+              substitution table changes ``describe()`` — the operator-set hash — so bump
+              ``TEXT_MUTATION_VERSION`` and note it in docs/EVIDENCE-AND-CLAIMS.md.
 """
 
 from __future__ import annotations
@@ -134,6 +158,7 @@ class LanguageProfile:
     stmt_skip_words: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
+        """Every field, in a fixed order — part of the operator-set hash via ``describe()``."""
         return {
             "language": self.language,
             "suffixes": list(self.suffixes),
@@ -216,6 +241,9 @@ KIND_COMMENT = "comment"
 
 @dataclass(frozen=True)
 class Token:
+    """One lexeme with its position. Offsets are CHARACTERS (the mutator splices ``str``),
+    unlike the AST family's byte offsets."""
+
     kind: str
     text: str
     line: int  # 1-based
@@ -224,6 +252,7 @@ class Token:
 
     @property
     def end(self) -> int:
+        """Character offset just past the token."""
         return self.start + len(self.text)
 
 
@@ -425,6 +454,7 @@ def _scan_template_expr(src: str, i: int) -> int:
 
 
 def _scan_block_comment(src: str, i: int, *, nested: bool) -> int:
+    """Index just past ``*/`` for a ``/*`` at ``i``; Rust nests, the others do not."""
     depth = 1
     j = i + 2
     n = len(src)
@@ -486,6 +516,8 @@ def _scan_raw_string(src: str, i: int) -> int | None:
 
 
 def _regex_allowed_here(prev: Token | None) -> bool:
+    """JS: a ``/`` begins a regex only where an operand cannot have just ended (else it
+    is division). Same rule as a parser's "previous significant token" test."""
     if prev is None:
         return True
     if prev.kind == KIND_OP:
@@ -631,6 +663,8 @@ def tokenize(source: str, profile: LanguageProfile) -> list[Token]:
 
 
 def _scan_single_quote(src: str, i: int, profile: LanguageProfile) -> int:
+    """Index past a single-quote literal: a string (JS), a char (Go/Java), or in Rust a
+    char OR a lifetime (``'a`` — no closing quote; returned as an identifier)."""
     if profile.single_quote == QUOTE_STRING:
         return _scan_quoted(src, i, "'")
     if profile.single_quote == QUOTE_CHAR:
@@ -673,6 +707,9 @@ _AddFn = Callable[["Token", str, str, tuple[int, int], str], None]
 
 @dataclass(frozen=True)
 class _Candidate:
+    """A splice (``source[start:end]`` → ``replacement``) before well-formedness and
+    de-duplication; the id is assigned in ``generate``."""
+
     line: int
     col: int
     op: str
@@ -683,6 +720,7 @@ class _Candidate:
 
     @property
     def sort_key(self) -> tuple[int, int, int, str]:
+        """The total order that makes generation seed-free (same key as the AST family)."""
         return (self.line, self.col, _OP_RANK[self.op], self.description)
 
 
@@ -698,6 +736,7 @@ def _is_operand_end(tok: Token | None) -> bool:
 
 
 def _spaced(source: str, tok: Token) -> bool:
+    """Whitespace on both sides — how a comparison ``<`` is told from a generic bracket."""
     before = source[tok.start - 1] if tok.start > 0 else " "
     after = source[tok.end] if tok.end < len(source) else " "
     return before.isspace() and after.isspace()
@@ -755,6 +794,8 @@ def _sig(tokens: list[Token], i: int, step: int) -> Token | None:
 def _collect(
     source: str, tokens: list[Token], lines: Set[int], profile: LanguageProfile
 ) -> list[_Candidate]:
+    """Every operator's candidates on the tokens of the changed lines, then one
+    ``delete_stmt`` per deletable changed line. Unsorted; the caller orders them."""
     out: list[_Candidate] = []
     idx = _LineIndex(source, tokens)
 
@@ -847,6 +888,8 @@ def _return_value(tokens: list[Token], i: int, tok: Token, *, add: _AddFn) -> No
 def _negate_condition(
     source: str, tokens: list[Token], i: int, tok: Token, *, profile: LanguageProfile, add: _AddFn
 ) -> None:
+    """Wrap the condition of an ``if`` on ``tok``'s line in ``!( )``; single-line only, and
+    never an ``if let`` (a pattern is not a boolean)."""
     same_line = [t for t in tokens[i + 1 :] if t.line == tok.line and t.kind != KIND_COMMENT]
     if not same_line:
         return
@@ -1000,6 +1043,7 @@ class TextLineMutator:
         self.suffixes: tuple[str, ...] = self.profile.suffixes
 
     def accepts(self, path: str) -> bool:
+        """``True`` for a path with one of the profile's source suffixes."""
         return path.endswith(self.suffixes)
 
     def generate(
@@ -1021,6 +1065,8 @@ class TextLineMutator:
             tokens = tokenize(source, self.profile)
         except ScanError:
             return []
+        # A source whose brackets already do not balance (the scanner's view) cannot be
+        # held to the balance check on its mutants; only a balanced original gates.
         original_ok = brackets_balanced(tokens)
         candidates = sorted(
             _collect(source, tokens, changed_lines, self.profile), key=lambda c: c.sort_key

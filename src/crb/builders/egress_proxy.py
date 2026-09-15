@@ -26,6 +26,31 @@ Policy, stated so it can be checked against the code:
 ``READY <host>:<port>`` is printed (and flushed) once the listener is bound — the
 worker treats a sidecar that has not printed it within its start timeout as
 unhealthy and fails the build closed.
+
+Navigation
+----------
+What it is:   The egress-proxy sidecar's program — a standalone, stdlib-only CONNECT proxy
+              with an exact-match host:port allowlist — plus the pure ``parse_allow`` /
+              ``decide`` functions the worker validates settings with.
+What it does: Serves ``CONNECT`` to allowlisted hosts only (``403`` otherwise, ``405`` for any
+              other method), opens the upstream itself so the builder needs no DNS or
+              default route, pumps bytes both ways until close or idle, logs decisions but
+              never tunnel contents, and prints ``READY`` once bound.
+How:          ``parse_allow`` (normalise, refuse malformed) → ``EgressProxy`` (threading TCP
+              server) → ``_Handler.handle``: read the request line, drain headers,
+              ``decide`` → connect upstream → ``200`` → ``_pump`` over a selector.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0012-builder-in-a-sealed-container.md
+Works with:   src/crb/builders/container.py (copies this file beside the checkout, mounts
+              it read-only, runs it in the sidecar and waits for ``READY``; validates the
+              allowlist with ``parse_allow`` before any container starts),
+              deploy/Dockerfile.builder (the image the sidecar runs on — it needs only
+              ``python3``), docs/DEPLOYMENT.md (``CRB_BUILDER__ALLOW_HOSTS``)
+Tested by:    tests/test_builders_container.py, tests/test_builders_container_docker.py
+Touch when:   a model endpoint on a new host is an allowlist entry
+              (``CRB_BUILDER__ALLOW_HOSTS``), never an edit here; any change to what is
+              served must keep this file free of ``crb`` imports — it runs where the package
+              is not installed — and needs a loopback test on a real socket.
 """
 
 from __future__ import annotations
@@ -70,6 +95,7 @@ def parse_allow(entries: list[str] | tuple[str, ...]) -> dict[str, int]:
 
 
 def normalise_host(host: str) -> str:
+    """Lower-case, no surrounding whitespace, no trailing dot (``Mock.Local.`` → ``mock.local``)."""
     return host.strip().lower().rstrip(".")
 
 
@@ -86,9 +112,12 @@ def decide(allow: dict[str, int], target: str) -> tuple[bool, str, int]:
 
 
 class _Handler(socketserver.StreamRequestHandler):
+    """One client connection: exactly one ``CONNECT`` decision, then a tunnel or a refusal."""
+
     server: EgressProxy  # narrowed for mypy; assigned by socketserver
 
     def handle(self) -> None:
+        """Read the request line, drain the headers unread, decide, tunnel."""
         request = self.connection
         request.settimeout(CONNECT_TIMEOUT_S)
         try:
@@ -131,6 +160,7 @@ class _Handler(socketserver.StreamRequestHandler):
                 upstream.close()
 
     def _reply(self, code: int, reason: str) -> None:
+        """A minimal HTTP/1.1 error response with ``Connection: close``."""
         body = f"{code} {reason}\n".encode()
         with contextlib.suppress(OSError):
             self.connection.sendall(
@@ -190,6 +220,7 @@ class EgressProxy(socketserver.ThreadingTCPServer):
         super().__init__(listen, _Handler)
 
     def log(self, line: str) -> None:
+        """One decision line to stdout (the worker keeps the tail in ``proxy_log``)."""
         if self.quiet:
             return
         with self._log_lock:
@@ -198,6 +229,8 @@ class EgressProxy(socketserver.ThreadingTCPServer):
 
 
 def main(argv: list[str] | None = None) -> int:
+    """The sidecar entry point: ``--listen host:port --allow host[:port] …``; an empty
+    allowlist is refused (the worker never starts a sidecar with one either)."""
     p = argparse.ArgumentParser(description="CONNECT-only allowlisting egress proxy")
     p.add_argument("--listen", default="0.0.0.0:3128", help="host:port to bind")
     p.add_argument(

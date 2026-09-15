@@ -13,6 +13,29 @@ Events are append-only and redacted at construction. The :class:`Emitter`
 binds a trace and produces the plain ``on_event(action, payload)`` callbacks
 the core accepts, so ``crb.core`` stays dependency-free while every belt,
 every builder turn and every ledger append lands in the stream.
+
+Navigation
+----------
+What it is:   The ``StepEvent`` envelope, the sink protocol with its four implementations
+              (memory, JSONL, fan-out, callback) and the trace-bound ``Emitter``.
+What it does: Gives every stage one redacted, append-only event shape; ``Emitter.on_event``
+              adapts the core's ``on_event(action, payload)`` callbacks (which know nothing
+              of traces or sinks) into sequenced events, inferring the status from the
+              action's suffix; ``MultiSink`` guarantees a broken sink never breaks a run.
+How:          ``StepEvent.__post_init__`` validates the stage and redacts every string in the
+              payload → ``Emitter.emit`` stamps trace, actor, repo and a monotonic ``seq`` →
+              ``sink.emit``; ``timed`` brackets a block with ``.start``/``.done``/``.error``.
+Layer:        observability — docs/ARCHITECTURE.md#72-observability
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/core/redact.py (applied at construction, so no sink can leak a
+              secret), src/crb/store/events.py (the DB sink and the SSE source),
+              src/crb/server/worker.py (binds an ``Emitter`` per run and hands its
+              ``on_event`` to the core), src/crb/core/grade.py and src/crb/core/mine.py (the
+              action names they emit), src/crb/server/schemas.py (the API shape of an event)
+Tested by:    tests/test_store_events.py, tests/test_worker.py
+Touch when:   never for a new repository; a new stage is an entry in ``STAGES`` plus its
+              mention in docs/ARCHITECTURE.md; a new field goes in ``to_dict``/``from_dict``,
+              the store model and the API schema together (a DB migration).
 """
 
 from __future__ import annotations
@@ -45,6 +68,9 @@ STAGES: tuple[str, ...] = (
 
 
 class StepStatus(StrEnum):
+    """The outcome of one step. ``skipped`` covers a deliberate non-run (a DQ, a control
+    skip) — it is not an error and not a pass."""
+
     OK = "ok"
     ERROR = "error"
     INVALID = "invalid"
@@ -53,14 +79,17 @@ class StepStatus(StrEnum):
 
 
 def new_trace_id() -> str:
+    """A fresh run id (32 hex chars)."""
     return uuid.uuid4().hex
 
 
 def _utc_now() -> str:
+    """ISO-8601 UTC to the millisecond (the timestamp every event carries)."""
     return _dt.datetime.now(_dt.UTC).isoformat(timespec="milliseconds")
 
 
 def _redact_value(v: Any) -> Any:
+    """Redact every string anywhere inside a payload (mappings and sequences recursed)."""
     if isinstance(v, str):
         return redact(v)
     if isinstance(v, Mapping):
@@ -72,6 +101,9 @@ def _redact_value(v: Any) -> Any:
 
 @dataclass(frozen=True)
 class StepEvent:
+    """One thing that happened. Redacted at construction; ``seq`` orders events within a
+    trace; ``event_id`` makes each one addressable across sinks."""
+
     trace_id: str
     stage: str
     action: str
@@ -99,6 +131,7 @@ class StepEvent:
         object.__setattr__(self, "error_message", redact(self.error_message))
 
     def to_dict(self) -> dict[str, Any]:
+        """The wire shape (JSONL line, DB row, SSE frame) — flat, sorted by the sinks."""
         return {
             "event_id": self.event_id,
             "seq": self.seq,
@@ -123,6 +156,7 @@ class StepEvent:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> StepEvent:
+        """Inverse of :meth:`to_dict`; unknown keys are ignored so old lines still load."""
         kw = {k: d[k] for k in cls.__dataclass_fields__ if k in d}
         if "status" in kw:
             kw["status"] = StepStatus(kw["status"])
@@ -130,6 +164,8 @@ class StepEvent:
 
 
 class EventSink(Protocol):
+    """Anything that accepts events. Implementations must not raise into the producer."""
+
     def emit(self, event: StepEvent) -> None: ...
 
 
@@ -142,6 +178,7 @@ class MemorySink:
         self._lock = threading.Lock()
 
     def emit(self, event: StepEvent) -> None:
+        """Append; the oldest events are dropped beyond ``max_events`` (a ring, not a leak)."""
         with self._lock:
             self._events.append(event)
             if len(self._events) > self._max:
@@ -149,13 +186,16 @@ class MemorySink:
 
     @property
     def events(self) -> list[StepEvent]:
+        """A snapshot copy (safe to iterate while producers keep emitting)."""
         with self._lock:
             return list(self._events)
 
     def by_trace(self, trace_id: str) -> list[StepEvent]:
+        """The events of one run, in emission order."""
         return [e for e in self.events if e.trace_id == trace_id]
 
     def clear(self) -> None:
+        """Drop everything (tests)."""
         with self._lock:
             self._events.clear()
 
@@ -168,6 +208,7 @@ class JsonlSink:
         self._lock = threading.Lock()
 
     def emit(self, event: StepEvent) -> None:
+        """Append one line and fsync — a crash mid-run loses at most the event in flight."""
         line = json.dumps(event.to_dict(), sort_keys=True, ensure_ascii=False)
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +218,7 @@ class JsonlSink:
                 os.fsync(f.fileno())
 
     def read(self) -> Iterator[StepEvent]:
+        """Every event in the file, in order (an absent file yields nothing)."""
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as f:
@@ -186,13 +228,18 @@ class JsonlSink:
 
 
 class MultiSink:
+    """Fan-out to several sinks; one sink's failure is suppressed so the others still see
+    the event and the run never notices."""
+
     def __init__(self, *sinks: EventSink) -> None:
         self._sinks = list(sinks)
 
     def add(self, sink: EventSink) -> None:
+        """Attach another sink (e.g. an SSE broadcaster once a client connects)."""
         self._sinks.append(sink)
 
     def emit(self, event: StepEvent) -> None:
+        """Deliver to every sink in order."""
         for s in self._sinks:
             with contextlib.suppress(Exception):  # a broken sink must never break a run
                 s.emit(event)
@@ -205,6 +252,7 @@ class CallbackSink:
         self._fn = fn
 
     def emit(self, event: StepEvent) -> None:
+        """Call the function; wrap in a ``MultiSink`` if it may raise."""
         self._fn(event)
 
 
@@ -225,6 +273,8 @@ class Emitter:
         self._lock = threading.Lock()
 
     def _next_seq(self) -> int:
+        """The next sequence number — the only per-trace ordering a reader may rely on
+        (timestamps can collide within a millisecond)."""
         with self._lock:
             self._seq += 1
             return self._seq
@@ -246,6 +296,8 @@ class Emitter:
         output_ref: str = "",
         **payload: Any,
     ) -> StepEvent:
+        """Build one event under this trace and hand it to the sink; ``step_id`` defaults
+        to ``task_id`` so per-task events group without the caller thinking about it."""
         ev = StepEvent(
             trace_id=self.trace_id,
             stage=stage,
@@ -269,6 +321,7 @@ class Emitter:
         return ev
 
     def error(self, stage: str, action: str, exc: BaseException, **payload: Any) -> StepEvent:
+        """An ``error`` event from an exception (type as the code, message redacted)."""
         return self.emit(
             stage,
             action,
@@ -283,6 +336,8 @@ class Emitter:
 
         def _cb(action: str, payload: Mapping[str, Any]) -> None:
             p = dict(payload)
+            # The core names the task as ``task`` (grade, controls) or ``sha`` (mine); either
+            # becomes the event's task_id, else the one bound when the callback was made.
             tid = str(p.pop("task", "") or p.pop("sha", "") or task_id)
             status = StepStatus.OK
             if action.endswith(".error"):
