@@ -92,8 +92,8 @@ Every grade row and every evidence pack carries an `ApparatusStamp`
 (`crb.core.evidence.ApparatusStamp`):
 
 ```
-apparatus_version:  2.0                 # grader semantics, belt set, size table, taxonomy, routing rule
-crb_version:        2.0.0a0
+apparatus_version:  2.2                 # grader semantics, belt set (v5), size table, taxonomy, routing rule
+crb_version:        2.0.0a1
 grader:             crb.core.grade
 runner:             pytest | go | node | vitest | jest | mocha | maven | cargo (+ options)
 executor:           {executor: docker, image, user, memory, cpus, pids_limit, network: none}

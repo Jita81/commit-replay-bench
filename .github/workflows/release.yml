@@ -123,7 +123,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=Commit Replay Bench
             org.opencontainers.image.vendor=Automated Agile
-            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.licenses=NOASSERTION  # BUSL-1.1 once LICENSE carries the text (docs/LICENSING.md)
             org.opencontainers.image.documentation=https://github.com/Jita81/commit-replay-bench/blob/main/docs/DEPLOYMENT.md
 
       - name: Build deploy/Dockerfile (load locally; nothing is pushed yet)

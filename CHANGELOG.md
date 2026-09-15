@@ -8,6 +8,46 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+Nothing yet — everything on `reboot/v2` up to the rc pin is in 2.0.0a1 below.
+
+## [2.0.0a1] — unreleased — first releasable v2 (dated on the day it is tagged; pinned as `2.0.0a1-rc1`)
+
+### 2026-09-15 — the NHS measurement's instrument findings (DL-020..025)
+- **CI green.** Red on every push since 2026-09-13: labeller tests needed a real `claude` on
+  PATH; git 2.5x renders a UTC `%aI` as `Z` (`GitRepo.author_date` normalises to `+00:00`);
+  `grades.trial` is `VARCHAR(16)`, which PostgreSQL enforces and SQLite does not
+  (`GradeRow` now refuses a longer label on every dialect; the store suite verified on
+  postgres:16); a non-existent `hadolint@v3` pin; artifact uploads made non-fatal.
+- **JavaScript dependency eras** (ADR-0011 amendment c): a task commit whose lockfile differs
+  from HEAD's gets its own `node_modules`, installed once per lockfile hash; a failed install
+  is a harness row; installs refuse below 2 GiB free, at most 8 eras per repo (LRU).
+- **Support files under the test layout** (`tests/helpers.py`, `tests/mock_server.py`) are
+  overlaid, never targets; a candidate with only support files is skipped. `kind: mine` +
+  `task_ids` re-qualifies known commits under their stored pool.
+- **One oracle measurement**: the capability map routes every cell under the repo's
+  task-level mutation scores — the same number the sign-off evidences — so the two can never
+  disagree (`oracle_strength_mean` is the strength the cell was routed under).
+- **The builder gets the grader's services** (DL-024): a sighted build brings the task's era
+  services up first and exports their environment in the test command.
+- **`outage` failure kind**: a provider refusal (usage limit / 429 / dead credential) is
+  outside `n`, never `harness`; label runs with only outage labels fail instead of succeeding.
+- Error strings are capped head-first so a long docker refusal keeps its
+  `protocol violation:` kind; one candidate's harness error skips it in a mine run (three in a
+  row stop the run); a non-build run's own counters are served as `counts.detail`.
+- Capability map: `mode` (default sighted) and `apparatus` (default current) filters; the
+  sign-off measures sighted rows of the current apparatus only.
+- **Licence**: BSL 1.1 adopted (DL-015/DL-025); `LICENSE` is a reservation of rights until
+  the text lands; the image label is `NOASSERTION`; `docs/LICENSING.md`.
+
+### Evidence caveat for this release
+Every ledger row to date was measured on the **host executor posture** (`executor: local`)
+— including the rows graded after the independent review's finding 1 (the builder
+controlled the grader's git view) was closed in code. The sealed-container posture
+(ADR-0012) is built and tested; no measurement has yet been taken on it. Numbers in this
+release license statements about the instrument, not demonstrations (EVIDENCE-AND-CLAIMS §7).
+
+
+
 ### Independent AI review pass (2026-09-14) — findings 1, 2, 4, 5, 6, 7, 8 closed
 Every finding of `docs/reviews/signoffs/2026-09-14-fable-ai-pass.md` was reproduced with its
 recorded command before it was fixed, and each reproduction is now a regression test. Finding 3
@@ -96,7 +136,6 @@ recorded command before it was fixed, and each reproduction is now a regression 
   standard` on koa is honest — the pre-fill's "not in node_modules/.bin" came from a
   cwd-less check.
 
-## [2.0.0a1] — 2026-09-14 — first releasable v2
 
 Apparatus version **2.2** (2.0 → 2.1 in Wave A, 2.1 → 2.2 in Wave B; the sections below
 say what each bump changed about the meaning of a verdict). Everything on `reboot/v2`
@@ -309,6 +348,6 @@ Apparatus version **2.0**.
 - The v1 (June 2026) implementation (`src/commit_replay_bench/*`, SEARCH/REPLACE-only
   generator, host-only pytest harness). Its last commit is tagged `v1.0.0-legacy`.
 
-[Unreleased]: https://github.com/Jita81/commit-replay-bench/compare/v2.0.0a1...HEAD
-[2.0.0a1]: https://github.com/Jita81/commit-replay-bench/compare/v1.0.0-legacy...v2.0.0a1
+[Unreleased]: https://github.com/Jita81/commit-replay-bench/compare/2.0.0a1-rc1...reboot/v2
+[2.0.0a1]: https://github.com/Jita81/commit-replay-bench/compare/v1.0.0-legacy...2.0.0a1-rc1
 [2.0.0a0]: https://github.com/Jita81/commit-replay-bench/compare/v1.0.0-legacy...v2.0.0a0

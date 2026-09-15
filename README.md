@@ -212,5 +212,8 @@ before the next begins.
 
 ## Licence
 
-`LICENSE` is currently the MIT licence inherited from v1. **The licence for the v2 product
-is to be confirmed by the owner**; do not rely on the current file as the final statement.
+Source-available: **Business Source License 1.1** (Apache-2.0 change licence, three-year
+change date, free non-production and verification use) — adopted, text with legal
+([DECISION-LOG](docs/DECISION-LOG.md) DL-015/DL-025, [LICENSING](docs/LICENSING.md)). Until
+the text is committed, `LICENSE` is a reservation of rights: read, evaluate and review only.
+Nothing in this tree is MIT (that applied to v1, tag `v1.0.0-legacy`).
