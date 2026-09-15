@@ -22,6 +22,26 @@ The table is created only when absent: a database that ``init_db`` created under
 release already has it (adoption stamps such a database at the newest *column* marker,
 0002, and replays this revision), and ``CREATE TABLE`` is not idempotent on either
 dialect. Creating it twice would fail; skipping it when present changes nothing.
+
+Navigation
+----------
+What it is:   Revision ``0003`` — the ``reviews`` table (human verdicts, append-only,
+              hash-chained).
+What it does: Creates ``reviews`` and its indexes when absent (an ``init_db`` database of this
+              release already has it), then installs the triggers on the five append-only
+              tables. ``downgrade`` refuses while any review exists.
+How:          ``_reviews_table_exists`` (always ``False`` offline so the emitted SQL carries
+              the CREATE) → ``op.create_table`` → ``install_append_only_triggers_on``.
+Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
+              docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/store/models.py (``Review``), src/crb/core/review.py (``ReviewRecord``
+              — the columns), src/crb/store/ledger.py (``DbReviewLedger`` writes here),
+              src/crb/store/migrate.py (the ``0003`` marker and ``REVISION_TABLES`` entry),
+              src/crb/store/migrations/versions/v0002_belt5_repo_lint_clean.py (the previous
+              revision)
+Tested by:    tests/test_store_migrate.py, tests/test_store_reviews.py
+Touch when:   never — a released revision is immutable.
 """
 
 from __future__ import annotations
@@ -51,6 +71,7 @@ def _reviews_table_exists() -> bool:
 
 
 def upgrade() -> None:
+    """Create ``reviews`` (unless ``init_db`` already did) and protect it."""
     if not _reviews_table_exists():
         op.create_table(
             "reviews",

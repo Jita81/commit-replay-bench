@@ -15,6 +15,39 @@ anchor rule (:func:`crb.core.review.check_review_anchor`) applied at append agai
 REVIEWED ROW's stored evidence pack — resolved through the row named by
 ``grade_row_hash``, never through the record's own pack field — so a review of bytes the
 instrument did not grade for that row cannot be written.
+
+Navigation
+----------
+What it is:   The database ledgers — ``DbLedger`` for ``grades`` (+ the ``evidence`` packs)
+              and ``DbReviewLedger`` for ``reviews`` — plus ``assert_append_only`` for
+              ``/health``.
+What it does: Appends hash-chained rows under a per-table write lock, re-asserting the
+              false-Q1 invariant before every insert; reads rows back as the core's
+              dataclasses; imports foreign JSONL rows by re-chaining them (source hash kept
+              in ``labels``); exports rows that verify standalone. Refuses a review whose row
+              is unknown, whose pack is not the row's, or which has nothing to anchor to.
+How:          ``append`` = lock → last ``row_hash`` → ``GradeRow.chained`` → insert → commit;
+              ``verify`` re-walks the chain with the core's ``verify_chain``;
+              ``DbReviewLedger.append`` resolves the reviewed row and its stored pack, runs
+              ``check_review_anchor``, then chains and inserts the same way.
+Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/core/ledger.py (``GradeRow``, ``verify_chain``, ``GENESIS_HASH`` — the
+              contract this mirrors), src/crb/core/review.py (``ReviewRecord`` and the anchor
+              rule), src/crb/store/models.py (the ``Grade`` / ``Review`` / ``EvidencePackRow``
+              columns), src/crb/store/db.py (the triggers that make append-only true at the
+              database), src/crb/server/worker.py (the writer), src/crb/server/routes/ledger.py
+              (verify / export over HTTP)
+Tested by:    tests/test_store_ledger.py, tests/test_store_reviews.py, tests/test_store_db.py,
+              tests/test_store_migrate.py
+Touch when:   never for a new repository; when ``GradeRow`` or ``ReviewRecord`` gains a field
+              (the column tuples are derived from the dataclasses, so a new field needs a
+              migration and a ``labels``-style exclusion if it is not a column); changing the
+              lock or chain semantics needs docs/adr/0002-append-only-hash-chained-ledger.md.
+Claims:       A verified chain proves rows were not edited or reordered since they were
+              written — not that the apparatus that wrote them was sound
+              (docs/EVIDENCE-AND-CLAIMS.md#4-the-apparatus-stamp--evidence-expires).
 """
 
 from __future__ import annotations
@@ -46,6 +79,8 @@ from crb.core.review import (
 )
 from crb.store.models import EvidencePackRow, Grade, Review
 
+# Column lists are DERIVED from the core dataclasses so a field added there cannot be
+# silently dropped here; the one field each holds as JSON is excluded and mapped by hand.
 _ROW_COLUMNS = tuple(k for k in GradeRow.__dataclass_fields__ if k != "labels")
 _REVIEW_COLUMNS = tuple(k for k in ReviewRecord.__dataclass_fields__ if k != "findings")
 
@@ -63,11 +98,17 @@ def _from_model(m: Grade) -> GradeRow:
 
 
 class DbLedger:
+    """The ``grades`` table as a hash-chained ledger of :class:`GradeRow`, plus the
+    content-addressed ``evidence`` packs the rows point at."""
+
     def __init__(self, factory: sessionmaker[Session]) -> None:
         self._factory = factory
 
     # --- write ----------------------------------------------------------------
     def _lock(self, s: Session) -> None:
+        # One writer at a time so "last row_hash" cannot be read twice by two appenders.
+        # SQLite: BEGIN IMMEDIATE takes the file's write lock now, not at first write.
+        # PostgreSQL: a transaction-scoped advisory lock keyed per ledger (7331 = grades).
         dialect = s.get_bind().dialect.name
         if dialect == "sqlite":
             s.execute(text("BEGIN IMMEDIATE"))
@@ -75,12 +116,18 @@ class DbLedger:
             s.execute(text("SELECT pg_advisory_xact_lock(7331)"))
 
     def _last_hash(self, s: Session) -> str:
+        """The chain head: the newest row's ``row_hash``, or the genesis hash when empty."""
         last = s.execute(
             select(Grade.row_hash).order_by(Grade.seq.desc()).limit(1)
         ).scalar_one_or_none()
         return last or GENESIS_HASH
 
     def append(self, row: GradeRow) -> GradeRow:
+        """Chain ``row`` onto the head and insert it; returns the chained copy.
+
+        The invariant check runs BEFORE the lock is taken so a false-Q1 row costs nothing
+        but the exception; the database constraint and triggers are the second line.
+        """
         row.assert_invariants()
         with self._factory() as s:
             self._lock(s)
@@ -90,6 +137,8 @@ class DbLedger:
         return chained
 
     def append_many(self, rows: Iterable[GradeRow]) -> list[GradeRow]:
+        """Chain and insert ``rows`` in order under one lock and one transaction — all or
+        nothing, so a rejected row in the middle leaves the chain where it was."""
         out: list[GradeRow] = []
         with self._factory() as s:
             self._lock(s)
@@ -104,6 +153,8 @@ class DbLedger:
         return out
 
     def store_pack(self, pack: EvidencePack) -> str:
+        """Store a pack body under its hash; a second store of the same hash is a no-op
+        (content-addressed, so a re-run cannot overwrite the evidence a row cites)."""
         with self._factory() as s:
             existing = s.get(EvidencePackRow, pack.pack_hash)
             if existing is None:
@@ -121,6 +172,8 @@ class DbLedger:
 
     # --- read -----------------------------------------------------------------
     def rows(self, *, repo: str | None = None, run_id: str | None = None) -> Iterator[GradeRow]:
+        """Rows in chain (``seq``) order, optionally filtered. A filtered read is not a
+        verifiable chain on its own — ``verify`` always reads everything."""
         with self._factory() as s:
             q = select(Grade).order_by(Grade.seq)
             if repo:
@@ -131,10 +184,13 @@ class DbLedger:
                 yield _from_model(m)
 
     def count(self) -> int:
+        """Total rows in the ledger."""
         with self._factory() as s:
             return int(s.execute(select(func.count(Grade.seq))).scalar_one())
 
     def get_pack(self, pack_hash: str) -> dict[str, Any] | None:
+        """The stored pack body for ``pack_hash`` (``EvidencePack.to_dict()`` shape), or
+        ``None``."""
         with self._factory() as s:
             m = s.get(EvidencePackRow, pack_hash)
             return None if m is None else dict(m.body_json)
@@ -153,11 +209,15 @@ class DbLedger:
                 labels.setdefault("source_row_hash", r.row_hash)
             d = r.fields()
             d["labels"] = labels
+            # Blank prev_hash: ``chained`` in append_many recomputes it against THIS
+            # ledger's head; the source ledger's chain position is not ours to keep.
             d["prev_hash"] = ""
             prepared.append(GradeRow(**d))
         return len(self.append_many(prepared))
 
     def export_jsonl(self, path: str | Path) -> int:
+        """Write every row, in chain order, as one JSON object per line (sorted keys, so
+        the file is byte-stable); returns the row count. The file verifies standalone."""
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         n = 0
@@ -187,6 +247,7 @@ class DbReviewLedger:
         self._factory = factory
 
     def _lock(self, s: Session) -> None:
+        # The reviews chain has its own head, so its own lock (see DbLedger._lock).
         dialect = s.get_bind().dialect.name
         if dialect == "sqlite":
             s.execute(text("BEGIN IMMEDIATE"))
@@ -194,6 +255,7 @@ class DbReviewLedger:
             s.execute(text("SELECT pg_advisory_xact_lock(7333)"))
 
     def _last_hash(self, s: Session) -> str:
+        """The review chain's head, or the genesis hash when empty."""
         last = s.execute(
             select(Review.row_hash).order_by(Review.seq.desc()).limit(1)
         ).scalar_one_or_none()
@@ -247,6 +309,7 @@ class DbReviewLedger:
                     observed=record.patch_sha256_reviewed,
                 )
             check_review_anchor(record, pack=body, row=row)
+            # Lock only once the anchor holds: a refused review never blocks a writer.
             self._lock(s)
             chained = record.chained(self._last_hash(s))
             s.add(_review_to_model(chained))
@@ -260,6 +323,7 @@ class DbReviewLedger:
         task_id: str | None = None,
         grade_row_hash: str | None = None,
     ) -> Iterator[ReviewRecord]:
+        """Reviews in chain order, optionally filtered by repo, task or reviewed row."""
         with self._factory() as s:
             q = select(Review).order_by(Review.seq)
             if repo:
@@ -272,11 +336,13 @@ class DbReviewLedger:
                 yield _review_from_model(m)
 
     def get(self, review_id: str) -> ReviewRecord | None:
+        """One review by its id, or ``None``."""
         with self._factory() as s:
             m = s.execute(select(Review).where(Review.review_id == review_id)).scalar_one_or_none()
             return None if m is None else _review_from_model(m)
 
     def count(self) -> int:
+        """Total reviews in the ledger."""
         with self._factory() as s:
             return int(s.execute(select(func.count(Review.seq))).scalar_one())
 
@@ -292,6 +358,8 @@ def assert_append_only(factory: sessionmaker[Session]) -> None:
         if first is None:
             return
         try:
+            # A no-op UPDATE (actor = actor): a live trigger aborts it; a missing one lets
+            # it through, the rollback undoes the harmless write, and we report the gap.
             s.execute(text("UPDATE grades SET actor = actor WHERE seq = :seq"), {"seq": first.seq})
             s.rollback()
         except Exception:

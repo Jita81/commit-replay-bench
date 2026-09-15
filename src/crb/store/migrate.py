@@ -27,6 +27,32 @@ Invariants
   operator must look.
 * The URL comes from the caller or ``CRB_DATABASE_URL``; it is never written to disk and
   never logged (a PostgreSQL URL can embed a password).
+
+Navigation
+----------
+What it is:   The programmatic Alembic entry point — ``upgrade`` / ``current`` / ``check`` and
+              the ``python -m crb.store.migrate`` CLI the container entrypoint runs.
+What it does: Migrates a database to the packaged head in one transaction, adopts an
+              unversioned ``init_db`` database by stamping it at the revision its schema
+              matches, and refuses a partial or foreign schema rather than guess. Re-asserts
+              the append-only triggers after every upgrade; never logs the URL.
+How:          ``upgrade`` = engine → ``_adopt_unversioned_schema`` (marker walk, parity
+              diff at head) → ``command.upgrade`` on the same connection →
+              ``install_append_only_triggers``; ``install_append_only_triggers_on`` adapts an
+              open connection so revision scripts reuse the one trigger helper.
+Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/store/migrations/env.py (receives the connection through
+              ``config.attributes``), src/crb/store/migrations/versions/v0001_initial_schema.py
+              (the revision that equals ``create_all``), src/crb/store/db.py (the engine and
+              the trigger helper), src/crb/store/models.py (``Base.metadata`` for the parity
+              diff), deploy/entrypoint.sh (runs ``upgrade`` before serving),
+              src/crb/cli/commands/service.py (``crb migrate``)
+Tested by:    tests/test_store_migrate.py
+Touch when:   never for a new repository; every new revision that ADDS a column appends a
+              ``REVISION_MARKERS`` entry and one that ADDS a table appends a
+              ``REVISION_TABLES`` entry — or adoption of a newer ``init_db`` database
+              breaks; the upgrade procedure is documented in docs/DEPLOYMENT.md#6-upgrade.
 """
 
 from __future__ import annotations
@@ -138,7 +164,8 @@ def install_append_only_triggers_on(
 
 
 def _model_tables_present(connection: Connection) -> tuple[set[str], set[str]]:
-    """``(present, expected)`` model table names in the connection's default schema."""
+    """``(present, expected)`` model table names in the connection's default schema
+    (``present`` is intersected with the models so foreign tables are ignored)."""
     present = set(inspect(connection).get_table_names())
     expected = set(Base.metadata.tables)
     return present & expected, expected
@@ -250,6 +277,7 @@ def check(url: str | None = None) -> bool:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """The ``python -m crb.store.migrate`` argument parser."""
     p = argparse.ArgumentParser(
         prog="python -m crb.store.migrate",
         description="Apply or inspect crb database migrations.",
@@ -272,6 +300,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry: ``upgrade`` (default) / ``current`` / ``check``; ``check`` exits 1 when the
+    database is not at head so an entrypoint or a Helm hook can gate on it."""
     args = _build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
