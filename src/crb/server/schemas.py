@@ -13,6 +13,28 @@ Invariants encoded on purpose:
   absent (the UI renders absence as ``NOT_YET_MEASURED``); nothing is zero-filled;
 * every rate travels with its ``n`` and its interval (``ci_low`` / ``ci_high``);
 * ``false_q1`` is a count that must read 0.
+
+Navigation
+----------
+What it is:   The Pydantic request/response models of the domain routes — the API contract
+              ``ui/src/api/types.ts`` mirrors field for field.
+What it does: Validates every write (``RunCreateRequest`` with its ladder / budget /
+              builder_config rules, repo config, sign-off bodies) and shapes every read
+              (runs, tasks, grades, events, oracle, learn); a field here is a field the UI
+              may rely on, nothing else is.
+How:          ``BaseModel`` classes with ``extra="forbid"`` on requests, validators that
+              refuse identity/credential-shaped builder kwargs and malformed ladders; the
+              route modules import from here, never the reverse.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   docs/API.md (the human-readable contract), ui/src/api/types.ts (the mirror),
+              src/crb/server/routes/runs.py (RunCreateRequest → Run), src/crb/server/routes/repos.py
+              (repo config), src/crb/server/schemas_capability.py and
+              src/crb/server/schemas_signoff.py (the map and sign-off shapes)
+Tested by:    tests/test_server_routes_runs.py, tests/test_server_routes_repos.py, tests/test_server_app.py
+Touch when:   any API field changes — update docs/API.md and ui/src/api/types.ts in the
+              same change; never for a new repository.
+
 """
 
 from __future__ import annotations

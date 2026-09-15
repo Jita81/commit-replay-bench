@@ -22,6 +22,27 @@ browser ``EventSource`` resumes by itself), then poll the table every
 :data:`SSE_POLL_S` seconds; a ``: keepalive`` comment every :data:`SSE_KEEPALIVE_S`
 seconds keeps proxies from closing an idle stream; ``event: done`` closes the
 stream once the run is terminal; a client disconnect stops the poll loop.
+
+Navigation
+----------
+What it is:   The ``/runs`` API — create, list, inspect, cancel a run; its per-task table;
+              its stored and streamed StepEvents.
+What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_config, retain,
+              outage_stop, preflight) into a queued ``Run`` row; serves run views with
+              counts re-derived from the ledger when the worker wrote none; streams events
+              as SSE with resume-by-seq; cancellation is a flag the worker honours.
+How:          FastAPI handlers over ``JobQueue`` (queue writes) and read-only SQLAlchemy
+              queries; ``run_out`` is the one place a ``Run`` row becomes a ``RunOut``.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut — mirrored by ui/src/api/types.ts),
+              src/crb/store/jobs.py (enqueue, cancel), src/crb/server/worker.py (what a
+              queued run becomes), src/crb/store/models.py (Run, Grade, Event),
+              ui/src/screens/Runs/RunsPage.tsx and ui/src/screens/Runs/RunDetailPage.tsx (the screens)
+Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py
+Touch when:   a run parameter is added (schema field → ``params`` here → the worker reads it →
+              docs/API.md → the UI type); a field is added to ``RunOut`` (the UI type first).
+
 """
 
 from __future__ import annotations

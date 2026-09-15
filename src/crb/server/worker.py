@@ -63,6 +63,38 @@ Honesty properties
   (``<max_tool_calls>/<max_turns>/<wall_clock_s>``, see :func:`budget_tier`) and
   ``labels.rung_index`` so a sweep over budgets can be split after the fact — a
   blind rate quoted without its budget tier is not a claim.
+
+Navigation
+----------
+What it is:   The worker process — the only thing that executes a run (the API never does).
+What it does: Polls the job queue, claims one run, dispatches by kind (setup, probe, mine,
+              label, replay, blind, oracle, controls, factory), streams StepEvents, writes
+              grade rows through the append-only ledger with the run's labels stamped,
+              records the apparatus, and marks the run succeeded / failed / cancelled
+              honestly (all-attempts-errored is a failure; a provider outage streak stops
+              the run; a harness error on one mined candidate skips it).
+How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
+              emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
+              ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
+              row with trial labels before it is chained → ``JobQueue.finish``.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0005-fail-closed-docker-sandbox.md,
+              docs/adr/0012-builder-in-a-sealed-container.md
+Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finish),
+              src/crb/core/run.py (a replay's task loop), src/crb/builders/adapter.py (the
+              build function, ladder, pre-flight), src/crb/core/mine.py (mining),
+              src/crb/core/oracle/mutation.py (oracle scores), src/crb/core/oracle/controls.py
+              (negative controls), src/crb/factory/loop.py (forward mode),
+              src/crb/server/factory_state.py (the factory's files), src/crb/store/ledger.py
+Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
+              tests/test_worker_clone.py, tests/test_store_jobs.py
+Touch when:   a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
+              src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
+              every run must carry is added (``_RunLedger._stamp``); never for a new
+              repository — repository behaviour lives in the runner and the repo config.
+Claims:       Nothing here decides a verdict: the grader does; the worker only sequences,
+              stamps and records (docs/EVIDENCE-AND-CLAIMS.md).
+
 """
 
 from __future__ import annotations
