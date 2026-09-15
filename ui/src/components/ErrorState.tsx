@@ -1,3 +1,32 @@
+/**
+ * ErrorState — the API's error envelope rendered honestly: message first, code and status small,
+ * detail behind a disclosure.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `ErrorState` alert every failed query or mutation renders through.
+ * What it does: Shows the human message from the envelope under a heading chosen by code
+ *               (`timeout`, `network`, `sandbox_unavailable`, `false_q1_refused`,
+ *               `invalid_response`) or by HTTP status (401 / 403 / 404 / 409 / 5xx), the
+ *               `HTTP <status> · <code>` line in small mono, the structured `detail` behind a
+ *               collapsed disclosure, and an optional Retry. No stack traces, no raw JSON in
+ *               chrome (design law 4 in ui/README.md); a non-`ApiError` is shown by its
+ *               message.
+ * How:          `instanceof ApiError` → pick the heading (code table, then status, then a
+ *               generic) → `role="alert"` card with `JsonView` for the detail.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/client.ts (`ApiError` — the only failure shape),
+ *               ui/src/components/QueryBoundary.tsx (renders this for every failed query),
+ *               ui/src/components/JsonView.tsx (the detail), ui/src/components/GateBanner.tsx
+ *               (a 409 `false_q1_refused` on a gate is rendered as a REFUSED gate, not here),
+ *               ui/src/screens/Login/LoginPage.tsx (a wrong password shows the envelope)
+ * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx and
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx (a 409 and a 5xx as rendered),
+ *               ui/e2e/walkthrough/01-login.spec.ts (the envelope on a wrong password)
+ * Touch when:   a reserved error code is added to docs/API.md "Conventions" — add its heading
+ *               to `CODE_TITLES`; never for a new repository.
+ */
 import type { ReactNode } from 'react'
 import { ApiError } from '../api/client'
 import { Button } from './Button'
@@ -12,6 +41,7 @@ interface ErrorStateProps {
   children?: ReactNode
 }
 
+/** Headings for the reserved codes (docs/API.md "Conventions") — chosen before the HTTP status. */
 const CODE_TITLES: Record<string, string> = {
   timeout: 'The server did not answer in time',
   network: 'Could not reach the server',
@@ -20,6 +50,7 @@ const CODE_TITLES: Record<string, string> = {
   invalid_response: 'Unexpected response from the server',
 }
 
+/** A heading from the HTTP status when the code is not a reserved one. */
 function statusTitle(status: number): string | null {
   if (status === 401) return 'You are not signed in'
   if (status === 403) return 'Your role does not allow this'

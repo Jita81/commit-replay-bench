@@ -1,3 +1,31 @@
+/**
+ * Learn — the learning half of the loop, read-only: refusals → guard corpus, weak oracles →
+ * strengthening backlog, apparatus change → re-measurement plan (/learn).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /learn: three derivations from one repo's ledger, each a card
+ *               with tiles and a table.
+ * What it does: Renders `GET /learn/refusals` (protocol rows grouped by guard, reason and
+ *               command shape, every verdict "unsure"), `/learn/strengthen` (cells withheld
+ *               from deliver for a weak oracle, as frozen-backlog-shaped items) and
+ *               `/learn/remeasure` (cells whose rows predate the current apparatus, with the
+ *               rows and spend still needed). Nothing here acts: each report stops where a
+ *               person decides, so the page has no write affordance by design.
+ * How:          Three local hooks (the shapes mirror `crb.core.learn` `to_dict()`s) → one
+ *               section component each with tiles + `DataTable`; the note the server attaches
+ *               is shown verbatim under each table.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   docs/LEARNING-LOOP.md (what each report means and why it stops at a human),
+ *               src/crb/core/learn.py (the three derivations), src/crb/server/routes/learn.py
+ *               (the routes), ui/src/components/StatTile.tsx and ui/src/components/DataTable.tsx,
+ *               ui/src/screens/Oracle/OraclePage.tsx (where the strengthen report sends you)
+ * Tested by:    untested — read-only rendering over the three reports; the derivations are
+ *               pinned in tests/test_learn.py and the routes in tests/test_server_routes_learn.py
+ * Touch when:   a report gains a field (src/crb/core/learn.py — mirror the interface here)
+ *               or a fourth play is added to docs/LEARNING-LOOP.md; never for a new repository.
+ */
 import { useMemo } from 'react'
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { Link } from 'react-router'
@@ -16,6 +44,7 @@ import { fmtInt, fmtPct, fmtUsd } from '../../lib/format'
 // Shapes (mirror crb.core.learn *.to_dict(); see docs/LEARNING-LOOP.md)
 // ---------------------------------------------------------------------------
 
+/** One refusal class: (guard prefix, reason, command shape) with its cost and the candidate corpus lines; `verdict` is always "unsure" here — a human writes honest / refuse. */
 export interface RefusalGroup {
   group_id: string
   prefix: string
@@ -33,6 +62,7 @@ export interface RefusalGroup {
   verdict: string
 }
 
+/** `GET /learn/refusals` — mirrors `crb.core.learn.RefusalReport.to_dict()`. */
 export interface RefusalReport {
   repo: string
   rows_total: number
@@ -46,6 +76,7 @@ export interface RefusalReport {
   note: string
 }
 
+/** One strengthening proposal in the frozen-backlog shape (`test.add`, structural slots only). */
 export interface StrengthenItem {
   id: string
   title: string
@@ -54,6 +85,7 @@ export interface StrengthenItem {
   labels: Record<string, string>
 }
 
+/** `GET /learn/strengthen` — cells withheld from deliver for a weak oracle, and the items that would strengthen them. */
 export interface StrengthenReport {
   repo: string
   threshold: number
@@ -63,6 +95,7 @@ export interface StrengthenReport {
   note: string
 }
 
+/** One cell with rows older than the current apparatus: how many are stale, how many current, how many still needed for n ≥ min_n, and the estimated spend. */
 export interface RemeasureCell {
   label: string
   stale_versions: string[]
@@ -76,6 +109,7 @@ export interface RemeasureCell {
   requests: Array<Record<string, unknown>>
 }
 
+/** `GET /learn/remeasure` — evidence expires with the apparatus (EVIDENCE-AND-CLAIMS §4). */
 export interface RemeasurePlan {
   repo: string
   current_apparatus: string
@@ -90,6 +124,7 @@ export interface RemeasurePlan {
 
 const enc = encodeURIComponent
 
+/** `GET /learn/refusals?repo=`. */
 function useLearnRefusals(repo: string): UseQueryResult<RefusalReport, ApiError> {
   return useQuery({
     queryKey: ['learn', repo, 'refusals'] as const,
@@ -99,6 +134,7 @@ function useLearnRefusals(repo: string): UseQueryResult<RefusalReport, ApiError>
   })
 }
 
+/** `GET /learn/strengthen?repo=`. */
 function useLearnStrengthen(repo: string): UseQueryResult<StrengthenReport, ApiError> {
   return useQuery({
     queryKey: ['learn', repo, 'strengthen'] as const,
@@ -108,6 +144,7 @@ function useLearnStrengthen(repo: string): UseQueryResult<StrengthenReport, ApiE
   })
 }
 
+/** `GET /learn/remeasure?repo=`. */
 function useLearnRemeasure(repo: string): UseQueryResult<RemeasurePlan, ApiError> {
   return useQuery({
     queryKey: ['learn', repo, 'remeasure'] as const,
@@ -121,6 +158,7 @@ function useLearnRemeasure(repo: string): UseQueryResult<RemeasurePlan, ApiError
 // Sections
 // ---------------------------------------------------------------------------
 
+/** The loading line for a report; says what is being derived. */
 function Pending({ what }: { what: string }) {
   return (
     <p role="status" className="text-sm text-on-surface-muted">
@@ -129,6 +167,7 @@ function Pending({ what }: { what: string }) {
   )
 }
 
+/** Play 04: protocol rows → candidate guard-corpus lines (tiles + table); the share tile turns amber above 5 %. */
 function RefusalsSection({ repo }: { repo: string }) {
   const q = useLearnRefusals(repo)
   const columns = useMemo<Column<RefusalGroup>[]>(
@@ -185,6 +224,7 @@ function RefusalsSection({ repo }: { repo: string }) {
   )
 }
 
+/** Play 03: oracle-held cells → test work; links to the Oracle page for cells without per-task scores. */
 function StrengthenSection({ repo }: { repo: string }) {
   const q = useLearnStrengthen(repo)
   const columns = useMemo<Column<StrengthenItem>[]>(
@@ -221,6 +261,7 @@ function StrengthenSection({ repo }: { repo: string }) {
   )
 }
 
+/** Stale evidence → the runs to queue; the spend tile is a dash when no cell has a known cost. */
 function RemeasureSection({ repo }: { repo: string }) {
   const q = useLearnRemeasure(repo)
   const columns = useMemo<Column<RemeasureCell>[]>(

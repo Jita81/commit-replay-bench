@@ -1,3 +1,25 @@
+/**
+ * List and key/value editors — one input per item, the shape every "list of strings" and "env"
+ * runner option shares.
+ *
+ * Navigation
+ * ----------
+ * What it is:   `ListEditor` (a list of strings: `pip`, `extra_args`, `maven_flags`, an
+ *               explicit belt-scope list) and `KeyValueEditor` (the `env` map).
+ * What it does: Edits ordered string lists and NAME=value maps as rows with add / remove,
+ *               keeping the order the runner will see; each row is labelled "<label> N" for
+ *               assistive tech; hint or error is attached to the group via
+ *               `aria-describedby`; `disabled` renders the same rows read-only for a viewer.
+ * How:          Controlled: the parent owns the array; every change emits a new array.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Repos/RunnerOptsEditor.tsx (the `list` and `env` kinds),
+ *               ui/src/screens/Repos/RepoConfigForm.tsx (the belt-scope list),
+ *               ui/src/components/Button.tsx
+ * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx (rows added and sent),
+ *               ui/e2e/walkthrough/repo-config.spec.ts (the belt-scope row editor in Chromium)
+ * Touch when:   never for a new repository.
+ */
 import { useId, type ReactNode } from 'react'
 import { Button } from '../../components/Button'
 

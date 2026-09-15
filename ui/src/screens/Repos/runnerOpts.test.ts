@@ -1,3 +1,25 @@
+/**
+ * ui/src/screens/Repos/runnerOpts.ts — the key table mirrors crb.core.runners and invents nothing.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Unit tests for the runner-options vocabulary.
+ * What it does: Pins that every registered runner has an entry and every language maps to
+ *               registered runners (each runner to exactly one language), that each runner
+ *               exposes exactly the keys its code reads, that `unknownKeys` lists only
+ *               unread keys (sorted), that the `as*` coercions never invent a value, and that
+ *               `validateRunnerOpts` flags an int / bool / choice / list / env of the wrong
+ *               shape.
+ * How:          Table assertions against `RUNNER_OPTS` and `RUNNERS_BY_LANGUAGE`; direct calls
+ *               for the helpers.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Repos/runnerOpts.ts (the code under test), ui/src/api/types.ts
+ *               (`RUNNERS`, `LANGUAGES` — the closed sets these cases cross-check)
+ * Tested by:    ui/src/screens/Repos/runnerOpts.test.ts
+ * Touch when:   a runner gains or loses a key (src/crb/core/runners/*) — the "exactly the
+ *               keys" case must be updated with the table.
+ */
 import { describe, expect, it } from 'vitest'
 import { LANGUAGES, RUNNERS } from '../../api/types'
 import { RUNNERS_BY_LANGUAGE, RUNNER_OPTS, asEnv, asList, runnersFor, specsFor, unknownKeys, validateRunnerOpts } from './runnerOpts'

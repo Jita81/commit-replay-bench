@@ -1,3 +1,25 @@
+/**
+ * ui/src/components/BeltPills.tsx — a missing belt is never rendered, and never rendered as failed.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Component tests for `BeltPills`.
+ * What it does: Pins the glyph and the accessible sentence per belt value (held / failed / not
+ *               recorded), that belt set `v5` shows five belts and anything else four, that a
+ *               `v5` row with `repo_lint_clean: null` reads "not evaluated — no linter" rather
+ *               than failed, that an evidence pack without a belt set infers the count from
+ *               the presence of the `repo_lint_clean` key, and the name / status-word display
+ *               modes.
+ * How:          Testing Library render + `rerender` across belt sets; assertions on
+ *               `data-testid="belt-<name>"` and `aria-label`.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0011-repo-lint-belt.md
+ * Works with:   ui/src/components/BeltPills.tsx (the code under test), ui/src/api/types.ts
+ *               (`beltNamesFor` — the rule these cases pin), ui/src/lib/verdict.ts
+ *               (`beltDisplay` wording)
+ * Tested by:    ui/src/components/BeltPills.test.tsx
+ * Touch when:   a belt or belt set is added — add its expected label and count here.
+ */
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { BeltPills } from './BeltPills'

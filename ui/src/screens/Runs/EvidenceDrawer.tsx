@@ -1,3 +1,46 @@
+/**
+ * Evidence drawer — one evidence pack and what stands behind it: the pack, the retained patch, the
+ * transcript, the review.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The side drawer opened from a run's task table, the task page and the sweep
+ *               views; four tabs: Pack, Patch, Transcript, Review.
+ * What it does: Renders `GET /evidence/{hash}` — spec, belts (with the target / belt / lint run
+ *               tails, redacted at capture), diff stats, builder ref, apparatus stamp and the
+ *               full JSON — with the `verified` badge (the pack's canonical hash recomputed on
+ *               read equals its key; a mismatch is red, never hidden). The Patch tab fetches
+ *               the retained worktree's diff on demand, hashes the served bytes and shows
+ *               whether they match the pack's anchor; the Transcript tab reports why a
+ *               transcript is unavailable rather than showing nothing; the Review tab hosts
+ *               the review form. When the opener only knows the pack, the ledger row is
+ *               resolved from the task's grades.
+ * How:          `useEvidence` → `PackBody`; row hash from the prop or `useTask`;
+ *               `useRetainedStatus`
+ *               says what is reachable; the patch query is enabled only once the tab was
+ *               opened (so the hash is of bytes the reviewer actually loaded); Esc closes.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
+ *               docs/adr/0011-repo-lint-belt.md
+ * Works with:   ui/src/screens/Runs/contract.ts (retained-patch fetch, diff parser, review
+ *               hooks), ui/src/screens/Runs/ReviewPanel.tsx (the Review tab), ui/src/api/types.ts
+ *               (`EvidencePack`, `TestRun`, `LintRun`), ui/src/components/BeltPills.tsx and
+ *               ui/src/components/Provenance.tsx, ui/src/screens/Runs/RunDetailPage.tsx and
+ *               ui/src/screens/Runs/TaskDetailPage.tsx (the openers), src/crb/core/evidence.py
+ *               (the pack's shape and `verify_pack`)
+ * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx (Patch tab: verified / redacted /
+ *               unavailable; row resolution from the task),
+ *               ui/src/screens/Runs/RunDetailPage.test.tsx
+ *               (the drawer opens with belts and the verified badge),
+ *               ui/e2e/walkthrough/05-replay-fake.spec.ts,
+ *               ui/e2e/walkthrough/09-review.spec.ts
+ * Touch when:   the pack schema gains a section (src/crb/core/evidence.py, then
+ *               ui/src/api/types.ts)
+ *               — add it to `PackBody`; never for a new repository.
+ * Claims:       `verified` means the pack's bytes hash to their key; it says nothing about
+ *               whether the change is mergeable
+ *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
+ */
 import { useEffect, useMemo, useState } from 'react'
 import { useEvidence, useTask } from '../../api/hooks'
 import type { EvidencePack, LintRun, TestRun } from '../../api/types'
@@ -22,8 +65,10 @@ interface Props {
   rowHash?: string | null
 }
 
+/** The four tabs. */
 export type DrawerTab = 'pack' | 'patch' | 'transcript' | 'review'
 
+/** A titled block of the pack view. */
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="space-y-2">
@@ -33,6 +78,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+/** A two-column definition list for the pack's fields. */
 function KV({ rows }: { rows: Array<[string, React.ReactNode]> }) {
   return (
     <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-[13px]">
@@ -90,6 +136,7 @@ function LintRunTail({ run }: { run: LintRun | null }) {
   )
 }
 
+/** One test run (belt 2 target or belt 3 belt) as a collapsible: verdict pill, failing ids, the redacted output tail. */
 function TestRunTail({ label, run }: { label: string; run: TestRun | null }) {
   if (!run) {
     return (
@@ -131,6 +178,7 @@ function TestRunTail({ label, run }: { label: string; run: TestRun | null }) {
   )
 }
 
+/** The Pack tab: grade pills, verified badge, spec, belts with run tails, diff stats, builder ref, apparatus, full JSON. */
 function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean }) {
   const g = pack.grade
   const b = pack.builder
@@ -367,6 +415,7 @@ export function PatchView({ patch, pack }: { patch: RetainedPatch; pack: Evidenc
   )
 }
 
+/** The Transcript tab; an unavailable transcript states the server's reason. */
 function TranscriptView({ rowHash }: { rowHash: string }) {
   const q = useRetainedTranscript(rowHash, true)
   if (q.isPending) {
@@ -396,6 +445,7 @@ function TranscriptView({ rowHash }: { rowHash: string }) {
   )
 }
 
+/** One drawer tab button (`role="tab"`). */
 function Tab({ id, active, onClick, children, testId }: { id: DrawerTab; active: DrawerTab; onClick: (t: DrawerTab) => void; children: React.ReactNode; testId: string }) {
   const on = id === active
   return (
@@ -435,8 +485,11 @@ export function EvidenceDrawer({ packHash, onClose, rowHash: rowHashProp }: Prop
   const rowHash = rowHashProp ?? task.data?.grades.find((g) => g.evidence_pack_hash === packHash)?.row_hash ?? ''
   const retained = useRetainedStatus(rowHash)
   const patchAvailable = retained.data?.patch_available ?? false
+  // The patch is fetched only after the reviewer OPENS the tab: the review's anchor is the
+  // hash of bytes a person actually loaded, so it must not be pre-fetched on their behalf.
   const patch = useRetainedPatch(rowHash, patchOpened && patchAvailable)
   const reviews = useReviews({ grade_row_hash: rowHash }, rowHash.length > 0)
+  // Reviews come in chain order; the last one is the standing verdict (nothing is edited).
   const latest = reviews.data?.items.length ? reviews.data.items[reviews.data.items.length - 1] : null
   const hasDiff = Boolean(pack?.grade.diff?.diff_sha256)
 

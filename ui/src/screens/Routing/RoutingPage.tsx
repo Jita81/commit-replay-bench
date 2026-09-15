@@ -1,3 +1,38 @@
+/**
+ * Routing — what the factory may do with each class of change, decided by the one published rule
+ * (/routing).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /routing: the policy in force, one tile per route with its cell
+ *               count, and the decisions table.
+ * What it does: Renders `GET /routes?repo=` — a `RouteDecision` per measured cell with its
+ *               route, reason code, n, point, Wilson lower bound, false-Q1, oracle strength,
+ *               the model rate and split, and the policy version that produced it. The policy
+ *               card states the rule in words with the thresholds in force, including the
+ *               controls gate; the controls verdict every decision was taken under is shown
+ *               beside it.
+ * How:          `useRepoParam` → `useRoutesWithControls` → count decisions per route for the
+ *               tiles → `DataTable` sorted by route. The interval bar's upper bound is
+ *               synthesised symmetrically because a decision carries `ci_low` only (see the
+ *               comment at the column).
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md
+ * Works with:   ui/src/screens/Capability/contract.ts (the extended decision type, the hook,
+ *               `REASON_DISPLAY`), ui/src/screens/Capability/FailureSplit.tsx (controls pill,
+ *               split, model point), ui/src/api/types.ts (`RouteDecision`, `ROUTES`),
+ *               src/crb/core/routing.py (`route()` — the rule this page describes),
+ *               src/crb/server/routes/capability.py (the `/routes` route),
+ *               ui/src/components/VerdictPill.tsx and ui/src/components/CiBar.tsx
+ * Tested by:    ui/src/screens/Routing/RoutingPage.test.tsx,
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ * Touch when:   the routing policy gains a threshold or a reason code (an ADR-0003 amendment)
+ *               — add it to the policy card and to ui/src/screens/Capability/contract.ts;
+ *               never for a new repository.
+ * Claims:       A route is a decision under a named policy version over measured evidence;
+ *               `deliver` licenses a branch + PR, never a merge
+ *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
+ */
 import { useMemo } from 'react'
 import type { RouteDecision } from '../../api/types'
 import { LinkButton } from '../../components/Button'
@@ -16,8 +51,10 @@ import { routeDisplay } from '../../lib/verdict'
 import { REASON_DISPLAY, useRoutesWithControls, type ControlsVerdict, type RouteDecisionWithControls, type RoutingPolicyWithControls } from '../Capability/contract'
 import { ControlsPill, FailureSplitPills, ModelPointLine } from '../Capability/FailureSplit'
 
+/** A decision as the base contract types it, with the A2 fields optional so an older server still renders. */
 type Decision = RouteDecision & Partial<RouteDecisionWithControls>
 
+/** The thresholds in force and the rule in words — the same rule `crb.core.routing.route` applies. */
 function PolicyCard({ policy, controls }: { policy: RoutingPolicyWithControls; controls?: ControlsVerdict }) {
   return (
     <Card title="Policy in force" eyebrow={`${policy.version}${policy.controls_version ? ` + ${policy.controls_version}` : ''}`} actions={<ControlsPill verdict={controls} />}>
@@ -63,9 +100,11 @@ function PolicyCard({ policy, controls }: { policy: RoutingPolicyWithControls; c
   )
 }
 
+/** `class · size[ · language · builder · model · provider]` — the projected key fields present. */
 const cellLabel = (c: Record<string, string>) =>
   [c.capability_class, c.size, c.language, c.builder, c.model, c.provider].filter(Boolean).join(' · ')
 
+/** The screen; `?repo=` from the URL. */
 export function RoutingPage() {
   const [repo, setRepo] = useRepoParam()
   const routes = useRoutesWithControls(repo)
@@ -99,6 +138,9 @@ export function RoutingPage() {
         hideBelowMd: true,
       },
       { key: 'ci_low', header: 'Wilson lower', numeric: true, sortValue: (d) => d.ci_low, cell: (d) => fmtPct(d.ci_low) },
+      // A RouteDecision carries `ci_low` only (the bound that routes), so the bar's upper
+      // end is mirrored from the lower one. The Wilson interval is asymmetric, so this is a
+      // glance aid; the capability page draws the server's true interval.
       { key: 'bar', header: 'Interval', cell: (d) => <CiBar point={d.point} low={d.ci_low} high={Math.min(1, d.point + (d.point - d.ci_low))} n={d.n} width={80} />, hideBelowMd: true },
       { key: 'fq1', header: 'false-Q1', numeric: true, sortValue: (d) => d.false_q1, cell: (d) => <span className={d.false_q1 > 0 ? 'font-semibold text-status-red' : ''}>{d.false_q1}{d.false_q1 > 0 ? ' ✗' : ''}</span> },
       { key: 'oracle', header: 'Oracle', numeric: true, sortValue: (d) => d.oracle_strength ?? -1, cell: (d) => fmtRatio(d.oracle_strength), hideBelowMd: true },

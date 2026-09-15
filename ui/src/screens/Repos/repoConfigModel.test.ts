@@ -1,3 +1,27 @@
+/**
+ * ui/src/screens/Repos/repoConfigModel.ts — stored config round-trips, only changes are sent,
+ * validation speaks the server's words.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Unit tests for the repo-config form model; also exports the `REPO` fixture
+ *               the tab test reuses.
+ * What it does: Pins that `formFromRepo` mirrors the stored config (an explicit belt list
+ *               becomes LIST + rows; an unknown stored runner falls back to the language
+ *               default, never an empty select), that `changedFields` is empty for an untouched
+ *               form and names only what changed, that the wire helpers produce the server's
+ *               shapes, that `validateForm` uses the server's messages, and that
+ *               `parseScopeList` / `sameJson` behave.
+ * How:          Direct calls on the `REPO` fixture and edited copies of its form.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Repos/repoConfigModel.ts (the code under test),
+ *               ui/src/screens/Repos/RepoConfigTab.test.tsx (imports `REPO`),
+ *               src/crb/core/spec.py (the messages the validation cases quote)
+ * Tested by:    ui/src/screens/Repos/repoConfigModel.test.ts
+ * Touch when:   a `RepoConfig` field or validation message changes — update the fixture and
+ *               the matching case.
+ */
 import { describe, expect, it } from 'vitest'
 import type { RepoDetail } from '../../api/types'
 import { beltScopeOf, changedFields, formFromRepo, miningOf, parseScopeList, requestOf, sameJson, validateForm } from './repoConfigModel'

@@ -1,3 +1,31 @@
+/**
+ * CiBar — an inline Wilson-interval bar: the [low, high] band, the point, optional policy ticks.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `CiBar` SVG: a 96 px glance aid for one rate's interval.
+ * What it does: Draws the interval band, the point mark and the routing policy's thresholds
+ *               (`min_point`, `min_ci_low`) as dashed ticks so a reader sees at once whether
+ *               the lower bound clears the bar. It is always paired with the numbers in text
+ *               and carries them in its `aria-label` — the bar is never the only carrier of
+ *               the value; non-finite inputs are clamped to 0 rather than drawn as `NaN`.
+ * How:          Clamp to [0, 1] → rects positioned as fractions of `width` → `<title>` and
+ *               `aria-label` from `fmtPct`.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md
+ * Works with:   ui/src/lib/format.ts (`fmtPct`), ui/src/screens/Capability/CapabilityPage.tsx
+ *               and ui/src/screens/Routing/RoutingPage.tsx (a bar per cell next to the interval
+ *               text), ui/src/screens/Signoff/SignoffPage.tsx (the evidence tiles),
+ *               ui/src/api/types.ts (`RoutingPolicy` — where the tick values come from)
+ * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx and
+ *               ui/src/screens/Routing/RoutingPage.test.tsx (rendered per cell,
+ *               `data-testid="ci-bar"`)
+ * Touch when:   the routing policy gains a threshold worth a tick
+ *               (docs/adr/0003-one-routing-rule.md);
+ *               never for a new repository.
+ * Claims:       A rate is shown with n and its interval, never alone
+ *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
+ */
 import { fmtPct } from '../lib/format'
 
 interface CiBarProps {

@@ -1,3 +1,32 @@
+/**
+ * LiveLog — the virtualised StepEvent list behind a run's SSE stream.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `LiveLog` component: stream status pill, counters and a virtualised row
+ *               list (time · stage · action · status glyph · task · duration · cost · payload).
+ * What it does: Renders only the visible window of a stream that may hold thousands of events,
+ *               follows the tail while the reader is at the bottom and stops the moment they
+ *               scroll up, and reports reconnects, malformed frames dropped and the stream
+ *               error verbatim — the log never hides a gap. An error line is shown red in
+ *               place of the payload summary.
+ * How:          Fixed row height → slice `[start, end)` from `scrollTop` with overscan →
+ *               absolutely positioned rows inside a full-height spacer; `role="log"`,
+ *               `aria-live="polite"`, and the scroll region is focusable (WCAG 2.1.1).
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/sse.ts (`SseStatus` and the snapshot fields this renders),
+ *               ui/src/api/hooks.ts (`useRunEvents` — the source),
+ *               ui/src/screens/Runs/RunDetailPage.tsx
+ *               (the only consumer), ui/src/lib/verdict.ts (`stepStatusDisplay`),
+ *               ui/src/lib/format.ts (`fmtTime`, `fmtMs`, `fmtUsd`)
+ * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx (events from a fake EventSource
+ *               appear as rows), ui/e2e/walkthrough/03-mine.spec.ts (`expectLogAction` on a
+ *               real worker's events), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe on
+ *               the run page)
+ * Touch when:   `StepEvent` gains a field worth a column (ui/src/api/types.ts first); never for
+ *               a new repository.
+ */
 import { useEffect, useRef, useState } from 'react'
 import type { StepEvent } from '../api/types'
 import type { SseStatus } from '../api/sse'
@@ -16,9 +45,12 @@ interface LiveLogProps {
   onSelectTask?: (taskId: string) => void
 }
 
+/** Fixed row height in px — the virtualiser depends on every row being exactly this tall. */
 const ROW_H = 26
+/** Rows rendered beyond the visible window on each side, so fast scrolling never shows a blank band. */
 const OVERSCAN = 12
 
+/** Stream status → pill copy; `done` is the server's verdict, `closed` is ours. */
 const STATUS_COPY: Record<SseStatus, { label: string; tone: 'green' | 'amber' | 'red' | 'primary' | 'muted'; glyph: string }> = {
   idle: { label: 'Idle', tone: 'muted', glyph: '·' },
   connecting: { label: 'Connecting', tone: 'primary', glyph: '…' },
@@ -28,6 +60,7 @@ const STATUS_COPY: Record<SseStatus, { label: string; tone: 'green' | 'amber' | 
   closed: { label: 'Closed', tone: 'muted', glyph: '—' },
 }
 
+/** The first four payload keys as `k=v`, each value truncated — a glance line, with the full payload in the row's `title`. */
 function payloadSummary(p: Record<string, unknown>): string {
   const parts: string[] = []
   for (const [k, v] of Object.entries(p)) {
@@ -52,6 +85,7 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
   const [scrollTop, setScrollTop] = useState(0)
   const [follow, setFollow] = useState(true)
 
+  // Follow the tail: every new event pins the scroll to the bottom while `follow` is on.
   useEffect(() => {
     const el = ref.current
     if (!el || !follow) return
@@ -100,6 +134,8 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
         onScroll={(e) => {
           const el = e.currentTarget
           setScrollTop(el.scrollTop)
+          // Scrolling up (more than a row from the bottom) is the reader saying "stop
+          // moving"; scrolling back to the bottom re-arms following without a click.
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < ROW_H
           if (!atBottom && follow) setFollow(false)
           if (atBottom && !follow) setFollow(true)

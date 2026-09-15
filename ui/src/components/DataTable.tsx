@@ -1,3 +1,28 @@
+/**
+ * DataTable — the sortable, sticky-header table every list screen uses.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The generic `DataTable<T>` and its `Column<T>` descriptor.
+ * What it does: Renders rows through per-column cell renderers with client-side sorting
+ *               (`sortValue`), numeric right-alignment with tabular numerals, `hideBelowMd`
+ *               columns, keyboard-operable clickable rows, `<th scope="col">` + `aria-sort`, a
+ *               required caption, and a designed empty slot — a table is never blank.
+ * How:          `useMemo` sorts a copy of `rows` with one `compare` (nulls last, numbers /
+ *               booleans numerically, else locale string compare); the header button toggles
+ *               asc / desc; the empty node fills one full-width cell.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/components/EmptyState.tsx (the `empty` slot),
+ *               ui/src/screens/Runs/RunDetailPage.tsx
+ *               (a typical column set with sort accessors), ui/src/screens/Ledger/LedgerPage.tsx
+ *               and ui/src/screens/Repos/ReposPage.tsx (dense list screens)
+ * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx,
+ *               ui/src/screens/Routing/RoutingPage.test.tsx
+ *               and ui/src/screens/Signoff/SignoffPage.test.tsx (rows and captions as rendered),
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe: headers, captions)
+ * Touch when:   a screen needs a column type the descriptor lacks; never for a new repository.
+ */
 import { useMemo, useState, type ReactNode } from 'react'
 
 export interface Column<T> {
@@ -33,6 +58,7 @@ interface DataTableProps<T> {
   maxHeight?: string
 }
 
+/** Sort comparator: nulls always last regardless of direction, numbers and booleans numerically, everything else by locale string. */
 function compare(a: unknown, b: unknown): number {
   if (a === b) return 0
   if (a === null || a === undefined) return 1

@@ -1,3 +1,30 @@
+/**
+ * The app shell — brand, primary nav, instrument health, user chip with role, theme toggle,
+ * provenance footer.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `Layout` shell every authenticated route renders inside (`<Outlet>`).
+ * What it does: One brand name in chrome, the primary nav (Repos … Settings), the instrument
+ *               health pill from `GET /health`, the user chip showing the principal's ROLE (so a
+ *               viewer knows why a button is missing), theme cycling and sign-out. The footer
+ *               carries crb / apparatus / policy versions — the one place internals appear,
+ *               because an auditor needs the provenance of what they are reading.
+ * How:          `useAuth` for the principal, `useHealth` / `useVersion` for the chrome facts,
+ *               `useLogout` then navigate to `/login`; a skip link precedes the header.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/App.tsx (mounts this under `RequireAuth`), ui/src/lib/auth.tsx (the
+ *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`),
+ *               ui/src/lib/theme.ts (the toggle), ui/src/lib/verdict.ts (`probeDisplay` for
+ *               the health pill), ui/src/screens/Login/LoginPage.tsx (uses `BRAND`)
+ * Tested by:    ui/e2e/smoke.spec.ts (the shell renders the nav),
+ *               ui/e2e/walkthrough/01-login.spec.ts
+ *               (the role chip reads the bootstrap admin's role), ui/src/test/utils.tsx
+ *               (`renderApp` mounts the shell for every screen test)
+ * Touch when:   a screen is added — add its `NAV` entry here and its route in ui/src/App.tsx;
+ *               never for a new repository.
+ */
 import { NavLink, Outlet, useNavigate } from 'react-router'
 import { useHealth, useLogout, useVersion } from '../api/hooks'
 import { useAuth } from '../lib/auth'
@@ -6,8 +33,10 @@ import { Button } from './Button'
 import { Pill } from './Pill'
 import { probeDisplay } from '../lib/verdict'
 
+/** The one brand string in chrome (design law 9): header, footer and the login page use it. */
 export const BRAND = 'Commit Replay Bench'
 
+/** The primary navigation, in display order; a new screen is added here and in `App.tsx`. */
 const NAV: Array<{ to: string; label: string }> = [
   { to: '/repos', label: 'Repos' },
   { to: '/runs', label: 'Runs' },
@@ -21,6 +50,7 @@ const NAV: Array<{ to: string; label: string }> = [
   { to: '/settings', label: 'Settings' },
 ]
 
+/** Sun / moon / half-disc for the theme toggle; the glyph is decorative, the `aria-label` carries the state. */
 const THEME_GLYPH = { light: '☀', dark: '☾', system: '◐' } as const
 
 /**

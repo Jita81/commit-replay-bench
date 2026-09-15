@@ -1,3 +1,31 @@
+/**
+ * ui/src/screens/Runs/RunDetailPage.tsx and ui/src/api/sse.ts — the live log follows the stream,
+ * and the split tiles never fabricate.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Tests for the SSE primitives and the run-detail screen, against a mocked API
+ *               and a controllable `FakeEventSource`.
+ * What it does: Pins that the resume URL carries `?after=`, that malformed frames are
+ *               rejected (counted, not buffered), that a dropped stream reconnects from
+ *               `lastSeq` and stops on `done`, that the buffer is bounded; that the page opens
+ *               the stream and appends step events into the live log; and — after A2 — that
+ *               the run's split tiles show the all-rows rate, the model rate, instrument and
+ *               budget counts with cost-known, that a v5 task row shows five belt pills and a
+ *               v4 row four (belt 5 never as failed), and that a failing split endpoint is
+ *               reported instead of zero-filled.
+ * How:          `RunEventStream` driven directly with the fake; `renderApp` at `/runs/:id` with
+ *               `eventSourceFactory` injected; assertions on `live-log`, `tile-*` and
+ *               `belt-*` test ids.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Runs/RunDetailPage.tsx and ui/src/api/sse.ts (the code under
+ *               test), ui/src/screens/Capability/contract.ts (`useFailureSplit`'s shape),
+ *               ui/src/test/utils.tsx
+ * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx
+ * Touch when:   the SSE wire shape or a run-detail tile changes (docs/API.md) — extend the
+ *               fake frames or the tile assertions.
+ */
 import { act, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EventSourceLike } from '../../api/sse'

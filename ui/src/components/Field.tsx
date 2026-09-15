@@ -1,3 +1,29 @@
+/**
+ * Form fields — labelled input, select and textarea, plus the inline toolbar select.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The form primitives: `TextField`, `SelectField`, `TextArea` and `InlineSelect`.
+ * What it does: Pairs every control with a real `<label for>` (generated id), renders a
+ *               required marker as `Label *`, and wires `hint` / `error` through
+ *               `aria-describedby` and `aria-invalid` so validation is announced, not just
+ *               coloured. `InlineSelect` is the compact labelled select toolbars use
+ *               (`RepoPicker`, filters).
+ * How:          `useId()` for the id when none is given; one shared class string for the
+ *               control; the error replaces the hint in the same slot.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/components/RepoPicker.tsx (`InlineSelect`),
+ *               ui/src/screens/Repos/RepoConfigForm.tsx
+ *               and ui/src/screens/Runs/RunNewDialog.tsx (the largest forms),
+ *               ui/e2e/walkthrough/support.ts (`field(scope, 'Label')` matches the `Label *`
+ *               rendering exactly)
+ * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx,
+ *               ui/src/screens/Runs/RunNewDialog.test.tsx,
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe: labels and descriptions)
+ * Touch when:   the required-marker rendering changes — update `field()` in
+ *               ui/e2e/walkthrough/support.ts with it; never for a new repository.
+ */
 import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
 const control =
@@ -11,6 +37,7 @@ interface BaseProps {
   required?: boolean
 }
 
+/** A labelled `<input>`; `error` replaces `hint` in the description slot and sets `aria-invalid`. */
 export function TextField({ label, hint, error, required, id, className = '', ...rest }: BaseProps & InputHTMLAttributes<HTMLInputElement>) {
   const auto = useId()
   const fid = id ?? auto
@@ -37,6 +64,7 @@ export function TextField({ label, hint, error, required, id, className = '', ..
   )
 }
 
+/** A labelled `<select>`; same hint / error contract as `TextField`. */
 export function SelectField({
   label,
   hint,
@@ -63,6 +91,7 @@ export function SelectField({
   )
 }
 
+/** A labelled `<textarea>`; same hint / error contract as `TextField`. */
 export function TextArea({ label, hint, error, required, id, className = '', ...rest }: BaseProps & TextareaHTMLAttributes<HTMLTextAreaElement>) {
   const auto = useId()
   const fid = id ?? auto

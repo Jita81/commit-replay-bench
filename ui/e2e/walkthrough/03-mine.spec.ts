@@ -1,11 +1,30 @@
-import { expect, expectLogAction, startRun, targets, test, waitForRun } from './support'
-
 /**
  * 03 — mining. Proves, for every onboarded repo: "Start a run" (kind mine, task limit)
  * queues a run the worker executes to `succeeded`; the live log shows the miner's
  * RED / gold checks; the repo's Tasks tab then lists at least one replayable task
  * with its size, capability class and gold pill; and the Runs list shows the run.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Walkthrough spec 03 (mining), for every tier target.
+ * What it does: Pins that "Start a run" (kind mine, a task limit) queues a run the worker
+ *               executes to `succeeded`; that the live log shows `mine.task` and `mine.done`;
+ *               that the progress bar reports found / target from the run's own counts; that
+ *               the repo's Tasks tab lists at least one task with size, class and gold pill;
+ *               and that the Runs list shows the run.
+ * How:          `startRun` through the dialog; `waitForRun`; `expectLogAction`; the
+ *               `progressbar` role's `aria-valuemax`.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Runs/RunDetailPage.tsx and
+ *               ui/src/screens/Repos/RepoDetail.tsx (the screens under test),
+ *               ui/src/components/LiveLog.tsx (the log rows asserted), src/crb/core/mine.py
+ *               (the miner whose events are asserted)
+ * Tested by:    ui/e2e/walkthrough/03-mine.spec.ts
+ * Touch when:   a miner event is renamed or the Tasks tab columns change.
  */
+import { expect, expectLogAction, startRun, targets, test, waitForRun } from './support'
+
 test.describe.configure({ mode: 'serial' })
 
 for (const t of targets()) {

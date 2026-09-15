@@ -7,10 +7,35 @@
  *
  * `probe` is deliberately left to the operator: a known-green scope is a fact about
  * the specific repository, never about its layout.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The table of layout presets (`REPO_PRESETS`) the Add-repo dialog offers, and
+ *               `findPreset`.
+ * What it does: Fills runner, source / test prefixes, extension, belt scope and runner options
+ *               for a well-known project shape (Python src/ or flat, Go, node / vitest / jest /
+ *               mocha, Maven, Cargo); every field stays editable. It never sets `probe` — a
+ *               known-green scope is a fact about one repository, not its layout.
+ * How:          A static array; the dialog applies a preset by copying its fields into the
+ *               form state.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Repos/RepoNewDialog.tsx (the only consumer), ui/src/api/types.ts
+ *               (`Language`, `Runner`, `BeltScope`), src/crb/core/spec.py (`RepoConfig` — the
+ *               fields a preset fills), src/crb/core/runners/pytest_runner.py and
+ *               src/crb/core/runners/node_runners.py (the `runner_opts` vocabulary the presets
+ *               use)
+ * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx,
+ *               ui/e2e/walkthrough/02-repo-onboard.spec.ts
+ * Touch when:   onboarding a repository whose layout no preset describes — add one here (its
+ *               `runner_opts` keys must exist in the runner,
+ *               docs/OPERATOR.md#2-configure-a-repository);
+ *               a new `Runner` or `Language` in src/crb/core/spec.py should get a preset too.
  */
 
 import type { BeltScope, Language, Runner } from '../api/types'
 
+/** One preset = the layout fields of `RepoConfig` it fills; `probe` is deliberately absent. */
 export interface RepoPreset {
   id: string
   label: string
@@ -24,6 +49,7 @@ export interface RepoPreset {
   runner_opts: Record<string, unknown>
 }
 
+/** Display order in the dialog. Belt scope follows the runner: `AFFECTED_DIRS` where the runner can scope by directory, `TARGET_ONLY` where a full build is too slow (Maven, Cargo). */
 export const REPO_PRESETS: readonly RepoPreset[] = [
   {
     id: 'python-src-layout',
@@ -135,6 +161,7 @@ export const REPO_PRESETS: readonly RepoPreset[] = [
   },
 ]
 
+/** Lookup by id (the dialog's `<select>` value); `undefined` for the "none" option. */
 export function findPreset(id: string): RepoPreset | undefined {
   return REPO_PRESETS.find((p) => p.id === id)
 }

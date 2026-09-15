@@ -1,3 +1,35 @@
+/**
+ * Settings — instrument health, the Claude Code login, non-secret configuration and users
+ * (/settings).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /settings: `HealthCard` (every probe with its verdict and the
+ *               versions), the Claude Code login card, and for admins the redacted
+ *               configuration (`GET /settings`) and `UsersCard` (list, role change, create a
+ *               local account).
+ * What it does: Describes the instrument honestly and never leaks a secret: a builder is
+ *               reported as configured or not, the retention settings are shown as returned,
+ *               sandbox mode / ledger backend / apparatus / policy are named. Non-admins see
+ *               health and the login status and an "admin only" note for the rest — the
+ *               admin queries are not even issued for them.
+ * How:          `useHealth` / `useVersion`; `useSettings(admin)` and `useUsers(admin)` gated
+ *               by `can('admin')`; role changes and user creation through their mutations.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useSettings`, `useUsers`,
+ *               `useCreateUser`, `useSetUserRole`), ui/src/api/types.ts (`Settings`, `User`,
+ *               `Probe`), ui/src/screens/Settings/ClaudeCodeLoginCard.tsx,
+ *               src/crb/server/routes/admin.py (settings and users),
+ *               src/crb/observability/probes.py
+ *               (the probes the health card lists)
+ * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (builders as configured yes /
+ *               no, sandbox mode, versions; axe), ui/e2e/walkthrough/01-login.spec.ts (the
+ *               health probes it relies on)
+ * Touch when:   `GET /settings` gains a non-secret field (src/crb/server/routes/admin.py
+ *               `get_settings_view`, docs/API.md "Admin") — type it in ui/src/api/types.ts
+ *               and add its `<dt>`; never for a new repository.
+ */
 import { useMemo, useState, type FormEvent } from 'react'
 import { useCreateUser, useHealth, useSetUserRole, useSettings, useUsers, useVersion } from '../../api/hooks'
 import { ROLE_ORDER, type Role, type User } from '../../api/types'
@@ -16,6 +48,7 @@ import { fmtDate } from '../../lib/format'
 import { probeDisplay } from '../../lib/verdict'
 import { ClaudeCodeLoginCard } from './ClaudeCodeLoginCard'
 
+/** Every probe from `GET /health` with its verdict, plus the versions. */
 function HealthCard() {
   const health = useHealth()
   const version = useVersion()
@@ -60,6 +93,7 @@ function HealthCard() {
   )
 }
 
+/** Admin: the user table with an inline role select, and the create-local-user form (the password field is never echoed). */
 function UsersCard() {
   const users = useUsers(true)
   const create = useCreateUser()
@@ -151,6 +185,7 @@ function UsersCard() {
   )
 }
 
+/** The screen; admin-only queries are gated by the role, not merely hidden. */
 export function SettingsPage() {
   const { can } = useAuth()
   const admin = can('admin')

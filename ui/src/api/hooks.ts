@@ -9,6 +9,36 @@
  *   - polling only while a run is non-terminal, never in a background tab;
  *   - `useRunEvents` is the SSE hook (EventSource, `?after=` resume,
  *     reconnection, bounded buffer) — see `sse.ts`.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The UI's data layer: one TanStack Query hook per endpoint in docs/API.md, the
+ *               query-key table (`keys`) and the SSE hook `useRunEvents`.
+ * What it does: Every read exposes `isError` + `error` and never retries by default (a missing
+ *               endpoint shows an honest error, not a delayed spinner); runs poll only while
+ *               non-terminal and never in a background tab; mutations invalidate the keys they
+ *               change so screens refresh without ad-hoc refetches. `useMe` maps a 401 to
+ *               `null` (not logged in); `normaliseEvidence` folds two server shapes into one.
+ * How:          `keys` is the single source of every query key → each hook wraps
+ *               `api<T>(path)` in `useQuery` / `useMutation` with the key, `enabled` guards on
+ *               empty ids and the polling rule → `useRunEvents` owns a `RunEventStream` per
+ *               run id and hands React its snapshot through `useSyncExternalStore`.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/client.ts (the fetch wrapper every hook calls), ui/src/api/types.ts
+ *               (the response types), ui/src/api/sse.ts (the stream `useRunEvents` drives),
+ *               ui/src/api/repoConfig.ts (the repo-config hooks nest under `keys.repo`),
+ *               ui/src/screens/Capability/contract.ts and ui/src/screens/Runs/contract.ts (the
+ *               newer readings not yet folded in here), ui/src/test/utils.tsx (`mockApi` — how
+ *               tests answer these hooks)
+ * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx,
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx,
+ *               ui/src/screens/Routing/RoutingPage.test.tsx,
+ *               ui/src/screens/Signoff/SignoffPage.test.tsx
+ *               (every screen test exercises its hooks through `mockApi`)
+ * Touch when:   an endpoint is added or its path / params change (docs/API.md) — add the type
+ *               in ui/src/api/types.ts, the key in `keys` and the hook here, then the screen;
+ *               never for a new repository.
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -66,6 +96,11 @@ import { isRunTerminal } from './types'
 // Query keys (one place, so invalidation never drifts)
 // ---------------------------------------------------------------------------
 
+/**
+ * Every query key in one table so an invalidation in a mutation can never drift from the
+ * read it is meant to refresh. Keys nest (`['runs', id, 'tasks']` under `['runs', id]`) so
+ * invalidating a prefix reaches its children.
+ */
 export const keys = {
   health: ['health'] as const,
   version: ['version'] as const,
@@ -103,10 +138,12 @@ const enc = encodeURIComponent
 // Health / version
 // ---------------------------------------------------------------------------
 
+/** `GET /health` — the probes (db, sandbox, toolchains, builders, worker); 15 s stale. */
 export function useHealth(): UseQueryResult<Health, ApiError> {
   return useQuery({ queryKey: keys.health, queryFn: () => api<Health>('/health'), retry: false, staleTime: 15_000 })
 }
 
+/** `GET /version` — crb, apparatus and policy versions; never refetched (they change only on deploy). */
 export function useVersion(): UseQueryResult<Version, ApiError> {
   return useQuery({ queryKey: keys.version, queryFn: () => api<Version>('/version'), retry: false, staleTime: Infinity })
 }
@@ -132,6 +169,7 @@ export function useMe(): UseQueryResult<Principal | null, ApiError> {
   })
 }
 
+/** `POST /auth/login` (local account); on success the principal is written straight into `keys.me`. */
 export function useLogin(): UseMutationResult<Principal, ApiError, LoginRequest> {
   const qc = useQueryClient()
   return useMutation({
@@ -140,6 +178,7 @@ export function useLogin(): UseMutationResult<Principal, ApiError, LoginRequest>
   })
 }
 
+/** `POST /auth/logout`; clears the whole query cache so nothing from the old session can be shown. */
 export function useLogout(): UseMutationResult<void, ApiError, void> {
   const qc = useQueryClient()
   return useMutation({
@@ -155,10 +194,12 @@ export function useLogout(): UseMutationResult<void, ApiError, void> {
 // Repos
 // ---------------------------------------------------------------------------
 
+/** `GET /repos` — the list with probe status, task counts and last run. */
 export function useRepos(): UseQueryResult<Page<RepoSummary>, ApiError> {
   return useQuery({ queryKey: keys.repos, queryFn: () => api<Page<RepoSummary>>('/repos'), retry: false })
 }
 
+/** `GET /repos/{name}` — the list item plus its `config`. */
 export function useRepo(name: string): UseQueryResult<RepoDetail, ApiError> {
   return useQuery({
     queryKey: keys.repo(name),
@@ -168,6 +209,7 @@ export function useRepo(name: string): UseQueryResult<RepoDetail, ApiError> {
   })
 }
 
+/** `POST /repos`; invalidates the list. */
 export function useCreateRepo(): UseMutationResult<RepoDetail, ApiError, RepoCreateRequest> {
   const qc = useQueryClient()
   return useMutation({
@@ -176,6 +218,7 @@ export function useCreateRepo(): UseMutationResult<RepoDetail, ApiError, RepoCre
   })
 }
 
+/** `POST /repos/{name}/probe` → a queued `probe` run; invalidates the repo, the list and every runs page. */
 export function useProbeRepo(): UseMutationResult<Run, ApiError, string> {
   const qc = useQueryClient()
   return useMutation({
@@ -188,6 +231,7 @@ export function useProbeRepo(): UseMutationResult<Run, ApiError, string> {
   })
 }
 
+/** `GET /repos/{name}/profile` — the (class × size) change profile the coverage figures need. */
 export function useRepoProfile(name: string): UseQueryResult<RepoProfile, ApiError> {
   return useQuery({
     queryKey: keys.repoProfile(name),
@@ -197,6 +241,7 @@ export function useRepoProfile(name: string): UseQueryResult<RepoProfile, ApiErr
   })
 }
 
+/** `GET /repos/{name}/tasks` — one page of mined `TaskSpec`s. */
 export function useRepoTasks(name: string, p: PageParams = {}): UseQueryResult<Page<TaskSpec>, ApiError> {
   return useQuery({
     queryKey: keys.repoTasks(name, p),
@@ -210,8 +255,10 @@ export function useRepoTasks(name: string, p: PageParams = {}): UseQueryResult<P
 // Runs
 // ---------------------------------------------------------------------------
 
+/** Poll period for a non-terminal run; the list polls at twice this. */
 export const RUN_POLL_MS = 2_500
 
+/** `GET /runs` (filters + page); polls only while some listed run is non-terminal, never in a hidden tab. */
 export function useRuns(p: RunListParams = {}): UseQueryResult<Page<Run>, ApiError> {
   return useQuery({
     queryKey: keys.runs(p),
@@ -222,6 +269,7 @@ export function useRuns(p: RunListParams = {}): UseQueryResult<Page<Run>, ApiErr
   })
 }
 
+/** `GET /runs/{id}`; polls while the run is non-terminal (`poll: false` to read once). */
 export function useRun(id: string, opts: { poll?: boolean } = {}): UseQueryResult<Run, ApiError> {
   const poll = opts.poll ?? true
   return useQuery({
@@ -234,6 +282,7 @@ export function useRun(id: string, opts: { poll?: boolean } = {}): UseQueryResul
   })
 }
 
+/** `POST /runs`; seeds the new run's detail key so the redirect to /runs/{id} renders without a second round trip. */
 export function useCreateRun(): UseMutationResult<Run, ApiError, RunCreateRequest> {
   const qc = useQueryClient()
   return useMutation({
@@ -245,6 +294,7 @@ export function useCreateRun(): UseMutationResult<Run, ApiError, RunCreateReques
   })
 }
 
+/** `POST /runs/{id}/cancel` — asks the API to set `cancel_requested`; the worker stops between tasks. */
 export function useCancelRun(): UseMutationResult<Run, ApiError, string> {
   const qc = useQueryClient()
   return useMutation({
@@ -253,6 +303,7 @@ export function useCancelRun(): UseMutationResult<Run, ApiError, string> {
   })
 }
 
+/** `GET /runs/{id}/tasks` — every task of the run (one request, limit 500); polls only while asked. */
 export function useRunTasks(id: string, opts: { poll?: boolean } = {}): UseQueryResult<Page<RunTaskRow>, ApiError> {
   return useQuery({
     queryKey: keys.runTasks(id),
@@ -264,6 +315,7 @@ export function useRunTasks(id: string, opts: { poll?: boolean } = {}): UseQuery
   })
 }
 
+/** `GET /runs/{id}/events/log` — the stored StepEvents as a page (the non-live view). */
 export function useRunEventLog(id: string, p: PageParams = {}): UseQueryResult<Page<StepEvent>, ApiError> {
   return useQuery({
     queryKey: keys.runEventLog(id, p),
@@ -274,18 +326,27 @@ export function useRunEventLog(id: string, p: PageParams = {}): UseQueryResult<P
 }
 
 export interface UseRunEventsOptions {
+  /** `false` keeps the stream closed (e.g. before the run id is known). */
   enabled?: boolean
+  /** Ring-buffer size; default 5,000 (see `RunEventStream`). */
   maxEvents?: number
+  /** Test seam: a fake EventSource. Read once at open; changing it does not reopen. */
   factory?: EventSourceFactory
 }
 
 /**
- * The live SSE log for one run. Opens `GET /runs/{id}/events`, resumes with
- * `?after=` on reconnect, appends StepEvents into a bounded buffer, and closes
- * on unmount or when the server sends `event: done`.
+ * The snapshot served before a stream exists (and on the server) — one frozen object so
+ * `useSyncExternalStore` sees a stable identity and does not re-render in a loop.
  */
 const IDLE_SNAPSHOT: SseSnapshot = { status: 'idle', events: [], lastSeq: 0, reconnects: 0, dropped: 0, error: null }
 
+/**
+ * The live SSE log for one run. Opens `GET /runs/{id}/events`, resumes with
+ * `?after=` on reconnect, appends StepEvents into a bounded buffer, and closes
+ * on unmount or when the server sends `event: done`. Returns the stream's
+ * snapshot; the screen renders `status`, `events`, `reconnects` and `dropped`
+ * as they are — a dropped frame is counted, never hidden.
+ */
 export function useRunEvents(runId: string, options: UseRunEventsOptions = {}): SseSnapshot {
   const enabled = (options.enabled ?? true) && runId.length > 0
   // Options are read through refs so an inline `factory` arrow or a changed
@@ -321,6 +382,7 @@ export function useRunEvents(runId: string, options: UseRunEventsOptions = {}): 
 // Tasks / grades / evidence
 // ---------------------------------------------------------------------------
 
+/** `GET /tasks/{repo}/{task_id}` — the spec plus every grade row for it. */
 export function useTask(repo: string, taskId: string): UseQueryResult<TaskDetail, ApiError> {
   return useQuery({
     queryKey: keys.task(repo, taskId),
@@ -330,6 +392,7 @@ export function useTask(repo: string, taskId: string): UseQueryResult<TaskDetail
   })
 }
 
+/** `GET /grades` — ledger rows as stored, with the API's filters. */
 export function useGrades(p: GradeListParams = {}): UseQueryResult<Page<GradeRow>, ApiError> {
   return useQuery({
     queryKey: keys.grades(p),
@@ -354,6 +417,7 @@ export function useGrades(p: GradeListParams = {}): UseQueryResult<Page<GradeRow
   })
 }
 
+/** `GET /grades/{row_id}` — one ledger row. */
 export function useGrade(rowId: string): UseQueryResult<GradeRow, ApiError> {
   return useQuery({
     queryKey: keys.grade(rowId),
@@ -377,6 +441,7 @@ export function normaliseEvidence(raw: unknown): EvidenceResponse {
   return { pack: pack as unknown as EvidencePack, verified: Boolean(verified) }
 }
 
+/** `GET /evidence/{hash}`; a pack is immutable (content-addressed), so it is never refetched. */
 export function useEvidence(hash: string): UseQueryResult<EvidenceResponse, ApiError> {
   return useQuery({
     queryKey: keys.evidence(hash),
@@ -391,6 +456,7 @@ export function useEvidence(hash: string): UseQueryResult<EvidenceResponse, ApiE
 // Capability / routing / forecast / sign-off
 // ---------------------------------------------------------------------------
 
+/** `GET /capability-map?repo=&by=` — the cells for one projection; 30 s stale. */
 export function useCapabilityMap(repo: string, by: CellField[]): UseQueryResult<CapabilityMap, ApiError> {
   const byStr = by.join(',')
   return useQuery({
@@ -402,6 +468,7 @@ export function useCapabilityMap(repo: string, by: CellField[]): UseQueryResult<
   })
 }
 
+/** `GET /routes?repo=` — one `RouteDecision` per cell under the published policy. */
 export function useRoutes(repo: string): UseQueryResult<RoutesResponse, ApiError> {
   return useQuery({
     queryKey: keys.routes(repo),
@@ -411,6 +478,7 @@ export function useRoutes(repo: string): UseQueryResult<RoutesResponse, ApiError
   })
 }
 
+/** `GET /forecast/build?repo=&mix=` — enabled only once a mix is given. */
 export function useForecastBuild(repo: string, mix: string): UseQueryResult<ForecastBuild, ApiError> {
   return useQuery({
     queryKey: keys.forecastBuild(repo, mix),
@@ -420,6 +488,7 @@ export function useForecastBuild(repo: string, mix: string): UseQueryResult<Fore
   })
 }
 
+/** `GET /forecast/readiness?repo=` — ok + gaps punch-list. */
 export function useForecastReadiness(repo: string): UseQueryResult<ForecastReadiness, ApiError> {
   return useQuery({
     queryKey: keys.forecastReadiness(repo),
@@ -429,6 +498,7 @@ export function useForecastReadiness(repo: string): UseQueryResult<ForecastReadi
   })
 }
 
+/** `GET /signoffs?repo=` — the attestations (active by default). */
 export function useSignoffs(repo: string): UseQueryResult<Page<Signoff>, ApiError> {
   return useQuery({
     queryKey: keys.signoffs(repo),
@@ -438,6 +508,7 @@ export function useSignoffs(repo: string): UseQueryResult<Page<Signoff>, ApiErro
   })
 }
 
+/** `POST /signoffs`; a 409 arrives as `ApiError` (false-Q1 or a policy refusal) and is rendered, never retried. Invalidates the repo's sign-offs and every capability projection (a sign-off lifts a tier). */
 export function useCreateSignoff(): UseMutationResult<Signoff, ApiError, SignoffCreateRequest> {
   const qc = useQueryClient()
   return useMutation({
@@ -449,6 +520,7 @@ export function useCreateSignoff(): UseMutationResult<Signoff, ApiError, Signoff
   })
 }
 
+/** `POST /signoffs/{id}/revoke`; invalidates the repo's sign-offs. */
 export function useRevokeSignoff(): UseMutationResult<Signoff, ApiError, { id: string; repo: string }> {
   const qc = useQueryClient()
   return useMutation({
@@ -461,6 +533,7 @@ export function useRevokeSignoff(): UseMutationResult<Signoff, ApiError, { id: s
 // Ledger
 // ---------------------------------------------------------------------------
 
+/** `GET /ledger/verify` — walks the chain server-side; 30 s stale. */
 export function useLedgerVerify(): UseQueryResult<LedgerVerify, ApiError> {
   return useQuery({
     queryKey: keys.ledgerVerify,
@@ -474,6 +547,7 @@ export function useLedgerVerify(): UseQueryResult<LedgerVerify, ApiError> {
 // Oracle
 // ---------------------------------------------------------------------------
 
+/** `GET /oracle/{repo}` — per-task and per-cell mutation strength. */
 export function useOracle(repo: string): UseQueryResult<OracleReport, ApiError> {
   return useQuery({
     queryKey: keys.oracle(repo),
@@ -483,6 +557,7 @@ export function useOracle(repo: string): UseQueryResult<OracleReport, ApiError> 
   })
 }
 
+/** `GET /oracle/{repo}/controls` — the latest negative-controls report (404 `not_measured` before one). */
 export function useOracleControls(repo: string): UseQueryResult<ControlsReport, ApiError> {
   return useQuery({
     queryKey: keys.oracleControls(repo),
@@ -496,6 +571,7 @@ export function useOracleControls(repo: string): UseQueryResult<ControlsReport, 
 // Factory (P6)
 // ---------------------------------------------------------------------------
 
+/** `GET /factory/{repo}/backlog` (P6; 501 until it lands — the screen renders that honestly). */
 export function useFactoryBacklog(repo: string): UseQueryResult<FactoryBacklog, ApiError> {
   return useQuery({
     queryKey: keys.factoryBacklog(repo),
@@ -505,6 +581,7 @@ export function useFactoryBacklog(repo: string): UseQueryResult<FactoryBacklog, 
   })
 }
 
+/** `GET /factory/{repo}/tasks` (P6). */
 export function useFactoryTasks(repo: string): UseQueryResult<Page<FactoryTask>, ApiError> {
   return useQuery({
     queryKey: keys.factoryTasks(repo),
@@ -514,6 +591,7 @@ export function useFactoryTasks(repo: string): UseQueryResult<Page<FactoryTask>,
   })
 }
 
+/** `GET /factory/{repo}/evidence` (P6). */
 export function useFactoryEvidence(repo: string): UseQueryResult<Page<EvidencePack>, ApiError> {
   return useQuery({
     queryKey: keys.factoryEvidence(repo),
@@ -527,10 +605,12 @@ export function useFactoryEvidence(repo: string): UseQueryResult<Page<EvidencePa
 // Admin
 // ---------------------------------------------------------------------------
 
+/** `GET /users` — admin only, so the caller passes `enabled` from the role check. */
 export function useUsers(enabled: boolean): UseQueryResult<Page<User>, ApiError> {
   return useQuery({ queryKey: keys.users, queryFn: () => api<Page<User>>('/users'), enabled, retry: false })
 }
 
+/** `POST /users` (local account); invalidates the list. */
 export function useCreateUser(): UseMutationResult<User, ApiError, UserCreateRequest> {
   const qc = useQueryClient()
   return useMutation({
@@ -539,6 +619,7 @@ export function useCreateUser(): UseMutationResult<User, ApiError, UserCreateReq
   })
 }
 
+/** `PUT /users/{id}/role`; invalidates the list. */
 export function useSetUserRole(): UseMutationResult<User, ApiError, { id: string; role: Role }> {
   const qc = useQueryClient()
   return useMutation({
@@ -547,6 +628,7 @@ export function useSetUserRole(): UseMutationResult<User, ApiError, { id: string
   })
 }
 
+/** `GET /settings` — non-secret settings; admin only, `enabled` from the role check. */
 export function useSettings(enabled: boolean): UseQueryResult<Settings, ApiError> {
   return useQuery({ queryKey: keys.settings, queryFn: () => api<Settings>('/settings'), enabled, retry: false })
 }

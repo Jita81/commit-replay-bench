@@ -9,6 +9,36 @@
  * Lives beside the screen (not in `api/types.ts` / `api/hooks.ts`, which another
  * workstream owns in this wave) — fold it in when the wave merges. Every field here is
  * `@contract` with `crb.server.schemas_signoff`.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The UI's reading of `signoff-policy.v2`: the policy, preview, refusal and
+ *               attestation types, the hooks (`useSignoffPreview`, `useSignoffPolicy`,
+ *               `useCreateSignoffWithAttestation`) and the refusal display vocabulary.
+ * What it does: Lets the screen show the bar BEFORE the approver tries — `GET /signoffs/preview`
+ *               returns every clause that would fail with observed vs threshold, whether each
+ *               is overridable, the accepted rows an attestation may name, and what would be
+ *               recorded. `isSignoffRefused` recognises the two 409s (`signoff_refused` and
+ *               the false-Q1 floor) so the gate renders REFUSED rather than a generic error.
+ * How:          Interfaces extend `Signoff` from ui/src/api/types.ts; the preview query is
+ *               keyed by repo, cell and the named row so it re-fetches as the form changes;
+ *               a successful POST invalidates the sign-offs and the preview.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md,
+ *               docs/adr/0001-four-belts-and-false-q1-at-write.md
+ * Works with:   src/crb/core/signoff.py (`SignoffPolicy`, `REFUSAL_CODES` — the clauses in
+ *               evaluation order), src/crb/server/schemas_signoff.py (the server side of every
+ *               field), src/crb/server/routes/signoffs.py (preview, POST, the 409 detail),
+ *               ui/src/screens/Signoff/SignoffPage.tsx (the only consumer),
+ *               ui/src/screens/Capability/contract.ts (`ControlsVerdict`, `FailureSplit`,
+ *               `ReasonCode` reused in the snapshot), ui/src/api/types.ts (`Signoff`)
+ * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx, ui/e2e/walkthrough/08-signoff.spec.ts
+ * Touch when:   a refusal clause is added (src/crb/core/signoff.py; docs/API.md "POST
+ *               /signoffs") — extend `RefusalCode` and `REFUSAL_DISPLAY` here and the gate
+ *               row in ui/src/screens/Signoff/SignoffPage.tsx; never for a new repository.
+ * Claims:       What a signed cell may be claimed to mean is fixed by the policy version
+ *               stamped on the record
+ *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
  */
 
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
@@ -34,6 +64,7 @@ export type RefusalCode =
   | `route_not_deliver:${ReasonCode | 'unrouted' | 'unknown'}`
   | 'attestation_missing'
 
+/** The policy this reading was written against; the server's `policy_version` is what is displayed. */
 export const SIGNOFF_POLICY_VERSION = 'signoff-policy.v2'
 
 /** `SignoffPolicy.to_dict()` — the bar in force (defaults or the deployment's relaxed values). */
@@ -135,6 +166,7 @@ export interface SignoffOracle {
   tasks: number
 }
 
+/** The cell as the policy measured it (sighted rows, current apparatus) — n, point, interval, false-Q1, the oracle measurement and the split. */
 export interface SignoffPreviewEvidence {
   measured: boolean
   n: number
@@ -172,6 +204,7 @@ export interface SignoffPreview {
 // Hooks
 // ---------------------------------------------------------------------------
 
+/** Query keys; the preview key includes the cell and the named row. */
 export const signoffKeys = {
   preview: (repo: string, cell: Record<string, string>, rowHash: string) => ['signoff-preview', repo, cell, rowHash] as const,
   policy: () => ['signoff-policy'] as const,
@@ -192,6 +225,7 @@ export function useSignoffPreview(repo: string, cell: Record<string, string> | n
   })
 }
 
+/** `GET /signoffs/policy` — the bar in force (503 when a deployment knob is out of bounds: a misconfigured bar is not a lower bar). */
 export function useSignoffPolicy(enabled = true): UseQueryResult<SignoffPolicy, ApiError> {
   return useQuery({
     queryKey: signoffKeys.policy(),
@@ -202,6 +236,12 @@ export function useSignoffPolicy(enabled = true): UseQueryResult<SignoffPolicy, 
   })
 }
 
+/**
+ * `POST /signoffs` with the attestation; a 409 arrives as `ApiError` for the gate to render.
+ * Invalidates the sign-offs and the preview. It also names `['capability-map', repo]`, but
+ * the map is keyed `['capability', repo, by]` (`keys.capability`), so that invalidation
+ * matches nothing — the map refreshes on its own stale time (30 s) or a remount.
+ */
 export function useCreateSignoffWithAttestation(): UseMutationResult<SignoffWithPolicy, ApiError, SignoffCreateWithAttestation> {
   const qc = useQueryClient()
   return useMutation({

@@ -1,3 +1,31 @@
+/**
+ * Every RepoConfig field the API accepts on PUT /repos/{name}, grouped the way an operator reasons
+ * about a repository.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The controlled `RepoConfigForm`: toolchain, location, layout, regression belt,
+ *               probe and sandbox, mining caps, runner options.
+ * What it does: Renders every editable `RepoConfig` field with the server's semantics as its
+ *               hint (how source is told from test, what the belt covers, what the probe
+ *               proves), limits the runner select to the language and swaps the runner
+ *               sub-form when the language changes, and shows the model's validation errors
+ *               beside each field. It owns no state: the parent holds the form and computes
+ *               the changed-field diff.
+ * How:          `set(key, value)` emits a new form; `setLanguage` keeps the runner when the
+ *               new language allows it, else the language default; `validateRunnerOpts`
+ *               feeds the options editor's per-key errors.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Repos/repoConfigModel.ts (the form state, help text and
+ *               errors), ui/src/screens/Repos/runnerOpts.ts (`runnersFor`, `DEFAULT_RUNNER`),
+ *               ui/src/screens/Repos/RunnerOptsEditor.tsx (the last group),
+ *               ui/src/screens/Repos/RepoConfigTab.tsx (the host), ui/src/components/Field.tsx,
+ *               src/crb/core/spec.py (what each field means to the miner and grader)
+ * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx, ui/e2e/walkthrough/repo-config.spec.ts
+ * Touch when:   `RepoConfig` gains a field — add its control to the right group after adding
+ *               it to ui/src/screens/Repos/repoConfigModel.ts; never for a new repository.
+ */
 import type { ReactNode } from 'react'
 import { LANGUAGES, type Language, type Runner } from '../../api/types'
 import { SelectField, TextField } from '../../components/Field'
@@ -14,6 +42,7 @@ interface Props {
   onJsonError?: (error: string | undefined) => void
 }
 
+/** A titled fieldset with a two-column grid; the note explains the group's semantics once. */
 function Group({ title, note, children }: { title: string; note?: ReactNode; children: ReactNode }) {
   return (
     <fieldset className="m-0 min-w-0 border-0 p-0">

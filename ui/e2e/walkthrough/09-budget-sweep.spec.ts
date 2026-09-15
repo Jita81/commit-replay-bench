@@ -1,6 +1,3 @@
-import type { Locator } from '@playwright/test'
-import { env, expect, expectLogAction, primary, startRun, test, waitForRun } from './support'
-
 /**
  * 09 — the budget is a measured variable, not a fixed cap (C8; NHS review §3: 6 of 8
  * blind misses were `budget` at the fixed 25/25/900 — a blind rate quoted without its
@@ -21,7 +18,33 @@ import { env, expect, expectLogAction, primary, startRun, test, waitForRun } fro
  * Runs LAST: it adds rows to the primary repo's only cell, whose `n = 2` 05 and 08 assert
  * on (thin-cell refusal, observed 2 vs threshold 10). Tier 2 skips it — a real sweep spends
  * up to three rungs per task and is a deliberate, priced run, not a walkthrough side effect.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Walkthrough spec 09 (budget sweep), run LAST because it adds rows to the
+ *               primary cell that 05 and 08 assert on (n = 2).
+ * What it does: Pins, from the UI alone, that the run dialog's "Blind budget sweep 25 → 50 →
+ *               100 tool calls" preset queues the SAME builder + model as three object rungs;
+ *               that the run header names the three declared rungs with their caps; that the
+ *               fixture is clean on rung 1 so every task has exactly ONE trial (the ladder
+ *               climbs only on a red attempt) — clean 100 %, $0.00; and that the Evidence
+ *               drawer opens on the r1 attempt with the verified badge. Tier 2 skips it (a
+ *               real sweep spends money).
+ * How:          `startRun` with the preset; `waitForRun`; assertions on the header's ladder
+ *               text (`ladderEntryLabel`) and the task table.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+ * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Runs/RunNewDialog.tsx (the
+ *               preset), ui/src/screens/Runs/RunDetailPage.tsx (the header and table),
+ *               ui/src/api/types.ts (`ladderEntryLabel`), src/crb/server/worker.py (stamps
+ *               `labels.budget_tier` per attempt)
+ * Tested by:    ui/e2e/walkthrough/09-budget-sweep.spec.ts
+ * Touch when:   the preset's caps or the rung label format change (docs/API.md "POST /runs:
+ *               ladder", "The budget is a measured variable").
  */
+import type { Locator } from '@playwright/test'
+import { env, expect, expectLogAction, primary, startRun, test, waitForRun } from './support'
+
 test.describe.configure({ mode: 'serial' })
 
 const REAL = env.builder === 'claude_code'

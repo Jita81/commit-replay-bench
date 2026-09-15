@@ -1,3 +1,46 @@
+/**
+ * Sign-off — a human attestation that a cell's evidence is trusted; a policy decision refused at
+ * write (/signoff).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /signoff: the gate (criteria derived from the server's preview),
+ *               the evidence panel (what you would be signing), the attestation form (name an
+ *               accepted row, affirm you read it, a statement) and the table of recorded
+ *               attestations with their snapshots.
+ * What it does: Shows the bar before the approver tries: the preview's refusals become the
+ *               gate's check-rows with observed vs threshold, and non-overridable clauses
+ *               (false-Q1, oracle unmeasured, attestation missing) are marked so; the action
+ *               is disabled until the preview says `signable` AND the approver has named a
+ *               row, ticked "I have read this accepted diff" and written a statement. A 409
+ *               from the POST renders as a REFUSED gate with the clauses (the false-Q1 floor
+ *               points at the ledger); a pre-policy record is listed honestly without a
+ *               fabricated snapshot; an approver can revoke.
+ * How:          `useCapabilityMapWithControls` lists the measured cells → `useSignoffPreview`
+ *               re-fetches as cell / row change (the named row and affirmation reset when the
+ *               cell changes) → `criteriaFor(preview)` → `GateBanner`;
+ *               `useCreateSignoffWithAttestation`
+ *               posts; `useSignoffs` lists.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md,
+ *               docs/adr/0001-four-belts-and-false-q1-at-write.md
+ * Works with:   ui/src/screens/Signoff/contract.ts (preview, policy, refusal vocabulary,
+ *               the 409 shape), ui/src/components/GateBanner.tsx (the gate),
+ *               ui/src/screens/Capability/contract.ts and
+ *               ui/src/screens/Capability/FailureSplit.tsx
+ *               (the cells, the controls pill and the split), ui/src/api/hooks.ts
+ *               (`useSignoffs`, `useRevokeSignoff`), src/crb/server/routes/signoffs.py (the
+ *               server's decision this screen previews and submits), src/crb/core/signoff.py
+ * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx, ui/e2e/walkthrough/08-signoff.spec.ts
+ *               (a thin cell refused with observed vs threshold; a policy-clearing cell
+ *               signed with an attestation), ui/e2e/walkthrough/05-replay-fake.spec.ts
+ * Touch when:   a refusal clause or a policy threshold is added (src/crb/core/signoff.py) —
+ *               add the gate row in `criteriaFor` and the vocabulary in
+ *               ui/src/screens/Signoff/contract.ts; never for a new repository.
+ * Claims:       A sign-off lifts the verification tier, never the route; it is refused
+ *               outright on any false-Q1 row
+ *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
+ */
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { useRevokeSignoff, useSignoffs } from '../../api/hooks'
@@ -34,6 +77,7 @@ import {
   type SignoffWithPolicy,
 } from './contract'
 
+/** `class · size[ · language · model]`, skipping `*` (unprojected) fields. */
 const cellLabel = (c: Record<string, string>) => [c.capability_class, c.size, c.language, c.model].filter((v) => v && v !== '*').join(' · ')
 
 /** The gate's check-rows, derived from the preview's refusals — never asserted. */
@@ -74,6 +118,7 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
   ]
 }
 
+/** Every failing clause with its code, one-line meaning, observed vs threshold and the non-overridable mark. */
 function RefusalList({ refusals, testId = 'signoff-refusals' }: { refusals: SignoffRefusal[]; testId?: string }) {
   if (refusals.length === 0) return null
   return (
@@ -98,6 +143,7 @@ function RefusalList({ refusals, testId = 'signoff-refusals' }: { refusals: Sign
   )
 }
 
+/** "What you would be signing": the tiles, the controls verdict, the route and the split — the snapshot the record will carry. */
 function EvidencePanel({ preview }: { preview: SignoffPreview }) {
   const ev = preview.evidence
   const c = preview.controls
@@ -147,6 +193,7 @@ function EvidencePanel({ preview }: { preview: SignoffPreview }) {
   )
 }
 
+/** The screen; `?repo=` from the URL, the chosen cell and the attestation draft are local. */
 export function SignoffPage() {
   const [repo, setRepo] = useRepoParam()
   const { can, me } = useAuth()

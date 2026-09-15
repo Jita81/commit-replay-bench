@@ -1,7 +1,3 @@
-import AxeBuilder from '@axe-core/playwright'
-import type { Page, Request } from '@playwright/test'
-import { env, expect, field, signIn, test } from './support'
-
 /**
  * repo-config — editing a repository's configuration from the UI. Proves, on a repo this
  * spec registers from the tier-1 fixture with a deliberately bare config:
@@ -16,7 +12,36 @@ import { env, expect, field, signIn, test } from './support'
  *   4. a viewer sees the same tab read-only; the tab has no WCAG 2.1 AA violations.
  *
  * Runs after 01–07 (file order) on the same stack; it touches only its own repo.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Walkthrough spec for the Configuration tab, on a repo it registers itself
+ *               from the tier-1 fixture with a deliberately bare config.
+ * What it does: Pins that the tab edits every `RepoConfig` field; that switching the
+ *               language limits the runner and swaps the runner-options sub-form; that an
+ *               explicit belt-scope list has a row editor; that Save sends ONLY the changed
+ *               fields (asserted on the PUT body) and the audit trail shows the redacted diff
+ *               event; that the edit persists across a reload and the raw-JSON view
+ *               round-trips; that "Run probe now" from the save toast goes green with the
+ *               result inline; and that a viewer sees the tab read-only with no WCAG 2.1 AA
+ *               violations.
+ * How:          Runs after 01–07 on the same stack and touches only its own repo; the PUT
+ *               body is captured through Playwright's request interception.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Repos/RepoConfigTab.tsx,
+ *               ui/src/screens/Repos/RepoConfigForm.tsx and
+ *               ui/src/screens/Repos/RunnerOptsEditor.tsx
+ *               (the code under test), src/crb/server/routes/repos.py (the PUT and the
+ *               audit event)
+ * Tested by:    ui/e2e/walkthrough/repo-config.spec.ts
+ * Touch when:   a `RepoConfig` field is added (assert its round-trip here) or the audit
+ *               event payload changes.
  */
+import AxeBuilder from '@axe-core/playwright'
+import type { Page, Request } from '@playwright/test'
+import { env, expect, field, signIn, test } from './support'
+
 test.describe.configure({ mode: 'serial' })
 
 const NAME = `${env.repoName}-cfg`

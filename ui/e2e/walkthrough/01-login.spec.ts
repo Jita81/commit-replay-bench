@@ -1,11 +1,29 @@
-import { expect, test } from '@playwright/test'
-import { env, field, signIn, stackHealth } from './support'
-
 /**
  * 01 — the front door. Proves: the stack is up (health), a wrong password renders
  * the API's error envelope (not a blank form), a right one lands in the shell with
  * the RBAC chip reading the bootstrap admin's role, and signing out returns to /login.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Walkthrough spec 01 (login), the first of the serial story.
+ * What it does: Pins that `/health` answers with a database, an append-only ledger with
+ *               false-Q1 = 0 and a worker before anything else runs; that a wrong password
+ *               renders the API's error envelope (not a blank form); that the right one
+ *               lands in the shell with the RBAC chip reading the bootstrap admin's role;
+ *               and that signing out returns to `/login`.
+ * How:          `stackHealth` for the probes; the login form filled through the UI; the
+ *               `user-chip` test id.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/e2e/walkthrough/support.ts (`stackHealth`, `signIn`, `env`),
+ *               ui/src/screens/Login/LoginPage.tsx and ui/src/components/Layout.tsx (the
+ *               screens under test), src/crb/observability/probes.py (the probes asserted)
+ * Tested by:    ui/e2e/walkthrough/01-login.spec.ts
+ * Touch when:   a health probe is renamed or the login flow changes.
  */
+import { expect, test } from '@playwright/test'
+import { env, field, signIn, stackHealth } from './support'
+
 test.describe.configure({ mode: 'serial' })
 
 test.describe('01 login', () => {

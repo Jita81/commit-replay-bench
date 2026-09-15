@@ -1,5 +1,34 @@
+/**
+ * GateBanner — gates look like gates: criteria check-rows and an action disabled until every row
+ * holds.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `GateBanner` used by the ledger, oracle and sign-off screens.
+ * What it does: Derives its state from the criteria, never from an assertion: OPEN (green)
+ *               only when every criterion is `true`, CLOSED (amber) while one is `false`,
+ *               PENDING while one is `null`, and REFUSED (red) only when the server refused
+ *               (a 409). Each row carries a glyph and a screen-reader word as well as its
+ *               colour; `data-state` exposes the verdict to tests.
+ * How:          Count failing / pending criteria → pick tone, glyph and state → a `<section>`
+ *               labelled by its heading with the action slot and the rows.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
+ * Works with:   ui/src/screens/Signoff/SignoffPage.tsx (the policy clauses as criteria; a 409
+ *               as `refused`), ui/src/screens/Ledger/LedgerPage.tsx (chain intact, false-Q1 =
+ *               0), ui/src/screens/Oracle/OraclePage.tsx (the controls verdict),
+ *               ui/src/components/ErrorState.tsx (what a refusal outside a gate looks like)
+ * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx (CLOSED / REFUSED / OPEN states),
+ *               ui/e2e/walkthrough/08-signoff.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
+ *               (the ledger gate OPEN)
+ * Touch when:   a gate gains a criterion — add the row at the call site, not here; never for a
+ *               new repository.
+ * Claims:       A green gate means every listed criterion held at read time, nothing more
+ *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
+ */
 import type { ReactNode } from 'react'
 
+/** One check-row; `null` = not yet evaluated (pending), so a gate is never green before its data arrived. */
 export interface GateCriterion {
   label: string
   /** true = satisfied, false = failed, null = not yet evaluated. */
@@ -26,6 +55,9 @@ interface GateBannerProps {
  * all hold, amber when a counted gap remains, red only on a refusal.
  */
 export function GateBanner({ title, criteria, action, refused, eyebrow, ...rest }: GateBannerProps) {
+  // The state is DERIVED, never asserted: a refusal from the server wins outright; a
+  // gate with no criteria, a pending row or a failing row is not open. Green requires
+  // every row true.
   const failing = criteria.filter((c) => c.ok === false).length
   const pending = criteria.filter((c) => c.ok === null).length
   const passed = !refused && failing === 0 && pending === 0 && criteria.length > 0

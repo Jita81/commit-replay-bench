@@ -1,6 +1,3 @@
-import type { APIRequestContext, Page } from '@playwright/test'
-import { env, expect, primary, test } from './support'
-
 /**
  * 09 — a human's verdict on an accepted patch has a place to live, and it is anchored
  * to the bytes the reviewer read (critical-friend review §5 plays 05/07, action #3).
@@ -19,7 +16,38 @@ import { env, expect, primary, test } from './support'
  *    `/reviews/verify` says the chain holds and every verdict is anchored; the cell's
  *    `n_reviewed` / `n_review_defects` go 0 → 1; the task page shows the verdict.
  *  - The Transcript tab reports honestly: the fixture builder writes no transcript.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Walkthrough spec 09 (review) — the retained patch, the browser-side hash and
+ *               the review record, end to end on a live stack.
+ * What it does: Pins that a replay queued with `retain: {worktrees, transcripts}` leaves the
+ *               graded worktree behind; that the Evidence drawer's Patch tab fetches it as a
+ *               unified diff computed on demand, hashes the served bytes in the browser and
+ *               shows "hash matches pack" with file list and +/− counts that agree with the
+ *               pack; that the Review panel stays disabled until that tab was loaded, then
+ *               records a Defect finding with a note, "not mergeable" and a statement — the
+ *               POST carrying the sha256 the browser computed, accepted only because it
+ *               equals the pack's anchor; that `GET /reviews` serves it hash-chained and
+ *               `/reviews/verify` says the chain holds and every verdict is anchored; that
+ *               the cell's `n_reviewed` / `n_review_defects` go 0 → 1 and the task page shows
+ *               the verdict; and that the Transcript tab reports honestly that the fixture
+ *               builder writes none.
+ * How:          `startRun` with retention on; the drawer's tabs by test id; the reviews API
+ *               read directly for the chain assertions.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+ * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Runs/EvidenceDrawer.tsx,
+ *               ui/src/screens/Runs/ReviewPanel.tsx and ui/src/screens/Runs/contract.ts (the
+ *               code under test), ui/src/screens/Runs/TaskDetailPage.tsx (the verdict column),
+ *               src/crb/server/routes/grades.py (the patch route) and
+ *               src/crb/server/routes/reviews.py
+ * Tested by:    ui/e2e/walkthrough/09-review.spec.ts
+ * Touch when:   the patch headers, the review write boundary or the drawer's test ids change.
  */
+import type { APIRequestContext, Page } from '@playwright/test'
+import { env, expect, primary, test } from './support'
+
 test.describe.configure({ mode: 'serial' })
 
 const MIN = 60_000

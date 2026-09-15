@@ -1,3 +1,31 @@
+/**
+ * ui/src/screens/Runs/contract.ts, EvidenceDrawer.tsx and ReviewPanel.tsx — the patch is hashed in
+ * the browser and a review attests to those bytes.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Tests for the C13 evidence contract helpers, the drawer's Patch / Transcript
+ *               tabs and the Review panel, against a mocked API.
+ * What it does: Pins the SHA-256 test vectors, the diff parser's counting rule (files the
+ *               pack does not list are shown but not counted) and `deriveVerdict`; that the
+ *               Patch tab fetches the retained patch, verifies its hash against the pack and
+ *               lists the files, warns when the served bytes were redacted, says why nothing
+ *               was retained, and resolves the row from the task when only the pack is known;
+ *               that the Review panel stays disabled until the patch was loaded in the
+ *               session and then submits that hash, refuses a regression marked mergeable
+ *               client-side and renders a server refusal honestly, records `not_reviewed`
+ *               without a patch, and is read-only for a viewer.
+ * How:          `mockApi` with a pack fixture and a raw `fetch` stub for the byte endpoint;
+ *               `userEvent` drives the tabs and the form; assertions on the request bodies
+ *               and the `patch-*` / `review-*` test ids.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+ * Works with:   ui/src/screens/Runs/contract.ts, ui/src/screens/Runs/EvidenceDrawer.tsx,
+ *               ui/src/screens/Runs/ReviewPanel.tsx (the code under test), ui/src/test/utils.tsx
+ * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx
+ * Touch when:   a header, a refusal code or a finding kind is added (docs/API.md "Reviews",
+ *               "/grades/{row_hash}/patch") — extend the fixture and the matching case.
+ */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'

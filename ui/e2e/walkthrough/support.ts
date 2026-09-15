@@ -17,6 +17,32 @@
  *   CRB_E2E_WORK       a scratch directory for downloads
  *   CRB_E2E_PUBLIC=1   tier 2: onboard github.com/spf13/cobra + pallets/click instead
  *   CRB_E2E_BUILDER    tier 2: `claude_code` → 05 runs a REAL replay (auth=cli, limit 2)
+ *
+ * Navigation
+ * ----------
+ * What it is:   The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract),
+ *               `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`,
+ *               `signIn`, `startRun`, `waitForRun`, `runStatus`, `expectLogAction`,
+ *               `stackHealth`.
+ * What it does: Makes every spec drive a REAL stack through the UI only — sign-in through the
+ *               form (never cookie injection), runs queued through the dialog, completion
+ *               awaited by watching the status pill the page itself polls (never a fixed
+ *               sleep). The one direct API read is `/health`, so a spec can say WHY the stack
+ *               is unusable instead of timing out. `field()` matches a label exactly with or
+ *               without the required marker so "Source" never matches "Source prefix".
+ * How:          Playwright `test.extend` signs in before every test; helpers wrap the
+ *               selectors documented in ui/e2e/walkthrough/README.md.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   scripts/walkthrough.sh (boots the stack and exports `CRB_E2E_*`),
+ *               ui/playwright.walkthrough.config.ts (the config that runs these specs in
+ *               order), ui/e2e/walkthrough/README.md (tiers, variables, selectors),
+ *               tests/fixtures/pyrepo.py (the tier-1 fixture repository),
+ *               ui/src/components/Field.tsx (the `Label *` rendering `field()` matches),
+ *               ui/src/screens/Runs/RunNewDialog.tsx (what `startRun` fills)
+ * Tested by:    every spec under ui/e2e/walkthrough (they all import this)
+ * Touch when:   a walkthrough variable, a tier target or a form label changes; for a new
+ *               repository in tier 2, add a `RepoTarget` to `publicTargets()`.
  */
 
 import { expect, test as base, type Locator, type Page } from '@playwright/test'

@@ -4,10 +4,35 @@
  * The builder-config rules mirror `crb.server.schemas.RunCreateRequest` so the
  * form can refuse what the server would refuse, with the same words — the
  * server remains the authority (a 422 still renders through ErrorState).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The parser and validator behind the two JSON editors: `parseJsonObject`
+ *               (any object), `validateBuilderConfig` / `parseBuilderConfig` (the server's
+ *               `builder_config` rules) and `formatJsonObject` (pre-fill).
+ * What it does: Refuses a non-object, an identity key (`model` / `provider` / `name` belong on
+ *               the ladder rung, where the ledger row records them) and any credential-shaped
+ *               key (`*api_key*`, `*token*`, `*secret*` … — provider keys come from the worker's
+ *               environment, never from a form), with the words the server would use. The
+ *               server stays the authority: a 422 still renders.
+ * How:          `JSON.parse` on the trimmed text → shape check → key checks against the same
+ *               regex, identity set, marker list and key cap as `crb.server.schemas`.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   src/crb/server/schemas.py (the rules this file mirrors — `_KWARG_RE`,
+ *               `BUILDER_CONFIG_IDENTITY_KEYS`, `BUILDER_CONFIG_SECRET_MARKERS`,
+ *               `BUILDER_CONFIG_MAX_KEYS`), ui/src/screens/Runs/RunNewDialog.tsx (the
+ *               builder-config editor), ui/src/screens/Repos/RunnerOptsEditor.tsx (the
+ *               runner-options raw-JSON view)
+ * Tested by:    ui/src/lib/jsonObject.test.ts, ui/src/screens/Runs/RunNewDialog.test.tsx
+ * Touch when:   the server's `builder_config` rules change (src/crb/server/schemas.py,
+ *               docs/API.md "POST /runs") — change both sides in the same commit; never for a
+ *               new repository.
  */
 
 export type JsonObject = Record<string, unknown>
 
+/** Parse outcome; `error` is shown verbatim under the editor. */
 export type JsonObjectResult = { ok: true; value: JsonObject } | { ok: false; error: string }
 
 /** Parse editor text into a JSON object. Blank → `{}`. Arrays / scalars are refused. */
@@ -26,9 +51,13 @@ export function parseJsonObject(text: string): JsonObjectResult {
   return { ok: true, value: parsed as JsonObject }
 }
 
+/** A builder constructor keyword: lowercase identifier, ≤ 64 chars (mirrors `_KWARG_RE` on the server). */
 const KWARG_RE = /^[a-z_][a-z0-9_]{0,63}$/
+/** Keys that name the rung's recorded identity — they belong on the ladder, where the ledger row reads them. */
 export const BUILDER_CONFIG_IDENTITY_KEYS = ['model', 'provider', 'name'] as const
+/** Substrings that make a key credential-shaped; refused so a secret never travels in a run request. */
 export const BUILDER_CONFIG_SECRET_MARKERS = ['api_key', 'apikey', 'secret', 'token', 'password', 'passwd', 'credential'] as const
+/** The server's key cap. */
 export const BUILDER_CONFIG_MAX_KEYS = 32
 
 /** The server's `builder_config` rules, applied client-side for immediate feedback. */

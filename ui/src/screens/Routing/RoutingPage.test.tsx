@@ -1,3 +1,26 @@
+/**
+ * ui/src/screens/Routing/RoutingPage.tsx — the amended rule, the controls verdict, a reason code
+ * and the split per decision.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Screen test for the routing page against a mocked `GET /routes`.
+ * What it does: Pins that the policy card states the amended rule with the controls
+ *               thresholds, that the repo's controls verdict pill is rendered as served
+ *               (an `escaped` verdict here), that every decision shows its `reason_code`
+ *               and its failure split next to the model point, and that the route pills
+ *               carry the reason in their accessible label.
+ * How:          `mockApi` with a `RoutesWithControls` fixture; `renderApp` at
+ *               `/routing?repo=…`; assertions on `reason-code`, `controls-*` and the policy
+ *               rule text.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md
+ * Works with:   ui/src/screens/Routing/RoutingPage.tsx (the code under test),
+ *               ui/src/screens/Capability/contract.ts (the fixture shapes), ui/src/test/utils.tsx
+ * Tested by:    ui/src/screens/Routing/RoutingPage.test.tsx
+ * Touch when:   a reason code or policy threshold is added — extend the fixture and the
+ *               rule-text assertion.
+ */
 import { screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'

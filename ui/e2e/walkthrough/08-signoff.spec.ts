@@ -1,10 +1,3 @@
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import type { APIRequestContext, Locator, Page } from '@playwright/test'
-import { env, expect, field, primary, test } from './support'
-
 /**
  * 08 — a sign-off is a policy decision, refused at write (`signoff-policy.v2`).
  *
@@ -29,7 +22,43 @@ import { env, expect, field, primary, test } from './support'
  *    "I have read this accepted diff", writes the statement, signs — and the record
  *    lists the snapshot (n, point, lower, false-Q1, oracle, policy, route, controls k of
  *    N / escapes / run, the attested row).
+ *
+ * Navigation
+ * ----------
+ * What it is:   Walkthrough spec 08 (sign-off), the only spec that also seeds through the API.
+ * What it does: Pins that the primary repo's only measured cell (n = 2 from 05) is REFUSED with
+ *               every failing clause visible before the approver tries — `thin_cell` (2 vs
+ *               10), the real `controls_escapes` 04 found (the fixture's literal asserts let
+ *               the hardcode-cheat control grade clean), `route_not_deliver`,
+ *               `attestation_missing` — gate CLOSED, action disabled, nothing recorded; and
+ *               that a second fixture repo with PARAMETRISED tests (the cheat is not
+ *               constructible → 0 escapes; its oracle scores ≥ 0.80 once measured), built
+ *               and served as a bare file:// clone, onboarded, probed, mined, put through
+ *               controls, an oracle run and 18 clean `fixture_gold` replays, routes
+ *               `deliver` — and the approver signs it through the UI, the record carrying
+ *               the whole snapshot.
+ * How:          Seeding goes through `POST /repos` / `POST /runs` with the CSRF header (the
+ *               pytest seed fixture is not touched); the sign-off itself is driven through
+ *               the form (`attest-row`, `attest-read`, `attest-statement`, `signoff-recorded`).
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md
+ * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Signoff/SignoffPage.tsx and
+ *               ui/src/screens/Signoff/contract.ts (the screen under test),
+ *               src/crb/core/signoff.py (the clauses asserted), src/crb/server/routes/signoffs.py,
+ *               src/crb/builders/fixture_gold.py (the clean rows),
+ *               ui/e2e/walkthrough/05-replay-fake.spec.ts
+ *               (whose n = 2 cell this spec relies on)
+ * Tested by:    ui/e2e/walkthrough/08-signoff.spec.ts
+ * Touch when:   a refusal clause or a policy default changes (src/crb/core/signoff.py) — the
+ *               expected clause list and the 18-row seed must follow.
  */
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { APIRequestContext, Locator, Page } from '@playwright/test'
+import { env, expect, field, primary, test } from './support'
+
 test.describe.configure({ mode: 'serial' })
 
 const SIGNABLE_NAME = 'walk-signable'

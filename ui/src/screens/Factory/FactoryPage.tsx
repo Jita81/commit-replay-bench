@@ -1,3 +1,30 @@
+/**
+ * Factory (phase P6) — the forward-mode surface, rendering an honest "not yet" until the phase
+ * ships (/factory).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /factory: the frozen backlog and the factory tasks for one repo.
+ * What it does: Reads `GET /factory/{repo}/backlog` and `/tasks` and renders them (frozen
+ *               pill, backlog hash, per-task DoR gaps, RED proof, build status, PR link, review
+ *               verdict). Until P6 lands the server answers 404 / 501; a 404 is rendered as
+ *               the designed "not enabled yet" empty state and any other error as the
+ *               envelope — nothing is fabricated in the meantime.
+ * How:          `useRepoParam` → the two hooks → per-card pending / error / data branches
+ *               (`notYet` picks the 404 case).
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/hooks.ts (`useFactoryBacklog`, `useFactoryTasks`), ui/src/api/types.ts
+ *               (`FactoryBacklog`, `FactoryTask` — provisional shapes),
+ *               src/crb/server/routes/factory.py
+ *               (answers 501 `not_implemented` until P6), docs/API.md (the "Factory (phase P6)"
+ *               section)
+ * Tested by:    untested — the phase is not implemented server-side; the screen only renders
+ *               the contract's empty / error states (tests/test_server_routes_factory.py pins
+ *               the 501)
+ * Touch when:   P6 lands — the shapes in ui/src/api/types.ts become final and this screen
+ *               gains its actions (freeze, sign a gap); never for a new repository.
+ */
 import { useFactoryBacklog, useFactoryTasks } from '../../api/hooks'
 import { LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'

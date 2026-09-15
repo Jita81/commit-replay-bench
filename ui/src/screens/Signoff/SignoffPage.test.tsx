@@ -1,3 +1,31 @@
+/**
+ * ui/src/screens/Signoff/SignoffPage.tsx — the bar is shown before the approver tries, a refusal is
+ * a gate, a record carries its snapshot.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Screen tests for the sign-off page under `signoff-policy.v2`, against a
+ *               mocked map, preview, POST and list.
+ * What it does: Pins that a seeded deliver cell is refused on a controls escape with
+ *               observed vs threshold shown before any attempt; that an unmeasured oracle is
+ *               a non-overridable refusal (gate row, tile and clause); that a cell whose
+ *               preview lists no refusal is signed with an attestation and listed with its
+ *               snapshot; that a 409 `signoff_refused` renders as a REFUSED gate with the
+ *               clauses and a 409 `false_q1_refused` as the floor; that other errors render
+ *               as the envelope with the gate as the preview says; and that a pre-policy
+ *               record is listed without a fabricated snapshot next to a policy record.
+ * How:          `mockApi` with capability, preview and sign-off fixtures; `userEvent` picks
+ *               the cell and row, ticks the affirmation and submits; assertions on the
+ *               `signoff-*` / `refusal-*` / `attest-*` test ids and the gate's `data-state`.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md
+ * Works with:   ui/src/screens/Signoff/SignoffPage.tsx and ui/src/screens/Signoff/contract.ts
+ *               (the code under test), ui/src/components/GateBanner.tsx (the states asserted),
+ *               ui/src/test/utils.tsx
+ * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx
+ * Touch when:   a refusal clause is added — add a preview fixture that lists it and assert
+ *               its gate row and clause.
+ */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'

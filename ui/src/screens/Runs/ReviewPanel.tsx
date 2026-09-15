@@ -1,3 +1,36 @@
+/**
+ * Review panel — a person's verdict on one graded row, anchored to the sha256 of the patch they
+ * loaded.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `ReviewPanel` (the drawer's Review tab) and the review `VerdictPill`.
+ * What it does: Lets an operator record findings (regression / defect / API change / style,
+ *               each with a note), a mergeable answer and a statement; the headline verdict
+ *               is derived by the core's one rule, shown live. The action stays disabled —
+ *               with the reasons listed — until the Patch tab was loaded in THIS session and
+ *               its hash matches the pack's anchor, a regression is never marked mergeable,
+ *               and every finding has a note; `not_reviewed` is the honest "I looked and could
+ *               not review" (no findings, no hash). A server 422 refusal is rendered with its
+ *               code. The list below shows every review of the row, newest first.
+ * How:          Local draft state → `blockers` (memoised) gates `canSubmit` → `useCreateReview`
+ *               posts `patch_sha256 = sha256(loaded bytes)` → on success the form clears and
+ *               the record is shown.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+ * Works with:   ui/src/screens/Runs/contract.ts (`deriveVerdict`, `useCreateReview`,
+ *               `useReviews`, `RetainedPatch`), ui/src/screens/Runs/EvidenceDrawer.tsx (the
+ *               host; passes the loaded patch), src/crb/core/review.py (the rules this panel
+ *               mirrors: verdict derivation, regression ⇒ not mergeable),
+ *               src/crb/server/routes/reviews.py (the write boundary and its 422 codes),
+ *               ui/src/lib/auth.tsx (`can('operator')`)
+ * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx, ui/e2e/walkthrough/09-review.spec.ts
+ * Touch when:   a finding kind or a write-boundary rule is added (src/crb/core/review.py,
+ *               docs/API.md "Reviews") — add the chip, the tone and the client-side blocker
+ *               together; never for a new repository.
+ * Claims:       A review is governance evidence about mergeability; it never alters the
+ *               mechanical grade (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
+ */
 import { useMemo, useState } from 'react'
 import { isApiError } from '../../api/client'
 import { Button } from '../../components/Button'
@@ -20,6 +53,7 @@ import {
   type Verdict,
 } from './contract'
 
+/** Tone per review verdict: regression and defect red, API change amber, style blue, ok green, not reviewed muted. */
 export const VERDICT_TONE: Record<Verdict, Tone> = {
   ok: 'green',
   regression: 'red',
@@ -29,6 +63,7 @@ export const VERDICT_TONE: Record<Verdict, Tone> = {
   not_reviewed: 'muted',
 }
 
+/** Glyph per verdict — always alongside the colour. */
 const VERDICT_GLYPH: Record<Verdict, string> = {
   ok: '✓',
   regression: '✗',
@@ -46,12 +81,14 @@ export function VerdictPill({ verdict, size = 'xs' }: { verdict: Verdict; size?:
   )
 }
 
+/** The editable note / file / line for one selected finding kind. */
 interface FindingDraft {
   note: string
   file: string
   line: string
 }
 
+/** A blank draft per kind. */
 const emptyDraft = (): FindingDraft => ({ note: '', file: '', line: '' })
 
 interface Props {
@@ -90,10 +127,14 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
   const [notReviewed, setNotReviewed] = useState(false)
   const [submitted, setSubmitted] = useState<Review | null>(null)
 
+  // The verdict is DERIVED, never chosen: the server re-derives it and refuses a
+  // disagreeing client value (422), so the preview and the record cannot diverge.
   const verdict: Verdict = notReviewed ? 'not_reviewed' : deriveVerdict(kinds)
   const anchored = patch !== null && patch.matches
   const missingNotes = kinds.filter((k) => !drafts[k].note.trim())
   const regressionMergeable = kinds.includes('regression') && mergeable === 'yes'
+  // Every reason the record cannot be written yet, in the words the reviewer sees. These
+  // mirror the server's write boundary (crb.core.review) so a refusal is rare and explained.
   const blockers = useMemo(() => {
     const out: string[] = []
     if (!mayReview) out.push('Reviews need the operator role or above.')
@@ -149,6 +190,8 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
   }
 
   const err = create.error
+  // A 422 is the server's write boundary speaking (patch_hash_mismatch, no_diff_in_pack …):
+  // rendered with its code, not as a generic failure.
   const refusal = err && isApiError(err) && err.status === 422 ? err : null
 
   return (

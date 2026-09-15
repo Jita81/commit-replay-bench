@@ -1,3 +1,43 @@
+/**
+ * Capability map — per (class × size) cell: pass rate with n and interval, false-Q1, cost, latency,
+ * oracle strength, and the route that evidence licenses (/capability).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /capability: summary tiles, the controls tile, the class × size
+ *               grid of cells, and a cell detail card.
+ * What it does: Renders `GET /capability-map` for one repo (projection by class × size,
+ *               optionally × language / × model). An absent cell is drawn as NOT_YET_MEASURED
+ *               with n = 0 — never zero-filled; a cell with false-Q1 > 0 is red and a page-wide
+ *               alert says every number is untrusted until the ledger is audited. Every cell
+ *               shows its route, n, point, Wilson interval with the policy ticks, the model
+ *               point beside it, the failure split and fQ1; the detail card recomputes the
+ *               interval in the browser and flags drift from the server's rather than hiding
+ *               it.
+ * How:          `useRepoParam` → `useCapabilityMapWithControls(repo, projection)` → index the
+ *               cells by `class|size` → the full taxonomy × size order as the grid so 0-count
+ *               classes render honestly → `CellBox` per cell, `CellDetail` on click.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md,
+ *               docs/adr/0001-four-belts-and-false-q1-at-write.md
+ * Works with:   ui/src/screens/Capability/contract.ts (the extended map type and hook),
+ *               ui/src/screens/Capability/FailureSplit.tsx (split, model point, controls pill),
+ *               ui/src/api/types.ts (`CapabilityMap`, `CellField`, `NOT_YET_MEASURED`),
+ *               ui/src/components/StatTile.tsx and ui/src/components/CiBar.tsx (the numbers
+ *               with their method), src/crb/server/routes/capability.py (the route),
+ *               src/crb/core/capability.py (the cell statistics), src/crb/core/taxonomy.py
+ *               (`ALL_CLASSES` — the list `ALL_CLASSES` here must match)
+ * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx,
+ *               ui/e2e/walkthrough/05-replay-fake.spec.ts
+ *               (a real cell with route `calibrate`),
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ * Touch when:   the class taxonomy changes (src/crb/core/taxonomy.py — mirror `ALL_CLASSES`
+ *               here), a cell field is added to docs/API.md "/capability-map" (type it in
+ *               ui/src/screens/Capability/contract.ts first), or the routing policy gains a
+ *               threshold worth a tick; never for a new repository.
+ * Claims:       The map shows measured cells only; coverage is `null` until the repo has a
+ *               change profile (docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity).
+ */
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { NOT_YET_MEASURED, type CapabilityMap, type CellField } from '../../api/types'
@@ -19,6 +59,7 @@ import { tierDisplay } from '../../lib/verdict'
 import { REASON_DISPLAY, controlsDisplay, useCapabilityMapWithControls, type CapabilityCellSplit as CapabilityCell, type ControlsVerdict } from './contract'
 import { ControlsPill, FailureSplitPills, ModelPointLine } from './FailureSplit'
 
+/** Column order of the grid — the size tiers as the apparatus defines them. */
 const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL']
 
 /** The full taxonomy (crb.core.spec.ALL_CLASSES) — so 0-count classes render honestly. */
@@ -39,14 +80,17 @@ const ALL_CLASSES = [
   'test.fix',
 ]
 
+/** `class|size[|language][|model]` — the map's index key for one projection. */
 function cellKey(c: { capability_class: string; size: string; language?: string; model?: string }, projection: CellField[]): string {
   return projection.map((f) => (f === 'capability_class' ? c.capability_class : f === 'size' ? c.size : f === 'language' ? (c.language ?? '') : f === 'model' ? (c.model ?? '') : '')).join('|')
 }
 
+/** A cell counts as measured only with rows behind it (`n > 0` and a real route); the type guard the grid and the tiles share. */
 export function isMeasured(c: CapabilityCell | undefined): c is CapabilityCell {
   return Boolean(c) && c!.route !== NOT_YET_MEASURED && c!.n > 0
 }
 
+/** One grid cell: the NOT_YET_MEASURED placeholder, or the route, n, point, interval bar, model point, split and fQ1 as a clickable button. */
 function CellBox({ cell, policy, onOpen }: { cell: CapabilityCell | undefined; policy: CapabilityMap['policy'] | undefined; onOpen: () => void }) {
   if (!isMeasured(cell)) {
     return (
@@ -107,6 +151,7 @@ function CellBox({ cell, policy, onOpen }: { cell: CapabilityCell | undefined; p
   )
 }
 
+/** The card under the grid for the selected cell: tiles for every number with its method, the split, and links to the ledger rows and the routing decision. */
 function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: string; onClose: () => void }) {
   const tier = tierDisplay(cell.verification_tier)
   const ci = wilson(cell.clean, cell.n)
@@ -182,6 +227,7 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
   )
 }
 
+/** The negative-controls verdict as a tile: FAILED / escapes / thin / passed / — with constructible k of N and the gate the policy applies. */
 function ControlsTile({ verdict, policy }: { verdict: ControlsVerdict | undefined; policy: CapabilityMap['policy'] | undefined }) {
   const d = controlsDisplay(verdict)
   const measured = Boolean(verdict?.measured)
@@ -208,6 +254,7 @@ function ControlsTile({ verdict, policy }: { verdict: ControlsVerdict | undefine
   )
 }
 
+/** The screen. `?repo=` from the URL; projection toggles (by language / by model) are local state. */
 export function CapabilityPage() {
   const [repo, setRepo] = useRepoParam()
   const [byLanguage, setByLanguage] = useState(false)

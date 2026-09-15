@@ -1,3 +1,29 @@
+/**
+ * Test helpers — a fetch mock keyed by "METHOD /path", and renderApp (query client + memory router
+ * + auth).
+ *
+ * Navigation
+ * ----------
+ * What it is:   `mockApi` (a `fetch` double that dispatches on `${METHOD} ${path}`), `json` /
+ *               `envelope` response builders, `PRINCIPAL` (an approver) and `renderApp`.
+ * What it does: Lets a screen test answer the API contract exactly — a body per route, or a
+ *               handler that inspects the request — and records every call so a test can
+ *               assert on the body a mutation sent. An unmatched call answers a 404
+ *               envelope so a missing mock is visible, never a silent hang. `renderApp`
+ *               mounts the same providers the app does (with `gcTime: 0` so nothing is
+ *               cached across tests) at a chosen route.
+ * How:          `vi.stubGlobal('fetch', …)`; the path is the URL without `/api/v1` and the
+ *               query string; `* /path` matches any method.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/client.ts (the fetch calls this intercepts), ui/src/lib/auth.tsx
+ *               (`AuthProvider` — `/auth/me` is usually mocked with `PRINCIPAL`),
+ *               ui/src/main.tsx (the provider stack this mirrors),
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx
+ *               (a typical consumer)
+ * Tested by:    every `*.test.tsx` under ui/src/screens (they all render through this)
+ * Touch when:   the API prefix or the provider stack changes; never for a new repository.
+ */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, type RenderOptions } from '@testing-library/react'
 import type { ReactElement, ReactNode } from 'react'
@@ -6,14 +32,18 @@ import { vi } from 'vitest'
 import { AuthProvider } from '../lib/auth'
 import type { Principal } from '../api/types'
 
+/** A default signed-in approver; override `role` per test to exercise RBAC. */
 export const PRINCIPAL: Principal = { id: 'u1', display_name: 'Ada', email: 'ada@example.org', role: 'approver', issuer: 'local' }
 
+/** A route handler: sees the URL and the request init, returns a `Response`. */
 type Handler = (url: string, init: RequestInit | undefined) => Response | Promise<Response>
 
+/** A JSON `Response` with the given status. */
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
+/** An error `Response` in the contract's envelope shape. */
 export function envelope(status: number, code: string, message: string, detail: Record<string, unknown> = {}): Response {
   return json({ error: { code, message, detail } }, status)
 }
@@ -40,6 +70,7 @@ export function mockApi(routes: Record<string, Handler | unknown>) {
   return { fetchMock, calls }
 }
 
+/** `route` = the initial URL (query string included); `path` = the route pattern the screen mounts at (`*` by default). `me` is declared but NOT read — the principal comes from the mocked `GET /auth/me`. */
 interface Opts extends Omit<RenderOptions, 'wrapper'> {
   route?: string
   path?: string

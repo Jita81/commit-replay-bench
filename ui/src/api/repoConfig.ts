@@ -7,6 +7,28 @@
  * Kept apart from the shared `hooks.ts` on purpose: this is the repo-config
  * workstream's own wire surface. Query keys nest under `keys.repo(name)` so the
  * existing invalidations (create, probe) reach the trail as well.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The repo-config wire surface: `useUpdateRepo` (`PUT /repos/{name}`) and
+ *               `useRepoEvents` (`GET /repos/{name}/events`), with the `RepoUpdateRequest` body.
+ * What it does: Sends a PARTIAL update — only the fields the form changed — and replaces the
+ *               cached repo detail with the server's fresh one; reads the repo's system trace
+ *               (`repo.created`, one `repo.updated` per save with the redacted field diff) as
+ *               the Configuration tab's audit trail.
+ * How:          A `useMutation` whose `onSuccess` seeds `keys.repo(name)` and invalidates the
+ *               list and the events page; a `useQuery` keyed under `['repos', name, 'events']`
+ *               so the shared invalidations (create, probe) reach it too.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Repos/RepoConfigTab.tsx (the only caller), ui/src/api/hooks.ts
+ *               (`keys.repo` this file nests under), ui/src/api/types.ts (`RepoDetail`,
+ *               `StepEvent`, the config field types), src/crb/server/routes/repos.py (the PUT
+ *               and the events route)
+ * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx, ui/e2e/walkthrough/repo-config.spec.ts
+ * Touch when:   a field is added to `RepoConfig` (src/crb/core/spec.py, docs/API.md "Repos") —
+ *               add it to `RepoUpdateRequest` here and to ui/src/api/types.ts; never for a new
+ *               repository (its configuration is edited through this surface, not by code).
  */
 
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'

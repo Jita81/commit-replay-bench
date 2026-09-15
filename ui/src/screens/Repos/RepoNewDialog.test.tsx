@@ -1,3 +1,26 @@
+/**
+ * ui/src/screens/Repos/RepoNewDialog.tsx — presets fill the body, the clone policy is enforced, bad
+ * JSON is refused.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Screen tests for the Add-repo dialog against a mocked API.
+ * What it does: Pins that `parseScopeList` splits and trims; that a preset fills layout,
+ *               runner options and belt scope and the POST body carries them; that invalid
+ *               runner-options JSON and a non-object are refused and then recover; that a
+ *               local path or `http://` is rejected as a URL but accepted as a clone path;
+ *               that an explicit belt list needs at least one scope and is sent as a list;
+ *               that the runner select follows the language; that the Form view offers the
+ *               runner's own keys; and that a 422 envelope renders.
+ * How:          `mockApi` records the POST body; `userEvent` drives the dialog; assertions on
+ *               the request and on field errors.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Repos/RepoNewDialog.tsx (the code under test),
+ *               ui/src/lib/repoPresets.ts (the preset the cases apply), ui/src/test/utils.tsx
+ * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx
+ * Touch when:   the clone policy, a preset or a field changes — extend the matching case.
+ */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'

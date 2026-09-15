@@ -16,13 +16,43 @@
  *     surfaced as `dropped` (fail closed, honestly).
  *
  * The browser `EventSource` is injectable so tests can drive it.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The SSE client: `RunEventStream` (a subscribable, reconnecting `EventSource`
+ *               wrapper), `parseStepEvent` and `runEventsUrl`.
+ * What it does: Streams a run's `StepEvent`s into a bounded ring buffer (5,000, oldest
+ *               dropped), resumes with `?after=<last seq>` on every reconnect so a drop never
+ *               replays or loses an event, backs off exponentially (1 s → 15 s) until the
+ *               server's `done` or `close()`, and counts a malformed frame as `dropped`
+ *               rather than parsing it into the buffer.
+ * How:          `open()` → the injected factory builds the source at the resume URL →
+ *               `step` frames go through `parseStepEvent` (seq / action / stage required,
+ *               duplicates below `lastSeq` skipped) → each change replaces the snapshot object
+ *               and notifies subscribers → `onerror` tears the source down and schedules a
+ *               reconnect; `done` finishes.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/hooks.ts (`useRunEvents` owns one stream per run and adapts it
+ *               with `useSyncExternalStore`), ui/src/api/types.ts (`StepEvent`),
+ *               ui/src/components/LiveLog.tsx (renders the snapshot), src/crb/server/routes/runs.py
+ *               (the `text/event-stream` route and its `event: done`),
+ *               src/crb/observability/events.py (the envelope the frames carry)
+ * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx (a fake EventSource drives the
+ *               stream through the page), ui/e2e/walkthrough/03-mine.spec.ts (live log
+ *               against a real worker)
+ * Touch when:   the SSE wire shape changes (docs/API.md "SSE event shape") or `StepEvent`
+ *               gains a field — update `parseStepEvent` and ui/src/api/types.ts together;
+ *               never for a new repository.
  */
 
 import type { StepEvent } from './types'
 import { API_BASE } from './client'
 
+/** The stream's lifecycle; `done` is the server's verdict (run terminal), `closed` is ours (unmount). */
 export type SseStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'done' | 'closed'
 
+/** What the screen sees. Replaced wholesale on every change so React compares by identity. */
 export interface SseSnapshot {
   status: SseStatus
   events: StepEvent[]
@@ -32,6 +62,7 @@ export interface SseSnapshot {
   error: string | null
 }
 
+/** The subset of the browser `EventSource` the stream needs — small enough to fake in tests. */
 export interface EventSourceLike {
   addEventListener(type: string, listener: (ev: MessageEvent) => void): void
   close(): void
@@ -53,13 +84,16 @@ export interface RunEventStreamOptions {
   maxBackoffMs?: number
 }
 
+/** The stream URL with `?after=<seq>` when resuming — the server replays only what follows. */
 export function runEventsUrl(runId: string, after: number): string {
   const q = after > 0 ? `?after=${encodeURIComponent(String(after))}` : ''
   return `${API_BASE}/runs/${encodeURIComponent(runId)}/events${q}`
 }
 
+/** `withCredentials` so the cookie session reaches the stream (it is a cross-origin request under the dev proxy). */
 const defaultFactory: EventSourceFactory = (url) => new EventSource(url, { withCredentials: true })
 
+/** One `data:` frame → a `StepEvent`, or `null` when it is not one. Only `seq`, `action` and `stage` are required; everything else defaults so an older server's frame still renders. A `null` is COUNTED by the caller (`dropped`), never silently skipped. */
 export function parseStepEvent(raw: string): StepEvent | null {
   let obj: unknown
   try {
@@ -129,10 +163,12 @@ export class RunEventStream {
     }
   }
 
+  /** The current snapshot (stable identity until the next change). */
   getSnapshot(): SseSnapshot {
     return this.snapshot
   }
 
+  /** Register a change listener; returns the unsubscribe. Shaped for `useSyncExternalStore`. */
   subscribe(listener: (s: SseSnapshot) => void): () => void {
     this.listeners.add(listener)
     return () => {
@@ -140,16 +176,23 @@ export class RunEventStream {
     }
   }
 
+  /** Replace the snapshot (never mutate it) and notify; the one place state changes. */
   private set(patch: Partial<SseSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch }
     for (const l of this.listeners) l(this.snapshot)
   }
 
+  /** Start streaming. A closed stream stays closed — `close()` is final. */
   open(): void {
     if (this.closed) return
     this.connect(false)
   }
 
+  /**
+   * Build a source at the resume URL and wire its callbacks. Reconnection is ours, not the
+   * browser's: a native EventSource would retry the ORIGINAL URL, without `?after=`, so on
+   * error the source is torn down and rebuilt from `lastSeq` under our own backoff.
+   */
   private connect(isReconnect: boolean): void {
     if (this.closed) return
     this.set({ status: isReconnect ? 'reconnecting' : 'connecting' })
@@ -169,6 +212,8 @@ export class RunEventStream {
     es.addEventListener('step', (ev) => this.onStep(String(ev.data)))
     es.addEventListener('done', () => this.finish())
     es.onerror = () => {
+      // The server closes the socket after `event: done`; the browser reports that as an
+      // error, which must not trigger a reconnect loop on a finished run.
       if (this.closed || this.snapshot.status === 'done') return
       this.teardownSource()
       this.set({ status: 'reconnecting', error: 'Event stream interrupted — reconnecting.' })
@@ -176,6 +221,7 @@ export class RunEventStream {
     }
   }
 
+  /** One `step` frame: parse, drop-or-append, trim the ring, advance `lastSeq`. */
   private onStep(raw: string): void {
     const ev = parseStepEvent(raw)
     if (!ev) {
@@ -188,6 +234,7 @@ export class RunEventStream {
     this.set({ events, lastSeq: Math.max(this.snapshot.lastSeq, ev.seq) })
   }
 
+  /** Exponential backoff, doubled per attempt and capped; reset to the minimum on `onopen`. */
   private scheduleReconnect(): void {
     if (this.closed) return
     const delay = this.backoff
@@ -199,6 +246,7 @@ export class RunEventStream {
     }, delay)
   }
 
+  /** The server's `event: done`: the run is terminal, nothing more will arrive. */
   private finish(): void {
     this.teardownSource()
     this.set({ status: 'done', error: null })
@@ -215,6 +263,7 @@ export class RunEventStream {
     }
   }
 
+  /** Stop for good (unmount / run id change); a `done` status is kept, anything else becomes `closed`. */
   close(): void {
     this.closed = true
     if (this.timer) {

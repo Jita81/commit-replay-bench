@@ -1,3 +1,35 @@
+/**
+ * The Configuration tab — edit the repo config, save only what changed, prove it with a probe, read
+ * the audit trail.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The Configuration tab of the repo page: the form with Save / Discard / Run
+ *               probe, the inline probe result, the stored config as returned, and the audit
+ *               trail of `repo.created` / `repo.updated` events.
+ * What it does: Sends ONLY the changed fields to `PUT /repos/{name}` (diffed against the last
+ *               state the SERVER confirmed, never a stale prop), shows a toast naming what was
+ *               sent, and offers "Run probe now" so the new configuration is proven rather
+ *               than assumed — the probe runs the STORED config, so it is disabled while the
+ *               form is dirty. A viewer sees the same form read-only. External changes
+ *               (another operator, the worker persisting a clone path) reset an untouched
+ *               form and are diffed against by a dirty one.
+ * How:          `formFromRepo` → local form state; `changedFields(form, saved)` → the PUT
+ *               body; on success the response replaces `saved` and the form; `ProbeResult`
+ *               follows the queued run to a terminal state and re-reads the repo (the worker
+ *               writes probe status on the repo row).
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/repoConfig.ts (`useUpdateRepo`, `useRepoEvents`),
+ *               ui/src/screens/Repos/repoConfigModel.ts (diff and validation),
+ *               ui/src/screens/Repos/RepoConfigForm.tsx (the fields), ui/src/api/hooks.ts
+ *               (`useProbeRepo`, `useRun`), ui/src/screens/Repos/RepoDetail.tsx (the host tab),
+ *               src/crb/server/routes/repos.py (the PUT, the events, the probe)
+ * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx, ui/e2e/walkthrough/repo-config.spec.ts
+ * Touch when:   the audit event payload changes (`system/repo.updated` in docs/API.md) —
+ *               update `fieldsOf`; never for a new repository (this IS the surface that
+ *               onboards one).
+ */
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
@@ -17,6 +49,7 @@ import { RepoConfigForm } from './RepoConfigForm'
 import { changedFields, formFromRepo, hasErrors, validateForm } from './repoConfigModel'
 import { validateRunnerOpts } from './runnerOpts'
 
+/** How long the "Saved …" toast stays. */
 const TOAST_MS = 8000
 
 /** The last non-empty line of a runner tail — the runner's own summary ("5 passed in 0.02s"). */
@@ -66,6 +99,7 @@ function ProbeResult({ runId, repo }: { runId: string; repo: RepoDetail }) {
   )
 }
 
+/** The changed field names of a `repo.updated` event (`payload.fields`, else the diff's keys). */
 function fieldsOf(ev: StepEvent): string[] {
   const p = ev.payload
   if (Array.isArray(p.fields)) return p.fields.map(String)
@@ -73,6 +107,7 @@ function fieldsOf(ev: StepEvent): string[] {
   return []
 }
 
+/** The repo's system events, newest first, each with its changed fields and the redacted diff behind a disclosure. */
 function AuditTrail({ name }: { name: string }) {
   const events = useRepoEvents(name, { limit: 50 })
   return (

@@ -1,3 +1,34 @@
+/**
+ * Add a repository — POST /repos with a preset, a URL or clone path, layout, belt scope, probe and
+ * runner options.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `RepoNewDialog` (the "Add repo" modal) and `URL_RE`, the clone-policy
+ *               check.
+ * What it does: Builds a `POST /repos` body: a preset fills the layout for a well-known shape
+ *               (every field stays editable); a Git URL is checked against the server's clone
+ *               policy (`https://`, `ssh://`, `user@host:path`; `file://` only under the
+ *               server's dev switch) so a refusal is immediate — a bare local path is
+ *               registered as a clone path, never cloned; runner options go through the
+ *               shared editor with the runner's own keys. Only set fields are sent. A URL-only
+ *               repo is cloned by the worker on its first run.
+ * How:          Local state per field; `valid` gates the submit; `body()` assembles the
+ *               request; on 201 the caller navigates to the new repo page.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/hooks.ts (`useCreateRepo`), ui/src/api/types.ts
+ *               (`RepoCreateRequest`), ui/src/lib/repoPresets.ts (`REPO_PRESETS`),
+ *               ui/src/screens/Repos/runnerOpts.ts and ui/src/screens/Repos/RunnerOptsEditor.tsx
+ *               (the options), ui/src/screens/Repos/repoConfigModel.ts (`BELT_HELP`,
+ *               `parseScopeList`), src/crb/server/routes/repos.py (the URL policy this mirrors)
+ * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx,
+ *               ui/e2e/walkthrough/02-repo-onboard.spec.ts
+ * Touch when:   the server's clone-URL policy changes (docs/API.md "POST /repos") — update
+ *               `URL_RE` and its hint with it; a new `RepoConfig` field gets a control here
+ *               AND in ui/src/screens/Repos/RepoConfigForm.tsx. For a new repository: use
+ *               the dialog; add a preset in ui/src/lib/repoPresets.ts if its layout is new.
+ */
 import { useState, type FormEvent } from 'react'
 import { useCreateRepo } from '../../api/hooks'
 import { LANGUAGES, type BeltScope, type Language, type RepoCreateRequest, type Runner } from '../../api/types'
@@ -16,6 +47,7 @@ interface Props {
   onCreated?: (name: string) => void
 }
 
+/** Where the repo comes from: a URL the worker clones, or a clone already on the server host. */
 type Source = 'url' | 'clone_path'
 
 export { parseScopeList }
