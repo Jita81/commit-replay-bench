@@ -163,6 +163,10 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+      # gitleaks-action lists a pull request's commits through the API on PR events;
+      # without this it fails 403 "Resource not accessible by integration" (first seen on
+      # PR #7, 2026-09-15 — pushes to a branch never needed it)
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
