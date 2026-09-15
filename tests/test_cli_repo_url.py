@@ -1,6 +1,26 @@
 """``crb repo add --url`` (W3-B): clones now into ``<workdir>/repos/<name>``, records the
 path, refuses policy-violating sources, and keeps ``--path`` + ``--url`` (informational)
-working as before."""
+working as before.
+
+Navigation
+----------
+What it is:   ``crb repo add --url``'s test suite (W3-B) — clone into the workdir, record the
+              path, refuse policy-violating sources.
+What it does: Pins that a URL registration clones into ``<workdir>/repos/<name>`` and records
+              the path, that local sources are refused by default (and accepted under the
+              developer switch), that ``--path`` or ``--url`` is required and duplicates are
+              checked BEFORE cloning, and that ``--path`` plus ``--url`` keeps the URL
+              informational (nothing cloned, no policy check).
+How:          ``fixtures.remote.bare_remote`` over ``pyrepo``; ``main([...])`` through ``run``.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/cli/commands/repo.py (under test), src/crb/core/git.py (``clone_repo``
+              and the policy), tests/fixtures/remote.py, tests/test_git_clone.py (the policy's
+              own suite), tests/test_server_routes_w3b.py (the same policy at ``POST /repos``)
+Tested by:    tests/test_cli_repo_url.py
+Touch when:   the clone destination layout or the URL policy changes (mirror the case in the
+              route and worker suites).
+"""
 
 from __future__ import annotations
 
@@ -20,11 +40,14 @@ Run = Callable[[Sequence[str]], tuple[int, str, str]]
 
 @pytest.fixture
 def workdir(tmp_path: Path) -> Path:
+    """A fresh ``--workdir`` per test (``repos/<name>`` is created under it by a URL registration)."""
     return tmp_path / ".crb"
 
 
 @pytest.fixture
 def run(workdir: Path, capsys: pytest.CaptureFixture[str]) -> Run:
+    """``run(argv) -> (exit_code, stdout, stderr)`` with ``--workdir`` supplied."""
+
     def _run(argv: Sequence[str]) -> tuple[int, str, str]:
         capsys.readouterr()
         code = main([*argv, "--workdir", str(workdir)])
@@ -36,6 +59,7 @@ def run(workdir: Path, capsys: pytest.CaptureFixture[str]) -> Run:
 
 @pytest.fixture
 def remote(pyrepo: pr.PyRepo, tmp_path: Path) -> str:
+    """A bare ``file://`` remote of ``pyrepo`` (the developer switch is set per test, not here)."""
     return bare_remote(pyrepo.path, tmp_path / "remote.git")
 
 

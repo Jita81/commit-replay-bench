@@ -1,4 +1,31 @@
-"""crb.factory.loop — one item end to end, and a frozen backlog under the all-comers rule."""
+"""crb.factory.loop — one item end to end, and a frozen backlog under the all-comers rule.
+
+Navigation
+----------
+What it is:   The factory loop's test suite — one item end to end, and a frozen backlog under
+              the all-comers rule.
+What it does: Pins that a spec refuses a test author that is also a rung, that a single item is
+              accepted with delivery off by default, that an unsigned structural gap is refused
+              and recorded, that an operator item is routed human not built, the test-first route
+              through the author rung, that no oracle means no build, that a green authored test
+              is not RED, that a not-clean build stops before delivery and review, that delivery
+              on fails closed without credentials and otherwise opens a branch + PR then reviews,
+              that accept-with-edit forces rework (RED → build → grade → fresh verdict) until the
+              budget is exhausted, the full loop on a frozen backlog, and the ledgered horizon
+              checkpoint.
+How:          ``Rig`` wires ``MultiBuilder`` (edit picked from the brief's subject; can misbehave
+              once), ``FakeTestAuthor``, a ``MemorySink`` emitter and static credentials over
+              ``pyrepo``.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/factory/loop.py (under test), src/crb/factory/readiness.py (the DoR
+              gate), src/crb/factory/build.py, src/crb/factory/delivery.py and
+              src/crb/factory/review.py (the steps it sequences), src/crb/factory/evidence.py
+              (the factory evidence chain), tests/test_factory_build.py (the shared harness)
+Tested by:    tests/test_factory_loop.py
+Touch when:   a step is added to the loop (a stop-before case and an end-to-end case); the
+              rework budget rule changes.
+"""
 
 from __future__ import annotations
 
@@ -70,6 +97,8 @@ class MultiBuilder(FakeBuilder):
 
 @dataclass
 class FakeTestAuthor:
+    """A test author that returns a scripted ``(path, content)`` per item id."""
+
     name: str = "author"
     model: str = "t1"
     provider: str = "fake"
@@ -144,6 +173,10 @@ def _items() -> tuple[BacklogItem, ...]:
 
 @dataclass
 class Rig:
+    """Everything one loop run needs, wired: the spec, the sink, the evidence chain, the ledger, the
+    fakes and the recorded delivery seams.
+    """
+
     repo: pr.PyRepo
     spec: fl.FactorySpec
     sink: MemorySink
@@ -155,11 +188,13 @@ class Rig:
     prs: list[dict[str, Any]]
 
     def loop(self) -> fl.FactoryLoop:
+        """A ``FactoryLoop`` over the rig's spec with an emitter into its sink."""
         return fl.FactoryLoop(
             self.spec, self.repo.repo, emitter=Emitter(self.sink, actor="tester", repo="pyrepo")
         )
 
     def kinds(self, item_id: str) -> list[str]:
+        """The factory-evidence event kinds recorded for ``item_id``, in order."""
         return [e.kind for e in self.evidence.events_for(item_id)]
 
 

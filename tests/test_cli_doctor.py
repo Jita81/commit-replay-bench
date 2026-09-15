@@ -1,6 +1,27 @@
 """``crb doctor``'s ``claude_code`` probe: the login source (env | secrets file (…xxxx)
 | keychain | none), the CLI's presence/version, and ``--verify``. Hermetic: a fake
-``claude`` on PATH, a throwaway ``CRB_HOME``, never the operator's login."""
+``claude`` on PATH, a throwaway ``CRB_HOME``, never the operator's login.
+
+Navigation
+----------
+What it is:   ``crb doctor``'s ``claude_code`` probe test suite — the login source, the CLI's
+              presence and ``--verify``.
+What it does: Pins that a keychain login is ok, that no login and no key is degraded WITH the
+              fix named, that a secrets file shows only its fingerprint, that an environment
+              token wins, that an insecure secrets file is down, that a missing CLI is degraded,
+              that ``--verify`` runs the probe (ok and invalid), and that ``crb doctor`` reports
+              the probe in text and JSON.
+How:          A fake ``claude`` on PATH and a throwaway ``CRB_HOME`` — never the operator's login.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/cli/commands/service.py (``probe_claude_code`` under test),
+              src/crb/builders/claude_code.py (the token sources it reports),
+              src/crb/core/secrets_file.py (the store), tests/test_builders_claude_code.py (the
+              same sources at the builder), docs/OPERATOR.md
+Tested by:    tests/test_cli_doctor.py
+Touch when:   a token source or auth mode is added (a status case naming it); a probe for
+              another builder is added (a module beside this one).
+"""
 
 from __future__ import annotations
 
@@ -37,6 +58,9 @@ esac
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A throwaway ``CRB_HOME`` with every ``CRB_*`` and credential variable cleared, so the probe
+    never sees the operator's login.
+    """
     for key in list(os.environ):
         if key.startswith("CRB_") or key in {"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}:
             monkeypatch.delenv(key, raising=False)
@@ -47,6 +71,8 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def fake_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[bool], None]:
+    """Install a fake ``claude`` first on PATH whose ``auth status`` answers ``logged_in``."""
+
     def make(logged_in: bool) -> None:
         bindir = tmp_path / "fakebin"
         bindir.mkdir(exist_ok=True)

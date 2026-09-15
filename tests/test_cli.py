@@ -2,6 +2,32 @@
 
 Covers every subcommand's happy path and the three exit codes:
 ``0`` ok / ``1`` verdict negative / ``2`` usage-or-harness error.
+
+Navigation
+----------
+What it is:   The ``crb`` CLI's test suite — every subcommand's happy path and the three exit
+              codes, driven in-process against a tiny real git repository.
+What it does: Pins ``0`` ok / ``1`` verdict negative / ``2`` usage-or-harness error across
+              ``config``, ``repo add | probe | import``, ``mine`` (idempotent, streams events,
+              no gold), ``prep`` (blind hides the oracle), ``grade`` (unedited not clean, gold
+              clean and ledgered, tampered oracle disqualified, blind overlay at grade time, a
+              wrong worktree a harness error), ``ledger verify | stats | export | import`` (tamper
+              detected), ``route``; that a forged false-Q1 row cannot even be read, that broken
+              state files are harness errors, that an unexpected exception maps to exit 2 unless
+              ``--debug``, and that the CLI never leaks the operator's environment into a test
+              run.
+How:          ``main([...])`` with ``--workdir`` supplied by the ``run`` fixture over
+              ``fixtures.cli_repo``; session-scoped ``registered`` / ``mined`` states.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0008-stdlib-core-and-downward-layers.md
+Works with:   src/crb/cli/main.py (under test), src/crb/cli/commands/repo.py,
+              src/crb/cli/commands/mine.py, src/crb/cli/commands/grade.py and
+              src/crb/cli/commands/ledger.py (the subcommands), tests/fixtures/cli_repo.py (the
+              history), docs/OPERATOR.md (the operator's view of the same commands)
+Tested by:    tests/test_cli.py
+Touch when:   a subcommand or flag is added (a happy-path case and the exit code of its
+              negative verdict; update docs/OPERATOR.md); never so that a verdict-negative exit
+              becomes 0.
 """
 
 from __future__ import annotations
@@ -38,11 +64,13 @@ Run = Callable[[Sequence[str]], tuple[int, str, str]]
 
 @pytest.fixture(scope="module")
 def demo(tmp_path_factory: pytest.TempPathFactory) -> CliRepo:
+    """The four-commit CLI fixture repository, built once for the module."""
     return make_repo(tmp_path_factory.mktemp("demo-repo"))
 
 
 @pytest.fixture(scope="module")
 def workdir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The ``--workdir`` every command runs against (module-scoped: later fixtures build on it)."""
     return tmp_path_factory.mktemp("crb-home") / ".crb"
 
 
@@ -61,12 +89,14 @@ def run(workdir: Path, capsys: pytest.CaptureFixture[str]) -> Run:
 
 
 def run_json(run: Run, argv: Sequence[str]) -> tuple[int, dict[str, object]]:
+    """``run(argv + ["--json"])`` with the stdout parsed — ``(exit_code, body)``."""
     code, out, _ = run([*argv, "--json"])
     return code, json.loads(out)
 
 
 @pytest.fixture(scope="module")
 def registered(demo: CliRepo, workdir: Path) -> CliRepo:
+    """The demo repository registered as ``demo`` (``crb repo add``), once for the module."""
     code = main(
         [
             "repo",
@@ -96,6 +126,7 @@ def registered(demo: CliRepo, workdir: Path) -> CliRepo:
 
 @pytest.fixture(scope="module")
 def mined(registered: CliRepo, workdir: Path) -> CliRepo:
+    """``registered`` after ``crb mine demo --target 2`` — two tasks on file for the grade cases."""
     code = main(["mine", "demo", "--target", "2", "--workdir", str(workdir)])
     assert code == 0
     return registered

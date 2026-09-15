@@ -1,4 +1,27 @@
-"""crb.factory.review — different identity, probes reproduce the evidence, verdict before edit."""
+"""crb.factory.review — different identity, probes reproduce the evidence, verdict before edit.
+
+Navigation
+----------
+What it is:   The factory review step's test suite — a different identity, probes that reproduce
+              the evidence, verdict before edit.
+What it does: Pins that the reviewer's identity must differ from builder and author, that on the
+              accept path the probes reproduce and the verdict is recorded FIRST, that
+              verdict-before-edit is enforced both ways, that a hardcoded source yields a weak
+              oracle and accept-with-edit, that a required probe's failure rejects whatever the
+              reviewer says, that a reviewer may be stricter never looser, that a tampered oracle
+              branch is caught by RED reproduction, and that the evidence chain detects a
+              rewritten verdict.
+How:          ``OpinionReviewer`` plus ``FailingProbe`` / ``MajorProbe`` over a build from
+              ``test_factory_build``'s harness.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/factory/review.py (under test), src/crb/factory/evidence.py (the chain),
+              src/crb/factory/testfirst.py (``RedProof`` reproduced), src/crb/factory/build.py
+              (``BuildResult``), tests/test_factory_build.py (the harness)
+Tested by:    tests/test_factory_review.py
+Touch when:   a probe kind is added (a required-failure case); the verdict vocabulary changes
+              (stricter-never-looser must survive).
+"""
 
 from __future__ import annotations
 
@@ -29,6 +52,8 @@ __all__ = ["harness"]
 
 @dataclass
 class OpinionReviewer:
+    """A reviewer that answers a fixed verdict and findings (and records the probes it was shown)."""
+
     verdict: str = rv.VERDICT_ACCEPT
     name: str = "reviewer"
     model: str = "r1"
@@ -46,6 +71,8 @@ class OpinionReviewer:
 
 
 class FailingProbe:
+    """A required probe that always fails — the reviewer's opinion must not override it."""
+
     name = "adversarial_fail"
 
     def run(self, ctx: rv.ReviewContext) -> rv.ProbeResult:
@@ -53,6 +80,8 @@ class FailingProbe:
 
 
 class MajorProbe:
+    """A probe that fails with a ``major`` finding, for the stricter-never-looser case."""
+
     name = "major_only"
 
     def run(self, ctx: rv.ReviewContext) -> rv.ProbeResult:

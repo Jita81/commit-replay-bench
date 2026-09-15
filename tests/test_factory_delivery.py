@@ -1,4 +1,27 @@
-"""crb.factory.delivery — branch + PR only, NEVER the default branch; creds fail closed."""
+"""crb.factory.delivery — branch + PR only, NEVER the default branch; creds fail closed.
+
+Navigation
+----------
+What it is:   The factory delivery step's test suite — branch + PR only, NEVER the default
+              branch; credentials fail closed.
+What it does: Pins that the default branch is refused (before any credential is touched), that
+              the delivery branch name is never a protected name, that a null credential provider
+              fails closed, that credentials never leak (env provider), that delivery commits the
+              source and the oracle on a new branch and opens the PR through stdlib ``urllib``,
+              that a build that is not clean is refused, that the push seam rejects non-branch
+              refspecs, ``owner/repo`` from the remote, and that the delivery commit never sweeps
+              unrelated files in.
+How:          ``Seams`` record the push and the PR call instead of reaching a forge; the build
+              comes from ``test_factory_build``'s harness.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/factory/delivery.py (under test), src/crb/factory/build.py
+              (``BuildResult``), src/crb/core/git.py (the branch and push operations),
+              tests/test_factory_build.py (the harness), docs/SECURITY.md (credentials, §3.3)
+Tested by:    tests/test_factory_delivery.py
+Touch when:   a forge other than GitHub is supported (a PR seam case; the default-branch refusal
+              must still come first); the branch-naming rule changes.
+"""
 
 from __future__ import annotations
 
@@ -35,15 +58,19 @@ def _creds() -> dv.GitCredentials:
 
 @dataclass
 class Seams:
+    """Recording stand-ins for the push and open-PR seams: nothing reaches a forge."""
+
     pushes: list[dict[str, Any]] = field(default_factory=list)
     prs: list[dict[str, Any]] = field(default_factory=list)
 
     def push(
         self, repo: GitRepo, *, branch: str, refspec: str, credentials: dv.GitCredentials
     ) -> None:
+        """Record the branch, refspec and remote instead of pushing."""
         self.pushes.append({"branch": branch, "refspec": refspec, "remote": credentials.remote})
 
     def open_pr(self, **kw: Any) -> tuple[str, int]:
+        """Record the PR request and answer with a fixed URL and number."""
         self.prs.append(dict(kw))
         return "https://github.invalid/acme/calc/pull/7", 7
 

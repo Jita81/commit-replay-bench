@@ -1,6 +1,26 @@
 """``crb tasks classes | label | label-llm`` — the class-axis audit table, the human
 label (highest precedence), and the model path — over the file workdir the miner
-writes and over the database the worker writes."""
+writes and over the database the worker writes.
+
+Navigation
+----------
+What it is:   ``crb tasks classes | label | label-llm``'s test suite — the class-axis audit table,
+              the human label and the model path, over the file workdir and the database.
+What it does: Pins the classes table (text and JSON), that a human label rewrites the task in
+              place with the highest precedence, that ``label-llm`` over the workdir goes through
+              the labeller factory, and that the DB store reads and writes the ``tasks`` table.
+How:          A workdir with ``pyrepo`` registered and its one mined task on file; a scripted
+              labeller; a temp SQLite store for the DB case.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/cli/commands/tasks.py (under test), src/crb/core/classify.py (the
+              precedence rule), src/crb/builders/labeller.py (``make_labeller``),
+              src/crb/store/models.py (the ``tasks`` table), tests/test_worker_label.py (the
+              same labelling as a worker run kind)
+Tested by:    tests/test_cli_tasks.py
+Touch when:   a task store (file or database) gains a field the audit table should show; the
+              label precedence changes (never below human).
+"""
 
 from __future__ import annotations
 
@@ -34,6 +54,7 @@ def workdir(tmp_path: Path, pyrepo: pr.PyRepo) -> Path:
 
 @pytest.fixture
 def run(workdir: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> Run:
+    """``run(argv) -> (exit_code, stdout, stderr)`` with ``--workdir`` supplied."""
     monkeypatch.delenv("CRB_DATABASE_URL", raising=False)
 
     def _run(argv: Sequence[str]) -> tuple[int, str, str]:
