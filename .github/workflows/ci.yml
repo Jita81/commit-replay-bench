@@ -161,6 +161,9 @@ jobs:
           # Required only for organisation-owned repositories; harmless when unset.
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
           GITLEAKS_CONFIG: .gitleaks.toml
+          # the verdict is the step's exit code; the report upload is what fails when the
+          # account's artifact-storage quota is full (2026-09-15)
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
