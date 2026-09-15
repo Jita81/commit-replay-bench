@@ -81,12 +81,16 @@ def iter_candidates(
     log_n: int = 0,
     ref: str = "HEAD",
     skip: frozenset[str] = frozenset(),
+    only: frozenset[str] | None = None,
 ) -> Iterator[Candidate]:
-    """Walk history newest→oldest yielding commits that fit the pool's shape."""
+    """Walk history newest→oldest yielding commits that fit the pool's shape.
+
+    ``only`` restricts the walk to those shas (re-qualifying known tasks after the
+    miner changed); ``skip`` drops shas already mined."""
     caps = pool_caps(config, pool)
     n = log_n or int(config.mining.get("log_n", 3000))
     for sha in repo.log_shas(n, ref=ref):
-        if sha in skip:
+        if sha in skip or (only is not None and sha not in only):
             continue
         if not repo.run("rev-parse", "--verify", "--quiet", f"{sha}^1").ok:
             continue  # root commit: no parent to replay from
@@ -315,19 +319,20 @@ def mine(
     target_count: int = 0,
     max_candidates: int = 0,
     known: frozenset[str] = frozenset(),
+    only: frozenset[str] | None = None,
     gold: bool = True,
     timeout: int = 0,
     ref: str = "HEAD",
     on_event: EventFn | None = None,
 ) -> Iterator[MineOutcome]:
     """Yield qualification outcomes until ``target_count`` tasks are found or
-    ``max_candidates`` candidates were examined."""
+    ``max_candidates`` candidates were examined (``only``: just these shas)."""
     want = target_count or int(
         config.mining.get("target_valid" if pool == POOL_STANDARD else "hard_target", 25)
     )
     cap = max_candidates or int(config.mining.get("max_candidates", 1000))
     found = examined = 0
-    for cand in iter_candidates(repo, config, pool=pool, ref=ref, skip=known):
+    for cand in iter_candidates(repo, config, pool=pool, ref=ref, skip=known, only=only):
         if found >= want or examined >= cap:
             break
         examined += 1

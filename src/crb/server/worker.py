@@ -869,6 +869,16 @@ class Worker:
         executor = self._executor(ctx)
         self._stamp(ctx, pool=pool, gold=gold, ref=ref)
         known = self._known_task_ids(ctx.run.repo)
+        # `task_ids` = RE-QUALIFY these commits (the miner changed: a new rule, a fixed
+        # runner). They are walked again whether or not they are known, and `_upsert_task`
+        # replaces the stored spec; a sha that no longer qualifies stays as it was and the
+        # run's `mine.skip` event says why. Grade rows are never touched.
+        only: frozenset[str] | None = None
+        ids = [str(i) for i in (p.get("task_ids") or [])]
+        if ids:
+            only = frozenset(ids)
+            known = frozenset()
+            want = target or len(only)
         counts: dict[str, Any] = {
             "examined": 0,
             "found": 0,
@@ -890,6 +900,7 @@ class Worker:
             target_count=target,
             max_candidates=max_candidates,
             known=known,
+            only=only,
             gold=gold,
             timeout=ctx.timeout,
             ref=ref,

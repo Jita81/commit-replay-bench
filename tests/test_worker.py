@@ -389,6 +389,24 @@ def test_mine_run_upserts_tasks(h: Harness) -> None:
     assert again.status == STATUS_SUCCEEDED
     assert again.counts_json["known"] == 1 and again.counts_json["gold_dirty"] == 1
     assert {t.gold_clean for t in h.tasks()} == {True, False}
+    # `task_ids` = RE-QUALIFY those commits even though they are known (the miner
+    # changed); the stored spec is replaced, nothing else is walked
+    with h.factory() as s:
+        row = next(
+            t for t in s.execute(select(Task)).scalars().all() if t.task_id == h.pyrepo.feat_sha
+        )
+        stale = dict(row.spec_json)
+        stale["target_tests"] = ["tests/stale.py"]
+        row.spec_json = stale
+        s.commit()
+    h.enqueue("mine", params_json={"task_ids": [h.pyrepo.feat_sha]})
+    requal = h.run_one()
+    assert requal.status == STATUS_SUCCEEDED, requal.error
+    assert requal.counts_json["examined"] == 1 and requal.counts_json["found"] == 1
+    assert requal.counts_json["known"] == 0
+    fresh = next(t for t in h.tasks() if t.task_id == h.pyrepo.feat_sha)
+    assert TaskSpec.from_dict(fresh.spec_json).target_tests == (pr.TEST_SUBTRACT,)
+    assert (requal.progress_done, requal.progress_total) == (1, 1)
 
 
 def test_mine_rejects_unknown_pool(h: Harness) -> None:
