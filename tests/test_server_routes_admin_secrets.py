@@ -3,6 +3,30 @@
 RBAC matrix, CSRF, shape validation, the secrets-file contract (owner-only, never
 a value in a response or log), the verify probe against a fake ``claude`` on PATH,
 and the verify rate limit. Hermetic: no network, no real CLI.
+
+Navigation
+----------
+What it is:   ``/settings/secrets``'s test suite — the Claude Code login token through the admin
+              API.
+What it does: Pins that every route is 401 anonymous and admin-only, that CSRF is required on
+              every mutating route, that PUT stores owner-only and answers with a status never
+              the value (shape validated, never echoed), that DELETE is idempotent, that an
+              insecure directory refuses the store with 409, that ``CRB_SECRETS_DIR`` relocates
+              the store; and that verify is 404 without a token, runs the fake CLI with the
+              stored token in the builder's environment, reports an invalid token fast (not
+              after the CLI's retries), handles a missing CLI, is rate-limited to one per ten
+              seconds, and refuses an insecure file.
+How:          A fake ``claude`` first on PATH that records what it was run with; a temp
+              ``CRB_HOME``; ambient ``CRB_*`` cleared.
+Layer:        tests — docs/ARCHITECTURE.md#71-security
+ADRs:         none
+Works with:   src/crb/server/routes/admin.py (under test), src/crb/server/secrets.py (the
+              wrapper and rate limiter), src/crb/core/secrets_file.py (the owner-only store),
+              tests/test_server_secrets.py (the store's own suite), docs/API.md (admin, the
+              ``/settings/secrets`` contract), docs/SECURITY.md (credentials, §3.3)
+Tested by:    tests/test_server_routes_admin_secrets.py
+Touch when:   a secret name is added (a shape-validation case and a never-echoed case); the
+              verify probe changes what it runs.
 """
 
 from __future__ import annotations
@@ -39,6 +63,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
+    """Dev ``Settings`` on ``tmp_path`` (the secrets directory resolves under its home)."""
     base: dict[str, Any] = {
         "env": "dev",
         "home": tmp_path / "home",
@@ -53,16 +78,19 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
+    """Default dev settings for one test."""
     return make_settings(tmp_path)
 
 
 @pytest.fixture
 def client(settings: Settings) -> Iterator[TestClient]:
+    """A started app behind a ``TestClient``."""
     with TestClient(create_app(settings)) as c:
         yield c
 
 
 def login(c: TestClient, username: str = "root", password: str = ROOT_PW) -> str:
+    """Log ``c`` in as ``username`` and set the CSRF header."""
     r = c.post(f"{API_PREFIX}/auth/login", json={"username": username, "password": password})
     assert r.status_code == 200, r.text
     token = c.cookies["crb_csrf"]

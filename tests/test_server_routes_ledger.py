@@ -1,4 +1,28 @@
-"""``/ledger/*`` — verify (reports, never raises), export (verifies standalone), abstract, import."""
+"""``/ledger/*`` — verify (reports, never raises), export (verifies standalone), abstract, import.
+
+Navigation
+----------
+What it is:   ``/ledger/*``'s test suite — verify (reports, never raises), export (verifies
+              standalone), abstract, import.
+What it does: Pins that verify reports ok, ``broken_at`` on a tampered row and a broken link on a
+              deleted one, counts false-Q1 over the STORED belts, a viewer reads; that the JSONL
+              export verifies standalone, the default format and repo filter, CSV with a header
+              and formula cells neutralised, 422 on a bad format, the abstract export is
+              operator-only and allowlisted, anonymous 401; and that import is admin-only,
+              re-chains and skips duplicates, keeps belt 5 unrecorded on pre-belt-5 rows
+              (ADR-0011), points census rows at the CLI, refuses a false-Q1 row with 409 and
+              malformed bodies with 422.
+How:          ``make_env`` over the seed; triggers dropped deliberately for the tamper cases.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0007-abstract-cell-export-only.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/server/routes/ledger.py (under test), src/crb/store/ledger.py (verify,
+              import, export), src/crb/core/federated.py (the abstract allowlist),
+              tests/fixtures/server_seed.py, docs/API.md (ledger)
+Tested by:    tests/test_server_routes_ledger.py
+Touch when:   an export format is added (a header / escaping case); a row field is added (the
+              CSV and abstract cases decide whether it is exported).
+"""
 
 from __future__ import annotations
 
@@ -27,6 +51,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
 

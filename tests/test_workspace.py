@@ -1,4 +1,28 @@
-"""crb.core.workspace — parent worktree + overlays + integrity on the fixture repo."""
+"""crb.core.workspace — parent worktree + overlays + integrity on the fixture repo.
+
+Navigation
+----------
+What it is:   The trial worktree's test suite — parent checkout, overlays, ``touched_files``,
+              ``diff_stats`` and the integrity checks on the fixture repository.
+What it does: Pins that a workspace checks out the parent, overlays tests and sources, detects a
+              tampered (even whitespace-only) or missing test file, counts diff stats over
+              untracked and deleted files, and that ``touched_files`` reads the filesystem against
+              the parent tree — so builder-authored ``.gitignore`` rules, ``info/exclude``,
+              ``core.excludesFile``, a forged index, a rename, a symlink or a self-hiding ignore
+              file cannot hide a change — while pre-existing ignore rules and harness-written
+              files are honoured. The sign-off findings 1(a)–1(c) (2026-09-14) are each a case.
+How:          ``Workspace.create`` on ``pyrepo`` → an edit made with plain file and git operations
+              → the method under test, compared with git's own (exclude-honouring) view where the
+              difference is the point.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/core/workspace.py (under test), tests/fixtures/pyrepo.py (the history),
+              src/crb/core/git.py (the wrapper the workspace drives), tests/test_grade.py (the
+              disqualifications these methods feed)
+Tested by:    tests/test_workspace.py
+Touch when:   a new way to hide or fake a change from git is found (add the case here and its
+              disqualification in tests/test_grade.py); a post-create hook kind is added.
+"""
 
 from __future__ import annotations
 

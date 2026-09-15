@@ -1,4 +1,34 @@
-"""The builder contract: brief (no leakage), budget + ladder, outcome, and the two guards."""
+"""The builder contract: brief (no leakage), budget + ladder, outcome, and the two guards.
+
+Navigation
+----------
+What it is:   The builder contract's test suite — brief, budget, ladder, outcome, and the two
+              guards (protected paths and the shell archaeology / network guard).
+What it does: Pins that a brief never carries ``src_files`` and a blind brief cannot be built
+              with test paths, budget validation and per-rung overrides, the cap tracker and cost
+              meter (unknown pricing flagged), that an outcome's claim is untrusted and redacted;
+              and the guards: protected test writes refused in both modes, traversal / absolute
+              / ``.git`` / symlink escapes refused, a path classified by what it resolves to
+              (review finding 6c, 2026-09-14), archaeology and network verbs refused with the
+              right label, honest developer shell allowed — ``$(pwd)``, quoted parentheses,
+              ``python -m pip list``, heredoc bodies, ``--offline`` build tools, working-tree
+              git verbs (koajs/koa, the NHS blind misses of 2026-09-14) — while ``git diff main``
+              and inline code are still scanned, and the blind brief carries the harness command
+              but never the oracle.
+How:          Pure calls to ``BuildBrief`` / ``Budget`` / ``EscalationLadder`` / the guards; a
+              worktree-shaped ``cwd`` under ``tmp_path`` for the ``npx`` and ``git diff`` checks.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/base.py (under test), src/crb/builders/budget.py (the cost
+              meter and pricing overlay), tests/test_builders_guard_corpus.py (the guard's
+              corpus regression suite), docs/SECURITY.md (builder containment, §3.2),
+              src/crb/builders/openai_agent.py and src/crb/builders/claude_code.py (the guard's
+              callers)
+Tested by:    tests/test_builders_base.py
+Touch when:   a builder is refused an honest command in a client repository (add the exact
+              command here AND to the honest corpus — never loosen the guard by hand); a new
+              archaeology or network verb is found (a refused case with its label).
+"""
 
 from __future__ import annotations
 

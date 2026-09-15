@@ -1,4 +1,31 @@
-"""``/runs`` — list/filters, create → enqueue, cancel, per-task table, event log, SSE."""
+"""``/runs`` — list/filters, create → enqueue, cancel, per-task table, event log, SSE.
+
+Navigation
+----------
+What it is:   ``/runs``'s test suite — list / filters, create → enqueue, cancel, the per-task
+              table, the event log and SSE.
+What it does: Pins the list shape and order, filters and pagination, the queue lister when
+              present, counts / progress / cost (derived when the worker wrote none), 404; create
+              RBAC, the enqueued fields, blind kind implies blind mode, non-build kinds need no
+              builder, 422 validation, unknown repo 404 and queue unavailable 503, the
+              ``JobQueue`` class adapter; the budget ladder (forwarded only as set, object rungs
+              stored as sent, mixed ladders, bounds and rung shape 422, repeated rungs refused
+              unless the budget differs, ``labels.budget_tier`` on task rows); cancel RBAC /
+              queue call / terminal 409 / 404; the task table and error rows; the paginated,
+              redacted event log; and SSE replay-then-done, resume with ``after``, 404 / 401,
+              live polling with keepalives, and disconnect stopping the poll.
+How:          ``make_env`` over the seed; ``FakeJobs`` records queue calls and persists the run;
+              SSE frames parsed from the streamed text.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/server/routes/runs.py (under test), src/crb/store/jobs.py (the queue
+              contract the fake mirrors), src/crb/store/events.py (the event log and SSE
+              source), tests/test_worker_budget_ladder.py (the worker's half of the ladder),
+              tests/fixtures/server_seed.py, docs/API.md (runs, SSE event shape)
+Tested by:    tests/test_server_routes_runs.py
+Touch when:   a run parameter is added (a create case, a 422 bound and the worker's reading of
+              it); a run kind is added (RUN_KINDS, the create cases and ui/src/api/types.ts).
+"""
 
 from __future__ import annotations
 
@@ -42,6 +69,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
 
@@ -56,6 +84,9 @@ class FakeJobs:
         self.cancel_result = True
 
     def install(self, monkeypatch: pytest.MonkeyPatch, *, with_list: bool = False) -> FakeJobs:
+        """Replace ``crb.store.jobs`` with a module whose ``enqueue`` / ``request_cancel`` (and
+        optionally ``list_runs``) record into this fake; returns self.
+        """
         mod = types.ModuleType("crb.store.jobs")
 
         def enqueue(factory: Any, run: Run) -> Run:
@@ -101,6 +132,7 @@ class FakeJobs:
 
 @pytest.fixture
 def jobs(monkeypatch: pytest.MonkeyPatch) -> FakeJobs:
+    """``FakeJobs`` installed for the test."""
     return FakeJobs().install(monkeypatch)
 
 

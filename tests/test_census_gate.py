@@ -10,6 +10,30 @@ Re-derives all 1,071 census verdicts through the current importer and ledger:
 If this test ever fails, do not "fix the test": either the data changed (it must
 not — it is evidence) or the invariant logic changed (bump the apparatus version
 and record an ADR).
+
+Navigation
+----------
+What it is:   The census-ledger invariant gate — runs in CI on every PR over the shipped data.
+What it does: Re-derives all 1,071 census verdicts through the current importer and ledger and
+              pins: every row passes ``GradeRow.assert_invariants`` (false-Q1 = 0), the chain
+              verifies end to end, the known counts hold, the MANIFEST hashes match the files, and
+              no cell delivers below ``min_n``. If it fails, the data changed (it must not — it is
+              evidence) or the invariant logic changed (apparatus bump + ADR); never "fix the
+              test".
+How:          ``import_census`` over ``data/census-2026-07-08`` into a session-scoped JSONL
+              ledger; skipped when the data directory is absent.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
+              docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/core/legacy.py (the importer), src/crb/core/ledger.py (the invariants
+              and chain), src/crb/core/capability.py (the no-thin-deliver check),
+              tests/test_legacy.py (the importer's own suite), docs/REPRODUCING-THE-CENSUS.md
+              (what CI asserts, §6), docs/EVIDENCE-AND-CLAIMS.md
+Tested by:    tests/test_census_gate.py
+Touch when:   never for a new repository; only when the apparatus version moves (update the
+              expected counts with the ADR that moved it).
+Claims:       Passing licenses "false-Q1 = 0 on the census under the current importer" and
+              nothing about mergeability (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -47,6 +71,7 @@ def test_manifest_matches_files() -> None:
 
 @pytest.fixture(scope="module")
 def census_ledger(tmp_path_factory: pytest.TempPathFactory) -> JsonlLedger:
+    """The shipped census imported once into a chained JSONL ledger (session-scoped: 1,071 rows)."""
     led = JsonlLedger(tmp_path_factory.mktemp("census") / "ledger.jsonl")
     imported = list(import_census(DATA / "grades.jsonl", DATA / "tasks", DATA / "configs.json"))
     led.append_many(g.row for g in imported)

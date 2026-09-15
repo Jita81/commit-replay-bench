@@ -3,6 +3,26 @@ splits, sealing, stratification, commitment hash, exposure reasoning.
 
 Hermetic: TaskSpecs built in memory (plus one tiny git repo for the authored-date
 lookup) — no model calls, no network.
+
+Navigation
+----------
+What it is:   The sealed corpus's test suite (``crb.core.oracle.sealed_corpus``).
+What it does: Pins that the manifest carries authored dates (looked up from git when a task
+              lacks one), suspected exposure per model cut-off, deterministic split assignment
+              that routes every task at the edge fractions, sealed redaction, a manifest hash
+              reproducible from the written files, tamper detection on verify, refusal of an
+              empty corpus, visibility validation, and per-cell stratified sampling that is
+              deterministic and hash-ordered.
+How:          ``TaskSpec``s built in memory plus one tiny git repository (via
+              ``fixtures.oracle_repo``) for the date lookup; no model, no network.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/core/oracle/sealed_corpus.py (under test), src/crb/core/spec.py
+              (``TaskSpec.authored``), tests/fixtures/oracle_repo.py (``init_repo`` / ``commit``
+              with a pinned author date), docs/EVIDENCE-AND-CLAIMS.md (exposure reasoning)
+Tested by:    tests/test_oracle_sealed_corpus.py
+Touch when:   a model cut-off is added to the exposure table; the split or stratification rule
+              changes (the determinism cases pin exact assignments).
 """
 
 from __future__ import annotations

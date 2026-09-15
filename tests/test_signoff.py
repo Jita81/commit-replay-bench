@@ -8,6 +8,30 @@ clauses, the operator-adjustable bounds, the v2 snapshot and the v1-record toler
 ``signoff-policy.v2`` (2026-09-14, the fable-decider's ``signoff-policy: adjust``)
 adds the third non-overridable clause: the cell's oracle strength must be MEASURED
 (``oracle_unmeasured``), not merely "≥ 0.80 when measured".
+
+Navigation
+----------
+What it is:   The sign-off ledger's test suite — human attestations that are append-only,
+              hash-chained, revocable and never able to lift a false-Q1 cell.
+What it does: Pins the record's required fields and redaction, the policy decision under
+              ``signoff-policy.v2`` — every refusal code, the non-overridable clauses (false-Q1
+              first, ``oracle_unmeasured``, attestation missing), the operator-adjustable bounds
+              from the environment, the v1-record tolerance — the chain and its tamper detection,
+              that a write refuses a false-Q1, unmeasured, thin or scope-mismatched cell, that
+              apply elevates only the matching cell and never downgrades or changes the route,
+              and that a revoked record does not elevate.
+How:          Synthetic cells through ``crb.core.capability``; ``check_signable`` / ``append`` /
+              ``apply_signoffs`` on a temp JSONL ledger.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/core/signoff.py (under test), src/crb/core/capability.py (the cells it
+              decides on), src/crb/core/routing.py (``ControlsVerdict`` and the route the policy
+              wraps), tests/test_server_routes_signoffs.py (the same decision as HTTP 409),
+              docs/EVIDENCE-AND-CLAIMS.md (what a signed cell may be claimed to mean)
+Tested by:    tests/test_signoff.py
+Touch when:   the policy gains a clause or a version (a refusal case, the defaults case and the
+              older-record tolerance case together; update docs/EVIDENCE-AND-CLAIMS.md and the
+              decision log).
 """
 
 from __future__ import annotations

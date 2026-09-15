@@ -5,6 +5,28 @@ sandbox); readiness = the deep probe. A liveness check on the deep endpoint rest
 a healthy API for a docker socket the serve container is not meant to have (A11).
 The API pod runs as ``CRB_ROLE=api`` so the deep probe reports the sandbox
 ``skipped``; the worker pod as ``CRB_ROLE=worker``.
+
+Navigation
+----------
+What it is:   The deploy artefacts' probe test suite — liveness at ``/health/live``, readiness
+              at ``/health``, roles per pod.
+What it does: Pins that the Dockerfile's ``HEALTHCHECK`` is the liveness endpoint, that the Helm
+              API deployment probes liveness on ``/health/live`` and readiness on ``/health`` and
+              runs as ``CRB_ROLE=api``, that the worker deployment runs as ``CRB_ROLE=worker``,
+              and (with ``helm`` on PATH) that the chart renders those probes and lints
+              ``--strict``. A liveness check on the deep endpoint restarted a healthy API for a
+              docker socket the serve container is not meant to have (A11).
+How:          Reads ``deploy/Dockerfile`` and the chart templates as text; ``helm template`` /
+              ``helm lint`` when available.
+Layer:        tests — docs/ARCHITECTURE.md#6-deployment-view
+ADRs:         none
+Works with:   deploy/Dockerfile (the HEALTHCHECK), deploy/helm/crb/templates/api-deployment.yaml
+              and deploy/helm/crb/templates/worker-deployment.yaml (the probes and roles),
+              src/crb/server/routes/system.py (the endpoints), tests/test_server_system.py (the
+              endpoints' own suite), docs/DEPLOYMENT.md (the image and its roles, §2)
+Tested by:    tests/test_deploy_health_probes.py
+Touch when:   a probe endpoint or a pod role is added (the template and this suite together);
+              never point liveness at the deep probe.
 """
 
 from __future__ import annotations

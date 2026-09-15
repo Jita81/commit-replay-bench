@@ -4,7 +4,34 @@ exception), auth + env handling mirrored from claude_code, and the factory.
 
 The real-LLM check at the bottom labels the three cobra commits the critical-friend
 review discusses and is skipped unless a credential (``ANTHROPIC_API_KEY``,
-``CRB_CLAUDE_CODE_AUTH=cli`` or ``CEREBRAS_API_KEY``) is present."""
+``CRB_CLAUDE_CODE_AUTH=cli`` or ``CEREBRAS_API_KEY``) is present.
+
+Navigation
+----------
+What it is:   The LLM intent labellers' test suite over fake transports — what the model is
+              shown, parsing, failures that are never exceptions, auth mirrored from
+              ``claude_code``, and the factory.
+What it does: Pins that the OpenAI-compatible labeller parses a reply and meters usage, shows
+              evidence and the vocabulary but never the diff body, turns malformed output into
+              ``unclassified`` and transport errors into a recorded label, and fails closed
+              without a credential at the first call; that the Claude labeller's argv and
+              environment mirror the builder in both auth modes, a missing key is a model-error
+              label, and every failure is ``unclassified`` never raised; and that
+              ``make_labeller`` routes by builder name and filters config. The real-LLM case
+              labels the three cobra commits the critical-friend review discusses, skipped
+              without a credential.
+How:          ``_Chat`` and ``FakeSpawn`` replay canned replies; a fake API key for the hermetic
+              cases only.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/builders/labeller.py (under test), src/crb/core/classify.py (the label,
+              evidence and parser it wraps), src/crb/builders/claude_code.py (the spawn and
+              auth it mirrors), src/crb/builders/openai_client.py (the chat transport),
+              tests/test_worker_label.py and tests/test_cli_tasks.py (the callers)
+Tested by:    tests/test_builders_labeller.py
+Touch when:   a labeller for a new transport is added (a no-diff case, a malformed-reply case
+              and a no-credential case); the prompt changes what the model sees.
+"""
 
 from __future__ import annotations
 
@@ -59,6 +86,8 @@ def _label(labeller: c.Labeller) -> c.IntentLabel:
 
 
 class _Chat:
+    """A chat transport that returns one canned reply and records the messages it was sent."""
+
     def __init__(self, reply: str | ChatReply | Exception) -> None:
         self.reply = reply
         self.messages: list[list[dict[str, Any]]] = []
@@ -174,6 +203,7 @@ def ev_result(
     is_error: bool = False,
     subtype: str = "success",
 ) -> str:
+    """The CLI's terminal ``result`` line for a label call."""
     ev: dict[str, Any] = {
         "type": "result",
         "subtype": subtype,
@@ -190,16 +220,22 @@ def ev_result(
 
 
 def ev_init() -> str:
+    """The CLI's ``system/init`` line."""
     return json.dumps(
         {"type": "system", "subtype": "init", "model": "claude-sonnet-5", "tools": []}
     )
 
 
 def ev_retry(status: int) -> str:
+    """A ``system/api_retry`` line with the given HTTP status (an auth failure
+    surfaces this way).
+    """
     return json.dumps({"type": "system", "subtype": "api_retry", "error_status": status})
 
 
 class FakeHandle:
+    """The spawned process as the labeller sees it: an iterator of stdout lines and a ``kill``."""
+
     def __init__(
         self, lines: list[str], *, returncode: int = 0, timed_out: bool = False, stderr: str = ""
     ) -> None:
@@ -220,6 +256,8 @@ class FakeHandle:
 
 
 class FakeSpawn:
+    """Records the argv, env and cwd of the spawn and answers with canned lines."""
+
     def __init__(self, lines: list[str], **handle_kw: Any) -> None:
         self.lines = lines
         self.handle_kw = handle_kw
@@ -237,6 +275,9 @@ class FakeSpawn:
 
 @pytest.fixture
 def api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fake API key in the environment, ``cli`` and model overrides cleared, and an unrelated
+    secret that must never reach the child.
+    """
     monkeypatch.setenv(cc.API_KEY_ENV, "sk-ant-test-key-0123456789abcdef")
     monkeypatch.delenv(cc.AUTH_ENV, raising=False)
     monkeypatch.delenv(cc.MODEL_ENV, raising=False)

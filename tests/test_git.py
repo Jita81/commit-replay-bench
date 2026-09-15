@@ -1,4 +1,21 @@
-"""crb.core.git — the argv-only git wrapper, exercised on the fixture repo."""
+"""crb.core.git — the argv-only git wrapper, exercised on the fixture repo.
+
+Navigation
+----------
+What it is:   The argv-only git wrapper's test suite on the fixture repository.
+What it does: Pins ``GitResult``, ``rev_parse`` / ``parent`` (and their errors on a bad ref or a
+              root commit), ``log_shas``, ``changed_files``, ``numstat`` churn, author / date /
+              subject / message, ``show_file``, the worktree lifecycle (add, checkout paths,
+              diff, remove), ``check=False`` results and a timeout as ``GitError`` rc 124.
+How:          Every call goes through a real ``git`` subprocess on ``pyrepo``; nothing is mocked.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0008-stdlib-core-and-downward-layers.md
+Works with:   src/crb/core/git.py (under test), tests/fixtures/pyrepo.py (the history),
+              tests/test_git_clone.py (the clone half of the same module)
+Tested by:    tests/test_git.py
+Touch when:   a git operation is added to the wrapper (one case here; the wrapper stays argv-only,
+              never a shell).
+"""
 
 from __future__ import annotations
 

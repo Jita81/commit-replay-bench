@@ -1,6 +1,29 @@
 """crb.store.ledger — ``DbLedger``: chain, verify, import/export, packs, concurrency.
 
 Parametrised over SQLite and (when ``CRB_TEST_POSTGRES_URL`` is set) PostgreSQL.
+
+Navigation
+----------
+What it is:   ``DbLedger``'s test suite — the chain, verify, import / export, packs and
+              concurrency, on SQLite and PostgreSQL.
+What it does: Pins that appends chain from genesis and verify, that ``append_many`` chains in
+              order in one transaction and is atomic, that a false-Q1 row is refused even when
+              constructed sideways, row filters by repo and run, that verify catches a row
+              tampered underneath dropped triggers, labels through the JSON column,
+              ``assert_append_only`` passing with triggers and raising without, that import
+              re-chains and keeps the source row hash, that an export re-verifies standalone,
+              pack store / get round trip and append-only, and that four threads appending
+              concurrently form one valid chain.
+How:          ``conftest_store`` backends and row builders; threads for the concurrency case.
+Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/store/ledger.py (under test), src/crb/core/ledger.py (the JSONL twin
+              whose hashes must match), src/crb/store/db.py (the write lock and triggers),
+              tests/conftest_store.py, tests/test_ledger.py (the core chain's own suite)
+Tested by:    tests/test_store_ledger.py
+Touch when:   a column is added to ``grades`` (the export must re-verify — pin it); the write
+              lock changes (the concurrency case is the proof).
 """
 
 from __future__ import annotations
@@ -46,6 +69,7 @@ except ImportError:  # pragma: no cover — rootdir-relative import (pytest defa
 
 @pytest.fixture
 def ledger(backend: Backend) -> DbLedger:
+    """A ``DbLedger`` over an initialised backend (tables and triggers installed)."""
     init_db(backend.engine)
     return DbLedger(backend.factory)
 

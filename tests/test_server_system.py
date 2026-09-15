@@ -1,4 +1,29 @@
-"""``/health``, ``/metrics``, ``/version`` and the admin ``/settings`` view."""
+"""``/health``, ``/metrics``, ``/version`` and the admin ``/settings`` view.
+
+Navigation
+----------
+What it is:   ``/health``, ``/health/live``, ``/metrics``, ``/version`` and the admin
+              ``/settings`` view's test suite.
+What it does: Pins the health shape and its append-only probe (an UPDATE is proven refused), that
+              a false-Q1 row bypassing the ledger is caught, that a stale worker heartbeat is
+              flagged, that health needs no auth; the role-aware sandbox probe (an ``api``
+              process reports it ``skipped`` and is not degraded by it; ``worker`` and ``all``
+              probe it; the gate is at the function); liveness as a database-only probe that
+              never touches the sandbox (the A11 container) and ignores a false-Q1 ledger but
+              fails when the database is gone; the metrics exposition (HTTP and ledger series;
+              can be disabled); the version carrying apparatus and policy; and the settings view
+              requiring admin and redacting.
+How:          ``create_app`` over a temp SQLite factory with probes patched at the function seam.
+Layer:        tests — docs/ARCHITECTURE.md#72-observability
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/server/routes/system.py (under test), src/crb/observability/probes.py
+              (the probe results), src/crb/observability/metrics.py (``crb_false_q1_total`` must
+              read 0), tests/test_deploy_health_probes.py (the deploy artefacts pointing at these
+              endpoints), docs/API.md (health / metrics), docs/DEPLOYMENT.md
+Tested by:    tests/test_server_system.py
+Touch when:   a probe is added (its role gating and its degraded / down case; the Helm probes in
+              tests/test_deploy_health_probes.py if it changes liveness); a metric series is added.
+"""
 
 from __future__ import annotations
 
@@ -37,6 +62,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
+    """Dev ``Settings`` on ``tmp_path``; ``overrides`` win (``sandbox``, ``metrics_enabled``)."""
     base: dict[str, Any] = {
         "env": "dev",
         "home": tmp_path,
@@ -51,16 +77,19 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
 
 @pytest.fixture
 def factory(tmp_path: Path) -> sessionmaker[Session]:
+    """A session factory over a fresh SQLite file (tables are created by the app's lifespan)."""
     return make_session_factory(make_engine(f"sqlite:///{tmp_path / 'sys.db'}"))
 
 
 @pytest.fixture
 def client(tmp_path: Path, factory: sessionmaker[Session]) -> Iterator[TestClient]:
+    """A started app over ``factory`` behind a ``TestClient``."""
     with TestClient(create_app(make_settings(tmp_path), factory)) as c:
         yield c
 
 
 def login(c: TestClient) -> None:
+    """Log ``c`` in as the bootstrap admin and set the CSRF header."""
     r = c.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
     assert r.status_code == 200, r.text
     c.headers["X-CSRF-Token"] = c.cookies["crb_csrf"]

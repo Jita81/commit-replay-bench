@@ -20,6 +20,35 @@ for the 2026-09-14 inline-code addendum. After the fix: 0 / 0 / 0.
 Both corpora run with a worktree-shaped ``cwd`` (``node_modules/.bin`` holding the
 usual test binaries, a few source dirs) because the fixed guard *verifies* ``npx``
 targets and ``git diff`` path arguments against the worktree instead of guessing.
+
+Navigation
+----------
+What it is:   The honest-shell corpus — the guard's regression suite against FALSE POSITIVES
+              (critical-friend review 2026-09-13, §4.2 / §5).
+What it does: Pins that every line of ``tests/fixtures/shell_corpus.txt`` (honest shell an agent
+              runs while fixing a bug in Python / Go / JS / JVM / Rust repositories, including the
+              adapter's ``sighted_test_command`` shapes) is allowed and every line of
+              ``tests/fixtures/shell_corpus_refused.txt`` is refused with the labelled prefix;
+              that the corpora are substantial (≥ 150 / ≥ 60); that ``git stash`` is refused in
+              every form with the reason (the stash stack is shared across worktrees); the
+              ``npx`` policy (honest and offline exactly when ``node_modules/.bin/<bin>`` exists in
+              the worktree; fail closed without); and that the 19 decider-settled refusal groups
+              are pinned with provenance. Baseline before the fix: 45 honest refused / 149
+              refused let through / 15 mislabelled; after: 0 / 0 / 0.
+How:          Both corpora parametrised line by line through ``GitArchaeologyGuard`` with a
+              worktree-shaped ``cwd`` (module-scoped) so ``npx`` targets and ``git diff`` paths
+              are verified, not guessed.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/base.py (the guard under test), tests/fixtures/shell_corpus.txt
+              and tests/fixtures/shell_corpus_refused.txt (the corpora), src/crb/core/learn.py
+              (``apply_triage`` appends a human's decisions to these files),
+              tests/test_builders_base.py (the guard's unit cases), docs/LEARNING-LOOP.md
+Tested by:    tests/test_builders_guard_corpus.py
+Touch when:   a builder is refused an honest command in a client repository (append the exact
+              line to the honest corpus — through ``crb learn refusals --apply`` with a named
+              decider — and let this suite fail before the guard is touched); a new refused
+              shape is found (the refused corpus, with its ``archaeology:`` / ``network:`` label).
 """
 
 from __future__ import annotations
@@ -53,6 +82,7 @@ def _decode(raw: str) -> str:
 
 
 def load_corpus(path: Path) -> list[str]:
+    """The non-blank, non-comment lines of a corpus file, backslash-n sequences decoded."""
     return [
         _decode(line)
         for line in path.read_text(encoding="utf-8").splitlines()
@@ -61,6 +91,9 @@ def load_corpus(path: Path) -> list[str]:
 
 
 def load_refused(path: Path) -> list[tuple[str, str]]:
+    """``(command, prefix)`` pairs from the refused corpus; a line without a known prefix is a
+    corpus error, not a test failure.
+    """
     out: list[tuple[str, str]] = []
     for line in load_corpus(path):
         cmd, tab, prefix = line.partition("\t")
@@ -77,6 +110,9 @@ REFUSED_LINES = load_refused(REFUSED)
 
 @pytest.fixture(scope="module")
 def worktree(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A worktree-shaped ``cwd``: the usual test binaries under ``node_modules/.bin`` plus a few
+    source paths, so ``npx`` targets and path arguments are verified against something real.
+    """
     root = tmp_path_factory.mktemp("guard-corpus-wt")
     for b in LOCAL_BINS:
         p = root / "node_modules" / ".bin" / b
@@ -93,6 +129,7 @@ def worktree(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture(scope="module")
 def guard(worktree: Path) -> GitArchaeologyGuard:
+    """The guard bound to the worktree ``cwd`` (module-scoped: the corpus is large)."""
     return GitArchaeologyGuard(cwd=worktree)
 
 

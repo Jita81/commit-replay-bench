@@ -1,5 +1,28 @@
 """The edit-block builder: tolerant parser, fuzzy apply, compile feedback, guards,
-budget, and an end-to-end build the core grader marks clean."""
+budget, and an end-to-end build the core grader marks clean.
+
+Navigation
+----------
+What it is:   The edit-block builder's test suite — parser, fuzzy apply, compile feedback,
+              guards, budget, and an end-to-end build the core grader marks clean.
+What it does: Pins that the parser handles clean blocks, marker variations and malformed
+              blocks without crashing, routes blocks by file header; exact and fuzzy apply; the
+              compile check; candidate-file selection from the subject and test imports; that a
+              build applies the edit and grades clean, feeds an apply failure back and then
+              succeeds, never writes a syntax-breaking edit, refuses test edits in both modes and
+              traversal, records a model error rather than raising, stops at the cost cap, and
+              that the transcript is opt-in and redacted. The ``live`` case spends real tokens.
+How:          ``ScriptedChat`` returns canned replies in order over ``fixtures.builders_repo``;
+              the build is graded by the real ``grade``.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/editblock.py (under test), src/crb/builders/openai_client.py
+              (the chat transport it scripts), src/crb/builders/base.py (guards and budget),
+              tests/fixtures/builders_repo.py, src/crb/core/grade.py (the verdict)
+Tested by:    tests/test_builders_editblock.py
+Touch when:   the edit-block grammar gains a marker form (a parser case); the feedback loop
+              changes what it tells the model after a failed apply.
+"""
 
 from __future__ import annotations
 

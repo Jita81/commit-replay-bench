@@ -1,6 +1,26 @@
 """crb.store.ledger.DbReviewLedger — chain, anchor against the stored pack, append-only.
 
 Parametrised over SQLite and (when ``CRB_TEST_POSTGRES_URL`` is set) PostgreSQL.
+
+Navigation
+----------
+What it is:   ``DbReviewLedger``'s test suite — chain, anchor against the stored pack,
+              append-only, on SQLite and PostgreSQL.
+What it does: Pins that appends chain, anchor and verify, that a hash that is not the pack's is
+              refused, that a review of a row this ledger does not hold is refused (with or
+              without a verdict), that a row whose pack is not stored is refused, that the anchor
+              is the REVIEWED row's pack never the record's (review finding 5, 2026-09-14), that
+              an explicit ``pack`` is only a self-certifying copy of the row's, the filters, that
+              the table is append-only, and that a tampered row breaks verify.
+How:          ``conftest_store`` backends with a ``DbLedger`` holding a clean row and its pack.
+Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/store/ledger.py (``DbReviewLedger`` under test), src/crb/core/review.py
+              (the record and refusal codes), tests/test_review.py (the JSONL twin),
+              tests/test_server_routes_reviews.py (the write as HTTP), tests/conftest_store.py
+Tested by:    tests/test_store_reviews.py
+Touch when:   the anchor rule changes (both ledgers and the route together); a review column is
+              added (a migration and the parity case).
 """
 
 from __future__ import annotations
@@ -35,6 +55,7 @@ except ImportError:  # pragma: no cover — rootdir-relative import (pytest defa
 
 @pytest.fixture
 def store(backend: Backend) -> tuple[DbLedger, DbReviewLedger]:
+    """``(DbLedger, DbReviewLedger)`` over an initialised backend."""
     init_db(backend.engine)
     return DbLedger(backend.factory), DbReviewLedger(backend.factory)
 
@@ -54,7 +75,9 @@ def _review(row_hash: str, pack_hash: str, diff_sha: str, **kw: Any) -> ReviewRe
 
 
 def _graded(store: tuple[DbLedger, DbReviewLedger]) -> tuple[str, str, str]:
-    """A stored pack WITH a diff, and a clean row pointing at it → (row_hash, pack_hash, diff_sha)."""
+    """A stored pack WITH a diff, and a clean row pointing at it → (row_hash,
+    pack_hash, diff_sha).
+    """
     ledger, _ = store
     diff_sha = "d" * 64
     result = GradeResult(

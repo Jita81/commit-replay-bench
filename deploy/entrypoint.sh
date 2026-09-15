@@ -12,6 +12,29 @@
 # Everything is `exec`'d so the role process is PID 1 and receives SIGTERM directly.
 # Environment (see docs/DEPLOYMENT.md): CRB_DATABASE_URL, CRB_SECRET_KEY, CRB_BIND_HOST/PORT,
 # CRB_FORWARDED_ALLOW_IPS, CRB_WEB_CONCURRENCY, CRB_MIGRATE_ON_START.
+#
+# Navigation
+# ----------
+# What it is:   The container entrypoint: one image, the role chosen by the first argument.
+# What it does: ``serve`` runs uvicorn on the app factory (optionally migrating first under
+#               ``CRB_MIGRATE_ON_START=1`` — single-host convenience only), ``worker`` the queue
+#               consumer, ``migrate`` / ``check`` the Alembic CLI, ``shell`` a debugging shell,
+#               anything else is exec'd verbatim. Every role is ``exec``'d so it is PID 1 and
+#               receives SIGTERM directly.
+# How:          A ``case`` on ``$1``; the bind host / port, worker count, forwarded IPs and graceful
+#               timeout come from ``CRB_*`` environment variables with safe defaults.
+# Layer:        deploy — docs/ARCHITECTURE.md#6-deployment-view
+# ADRs:         none
+# Works with:   deploy/Dockerfile (installs it as ``crb-entrypoint`` and sets it as ENTRYPOINT),
+#               deploy/docker-compose.yml and deploy/helm/crb/templates/api-deployment.yaml (pass
+#               the role), src/crb/server/app.py (``create_app``), src/crb/server/worker_main.py,
+#               src/crb/store/migrate.py, docs/DEPLOYMENT.md (the image and its roles, §2)
+# Tested by:    untested — no unit test; the container smoke in .github/workflows/ci.yml runs the
+#               ``migrate upgrade`` and ``migrate current`` roles through the built image
+# Touch when:   a role is added to the image (a ``case`` arm, docs/DEPLOYMENT.md and the Helm
+#               template that runs it); a uvicorn flag changes (keep ``--proxy-headers`` scoped to
+#               ``CRB_FORWARDED_ALLOW_IPS``).
+
 set -eu
 
 role="${1:-serve}"

@@ -1,4 +1,27 @@
-"""crb.factory.readiness — structural gaps block, value gaps route, sign-offs are ledgered."""
+"""crb.factory.readiness — structural gaps block, value gaps route, sign-offs are ledgered.
+
+Navigation
+----------
+What it is:   The factory readiness (DoR) gate's test suite — structural gaps block, value gaps
+              route, sign-offs are ledgered.
+What it does: Pins that the catalogue covers every class with structural slots, that
+              ``parse_facts`` fills only slot-prefixed lines, that an unfilled structural gap
+              blocks and routes human while a value gap never blocks and routes test-first, that
+              all slots filled routes build, that readiness cannot claim ready with a blocking
+              gap, that operator-kind, weak-oracle and uncatalogued items route human, that a
+              sign-off fills a structural gap and is ledgered, that revocation reopens it (latest
+              wins), record validation and redaction, and the gap ledger's tamper detection.
+How:          In-memory items over ``ALL_CLASSES``; a temp JSONL gap ledger.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/factory/readiness.py (under test), src/crb/factory/backlog.py (the
+              items), src/crb/core/spec.py (``ALL_CLASSES`` the catalogue must cover),
+              src/crb/core/learn.py (the strengthening items must pass this gate),
+              tests/test_factory_loop.py
+Tested by:    tests/test_factory_readiness.py
+Touch when:   a class is added to the taxonomy (its structural slots must be catalogued — the
+              coverage case fails first); a slot kind is added.
+"""
 
 from __future__ import annotations
 

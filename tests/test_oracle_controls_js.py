@@ -13,6 +13,29 @@ session by :func:`conftest_langs.npm_cache` (skipped with npm's reason when offl
 * :mod:`fixtures.langs.negctrl.noderepo_fix` (feat FIXES ``mul``) — 7/7 constructible
   for jest / vitest / mocha through each runner's own collection-time hook; 6/7 for
   ``node --test``, which has no configuration file (``env_poison`` names that reason).
+
+Navigation
+----------
+What it is:   The JavaScript negative-controls suite (ADR-0010): the four Python-only controls
+              ported as text transforms, then the matrices on the four real runners.
+What it does: Pins the pure transforms (function shapes, CommonJS / ESM wiring on stub and
+              cheat, relative-import resolution, poison-target and belt-file selection, the
+              per-tool ``env_poison`` plan that merges JSON configs and refuses JS ones) and, with
+              ``node`` on PATH, that ``noderepo`` is 6/7 constructible per tool (was 4/7),
+              ``noderepo_fix`` 7/7 for jest / vitest / mocha and 6/7 for ``node --test`` (no
+              configuration file — the reason is named), and that ``env_poison`` through a
+              runner's collection-time hook is caught by belt 1b as test infrastructure.
+How:          Inline JS source for the unit half; ``qualify`` + ``controls_for_task`` per tool
+              with the session ``node_modules`` cache for the matrix half.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0010-polyglot-negative-controls.md
+Works with:   src/crb/core/oracle/controls_js.py (under test), src/crb/core/oracle/controls.py
+              (the dispatcher and the report), tests/fixtures/langs/noderepo.py and
+              tests/fixtures/langs/negctrl/noderepo_fix.py (the fixtures), tests/conftest_langs.py
+              (``npm_cache``), src/crb/core/runners/node_runners.py (the four runners)
+Tested by:    tests/test_oracle_controls_js.py
+Touch when:   a fifth JavaScript runner is added (its ``env_poison`` plan and both matrices); a
+              JS construct the scanner misses is found in a client repository.
 """
 
 from __future__ import annotations
@@ -346,16 +369,21 @@ def _matrix(repo, task, config, scratch, controls=nc.CONTROLS) -> dict[str, nc.C
 
 @pytest.fixture(scope="module", params=noderepo.TOOLS)
 def tool(request: pytest.FixtureRequest) -> str:
+    """The runner flavour under test (``node`` / ``vitest`` / ``jest`` / ``mocha``)."""
     return str(request.param)
 
 
 @pytest.fixture(scope="module")
 def node_modules(tool: str):
+    """The session dependency cache for the flavour (``None`` for the dependency-free ``node
+    --test``); skips with npm's reason when it cannot be installed.
+    """
     return None if tool == "node" else langs.npm_cache(tool)
 
 
 @pytest.fixture(scope="module")
 def base(tool: str, node_modules, tmp_path_factory: pytest.TempPathFactory):
+    """``noderepo`` for the flavour (feat ADDS ``sub``) as ``(repo, task, config, scratch)``."""
     root, sha = noderepo.build(tmp_path_factory.mktemp(tool), tool, node_modules=node_modules)
     config = noderepo.config(tool)
     repo = GitRepo(root)
@@ -365,12 +393,16 @@ def base(tool: str, node_modules, tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(scope="module")
 def base_matrix(base):
+    """The seven controls on ``base``, keyed by control name."""
     repo, task, config, scratch = base
     return _matrix(repo, task, config, scratch)
 
 
 @pytest.fixture(scope="module")
 def fix(tool: str, node_modules, tmp_path_factory: pytest.TempPathFactory):
+    """``noderepo_fix`` for the flavour (feat FIXES ``mul``) as ``(repo, task,
+    config, scratch)``.
+    """
     root, sha = nodefix.build(
         tmp_path_factory.mktemp(f"fix-{tool}"), tool, node_modules=node_modules
     )
@@ -382,6 +414,7 @@ def fix(tool: str, node_modules, tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(scope="module")
 def fix_matrix(fix):
+    """The seven controls on ``fix``, keyed by control name."""
     repo, task, config, scratch = fix
     return _matrix(repo, task, config, scratch)
 

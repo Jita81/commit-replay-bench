@@ -4,6 +4,28 @@ Every command reads the ledger the way ``crb route`` does (``--path`` or
 ``<workdir>/ledger.jsonl``), prints a report (text or ``--json``), and never acts:
 ``refusals --apply`` is the ONE write, and it appends only what a named human
 decided to the corpus files under ``--corpus-dir``.
+
+Navigation
+----------
+What it is:   ``crb learn {refusals, strengthen, remeasure}``'s test suite — round trips on a
+              temp ledger.
+What it does: Pins that every command reads the ledger the way ``crb route`` does, prints text
+              or ``--json`` and never acts — ``refusals --apply`` is the ONE write and appends
+              only a named human's decisions; that ``strengthen`` accepts every server export
+              shape (oracle scores, a controls report or a run body, a run's event-log page) and
+              routes the cells as the server does; that ``remeasure`` defaults to the instrument's
+              apparatus; that the score-action constants mirror the server's (the CLI cannot
+              import it); reproducible bytes; and a missing ledger is empty, not an error.
+How:          ``main([...])`` through a ``run`` fixture over a workdir holding a synthetic
+              ``ledger.jsonl``.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0008-stdlib-core-and-downward-layers.md
+Works with:   src/crb/cli/commands/learn.py (under test), src/crb/core/learn.py (the
+              derivations), tests/test_learn.py (their own suite), tests/test_server_routes_learn.py
+              (the same reports served), docs/LEARNING-LOOP.md (using it, §4)
+Tested by:    tests/test_cli_learn.py
+Touch when:   a server export shape changes (a loader case here — the CLI must read what the
+              API writes); a learn subcommand is added.
 """
 
 from __future__ import annotations
@@ -86,6 +108,7 @@ def _protocol(err: str, **kw: Any) -> GradeRow:
 
 @pytest.fixture(scope="module")
 def workdir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A workdir holding the synthetic ``ledger.jsonl`` the three commands read (module-scoped)."""
     wd = tmp_path_factory.mktemp("crb-home") / ".crb"
     ledger = JsonlLedger(wd / "ledger.jsonl")
     rows = [
@@ -122,6 +145,8 @@ def workdir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture
 def run(workdir: Path, capsys: pytest.CaptureFixture[str]) -> Run:
+    """``run(argv) -> (exit_code, stdout, stderr)`` with ``--workdir`` supplied."""
+
     def _run(argv: Sequence[str]) -> tuple[int, str, str]:
         capsys.readouterr()
         code = main([*argv, "--workdir", str(workdir)])

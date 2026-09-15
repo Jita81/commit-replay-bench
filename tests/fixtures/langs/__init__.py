@@ -21,6 +21,28 @@ failing independently of the target (see :mod:`gorepo`).
 
 Git here is deliberately hermetic: no global/system config, fixed identity, no
 signing — so the shas depend only on content and the timestamps we set.
+
+Navigation
+----------
+What it is:   The per-language fixture package: hermetic git helpers and the shared two-commit
+              repository shape every runner integration test relies on.
+What it does: Fixes the invariant — commit 1 is one unit plus one GREEN test, commit 2 adds a
+              NEW unit and its NEW test — so that parent + feat tests = RED and parent + feat
+              tests + feat sources = GREEN with no new failures, in every language. Git runs with
+              no global/system config, a fixed identity and fixed dates.
+How:          ``two_commit_repo(root, initial, feat)`` writes the files, commits twice and returns
+              ``(root, feat_sha)``; each language module builds its files and calls it.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   tests/fixtures/langs/gorepo.py, tests/fixtures/langs/noderepo.py,
+              tests/fixtures/langs/jvmrepo.py, tests/fixtures/langs/rustrepo.py and
+              tests/fixtures/langs/pyrepo_min.py (the builders), tests/conftest_langs.py (the
+              instrument steps that consume the shape)
+Tested by:    tests/test_runners_go.py, tests/test_runners_node.py, tests/test_runners_jvm.py,
+              tests/test_runners_cargo.py, tests/test_sandbox_docker.py
+Touch when:   adding a runner for a new language — add ``<lang>repo.py`` beside this file
+              exposing ``build`` and ``config`` with the same two-commit shape; never change the
+              subjects or dates (shas are content-addressed and tests compare them).
 """
 
 from __future__ import annotations
@@ -70,6 +92,7 @@ def write_files(root: Path, files: Mapping[str, str]) -> None:
 
 
 def init_repo(root: Path) -> None:
+    """``git init`` on branch ``main`` under the hermetic environment."""
     root.mkdir(parents=True, exist_ok=True)
     git(root, "init", "-q", "-b", "main")
 

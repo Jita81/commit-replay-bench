@@ -1,5 +1,29 @@
 """The job queue on a temp SQLite database: atomic claims, liveness, reclaim,
-cancellation, ownership and listing."""
+cancellation, ownership and listing.
+
+Navigation
+----------
+What it is:   The job queue's test suite on a temp SQLite database — atomic claims, liveness,
+              reclaim, cancellation, ownership and listing.
+What it does: Pins that enqueue fills defaults and forces the queued state, FIFO claims that mark
+              running, exactly one winner among two (and among eight racing threads through the
+              real database lock), claim filters by kind and repo, worker-id required, heartbeat
+              and finish only for the running owner (a zombie cannot overwrite), progress and
+              finish recording counts and timestamps, cancel of a queued run terminal at once and
+              of a running run as a flag with an event (honoured at the next claim after a
+              reclaim), stale-claim reclaim with an event and a maximum, live and terminal runs
+              never reclaimed, unparseable liveness treated as dead, listing filters and
+              pagination, and the timestamp helpers.
+How:          ``JobQueue`` over a fresh session factory; threads for the race.
+Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         none
+Works with:   src/crb/store/jobs.py (under test), src/crb/store/models.py (the ``runs`` row),
+              src/crb/server/worker.py (the consumer), tests/test_worker.py (the queue under the
+              worker), tests/test_server_routes_runs.py (the producer)
+Tested by:    tests/test_store_jobs.py
+Touch when:   a run kind or status is added (``RUN_KINDS`` and the terminal-status cases); the
+              liveness window or reclaim limit changes.
+"""
 
 from __future__ import annotations
 
@@ -30,6 +54,7 @@ from crb.store.models import Repo, Run
 
 @pytest.fixture
 def factory(tmp_path: Path) -> sessionmaker[Session]:
+    """A session factory over a fresh SQLite file with the ``repos`` row the runs reference."""
     engine = make_engine(f"sqlite:///{tmp_path / 'jobs.db'}")
     init_db(engine)
     f = make_session_factory(engine)
@@ -41,6 +66,7 @@ def factory(tmp_path: Path) -> sessionmaker[Session]:
 
 @pytest.fixture
 def queue(factory: sessionmaker[Session]) -> JobQueue:
+    """A ``JobQueue`` over the factory."""
     return JobQueue(factory, max_reclaims=2)
 
 

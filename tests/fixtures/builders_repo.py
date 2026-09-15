@@ -10,6 +10,27 @@ At the parent with ``tests/test_calc.py`` overlaid the target is RED; with the
 commit's ``pkg/calc.py`` overlaid it is GREEN. ``make_task`` records exactly that
 (``red_checked=True``, empty baseline), so :func:`crb.core.grade.grade` can be
 run against a builder's edit in the tests.
+
+Navigation
+----------
+What it is:   A two-commit Python fixture repository for the builder tests, built inline.
+What it does: Gives every builder test the same parent (buggy ``add``, an unrelated module, one
+              green test) and task (the fix plus its RED oracle ``tests/test_calc.py``), with a
+              ``TaskSpec`` that already records ``red_checked=True`` and an empty baseline so
+              ``crb.core.grade.grade`` can judge a builder's edit directly.
+How:          ``make_fixture`` runs ``git init`` + two commits under a temp dir and returns a
+              ``Fixture`` whose ``workspace(dest, mode)`` opens a trial worktree at the parent
+              (tests overlaid only in sighted mode).
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   tests/test_builders_editblock.py, tests/test_builders_openai_agent.py and
+              tests/test_builders_claude_code.py (the consumers), src/crb/core/workspace.py (the
+              trial), src/crb/core/spec.py (``TaskSpec`` / ``RepoConfig``), src/crb/core/grade.py
+              (what the builders' edits are graded by)
+Tested by:    tests/test_builders_editblock.py, tests/test_builders_openai_agent.py,
+              tests/test_builders_claude_code.py
+Touch when:   a builder test needs a shape this history cannot express (add a commit; keep the
+              parent RED/GREEN contract the docstring states).
 """
 
 from __future__ import annotations
@@ -54,6 +75,8 @@ def _git(repo: Path, *args: str) -> str:
 
 @dataclass(frozen=True)
 class Fixture:
+    """The built repository: its ``GitRepo``, config, the one ``TaskSpec`` and the root path."""
+
     repo: GitRepo
     config: RepoConfig
     task: TaskSpec
@@ -68,6 +91,7 @@ class Fixture:
 
 
 def make_fixture(base: Path) -> Fixture:
+    """Build the two-commit repository under ``base`` and return the ``Fixture`` for its task."""
     root = base / "fixture-repo"
     root.mkdir(parents=True)
     _git(root, "init", "-q", "-b", "main")

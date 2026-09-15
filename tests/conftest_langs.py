@@ -14,6 +14,29 @@ test modules import this explicitly. It owns three things:
   tests overlaid.
 
 Everything here runs real toolchains; nothing here decides verdicts.
+
+Navigation
+----------
+What it is:   Shared helpers for the toolchain and sandbox integration suites (imported
+              explicitly; not a conftest).
+What it does: Answers "is go/node/mvn/cargo/docker available", warms the npm dev-dependency
+              caches, the Maven local repository and the sandbox image once per session, and
+              performs the two instrument steps every language module repeats — mine the feat
+              candidate, open a trial worktree at the parent with the tests overlaid. A warm-up
+              that cannot complete becomes a pytest skip with the reason, never a failure.
+How:          Memoised probes → on-disk caches under ``tests/.cache`` → ``iter_candidates`` +
+              ``Workspace.create`` + ``overlay_tests`` through the real runner and executor.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   tests/fixtures/langs/__init__.py (the two-commit fixture shape these steps rely
+              on), src/crb/core/mine.py (``iter_candidates``), src/crb/core/workspace.py (the
+              trial), src/crb/core/runners/__init__.py (``get_runner``), tests/test_runners_node.py
+              and tests/test_runners_jvm.py (typical callers)
+Tested by:    tests/test_runners_go.py, tests/test_runners_node.py, tests/test_runners_jvm.py,
+              tests/test_runners_cargo.py, tests/test_sandbox_docker.py (every consumer)
+Touch when:   adding a runner for a new language (add its availability probe and any per-session
+              warm-up here, the fixture under tests/fixtures/langs/, and a ``test_runners_<lang>``
+              module); the per-session cache directory (``.cache`` under the tests tree) moves.
 """
 
 from __future__ import annotations
@@ -53,6 +76,7 @@ DOCKER_BUILD_TIMEOUT_S = 900
 
 
 def has_tool(name: str) -> bool:
+    """True when ``name`` resolves on PATH (a toolchain gate, never a verdict)."""
     return shutil.which(name) is not None
 
 
@@ -87,6 +111,7 @@ def docker_unavailable_reason() -> str:
 
 
 def docker_available() -> bool:
+    """True when a daemon answered ``docker info`` (memoised per process)."""
     return docker_unavailable_reason() == ""
 
 

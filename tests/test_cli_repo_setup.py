@@ -3,6 +3,26 @@
 Hermetic cases use a scripted runner (the environment phase is answered from a
 script); the one real case (``@pytest.mark.network``) builds a genuine ``uv``
 venv under ``<workdir>/envs/<name>`` and proves the probe then runs on it.
+
+Navigation
+----------
+What it is:   ``crb repo setup`` and the auto-setup inside ``crb repo probe``, driven in-process.
+What it does: Pins that setup with an explicit interpreter verifies it and records ``env_dir``,
+              that a failure exits negative with the steps, that an unknown repo is a usage
+              error, that probe runs setup when the environment is not ready and does NOT probe
+              when auto-setup fails; the one ``network`` case builds a genuine ``uv`` venv under
+              ``<workdir>/envs/<name>`` and proves the probe runs on it.
+How:          A ``ScriptedRunner`` answers the environment phase from a script for the hermetic
+              cases; ``pyrepo`` registered through the CLI.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/cli/commands/repo.py (under test), src/crb/core/runners/base.py
+              (``SetupResult`` / ``SetupStep``), src/crb/core/runners/pytest_runner.py
+              (``venv_python``), tests/test_runners_setup.py (the phase's own suite),
+              docs/OPERATOR.md (environment setup, §2.1)
+Tested by:    tests/test_cli_repo_setup.py
+Touch when:   the setup phase gains an option surfaced on the CLI (a flag case here and its
+              docs/OPERATOR.md entry).
 """
 
 from __future__ import annotations
@@ -27,11 +47,14 @@ Run = Callable[[Sequence[str]], tuple[int, str, str]]
 
 @pytest.fixture
 def workdir(tmp_path: Path) -> Path:
+    """A fresh ``--workdir`` per test (setup writes ``envs/<name>`` under it)."""
     return tmp_path / ".crb"
 
 
 @pytest.fixture
 def run(workdir: Path, capsys: pytest.CaptureFixture[str]) -> Run:
+    """``run(argv) -> (exit_code, stdout, stderr)`` with ``--workdir`` supplied."""
+
     def _run(argv: Sequence[str]) -> tuple[int, str, str]:
         capsys.readouterr()
         code = main([*argv, "--workdir", str(workdir)])
@@ -71,6 +94,11 @@ def _register(run: Run, pyrepo: pr.PyRepo, name: str, *opts: str) -> None:
 
 
 class ScriptedRunner(PytestRunner):
+    """A pytest runner whose environment phase is scripted: ``ready`` answers
+    ``environment_ready``, ``outcome`` is what ``setup`` returns — so the CLI's control flow is
+    tested without a venv.
+    """
+
     ready: ClassVar[list[bool]] = [True]
     outcome: ClassVar[SetupResult] = SetupResult(True, (), "scripted", 0.0)
     calls: ClassVar[list[Path]] = []
@@ -86,6 +114,9 @@ class ScriptedRunner(PytestRunner):
 
 @pytest.fixture
 def scripted(monkeypatch: pytest.MonkeyPatch) -> type[ScriptedRunner]:
+    """Install ``ScriptedRunner`` as the ``pytest`` runner for the test;
+    returns it for scripting.
+    """
     ScriptedRunner.ready = [True]
     ScriptedRunner.outcome = SetupResult(True, (), "scripted", 0.0)
     ScriptedRunner.calls = []

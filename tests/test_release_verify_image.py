@@ -8,6 +8,28 @@ the files, so a drift is caught in CI rather than by an operator at 2 a.m.
 
 The script itself is exercised in ``--print`` mode only: it must never reach the network
 from the suite. cosign is not required.
+
+Navigation
+----------
+What it is:   The release-verification agreement test suite — ``deploy/verify-image.sh`` and the
+              release workflow state the same identity.
+What it does: Pins that the script is executable and parses, that usage exits 2 without a tag,
+              that ``--print`` runs nothing and names the identity (with the digest pin and SBOM
+              output forms), that a malformed digest is rejected, that the script and
+              ``release.yml`` agree on the image repository, OIDC issuer and identity pattern,
+              that the workflow pushes and signs only on canonical ``v*`` tags, that the Helm
+              values pull the same repository, and that no action is pinned to a moving branch.
+How:          Runs the script with ``bash`` in ``--print`` mode only (never the network; cosign
+              not required) and reads the workflow and values files as text.
+Layer:        tests — docs/ARCHITECTURE.md#6-deployment-view
+ADRs:         none
+Works with:   deploy/verify-image.sh (under test), .github/workflows/release.yml (the signer),
+              deploy/helm/crb/values.yaml (the puller), docs/DEPLOYMENT.md (the released image:
+              name, signature, SBOM, §2.2), docs/SECURITY.md (supply chain, §3.7)
+Tested by:    tests/test_release_verify_image.py
+Touch when:   the image repository, issuer or signing identity changes (all three files and this
+              suite together — a drift here is a release signed under one identity and
+              "verified" under another).
 """
 
 from __future__ import annotations

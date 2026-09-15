@@ -35,6 +35,32 @@ One opt-in commit exists for the environment-setup tests:
   ``src/calc`` layout, a ``[test]`` extra) so ``pip install -e .`` has something to
   build. It is NOT part of the default history: the core suite pins the initial
   commit's file list.
+
+Navigation
+----------
+What it is:   THE core fixture: a three-commit Python repository built with ``git init`` in well
+              under a second, plus the builder-edit helpers that exercise each belt.
+What it does: Reproduces exactly the shape the miner looks for and the grader judges — a feat
+              commit RED at its parent with only its test overlaid, GREEN with its source — and
+              supplies ``apply_gold`` / ``apply_noop`` / ``apply_tamper`` / ``apply_regression`` /
+              ``apply_hardcoded`` / ``apply_test_only`` so a test can make one belt fail at a
+              time. Opt-in commits add a green-at-parent task, a bad-gold task and a
+              ``pyproject.toml`` for the setup and test-infrastructure cases.
+How:          Fixed identity and dates through ``git``; ``build(root)`` returns a ``PyRepo`` whose
+              ``feat_task`` mirrors what ``crb mine`` records and whose ``trial(dest)`` opens a
+              sighted ``Workspace`` at the parent.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   tests/conftest.py (turns it into fixtures), src/crb/core/grade.py (the belts the
+              ``apply_*`` helpers target), src/crb/core/mine.py (the candidate rule the history
+              satisfies), src/crb/core/workspace.py (``trial``), tests/test_grade.py and
+              tests/test_mine.py (the heaviest consumers), scripts/walkthrough.sh (pads it into
+              the walkthrough's "public" repository)
+Tested by:    tests/test_grade.py, tests/test_mine.py, tests/test_workspace.py, tests/test_git.py,
+              tests/test_worker.py
+Touch when:   a belt or miner rule needs a shape the history cannot show — add an OPT-IN commit
+              method (never change the three base commits: ``feat_task`` and the walkthrough
+              depend on them) and an ``apply_*`` helper named for the belt it defeats.
 """
 
 from __future__ import annotations
@@ -203,6 +229,10 @@ def default_config(**overrides: object) -> RepoConfig:
 
 @dataclass(frozen=True)
 class PyRepo:
+    """The built repository: its path, the three base shas and the
+    ``RepoConfig`` that describes it.
+    """
+
     path: Path
     initial_sha: str
     feat_sha: str
@@ -211,6 +241,7 @@ class PyRepo:
 
     @property
     def repo(self) -> GitRepo:
+        """The core's ``GitRepo`` wrapper over the fixture path."""
         return GitRepo(self.path)
 
     # --- tasks -------------------------------------------------------------------
@@ -336,5 +367,6 @@ def apply_test_only(ws: Workspace, rel: str = "tests/test_extra.py") -> None:
 
 
 def write_files(ws: Workspace, files: Sequence[tuple[str, str]]) -> None:
+    """Write ``(relative_path, content)`` pairs into the trial worktree — a builder edit by hand."""
     for rel, content in files:
         _write(ws.root, rel, content)

@@ -11,6 +11,32 @@ that needs a signable cell first appends a NEWER, clean controls report for ``al
 editing the seed; :func:`clear_policy` does both — then posts a body that names an
 accepted row of the cell (:func:`attested_body`). Nothing here bypasses the write
 path of the grade ledger.
+
+Navigation
+----------
+What it is:   Sign-off helpers on top of ``fixtures.server_seed`` for ``signoff-policy.v2``.
+What it does: Makes the seed's deliver cell signable the honest way: appends a NEWER, clean
+              ``controls.report`` (``pass_controls``) and NEWER strong ``oracle.score`` events per
+              task (``score_oracle``) — the worker's own event shapes, through the ORM, never by
+              editing the seed — and builds a ``POST /signoffs`` body naming an accepted row of
+              the cell (``attested_body``). The seed is refused by design (one controls escape;
+              oracle measured at 0.58) so every test starts from a 409.
+How:          ``clear_policy`` = ``pass_controls`` + ``score_oracle``; ``accepted_row`` picks the
+              newest seeded row of the cell by ``row_hash``; ``attestation_for`` shapes the
+              attestation the policy validates.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   tests/fixtures/server_seed.py (the seed it extends), src/crb/core/signoff.py (the
+              policy the helpers satisfy clause by clause), src/crb/server/routes/signoffs.py
+              (the route under test), tests/test_server_routes_signoffs.py,
+              tests/test_server_routes_capability.py and tests/test_server_routes_forecast.py
+              (the consumers)
+Tested by:    tests/test_server_routes_signoffs.py, tests/test_server_routes_capability.py,
+              tests/test_server_routes_forecast.py
+Touch when:   the sign-off policy gains a clause (add the helper that clears it honestly and a
+              409 case in the route tests); the ``oracle.score`` or ``controls.report`` event
+              shape changes in the worker (mirror it here — the helpers must stay the worker's
+              shapes).
 """
 
 from __future__ import annotations
@@ -155,6 +181,9 @@ def accepted_row(env: Env, cell: dict[str, str], *, clean: bool = True) -> Grade
 def attestation_for(
     env: Env, cell: dict[str, str], *, statement: str = STATEMENT
 ) -> dict[str, str]:
+    """The attestation the policy validates: an accepted row of ``cell`` plus
+    the human statement.
+    """
     return {"reviewed_row_hash": accepted_row(env, cell).row_hash, "statement": statement}
 
 

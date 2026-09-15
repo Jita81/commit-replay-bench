@@ -1,5 +1,27 @@
 """crb.core.review — ReviewRecord invariants, the patch-hash anchor, the JSONL chain,
-tamper detection, and the per-cell join onto graded rows."""
+tamper detection, and the per-cell join onto graded rows.
+
+Navigation
+----------
+What it is:   The review ledger's test suite — ``ReviewRecord`` invariants, the patch-hash
+              anchor, the JSONL chain and the per-cell join onto graded rows.
+What it does: Pins the closed vocabulary (findings are never headlines), that the verdict is the
+              most severe finding and must agree with them, that a regression is never mergeable,
+              redaction of statements, the round trip and hash, that the anchor holds only when
+              the reviewed row's pack diff hash equals the reviewer's, that a verdict needs the
+              row's own pack (review finding 5, 2026-09-14), chain detection of edit / reorder /
+              removal, the latest review per row as the standing verdict, and the cell join.
+How:          In-memory records and packs; ``JsonlReviewLedger`` on a temp file.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/core/review.py (under test), src/crb/core/evidence.py (the pack the
+              anchor reads), src/crb/core/ledger.py (the rows the join is over),
+              tests/test_store_reviews.py (the same anchor in the database),
+              tests/test_server_routes_reviews.py (the write as HTTP)
+Tested by:    tests/test_review.py
+Touch when:   a finding kind or verdict is added (the vocabulary and severity cases); the anchor
+              gains a field (both ledgers and the route together).
+"""
 
 from __future__ import annotations
 
@@ -63,6 +85,9 @@ PACK_HASH = pack()["pack_hash"]
 
 
 def record(**kw: Any) -> ReviewRecord:
+    """A valid ``ReviewRecord`` anchored to the module's fixed row and pack hashes, unless
+    overridden.
+    """
     base: dict[str, Any] = {
         "grade_row_hash": ROW_HASH,
         "repo": "alpha",
@@ -77,6 +102,7 @@ def record(**kw: Any) -> ReviewRecord:
 
 
 def grade_row(**kw: Any) -> GradeRow:
+    """A clean ``GradeRow`` for the join cases, unless overridden."""
     base: dict[str, Any] = {
         "repo": "alpha",
         "task_id": "t" * 40,

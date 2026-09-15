@@ -3,6 +3,31 @@
 
 This module also carries the hermetic harness (fake builders, the forward-mode
 item on :mod:`fixtures.pyrepo`) that the delivery / review / loop tests import.
+
+Navigation
+----------
+What it is:   The factory build step's test suite — the throwaway oracle commit, the ordinary
+              grade path and a ``process_step="factory"`` row whose false-Q1 invariant is intact.
+              Also the hermetic harness (fake builders, the forward-mode item on ``pyrepo``) the
+              delivery, review and loop suites import.
+What it does: Pins that the staged oracle commit contains only the test at HEAD and refuses
+              bytes that are not the RED proof, that a green build produces a pack and a factory
+              row, that the false-Q1 invariant holds on factory rows, that belt 1 catches an
+              edited authored test, belt 3 a regression and belt 4 a no-change, that a builder
+              exception is recorded and graded not clean, that the builder identity may not
+              equal the test author, and that the ladder escalates until clean.
+How:          ``Harness`` over ``pyrepo`` with ``prove_red`` → ``build`` under the real
+              ``PytestRunner`` / ``LocalExecutor``; ``FakeBuilder`` writes the source a real
+              builder would.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/factory/build.py (under test), src/crb/factory/testfirst.py (the RED
+              proof it stages), src/crb/core/grade.py (the unchanged grader),
+              src/crb/core/ledger.py (``PROCESS_FACTORY`` rows), tests/test_factory_delivery.py,
+              tests/test_factory_review.py and tests/test_factory_loop.py (import this harness)
+Tested by:    tests/test_factory_build.py
+Touch when:   the build step gains a stage (a harness method and a case); never so that a
+              factory row can be clean under a belt the replay row could not.
 """
 
 from __future__ import annotations
@@ -55,6 +80,8 @@ Edit = Callable[[Workspace], None]
 
 
 def append_src(text: str) -> Edit:
+    """An edit that appends ``text`` to the fixture's source module (how the fakes "implement")."""
+
     def _edit(ws: Workspace) -> None:
         p = ws.root / SRC
         p.write_text(p.read_text(encoding="utf-8") + text, encoding="utf-8")
@@ -63,6 +90,7 @@ def append_src(text: str) -> Edit:
 
 
 def noop(ws: Workspace) -> None:
+    """The builder did nothing: the authored test stays RED."""
     return None
 
 
@@ -119,6 +147,9 @@ class FakeBuilder:
 
 
 def multiply_item(**kw: object) -> BacklogItem:
+    """The forward-mode item: "add multiply to calc", with the structural facts
+    the DoR gate needs.
+    """
     base: dict[str, object] = {
         "id": "I-1",
         "title": "Add multiply to calc",
@@ -138,11 +169,18 @@ def multiply_item(**kw: object) -> BacklogItem:
 
 
 def authored_multiply(content: str = TEST_MULTIPLY_SRC, author: str = OPERATOR) -> AuthoredTest:
+    """The authored oracle for ``multiply_item`` (content and author
+    overridable for the refusals).
+    """
     return AuthoredTest(TEST_MULTIPLY, content, author)
 
 
 @dataclass
 class Harness:
+    """The hermetic factory rig over ``pyrepo``: scratch, evidence dir, ledger and the real
+    instrument; ``prove`` and ``build`` wrap the module functions with it.
+    """
+
     repo: pr.PyRepo
     scratch: Path
     evidence_dir: Path
@@ -152,9 +190,11 @@ class Harness:
 
     @property
     def head(self) -> str:
+        """The fixture repository's current HEAD sha (the base every proof is taken at)."""
         return self.repo.repo.rev_parse("HEAD")
 
     def prove(self, item: BacklogItem, authored: AuthoredTest) -> RedProof:
+        """``prove_red`` for ``item`` / ``authored`` with the rig's instrument."""
         return prove_red(
             self.repo.repo,
             item,
@@ -176,6 +216,9 @@ class Harness:
         trial: str = "r1",
         ledger: bool = True,
     ) -> fb.BuildResult:
+        """``build`` for ``item`` under ``builder`` with the rig's instrument; ``events`` collects
+        the emitted ``(kind, payload)`` pairs when given.
+        """
         return fb.build_item(
             self.repo.repo,
             item,
@@ -198,6 +241,7 @@ class Harness:
 
 @pytest.fixture
 def harness(pyrepo: pr.PyRepo, tmp_path: Path) -> Harness:
+    """A fresh ``Harness`` per test (its own ledger and evidence dir under ``tmp_path``)."""
     return Harness(
         repo=pyrepo,
         scratch=tmp_path / "scratch",

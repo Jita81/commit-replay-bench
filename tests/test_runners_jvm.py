@@ -19,6 +19,31 @@ Two MavenRunner defects are pinned as strict xfails: the generic
 and ``parse`` reads surefire XML left by a previous run in the same worktree.
 
 Runs only when ``mvn`` is on PATH (``@pytest.mark.toolchain("mvn")``).
+
+Navigation
+----------
+What it is:   The JVM toolchain suite — the full instrument on a real Maven + surefire.
+What it does: Pins, on ``fixtures.langs.jvmrepo``, that the miner finds the feat commit, RED at
+              the parent (``SubTest`` does not compile) with the baseline captured and the gold
+              GREEN, that gold grades clean, noop is not green, tamper is disqualified, a
+              regression in ``Calc.add`` fails belt 3 with ``ex.CalcTest::addWorks``, the scope
+              mapping (``SubTest.java`` → ``-Dtest=SubTest``), the belt-scope policies, the
+              command shape, and ``parse`` of the real surefire XML. Two ``MavenRunner`` defects
+              are pinned as strict xfails (``AFFECTED_DIRS`` selects zero tests and exits 0; stale
+              surefire XML from a previous run is read).
+How:          Maven warmed once per session (``conftest_langs.maven_warmup``; skipped with
+              Maven's own tail offline) → module-scoped fixture → ``qualify`` / ``grade`` with a
+              ``LocalExecutor``; skipped without ``mvn`` on PATH.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   src/crb/core/runners/jvm_runner.py (under test), tests/fixtures/langs/jvmrepo.py
+              (the fixture), tests/conftest_langs.py (``maven_warmup``),
+              tests/test_runners_parsers.py (the surefire parser on canned output),
+              docs/CONTRIBUTING.md (how to add a runner)
+Tested by:    tests/test_runners_jvm.py
+Touch when:   the maven runner's goals or parser change (an xfail turning into a pass is the
+              signal to remove the marker); a Gradle runner is added (a new module, not an
+              option here).
 """
 
 from __future__ import annotations
@@ -114,6 +139,9 @@ def task(
     candidate: Candidate,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> TaskSpec:
+    """The feat task qualified once through the real miner; a skip reason here
+    is a fixture failure.
+    """
     repo, _ = built
     outcome = qualify(
         repo,
@@ -129,6 +157,9 @@ def task(
 
 @pytest.fixture
 def trial(built: tuple[GitRepo, str], config: RepoConfig, candidate: Candidate, tmp_path: Path):
+    """A fresh worktree per test at the parent with the feat tests overlaid (RED), removed
+    afterwards.
+    """
     repo, _ = built
     ws = langs.trial_worktree(repo, candidate, tmp_path / "trial", config)
     yield ws

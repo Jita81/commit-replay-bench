@@ -9,6 +9,23 @@ History (oldest → newest)::
 
 Every commit is authored with a fixed identity and date so shas are stable
 within a test run. Nothing here imports crb; it is plain git + files.
+
+Navigation
+----------
+What it is:   A four-commit Python git repository for driving the ``crb`` CLI in-process.
+What it does: Provides two replayable commits (``add``, ``sub``: coupled source + test) between a
+              test-less scaffold and a docs-only commit, so ``crb mine`` must admit exactly two
+              candidates; ``apply_gold`` plays the builder by writing the commit's own source into
+              a trial worktree. Imports nothing from ``crb``: plain git and files.
+How:          Fixed author identity and dates so shas are stable within a run; ``make_repo``
+              returns the four shas and per-task ids on a ``CliRepo``.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   tests/test_cli.py (the consumer), src/crb/cli/main.py (what is driven),
+              src/crb/core/mine.py (the candidate rule this history is shaped for)
+Tested by:    tests/test_cli.py
+Touch when:   a CLI test needs another commit shape (a non-candidate, a second language) — keep
+              the candidate count the miner tests assert.
 """
 
 from __future__ import annotations
@@ -35,15 +52,19 @@ _GIT_ENV = {
 
 @dataclass(frozen=True)
 class CliRepo:
+    """The built repository and its four shas, oldest first (``c0`` … ``c3``)."""
+
     path: Path
     shas: tuple[str, ...]  # (c0, c1, c2, c3)
 
     @property
     def add_task(self) -> str:
+        """The sha of ``c1`` (``feat: add``) — the first replayable task."""
         return self.shas[1]
 
     @property
     def sub_task(self) -> str:
+        """The sha of ``c2`` (``feat: sub``) — the second replayable task."""
         return self.shas[2]
 
 

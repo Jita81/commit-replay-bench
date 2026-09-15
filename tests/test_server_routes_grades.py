@@ -1,4 +1,25 @@
-"""``/grades``, ``/grades/{row_id}``, ``/tasks/{repo}/{task_id}``, ``/evidence/{hash}``."""
+"""``/grades``, ``/grades/{row_id}``, ``/tasks/{repo}/{task_id}``, ``/evidence/{hash}``.
+
+Navigation
+----------
+What it is:   ``/grades``, ``/grades/{row_id}``, ``/tasks/{repo}/{task_id}`` and
+              ``/evidence/{hash}``'s test suite.
+What it does: Pins the list in chain order with stored fields, filters, pagination, get-one and
+              404, viewer reads / anonymous 401, that the audit surface SHOWS a false-Q1 row that
+              bypassed the write path (the auditor must see it), the task detail with its spec
+              and grades, and that native and imported packs verify, a tampered pack does not,
+              and every clean row has a resolvable pack.
+How:          ``make_env`` over the seed; the false-Q1 row inserted with the ORM on purpose.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
+              docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/server/routes/grades.py (under test), src/crb/core/evidence.py
+              (``verify_pack``), src/crb/store/ledger.py (the rows and packs read),
+              tests/fixtures/server_seed.py, docs/API.md (tasks / grades / evidence)
+Tested by:    tests/test_server_routes_grades.py
+Touch when:   a field is added to the grade row response (the schema, this suite and
+              ui/src/api/types.ts); the pack shape changes (the verify cases).
+"""
 
 from __future__ import annotations
 
@@ -24,6 +45,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
 

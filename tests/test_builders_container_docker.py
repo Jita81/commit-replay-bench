@@ -22,6 +22,34 @@ shared with ``test_sandbox_docker``), on :mod:`tests.fixtures.langs.pyrepo_min`:
 Skipped — with the probe's reason — when no daemon answers ``docker info`` or the
 image cannot be built. Checkouts live under ``tests/.cache/sandbox`` (bind-mountable
 on colima / Docker Desktop, unlike pytest's ``tmp_path``).
+
+Navigation
+----------
+What it is:   The sealed-container builder against a real daemon (ADR-0012).
+What it does: Pins that a scripted builder (a shell script mounted read-only as ``claude``)
+              runs through the SAME spawn contract as the real adapter, edits the source and runs
+              the target tests INSIDE the container, and the result is copied back and graded
+              clean on the host by the unchanged grader; that from inside the cell the checkout
+              is its own ``.git``, the host path does not exist, the root filesystem is
+              read-only, the credential is in the environment and nowhere on a command line, and
+              a direct socket fails; that egress reaches only the allowlisted host through the
+              sidecar (``example.com`` is 403, direct connections fail, the sidecar logs both), a
+              TLS handshake with the real endpoint costs no tokens; and that a missing image or
+              a sidecar that cannot start is ``SandboxUnavailable`` while cancel and the wall
+              clock end in ``docker kill``.
+How:          ``crb-test-py:local`` built once per session; checkouts under the tests cache
+              (bind-mountable on colima / Docker Desktop); a mock endpoint container on its own
+              egress network; skipped with the probe's reason without a daemon.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
+              docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/builders/container.py (under test), src/crb/builders/egress_proxy.py
+              (the sidecar), src/crb/builders/adapter.py (``build_fn_for``),
+              tests/fixtures/langs/pyrepo_min.py (the fixture), tests/conftest_langs.py (the
+              image build and probes), tests/test_builders_container.py (the daemon-free half)
+Tested by:    tests/test_builders_container_docker.py
+Touch when:   the builder image or the sidecar changes (a from-inside case that proves the wall
+              holds, not only that the flag is set); the default allowlist changes.
 """
 
 from __future__ import annotations
@@ -113,6 +141,9 @@ def _sandbox_ready() -> None:
 
 @pytest.fixture(scope="module")
 def sandbox_root() -> Iterator[Path]:
+    """A bind-mountable scratch root under the tests cache (the VM cannot mount ``tmp_path``);
+    removed after the module.
+    """
     root = langs.CACHE_DIR / "sandbox" / f"builder-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     root.mkdir(parents=True, exist_ok=True)
     yield root
@@ -155,6 +186,7 @@ def task(
     candidate: Candidate,
     sandbox_root: Path,
 ) -> TaskSpec:
+    """The feat task qualified once INSIDE the sandbox; a skip reason here is a fixture failure."""
     repo, _ = built
     outcome = qualify(
         repo, config, candidate, runner=runner, executor=executor, scratch=sandbox_root / "mine"
@@ -165,6 +197,9 @@ def task(
 
 @pytest.fixture(scope="module")
 def fake_claude_dir(sandbox_root: Path) -> Path:
+    """A directory holding the scripted ``claude`` (a shell script) the session mounts read-only at
+    ``/opt/fake/claude``.
+    """
     d = sandbox_root / "fake-claude"
     d.mkdir()
     script = d / "claude"
@@ -177,6 +212,9 @@ def fake_claude_dir(sandbox_root: Path) -> Path:
 def trial(
     built: tuple[GitRepo, str], config: RepoConfig, candidate: Candidate, sandbox_root: Path
 ) -> Iterator[Workspace]:
+    """A fresh worktree per test under ``sandbox_root`` with the feat tests overlaid, removed
+    afterwards.
+    """
     repo, _ = built
     ws = langs.trial_worktree(
         repo, candidate, sandbox_root / f"trial-{uuid.uuid4().hex[:8]}", config
@@ -187,6 +225,7 @@ def trial(
 
 @pytest.fixture
 def sealed(trial: Workspace, candidate: Candidate) -> Iterator[SealedCheckout]:
+    """The trial exported as a ``SealedCheckout`` beside it, removed afterwards."""
     s = SealedCheckout.create(
         trial, trial.root.parent / f"{trial.root.name}-sealed", test_files=candidate.test_files
     )

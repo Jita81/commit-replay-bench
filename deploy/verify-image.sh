@@ -14,6 +14,27 @@
 # fork, not a branch, not a manual dispatch. Requires `cosign` ≥ 2 (and `jq` for --sbom).
 #
 # Exit codes: 0 verified; 1 verification failed; 2 usage / missing tool.
+#
+# Navigation
+# ----------
+# What it is:   The operator's release-verification script: keyless signature, SBOM attestation
+#               and (optionally) the tag → digest pin, before an image is run.
+# What it does: Accepts a released image only when its signature was produced by THIS
+#               repository's release workflow on a ``v*`` tag, authenticated by GitHub's OIDC
+#               issuer and recorded in the Sigstore transparency log — not a fork, a branch or a
+#               manual dispatch. ``--print`` shows the exact cosign commands and runs nothing.
+# How:          ``cosign verify`` with the issuer and identity regexp → ``cosign verify-attestation
+#               --type spdxjson`` (written out with ``--sbom``) → ``cosign triangulate`` compared
+#               with the pinned digest. Exit 0 verified, 1 failed, 2 usage or missing tool.
+# Layer:        deploy — docs/ARCHITECTURE.md#6-deployment-view
+# ADRs:         none
+# Works with:   .github/workflows/release.yml (the signer whose identity this must match),
+#               deploy/helm/crb/values.yaml (the repository the chart pulls),
+#               tests/test_release_verify_image.py (pins the three agree), docs/DEPLOYMENT.md (the
+#               released image: name, signature, SBOM, §2.2), docs/SECURITY.md (supply chain, §3.7)
+# Tested by:    tests/test_release_verify_image.py
+# Touch when:   the image repository, issuer or identity pattern changes (change release.yml, the
+#               Helm values and this script together — the test enforces it); cosign's CLI changes.
 set -euo pipefail
 
 IMAGE="${CRB_IMAGE_REPOSITORY:-ghcr.io/jita81/commit-replay-bench}"

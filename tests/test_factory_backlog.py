@@ -1,4 +1,24 @@
-"""crb.factory.backlog — frozen, hashed, evolvable-only-through-the-front-door."""
+"""crb.factory.backlog — frozen, hashed, evolvable-only-through-the-front-door.
+
+Navigation
+----------
+What it is:   The factory backlog's test suite — frozen, hashed, evolvable only through the front
+              door.
+What it does: Pins item validation and round trip, that freezing computes a hash ``verify``
+              holds, that the hash is canonical and order-sensitive, that a tampered frozen
+              record fails, that an empty or malformed backlog cannot freeze, that an evolution
+              supersedes without mutating the frozen record (refusals included) and chains with
+              tamper detection, and that ordering is topological with cycle detection.
+How:          In-memory ``BacklogItem`` / ``Backlog`` objects; JSON round trips.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/factory/backlog.py (under test), src/crb/factory/readiness.py (the DoR
+              gate over items), src/crb/factory/loop.py (consumes the frozen backlog),
+              tests/test_factory_loop.py
+Tested by:    tests/test_factory_backlog.py
+Touch when:   an item field is added (it is hashed — pin the round trip and that old frozen
+              records still verify); an evolution kind is added.
+"""
 
 from __future__ import annotations
 

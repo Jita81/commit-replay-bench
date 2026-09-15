@@ -1,6 +1,27 @@
 """The test-only ``fixture_gold`` builder: opt-in registration, unmistakable identity,
 zero spend, and an end-to-end build the core grader marks clean (the instrument
-check the browser walkthrough relies on)."""
+check the browser walkthrough relies on).
+
+Navigation
+----------
+What it is:   The test-only ``fixture_gold`` builder's test suite — opt-in registration,
+              unmistakable identity, zero spend, and a build the grader marks clean.
+What it does: Pins that exactly one switch (``CRB_ENABLE_FIXTURE_BUILDER``) registers it and
+              that without the switch it is absent, that its identity is forced (it can never
+              masquerade as a real model), that it overlays only non-test files, that build then
+              grade is clean on all four belts, and that blind mode works without test paths —
+              the instrument check the browser walkthrough relies on.
+How:          Re-imports ``crb.builders`` under the switch; ``trial`` + ``feat_task`` from
+              ``conftest.py``; the real ``grade``.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/fixture_gold.py (under test), src/crb/builders/__init__.py (the
+              registry and the switch), scripts/walkthrough.sh (sets the switch for the
+              hermetic tier), ui/e2e/walkthrough/05-replay-fake.spec.ts (the replay it drives)
+Tested by:    tests/test_builders_fixture_gold.py
+Touch when:   never for a new repository; only if the registry's opt-in mechanism changes (the
+              "absent without the switch" case is the production guarantee).
+"""
 
 from __future__ import annotations
 

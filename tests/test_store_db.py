@@ -1,6 +1,27 @@
 """crb.store.db — engine construction, ``init_db`` idempotence, the append-only triggers.
 
 Parametrised over SQLite and (when ``CRB_TEST_POSTGRES_URL`` is set) PostgreSQL.
+
+Navigation
+----------
+What it is:   The store engine's test suite — engine construction, ``init_db`` idempotence and
+              the append-only triggers, on SQLite and PostgreSQL.
+What it does: Pins the database-URL precedence, that a SQLite engine creates the parent
+              directory and sets the pragmas (WAL, foreign keys), that ``init_db`` creates every
+              model table and is idempotent (as is installing the triggers alone), that foreign
+              keys are enforced, that ``session_scope`` commits and rolls back, and that every
+              append-only table refuses UPDATE and DELETE while still accepting INSERT — and that
+              the ordinary tables (``repos`` / ``runs`` / ``users``) stay mutable.
+How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
+              per append-only table is inserted and then attacked.
+Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/store/db.py (under test), src/crb/store/models.py (``APPEND_ONLY_TABLES``
+              and the rows), tests/conftest_store.py (the backends), tests/test_store_migrate.py
+              (the same triggers through Alembic), docs/SECURITY.md (evidence integrity, §3.5)
+Tested by:    tests/test_store_db.py
+Touch when:   a table is added (decide whether it is append-only — if so, add it to
+              ``APPEND_ONLY_TABLES`` and ``_one_row`` here, and a migration); a pragma changes.
 """
 
 from __future__ import annotations

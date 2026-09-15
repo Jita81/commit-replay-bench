@@ -6,6 +6,23 @@ chart's ``appVersion`` is what an operator sees in ``helm list``. One number, th
 readers — pinned here so a bump that misses one is a failing test, not a refused tag
 or a mislabelled deployment. ``APPARATUS_VERSION`` is deliberately NOT tied to it: it
 moves only when the meaning of a verdict changes (ADR-0011 → 2.2).
+
+Navigation
+----------
+What it is:   The version-drift test suite — one package version in three places.
+What it does: Pins that ``pyproject.toml``, ``crb.core.version.__version__`` and the Helm chart's
+              ``appVersion`` are the same string, that ``release.yml``'s tag rule would accept
+              ``v<version>``, that ``APPARATUS_VERSION`` is deliberately independent of it, and
+              that the CHANGELOG has a dated header for the current version.
+How:          Reads the files as text / TOML; no subprocess.
+Layer:        tests — docs/ARCHITECTURE.md#74-versioning
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/core/version.py (the source of truth), deploy/helm/crb/Chart.yaml
+              (``appVersion``), .github/workflows/release.yml (the tag rule),
+              docs/EVIDENCE-AND-CLAIMS.md (the apparatus stamp — why the two versions differ, §4)
+Tested by:    tests/test_version_consistency.py
+Touch when:   releasing (bump all three and the CHANGELOG together — this suite is the
+              checklist); never tie ``APPARATUS_VERSION`` to the package version.
 """
 
 from __future__ import annotations

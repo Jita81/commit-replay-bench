@@ -6,6 +6,33 @@ The seed's latest ``controls.report`` (see ``fixtures/server_seed``) PASSED with
 the numbers alone routes ``human`` (``controls_escapes``) on the product surface.
 Tests that need another controls state append a NEWER ``controls.report`` event
 (the latest wins) or remove them all (``unmeasured``); nothing bypasses the rule.
+
+Navigation
+----------
+What it is:   ``/capability-map``, ``/routes`` and ``/failure-split``'s test suite — honest
+              cells, the one rule, the controls verdict, the failure split, the sign-off overlay.
+What it does: Pins that only measured cells appear, that the seed's controls verdict is on the
+              map and its one escape routes the 40-row cell ``human``, that deliver needs a
+              passed majority-constructible zero-escape report (a failed gate routes every cell
+              human; thin or unmeasured controls withhold deliver; a finished controls run with
+              counts but no event still counts), the thin cell calibrates, the legacy cell is a
+              separate apparatus, summaries with and without a profile, projections, the empty
+              repo and 404, that a sign-off lifts the tier, that a false-Q1 row inserted around
+              the ledger REFUSES the map, that a viewer reads, the per-cell route decisions
+              following the latest verdict, the failure split per repo and run, and that
+              sighted and blind rows are never pooled.
+How:          ``make_env`` over the seed; newer ``controls.report`` events appended through the
+              ORM where a different controls state is needed (the latest wins).
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/server/routes/capability.py (under test), src/crb/core/capability.py
+              (the map), src/crb/core/routing.py (the rule), tests/fixtures/server_seed.py (the
+              seed and its load-bearing counts), tests/fixtures/signoff_seed.py (the overlay
+              case), src/crb/server/schemas_capability.py (the response shapes), docs/API.md
+Tested by:    tests/test_server_routes_capability.py
+Touch when:   a field is added to a cell response (the schema, this suite and
+              ui/src/api/types.ts together); the controls clause changes (mirror
+              tests/test_routing.py).
 """
 
 from __future__ import annotations
@@ -65,6 +92,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
 

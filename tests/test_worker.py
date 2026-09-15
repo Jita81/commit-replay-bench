@@ -1,6 +1,40 @@
 """The worker end to end on a temp SQLite database and the ``pyrepo`` fixture: every
 run kind, cancellation between tasks, fail-closed sandbox, stale-claim resume, the
-``--once`` entrypoint and the polling loop. No docker, no network, no model."""
+``--once`` entrypoint and the polling loop. No docker, no network, no model.
+
+Navigation
+----------
+What it is:   The worker's test suite, end to end on a temp SQLite database and the ``pyrepo``
+              fixture — every run kind, cancellation, the fail-closed sandbox, stale-claim
+              resume, ``--once`` and the polling loop.
+What it does: Pins a replay run end to end (and blind), not-clean plus the ladder climb, that
+              consecutive provider outages stop the run (263 of the first 534 rows on the dev
+              stack were usage-limit refusals), the ladder from builder columns and task ids,
+              replay without a ladder failing closed, gold-dirty tasks excluded by default,
+              cancel between tasks keeping partial counts and cancel-before-start honoured, mine
+              upserting tasks and rejecting an unknown pool, probe and setup runs (auto-setup
+              first when not ready; failing closed when it fails; runners bound to the repo's
+              ``env_dir``), docker unavailable or without an image failing closed, oracle and
+              controls runs recording their events (a violation failing the gate), unknown repo
+              / kind failing cleanly, stale-claim reclaim with event seq resuming, the heartbeat
+              thread, ``run_forever`` processing then stopping and surviving a broken iteration,
+              stage routing, the ``--once`` entrypoint and settings from args / env, and that a
+              run where every attempt errors is ``failed`` not ``succeeded``.
+How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
+              / ``noop`` builder around ``Worker.run_one``; no docker, no network, no model.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/server/worker.py (under test), src/crb/store/jobs.py (the queue),
+              src/crb/builders/adapter.py (the build path), src/crb/core/oracle/controls.py
+              (the controls run kind), tests/fixtures/pyrepo.py, tests/test_worker_label.py,
+              tests/test_worker_clone.py and tests/test_worker_budget_ladder.py (the same
+              harness for one kind or seam each)
+Tested by:    tests/test_worker.py
+Touch when:   a run kind is added (``stage_for``, a run case here and the queue's
+              ``RUN_KINDS``); a new way for a run to end must decide ``failed`` vs
+              ``succeeded`` honestly.
+"""
 
 from __future__ import annotations
 
@@ -132,6 +166,10 @@ def _register(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class Harness:
+    """One worker over a fresh SQLite store under ``tmp_path``: the queue, fast poll / heartbeat
+    settings, and helpers to seed the repo and tasks, enqueue a run and read back rows and events.
+    """
+
     def __init__(self, tmp_path: Path, pyrepo: pr.PyRepo) -> None:
         self.home = tmp_path / "home"
         self.url = f"sqlite:///{self.home / 'crb.db'}"
@@ -151,6 +189,9 @@ class Harness:
         self.worker = Worker(self.settings, engine=engine)
 
     def add_repo(self, **overrides: Any) -> None:
+        """Register ``pyrepo`` as the fixture repository (its config, with
+        ``overrides`` merged in).
+        """
         cfg = self.pyrepo.config.to_dict()
         cfg.update(overrides)
         with self.factory() as s:
@@ -166,6 +207,7 @@ class Harness:
             s.commit()
 
     def add_task(self, task: TaskSpec) -> None:
+        """Upsert one mined task into the ``tasks`` table."""
         with self.factory() as s:
             s.merge(
                 Task(
@@ -185,6 +227,9 @@ class Harness:
             s.commit()
 
     def enqueue(self, kind: str, **fields: Any) -> Run:
+        """Enqueue a run of ``kind`` for the fixture repository; replay / blind runs default to the
+        fake builder's ladder unless ``fields`` say otherwise.
+        """
         base: dict[str, Any] = {"repo": pr.REPO_NAME, "kind": kind, "actor": "tester"}
         if kind in {"replay", "blind"} and "ladder_json" not in fields and "builder" not in fields:
             base["ladder_json"] = ["fake:m@p"]
@@ -192,18 +237,22 @@ class Harness:
         return self.queue.enqueue(Run(**base))
 
     def run_one(self) -> Run:
+        """Claim and process exactly one run; a ``None`` (nothing queued) is a test error."""
         run = self.worker.run_once()
         assert run is not None
         return run
 
     def events(self, run_id: str) -> list[Any]:
+        """Every event of ``run_id`` in ``seq`` order."""
         return read_events(self.factory, run_id, limit=5000)
 
     def tasks(self) -> list[Task]:
+        """Every task row, ordered by id."""
         with self.factory() as s:
             return list(s.execute(select(Task).order_by(Task.task_id)).scalars().all())
 
     def repo_row(self) -> Repo:
+        """The fixture repository's ``repos`` row as the worker left it."""
         with self.factory() as s:
             row = s.get(Repo, pr.REPO_NAME)
             assert row is not None
@@ -212,6 +261,7 @@ class Harness:
 
 @pytest.fixture
 def h(tmp_path: Path, pyrepo: pr.PyRepo) -> Harness:
+    """The harness with the repo registered and its one mined task on file."""
     harness = Harness(tmp_path, pyrepo)
     harness.add_repo()
     harness.add_task(pyrepo.feat_task())
@@ -533,6 +583,7 @@ class ScriptedSetupRunner(PytestRunner):
 
 @pytest.fixture
 def scripted(monkeypatch: pytest.MonkeyPatch) -> type[ScriptedSetupRunner]:
+    """Reset ``ScriptedSetupRunner``'s script and install it as the worker's ``get_runner``."""
     ScriptedSetupRunner.ready = [True]
     ScriptedSetupRunner.outcome = SetupResult(True, (), "scripted", 0.0)
     ScriptedSetupRunner.calls = []

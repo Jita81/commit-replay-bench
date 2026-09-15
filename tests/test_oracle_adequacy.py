@@ -4,6 +4,25 @@ Locks the routing consequence: a CLEAN grade auto-ships only on a strong oracle;
 weak/unscoreable oracle routes a real pass to human review; false-Q1 = 0 is
 orthogonal; and the adequacy floor is the SAME number as the routing policy's
 ``min_oracle_strength`` (the two gates cannot drift apart silently).
+
+Navigation
+----------
+What it is:   The oracle-adequacy gate's test suite (``crb.core.oracle.adequacy``).
+What it does: Pins the strength bands, that only a strong oracle licenses auto-ship, that a
+              clean grade on a weak or unscoreable oracle routes to human review (the five
+              confirmatory tasks that passed on a weak oracle upstream), that the adequacy floor
+              is the SAME number as ``RoutingPolicy.min_oracle_strength`` (derived, so the two
+              gates cannot drift), that inverted or out-of-range floors are refused, and that the
+              policy is frozen.
+How:          Pure calls over the module's constants and ``AdequacyPolicy``; no runner, no git.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/oracle/adequacy.py (under test), src/crb/core/routing.py (the
+              policy the floor is derived from), src/crb/core/oracle/mutation.py (the strength
+              number the gate consumes), tests/test_oracle_mutation.py
+Tested by:    tests/test_oracle_adequacy.py
+Touch when:   the routing policy's oracle floor moves (an ADR; the derivation case here fails
+              first); a band is added.
 """
 
 from __future__ import annotations

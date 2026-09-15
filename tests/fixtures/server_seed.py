@@ -20,6 +20,37 @@ Every native row carries a real :class:`~crb.core.evidence.EvidencePack` whose g
 matches the row's belts, stored via ``DbLedger.store_pack``; ``append_many`` chains
 the rows. Nothing here bypasses the write path — tests that need a false-Q1 row
 insert one deliberately with the ORM and say so.
+
+Navigation
+----------
+What it is:   The seeded store behind every domain-route test: a small synthetic ledger written
+              THROUGH ``DbLedger``, users per role, and a logged-in test client.
+What it does: Seeds repo ``alpha`` with a deliver cell (40 rows, 38 clean), a thin cell, a
+              legacy census-style cell, one harness-error row, a run per status plus oracle,
+              controls and probe runs with their events, and repo ``beta`` as the honest-empty
+              case; every native row carries a real evidence pack whose grade matches its belts.
+              Nothing bypasses the write path — a test that needs a false-Q1 row inserts one
+              with the ORM deliberately and says so. ``assert_rbac`` pins 401/403/allowed per
+              role ladder.
+How:          ``make_env(role)`` builds settings and a SQLite file under ``tmp_path``, creates the
+              app, seeds through ``DbLedger.append_many`` / ``store_pack``, inserts users with a
+              cached argon2 hash and logs the client in; ``Env`` wraps GET/POST/PUT with the CSRF
+              header.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/store/ledger.py (the write path every row goes through),
+              src/crb/server/app.py (``create_app``), src/crb/server/auth.py (``hash_password``,
+              the role ladder), tests/fixtures/signoff_seed.py (layers the sign-off helpers on
+              top), tests/test_server_routes_capability.py and tests/test_server_routes_runs.py
+              (typical consumers)
+Tested by:    tests/test_server_routes_capability.py, tests/test_server_routes_runs.py,
+              tests/test_server_routes_signoffs.py, tests/test_server_routes_ledger.py (every
+              ``test_server_routes_*`` module)
+Touch when:   a route needs a run status, event kind or cell shape the seed lacks (add it here
+              and update every count the route tests assert — the seed's numbers are load-bearing:
+              Wilson lower ≈ 0.835 on the deliver cell, n = 4 on the thin one); a column is added
+              to ``GradeRow`` (``_result`` must still produce a pack whose grade matches).
 """
 
 from __future__ import annotations
@@ -102,6 +133,7 @@ RUN_IDS: dict[str, str] = {
 
 
 def task_id(i: int) -> str:
+    """A stable 40-hex task id for seed task ``i`` (sha1 of ``task-<i>``)."""
     return hashlib.sha1(f"task-{i}".encode()).hexdigest()
 
 
@@ -147,6 +179,10 @@ def _result(task: TaskSpec, *, clean: bool, error: str = "") -> GradeResult:
 
 @dataclass
 class SeedInfo:
+    """What ``seed`` created: the tasks, the chained rows, their pack hashes, the run ids per
+    status and the three cells the route tests address by name.
+    """
+
     tasks: list[TaskSpec]
     rows: list[GradeRow] = field(default_factory=list)
     pack_hashes: list[str] = field(default_factory=list)
@@ -157,9 +193,11 @@ class SeedInfo:
 
     @property
     def succeeded_rows(self) -> list[GradeRow]:
+        """The rows of the ``succeeded`` run (T3's ``r1`` red + ``r2`` clean among them)."""
         return [r for r in self.rows if r.run_id == RUN_IDS["succeeded"]]
 
     def task(self, i: int) -> TaskSpec:
+        """Seed task ``i`` (1-based, the numbering the docstring uses)."""
         return self.tasks[i - 1]
 
 
@@ -169,12 +207,16 @@ class SeedInfo:
 
 
 def make_factory(tmp_path: Path, name: str = "routes.db") -> sessionmaker[Session]:
+    """A fresh SQLite database under ``tmp_path`` with every table and trigger installed."""
     engine = make_engine(f"sqlite:///{tmp_path / name}")
     init_db(engine)
     return make_session_factory(engine)
 
 
 def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
+    """Dev ``Settings`` on ``tmp_path``: local sandbox, a fixed 40-char secret, the bootstrap admin
+    the seed's users are keyed on; ``overrides`` win.
+    """
     base: dict[str, Any] = {
         "env": "dev",
         "home": tmp_path,
@@ -214,6 +256,9 @@ def add_users(factory: sessionmaker[Session]) -> None:
 
 
 def login(client: TestClient, role: str = "admin") -> None:
+    """Log the client in as ``role`` and copy the CSRF cookie into the header every mutating
+    request needs.
+    """
     name = USERS[role]
     password = ROOT_PW if role == "admin" else USER_PW
     r = client.post(f"{API_PREFIX}/auth/login", json={"username": name, "password": password})
@@ -222,6 +267,7 @@ def login(client: TestClient, role: str = "admin") -> None:
 
 
 def logout(client: TestClient) -> None:
+    """Log out and forget the cookies and the CSRF header (the next call is anonymous)."""
     client.post(f"{API_PREFIX}/auth/logout")
     client.cookies.clear()
     client.headers.pop("X-CSRF-Token", None)
@@ -251,6 +297,9 @@ def _event(trace: str, seq: int, stage: str, action: str, **kw: Any) -> Event:
 
 
 def seed(factory: sessionmaker[Session], *, clone_path: str = "") -> SeedInfo:
+    """Populate ``factory`` with the store the docstring describes and return the ``SeedInfo``;
+    ``clone_path`` sets ``alpha``'s clone (empty = never cloned).
+    """
     tasks = [
         _task(1, "bug.fix", "S"),
         _task(2, "bug.fix", "S"),
@@ -696,18 +745,25 @@ def _events(tasks: list[TaskSpec]) -> list[Event]:
 
 @dataclass
 class Env:
+    """One seeded, logged-in test environment: the client, the session factory, the seed and the
+    settings the app was built with.
+    """
+
     client: TestClient
     factory: sessionmaker[Session]
     info: SeedInfo
     settings: Settings
 
     def get(self, path: str, **kw: Any) -> Any:
+        """``GET`` under the API prefix."""
         return self.client.get(f"{API_PREFIX}{path}", **kw)
 
     def post(self, path: str, **kw: Any) -> Any:
+        """``POST`` under the API prefix (the CSRF header was set at login)."""
         return self.client.post(f"{API_PREFIX}{path}", **kw)
 
     def put(self, path: str, **kw: Any) -> Any:
+        """``PUT`` under the API prefix (the CSRF header was set at login)."""
         return self.client.put(f"{API_PREFIX}{path}", **kw)
 
 
@@ -725,6 +781,9 @@ def make_env(tmp_path: Path, *, clone_path: str = "", role: str | None = "admin"
 
 
 def envelope(r: Any) -> dict[str, Any]:
+    """The error envelope of a non-2xx response — asserts the ``{"error": {code, message,
+    detail}}`` shape and returns the inner object.
+    """
     body = r.json()
     assert set(body) == {"error"}, body
     assert set(body["error"]) == {"code", "message", "detail"}

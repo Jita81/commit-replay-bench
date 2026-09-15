@@ -1,6 +1,31 @@
 """Authentication: local login, sessions, CSRF, rate limit, OIDC (faked provider), users.
 
 No network: the OIDC provider is a fake injected through ``create_app(oidc_client=...)``.
+
+Navigation
+----------
+What it is:   The authentication test suite — local login, sessions, CSRF, the login rate
+              limit, OIDC against a faked provider, and user management.
+What it does: Pins password hashing (short passwords refused), session round trip / tamper /
+              expiry, the rate limiter window, ``safe_next_path`` (open redirects neutralised),
+              role mapping; that login sets the cookies, a wrong password is a 401 envelope, five
+              failures rate-limit, local auth can be disabled, a deactivated user's session
+              stops working, logout clears; that a POST without the CSRF header is refused while
+              GET is never checked and an anonymous POST is 401 not CSRF; that a viewer cannot
+              manage users, the last-admin guard, and user lists never include hashes; and the
+              OIDC flow — state + PKCE cookie on start, a mapped user on callback, state mismatch
+              and provider errors rejected, exchange failure as 502.
+How:          ``create_app(oidc_client=FakeOidc(...))`` — no network; a ``TestClient`` per
+              settings variant.
+Layer:        tests — docs/ARCHITECTURE.md#71-security
+ADRs:         none
+Works with:   src/crb/server/auth.py (under test), src/crb/server/routes/auth.py (the login /
+              logout / users routes), src/crb/server/settings.py (``OidcSettings``),
+              src/crb/store/models.py (the ``users`` table), docs/SECURITY.md (authentication
+              and authorisation, §3.4), docs/DEPLOYMENT.md (Entra ID → ``CRB_OIDC__*``, §4.1)
+Tested by:    tests/test_server_auth.py
+Touch when:   a role is added to the ladder (the map and the RBAC matrices in every route
+              suite); the OIDC claims mapping changes; never so that a mutating route skips CSRF.
 """
 
 from __future__ import annotations
@@ -46,6 +71,9 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
+    """Dev ``Settings`` on ``tmp_path`` with the bootstrap admin; ``overrides`` win (``oidc``,
+    cookie security, ``local_auth``).
+    """
     base: dict[str, Any] = {
         "env": "dev",
         "home": tmp_path,
@@ -60,16 +88,19 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
+    """Default dev settings for one test."""
     return make_settings(tmp_path)
 
 
 @pytest.fixture
 def client(settings: Settings) -> Iterator[TestClient]:
+    """A started app behind a ``TestClient``."""
     with TestClient(create_app(settings)) as c:
         yield c
 
 
 def login(c: TestClient, username: str = "root", password: str = ROOT_PW) -> Any:
+    """Log ``c`` in as ``username`` and set the CSRF header."""
     r = c.post(f"{API_PREFIX}/auth/login", json={"username": username, "password": password})
     assert r.status_code == 200, r.text
     c.headers["X-CSRF-Token"] = c.cookies[CSRF_COOKIE]
@@ -77,6 +108,7 @@ def login(c: TestClient, username: str = "root", password: str = ROOT_PW) -> Any
 
 
 def err(r: Any) -> dict[str, Any]:
+    """The error envelope of a response, shape asserted."""
     body = r.json()
     assert set(body) == {"error"} and set(body["error"]) == {"code", "message", "detail"}
     return dict(body["error"])
@@ -86,6 +118,10 @@ def err(r: Any) -> dict[str, Any]:
 
 
 class TestPrimitives:
+    """The building blocks below the routes: hashing, sessions, the limiter, redirects, role
+    mapping.
+    """
+
     def test_password_hash_roundtrip(self) -> None:
         h = hash_password(USER_PW)
         assert h.startswith("$argon2id$")
@@ -381,6 +417,7 @@ class FakeOidc:
     def authorization_url(
         self, *, state: str, nonce: str, code_verifier: str, redirect_uri: str
     ) -> str:
+        """Record the PKCE material and answer a canned provider URL."""
         self.starts.append(
             {
                 "state": state,
@@ -397,6 +434,7 @@ class FakeOidc:
     def exchange(
         self, *, code: str, code_verifier: str, nonce: str, redirect_uri: str
     ) -> Mapping[str, Any]:
+        """Answer the canned claims for any code (the provider is trusted by construction here)."""
         self.exchanges.append(
             {
                 "code": code,
@@ -423,6 +461,9 @@ OIDC_SETTINGS: dict[str, Any] = {
 
 @pytest.fixture
 def oidc_app(tmp_path: Path) -> tuple[Any, FakeOidc]:
+    """An app with OIDC configured against ``FakeOidc``; returns both so a test can read what the
+    provider was handed.
+    """
     fake = FakeOidc(
         {
             "sub": "entra-oid-123",

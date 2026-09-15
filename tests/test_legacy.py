@@ -7,6 +7,28 @@ Two layers:
 * the REAL census under ``~/.expansion-bench`` (skipped when absent), asserting
   the headline facts the product boots with: 1,071 rows, 0 rejections,
   false-Q1 = 0, 706 v3-legacy / 365 v4.
+
+Navigation
+----------
+What it is:   The importers' test suite — the census and the benchmark ledger.
+What it does: Pins, on an inline synthetic census with one row per shape (legacy v3, v4, blind,
+              disqualified, error, a duplicate line), that every shape imports and passes the
+              invariants, that a v3 row never invents belt 4, that the pack hash is the canonical
+              hash of the imported envelope, determinism, chaining, that an unknown task is
+              skipped with an event and a false-Q1 census row cannot be imported; that an
+              ``AggregateRow`` is not a ``GradeRow``; and, on the real census when present, the
+              headline facts (1,071 rows, 0 rejections, false-Q1 = 0, 706 v3 / 365 v4).
+How:          ``write_census`` writes the three census files under ``tmp_path``; the real-census
+              cases skip unless ``~/.expansion-bench`` exists.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/core/legacy.py (under test), src/crb/core/ledger.py (the rows and the
+              belt sets), tests/test_census_gate.py (the same importer over the shipped census
+              in CI), docs/EVIDENCE-AND-CLAIMS.md (the legacy-belt caveat, §5),
+              docs/REPRODUCING-THE-CENSUS.md
+Tested by:    tests/test_legacy.py
+Touch when:   the census format gains a field (a synthetic row per shape here — the real data
+              must not change); never to make an import more lenient.
 """
 
 from __future__ import annotations
@@ -215,6 +237,7 @@ def write_census(root: Path, rows: tuple[dict[str, object], ...] = ROWS) -> tupl
 
 @pytest.fixture
 def census(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """The synthetic census files (``configs.json``, ``<repo>_tasks.json``, ``grades.jsonl``)."""
     return write_census(tmp_path)
 
 

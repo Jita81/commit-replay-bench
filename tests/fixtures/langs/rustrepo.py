@@ -12,6 +12,25 @@ Layout::
 
 Cargo's target scope is the integration-test *binary* (``tests/sub.rs`` →
 ``--test sub``); the belt is the whole ``cargo test``.
+
+Navigation
+----------
+What it is:   The Rust fixture: cargo package ``calc`` with a lib, a unit test and integration
+              tests, lockfile committed.
+What it does: Builds the two-commit shape for the cargo runner where the feat commit MODIFIES
+              ``src/lib.rs`` (``pub mod sub;``) as well as adding ``src/sub.rs`` and
+              ``tests/sub.rs``; the committed ``Cargo.lock`` keeps a build from dirtying the
+              worktree.
+How:          ``two_commit_repo`` over inline Rust sources; ``config`` returns a ``RepoConfig``
+              whose target scope is the integration-test binary (``--test sub``).
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   tests/fixtures/langs/__init__.py (the shape),
+              src/crb/core/runners/cargo_runner.py (the runner under test),
+              tests/test_runners_cargo.py and tests/test_oracle_mutation_text.py (the consumers)
+Tested by:    tests/test_runners_cargo.py, tests/test_oracle_mutation_text.py, tests/test_grade.py
+Touch when:   the cargo runner's scope mapping changes; a Rust test needs a workspace member or a
+              dev-dependency in the parent (use ``extra``).
 """
 
 from __future__ import annotations
@@ -84,6 +103,9 @@ def build(tmp_path: Path, *, extra: Mapping[str, str] | None = None) -> tuple[Pa
 
 
 def config(belt_scope: str | tuple[str, ...] = BELT_BARE) -> RepoConfig:
+    """The ``RepoConfig`` for the fixture: the ``cargo`` runner, offline (the lockfile is committed
+    and there are no dependencies to fetch).
+    """
     return RepoConfig(
         name="rustfix",
         language=Language.RUST,

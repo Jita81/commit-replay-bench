@@ -11,6 +11,25 @@ this one needs nothing but the interpreter + pytest inside the image.
 Pytest ids are ``tests/test_sub.py::test_sub`` etc. The runner's declared
 writable path (``.pytest_scratch``) is git-ignored so a sandboxed run leaves
 ``git status`` clean.
+
+Navigation
+----------
+What it is:   The minimal Python fixture for the docker sandbox tests.
+What it does: Builds the two-commit shape with nothing but the interpreter and pytest required
+              inside the image, with the runner's writable scratch path git-ignored so a
+              sandboxed run leaves the worktree clean. Kept apart from ``fixtures/pyrepo.py``,
+              which belongs to the core suite and carries opt-in commits the sandbox never needs.
+How:          ``two_commit_repo`` over ``pkg/`` sources and ``tests/`` files; ``config`` returns a
+              ``RepoConfig`` for the pytest runner with the requested belt scope.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   tests/test_sandbox_docker.py and tests/test_builders_container_docker.py (the
+              consumers), tests/fixtures/langs/__init__.py (the shape),
+              src/crb/core/execution.py (``DockerExecutor`` runs it), tests/conftest_langs.py
+              (``ensure_docker_image``)
+Tested by:    tests/test_sandbox_docker.py, tests/test_builders_container_docker.py
+Touch when:   the sandbox image changes what it carries (the fixture must still need nothing but
+              pytest); never for a new repository.
 """
 
 from __future__ import annotations
@@ -69,6 +88,9 @@ def build(tmp_path: Path, *, extra: Mapping[str, str] | None = None) -> tuple[Pa
 def config(
     belt_scope: str | tuple[str, ...] = BELT_BARE, *, runner_opts: Mapping[str, Any] | None = None
 ) -> RepoConfig:
+    """The ``RepoConfig`` for the fixture: the ``pytest`` runner over ``pkg/`` + ``tests/``;
+    ``runner_opts`` is passed through untouched (the default is empty: the image's own pytest).
+    """
     return RepoConfig(
         name="pyfix-min",
         language=Language.PYTHON,

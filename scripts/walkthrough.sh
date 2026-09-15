@@ -34,6 +34,35 @@
 #   CRB_E2E_OUTPUT_DIR=…  Playwright traces/screenshots dir (default <tmp>/test-results)
 #
 # Exit code is Playwright's. Server/worker log tails are printed on failure.
+#
+# Navigation
+# ----------
+# What it is:   The browser-walkthrough driver: boots a FRESH crb stack in a temporary
+#               ``CRB_HOME`` and runs the Playwright suite against it, then tears it down.
+# What it does: Tier 1 (default) is hermetic — a padded ``fixtures.pyrepo`` served as a bare
+#               ``file://`` remote, the test-only ``fixture_gold`` builder, the venv's own pytest;
+#               tier 2 (``CRB_E2E_PUBLIC`` / ``CRB_E2E_BUILDER``) reuses the same specs against real
+#               repositories and a real model. It refuses to run when ``CRB_HOME`` or
+#               ``CRB_DATABASE_URL`` is already set and never binds port 8000, so it cannot touch an
+#               operator's live stack.
+# How:          Refuse-if-configured → build ``ui/dist`` if stale → build and bare-clone the
+#               fixture → export a fresh env (secret, admin, local sandbox, dev switches) →
+#               ``crb migrate`` → ``crb serve`` + ``crb worker`` on a free port → wait for
+#               ``/health`` → export the ``CRB_E2E_*`` contract → ``npx playwright test``; the
+#               trap stops only the two PIDs it started and removes only its own temp dir (kept
+#               on failure or ``CRB_E2E_KEEP=1``).
+# Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+# ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+# Works with:   ui/e2e/walkthrough/README.md (the tiers and the spec list),
+#               ui/playwright.walkthrough.config.ts (the config it runs), tests/fixtures/pyrepo.py
+#               (the fixture it pads), src/crb/builders/fixture_gold.py (the builder it enables),
+#               src/crb/cli/main.py (``migrate`` / ``serve`` / ``worker``), .github/workflows/ci.yml
+#               (the ``walkthrough`` job)
+# Tested by:    ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
+#               (the suite it drives; the script itself has no unit test — CI runs it end to end)
+# Touch when:   a spec needs another ``CRB_E2E_*`` variable (export it in step 4 and document it in
+#               the README); the server or worker CLI flags change; never to inherit an existing
+#               home, database or port.
 
 set -euo pipefail
 

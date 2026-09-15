@@ -11,6 +11,32 @@ Locked-in guarantees: kill/escape detection, seed-free determinism (two runs
 byte-identical), boundedness (``max_mutants`` truncates a stable prefix), mutants
 NEVER touch test files, the source is restored byte-exact even on exception, a RED
 baseline / harness error is never a strength number, and the provenance stamp.
+
+Navigation
+----------
+What it is:   The mutation oracle-strength scorer's test suite (``crb.core.oracle.mutation``) on
+              the Python AST mutators.
+What it does: Pins, on the fixture's lopsided oracle, that the strong ``is_admin`` oracle kills
+              every mutant and the weak ``discount`` oracle lets the untested branch escape;
+              confinement to changed lines; seed-free determinism (two runs byte-identical);
+              boundedness (``max_mutants`` truncates a stable prefix); that mutants never touch
+              test files and the source is restored byte-exact even when the harness raises; that
+              a RED baseline, a harness error or no mutants is ``unscoreable`` never a number; a
+              timeout counts as a kill; the seven-operator set and its hash; the provenance
+              stamp; the ``.pyc`` mtime regression on sequential scores; and that the number is
+              exactly what routing consumes.
+How:          A GOLD-state workspace on ``fixtures.oracle_repo`` → ``score_task`` with a real
+              ``PytestRunner`` + ``LocalExecutor``; ``_StubRunner`` scripts verdicts for the
+              error paths.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0009-text-level-mutators.md, docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/oracle/mutation.py (under test), src/crb/core/oracle/mutant.py (the
+              Python operators), tests/fixtures/oracle_repo.py (the ``mut`` commit and its line
+              spans), src/crb/core/oracle/adequacy.py (the consumer of the number),
+              tests/test_oracle_mutation_text.py (the text mutators for the other languages)
+Tested by:    tests/test_oracle_mutation.py
+Touch when:   a Python operator is added (the operator-set case and its hash change — an
+              apparatus consequence); the scoring rule for timeouts or errors changes (ADR).
 """
 
 from __future__ import annotations
@@ -45,16 +71,19 @@ TEST_PATH = "tests/test_mod2.py"
 # --- fixtures ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def fixture_repo(tmp_path_factory):
+    """The oracle fixture repository, built once for the module."""
     return build_controls_repo(tmp_path_factory.mktemp("mutrepo"))
 
 
 @pytest.fixture(scope="module")
 def scratch(tmp_path_factory) -> Path:
+    """One scratch directory for the module's miner run and the gold workspace."""
     return tmp_path_factory.mktemp("scratch")
 
 
 @pytest.fixture(scope="module")
 def task(fixture_repo, scratch):
+    """The ``mut`` task (``mod2.py`` + its lopsided test) through the REAL miner path."""
     return make_task(fixture_repo, fixture_repo.mut, (SRC_PATH,), (TEST_PATH,), scratch)
 
 
@@ -70,6 +99,7 @@ def gold_ws(fixture_repo, task, scratch):
 
 @pytest.fixture(scope="module")
 def harness():
+    """The real instrument as keyword arguments: config, ``PytestRunner`` and ``LocalExecutor``."""
     config = fixture_config()
     return {"config": config, "runner": PytestRunner(config), "executor": LocalExecutor()}
 
@@ -82,11 +112,15 @@ def _score(ws, task, harness, lines, **kw) -> ms.CommitOracleScore:
 
 @pytest.fixture(scope="module")
 def strong(gold_ws, task, harness):
+    """The score confined to ``is_admin``'s lines — the STRONG oracle (every mutant dies)."""
     return _score(gold_ws, task, harness, MUT_IS_ADMIN_LINES)
 
 
 @pytest.fixture(scope="module")
 def weak(gold_ws, task, harness):
+    """The score confined to ``discount``'s lines — the WEAK oracle (the
+    untested branch escapes).
+    """
     return _score(gold_ws, task, harness, MUT_DISCOUNT_LINES)
 
 

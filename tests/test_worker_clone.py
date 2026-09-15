@@ -2,7 +2,31 @@
 ``<home>/repos/<name>``, persisted on the row, ``repo.clone.start`` / ``repo.clone.done``
 on the run's trace, credentials never in an event or an error, policy-refused sources
 fail the run closed, and a second run reuses the clone. Also: ``params.builder_config``
-reaches the builder as constructor overrides and is stamped into the apparatus."""
+reaches the builder as constructor overrides and is stamped into the apparatus.
+
+Navigation
+----------
+What it is:   The worker's clone-on-first-run test suite (W3-B) and ``params.builder_config``
+              reaching the builder.
+What it does: Pins that a URL-registered repo is cloned into ``<home>/repos/<name>`` on its first
+              run with the path persisted and ``repo.clone.start`` / ``repo.clone.done`` on the
+              trace, that an unusable clone path with a URL is re-cloned, that a policy-refused
+              URL fails the run closed, that no URL and no clone keeps the old errors, that
+              credentials in the URL never reach events or errors; and that ``builder_config``
+              reaches the builder as constructor overrides and is stamped into the apparatus
+              (absent means none), that bare rung labels mean the run's own builder / model and
+              fail closed without a model, and that explicit labels mix with bare ones.
+How:          ``fixtures.remote.bare_remote`` over ``pyrepo`` with the developer switch;
+              ``RecordingBuilder`` captures its constructor kwargs; ``test_worker``'s harness.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/server/worker.py (under test), src/crb/core/git.py (``clone_repo`` and
+              the policy), tests/fixtures/remote.py, tests/test_server_routes_w3b.py (the API's
+              half), tests/test_git_clone.py (the policy's own suite), tests/test_worker.py
+Tested by:    tests/test_worker_clone.py
+Touch when:   the clone destination or the URL policy changes (mirror the route and CLI suites);
+              a builder gains a config key the worker must pass through.
+"""
 
 from __future__ import annotations
 
@@ -23,15 +47,18 @@ from test_worker import FakeBuilder, Harness
 
 @pytest.fixture
 def remote(pyrepo: pr.PyRepo, tmp_path: Path) -> str:
+    """A bare ``file://`` remote of ``pyrepo`` (each case sets the developer switch itself)."""
     return bare_remote(pyrepo.path, tmp_path / "remote.git")
 
 
 @pytest.fixture
 def h(tmp_path: Path, pyrepo: pr.PyRepo) -> Harness:
+    """An EMPTY worker harness (no repo registered — the cases register URL repos themselves)."""
     return Harness(tmp_path, pyrepo)
 
 
 def add_url_repo(h: Harness, url: str, *, clone_path: str = "") -> None:
+    """Register the fixture repository by ``url`` with the given (possibly empty) ``clone_path``."""
     cfg = h.pyrepo.config.to_dict()
     cfg["path"] = clone_path
     cfg["url"] = url
@@ -161,6 +188,9 @@ class RecordingBuilder(FakeBuilder):
 
 @pytest.fixture
 def hr(tmp_path: Path, pyrepo: pr.PyRepo, monkeypatch: pytest.MonkeyPatch) -> Harness:
+    """The harness with the repo and task on file and ``RecordingBuilder`` registered as
+    ``recording`` (its ``seen`` list reset).
+    """
     monkeypatch.setitem(builders_pkg._REGISTRY, "recording", RecordingBuilder)
     RecordingBuilder.seen = []
     harness = Harness(tmp_path, pyrepo)

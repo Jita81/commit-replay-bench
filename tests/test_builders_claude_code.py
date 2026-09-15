@@ -1,6 +1,35 @@
 """The Claude Code adapter: headless argv, stream-json parsing (turns / tool uses / usage /
 cost / structured claim), post-hoc tamper + archaeology detection, and an end-to-end
-build (fake transport performs the edit) the core grader marks clean."""
+build (fake transport performs the edit) the core grader marks clean.
+
+Navigation
+----------
+What it is:   The Claude Code adapter's test suite — headless argv, stream-json parsing, auth
+              modes and the token sources, post-hoc tamper and archaeology detection, and an
+              end-to-end build the core grader marks clean.
+What it does: Pins that the argv is headless, tool-restricted and uses the skill's model ids,
+              that a blind prompt has no test paths, that the environment is minimal and the key
+              comes only from the environment (``api_key``) or from nothing at all (``cli`` mode:
+              the operator's own login, never forwarded); the token-source precedence (env >
+              secrets file > CLI login; an insecure secrets file fails closed), ``verify_login``
+              killing at the first 401 retry, ``auth_status`` naming the source; that usage falls
+              back to summed messages and priced cost; that tampering is detected post hoc and
+              the grader disqualifies; that archaeology or network in the transcript is a
+              violation; wall-clock timeout, missing result, max turns, auth failure and a
+              missing binary as recorded outcomes. The ``live`` cases spend real tokens.
+How:          ``FakeSpawn`` replays canned stream-json lines and optionally edits the worktree
+              like the real CLI; a throwaway ``CRB_HOME`` for the secrets cases;
+              ``fixtures.builders_repo`` for the build + grade.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/claude_code.py (under test), src/crb/builders/base.py (the
+              contract and guards), src/crb/core/secrets_file.py (the token store),
+              tests/fixtures/builders_repo.py (the parent + task), tests/test_cli_doctor.py (the
+              same probe behind ``crb doctor``), docs/SECURITY.md (credentials, §3.3)
+Tested by:    tests/test_builders_claude_code.py
+Touch when:   the CLI's stream-json shape or flags change (a fake-transport case on the new
+              shape); an auth mode or token source is added (precedence and fail-closed cases).
+"""
 
 from __future__ import annotations
 
@@ -31,6 +60,7 @@ from builders_repo import FIXED_CALC, make_fixture  # noqa: E402
 
 
 def ev_init(model: str = "claude-opus-5") -> str:
+    """One stream-json ``system/init`` line as the CLI emits it (model + tool list)."""
     return json.dumps(
         {
             "type": "system",
@@ -44,6 +74,9 @@ def ev_init(model: str = "claude-opus-5") -> str:
 
 
 def ev_assistant(*blocks: dict[str, Any], tin: int = 100, tout: int = 30, cached: int = 0) -> str:
+    """One ``assistant`` line carrying ``blocks`` and a usage record (input / output / cached
+    tokens).
+    """
     return json.dumps(
         {
             "type": "assistant",
@@ -62,14 +95,17 @@ def ev_assistant(*blocks: dict[str, Any], tin: int = 100, tout: int = 30, cached
 
 
 def text(t: str) -> dict[str, Any]:
+    """A text content block for ``ev_assistant``."""
     return {"type": "text", "text": t}
 
 
 def tool_use(name: str, **inp: Any) -> dict[str, Any]:
+    """A ``tool_use`` content block for ``ev_assistant`` (one tool call the parser counts)."""
     return {"type": "tool_use", "id": f"tu_{name}", "name": name, "input": inp}
 
 
 def ev_user(n: int = 1) -> str:
+    """One ``user`` line carrying ``n`` tool results."""
     return json.dumps(
         {
             "type": "user",
@@ -93,6 +129,9 @@ def ev_result(
     result: str = "",
     denials: list[dict[str, Any]] | None = None,
 ) -> str:
+    """The terminal ``result`` line: subtype, error flag, turns, cost and usage as the CLI reports
+    them.
+    """
     ev: dict[str, Any] = {
         "type": "result",
         "subtype": subtype,
@@ -131,6 +170,8 @@ GOOD_RUN = [
 
 
 class FakeHandle:
+    """The spawned process as the adapter sees it: an iterator of stdout lines and a ``kill``."""
+
     def __init__(
         self, lines: list[str], *, returncode: int = 0, timed_out: bool = False, stderr: str = ""
     ) -> None:
@@ -463,6 +504,7 @@ def test_insecure_secrets_file_makes_a_cli_build_a_model_error(
 
 
 def ev_api_retry(status: int = 401) -> str:
+    """One ``system/api_retry`` line — the shape an auth failure surfaces as before any result."""
     return json.dumps(
         {
             "type": "system",
@@ -594,6 +636,10 @@ exit 3
 
 @pytest.fixture
 def fake_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[bool], Path]:
+    """Install a fake ``claude`` first on PATH whose ``auth status`` answers ``logged_in``; returns
+    the factory so a test can flip the answer.
+    """
+
     def make(logged_in: bool) -> Path:
         bindir = tmp_path / "fakebin"
         bindir.mkdir(exist_ok=True)

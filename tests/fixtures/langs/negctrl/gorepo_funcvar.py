@@ -13,6 +13,25 @@ Layout::
 
 Parent + ``scale_test.go`` overlaid → ``TestScale`` fails on an assertion (RED,
 attributed); gold → GREEN with no new failures.
+
+Navigation
+----------
+What it is:   The Go fixture whose feat commit changes a package-level function variable.
+What it does: Gives the Go ``env_poison`` control its vector: ``var Scale = func…`` is the one
+              thing an ``init()`` in a new file can re-assign, so all seven controls are
+              constructible on it (the base ``gorepo`` reaches 6/7). Parent + ``scale_test.go``
+              is RED on an assertion, so the failure is attributed, not a build error.
+How:          ``two_commit_repo`` over inline Go sources (``calc`` with ``Scale``, ``util`` as the
+              adjacent package for belt 3); ``config`` returns a ``RepoConfig`` with the requested
+              belt scope.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0010-polyglot-negative-controls.md
+Works with:   src/crb/core/oracle/controls_go.py (the transforms exercised on it),
+              tests/test_oracle_controls_go.py (the consumer), tests/fixtures/langs/gorepo.py (the
+              base fixture it varies), tests/fixtures/langs/__init__.py (the shape)
+Tested by:    tests/test_oracle_controls_go.py
+Touch when:   the Go ``env_poison`` transform gains another vector (a method value, an
+              interface) — add the unit here and pin the verdict in the matrix test.
 """
 
 from __future__ import annotations
@@ -74,8 +93,12 @@ _FEAT = {
 
 
 def build(tmp_path: Path) -> tuple[Path, str]:
+    """The two-commit fixture under ``tmp_path / "gorepo-funcvar"``; returns
+    ``(root, feat_sha)``.
+    """
     return two_commit_repo(Path(tmp_path) / "gorepo-funcvar", _INITIAL, _FEAT)
 
 
 def config(belt_scope: str | tuple[str, ...] = BELT_BARE) -> RepoConfig:
+    """The ``RepoConfig`` for the fixture (the ``go`` runner; same shape as ``gorepo.config``)."""
     return RepoConfig(name="gofuncvar", language=Language.GO, runner="go", belt_scope=belt_scope)

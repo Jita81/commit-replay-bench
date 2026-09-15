@@ -1,7 +1,26 @@
 """crb.core.run — the orchestrator grades under the same worktree-integrity pre-flight
 as the CLI (independent review pass, 2026-09-14, finding 1(b): ``run_task`` graded a
 worktree whose builder had committed the poison ``clean``; the CLI pinned HEAD, the
-run path did not)."""
+run path did not).
+
+Navigation
+----------
+What it is:   The orchestrator's regression suite for the worktree-integrity pre-flight
+              (independent review pass 2026-09-14, finding 1(b)).
+What it does: Pins that ``run_task`` disqualifies a worktree whose builder committed the poison
+              or hid it in ``info/exclude`` — the CLI pinned HEAD, the run path did not — and
+              that an honest gold still grades clean under the same pre-flight.
+How:          A ``RunSpec`` over ``pyrepo`` with a ``BuildAttempt`` that performs the edit; the
+              ledger row is read back and the chain verified.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/core/run.py (under test), src/crb/core/workspace.py
+              (``enforce_integrity``), tests/test_builders_adapter.py (the full ``run`` end to
+              end), tests/test_grade.py (the same findings at the grader)
+Tested by:    tests/test_run.py
+Touch when:   a new integrity violation is added to the workspace (mirror the case here so the
+              run path and the CLI stay in step).
+"""
 
 from __future__ import annotations
 

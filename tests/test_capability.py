@@ -10,6 +10,29 @@ test_benchmark_ledger pareto+best_config) onto crb types. Every verdict here is
 * cheapest+fastest pick — Pareto over PASSING configs only; false-Q1 excluded first;
 * TAC is volume-weighted over the repo's real change profile;
 * the REAL census ledger: false-Q1 = 0 everywhere, no deliver claim under n=10.
+
+Navigation
+----------
+What it is:   The capability map's test suite — honest cells, config pick, change profile and
+              the total automation coverage (TAC).
+What it does: Pins that an unmeasured cell is ``not_yet_measured`` (never a fabricated row), that
+              every verdict is ``crb.core.routing.route`` applied unchanged, that σ is advisory,
+              that disqualified and gold-dirty rows leave the denominator, that legacy belt sets
+              are a separate apparatus, the cheapest-then-fastest config pick over PASSING configs
+              only, that TAC is volume-weighted over the repository's real change profile, the
+              failure split next to the point, and — on the real census ledger when present —
+              false-Q1 = 0 everywhere with no deliver claim under n = 10.
+How:          Synthetic ``GradeRow`` lists → ``build_capability_map`` and friends; one case
+              histograms a tiny git repository; the census case imports ``data/`` inline.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/core/capability.py (under test), src/crb/core/routing.py (the verdicts),
+              src/crb/core/ledger.py (``CELL_FIELDS`` — the projection basis), src/crb/core/spec.py
+              (``classify_commit`` / ``size_tier`` for the profile), tests/test_forecast.py (the
+              forecast built on the map), tests/test_server_routes_capability.py (the map served)
+Tested by:    tests/test_capability.py
+Touch when:   a cell field is added (``CELL_FIELDS`` and every projection here); the config pick
+              gains a criterion; the profile classifier changes.
 """
 
 from __future__ import annotations

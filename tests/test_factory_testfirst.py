@@ -1,4 +1,26 @@
-"""crb.factory.testfirst — a test that is green at base is refused; RED is proven, hashed."""
+"""crb.factory.testfirst — a test that is green at base is refused; RED is proven, hashed.
+
+Navigation
+----------
+What it is:   The factory test-first step's test suite — a test that is green at base is refused;
+              RED is proven and hashed.
+What it does: Pins authored-test validation and hash, case- and space-insensitive identity
+              checks, that the worktree at HEAD has no commit parent, that ``prove_red`` records
+              the failing ids, the hash and the base, that green-at-base is refused, that a
+              non-test path or a malformed oracle is refused, that a timeout or an unattributed
+              failure fails closed, that a ``RedProof`` needs failing ids, and that an author
+              runs in a disposable worktree and stamps its identity.
+How:          ``Workspace`` at ``pyrepo``'s HEAD with the real ``PytestRunner`` /
+              ``LocalExecutor``; ``_Author`` is a scripted test author.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/factory/testfirst.py (under test), src/crb/core/runners/base.py (the
+              RED run), src/crb/core/workspace.py (the disposable worktree),
+              src/crb/factory/build.py (stages the proof), tests/test_factory_build.py
+Tested by:    tests/test_factory_testfirst.py
+Touch when:   a runner other than pytest is used by the factory (a RED-proof case on its
+              output); the identity rule changes.
+"""
 
 from __future__ import annotations
 
@@ -143,6 +165,8 @@ def test_red_proof_needs_failing_ids() -> None:
 
 
 class _Author:
+    """A scripted test author writing a fixed file; records the workspace it was handed."""
+
     name = "author"
     model = "m1"
     provider = "fake"

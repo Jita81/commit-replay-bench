@@ -13,6 +13,26 @@ Layout::
     calc/sub_test.go       TestSub        /
 
 Go's ``is_test`` is suffix-based (``*_test.go``), so no prefixes are configured.
+
+Navigation
+----------
+What it is:   The Go fixture: module ``example.com/m`` with package ``calc`` and a sibling
+              package ``util``.
+What it does: Builds the two-commit shape for the ``go test -json`` runner; the sibling package
+              lets belt 3 be shown failing on its own because Go's target scope is a whole
+              package (a same-package regression shows in belt 2 instead). ``build(extra=…)``
+              lets a test commit a lint config on the parent.
+How:          ``two_commit_repo`` over inline Go sources; ``config`` returns a ``RepoConfig`` with
+              suffix-based test detection (``*_test.go``) and the requested belt scope.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0010-polyglot-negative-controls.md
+Works with:   tests/fixtures/langs/__init__.py (the shape), src/crb/core/runners/go_runner.py
+              (the runner under test), tests/test_runners_go.py, tests/test_oracle_controls_go.py
+              and tests/test_lint.py (the consumers), tests/fixtures/langs/negctrl/gorepo_funcvar.py
+              (the variant whose feat commit changes an existing unit)
+Tested by:    tests/test_runners_go.py, tests/test_oracle_controls_go.py, tests/test_grade.py
+Touch when:   the Go runner's scope or parse rules change in a way the fixture cannot exercise;
+              a test needs another package or file in the parent (use ``extra``).
 """
 
 from __future__ import annotations
@@ -81,4 +101,5 @@ def build(tmp_path: Path, *, extra: Mapping[str, str] | None = None) -> tuple[Pa
 
 
 def config(belt_scope: str | tuple[str, ...] = BELT_BARE) -> RepoConfig:
+    """The ``RepoConfig`` for the fixture: the ``go`` runner with suffix-based test detection."""
     return RepoConfig(name="gofix", language=Language.GO, runner="go", belt_scope=belt_scope)

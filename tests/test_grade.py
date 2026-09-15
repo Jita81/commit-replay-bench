@@ -4,6 +4,36 @@ Every test here runs the actual ``PytestRunner`` under the actual ``LocalExecuto
 the belts are judged by pytest's own exit code and short summary, never by a stub.
 Stubs are used only to inject harness *failures* (timeouts, exceptions) that a
 healthy fixture cannot produce on its own.
+
+Navigation
+----------
+What it is:   The grader's test suite — the belts judged on real pytest runs against the fixture
+              repository, never a stub verdict.
+What it does: Pins the ``GradeResult`` invariant (a clean result cannot carry a failed belt, a
+              disqualification or an error — ``FalseQ1Violation``), one case per belt on the
+              ``apply_*`` edits, blind mode's pre-overlay belt 0, harness errors and timeouts as
+              non-passes, redaction of run tails, and the test-infrastructure and worktree-
+              integrity disqualifications — including the incidents that motivated them: belt 1c
+              (2026-09-14), the ``env_poison`` shape that escaped 3/7 on click, and the sign-off
+              findings 1(a)–1(c) of the 2026-09-14 independent review (``info/exclude``, a commit
+              inside the worktree, ``--skip-worktree``). The polyglot cases (JavaScript, Go, JVM,
+              Rust) run only with the toolchain on PATH.
+How:          ``trial`` + ``feat_task`` from ``conftest.py`` → an ``apply_*`` edit →
+              ``grade.grade`` with the real ``PytestRunner`` / ``LocalExecutor``; stubbed runners
+              are used only to inject failures a healthy fixture cannot produce.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/grade.py (under test), tests/fixtures/pyrepo.py (the edits per belt),
+              src/crb/core/workspace.py (integrity and ``touched_files``),
+              src/crb/core/test_infra.py (belt 1's infrastructure table), tests/conftest.py (the
+              fixtures), tests/fixtures/langs/noderepo.py and tests/fixtures/langs/gorepo.py (the
+              polyglot infrastructure cases)
+Tested by:    tests/test_grade.py
+Touch when:   a belt is added or its meaning changes (one case per belt here, an ADR and an
+              apparatus bump); a new test-infrastructure file is added to the table (a
+              disqualification case here and a positive/negative pair in
+              tests/test_test_infra.py); a new way to hide a change from git is found (an
+              integrity case here and in tests/test_workspace.py).
 """
 
 from __future__ import annotations
