@@ -95,6 +95,8 @@ class CapabilityCellSplitOut(CapabilityCellOut):
     n_lint: int = 0
     n_lint_evaluated: int = 0
     n_outage: int = 0
+    #: distinct tasks behind ``n`` (attempts) — 16 rows on 4 commits is a statement about 4 commits
+    n_tasks: int = 0
     model_n: int
     model_point: float | None
     model_ci_low: float

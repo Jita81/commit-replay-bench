@@ -203,6 +203,7 @@ def cell_out(c: CapabilityCell) -> CapabilityCellSplitOut:
         n_protocol=s.n_protocol,
         n_harness=s.n_harness,
         n_outage=s.n_outage,
+        n_tasks=s.n_tasks,
         n_disqualified=s.n_disqualified,
         n_lint=s.n_lint,
         n_lint_evaluated=s.n_lint_evaluated,

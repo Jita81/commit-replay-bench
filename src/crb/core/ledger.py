@@ -1056,6 +1056,10 @@ class CellStats:
     n_protocol: int = 0
     n_harness: int = 0
     n_outage: int = 0  # provider outages: outside n, reported so a reader sees the gap
+    #: DISTINCT tasks among the eligible rows. ``n`` counts attempts: a cell of 16 rows on
+    #: 4 commits is a statement about 4 commits — the clustering EVIDENCE-AND-CLAIMS §3
+    #: forbids hiding (decider pass 2, 2026-09-15). Shown next to ``n`` everywhere.
+    n_tasks: int = 0
     model_n: int = 0
     model_point: float = 0.0
     model_ci: Interval = field(default_factory=lambda: Interval(0.0, 1.0))
@@ -1076,6 +1080,7 @@ class CellStats:
         return {
             **self.cell.to_dict(),
             "n": self.n,
+            "n_tasks": self.n_tasks,
             "clean": self.clean,
             "disqualified": self.disqualified,
             "errors": self.errors,
@@ -1142,6 +1147,7 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         n_protocol=split.protocol,
         n_harness=split.harness,
         n_outage=split.outage,
+        n_tasks=len({r.task_id for r in eligible if r.task_id}),
         model_n=split.model_n,
         model_point=split.model_point,
         model_ci=split.model_ci,

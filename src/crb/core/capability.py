@@ -286,6 +286,11 @@ class CapabilityCell:
         return self.stats.n_outage if self.stats is not None else 0
 
     @property
+    def n_tasks(self) -> int:
+        """Distinct tasks behind ``n`` — the clustering a reader must see next to the rate."""
+        return self.stats.n_tasks if self.stats is not None else 0
+
+    @property
     def n_disqualified(self) -> int:
         return self.stats.n_disqualified if self.stats is not None else 0
 
@@ -349,6 +354,7 @@ class CapabilityCell:
             },
             "model_n": self.model_n,
             "model_point": None if self.model_point is None else round(self.model_point, 4),
+            "n_tasks": self.n_tasks,
         }
 
 

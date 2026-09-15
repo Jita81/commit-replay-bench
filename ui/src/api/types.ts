@@ -745,6 +745,8 @@ export interface CapabilityCell {
   provider?: string
   builder?: string
   n: number
+  /** Distinct tasks behind `n` (attempts): 16 rows on 4 commits is a statement about 4 commits. */
+  n_tasks?: number
   clean: number
   point: number
   ci_low: number

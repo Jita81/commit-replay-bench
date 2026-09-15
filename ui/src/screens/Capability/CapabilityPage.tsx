@@ -194,6 +194,7 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
         )}
         <div className="flex flex-wrap gap-3">
           <StatTile label="Pass rate" value={fmtPct(cell.point)} n={cell.n} ci={{ low: cell.ci_low, high: cell.ci_high }} apparatus={`all rows: ${fmtInt(cell.clean)} clean of ${fmtInt(cell.n)} eligible · Wilson 95% · the rate that routes`} data-testid="tile-point" />
+          <StatTile label="Distinct tasks" value={cell.n_tasks == null ? '—' : fmtInt(cell.n_tasks)} n={cell.n} apparatus="n counts attempts; this is the number of commits behind them — the clustering the rate hides" tone={cell.n_tasks != null && cell.n_tasks < 5 ? 'amber' : undefined} data-testid="tile-n-tasks" />
           {cell.failure_split && (
             <StatTile
               label="Model rate (fair attempts)"

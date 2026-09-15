@@ -653,6 +653,7 @@ def _observed(
     strength = resolve_oracle_strength(cell, oracle_strength=oracle.strength)
     return {
         "n": cell.n,
+        "n_tasks": cell.n_tasks,
         "point": None if s is None else round(s.point, 4),
         "ci_low": None if s is None else round(s.ci.low, 4),
         "false_q1": cell.false_q1,
@@ -920,6 +921,7 @@ def preview_signoff(
         evidence=SignoffPreviewEvidence(
             measured=cell.measured,
             n=cell.n,
+            n_tasks=cell.n_tasks,
             clean=0 if s is None else s.clean,
             point=None if s is None else round(s.point, 4),
             ci_low=None if s is None else round(s.ci.low, 4),

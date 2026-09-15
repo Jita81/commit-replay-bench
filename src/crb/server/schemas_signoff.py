@@ -189,6 +189,8 @@ class SignoffPreviewEvidence(BaseModel):
 
     measured: bool
     n: int
+    #: distinct tasks behind ``n`` — the clustering an approver must see (16 rows on 4 commits)
+    n_tasks: int = 0
     clean: int
     point: float | None
     ci_low: float | None
