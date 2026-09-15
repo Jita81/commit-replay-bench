@@ -129,6 +129,22 @@ Branches: `reboot/v2` is the integration branch for the reboot; feature branches
 merge; the adversarial verify pass (re-run the full suite on the merged tree) before each
 release tag.
 
+## Pull requests and third-party review (CodeRabbit)
+
+From 2026-09-15 every change lands through a pull request into `reboot/v2` (and
+`reboot/v2` into `main` for a release). **CodeRabbit** is attached to the repository and
+reviews every PR automatically under `.coderabbit.yaml`, which carries per-package
+instructions written from this product's own invariants (stdlib-only core, false-Q1 at
+write, append-only stores, never-weaken-a-test, the header standard, the claims policy).
+Its role is the independent reviewer's: to notice what the tests do not cover and say so on
+the PR. Its verdict is **advisory to the humans who merge** — it is never read by the grader,
+the routing rule or the sign-off policy (a model's opinion of a model's work is not evidence:
+EVIDENCE-AND-CLAIMS §2). Address every finding in the PR (fix, or reply with the reason and
+the evidence); `@coderabbitai review` re-runs it after a push, `@coderabbitai resolve` closes
+addressed threads. The same reviewer sees the factory's own PRs when a client repository has
+it attached — the third-party check on manufactured work that the factory's mechanical
+reviewer cannot provide.
+
 ## Documentation
 
 - Every number in the docs carries its tag and its method (see EVIDENCE-AND-CLAIMS).
