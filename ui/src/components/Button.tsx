@@ -1,3 +1,25 @@
+/**
+ * Buttons — one class set for <button>, <Link> and <a>, so every action renders identically.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The button primitives: `Button`, `LinkButton` (router link), `AnchorButton`
+ *               (plain anchor, for API download URLs) and the shared `buttonClasses`.
+ * What it does: Four variants (filled / outlined / ghost / danger) and two sizes with a ≥40 px
+ *               hit target at `md`, a visible focus ring from the global styles, and
+ *               `type="button"` by default so a button inside a form never submits it by
+ *               accident.
+ * How:          `buttonClasses(variant, size)` composes the Tailwind classes; each wrapper
+ *               spreads the rest of its props onto the native element.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/index.css (the tokens and the focus ring), ui/src/components/Dialog.tsx
+ *               (close button), ui/src/components/ErrorState.tsx (retry),
+ *               ui/src/screens/Ledger/LedgerPage.tsx (`AnchorButton` for the export URLs)
+ * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe on every screen), and
+ *               every screen test that clicks a button by role
+ * Touch when:   a variant or size is added; never for a new repository.
+ */
 import type { ButtonHTMLAttributes, AnchorHTMLAttributes } from 'react'
 import { Link, type LinkProps } from 'react-router'
 
@@ -27,6 +49,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize
 }
 
+/** A `<button>`; `type="button"` unless told otherwise, so a button inside a form does not submit it. */
 export function Button({ variant = 'outlined', size = 'md', className = '', type = 'button', ...rest }: ButtonProps) {
   return <button type={type} className={`${buttonClasses(variant, size)} ${className}`} {...rest} />
 }
@@ -36,6 +59,7 @@ interface LinkButtonProps extends LinkProps {
   size?: ButtonSize
 }
 
+/** A router `<Link>` styled as a button (in-app navigation that reads as an action). */
 export function LinkButton({ variant = 'outlined', size = 'md', className = '', ...rest }: LinkButtonProps) {
   return <Link className={`${buttonClasses(variant, size)} ${className}`} {...rest} />
 }

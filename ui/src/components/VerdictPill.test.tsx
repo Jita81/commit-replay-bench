@@ -1,3 +1,21 @@
+/**
+ * ui/src/components/VerdictPill.tsx — every route has a label, a glyph and a tone; absence is never a colour.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Component tests for `VerdictPill`.
+ * What it does: Pins, for each of the five routes and NOT_YET_MEASURED, the label, glyph, tone
+ *               class and accessible sentence; that NOT_YET_MEASURED is a dashed muted outline
+ *               with no status colour; that `null` renders as NOT_YET_MEASURED (no fabricated
+ *               verdict); and that the routing reason is appended to the accessible label.
+ * How:          `it.each` over the route table; assertions on `data-testid="verdict-<route>"`.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md
+ * Works with:   ui/src/components/VerdictPill.tsx (the code under test), ui/src/lib/verdict.ts
+ *               (`routeDisplay` — the table these cases mirror)
+ * Tested by:    ui/src/components/VerdictPill.test.tsx
+ * Touch when:   a route is added — add its row to the `it.each` table.
+ */
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { VerdictPill } from './VerdictPill'

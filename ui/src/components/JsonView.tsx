@@ -1,3 +1,23 @@
+/**
+ * JsonView — collapsible, typed-coloured JSON for evidence packs and structured error detail.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `JsonView` tree renderer.
+ * What it does: Shows any JSON value as a collapsible tree — objects and arrays fold with a
+ *               count, scalars are coloured by type — inside a scrollable, labelled region.
+ *               Nothing is reformatted or hidden: what the API sent is what an auditor reads.
+ * How:          A recursive `Node` with per-node `open` state; `collapseBelow` (or
+ *               `initiallyOpen`) sets the depth at which nesting starts folded.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+ * Works with:   ui/src/screens/Runs/EvidenceDrawer.tsx (the raw pack tab),
+ *               ui/src/components/ErrorState.tsx (the envelope's `detail`),
+ *               ui/src/screens/Repos/RepoConfigTab.tsx (the config as stored)
+ * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx (the pack rendered in the drawer);
+ *               the tree itself is untested — presentational, no logic beyond fold state
+ * Touch when:   never for a new repository.
+ */
 import { useState } from 'react'
 
 interface JsonViewProps {
@@ -8,10 +28,12 @@ interface JsonViewProps {
   label?: string
 }
 
+/** A plain object (not null, not an array) — decides whether a node is expandable. */
 function isObj(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
 }
 
+/** One tree node; its own `open` state, seeded from `depth < collapseBelow`. */
 function Node({ k, v, depth, collapseBelow }: { k: string | null; v: unknown; depth: number; collapseBelow: number }) {
   const [open, setOpen] = useState(depth < collapseBelow)
   const key = k !== null ? <span className="text-status-violet">{JSON.stringify(k)}</span> : null

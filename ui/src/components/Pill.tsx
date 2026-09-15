@@ -1,3 +1,26 @@
+/**
+ * Pill — the base status chip: soft fill, strong ink, a glyph, and a sentence for assistive tech.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `Pill` primitive every status, belt, route and provenance chip is built on.
+ * What it does: Renders a tone from ui/src/lib/verdict.ts with its glyph and text, so colour
+ *               never travels alone (design law 2 in ui/README.md); when `label` is given the
+ *               pill becomes `role="img"` with that full sentence and the visible text is
+ *               hidden from the tree, so a screen reader hears "Belt 2 — target green: held"
+ *               rather than "B2 target".
+ * How:          A `<span>` with `TONE_CLASSES[tone]`; `size` picks the height and type size.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/lib/verdict.ts (`Tone`, `TONE_CLASSES` and the display tables that feed
+ *               this), ui/src/components/VerdictPill.tsx, ui/src/components/BeltPills.tsx and
+ *               ui/src/components/Provenance.tsx (the specialised pills), ui/src/components/Layout.tsx
+ *               (the health pill)
+ * Tested by:    ui/src/components/VerdictPill.test.tsx, ui/src/components/BeltPills.test.tsx
+ *               (tone classes, glyphs and `aria-label` as rendered through this primitive)
+ * Touch when:   a tone is added in ui/src/lib/verdict.ts (add the token in ui/src/index.css
+ *               too); never for a new repository.
+ */
 import type { ReactNode } from 'react'
 import { TONE_CLASSES, type Tone } from '../lib/verdict'
 

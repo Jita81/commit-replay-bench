@@ -1,3 +1,23 @@
+/**
+ * ui/src/components/StatTile.tsx — a headline number never appears without its n, interval and apparatus.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Component tests for `StatTile`.
+ * What it does: Pins that a measured tile shows the value, `n =` with thousands separators,
+ *               the interval text and the apparatus line; that an unmeasured tile (`—`, n = 0)
+ *               is muted with no fabricated zero and no `NaN` / `Infinity` / `undefined`; and
+ *               that a non-finite `n` still renders without `NaN`.
+ * How:          Testing Library render; assertions on the tile's text content and the muted
+ *               class.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/components/StatTile.tsx (the code under test), ui/src/lib/format.ts
+ *               (the guards whose output is asserted)
+ * Tested by:    ui/src/components/StatTile.test.tsx
+ * Touch when:   the tile gains a line (e.g. a belt set) — assert it here so no variant can
+ *               drop it.
+ */
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { StatTile } from './StatTile'

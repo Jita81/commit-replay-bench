@@ -1,3 +1,30 @@
+/**
+ * StatTile — a headline metric that carries its evidence: value + n + interval + apparatus, always.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `StatTile` every headline number on every screen is shown in.
+ * What it does: Enforces design law 1 (ui/README.md) at the type level: there is no variant
+ *               without `n` and an apparatus line, and the value arrives already formatted so
+ *               a bare number can never reach the page. An unmeasured value (`—`, or `n` of 0 /
+ *               null) renders muted as an honest empty tile, never as a zero rate; a
+ *               non-finite `n` renders as a dash.
+ * How:          A `<dl>` of n / 95 % CI / apparatus under the value; `fmtInt` and `fmtCi` do
+ *               the guarding.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/lib/format.ts (`fmtInt`, `fmtCi`, `wilson` for a client-side interval),
+ *               ui/src/lib/verdict.ts (`TONE_TEXT` for a toned value),
+ *               ui/src/screens/Runs/RunDetailPage.tsx (a run's tiles), ui/src/screens/Capability/CapabilityPage.tsx
+ *               (coverage and false-Q1 tiles), ui/src/screens/Signoff/SignoffPage.tsx
+ *               (the evidence tiles an approver reads)
+ * Tested by:    ui/src/components/StatTile.test.tsx, ui/src/screens/Runs/RunDetailPage.test.tsx
+ *               (`tile-*` test ids), ui/e2e/walkthrough/05-replay-fake.spec.ts
+ * Touch when:   never for a new repository; the tile's anatomy changes only with
+ *               docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method.
+ * Claims:       Every number the UI shows carries its n and its method
+ *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
+ */
 import type { ReactNode } from 'react'
 import { fmtCi, fmtInt } from '../lib/format'
 import { TONE_TEXT, type Tone } from '../lib/verdict'

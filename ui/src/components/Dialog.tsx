@@ -1,3 +1,22 @@
+/**
+ * Dialog — a native <dialog> with the platform's focus trap, Esc to close and a labelled heading.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `Dialog` primitive the two "new …" forms open in.
+ * What it does: Opens and closes a native `<dialog>` from an `open` prop, keeps the heading as
+ *               its accessible name, routes Esc through `onClose`, and unmounts its content
+ *               while closed so form state resets per opening. No portal library.
+ * How:          A `useEffect` calls `showModal()` / `close()` to track `open`; jsdom has no
+ *               `showModal`, so the effect falls back to the `open` attribute there.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Repos/RepoNewDialog.tsx and ui/src/screens/Runs/RunNewDialog.tsx
+ *               (the two consumers), ui/src/components/Button.tsx (the close button)
+ * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx, ui/src/screens/Runs/RunNewDialog.test.tsx,
+ *               ui/e2e/walkthrough/02-repo-onboard.spec.ts (the real modal in Chromium)
+ * Touch when:   a third dialog needs a size or a non-modal mode; never for a new repository.
+ */
 import { useEffect, useRef, type ReactNode } from 'react'
 import { Button } from './Button'
 

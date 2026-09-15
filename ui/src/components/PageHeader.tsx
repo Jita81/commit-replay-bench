@@ -1,3 +1,22 @@
+/**
+ * PageHeader — eyebrow, the page's one h1, its purpose sentence and the actions slot.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `PageHeader` every screen opens with.
+ * What it does: Fixes the page anatomy: a small-caps eyebrow (where you are), the single `h1`
+ *               (one per page — axe checks it), a one-line purpose, and the top-right slot for
+ *               selectors and export / audit affordances (design law 10 in ui/README.md).
+ * How:          A flex `<header>`; nothing stateful.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/components/Card.tsx (the section-level counterpart with `h2`),
+ *               ui/src/components/RepoPicker.tsx (the usual occupant of the actions slot),
+ *               ui/src/screens/Runs/RunDetailPage.tsx (status pills in the purpose slot)
+ * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (one `h1` per page, axe);
+ *               rendered by every screen test
+ * Touch when:   never for a new repository.
+ */
 import type { ReactNode } from 'react'
 
 interface PageHeaderProps {
