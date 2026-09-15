@@ -40,6 +40,38 @@ stops what it started on close. Three invariants:
 
 The core stays standard-library only; docker is driven through the executor's
 ``Command`` interface so a scripted executor can exercise every branch offline.
+
+Navigation
+----------
+What it is:   The oracle's services — the ``ServiceSpec`` vocabulary (image / compose /
+              build, health, fixtures, era variants, exported environment) parsed from
+              ``runner_opts.services``, and the ``ServiceSession`` that provides them.
+What it does: Validates the declaration before anything starts; stages each variant's
+              fixtures where the container runtime can see them; starts (or adopts) one
+              instance per service, waits for health, records the image digest that
+              answered for the apparatus stamp, exports the environment the test command
+              needs, and stops what it started. A service that cannot be provided is
+              ``ServiceUnavailable`` — a sandbox failure, never a red or green test run.
+How:          ``parse_services`` → ``ServiceSession.prepare`` (every variant staged at setup)
+              → ``ensure(authored)`` selects the variant by era → ``_find_container`` (adopt)
+              / ``_evict_other_variants`` / ``_start`` (``docker run -d`` | ``compose up -d`` |
+              ``build``) → ``_wait_healthy`` (URL or command probe) → ``ServiceRecord``;
+              ``close`` / an ``atexit`` finaliser stop it.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/core/runners/base.py (owns one session per repository; binds the
+              task's authored date; merges ``env`` into the test command; stamps the
+              TestRun), src/crb/core/execution.py (every docker command is a Command through
+              the executor), src/crb/core/mine.py and src/crb/core/grade.py (pass
+              ``authored`` so the right era answers), src/crb/core/redact.py (log tails),
+              src/crb/server/worker.py (the setup run that calls ``runner.setup``, which
+              stages and starts them)
+Tested by:    tests/test_services.py, tests/test_builders_adapter.py
+Touch when:   onboarding a repository whose tests need a running service — write the
+              ``services`` block in its runner options (docs/OPERATOR.md#22-services-the-oracle-needs),
+              one variant per certificate / API era, and run ``crb repo setup``; nothing here
+              changes for that. Add a service kind or a health probe here only with a
+              scripted-executor test that exercises the fail-closed branch.
 """
 
 from __future__ import annotations
@@ -140,6 +172,7 @@ class Era:
             )
 
     def matches(self, authored: str) -> bool:
+        """Does the task's author date fall in this window?"""
         when = _parse_when(authored, what="authored")
         if self.after and when < _parse_when(self.after, what="era.after"):
             return False
@@ -383,6 +416,7 @@ class ServiceSpec:
 
     @property
     def kind(self) -> str:
+        """``image`` | ``compose`` | ``build`` — which of the three was declared."""
         return "image" if self.image else "compose" if self.compose else "build"
 
     @property
@@ -397,10 +431,12 @@ class ServiceSpec:
 
     @property
     def needs_era(self) -> bool:
+        """Does variant selection depend on the task's author date?"""
         return any(v.era is not None for v in self.variants)
 
     @property
     def host_port(self) -> str:
+        """The first published host port (what ``{port}`` in ``export`` becomes)."""
         for p in self.ports:
             m = _PORT_RE.fullmatch(p)
             if m:
@@ -450,6 +486,8 @@ class ServiceSpec:
         return variants[-1]
 
     def _merged(self, v: Variant) -> Variant:
+        """The variant with the service-wide fixtures prepended and the service-wide
+        ``generate`` as its fallback."""
         if not self.fixtures and not self.generate:
             return v
         return Variant(
@@ -477,6 +515,8 @@ class ServiceSpec:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> ServiceSpec:
+        """One ``runner_opts.services[]`` entry → spec; every validation error is
+        re-raised naming the service so the operator can find it."""
         name = str(d.get("name", "") or "")
         where = f"services[{name or '?'}]"
         try:
@@ -598,6 +638,9 @@ class ServiceRecord:
 
 @dataclass
 class _Active:
+    """A service the session currently holds: what is running, under which variant,
+    and whether this process started it (only then does ``close`` stop it)."""
+
     spec: ServiceSpec
     variant: Variant
     record: ServiceRecord
@@ -702,6 +745,8 @@ def probe_url(url: str, timeout: float = PROBE_TIMEOUT_S, insecure_tls: bool = F
 
 
 def bit_rot_hint(spec: ServiceSpec) -> str:
+    """The sentence a start failure ends with: exactly which config key to move to a
+    ref that still builds — because crb will not pick one itself."""
     if spec.kind == "build":
         assert spec.build is not None
         return (
@@ -721,6 +766,8 @@ def bit_rot_hint(spec: ServiceSpec) -> str:
 
 
 def _substitute(value: str, **subs: str) -> str:
+    """``{fixtures}`` / ``{port}`` / ``{host}`` / ``{name}`` in an ``export`` value —
+    plain replacement, no format-string evaluation of operator text."""
     for k, v in subs.items():
         value = value.replace("{" + k + "}", v)
     return value
@@ -775,6 +822,7 @@ class ServiceSession:
     # --- public --------------------------------------------------------------------
     @property
     def records(self) -> tuple[ServiceRecord, ...]:
+        """One record per active service — what a TestRun is stamped with."""
         return tuple(a.record for a in self._active.values())
 
     @property
@@ -835,6 +883,8 @@ class ServiceSession:
 
     # --- one service -----------------------------------------------------------------
     def _ensure_one(self, spec: ServiceSpec, variant: Variant) -> None:
+        """Stage → adopt a healthy instance under our name, else evict other eras,
+        start, wait for health → record. Every failure is ``ServiceUnavailable``."""
         fixtures_dir = self._stage(spec, variant)
         container_name = safe_name("crb", self.repo, spec.name, variant.name)
         compose_argv = self._compose_argv(spec, variant, fixtures_dir)
@@ -863,6 +913,7 @@ class ServiceSession:
         *,
         adopted: bool,
     ) -> None:
+        """Record the instance (image digest = the apparatus) and hold it as active."""
         digest, image = self._inspect_image(container)
         record = ServiceRecord(
             name=spec.name,
@@ -879,6 +930,10 @@ class ServiceSession:
 
     # --- staging -----------------------------------------------------------------------
     def _stage(self, spec: ServiceSpec, variant: Variant) -> Path | None:
+        """Materialise the variant's fixtures under ``state_dir/<service>/<variant>/``
+        (running ``generate`` once, marker-guarded) and return the fixtures directory;
+        ``None`` when the variant needs nothing on disk. Idempotent: fixtures are
+        rewritten from the clone every time, so a stale copy cannot survive."""
         needs = bool(variant.fixtures or variant.generate or spec.kind == "compose")
         if not needs:
             return None
@@ -926,6 +981,8 @@ class ServiceSession:
         return fixtures_dir
 
     def _mounts(self, variant: Variant, fixtures_dir: Path | None) -> list[tuple[str, str, bool]]:
+        """``(host_path, container_path, read_only)`` per fixture — the staged copy is
+        mounted at the exact container path the fixture declares."""
         if fixtures_dir is None:
             return []
         return [
@@ -935,6 +992,8 @@ class ServiceSession:
 
     # --- docker plumbing -----------------------------------------------------------------
     def _run(self, cmd: Command) -> ExecResult:
+        """Every command goes through here: the executor runs it, a missing binary
+        becomes rc 127 (a result, so the caller's error names it), and the hook sees it."""
         try:
             res = self.executor.run(cmd)
         except OSError as exc:
@@ -946,6 +1005,7 @@ class ServiceSession:
     def _docker(
         self, *args: str, timeout: int = DOCKER_CMD_TIMEOUT_S, network: bool = False
     ) -> ExecResult:
+        """``docker <args>`` in the clone."""
         return self._run(
             Command((self.docker, *args), self.clone, timeout=timeout, network=network)
         )
@@ -953,6 +1013,9 @@ class ServiceSession:
     def _compose_argv(
         self, spec: ServiceSpec, variant: Variant, fixtures_dir: Path | None
     ) -> tuple[str, ...]:
+        """The ``docker compose -p <project> -f <repo file> -f <override>`` prefix for a
+        compose service, writing the override file (mounts, env, ports, labels merged
+        into the operator's) as a side effect; ``()`` for the other kinds."""
         if spec.compose is None:
             return ()
         assert fixtures_dir is not None  # compose always stages (the override file)
@@ -1055,6 +1118,9 @@ class ServiceSession:
         compose_argv: tuple[str, ...],
         fixtures_dir: Path | None,
     ) -> str:
+        """Start the instance by kind and return its container id/name. This is the one
+        place ``network=True`` is asked for (a pull or a build needs it); the tests
+        themselves still run with none."""
         t = spec.start_timeout_s
         if spec.kind == "compose":
             assert spec.compose is not None
@@ -1116,6 +1182,8 @@ class ServiceSession:
         return name
 
     def _start_failure(self, spec: ServiceSpec, res: ExecResult, what: str) -> str:
+        """The ``ServiceUnavailable`` message: what failed, how, the bit-rot hint, and
+        the redacted output tail."""
         how = "timed out" if res.timed_out else f"rc={res.returncode}"
         return (
             f"service {spec.name!r} ({spec.ref}): {what} failed ({how}); {bit_rot_hint(spec)}\n"
@@ -1123,6 +1191,7 @@ class ServiceSession:
         )
 
     def _healthy_once(self, spec: ServiceSpec) -> bool:
+        """One health probe: the URL answers, or the command exits 0."""
         h = spec.health
         if h.url:
             return self._probe(h.url, PROBE_TIMEOUT_S, h.insecure_tls)
@@ -1132,6 +1201,9 @@ class ServiceSession:
     def _wait_healthy(
         self, spec: ServiceSpec, container: str, compose_argv: tuple[str, ...]
     ) -> None:
+        """Poll until healthy or the deadline; on the deadline keep the log tail as
+        evidence, remove the container (a half-started service must not be adopted
+        by the next process) and raise."""
         deadline = self._clock() + spec.health.timeout_s
         while True:
             if self._healthy_once(spec):
@@ -1149,6 +1221,7 @@ class ServiceSession:
         )
 
     def _logs_of(self, spec: ServiceSpec, container: str, compose_argv: tuple[str, ...]) -> str:
+        """The last ``logs_tail`` lines of the service, redacted and capped."""
         if spec.logs_tail == 0:
             return ""
         if compose_argv:
@@ -1172,6 +1245,8 @@ class ServiceSession:
         return redact_and_cap(res.combined, max_chars=SERVICE_TAIL_CHARS)
 
     def _inspect_image(self, container: str) -> tuple[str, str]:
+        """``(image digest, image reference)`` of a running container — the digest is
+        what the record cites, so "which service version" is never a guess."""
         res = self._docker("inspect", "--format", "{{.Image}}|{{.Config.Image}}", container)
         if not res.ok:
             return "", ""
@@ -1184,6 +1259,7 @@ class ServiceSession:
         )
 
     def _remove(self, spec: ServiceSpec, container: str, compose_argv: tuple[str, ...]) -> None:
+        """``compose down`` or ``docker rm -f`` — best effort, result not checked."""
         if compose_argv:
             self._run(
                 Command(
