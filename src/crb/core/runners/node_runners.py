@@ -82,7 +82,16 @@ def snapshot_to_test(path: str) -> str:
     return path
 
 
-_LOCKFILES: tuple[str, ...] = ("package-lock.json", "npm-shrinkwrap.json", "package.json")
+#: Manifest files in identity order: the first present names the era. npm honours
+#: ``yarn.lock`` as a resolution hint, so a yarn repository's era is still keyed and
+#: installed from the lockfile the maintainers committed.
+_LOCKFILES: tuple[str, ...] = (
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "package.json",
+)
 
 
 def lock_key(root: Path) -> str | None:
