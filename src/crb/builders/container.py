@@ -371,10 +371,24 @@ class SealedCheckout:
 
     # --- creation ------------------------------------------------------------------
     @classmethod
-    def create(cls, ws: Workspace, dest: Path, *, test_files: Sequence[str] = ()) -> SealedCheckout:
+    def create(
+        cls,
+        ws: Workspace,
+        dest: Path,
+        *,
+        test_files: Sequence[str] = (),
+        carry_files: Sequence[str] = (),
+    ) -> SealedCheckout:
         """Export ``ws.parent`` into ``dest`` as its own repository; overlay ``test_files``
         (their content is taken from ``ws`` — the orchestrator already overlaid the
-        commit's version there) and replicate the harness fix-ups."""
+        commit's version there) and replicate the harness fix-ups.
+
+        ``carry_files`` are the REAL worktree's current versions of source files a prior
+        attempt already changed (the pre-flight's repair call): they are committed into the
+        sealed base, so the repair builder starts from the first attempt's edits and
+        :meth:`diff_against_parent` reports only what the repair changed (CodeRabbit finding
+        on PR #3, 2026-09-15 — without this a sealed repair started from the bare parent
+        and silently discarded the first attempt)."""
         dest = Path(dest)
         if dest.exists():
             shutil.rmtree(dest, ignore_errors=True)
@@ -387,6 +401,15 @@ class SealedCheckout:
             _git(git, dest, "init", "-q", f"--template={empty}")
         _git(git, dest, "add", "-A", "-f")
         _git(git, dest, "commit", "-q", "--allow-empty", "-m", "sealed parent tree")
+        carried = [t for t in (_safe_rel(t) for t in carry_files) if t]
+        if carried:
+            for rel in carried:
+                if (ws.root / rel).is_file():
+                    cls._copy_file(ws.root / rel, dest / rel)
+                else:
+                    (dest / rel).unlink(missing_ok=True)  # the prior attempt deleted it
+            _git(git, dest, "add", "-A", "-f", "--", *carried)
+            _git(git, dest, "commit", "-q", "--allow-empty", "-m", "prior attempt's edits")
         c1 = _git(git, dest, "rev-parse", "HEAD").decode().strip()
         oracle = c1
         tests = [t for t in (_safe_rel(t) for t in test_files) if t]

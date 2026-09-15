@@ -408,13 +408,17 @@ class DockerExecutor:
         # tests only read it; a test that writes into the tree fails, never mutates it
         argv += ["--mount", f"type=bind,src={cmd.root},dst={s.workdir},readonly"]
         # Writable paths are bind-mounted rw from the (disposable) worktree so the
-        # runner can parse reports the toolchain writes there (surefire XML, …).
-        # They are created world-writable because the container runs as `user`.
+        # runner can parse reports the toolchain writes there (surefire XML, …). The
+        # container runs as `user` (nobody by default), which owns nothing on the host,
+        # so the directory must be group/other-writable for it — but never world-listable
+        # or executable beyond that: 0o733 lets the container's uid create files inside
+        # without handing every host user a readable tree (CodeRabbit on PR #3, CWE-276;
+        # the worktree itself is disposable and lives under the worker's scratch).
         for rel in cmd.writable_paths:
             host_dir = cmd.root / rel
             host_dir.mkdir(parents=True, exist_ok=True)
             with contextlib.suppress(OSError):
-                host_dir.chmod(0o777)
+                host_dir.chmod(0o733)
             inside = f"{s.workdir}/{rel}".rstrip("/")
             argv += ["--mount", f"type=bind,src={host_dir},dst={inside}"]
         for host, inside in s.extra_ro_mounts.items():

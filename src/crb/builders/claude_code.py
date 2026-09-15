@@ -647,10 +647,18 @@ class StreamStats:
                     if p.is_absolute():
                         rel = str(p.resolve().relative_to(self.guard.root))
                 except (ValueError, OSError):
+                    # outside the worktree: the CLI's deny rule stops it and nothing in the
+                    # graded tree changes — recorded as an observation (extra.refused); the
+                    # sealed posture (ADR-0012) is what makes it impossible, not this note
                     self.refused.append(f"{name} outside worktree: {path}")
                     return
-                if self.guard.check_write(rel):
-                    self.refused.append(f"{name} {rel}: {self.guard.check_write(rel)}")
+                reason = self.guard.check_write(rel)
+                if reason:
+                    # an attempted TEST-file write is a protocol breach even when the deny
+                    # rule stopped it — the attempt is what the rules forbid, as for a
+                    # refused shell command (CodeRabbit on PR #3, 2026-09-15)
+                    self.refused.append(f"{name} {rel}: {reason}")
+                    self.violations.append(f"tamper: {name} {rel}: {reason[:120]}")
 
     # --- totals ---------------------------------------------------------------
     def totals(self) -> tuple[int, int, int]:

@@ -962,6 +962,10 @@ def test_stream_stats_claim_and_write_path_inspection(tmp_path: Path) -> None:
     st.feed(ev_assistant(tool_use("Write", file_path="/etc/passwd", content="x")), keep=False)
     st.feed(ev_assistant(text("prose only")), keep=True)
     assert len(st.refused) == 2 and "immutable" in st.refused[0] and "outside" in st.refused[1]
+    # an attempted test-file write is a protocol breach even though the CLI's deny rule
+    # stopped it; a write aimed outside the worktree stays an observation (the sealed
+    # posture, not a note, is what makes it impossible)
+    assert len(st.violations) == 1 and st.violations[0].startswith("tamper: Write tests/")
     assert st.claim() == (False, "prose only")
     st.feed(ev_result(result='{"done": true, "summary": "parsed from text"}'), keep=False)
     assert st.claim() == (True, "parsed from text")

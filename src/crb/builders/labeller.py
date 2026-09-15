@@ -498,8 +498,11 @@ class ClaudeCodeLabeller:
             return fail(f"model_error: no result event (rc={rc}){': ' + tail if tail else ''}")
         tin, tout, cached = _usage_of(result)
         cost = result.get("total_cost_usd")
+        # tokens_in is the TOTAL prompt (cache reads included) — the same reading as
+        # claude_code's finish(): the meter prices `tokens_in - cached_in` as uncached
+        # (CodeRabbit on PR #3: passing `tin` alone under-reported the labelling spend)
         self.usage.add(
-            tokens_in=tin,
+            tokens_in=tin + cached,
             tokens_out=tout,
             cached_in=cached,
             cost_usd=float(cost) if isinstance(cost, int | float) else None,

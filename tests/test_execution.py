@@ -355,7 +355,9 @@ def test_docker_build_argv_network_writable_paths_extra_mounts_and_cwd(tmp_path:
     for rel in ("target", "core/target"):
         p = tmp_path / rel
         assert p.is_dir()
-        assert stat.S_IMODE(p.stat().st_mode) & 0o777 == 0o777  # world-writable for uid 65534
+        assert (
+            stat.S_IMODE(p.stat().st_mode) & 0o777 == 0o733
+        )  # writable for uid 65534, never world-listable
     assert argv[argv.index("--workdir") + 1] == "/w/core"
 
 

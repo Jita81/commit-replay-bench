@@ -29,6 +29,7 @@ Touch when:   never for a new repository; a new sink or event field lands in
 """
 
 from crb.observability.events import (
+    CallbackSink,
     Emitter,
     EventSink,
     JsonlSink,
@@ -40,6 +41,7 @@ from crb.observability.events import (
 )
 
 __all__ = [
+    "CallbackSink",
     "Emitter",
     "EventSink",
     "JsonlSink",

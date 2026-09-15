@@ -49,7 +49,6 @@ from __future__ import annotations
 
 import fnmatch
 import json
-import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -311,18 +310,14 @@ class _Tools:
             str(pattern),
             ".",
         ]
+        # through the injected executor, never a host subprocess: in the sealed posture the
+        # executor is the container, and a host `grep` would read the host's checkout — the
+        # tree the guards do not cover (CodeRabbit on PR #3, 2026-09-15)
         try:
-            proc = subprocess.run(
-                argv,
-                cwd=str(self.ws.root),
-                capture_output=True,
-                text=True,
-                timeout=15,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
+            res = self.executor.run(Command(tuple(argv), self.ws.root, timeout=15))
+        except Exception as exc:
             return f"ERROR: search failed: {type(exc).__name__}"
-        raw = [ln[2:] if ln.startswith("./") else ln for ln in proc.stdout.splitlines() if ln]
+        raw = [ln[2:] if ln.startswith("./") else ln for ln in res.stdout.splitlines() if ln]
         if not raw:
             return f"no matches for {pattern!r}"
         out = [

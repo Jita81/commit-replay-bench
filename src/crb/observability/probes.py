@@ -134,6 +134,7 @@ def aggregate(results: Iterable[ProbeResult]) -> dict[str, Any]:
         if r.status == DOWN:
             worst = DOWN
             break
-        if r.status == DEGRADED:
+        if r.status == DEGRADED or r.status not in (OK, SKIPPED):
+            # an unknown status is never "ok": fail closed to degraded (CodeRabbit on PR #3)
             worst = DEGRADED
     return {"status": worst, "probes": [r.to_dict() for r in rs]}
