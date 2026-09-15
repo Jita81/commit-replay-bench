@@ -62,7 +62,7 @@ from crb.core.routing import (
     REASON_ORACLE_WEAK,
     RoutingPolicy,
 )
-from crb.core.stats import mean
+from crb.core.stats import mean, wilson_interval
 from crb.core.version import APPARATUS_VERSION
 
 REFUSALS_SCHEMA = "crb.learn.refusals.v1"
@@ -1153,6 +1153,25 @@ class RemeasurePlan:
         }
 
 
+def rows_to_clear_bar(clean: int, n: int, policy: RoutingPolicy, *, cap: int = 200) -> int:
+    """The smallest N ≥ ``policy.min_n`` at which a cell that keeps its OBSERVED clean
+    rate would clear the routing rule's Wilson-lower bar — the number a re-measurement
+    must reach, not just ``min_n``. Three cobra/koa cells sat at 10–11/10–11 clean on
+    2.2 and still read ``calibrate: ci_low_below_bar`` (2026-09-15): at 100 % the
+    lower bound reaches 0.80 only from n = 16. A cell with no rows yet plans for the
+    rate 1.0 (the optimistic case: the honest minimum). A rate that can never clear
+    the point bar returns ``min_n`` — more rows will not help, and the plan says so
+    through the cell's ``point``."""
+    rate = (clean / n) if n else 1.0
+    if rate < policy.min_point:
+        return policy.min_n
+    for total in range(max(policy.min_n, 1), cap + 1):
+        ok = round(rate * total)
+        if ok / total >= policy.min_point and wilson_interval(ok, total).low >= policy.min_ci_low:
+            return total
+    return cap
+
+
 def remeasure_plan(
     rows: Iterable[GradeRow],
     *,
@@ -1163,7 +1182,8 @@ def remeasure_plan(
 
     Per full cell (the unit a run request targets): ``n_current`` counts eligible
     rows stamped with the current apparatus; a cell is in the plan when it has
-    stale rows and ``n_current < policy.min_n``; ``n_needed = min_n − n_current``.
+    stale rows and ``n_current`` is below the rows needed to clear the rule's bars at the
+    observed rate (:func:`rows_to_clear_bar`); ``n_needed`` is the difference.
     Cost is the cell's own mean over rows that recorded one (``cost_known``
     says whether any did). Requests are one per (repo, mode) naming the stale
     rows' task ids (oldest-first ordering is the worker's), capped by ``limit``;
@@ -1183,10 +1203,12 @@ def remeasure_plan(
         n_current = sum(1 for r in current if r.eligible)
         if not stale:
             continue
-        if n_current >= policy.min_n:
+        clean_current = sum(1 for r in current if r.eligible and r.clean)
+        target = rows_to_clear_bar(clean_current, n_current, policy)
+        if n_current >= target:
             fresh.append(cell.label)
             continue
-        n_needed = policy.min_n - n_current
+        n_needed = target - n_current
         costs = [r.cost_usd for r in group if r.cost_usd > 0 and r.cost_known]
         lats = [r.latency_s for r in group if r.latency_s > 0]
         cost_mean = mean(costs)

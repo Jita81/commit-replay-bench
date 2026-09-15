@@ -537,13 +537,15 @@ def test_remeasure_text_json_and_out(run: Run, tmp_path: Path) -> None:
     assert d["schema"] == "crb.learn.remeasure.v1" and d["rows_stale"] == 3
     (cell,) = d["cells"]
     assert cell["label"] == "replay|bug.fix|M|python|claude_code|claude-sonnet-5|anthropic"
-    assert cell["n_needed"] == 10 and cell["cost_known"]
-    assert cell["est_cost_usd"] == pytest.approx(0.4 * 10)
+    assert (
+        cell["n_needed"] == 16 and cell["cost_known"]
+    )  # the Wilson minimum at rate 1.0, not min_n
+    assert cell["est_cost_usd"] == pytest.approx(0.4 * 16)
     req = cell["requests"][0]
     assert req["repo"] == "click" and req["kind"] == "replay" and req["mode"] == "sighted"
     assert req["builder"] == "claude_code" and len(req["task_ids"]) == 3 and req["limit"] == 3
-    assert cell["requests"][1]["limit"] == 7
-    assert json.loads(plan.read_text(encoding="utf-8"))["cells"][0]["n_needed"] == 10
+    assert cell["requests"][1]["limit"] == 13  # 16 needed − 3 named stale tasks
+    assert json.loads(plan.read_text(encoding="utf-8"))["cells"][0]["n_needed"] == 16
 
 
 def test_remeasure_default_apparatus_is_the_instrument(run: Run) -> None:
@@ -554,7 +556,20 @@ def test_remeasure_default_apparatus_is_the_instrument(run: Run) -> None:
 
 
 def test_remeasure_policy_override(run: Run) -> None:
-    _, d = _json(run, ["learn", "remeasure", "--apparatus", "2.1", "--policy-json", '{"min_n": 3}'])
+    # min_n alone no longer sets the target: an unmeasured cell plans for the rows that
+    # clear the Wilson bar at rate 1.0 (16 at ci_low 0.80). Relax that bar too and the
+    # override shows through.
+    _, d = _json(
+        run,
+        [
+            "learn",
+            "remeasure",
+            "--apparatus",
+            "2.1",
+            "--policy-json",
+            '{"min_n": 3, "min_ci_low": 0.0}',
+        ],
+    )
     assert d["cells"][0]["n_needed"] == 3
 
 

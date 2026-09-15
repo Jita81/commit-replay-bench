@@ -827,14 +827,14 @@ def _stale_ledger(tmp_path: Path) -> list[GradeRow]:
             )
             for i in range(30, 38)
         ],
-        # cell C (koa): 3 stale + 10 current → up to date
+        # cell C (koa): 3 stale + 16 current at 100 % → up to date (16 clears the Wilson bar)
         *[
             _clean(task_id=f"{i:040x}", repo="koa", language="javascript", apparatus_version="2.0")
             for i in range(40, 43)
         ],
         *[
             _clean(task_id=f"{i:040x}", repo="koa", language="javascript", apparatus_version="2.1")
-            for i in range(50, 60)
+            for i in range(50, 66)
         ],
         # cell D: only current rows → not in the plan at all
         _clean(task_id="e" * 40, repo="cobra", size="M", apparatus_version="2.1"),
@@ -855,13 +855,17 @@ class TestRemeasure:
             "replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic",
         )
         a = by["replay|bug.fix|XS|go|claude_code|claude-sonnet-5|anthropic"]
-        assert (a.n_stale, a.n_current, a.n_needed) == (8, 0, 10)
+        assert (a.n_stale, a.n_current, a.n_needed) == (
+            8,
+            0,
+            16,
+        )  # unmeasured: the Wilson minimum at 1.0
         assert a.stale_versions == ("2.0",) and a.repos == ("cobra",)
         assert a.cost_usd_mean == pytest.approx((0.24 * 7 + 0.39) / 8)
-        assert a.est_cost_usd == pytest.approx(a.cost_usd_mean * 10) and a.cost_known
-        assert a.est_minutes == pytest.approx(((62 * 7 + 122) / 8) * 10 / 60)
+        assert a.est_cost_usd == pytest.approx(a.cost_usd_mean * 16) and a.cost_known
+        assert a.est_minutes == pytest.approx(((62 * 7 + 122) / 8) * 16 / 60)
         reqs = [r.to_dict() for r in a.requests]
-        # (cobra, blind): 1 known task, needs 10 → a task_ids request + a limit-only remainder
+        # (cobra, blind): 1 known task, needs 16 → a task_ids request + a limit-only remainder
         blind = [r for r in reqs if r["mode"] == "blind"]
         assert (
             blind[0]["kind"] == "blind"
@@ -870,7 +874,7 @@ class TestRemeasure:
         )
         assert (
             blind[1]["task_ids"] == []
-            and blind[1]["limit"] == 9
+            and blind[1]["limit"] == 15
             and "remainder" in blind[1]["note"]
         )
         sighted = [r for r in reqs if r["mode"] == "sighted"]
@@ -879,14 +883,15 @@ class TestRemeasure:
             and len(sighted[0]["task_ids"]) == 7
             and sighted[0]["limit"] == 7
         )
-        assert sighted[1]["limit"] == 3
+        assert sighted[1]["limit"] == 9  # 16 − 7 named stale tasks
         for r in reqs:
             assert r["repo"] == "cobra" and r["builder"] == "claude_code"
             assert r["model"] == "claude-sonnet-5" and r["provider"] == "anthropic"
         b = by["replay|bug.fix|XS|python|claude_code|claude-sonnet-5|anthropic"]
-        assert (b.n_stale, b.n_current, b.n_needed) == (5, 8, 2)
-        (req,) = b.requests
-        assert req.limit == 2 and len(req.task_ids) == 2 and req.kind == "replay"
+        assert (b.n_stale, b.n_current, b.n_needed) == (5, 8, 8)  # 8/8 clean: 16 clears the bar
+        req, rest = b.requests  # 5 named stale tasks + a limit-only remainder of 3
+        assert req.limit == 5 and len(req.task_ids) == 5 and req.kind == "replay"
+        assert rest.limit == 3 and rest.task_ids == ()
 
     def test_requests_are_valid_post_runs_bodies(self, tmp_path: Path) -> None:
         pydantic = pytest.importorskip("pydantic")
@@ -908,7 +913,7 @@ class TestRemeasure:
         )
         plan = learn.remeasure_plan(rows, current_apparatus="2.1")
         (c,) = plan.cells
-        assert not c.cost_known and c.est_cost_usd == 0.0 and c.n_needed == 10
+        assert not c.cost_known and c.est_cost_usd == 0.0 and c.n_needed == 16
         assert plan.to_dict()["summary"]["cost_known_cells"] == 0
         assert "?" in learn.render_remeasure(plan)
 
@@ -934,8 +939,9 @@ class TestRemeasure:
             _stale_ledger(tmp_path), current_apparatus="2.1", policy=RoutingPolicy(min_n=20)
         )
         by = {c.cell.label: c for c in plan.cells}
+        # koa has 16 current rows; min_n 20 outranks the Wilson minimum (16) → 4 more
         assert (
-            by["replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic"].n_needed == 10
+            by["replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic"].n_needed == 4
         )
 
     def test_deterministic(self, tmp_path: Path) -> None:
@@ -960,3 +966,17 @@ class TestRemeasure:
 def test_version_key_orders_versions_and_tolerates_legacy() -> None:
     assert learn._version_key("2.1") > learn._version_key("2.0") > learn._version_key("v3-legacy")
     assert learn._version_key("2.10") > learn._version_key("2.9")
+
+
+def test_rows_to_clear_bar_is_the_wilson_minimum_not_min_n() -> None:
+    """Three 10–11/10–11 cells read `calibrate: ci_low_below_bar` on 2.2 (2026-09-15):
+    the plan must target the rows that clear the lower bound at the observed rate."""
+    from crb.core.learn import rows_to_clear_bar
+    from crb.core.routing import DEFAULT_POLICY
+    from crb.core.stats import wilson_interval
+
+    assert rows_to_clear_bar(11, 11, DEFAULT_POLICY) == 16
+    assert wilson_interval(16, 16).low >= 0.80 and wilson_interval(15, 15).low < 0.80
+    assert rows_to_clear_bar(0, 0, DEFAULT_POLICY) == 16  # unmeasured: the optimistic minimum
+    assert rows_to_clear_bar(5, 8, DEFAULT_POLICY) == DEFAULT_POLICY.min_n  # rate below the bar
+    assert rows_to_clear_bar(11, 12, DEFAULT_POLICY) > 16
