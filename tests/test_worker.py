@@ -94,6 +94,22 @@ class FakeBuilder:
                 latency_s=0.1,
                 budget=budget,
             )
+        if self.behaviour == "multiply":
+            # the factory's fixture item: append multiply() to the calc source
+            src = workspace.root / pr.SRC
+            src.write_text(
+                src.read_text(encoding="utf-8")
+                + "\n\ndef multiply(a: int, b: int) -> int:\n    return a * b\n",
+                encoding="utf-8",
+            )
+            return BuildOutcome(
+                **base,
+                done=True,
+                stop_reason=STOP_DONE,
+                cost_usd=0.02,
+                latency_s=0.2,
+                budget=budget,
+            )
         if self.behaviour == "outage":
             return BuildOutcome(
                 **base,
@@ -789,7 +805,7 @@ def test_unknown_repo_and_kind_fail_cleanly(tmp_path: Path, pyrepo: pr.PyRepo) -
             Run(
                 id="k1",
                 repo="ghost",
-                kind="factory",
+                kind="teleport",
                 status=STATUS_QUEUED,
                 created="2020-01-01T00:00:00+00:00",
             )
@@ -988,3 +1004,83 @@ def test_run_where_every_attempt_errors_is_failed_not_succeeded(h: Harness) -> N
     assert done.counts_json["errors"] == done.counts_json["rows"] == 1
     (row,) = h.worker.ledger.rows(run_id=run.id)
     assert row.clean is False and "402" in row.error
+
+
+# --- factory (P6) ---------------------------------------------------------------------------
+
+
+def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -> None:
+    """The forward-mode loop as a run kind: a frozen backlog with an operator-authored
+    oracle → readiness → RED proof → build under the belts → (delivery refused, opt-in)
+    → mechanical review → item outcome; a process_step=factory ledger row; the evidence
+    chain under CRB_HOME/factory/<repo>/; live counts on the run."""
+    from crb.core.ledger import PROCESS_FACTORY
+    from crb.factory import evidence as fe
+    from crb.factory.backlog import KIND_CODE, BacklogItem
+    from crb.factory.testfirst import AuthoredTest
+    from crb.server.factory_state import FactoryHome
+
+    home = FactoryHome(h.home, pr.REPO_NAME)
+    item = BacklogItem(
+        id="I-1",
+        title="Add multiply to calc",
+        kind=KIND_CODE,
+        description="calc needs multiply(a, b).",
+        acceptance_criteria=("multiply(3, 4) == 12",),
+        capability_class="bug.fix",
+        size_estimate="XS",
+        structural_facts=(
+            "reproduction: `from calc import multiply` raises ImportError",
+            "expected_behaviour: calc exposes multiply(a: int, b: int) -> int",
+            "exact_value: multiply(3, 4) == 12",
+        ),
+    )
+    backlog = home.register_backlog([item], actor="tester")
+    home.save_authored(
+        {
+            "I-1": AuthoredTest(
+                "tests/test_multiply.py",
+                "from calc import multiply\n\n\ndef test_multiply():\n    assert multiply(3, 4) == 12\n",
+                "operator:tester",
+            )
+        }
+    )
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="multiply", **cfg)
+    run = h.enqueue("factory", ladder_json=["fake:m0"])
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    c = done.counts_json
+    assert (c["items"], c["done"], c["accepted"]) == (1, 1, 1) and c["by_status"] == {"accepted": 1}
+    assert c["outcomes"][0]["status"] == "accepted"
+    assert (done.progress_done, done.progress_total) == (1, 1)
+    assert done.apparatus_json["backlog_hash"] == backlog.backlog_hash
+    # the ledger row is a factory row, clean, chained
+    rows = list(h.worker.ledger.rows(run_id=run.id))
+    assert len(rows) == 1 and rows[0].process_step == PROCESS_FACTORY and rows[0].clean
+    assert rows[0].builder == "fake" and rows[0].evidence_pack_hash
+    # the evidence chain: freeze (from registration) then the loop's steps, verified
+    kinds = [e.kind for e in home.events()]
+    assert kinds[0] == fe.EV_BACKLOG_FROZEN and fe.EV_RED_PROOF in kinds and fe.EV_BUILD in kinds
+    assert (
+        fe.EV_DELIVERY_REFUSED in kinds
+        and fe.EV_VERDICT in kinds
+        and kinds[-1] == fe.EV_ITEM_OUTCOME
+    )
+    assert home.evidence().verify() == len(kinds)
+    view = home.task_views()[0]
+    assert (view.status, view.red_proof, view.build_status, view.review_verdict) == (
+        "accepted",
+        True,
+        "clean",
+        "accept",
+    )
+    # the run's StepEvents carry stage=factory and the item id
+    actions = [e.action for e in h.events(run.id) if e.stage == "factory"]
+    assert "item.start" in actions and "review.verdict" in actions and "item.done" in actions
+    # no backlog → the run fails closed with the instruction
+    home2 = FactoryHome(h.home, "nope")
+    assert home2.load_backlog() is None
+    (home.dir / "backlog.json").unlink()
+    h.enqueue("factory", ladder_json=["fake:m0"])
+    again = h.run_one()
+    assert again.status == STATUS_FAILED and "no frozen backlog" in again.error

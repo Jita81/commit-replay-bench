@@ -81,6 +81,7 @@ from typing import Any
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from crb.builders import builder_for_rung
 from crb.builders.adapter import (
     Preflight,
     as_run_ledger,
@@ -89,7 +90,7 @@ from crb.builders.adapter import (
     ladder_labels,
     parse_rung_label,
 )
-from crb.builders.base import Budget, EscalationLadder, Rung
+from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.budget import budget_for_rung
 from crb.builders.labeller import make_labeller
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
@@ -128,13 +129,18 @@ from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
 from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace
+from crb.factory.backlog import BacklogItem
+from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
+from crb.factory.testfirst import AuthoredTest
 from crb.observability import metrics
 from crb.observability.events import Emitter, JsonlSink, MultiSink, StepStatus
+from crb.server.factory_state import FactoryHome
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
     KIND_BLIND,
     KIND_CONTROLS,
+    KIND_FACTORY,
     KIND_LABEL,
     KIND_MINE,
     KIND_ORACLE,
@@ -444,6 +450,7 @@ class Worker:
             KIND_ORACLE: self._run_oracle,
             KIND_CONTROLS: self._run_controls,
             KIND_LABEL: self._run_label,
+            KIND_FACTORY: self._run_factory,
         }
 
     # --- layout ---------------------------------------------------------------
@@ -1210,6 +1217,107 @@ class Worker:
         ctx.counts.update(counts)
         self._progress(ctx, len(scores), total)
         return (STATUS_CANCELLED if cancelled else STATUS_SUCCEEDED), counts, ""
+
+    def _run_factory(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
+        """Forward mode (P6): run the repo's FROZEN backlog through the governed loop
+        (:class:`crb.factory.loop.FactoryLoop`) — readiness gate, RED proof, build ladder
+        under the belts, opt-in delivery, independent review — with every step in the
+        factory evidence chain under ``CRB_HOME/factory/<repo>/`` and every graded attempt
+        a ``process_step=factory`` ledger row. The backlog is registered through
+        ``POST /factory/{repo}/backlog``; the run verifies it against its hash first.
+
+        ``params``: the ladder / budget / builder_config of a replay; ``deliver`` (default
+        False — a PR needs a credentials provider, absent here, so delivery fails closed
+        as ``delivery_failed`` when asked for); ``max_rework`` (default 1)."""
+        run = ctx.run
+        p = ctx.params
+        home = FactoryHome(self.home, run.repo)
+        backlog = home.load_backlog()
+        if backlog is None or not backlog.frozen:
+            raise ValueError(
+                f"no frozen backlog registered for {run.repo!r}: POST /factory/{run.repo}/backlog first"
+            )
+        ladder = self._ladder(ctx)
+        budget = self._budget(ctx)
+        rungs = trial_labels_for(ladder, budget)
+        retain = dict(p.get("retain") or {})
+        runner = self._runner(ctx)
+        executor = self._executor(ctx)
+        overrides = dict(p.get("builder_config") or {})
+        builders: dict[str, Builder] = {}
+
+        def builder_for(rung: Rung) -> Builder:
+            b = builders.get(rung.label)
+            if b is None:
+                b = builder_for_rung(rung, **overrides)
+                builders[rung.label] = b
+            return b
+
+        run_ledger = _RunLedger(
+            self.ledger,
+            self.factory,
+            self.evidence_dir,
+            ctx,
+            runner.name,
+            trial_labels=rungs,
+        )
+        self._stamp(
+            ctx,
+            backlog_hash=backlog.backlog_hash,
+            items=len(backlog.items),
+            deliver=bool(p.get("deliver", False)),
+            budget=budget.to_dict(),
+            ladder=[r.label for r in ladder.rungs],
+        )
+        spec = FactorySpec(
+            config=ctx.config,
+            runner=runner,
+            executor=executor,
+            scratch=self.scratch_dir,
+            evidence_dir=self.evidence_dir,
+            evidence=home.evidence(actor=run.actor),
+            ladder=ladder.rungs,
+            builder_for=builder_for,
+            ledger=as_run_ledger(run_ledger),
+            budget=budget,
+            gap_ledger=home.gap_ledger(),
+            deliver=bool(p.get("deliver", False)),
+            run_id=run.id,
+            actor=run.actor,
+            timeout=ctx.timeout,
+            max_rework=int(p.get("max_rework", 1)),
+            keep_workspaces=bool(retain.get("worktrees", False)),
+        )
+        loop = FactoryLoop(spec, ctx.git, emitter=ctx.emitter)
+        total = len(backlog.items)
+        counts: dict[str, Any] = {"items": total, "done": 0, "accepted": 0, "by_status": {}}
+        ctx.counts.update(counts)
+        self._progress(ctx, 0, total)
+        original_run_item = loop.run_item
+
+        def run_item(item: BacklogItem, *, authored: AuthoredTest | None = None) -> ItemOutcome:
+            out = original_run_item(item, authored=authored)
+            counts["done"] += 1
+            counts["accepted"] += int(out.accepted)
+            counts["by_status"][out.status] = counts["by_status"].get(out.status, 0) + 1
+            ctx.counts.update(counts)
+            self._progress(ctx, counts["done"], total)
+            return out
+
+        loop.run_item = run_item  # type: ignore[method-assign]
+        outcomes = loop.run_backlog(
+            backlog,
+            authored=home.authored(),
+            expected_hash=backlog.backlog_hash,
+            stop=lambda: self._cancelled(ctx),
+        )
+        counts["outcomes"] = [o.to_dict() for o in outcomes]
+        ctx.counts.clear()
+        ctx.counts.update(counts)
+        self._ledger_health()
+        if self._cancelled(ctx):
+            return STATUS_CANCELLED, counts, ""
+        return STATUS_SUCCEEDED, counts, ""
 
     def _run_controls(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
         tasks = self._select_tasks(ctx)

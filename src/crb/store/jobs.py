@@ -70,6 +70,7 @@ KIND_BLIND = "blind"
 KIND_ORACLE = "oracle"
 KIND_CONTROLS = "controls"
 KIND_LABEL = "label"
+KIND_FACTORY = "factory"
 RUN_KINDS: tuple[str, ...] = (
     KIND_SETUP,
     KIND_PROBE,
@@ -79,6 +80,7 @@ RUN_KINDS: tuple[str, ...] = (
     KIND_ORACLE,
     KIND_CONTROLS,
     KIND_LABEL,
+    KIND_FACTORY,
 )
 
 DEFAULT_MAX_RECLAIMS = 3

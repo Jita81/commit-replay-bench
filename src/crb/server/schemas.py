@@ -55,9 +55,10 @@ RUN_KINDS: tuple[str, ...] = (
     "oracle",
     "controls",
     "probe",
+    "factory",
 )
 #: Kinds that need a builder (they produce graded attempts).
-BUILD_KINDS: frozenset[str] = frozenset({"replay", "blind"})
+BUILD_KINDS: frozenset[str] = frozenset({"replay", "blind", "factory"})
 RUN_STATUSES: tuple[str, ...] = ("queued", "running", "succeeded", "failed", "cancelled")
 TERMINAL_STATUSES: frozenset[str] = frozenset({"succeeded", "failed", "cancelled"})
 EXECUTORS: tuple[str, ...] = ("local", "docker")

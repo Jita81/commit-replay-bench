@@ -123,17 +123,19 @@ A review is a person's post-hoc verdict on ONE graded row (`crb.core.review.Revi
 | GET | `/oracle/{repo}` | viewer | `{repo, policy: AdequacyPolicy, tasks: [{task_id, capability_class, size, strength, band, mutants, killed, errors, gate, run_id, scored_at, note}], cells: [{capability_class, size, n, tasks, strength_mean, strength_min, band, gate}], apparatus_versions, runs}` — aggregated from `oracle.score` events (latest per task wins); `band` ∈ strong|adequate|weak|unscoreable, `gate` = what a CLEAN grade on that oracle licenses (auto_ship|human_review); unscoreable oracles are never averaged in |
 | GET | `/oracle/{repo}/controls` | viewer | latest `controls.report` event payload (`ControlsReport.to_dict()` + `run_id`, `reported_at`, `verdict`) or **404 `not_measured`**; `verdict` is the routing-reduced view of the same report (`ControlsVerdict.to_dict()` + `state`) that `/capability-map` and `/routes` route under — one source, so the controls screen and the map can never disagree |
 
-## Factory (phase P6)
+## Factory (forward mode, P6)
+
+The factory manufactures NEW work under the same governance as a replay: a frozen, hashed backlog → the DoR readiness gate (structural gaps only; value slots can never be signed) → a RED proof of the item's oracle → the build ladder under the belts (a `process_step=factory` ledger row + evidence pack per attempt) → opt-in delivery as a branch + PR (never the default branch) → an independent review whose verdict is recorded before any edit. State lives under `CRB_HOME/factory/<repo>/` (`backlog.json` + history, `evidence.jsonl`, `gaps.jsonl`, `authored.json`) — append-only and hash-chained like the ledger. **Running the loop is a run kind:** `POST /runs {repo, kind: "factory", ladder/builder…, deliver?: false, max_rework?: 1}` — the worker verifies the backlog hash first, walks the items in dependency order, and stops on cancel; `GET /runs/{id}` shows `counts.detail {items, done, accepted, by_status, outcomes[]}` and the apparatus stamp carries `backlog_hash`.
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET/POST | `/factory/{repo}/backlog` | viewer/operator | frozen backlog (hash) |
-| GET | `/factory/{repo}/tasks` | viewer | DoR gaps, RED proof, build, PR, review verdict |
-| POST | `/factory/{repo}/tasks/{id}/signoff-gap` | approver | sign a structural gap |
-| GET | `/factory/{repo}/evidence` | viewer | factory evidence packs |
+| GET | `/factory/{repo}/backlog` | viewer | the active frozen backlog: `{repo, hash, frozen_at, items[{id, title, kind, capability_class, size, level, depends_on, structural_facts, has_authored_test}]}` in dependency order; **404** when none |
+| POST | `/factory/{repo}/backlog` | operator | `{items[{id, title, kind: code\|infra\|operator, description?, acceptance_criteria?, capability_class?, size_estimate?, structural_facts?: ["slot: text"], depends_on?, level?: L1\|L2\|L3, labels?}], authored?: {item_id: {path, content}}}` → **201** the frozen backlog. Items are validated by the factory's own rules (unique ids, known dependencies, no cycles — 422), frozen and hashed, written with a history copy, and the freeze is the first event of the evidence chain; `authored` are operator-written oracles (author `operator:<user id>`, proven RED before they are trusted). **409 `factory_run_active`** while a factory run is queued or running on the repo |
+| GET | `/factory/{repo}/tasks` | viewer | every item's latest state folded from the evidence: `{id, title, capability_class, size, kind, status: pending\|accepted\|rejected\|not_ready\|routed_human\|no_oracle\|not_red\|not_clean\|disqualified\|delivery_failed\|rework_exhausted\|blocked_on_dependency\|error, dor_gaps[], route_hint, red_proof: true\|false\|null, build_status: not_built\|clean\|not_clean\|disqualified, pr_url, review_verdict, last_event}` |
+| POST | `/factory/{repo}/tasks/{id}/signoff-gap` | approver | `{slot, answer}` → **201** `{item_id, slot, kind, verifier, signed_at, row_hash}`: appended to the hash-chained gap ledger and echoed into the evidence chain. **422 `value_slot_unsignable`** for a value slot (a value nobody derived from the answer cannot be signed into readiness — EVIDENCE-AND-CLAIMS); 422 for a slot the item's class does not have; 404 unknown item |
+| GET | `/factory/{repo}/evidence` | viewer | `?item_id=&limit=&offset=` → `{repo, total, verified, items[{seq, kind, item_id, actor, created, payload, row_hash}]}` — the chain oldest first, hash-verified on read (`verified: false` is reported, never hidden) |
 
-Until P6 lands every factory path answers **501 `not_implemented`** with
-`detail: {"phase": "P6", "path": …}` (role gates already apply: 401/403 come first).
+Not yet: a model-backed test author (an item without an authored oracle ends `no_oracle`), and delivery credentials on the server (`deliver: true` fails closed as `delivery_failed` until a credentials provider is configured) — both are recorded on the item, never skipped.
 
 ## Admin
 
