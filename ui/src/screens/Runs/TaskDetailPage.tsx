@@ -1,5 +1,6 @@
 /**
- * Task detail — one replayable commit: its spec and every graded trial against it (/tasks/:repo/:taskId).
+ * Task detail — one replayable commit: its spec and every graded trial against it
+ * (/tasks/:repo/:taskId).
  *
  * Navigation
  * ----------

@@ -1,5 +1,6 @@
 /**
- * ui/src/screens/Runs/contract.ts, EvidenceDrawer.tsx and ReviewPanel.tsx — the patch is hashed in the browser and a review attests to those bytes.
+ * ui/src/screens/Runs/contract.ts, EvidenceDrawer.tsx and ReviewPanel.tsx — the patch is hashed in
+ * the browser and a review attests to those bytes.
  *
  * Navigation
  * ----------

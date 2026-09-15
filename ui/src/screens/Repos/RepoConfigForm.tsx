@@ -1,5 +1,6 @@
 /**
- * Every RepoConfig field the API accepts on PUT /repos/{name}, grouped the way an operator reasons about a repository.
+ * Every RepoConfig field the API accepts on PUT /repos/{name}, grouped the way an operator reasons
+ * about a repository.
  *
  * Navigation
  * ----------

@@ -1,5 +1,6 @@
 /**
- * ui/src/screens/Capability/CapabilityPage.tsx — absence is NOT_YET_MEASURED, false-Q1 is red, and the controls verdict is shown as it is.
+ * ui/src/screens/Capability/CapabilityPage.tsx — absence is NOT_YET_MEASURED, false-Q1 is red, and
+ * the controls verdict is shown as it is.
  *
  * Navigation
  * ----------

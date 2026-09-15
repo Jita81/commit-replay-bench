@@ -1,5 +1,6 @@
 /**
- * Learn — the learning half of the loop, read-only: refusals → guard corpus, weak oracles → strengthening backlog, apparatus change → re-measurement plan (/learn).
+ * Learn — the learning half of the loop, read-only: refusals → guard corpus, weak oracles →
+ * strengthening backlog, apparatus change → re-measurement plan (/learn).
  *
  * Navigation
  * ----------

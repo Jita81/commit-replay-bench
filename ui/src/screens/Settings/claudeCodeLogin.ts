@@ -24,7 +24,8 @@
  *               (`SecretStatus`, the owner-only file and its shape checks),
  *               ui/src/screens/Settings/ClaudeCodeLoginCard.tsx (the only consumer),
  *               ui/src/api/client.ts (`api`, per-call `timeoutMs`)
- * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx, ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx,
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  *               (round-trips a shape-valid fake token without the value ever appearing in
  *               the page), tests/test_server_routes_admin_secrets.py (no response carries
  *               a value)

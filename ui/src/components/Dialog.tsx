@@ -13,7 +13,8 @@
  * ADRs:         none
  * Works with:   ui/src/screens/Repos/RepoNewDialog.tsx and ui/src/screens/Runs/RunNewDialog.tsx
  *               (the two consumers), ui/src/components/Button.tsx (the close button)
- * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx, ui/src/screens/Runs/RunNewDialog.test.tsx,
+ * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx,
+ *               ui/src/screens/Runs/RunNewDialog.test.tsx,
  *               ui/e2e/walkthrough/02-repo-onboard.spec.ts (the real modal in Chromium)
  * Touch when:   a third dialog needs a size or a non-modal mode; never for a new repository.
  */

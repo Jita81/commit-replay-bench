@@ -1,5 +1,6 @@
 /**
- * The Configuration tab — edit the repo config, save only what changed, prove it with a probe, read the audit trail.
+ * The Configuration tab — edit the repo config, save only what changed, prove it with a probe, read
+ * the audit trail.
  *
  * Navigation
  * ----------

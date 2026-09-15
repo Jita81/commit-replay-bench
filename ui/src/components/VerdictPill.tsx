@@ -1,5 +1,6 @@
 /**
- * VerdictPill — a cell's route as a pill: deliver ✓, calibrate ◐, granularize ⋮, human ☺, do_not_ship ✗, not yet measured ·.
+ * VerdictPill — a cell's route as a pill: deliver ✓, calibrate ◐, granularize ⋮, human ☺,
+ * do_not_ship ✗, not yet measured ·.
  *
  * Navigation
  * ----------
@@ -13,9 +14,11 @@
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/lib/verdict.ts (`routeDisplay` — the one table), ui/src/components/Pill.tsx
  *               (the primitive), ui/src/api/types.ts (`CellVerdict`, `NOT_YET_MEASURED`),
- *               ui/src/screens/Capability/CapabilityPage.tsx and ui/src/screens/Routing/RoutingPage.tsx
+ *               ui/src/screens/Capability/CapabilityPage.tsx and
+ *               ui/src/screens/Routing/RoutingPage.tsx
  *               (a pill per cell)
- * Tested by:    ui/src/components/VerdictPill.test.tsx, ui/src/screens/Capability/CapabilityPage.test.tsx
+ * Tested by:    ui/src/components/VerdictPill.test.tsx,
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx
  *               (`cell-measured` / `cell-not-measured`)
  * Touch when:   a route is added to `crb.core.routing` (an ADR) — extend `Route` in
  *               ui/src/api/types.ts and the table in ui/src/lib/verdict.ts; never for a new

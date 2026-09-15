@@ -1,5 +1,6 @@
 /**
- * Provenance — apparatus version(s), belt set and where the rows came from; mixed apparatus is flagged, never averaged.
+ * Provenance — apparatus version(s), belt set and where the rows came from; mixed apparatus is
+ * flagged, never averaged.
  *
  * Navigation
  * ----------

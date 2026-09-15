@@ -1,5 +1,6 @@
 /**
- * ui/src/screens/Signoff/SignoffPage.tsx — the bar is shown before the approver tries, a refusal is a gate, a record carries its snapshot.
+ * ui/src/screens/Signoff/SignoffPage.tsx — the bar is shown before the approver tries, a refusal is
+ * a gate, a record carries its snapshot.
  *
  * Navigation
  * ----------

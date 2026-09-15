@@ -23,7 +23,8 @@
  *               ui/src/screens/Repos/RepoConfigForm.tsx and ui/src/screens/Repos/RepoNewDialog.tsx
  *               (the two hosts)
  * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx (round-trip, parse error blocks
- *               save), ui/src/screens/Repos/RepoNewDialog.test.tsx, ui/e2e/walkthrough/repo-config.spec.ts
+ *               save), ui/src/screens/Repos/RepoNewDialog.test.tsx,
+ *               ui/e2e/walkthrough/repo-config.spec.ts
  * Touch when:   an `OptKind` is added to ui/src/screens/Repos/runnerOpts.ts — add its control
  *               in `OptControl`; never for a new repository.
  */

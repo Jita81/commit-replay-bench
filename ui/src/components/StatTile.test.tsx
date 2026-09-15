@@ -1,5 +1,6 @@
 /**
- * ui/src/components/StatTile.tsx — a headline number never appears without its n, interval and apparatus.
+ * ui/src/components/StatTile.tsx — a headline number never appears without its n, interval and
+ * apparatus.
  *
  * Navigation
  * ----------

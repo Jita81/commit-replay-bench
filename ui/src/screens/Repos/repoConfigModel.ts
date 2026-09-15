@@ -29,7 +29,8 @@
  *               ui/src/screens/Repos/runnerOpts.ts (`runnersFor` — which runners a language
  *               allows), ui/src/screens/Repos/RepoConfigTab.tsx and
  *               ui/src/screens/Repos/RepoNewDialog.tsx (the two consumers)
- * Tested by:    ui/src/screens/Repos/repoConfigModel.test.ts, ui/src/screens/Repos/RepoConfigTab.test.tsx
+ * Tested by:    ui/src/screens/Repos/repoConfigModel.test.ts,
+ *               ui/src/screens/Repos/RepoConfigTab.test.tsx
  * Touch when:   `RepoConfig` gains a field (src/crb/core/spec.py) — add it to `RepoConfigForm`,
  *               `formFromRepo`, `requestOf` and (if bounded) `FIELD_LIMITS`, with the server's
  *               message in `validateForm`; a new belt policy or mining cap gets its help text

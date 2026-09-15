@@ -1,5 +1,6 @@
 /**
- * GateBanner — gates look like gates: criteria check-rows and an action disabled until every row holds.
+ * GateBanner — gates look like gates: criteria check-rows and an action disabled until every row
+ * holds.
  *
  * Navigation
  * ----------

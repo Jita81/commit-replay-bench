@@ -13,10 +13,12 @@
  *               asc / desc; the empty node fills one full-width cell.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/components/EmptyState.tsx (the `empty` slot), ui/src/screens/Runs/RunDetailPage.tsx
+ * Works with:   ui/src/components/EmptyState.tsx (the `empty` slot),
+ *               ui/src/screens/Runs/RunDetailPage.tsx
  *               (a typical column set with sort accessors), ui/src/screens/Ledger/LedgerPage.tsx
  *               and ui/src/screens/Repos/ReposPage.tsx (dense list screens)
- * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx, ui/src/screens/Routing/RoutingPage.test.tsx
+ * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx,
+ *               ui/src/screens/Routing/RoutingPage.test.tsx
  *               and ui/src/screens/Signoff/SignoffPage.test.tsx (rows and captions as rendered),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe: headers, captions)
  * Touch when:   a screen needs a column type the descriptor lacks; never for a new repository.

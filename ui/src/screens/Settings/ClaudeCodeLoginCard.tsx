@@ -1,5 +1,6 @@
 /**
- * The "Claude Code login" card — status for every role; paste, verify and remove for admins; the value is never shown.
+ * The "Claude Code login" card — status for every role; paste, verify and remove for admins; the
+ * value is never shown.
  *
  * Navigation
  * ----------
@@ -20,7 +21,8 @@
  *               (`can('admin')`), src/crb/server/routes/admin.py (the routes and their 422 /
  *               409 / 429 answers), src/crb/builders/claude_code.py (the `cli` auth mode
  *               that consumes the stored token)
- * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx, ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx,
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   a `LoginCheckStatus` is added on the server (src/crb/server/secrets.py) —
  *               add its `CHECK_DISPLAY` row; never for a new repository.
  */

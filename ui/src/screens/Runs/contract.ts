@@ -27,7 +27,8 @@
  * Works with:   src/crb/server/routes/grades.py (the patch / transcript / retained routes and
  *               their headers), src/crb/server/routes/reviews.py and
  *               src/crb/server/schemas_review.py (the review records), src/crb/core/review.py
- *               (`derive_verdict`, `SEVERITY` — mirrored here), ui/src/screens/Runs/EvidenceDrawer.tsx
+ *               (`derive_verdict`, `SEVERITY` — mirrored here),
+ *               ui/src/screens/Runs/EvidenceDrawer.tsx
  *               (the Patch and Transcript tabs), ui/src/screens/Runs/ReviewPanel.tsx (the
  *               review form), ui/src/api/client.ts (`ApiError`, `API_BASE`)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx (SHA-256 test vectors, the diff

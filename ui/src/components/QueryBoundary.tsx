@@ -1,5 +1,6 @@
 /**
- * QueryBoundary — loading line, honest error, or the data; a disabled query shows a designed prompt.
+ * QueryBoundary — loading line, honest error, or the data; a disabled query shows a designed
+ * prompt.
  *
  * Navigation
  * ----------

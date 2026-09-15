@@ -1,5 +1,6 @@
 /**
- * ErrorState — the API's error envelope rendered honestly: message first, code and status small, detail behind a disclosure.
+ * ErrorState — the API's error envelope rendered honestly: message first, code and status small,
+ * detail behind a disclosure.
  *
  * Navigation
  * ----------

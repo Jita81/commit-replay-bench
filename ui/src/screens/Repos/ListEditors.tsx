@@ -1,5 +1,6 @@
 /**
- * List and key/value editors — one input per item, the shape every "list of strings" and "env" runner option shares.
+ * List and key/value editors — one input per item, the shape every "list of strings" and "env"
+ * runner option shares.
  *
  * Navigation
  * ----------

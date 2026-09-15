@@ -1,5 +1,6 @@
 /**
- * Sign-off — a human attestation that a cell's evidence is trusted; a policy decision refused at write (/signoff).
+ * Sign-off — a human attestation that a cell's evidence is trusted; a policy decision refused at
+ * write (/signoff).
  *
  * Navigation
  * ----------
@@ -17,13 +18,16 @@
  *               fabricated snapshot; an approver can revoke.
  * How:          `useCapabilityMapWithControls` lists the measured cells → `useSignoffPreview`
  *               re-fetches as cell / row change (the named row and affirmation reset when the
- *               cell changes) → `criteriaFor(preview)` → `GateBanner`; `useCreateSignoffWithAttestation`
+ *               cell changes) → `criteriaFor(preview)` → `GateBanner`;
+ *               `useCreateSignoffWithAttestation`
  *               posts; `useSignoffs` lists.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md
+ * ADRs:         docs/adr/0003-one-routing-rule.md,
+ *               docs/adr/0001-four-belts-and-false-q1-at-write.md
  * Works with:   ui/src/screens/Signoff/contract.ts (preview, policy, refusal vocabulary,
  *               the 409 shape), ui/src/components/GateBanner.tsx (the gate),
- *               ui/src/screens/Capability/contract.ts and ui/src/screens/Capability/FailureSplit.tsx
+ *               ui/src/screens/Capability/contract.ts and
+ *               ui/src/screens/Capability/FailureSplit.tsx
  *               (the cells, the controls pill and the split), ui/src/api/hooks.ts
  *               (`useSignoffs`, `useRevokeSignoff`), src/crb/server/routes/signoffs.py (the
  *               server's decision this screen previews and submits), src/crb/core/signoff.py

@@ -1,5 +1,6 @@
 /**
- * Settings — instrument health, the Claude Code login, non-secret configuration and users (/settings).
+ * Settings — instrument health, the Claude Code login, non-secret configuration and users
+ * (/settings).
  *
  * Navigation
  * ----------
@@ -19,7 +20,8 @@
  * Works with:   ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useSettings`, `useUsers`,
  *               `useCreateUser`, `useSetUserRole`), ui/src/api/types.ts (`Settings`, `User`,
  *               `Probe`), ui/src/screens/Settings/ClaudeCodeLoginCard.tsx,
- *               src/crb/server/routes/admin.py (settings and users), src/crb/observability/probes.py
+ *               src/crb/server/routes/admin.py (settings and users),
+ *               src/crb/observability/probes.py
  *               (the probes the health card lists)
  * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (builders as configured yes /
  *               no, sandbox mode, versions; axe), ui/e2e/walkthrough/01-login.spec.ts (the

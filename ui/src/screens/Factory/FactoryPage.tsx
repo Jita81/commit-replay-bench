@@ -1,5 +1,6 @@
 /**
- * Factory (phase P6) — the forward-mode surface, rendering an honest "not yet" until the phase ships (/factory).
+ * Factory (phase P6) — the forward-mode surface, rendering an honest "not yet" until the phase
+ * ships (/factory).
  *
  * Navigation
  * ----------
@@ -14,7 +15,8 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useFactoryBacklog`, `useFactoryTasks`), ui/src/api/types.ts
- *               (`FactoryBacklog`, `FactoryTask` — provisional shapes), src/crb/server/routes/factory.py
+ *               (`FactoryBacklog`, `FactoryTask` — provisional shapes),
+ *               src/crb/server/routes/factory.py
  *               (answers 501 `not_implemented` until P6), docs/API.md (the "Factory (phase P6)"
  *               section)
  * Tested by:    untested — the phase is not implemented server-side; the screen only renders

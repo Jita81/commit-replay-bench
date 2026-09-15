@@ -1,5 +1,6 @@
 /**
- * Review panel — a person's verdict on one graded row, anchored to the sha256 of the patch they loaded.
+ * Review panel — a person's verdict on one graded row, anchored to the sha256 of the patch they
+ * loaded.
  *
  * Navigation
  * ----------

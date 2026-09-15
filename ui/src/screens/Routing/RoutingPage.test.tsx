@@ -1,5 +1,6 @@
 /**
- * ui/src/screens/Routing/RoutingPage.tsx — the amended rule, the controls verdict, a reason code and the split per decision.
+ * ui/src/screens/Routing/RoutingPage.tsx — the amended rule, the controls verdict, a reason code
+ * and the split per decision.
  *
  * Navigation
  * ----------

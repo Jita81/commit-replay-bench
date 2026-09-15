@@ -1,5 +1,6 @@
 /**
- * Route table — everything but /login sits inside the authenticated shell; unknown routes render the 404 inside it.
+ * Route table — everything but /login sits inside the authenticated shell; unknown routes render
+ * the 404 inside it.
  *
  * Navigation
  * ----------

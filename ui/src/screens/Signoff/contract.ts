@@ -24,7 +24,8 @@
  *               keyed by repo, cell and the named row so it re-fetches as the form changes;
  *               a successful POST invalidates the sign-offs, the preview and the map.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md
+ * ADRs:         docs/adr/0003-one-routing-rule.md,
+ *               docs/adr/0001-four-belts-and-false-q1-at-write.md
  * Works with:   src/crb/core/signoff.py (`SignoffPolicy`, `REFUSAL_CODES` — the clauses in
  *               evaluation order), src/crb/server/schemas_signoff.py (the server side of every
  *               field), src/crb/server/routes/signoffs.py (preview, POST, the 409 detail),

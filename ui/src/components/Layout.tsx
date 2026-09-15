@@ -1,5 +1,6 @@
 /**
- * The app shell — brand, primary nav, instrument health, user chip with role, theme toggle, provenance footer.
+ * The app shell — brand, primary nav, instrument health, user chip with role, theme toggle,
+ * provenance footer.
  *
  * Navigation
  * ----------
@@ -17,7 +18,8 @@
  *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`),
  *               ui/src/lib/theme.ts (the toggle), ui/src/lib/verdict.ts (`probeDisplay` for
  *               the health pill), ui/src/screens/Login/LoginPage.tsx (uses `BRAND`)
- * Tested by:    ui/e2e/smoke.spec.ts (the shell renders the nav), ui/e2e/walkthrough/01-login.spec.ts
+ * Tested by:    ui/e2e/smoke.spec.ts (the shell renders the nav),
+ *               ui/e2e/walkthrough/01-login.spec.ts
  *               (the role chip reads the bootstrap admin's role), ui/src/test/utils.tsx
  *               (`renderApp` mounts the shell for every screen test)
  * Touch when:   a screen is added — add its `NAV` entry here and its route in ui/src/App.tsx;

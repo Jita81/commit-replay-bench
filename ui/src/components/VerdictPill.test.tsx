@@ -1,5 +1,6 @@
 /**
- * ui/src/components/VerdictPill.tsx — every route has a label, a glyph and a tone; absence is never a colour.
+ * ui/src/components/VerdictPill.tsx — every route has a label, a glyph and a tone; absence is never
+ * a colour.
  *
  * Navigation
  * ----------

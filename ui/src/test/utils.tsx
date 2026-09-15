@@ -1,5 +1,6 @@
 /**
- * Test helpers — a fetch mock keyed by "METHOD /path", and renderApp (query client + memory router + auth).
+ * Test helpers — a fetch mock keyed by "METHOD /path", and renderApp (query client + memory router
+ * + auth).
  *
  * Navigation
  * ----------
@@ -17,7 +18,8 @@
  * ADRs:         none
  * Works with:   ui/src/api/client.ts (the fetch calls this intercepts), ui/src/lib/auth.tsx
  *               (`AuthProvider` — `/auth/me` is usually mocked with `PRINCIPAL`),
- *               ui/src/main.tsx (the provider stack this mirrors), ui/src/screens/Capability/CapabilityPage.test.tsx
+ *               ui/src/main.tsx (the provider stack this mirrors),
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx
  *               (a typical consumer)
  * Tested by:    every `*.test.tsx` under ui/src/screens (they all render through this)
  * Touch when:   the API prefix or the provider stack changes; never for a new repository.

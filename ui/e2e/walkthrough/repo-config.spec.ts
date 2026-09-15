@@ -30,7 +30,8 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Repos/RepoConfigTab.tsx,
- *               ui/src/screens/Repos/RepoConfigForm.tsx and ui/src/screens/Repos/RunnerOptsEditor.tsx
+ *               ui/src/screens/Repos/RepoConfigForm.tsx and
+ *               ui/src/screens/Repos/RunnerOptsEditor.tsx
  *               (the code under test), src/crb/server/routes/repos.py (the PUT and the
  *               audit event)
  * Tested by:    ui/e2e/walkthrough/repo-config.spec.ts

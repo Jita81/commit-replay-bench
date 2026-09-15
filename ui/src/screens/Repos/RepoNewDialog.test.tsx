@@ -1,5 +1,6 @@
 /**
- * ui/src/screens/Repos/RepoNewDialog.tsx — presets fill the body, the clone policy is enforced, bad JSON is refused.
+ * ui/src/screens/Repos/RepoNewDialog.tsx — presets fill the body, the clone policy is enforced, bad
+ * JSON is refused.
  *
  * Navigation
  * ----------

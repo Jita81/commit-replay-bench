@@ -15,7 +15,8 @@
  * ADRs:         none
  * Works with:   ui/src/lib/format.ts (`fmtInt`, `fmtCi`, `wilson` for a client-side interval),
  *               ui/src/lib/verdict.ts (`TONE_TEXT` for a toned value),
- *               ui/src/screens/Runs/RunDetailPage.tsx (a run's tiles), ui/src/screens/Capability/CapabilityPage.tsx
+ *               ui/src/screens/Runs/RunDetailPage.tsx (a run's tiles),
+ *               ui/src/screens/Capability/CapabilityPage.tsx
  *               (coverage and false-Q1 tiles), ui/src/screens/Signoff/SignoffPage.tsx
  *               (the evidence tiles an approver reads)
  * Tested by:    ui/src/components/StatTile.test.tsx, ui/src/screens/Runs/RunDetailPage.test.tsx

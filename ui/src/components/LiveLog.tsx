@@ -16,7 +16,8 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/sse.ts (`SseStatus` and the snapshot fields this renders),
- *               ui/src/api/hooks.ts (`useRunEvents` — the source), ui/src/screens/Runs/RunDetailPage.tsx
+ *               ui/src/api/hooks.ts (`useRunEvents` — the source),
+ *               ui/src/screens/Runs/RunDetailPage.tsx
  *               (the only consumer), ui/src/lib/verdict.ts (`stepStatusDisplay`),
  *               ui/src/lib/format.ts (`fmtTime`, `fmtMs`, `fmtUsd`)
  * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx (events from a fake EventSource

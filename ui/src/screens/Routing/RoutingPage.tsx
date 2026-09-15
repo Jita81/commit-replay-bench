@@ -1,5 +1,6 @@
 /**
- * Routing — what the factory may do with each class of change, decided by the one published rule (/routing).
+ * Routing — what the factory may do with each class of change, decided by the one published rule
+ * (/routing).
  *
  * Navigation
  * ----------
@@ -23,7 +24,8 @@
  *               src/crb/core/routing.py (`route()` — the rule this page describes),
  *               src/crb/server/routes/capability.py (the `/routes` route),
  *               ui/src/components/VerdictPill.tsx and ui/src/components/CiBar.tsx
- * Tested by:    ui/src/screens/Routing/RoutingPage.test.tsx, ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ * Tested by:    ui/src/screens/Routing/RoutingPage.test.tsx,
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   the routing policy gains a threshold or a reason code (an ADR-0003 amendment)
  *               — add it to the policy card and to ui/src/screens/Capability/contract.ts;
  *               never for a new repository.

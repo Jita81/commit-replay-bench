@@ -13,11 +13,13 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useRepos`), ui/src/components/Field.tsx (`InlineSelect`),
- *               ui/src/screens/Capability/CapabilityPage.tsx and ui/src/screens/Signoff/SignoffPage.tsx
+ *               ui/src/screens/Capability/CapabilityPage.tsx and
+ *               ui/src/screens/Signoff/SignoffPage.tsx
  *               (typical consumers — the page header's actions slot),
  *               ui/src/components/QueryBoundary.tsx (its `idle` branch is what an empty
  *               `?repo=` shows)
- * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx, ui/src/screens/Routing/RoutingPage.test.tsx
+ * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx,
+ *               ui/src/screens/Routing/RoutingPage.test.tsx
  *               and ui/src/screens/Signoff/SignoffPage.test.tsx (each renders with `?repo=`),
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  * Touch when:   never for a new repository (a newly added repo appears in the list).

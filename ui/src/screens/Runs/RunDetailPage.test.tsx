@@ -1,5 +1,6 @@
 /**
- * ui/src/screens/Runs/RunDetailPage.tsx and ui/src/api/sse.ts — the live log follows the stream, and the split tiles never fabricate.
+ * ui/src/screens/Runs/RunDetailPage.tsx and ui/src/api/sse.ts — the live log follows the stream,
+ * and the split tiles never fabricate.
  *
  * Navigation
  * ----------

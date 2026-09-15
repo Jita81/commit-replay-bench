@@ -1,5 +1,6 @@
 /**
- * Evidence drawer — one evidence pack and what stands behind it: the pack, the retained patch, the transcript, the review.
+ * Evidence drawer — one evidence pack and what stands behind it: the pack, the retained patch, the
+ * transcript, the review.
  *
  * Navigation
  * ----------
@@ -14,11 +15,13 @@
  *               transcript is unavailable rather than showing nothing; the Review tab hosts
  *               the review form. When the opener only knows the pack, the ledger row is
  *               resolved from the task's grades.
- * How:          `useEvidence` → `PackBody`; row hash from the prop or `useTask`; `useRetainedStatus`
+ * How:          `useEvidence` → `PackBody`; row hash from the prop or `useTask`;
+ *               `useRetainedStatus`
  *               says what is reachable; the patch query is enabled only once the tab was
  *               opened (so the hash is of bytes the reviewer actually loaded); Esc closes.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md, docs/adr/0011-repo-lint-belt.md
+ * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
+ *               docs/adr/0011-repo-lint-belt.md
  * Works with:   ui/src/screens/Runs/contract.ts (retained-patch fetch, diff parser, review
  *               hooks), ui/src/screens/Runs/ReviewPanel.tsx (the Review tab), ui/src/api/types.ts
  *               (`EvidencePack`, `TestRun`, `LintRun`), ui/src/components/BeltPills.tsx and
@@ -26,13 +29,17 @@
  *               ui/src/screens/Runs/TaskDetailPage.tsx (the openers), src/crb/core/evidence.py
  *               (the pack's shape and `verify_pack`)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx (Patch tab: verified / redacted /
- *               unavailable; row resolution from the task), ui/src/screens/Runs/RunDetailPage.test.tsx
- *               (the drawer opens with belts and the verified badge), ui/e2e/walkthrough/05-replay-fake.spec.ts,
+ *               unavailable; row resolution from the task),
+ *               ui/src/screens/Runs/RunDetailPage.test.tsx
+ *               (the drawer opens with belts and the verified badge),
+ *               ui/e2e/walkthrough/05-replay-fake.spec.ts,
  *               ui/e2e/walkthrough/09-review.spec.ts
- * Touch when:   the pack schema gains a section (src/crb/core/evidence.py, then ui/src/api/types.ts)
+ * Touch when:   the pack schema gains a section (src/crb/core/evidence.py, then
+ *               ui/src/api/types.ts)
  *               — add it to `PackBody`; never for a new repository.
  * Claims:       `verified` means the pack's bytes hash to their key; it says nothing about
- *               whether the change is mergeable (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
+ *               whether the change is mergeable
+ *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useEvidence, useTask } from '../../api/hooks'

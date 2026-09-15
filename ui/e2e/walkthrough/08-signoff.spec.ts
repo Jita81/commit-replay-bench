@@ -45,7 +45,8 @@
  * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Signoff/SignoffPage.tsx and
  *               ui/src/screens/Signoff/contract.ts (the screen under test),
  *               src/crb/core/signoff.py (the clauses asserted), src/crb/server/routes/signoffs.py,
- *               src/crb/builders/fixture_gold.py (the clean rows), ui/e2e/walkthrough/05-replay-fake.spec.ts
+ *               src/crb/builders/fixture_gold.py (the clean rows),
+ *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (whose n = 2 cell this spec relies on)
  * Tested by:    ui/e2e/walkthrough/08-signoff.spec.ts
  * Touch when:   a refusal clause or a policy default changes (src/crb/core/signoff.py) — the

@@ -14,7 +14,8 @@
  * ADRs:         none
  * Works with:   ui/src/lib/verdict.ts (`Tone`, `TONE_CLASSES` and the display tables that feed
  *               this), ui/src/components/VerdictPill.tsx, ui/src/components/BeltPills.tsx and
- *               ui/src/components/Provenance.tsx (the specialised pills), ui/src/components/Layout.tsx
+ *               ui/src/components/Provenance.tsx (the specialised pills),
+ *               ui/src/components/Layout.tsx
  *               (the health pill)
  * Tested by:    ui/src/components/VerdictPill.test.tsx, ui/src/components/BeltPills.test.tsx
  *               (tone classes, glyphs and `aria-label` as rendered through this primitive)

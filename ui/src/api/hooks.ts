@@ -31,8 +31,10 @@
  *               ui/src/screens/Capability/contract.ts and ui/src/screens/Runs/contract.ts (the
  *               newer readings not yet folded in here), ui/src/test/utils.tsx (`mockApi` — how
  *               tests answer these hooks)
- * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx, ui/src/screens/Capability/CapabilityPage.test.tsx,
- *               ui/src/screens/Routing/RoutingPage.test.tsx, ui/src/screens/Signoff/SignoffPage.test.tsx
+ * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx,
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx,
+ *               ui/src/screens/Routing/RoutingPage.test.tsx,
+ *               ui/src/screens/Signoff/SignoffPage.test.tsx
  *               (every screen test exercises its hooks through `mockApi`)
  * Touch when:   an endpoint is added or its path / params change (docs/API.md) — add the type
  *               in ui/src/api/types.ts, the key in `keys` and the hook here, then the screen;

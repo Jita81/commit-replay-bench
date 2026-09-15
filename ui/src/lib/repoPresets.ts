@@ -25,9 +25,11 @@
  *               fields a preset fills), src/crb/core/runners/pytest_runner.py and
  *               src/crb/core/runners/node_runners.py (the `runner_opts` vocabulary the presets
  *               use)
- * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx, ui/e2e/walkthrough/02-repo-onboard.spec.ts
+ * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx,
+ *               ui/e2e/walkthrough/02-repo-onboard.spec.ts
  * Touch when:   onboarding a repository whose layout no preset describes — add one here (its
- *               `runner_opts` keys must exist in the runner, docs/OPERATOR.md#2-configure-a-repository);
+ *               `runner_opts` keys must exist in the runner,
+ *               docs/OPERATOR.md#2-configure-a-repository);
  *               a new `Runner` or `Language` in src/crb/core/spec.py should get a preset too.
  */
 

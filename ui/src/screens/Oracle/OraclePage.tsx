@@ -1,5 +1,6 @@
 /**
- * Oracle — how much a green is worth: mutation strength per task and per cell, and the negative-controls report (/oracle).
+ * Oracle — how much a green is worth: mutation strength per task and per cell, and the
+ * negative-controls report (/oracle).
  *
  * Navigation
  * ----------
@@ -23,7 +24,8 @@
  *               src/crb/core/oracle/adequacy.py (bands and gates), src/crb/core/oracle/controls.py
  *               (the control matrix and verdict vocabulary)
  * Tested by:    ui/e2e/walkthrough/04-oracle-and-controls.spec.ts (strength, band and gate per
- *               task; every control with its verdict; no VIOLATION), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ *               task; every control with its verdict; no VIOLATION),
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   a control or a verdict word is added (src/crb/core/oracle/controls.py — add it
  *               to `VERDICT_TONE` and `ControlName` in ui/src/api/types.ts); never for a new
  *               repository.

@@ -18,8 +18,10 @@
  *               text), ui/src/screens/Signoff/SignoffPage.tsx (the evidence tiles),
  *               ui/src/api/types.ts (`RoutingPolicy` — where the tick values come from)
  * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx and
- *               ui/src/screens/Routing/RoutingPage.test.tsx (rendered per cell, `data-testid="ci-bar"`)
- * Touch when:   the routing policy gains a threshold worth a tick (docs/adr/0003-one-routing-rule.md);
+ *               ui/src/screens/Routing/RoutingPage.test.tsx (rendered per cell,
+ *               `data-testid="ci-bar"`)
+ * Touch when:   the routing policy gains a threshold worth a tick
+ *               (docs/adr/0003-one-routing-rule.md);
  *               never for a new repository.
  * Claims:       A rate is shown with n and its interval, never alone
  *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).

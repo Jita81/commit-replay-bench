@@ -1,5 +1,6 @@
 /**
- * Capability map — per (class × size) cell: pass rate with n and interval, false-Q1, cost, latency, oracle strength, and the route that evidence licenses (/capability).
+ * Capability map — per (class × size) cell: pass rate with n and interval, false-Q1, cost, latency,
+ * oracle strength, and the route that evidence licenses (/capability).
  *
  * Navigation
  * ----------
@@ -17,7 +18,8 @@
  *               cells by `class|size` → the full taxonomy × size order as the grid so 0-count
  *               classes render honestly → `CellBox` per cell, `CellDetail` on click.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md
+ * ADRs:         docs/adr/0003-one-routing-rule.md,
+ *               docs/adr/0001-four-belts-and-false-q1-at-write.md
  * Works with:   ui/src/screens/Capability/contract.ts (the extended map type and hook),
  *               ui/src/screens/Capability/FailureSplit.tsx (split, model point, controls pill),
  *               ui/src/api/types.ts (`CapabilityMap`, `CellField`, `NOT_YET_MEASURED`),
@@ -25,8 +27,10 @@
  *               with their method), src/crb/server/routes/capability.py (the route),
  *               src/crb/core/capability.py (the cell statistics), src/crb/core/taxonomy.py
  *               (`ALL_CLASSES` — the list `ALL_CLASSES` here must match)
- * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx, ui/e2e/walkthrough/05-replay-fake.spec.ts
- *               (a real cell with route `calibrate`), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx,
+ *               ui/e2e/walkthrough/05-replay-fake.spec.ts
+ *               (a real cell with route `calibrate`),
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   the class taxonomy changes (src/crb/core/taxonomy.py — mirror `ALL_CLASSES`
  *               here), a cell field is added to docs/API.md "/capability-map" (type it in
  *               ui/src/screens/Capability/contract.ts first), or the routing policy gains a

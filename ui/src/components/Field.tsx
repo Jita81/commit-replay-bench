@@ -13,11 +13,13 @@
  *               control; the error replaces the hint in the same slot.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/components/RepoPicker.tsx (`InlineSelect`), ui/src/screens/Repos/RepoConfigForm.tsx
+ * Works with:   ui/src/components/RepoPicker.tsx (`InlineSelect`),
+ *               ui/src/screens/Repos/RepoConfigForm.tsx
  *               and ui/src/screens/Runs/RunNewDialog.tsx (the largest forms),
  *               ui/e2e/walkthrough/support.ts (`field(scope, 'Label')` matches the `Label *`
  *               rendering exactly)
- * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx, ui/src/screens/Runs/RunNewDialog.test.tsx,
+ * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx,
+ *               ui/src/screens/Runs/RunNewDialog.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe: labels and descriptions)
  * Touch when:   the required-marker rendering changes — update `field()` in
  *               ui/e2e/walkthrough/support.ts with it; never for a new repository.

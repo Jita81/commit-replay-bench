@@ -1,5 +1,6 @@
 /**
- * ui/src/screens/Repos/repoConfigModel.ts — stored config round-trips, only changes are sent, validation speaks the server's words.
+ * ui/src/screens/Repos/repoConfigModel.ts — stored config round-trips, only changes are sent,
+ * validation speaks the server's words.
  *
  * Navigation
  * ----------

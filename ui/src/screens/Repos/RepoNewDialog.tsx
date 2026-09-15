@@ -1,5 +1,6 @@
 /**
- * Add a repository — POST /repos with a preset, a URL or clone path, layout, belt scope, probe and runner options.
+ * Add a repository — POST /repos with a preset, a URL or clone path, layout, belt scope, probe and
+ * runner options.
  *
  * Navigation
  * ----------
@@ -21,7 +22,8 @@
  *               ui/src/screens/Repos/runnerOpts.ts and ui/src/screens/Repos/RunnerOptsEditor.tsx
  *               (the options), ui/src/screens/Repos/repoConfigModel.ts (`BELT_HELP`,
  *               `parseScopeList`), src/crb/server/routes/repos.py (the URL policy this mirrors)
- * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx, ui/e2e/walkthrough/02-repo-onboard.spec.ts
+ * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx,
+ *               ui/e2e/walkthrough/02-repo-onboard.spec.ts
  * Touch when:   the server's clone-URL policy changes (docs/API.md "POST /repos") — update
  *               `URL_RE` and its hint with it; a new `RepoConfig` field gets a control here
  *               AND in ui/src/screens/Repos/RepoConfigForm.tsx. For a new repository: use

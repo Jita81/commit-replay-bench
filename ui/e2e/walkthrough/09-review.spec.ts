@@ -40,7 +40,8 @@
  * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Runs/EvidenceDrawer.tsx,
  *               ui/src/screens/Runs/ReviewPanel.tsx and ui/src/screens/Runs/contract.ts (the
  *               code under test), ui/src/screens/Runs/TaskDetailPage.tsx (the verdict column),
- *               src/crb/server/routes/grades.py (the patch route) and src/crb/server/routes/reviews.py
+ *               src/crb/server/routes/grades.py (the patch route) and
+ *               src/crb/server/routes/reviews.py
  * Tested by:    ui/e2e/walkthrough/09-review.spec.ts
  * Touch when:   the patch headers, the review write boundary or the drawer's test ids change.
  */

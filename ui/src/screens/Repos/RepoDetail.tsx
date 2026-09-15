@@ -1,5 +1,6 @@
 /**
- * Repository detail — the repository as an instrument: probe, change profile, mined tasks, configuration (/repos/:name).
+ * Repository detail — the repository as an instrument: probe, change profile, mined tasks,
+ * configuration (/repos/:name).
  *
  * Navigation
  * ----------

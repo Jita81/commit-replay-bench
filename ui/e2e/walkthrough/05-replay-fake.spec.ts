@@ -37,7 +37,8 @@
  *               screen in turn by its test ids; the export downloaded and verified through
  *               the CLI named by `CRB_E2E_CRB`.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+ * ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
+ *               docs/adr/0006-zero-raw-retention-and-evidence-packs.md
  * Works with:   ui/e2e/walkthrough/support.ts, src/crb/builders/fixture_gold.py (the
  *               hermetic builder — registered only under `CRB_ENABLE_FIXTURE_BUILDER=1`),
  *               ui/src/screens/Runs/RunDetailPage.tsx, ui/src/screens/Runs/EvidenceDrawer.tsx,

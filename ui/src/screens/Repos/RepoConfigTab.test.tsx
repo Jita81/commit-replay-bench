@@ -1,5 +1,6 @@
 /**
- * ui/src/screens/Repos/RepoConfigTab.tsx — only the changed fields are sent, validation mirrors the API, the probe result is shown inline.
+ * ui/src/screens/Repos/RepoConfigTab.tsx — only the changed fields are sent, validation mirrors the
+ * API, the probe result is shown inline.
  *
  * Navigation
  * ----------

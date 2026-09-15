@@ -1,5 +1,6 @@
 /**
- * Start a run — POST /runs: kind, builder, model, ladder, the run-level budget, object rungs, builder config, sampling knobs.
+ * Start a run — POST /runs: kind, builder, model, ladder, the run-level budget, object rungs,
+ * builder config, sampling knobs.
  *
  * Navigation
  * ----------

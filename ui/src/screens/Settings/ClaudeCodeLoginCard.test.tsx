@@ -1,5 +1,6 @@
 /**
- * ui/src/screens/Settings/ClaudeCodeLoginCard.tsx — a token value never appears in the page, in any state.
+ * ui/src/screens/Settings/ClaudeCodeLoginCard.tsx — a token value never appears in the page, in any
+ * state.
  *
  * Navigation
  * ----------

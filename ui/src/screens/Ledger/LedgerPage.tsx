@@ -13,7 +13,8 @@
  * How:          `useLedgerVerify` → `GateBanner`; filters read from `?…` into
  *               `GradeListParams` → `useGrades` → `DataTable` with offset paging (100 rows).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0007-abstract-cell-export-only.md
+ * ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+ *               docs/adr/0007-abstract-cell-export-only.md
  * Works with:   ui/src/api/hooks.ts (`useLedgerVerify`, `useGrades`), ui/src/api/types.ts
  *               (`GradeRow`, `LedgerVerify`, `beltsOf`), ui/src/components/GateBanner.tsx (the
  *               gate), ui/src/components/BeltPills.tsx and ui/src/components/Provenance.tsx
@@ -25,7 +26,8 @@
  * Touch when:   a filter is added to `GET /grades` (docs/API.md) — add it to `FILTER_KEYS`
  *               and `GradeListParams` in ui/src/api/types.ts; never for a new repository.
  * Claims:       A verified chain proves the rows were not edited, reordered or removed — not
- *               that a clean row is mergeable (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
+ *               that a clean row is mergeable
+ *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
  */
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
