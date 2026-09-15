@@ -4,6 +4,7 @@
 # Jobs:
 #   lint      ruff check + ruff format --check
 #   types     mypy --strict over src/crb
+#   code-map  every source file carries a valid Navigation header; docs/CODE-MAP.md current (advisory until the programme lands)
 #   layers    import-linter: crb.core is stdlib-only; layers depend downward only
 #   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
 #   security  gitleaks (secrets in history) + pip-audit on the resolved environment
@@ -82,6 +83,22 @@ jobs:
           uv pip install -q -e '.[server,postgres,dev]' --python .venv/bin/python
       - name: mypy
         run: .venv/bin/mypy
+
+  code-map:
+    name: code-map (every file has a valid header; docs/CODE-MAP.md is current)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # ADVISORY while the file-header programme lands (docs/FILE-HEADER-STANDARD.md, started
+    # 2026-09-15: 337 files); remove continue-on-error the day scripts/code_map.py --check is
+    # green, and it becomes a required gate like the others.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Headers present, links resolve, map current
+        run: python scripts/code_map.py --check
 
   layers:
     name: layers (import-linter)

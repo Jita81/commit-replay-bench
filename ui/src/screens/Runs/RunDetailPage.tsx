@@ -1,3 +1,29 @@
+/**
+ * Run detail — one run's status, counts, live event stream and per-task table (/runs/:id).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The run-detail screen: header with status and cancel, headline tiles, the
+ *               failure split, the live StepEvent log (SSE) and the per-task outcome table
+ *               with the evidence drawer.
+ * What it does: Renders GET /runs/{id}, /runs/{id}/tasks and the SSE stream; every number
+ *               carries its n and apparatus (StatTile), a non-build run shows its own
+ *               counters (counts.detail); cancelling asks the API, never the worker.
+ * How:          TanStack Query hooks for the run and its tasks, an EventSource for the
+ *               stream (refetch on the server's `done` event), DataTable columns per
+ *               RunTaskRow, the drawer loads an evidence pack by hash on demand.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+ * Works with:   ui/src/api/hooks.ts (the queries), ui/src/api/types.ts (Run, RunTaskRow —
+ *               mirror docs/API.md), ui/src/screens/Runs/EvidenceDrawer.tsx (the pack view),
+ *               ui/src/screens/Capability/FailureSplit.tsx (the split pills),
+ *               ui/src/components/StatTile.tsx (value + n + CI + apparatus, always)
+ * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx, ui/e2e/walkthrough/05-replay-fake.spec.ts,
+ *               ui/e2e/walkthrough/06-cancel.spec.ts
+ * Touch when:   a field is added to GET /runs/{id} or /runs/{id}/tasks (docs/API.md) — update
+ *               ui/src/api/types.ts first, then the tile or column here; never for a new
+ *               repository.
+ */
 import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'

@@ -61,6 +61,30 @@ The test-infrastructure check runs in both modes on the pre-run worktree
 (alongside belt 0 in blind mode, alongside the byte-identical check in sighted
 mode); the task's own test files are excluded from it because the harness overlays
 them and belt 1 already holds them byte-for-byte.
+
+Navigation
+----------
+What it is:   The grader — the one function (``grade``) that turns a trial worktree into a
+              ``GradeResult`` under the belts.
+What it does: Evaluates belts 1–5 mechanically against the parent tree and the overlaid oracle;
+              credits ``clean`` only when every evaluated belt holds; records harness errors,
+              tampering and malformed oracles as non-passes or disqualifications — never a
+              silent pass.
+How:          Integrity check of the git view → tamper scan (target tests, test infrastructure,
+              other tests) → target run → belt-scope run → diff stats → belt 5 plan → result.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/workspace.py (the trial tree and its integrity), src/crb/core/lint.py
+              (belt 5), src/crb/core/ledger.py (the row a result becomes),
+              src/crb/core/runners/base.py (the test runs), src/crb/core/test_infra.py (belt 1's
+              infrastructure table)
+Tested by:    tests/test_grade.py, tests/test_oracle_controls.py, tests/test_runners_node.py
+Touch when:   never for a new repository — configure the runner, belt scope and lint in the
+              repo config instead (docs/OPERATOR.md); adding a belt or changing what "clean"
+              means needs an ADR and an apparatus bump (docs/EVIDENCE-AND-CLAIMS.md).
+Claims:       A clean grade is a mechanical observation under the belts, not mergeability
+              (docs/EVIDENCE-AND-CLAIMS.md).
+
 """
 
 from __future__ import annotations
