@@ -2,6 +2,31 @@
 ``crb.server.secrets`` (the admin wrapper, shape validation, verify rate limit).
 
 Every test here is hermetic (tmp_path, no network, no real ``claude``).
+
+Navigation
+----------
+What it is:   The secrets-at-rest test suite — ``crb.core.secrets_file`` (the owner-only store)
+              and ``crb.server.secrets`` (the admin wrapper, shape validation, verify rate limit).
+What it does: Pins directory resolution precedence, that a fingerprint is at most four trailing
+              characters (empty for short values), the closed name alphabet, that ``set`` creates
+              a 0700 directory and 0600 files atomically (no partial file on failure; concurrent
+              writers never tear), that a group- or world-readable directory or value is refused,
+              that an operator-mounted raw file without metadata is readable (CSI / Key Vault),
+              that ``repr`` and status never carry the value; token shape validation without
+              echoing; and the wrapper's dir resolution, set-validates-then-stores logging only
+              the fingerprint, unknown names refused, insecure files reported absent with the
+              reason, verify running the builder's probe, and the deployment-wide one-per-interval
+              rate limiter with a single winner under threads.
+How:          Everything under ``tmp_path`` with real ``chmod``; no network, no real ``claude``.
+Layer:        tests — docs/ARCHITECTURE.md#71-security
+ADRs:         none
+Works with:   src/crb/core/secrets_file.py and src/crb/server/secrets.py (under test),
+              src/crb/builders/claude_code.py (the probe verify runs),
+              tests/test_server_routes_admin_secrets.py (the same store behind the API),
+              docs/SECURITY.md (credentials, §3.3), docs/DEPLOYMENT.md (Key Vault → environment)
+Tested by:    tests/test_server_secrets.py
+Touch when:   a secret name is added to the alphabet (a shape case); the file-mode rules change
+              (never looser than owner-only).
 """
 
 from __future__ import annotations

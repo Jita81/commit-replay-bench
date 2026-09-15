@@ -1,4 +1,24 @@
-"""``/oracle/{repo}`` and ``/oracle/{repo}/controls`` — strength, band, gate; 404 not_measured."""
+"""``/oracle/{repo}`` and ``/oracle/{repo}/controls`` — strength, band, gate; 404 not_measured.
+
+Navigation
+----------
+What it is:   ``/oracle/{repo}`` and ``/oracle/{repo}/controls``'s test suite — strength, band,
+              gate; 404 ``not_measured``.
+What it does: Pins the report's shape, bands and gates over the seed's ``oracle.score`` events,
+              that the latest score per task wins and the class comes from the task table, the
+              empty repo and 404, anonymous 401; and that the controls route serves the latest
+              report, 404s when not measured, and admins read too.
+How:          ``make_env`` over the seed; extra ``oracle.score`` events appended through the ORM
+              in the worker's shape.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/server/routes/oracle.py (under test), src/crb/core/oracle/adequacy.py
+              (the bands and gates), src/crb/server/routes/runs.py (``event_to_model``),
+              tests/fixtures/server_seed.py, docs/API.md (oracle adequacy)
+Tested by:    tests/test_server_routes_oracle.py
+Touch when:   the ``oracle.score`` or ``controls.report`` event shape changes in the worker (the
+              seed and these cases together).
+"""
 
 from __future__ import annotations
 
@@ -23,6 +43,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path, role="viewer") as e:
         yield e
 

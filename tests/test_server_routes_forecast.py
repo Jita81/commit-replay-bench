@@ -1,4 +1,24 @@
-"""``/forecast/build`` and ``/forecast/readiness`` — honest ex-ante numbers and the punch-list."""
+"""``/forecast/build`` and ``/forecast/readiness`` — honest ex-ante numbers and the punch-list.
+
+Navigation
+----------
+What it is:   ``/forecast/build`` and ``/forecast/readiness``'s test suite — honest ex-ante
+              numbers and the punch-list.
+What it does: Pins ``parse_mix`` shapes and 422 on malformed input, the forecast's shape and
+              numbers over the seed, its errors, that a viewer reads; and that readiness with a
+              mix is not ready until a sign-off lands, an unmeasured mix is reported as such,
+              without a mix a profile is required (computed from a clone), and the error cases.
+How:          ``make_env`` over the seed; ``clear_policy`` + ``attested_body`` to make the
+              sign-off land honestly; a ``pyrepo`` clone for the profile case.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/server/routes/forecast.py (under test), src/crb/core/forecast.py (the
+              numbers), tests/fixtures/server_seed.py, tests/fixtures/signoff_seed.py,
+              tests/test_forecast.py (the core suite), docs/API.md
+Tested by:    tests/test_server_routes_forecast.py
+Touch when:   the mix grammar or a readiness gap kind changes (mirror tests/test_forecast.py
+              and ui/src/api/types.ts).
+"""
 
 from __future__ import annotations
 
@@ -23,6 +43,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
 

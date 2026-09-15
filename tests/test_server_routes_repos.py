@@ -1,4 +1,27 @@
-"""``/repos`` — list/detail shapes, config validation, the audit event + trail, probe, profile, tasks."""
+"""``/repos`` — list/detail shapes, config validation, the audit event + trail, probe, profile, tasks.
+
+Navigation
+----------
+What it is:   ``/repos``'s test suite — list / detail shapes, config validation, the audit event
+              and trail, probe, profile, tasks.
+What it does: Pins the list shape (probe, counts, last run), pagination, viewer reads, anonymous
+              401, detail with config and 404, create RBAC / validation / the recorded event /
+              duplicate 409 / invalid config 422, update RBAC with a redacted diff event, the
+              per-repo audit trail newest first, probe RBAC and enqueue (queue unavailable
+              handled), profile computed / cached / refreshed and 409 without a clone, and the
+              task list with filters.
+How:          ``make_env`` over the seed; ``fake_jobs`` stands in for ``crb.store.jobs`` and
+              persists the run so the API can read it back.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/server/routes/repos.py (under test), src/crb/core/spec.py
+              (``RepoConfig`` validation), src/crb/store/jobs.py (the probe enqueue),
+              tests/fixtures/server_seed.py, docs/API.md (repos), docs/OPERATOR.md (configuring
+              a repository from the UI, §2.0)
+Tested by:    tests/test_server_routes_repos.py
+Touch when:   a ``RepoConfig`` field is added (a validation case and the redacted-diff case; the
+              UI form in ui/src/api/types.ts); a repo-level route is added.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +51,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
 

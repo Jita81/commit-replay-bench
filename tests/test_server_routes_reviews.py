@@ -5,6 +5,33 @@ The patch route is exercised on a REAL retained worktree: a ``pyrepo`` trial wit
 source edit and an untracked new file, whose :meth:`Workspace.diff_stats` hash is the
 pack's ``diff_sha256`` — the served bytes must hash to exactly that (the drift guard
 between the grader's hashing and the route's recomputation).
+
+Navigation
+----------
+What it is:   ``/reviews``, ``/reviews/verify``, ``/reviews/stats`` and the retained-artefact
+              routes ``/grades/{row_hash}/{retained, patch, transcript}``'s test suite.
+What it does: Pins, on a REAL retained worktree, that the served patch hashes to exactly the
+              pack's ``diff_sha256`` (the drift guard between the grader's hashing and the
+              route's recomputation), the retained status, that redaction and the cap change the
+              bytes and say so, that a drifted worktree is served unverified, the 404 reasons,
+              that a transcript is served only from inside the transcripts directory; and for
+              reviews: RBAC, CSRF on the write, ok then defect reviews, the client verdict must
+              agree, a patch-hash mismatch is 422 ``review_refused``, a row whose pack has no
+              diff cannot be reviewed, a regression is never mergeable, redaction, verify
+              reporting tamper and a lost anchor, stats joining the standing verdict onto cells
+              and refusing a false-Q1 repo, and the table being append-only.
+How:          ``Retained`` builds a graded row with a real ``pyrepo`` trial (a source edit and
+              an untracked new file) under the API's home; ``make_env`` over the seed.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
+              docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/server/routes/reviews.py and src/crb/server/routes/grades.py (under
+              test), src/crb/core/review.py (the record and anchor), src/crb/core/workspace.py
+              (``diff_stats`` — the hash the patch must match), src/crb/store/ledger.py
+              (``DbReviewLedger``), tests/fixtures/server_seed.py, docs/API.md (reviews)
+Tested by:    tests/test_server_routes_reviews.py
+Touch when:   the diff hashing rule changes in the grader (this suite fails first — that is
+              its job); a retention kind is added.
 """
 
 from __future__ import annotations
@@ -51,6 +78,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
 
@@ -162,9 +190,11 @@ class Retained:
         )
 
     def patch(self) -> Any:
+        """``GET`` the retained patch of the row."""
         return self.env.get(f"/grades/{self.row.row_hash}/patch")
 
     def review_body(self, **over: Any) -> dict[str, Any]:
+        """A valid ``POST /reviews`` body anchored to the row's diff hash; ``over`` overrides fields."""
         body: dict[str, Any] = {
             "grade_row_hash": self.row.row_hash,
             "statement": "read every hunk; the extra module is dead code",

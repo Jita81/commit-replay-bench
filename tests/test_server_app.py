@@ -1,6 +1,32 @@
 """The app factory: settings, middleware, error envelope, router seam.
 
 Hermetic: a temp SQLite database per test, no network, no docker (sandbox=local).
+
+Navigation
+----------
+What it is:   The app factory's test suite — settings, middleware, the error envelope and the
+              router seam.
+What it does: Pins that prod requires a long secret key (dev generates one with a warning),
+              cookie security by environment, the ``CRB_`` prefix and nested delimiter, unknown
+              roles and short bootstrap passwords refused, a redacted settings dict; that the
+              factory mounts the core routers, opens the database and bootstraps once, honours an
+              injected session factory, and that ``/health`` detects dropped append-only triggers
+              which a restart heals; the security headers (HSTS only when secure), request ids,
+              a structured redacted access log, CORS only when configured; the envelope for 404 /
+              405 / 422 (never echoing input) and the reserved codes for ``FalseQ1Violation``,
+              ``SandboxUnavailable`` and ``LedgerIntegrityError``; and the ``require_role``
+              ladder.
+How:          ``create_app`` on dev settings over a temp SQLite file, a ``TestClient``, and every
+              ambient ``CRB_*`` variable cleared per test.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/server/app.py (under test), src/crb/server/settings.py (the settings
+              cases), src/crb/server/deps.py (the error envelope), src/crb/server/auth.py
+              (``require_role``), docs/API.md (conventions the envelope tests pin),
+              docs/SECURITY.md
+Tested by:    tests/test_server_app.py
+Touch when:   a domain exception is mapped to a reserved code (a case here and docs/API.md); a
+              security header or middleware is added; a settings field gains validation.
 """
 
 from __future__ import annotations
@@ -35,6 +61,9 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
+    """Dev ``Settings`` on ``tmp_path`` (local sandbox, fixed secret, bootstrap admin, no UI dist so a
+    built bundle in the cwd can never shadow a router); ``overrides`` win.
+    """
     base: dict[str, Any] = {
         "env": "dev",
         "home": tmp_path,
@@ -52,16 +81,19 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
+    """Default dev settings for one test."""
     return make_settings(tmp_path)
 
 
 @pytest.fixture
 def client(settings: Settings) -> Iterator[TestClient]:
+    """A started app (lifespan run: database opened, admin bootstrapped) behind a ``TestClient``."""
     with TestClient(create_app(settings)) as c:
         yield c
 
 
 def login(c: TestClient, username: str = "root", password: str = ROOT_PW) -> str:
+    """Log ``c`` in and set the CSRF header; returns the token for the CSRF cases."""
     r = c.post(f"{API_PREFIX}/auth/login", json={"username": username, "password": password})
     assert r.status_code == 200, r.text
     token = c.cookies["crb_csrf"]
@@ -368,6 +400,8 @@ class TestErrorEnvelope:
 
 
 class TestRbacSeam:
+    """``require_role``: the ladder every route's minimum role is checked against."""
+
     def test_require_role_ladder(self, settings: Settings) -> None:
         app = create_app(settings)
         for role in ROLE_LADDER:
@@ -414,4 +448,5 @@ class TestRbacSeam:
 
 
 def matrix_role(username: str) -> str:
+    """The role of each seeded username, for the RBAC matrix."""
     return {"root": "admin", "appr1": "approver", "op1": "operator", "viewer1": "viewer"}[username]

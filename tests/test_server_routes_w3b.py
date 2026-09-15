@@ -1,7 +1,31 @@
 """W3-B route contracts: ``POST /runs`` ``builder_config`` (stored under
 ``params.builder_config``, served on the run, identity/credential keys refused) and
 ``POST /repos`` URL policy for URL-only registrations (cloned by the worker later, so an
-uncloneable source is refused at registration)."""
+uncloneable source is refused at registration).
+
+Navigation
+----------
+What it is:   The W3-B route contracts' test suite — ``POST /runs`` ``builder_config`` and
+              ``POST /repos`` URL policy for URL-only registrations, plus the Claude Code model
+              default and per-run retention.
+What it does: Pins that ``builder_config`` is stored under ``params.builder_config`` and served
+              (absent or empty means no key; identity and credential keys refused with 422;
+              non-object 422), that URL-only registration accepts HTTPS and SSH and refuses
+              uncloneable sources without echoing credentials while a URL beside a clone path is
+              informational, that ``claude_code`` without a model gets the default, and that
+              retention defaults to none and is stored under ``params.retain`` when asked
+              (unknown keys 422).
+How:          ``make_env`` over the seed with a recording jobs stand-in.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/server/routes/runs.py and src/crb/server/routes/repos.py (under test),
+              src/crb/core/git.py (the URL policy), tests/test_worker_clone.py (the worker's
+              half: the clone and ``builder_config`` reaching the builder),
+              tests/test_cli_repo_url.py (the CLI's half), docs/API.md
+Tested by:    tests/test_server_routes_w3b.py
+Touch when:   a builder gains a config key (decide here whether it is identity — refused — or
+              config — stored); a retention key is added (ADR-0006).
+"""
 
 from __future__ import annotations
 
@@ -27,6 +51,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         login(e.client, "operator")
         yield e
@@ -34,6 +59,7 @@ def env(tmp_path: Path) -> Iterator[Env]:
 
 @pytest.fixture
 def jobs(monkeypatch: pytest.MonkeyPatch) -> list[Run]:
+    """A recording ``enqueue`` installed as ``crb.store.jobs``; returns the list of enqueued runs."""
     calls: list[Run] = []
 
     def enqueue(factory: Any, run: Run) -> Run:

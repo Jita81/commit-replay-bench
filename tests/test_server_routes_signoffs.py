@@ -10,6 +10,36 @@ whose tasks were never scored is ``oracle_unmeasured``: refused under every depl
 knob (the v2 clause). Also: the false-Q1 floor (first, non-overridable, its historical
 envelope code), the preview, attestation validation (422), the policy endpoint and the
 deployment knobs, revoke, the chain, and records signed under v1 served as such.
+
+Navigation
+----------
+What it is:   ``/signoffs``'s test suite under ``signoff-policy.v2`` — a sign-off is a policy
+              decision, refused at write.
+What it does: Pins that the seed's deliver cell is refused on its controls escape (409
+              ``signoff_refused`` / ``controls_escapes``), signs (201) once the controls gate is
+              clean AND the oracle is strong, is ``oracle_weak`` at the seed's measured 0.58 and
+              ``oracle_unmeasured`` (not overridable) when never scored; full-cell scope and a
+              second attestation chaining; every clause listed with observed vs threshold on a
+              thin cell; attestation missing not overridable; the false-Q1 floor first and its
+              historical envelope code; the read-time check invalidating a signed cell; 422
+              bodies and the accepted-row rule; redaction; the policy endpoint, relaxed
+              thresholds applied and stamped, the non-relaxable clauses; the preview as a viewer
+              read; list, legacy and v1 records served honestly, revoke RBAC / append-and-hide /
+              re-attest, and chain tamper detection including the attestation.
+How:          ``make_env`` over the seed; ``pass_controls`` / ``score_oracle`` / ``attested_body``
+              from the sign-off seed to clear each clause the honest way; a false-Q1 row inserted
+              with the ORM on purpose.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/server/routes/signoffs.py (under test), src/crb/core/signoff.py (the
+              policy), tests/fixtures/signoff_seed.py (the clause-clearing helpers),
+              tests/fixtures/server_seed.py, src/crb/server/schemas_signoff.py (the shapes),
+              docs/EVIDENCE-AND-CLAIMS.md (what a signed cell may be claimed to mean, §6a),
+              docs/API.md
+Tested by:    tests/test_server_routes_signoffs.py
+Touch when:   the policy gains a clause (a 409 case naming its code, a helper that clears it,
+              the preview case and ui/src/api/types.ts); never to make a clause overridable
+              without the decision log.
 """
 
 from __future__ import annotations
@@ -98,6 +128,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path, role="approver") as e:
         yield e
 

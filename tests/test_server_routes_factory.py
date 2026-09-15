@@ -1,4 +1,22 @@
-"""``/factory/{repo}/*`` — phase P6 stubs: a real 501 code the UI can key on, RBAC in force."""
+"""``/factory/{repo}/*`` — phase P6 stubs: a real 501 code the UI can key on, RBAC in force.
+
+Navigation
+----------
+What it is:   ``/factory/{repo}/*``'s test suite — phase P6 stubs: a real 501 code the UI can key
+              on, RBAC in force.
+What it does: Pins that every factory route answers the 501 envelope with its code, and that
+              RBAC (401 / 403) precedes the 501 so a stub never leaks whether it exists to an
+              unauthorised caller.
+How:          Parametrised over method, path and minimum role against ``make_env``.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/server/routes/factory.py (under test), tests/fixtures/server_seed.py
+              (``assert_rbac``), docs/API.md (factory, phase P6), src/crb/factory/loop.py (what
+              the routes will front)
+Tested by:    tests/test_server_routes_factory.py
+Touch when:   a factory route is implemented (replace its 501 case with real ones — keep the
+              RBAC-precedes case).
+"""
 
 from __future__ import annotations
 
@@ -29,6 +47,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
 

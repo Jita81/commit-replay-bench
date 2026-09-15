@@ -5,6 +5,26 @@ The seed (``fixtures/server_seed``) has no protocol rows, four ``oracle.score`` 
 report with one ESCAPE — so the 40-row deliver-on-numbers cell routes ``human``
 (``controls_escapes``) and IS oracle-held. Rows are stamped with the live apparatus,
 so nothing is stale until the query asks about a newer one.
+
+Navigation
+----------
+What it is:   ``/learn/{refusals, strengthen, remeasure}``'s test suite — the three learning
+              reports over the seed.
+What it does: Pins RBAC and 404, refusals empty then one after a protocol row lands through the
+              write path, that strengthen uses the controls verdict and the per-task
+              ``oracle.score`` events from the store, that the CLI over the exports derives the
+              same route items, that nothing is stale until the apparatus moves, and that a
+              false-Q1 row inserted around the ledger refuses to load.
+How:          ``make_env`` over the seed; a protocol row appended through ``DbLedger``; the CLI
+              invoked over the API's own exports for the parity case.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/server/routes/learn.py (under test), src/crb/core/learn.py (the
+              derivations), tests/test_cli_learn.py (the CLI half of the parity),
+              tests/fixtures/server_seed.py, docs/LEARNING-LOOP.md, docs/API.md
+Tested by:    tests/test_server_routes_learn.py
+Touch when:   a learn report gains a field (the CLI must read the export the same way — add the
+              parity case); the event shapes the reports read change.
 """
 
 from __future__ import annotations
@@ -48,6 +68,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
+    """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
 
