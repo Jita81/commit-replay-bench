@@ -75,6 +75,39 @@ Known residuals (documented, not covered)
   ``pytest.py`` under ``src/``) — only the repository root is covered.
 * Dependency trees (``node_modules``, ``vendor``, ``.venv``) are git-ignored and are
   the sandbox's responsibility (ADR-0005), not belt 1's.
+
+Navigation
+----------
+What it is:   Belt 1b's table — which files, per language and runner, are part of the
+              oracle's execution environment (``INFRA_RULES``), and the section-aware
+              comparison for files that are only partly so.
+What it does: Answers "is this path test infrastructure?" from a documented pattern table
+              in which every rule carries its reason; for ``pyproject.toml``, ``setup.cfg``,
+              ``tox.ini``, ``package.json``, ``go.mod``, ``pom.xml`` and ``Cargo.toml``
+              decides whether an edit touched the oracle-relevant sections (pytest, jest,
+              mocha, babel, surefire, dev-dependencies, the linters belt 5 reads) rather
+              than a version or a runtime dependency. Fails closed on anything it cannot
+              parse, anything too large, and any XML with a DOCTYPE.
+How:          ``rules_for`` (language + optional runner narrowing) → ``matching_rule``
+              (whole-file rules beat section-aware ones) → ``is_test_infra``;
+              ``infra_sections_changed`` projects both sides of the file onto the relevant
+              key paths (TOML / JSON), section bodies (INI), directives (go.mod) or
+              elements (pom.xml) and compares the projections.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0010-polyglot-negative-controls.md
+Works with:   src/crb/core/grade.py (``infra_tampered`` calls both questions before any
+              test runs), src/crb/core/lint.py (the linter configs listed here are what its
+              detectors read), src/crb/core/spec.py (Language; ``RepoConfig.is_test`` covers
+              the test files themselves), src/crb/core/oracle/controls.py (the
+              ``env_poison`` control that measures this belt), src/crb/core/runners/base.py
+              (the runner names the narrowing keys on)
+Tested by:    tests/test_test_infra.py, tests/test_grade.py, tests/test_oracle_controls.py
+Touch when:   onboarding a repository whose test runner reads a config file not in the
+              table (a builder editing it would go unnoticed — a belt-1 gap) or whose
+              honest commits keep tripping a rule (narrow it by runner, or make the file
+              section-aware): add the rule WITH its reason and a case in
+              tests/test_test_infra.py; note it in docs/adr/0001-four-belts-and-false-q1-at-write.md.
 """
 
 from __future__ import annotations
@@ -128,6 +161,7 @@ class InfraRule:
         object.__setattr__(self, "globs", tuple(g.lower() for g in self.globs))
 
     def matches(self, rel_lower: str) -> bool:
+        """Does any glob match the (already lower-cased, normalised) path?"""
         return any(fnmatch.fnmatchcase(rel_lower, g) for g in self.globs)
 
 
@@ -142,6 +176,7 @@ def _under(*dirs: str) -> tuple[str, ...]:
 
 
 def _root(*names: str) -> tuple[str, ...]:
+    """Globs at the repository root only (a nested copy is not read by the tool)."""
     return tuple(names)
 
 
@@ -151,6 +186,9 @@ _GO = Language.GO.value
 _JVM = Language.JVM.value
 _RS = Language.RUST.value
 
+#: THE table. Order matters only among rules matching the same path (the first
+#: whole-file rule wins); every row's ``reason`` is the documentation of why a
+#: builder touching that file has changed the instrument.
 INFRA_RULES: tuple[InfraRule, ...] = (
     # --- every language --------------------------------------------------------
     InfraRule(
@@ -429,6 +467,7 @@ INFRA_RULES: tuple[InfraRule, ...] = (
 
 
 def _language_value(language: str) -> str:
+    """Canonical language value (aliases accepted); ``*`` passes through."""
     if language == ANY_LANGUAGE:
         return ANY_LANGUAGE
     return Language.parse(str(language)).value
@@ -551,16 +590,19 @@ def _pluck(doc: Any, path: Sequence[str]) -> Any:
 
 
 def _canon(value: Any) -> str:
+    """A comparable string for a plucked value (absent ≠ empty: ``<missing>``)."""
     if value is _MISSING:
         return "<missing>"
     return json.dumps(value, sort_keys=True, default=str, separators=(",", ":"))
 
 
 def _project(doc: Any, paths: Sequence[Sequence[str]]) -> dict[str, str]:
+    """The document reduced to its oracle-relevant key paths — what is compared."""
     return {".".join(p): _canon(_pluck(doc, p)) for p in paths}
 
 
 def _toml_view(text: str, paths: Sequence[Sequence[str]]) -> dict[str, str] | None:
+    """Projection of a TOML document; ``None`` when it does not parse (fail closed)."""
     try:
         doc = tomllib.loads(text) if text.strip() else {}
     except (tomllib.TOMLDecodeError, ValueError):
@@ -569,6 +611,7 @@ def _toml_view(text: str, paths: Sequence[Sequence[str]]) -> dict[str, str] | No
 
 
 def _json_view(text: str, paths: Sequence[Sequence[str]]) -> dict[str, str] | None:
+    """Projection of a JSON object; ``None`` when it does not parse or is not an object."""
     try:
         doc = json.loads(text) if text.strip() else {}
     except ValueError:
@@ -579,6 +622,7 @@ def _json_view(text: str, paths: Sequence[Sequence[str]]) -> dict[str, str] | No
 
 
 def _ini_header(line: str) -> str | None:
+    """The normalised section name of an INI header line, or ``None``."""
     s = line.strip()
     if not s.startswith("["):
         return None
@@ -631,6 +675,7 @@ def _gomod_view(text: str) -> list[str]:
 
 
 def _strip_ws(elem: ET.Element) -> None:
+    """Drop formatting whitespace so a re-indented pom compares equal."""
     for e in elem.iter():
         if e.text is not None and not e.text.strip():
             e.text = None
@@ -640,10 +685,13 @@ def _strip_ws(elem: ET.Element) -> None:
 
 
 def _local(tag: str) -> str:
+    """The tag without its namespace, lower-cased (``{ns}Build`` → ``build``)."""
     return tag.rsplit("}", 1)[-1].lower()
 
 
 def _xml_view(text: str, wanted: frozenset[str]) -> list[str] | None:
+    """The serialised ``wanted`` top-level elements of a pom; ``None`` for unparsable
+    or DOCTYPE/ENTITY-bearing XML (never expanded — fail closed)."""
     if not text.strip():
         return []
     if _XML_UNSAFE_RE.search(text):

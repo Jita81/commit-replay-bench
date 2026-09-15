@@ -22,6 +22,37 @@ measured, never assumed:
 The miner assigns the **path class** only (:func:`~crb.core.spec.classify_commit`);
 the intent label is a separate step (:mod:`crb.core.classify`) so mining never
 needs a model.
+
+Navigation
+----------
+What it is:   The miner — the stage that turns a repository's history into ``TaskSpec``s
+              whose oracle is proven RED at the parent and satisfiable by the humans' own
+              patch.
+What it does: Walks commits newest-first and keeps those that couple source and test
+              changes within the pool's caps; for each, in a fresh worktree, measures RED,
+              the baseline failing set and (unless told not to) the gold under belts 2, 3
+              and 5; skips a candidate whose target is green, times out or defines no test;
+              stops the run after three consecutive harness errors rather than skipping
+              history silently. Never assigns an intent label and never needs a model.
+How:          ``iter_candidates`` (git log + changed files + layout rules) → ``qualify``
+              (``Workspace.create`` → ``overlay_tests`` → target run → belt-scope run →
+              ``TaskSpec``) → ``gold_check`` (``overlay_sources`` → target → belt → lint) →
+              ``mine`` drives the loop to ``target_count`` and emits ``mine.*`` events.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/spec.py (RepoConfig layout rules, TaskSpec, size tiers, path
+              class), src/crb/core/workspace.py (the worktree and overlays),
+              src/crb/core/runners/base.py (target scope, belt scope, oracle validity, lint
+              plan), src/crb/core/git.py (log, changed files, churn), src/crb/core/grade.py
+              (applies the same belts to a builder's patch), src/crb/core/lint.py (belt 5 on
+              the gold), src/crb/cli/commands/mine.py (the ``crb mine`` command)
+Tested by:    tests/test_mine.py, tests/test_runners_go.py, tests/test_runners_jvm.py,
+              tests/test_runners_node.py, tests/test_runners_cargo.py
+Touch when:   onboarding a repository whose commits do not fit the pool caps (``pool_caps``)
+              or whose skip reasons dominate (``crb mine`` reports them: fix the layout,
+              probe scope or ``mining`` limits in the repo config first —
+              docs/OPERATOR.md#2-configure-a-repository); changing a cap or a qualification
+              rule changes which commits become tasks — bump src/crb/core/version.py.
 """
 
 from __future__ import annotations
@@ -51,12 +82,17 @@ EventFn = Callable[[str, Mapping[str, Any]], None]
 
 @dataclass(frozen=True)
 class PoolCaps:
+    """The shape a commit must have to enter a pool: how many SOURCE files it may
+    touch (``src_min``–``src_max``) and how many language files in total."""
+
     src_min: int
     src_max: int
     files_max: int
 
 
 def pool_caps(config: RepoConfig, pool: str) -> PoolCaps:
+    """The census caps. JVM gets wider caps because one change there spans code plus
+    templates and properties under ``src/main/`` (``RepoConfig.is_src``)."""
     jvm = config.language.value == "jvm"
     if pool == POOL_HARD:
         return PoolCaps(4, 8, 14)
@@ -67,6 +103,8 @@ def pool_caps(config: RepoConfig, pool: str) -> PoolCaps:
 
 @dataclass(frozen=True)
 class Candidate:
+    """A commit that fits the pool's shape but has not yet been proven replayable."""
+
     sha: str
     files: tuple[str, ...]
     src_files: tuple[str, ...]
@@ -99,7 +137,8 @@ def iter_candidates(
         tests = [f for f in files if config.is_test(f)]
         lang_files = config.language_files(files)
         if not (src and tests):
-            continue
+            continue  # no oracle, or nothing for the oracle to judge
+
         if not (caps.src_min <= len(src) <= caps.src_max and len(lang_files) <= caps.files_max):
             continue
         yield Candidate(sha, tuple(files), tuple(src), tuple(tests))
@@ -107,6 +146,9 @@ def iter_candidates(
 
 @dataclass(frozen=True)
 class MineOutcome:
+    """What qualifying one candidate produced: a ``task`` (possibly ``gold_clean=False``)
+    or ``None`` with the ``skipped_reason`` the run reports."""
+
     sha: str
     task: TaskSpec | None
     skipped_reason: str = ""
@@ -131,7 +173,13 @@ def qualify(
     timeout: int = 0,
     on_event: EventFn | None = None,
 ) -> MineOutcome:
-    """RED-check + baseline (+ gold) one candidate in a fresh worktree."""
+    """RED-check + baseline (+ gold) one candidate in a fresh worktree.
+
+    Every test run is bound to the commit's author date (``authored``) so a declared
+    service (:mod:`crb.core.services`) answers in the era variant that commit was
+    written against. A skip is a fact about the candidate (not RED, timed out, no
+    oracle); a harness exception propagates to :func:`mine`, which counts it.
+    """
     started = time.monotonic()
     sha = cand.sha
     dest = Path(scratch) / f"mine-{config.name}-{sha[:10]}"
@@ -154,6 +202,8 @@ def qualify(
         red = runner.run_for(
             executor, ws.root, target_scope, timeout=timeout, authored=repo.author_date(cand.sha)
         )
+        # a timeout is not RED: a target that never finishes at the parent cannot be
+        # told apart from one that fails, and a builder could "pass" it by making it hang
         if red.timed_out:
             _emit(on_event, "mine.skip", sha=sha, reason="target timeout at parent")
             return MineOutcome(sha, None, "target timeout at parent", time.monotonic() - started)
@@ -169,6 +219,7 @@ def qualify(
             _emit(on_event, "mine.skip", sha=sha, reason="baseline timeout")
             return MineOutcome(sha, None, "baseline timeout", time.monotonic() - started)
 
+        # size is the SOURCE churn only: the tests are the oracle, not the change
         churn = repo.numstat_churn(f"{sha}~1", sha, list(cand.src_files))
         task = TaskSpec(
             task_id=sha,
@@ -330,7 +381,13 @@ def mine(
     on_event: EventFn | None = None,
 ) -> Iterator[MineOutcome]:
     """Yield qualification outcomes until ``target_count`` tasks are found or
-    ``max_candidates`` candidates were examined (``only``: just these shas)."""
+    ``max_candidates`` candidates were examined (``only``: just these shas).
+
+    A task counts as found whatever its ``gold_clean`` — the miner's job is to
+    record the fact, and the statistics exclude a false gold later. ``known`` shas
+    are skipped so re-mining a repository extends its tasks rather than repeating
+    them.
+    """
     want = target_count or int(
         config.mining.get("target_valid" if pool == POOL_STANDARD else "hard_target", 25)
     )

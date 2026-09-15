@@ -38,6 +38,39 @@ This module only builds the boundary and the aggregator; nothing in ``crb``
 reads a shared cell back into a routing decision. That is the "designed
 boundary, not demonstrated" line from the essay, and it stays that way until a
 consumption path has its own evidence.
+
+Navigation
+----------
+What it is:   The federated export boundary — ``AbstractCell`` (exactly the allowlisted
+              fields of one cell), ``export_abstract`` (what leaves an organisation) and
+              ``aggregate_abstract_cells`` (the k-anonymous, optionally noised merge across
+              organisations).
+What it does: Projects ``CellStats`` onto the allowlist and nothing else; refuses at import
+              time to let the dataclass and the allowlist drift; releases a cross-org cell
+              only when ``min_cohort_k`` distinct organisations contributed; keeps a
+              contributor's false-Q1 visible in the sum so averaging cannot hide it; adds
+              seeded Laplace noise to released means when asked. Consumes nothing back
+              into routing — by design.
+How:          ``all_cell_stats`` → ``to_abstract_cell`` (redacted key strings, ``None`` for
+              an unmeasured axis) → sorted dicts; aggregation groups contributions by
+              key → cohort check → pooled counts, n-weighted means, Wilson interval
+              recomputed → optional DP → ``SharedCell``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0007-abstract-cell-export-only.md
+Works with:   src/crb/core/ledger.py (CellStats and the cell key — the abstraction
+              boundary), src/crb/core/redact.py (defence in depth on key strings),
+              src/crb/core/stats.py (the recomputed interval),
+              src/crb/cli/commands/ledger.py (``crb ledger export --abstract``),
+              src/crb/server/routes/ledger.py (``GET /ledger/export/abstract``)
+Tested by:    tests/test_federated.py, tests/test_server_routes_ledger.py
+Touch when:   never for a new repository; adding a field to the export is a privacy decision
+              — it must be added to ``ABSTRACT_ALLOWLIST`` on purpose (the import-time
+              assertion and tests/test_federated.py refuse a drift), justified in
+              docs/adr/0007-abstract-cell-export-only.md and
+              docs/DATA-RETENTION.md#5-cross-organisation-sharing.
+Claims:       DP here is a designed boundary with a nominal sensitivity, not a calibrated
+              privacy proof; no consumption path exists yet
+              (docs/EVIDENCE-AND-CLAIMS.md#1-claim-tags — ``[aspiration]``).
 """
 
 from __future__ import annotations
@@ -109,6 +142,7 @@ class AbstractCell:
 
     @property
     def key(self) -> AbstractKey:
+        """The seven key fields as a tuple — what contributions are grouped on."""
         return (
             self.process_step,
             self.capability_class,
@@ -121,13 +155,17 @@ class AbstractCell:
 
     @property
     def cell(self) -> CellKey:
+        """The same key as the ledger's ``CellKey``."""
         return CellKey(*self.key)
 
     def to_dict(self) -> dict[str, Any]:
+        """The allowlisted fields, in allowlist order — the bytes that leave."""
         return {f: getattr(self, f) for f in ABSTRACT_ALLOWLIST}
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> AbstractCell:
+        """Rebuild an imported cell; an extra field is refused, never dropped silently
+        (a foreign bundle carrying an identifier must fail loudly)."""
         extra = set(d) - set(ABSTRACT_ALLOWLIST)
         if extra:
             raise ValueError(f"abstract cell carries non-allowlisted field(s): {sorted(extra)}")
@@ -225,6 +263,7 @@ class SharedCell:
 
     @property
     def key(self) -> AbstractKey:
+        """The seven key fields as a tuple."""
         return (
             self.process_step,
             self.capability_class,
@@ -236,6 +275,7 @@ class SharedCell:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """The released shape (means rounded; ``None`` where no contributor had the axis)."""
         return {
             "process_step": self.process_step,
             "capability_class": self.capability_class,
@@ -284,6 +324,7 @@ def _laplace(scale: float, rng: random.Random) -> float:
 def _normalise(
     contributions: Mapping[str, Iterable[AbstractCell]] | Iterable[OrgContribution],
 ) -> list[tuple[str, tuple[AbstractCell, ...]]]:
+    """Both accepted input shapes → ``[(org_hash, cells)]``, opted-out bundles dropped."""
     if isinstance(contributions, Mapping):
         return [(str(h), tuple(cells)) for h, cells in contributions.items()]
     return [(c.org_hash, c.cells) for c in contributions if c.opted_in]
@@ -335,6 +376,8 @@ def aggregate_abstract_cells(
         latency = _weighted_mean((c.latency_s_mean, c.n) for c in group)
         point = (clean / n) if n else 0.0
         if dp_epsilon is not None:
+            # the released clean count is DERIVED from the noised point, so the exact
+            # count cannot be read back; n and false_q1 stay exact (they gate trust)
             point = min(1.0, max(0.0, point + _laplace(scale, noise)))
             clean = min(n, max(0, round(point * n)))
             if cost is not None:

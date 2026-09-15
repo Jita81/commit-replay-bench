@@ -32,6 +32,42 @@ strengthening item pulled into a sprint by the product would spend a builder on 
 oracle nobody reviewed (§5 play 03); a re-measurement queued by the product would
 spend money without an operator's consent. Each derivation stops exactly where a
 decision needs a name attached.
+
+Navigation
+----------
+What it is:   The learning loop's three derivations — refusal triage, the oracle-strengthening
+              backlog and the apparatus re-measurement plan — pure functions from the ledger
+              and the capability map to proposals a human acts on.
+What it does: Groups every ``protocol`` row's guard refusals by (reason, command shape),
+              costs them and proposes corpus lines whose verdict is always ``unsure``;
+              turns every oracle-held cell into ``test.add`` backlog items with structural
+              facts from the ledger; lists every cell with stale-apparatus evidence, the
+              rows it needs to clear the rule's bars and the ``POST /runs`` bodies that
+              would renew it. Writes only what a named human decided (``apply_triage``)
+              and queues nothing.
+How:          ``triage_refusals`` (``parse_violations`` → ``normalise_reason`` /
+              ``normalise_command`` → ``RefusalGroup``) → a decisions file → ``apply_triage``
+              (validate all, then append with provenance); ``strengthening_backlog`` (cells
+              with an oracle reason code × ``OracleTaskScore``) → ``StrengthenItem``;
+              ``remeasure_plan`` (rows per full cell by apparatus version →
+              ``rows_to_clear_bar`` → ``RunRequest``).
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules (the loop itself:
+              docs/LEARNING-LOOP.md#2-what-crbcorelearn-adds)
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/ledger.py (the rows, failure kinds and cell grouping),
+              src/crb/core/capability.py (the cells and their reason codes),
+              src/crb/core/routing.py (the reasons and thresholds the derivations key on),
+              src/crb/cli/commands/learn.py (``crb learn refusals|strengthen|remeasure``),
+              src/crb/server/routes/learn.py (the same derivations over the store),
+              src/crb/builders/base.py (the guard reasons parsed here; the corpus tests in
+              tests/test_builders_guard_corpus.py consume what ``apply_triage`` writes),
+              src/crb/factory/backlog.py (the BacklogItem shape strengthening items mirror)
+Tested by:    tests/test_learn.py, tests/test_cli_learn.py, tests/test_server_routes_learn.py
+Touch when:   never for a new repository; a new guard prefix, a new routing reason code or a
+              change to ``BacklogItem`` must be mirrored here (the core cannot import the
+              builders or the factory — tests/test_learn.py pins the mirrors); the human
+              steps are deliberate (docs/LEARNING-LOOP.md#3-what-still-needs-a-human-and-why-that-is-deliberate)
+              — do not add a path that accepts, builds or queues.
 """
 
 from __future__ import annotations
@@ -111,6 +147,8 @@ class LearnError(ValueError):
 
 
 def _short_hash(*parts: str) -> str:
+    """A stable 16-hex id from its parts (unit-separator joined, so ``("a b", "c")``
+    and ``("a", "b c")`` differ) — group and item ids survive a re-run unchanged."""
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
@@ -155,6 +193,8 @@ class Violation:
 
 
 def _prefix_of(reason: str) -> str:
+    """The guard family a reason belongs to, by its ``<prefix>:`` lead; ``other``
+    for free text."""
     for p in GUARD_PREFIXES:
         if reason.startswith(p + ":"):
             return p
@@ -186,6 +226,8 @@ def parse_violations(text: str) -> list[Violation]:
             continue
         reason = frag[:idx].strip()
         cmd = frag[idx + len(_ATTEMPTED) :]
+        # no closing paren: the ledger's own field cap cut the text mid-command;
+        # a closing paren at exactly the recorder's cap: probably cut by the recorder
         truncated = True
         if cmd.endswith(")"):
             cmd = cmd[:-1]
@@ -203,6 +245,7 @@ _EXT_RE = re.compile(r"^[\w.@+-]+\.[A-Za-z][A-Za-z0-9]{0,5}$")
 
 
 def _norm_token(tok: str) -> str:
+    """One shell token → its shape token (flags and verbs kept, paths ``<path>``)."""
     if not tok or tok.startswith("-"):
         return tok
     if "$(" in tok or "`" in tok or "${" in tok:
@@ -323,9 +366,11 @@ class RefusalReport:
 
     @property
     def instrument_share(self) -> float:
+        """The share of ALL rows the guards refused (review §7.5's denominator)."""
         return self.rows_protocol / self.rows_total if self.rows_total else 0.0
 
     def get(self, group_id: str) -> RefusalGroup | None:
+        """The group a decision names, or ``None`` (an unknown id is refused)."""
         for g in self.groups:
             if g.group_id == group_id:
                 return g
@@ -391,6 +436,8 @@ def triage_refusals(rows: Iterable[GradeRow]) -> RefusalReport:
             buckets.setdefault(key, []).append((r, v))
     groups: list[RefusalGroup] = []
     for (prefix, reason, shape), members in buckets.items():
+        # whole examples are preferred; a group that only has cut ones is marked so a
+        # human supplies the full line rather than the product guessing the tail
         whole = sorted(
             {encode_corpus_line(v.command) for _, v in members if v.command and not v.truncated}
         )
@@ -509,6 +556,7 @@ class TriageApplied:
 
 
 def _existing_lines(path: Path) -> set[str]:
+    """The corpus lines already present (comments and blanks skipped)."""
     if not path.exists():
         return set()
     return {
@@ -617,6 +665,7 @@ def apply_triage(
 
 
 def _append(path: Path, block: str) -> None:
+    """Append ``block`` on its own line (a corpus that lacks a final newline gets one)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     sep = "" if not existing or existing.endswith("\n") else "\n"
@@ -639,6 +688,9 @@ STRENGTHEN_ID_PREFIX = "strengthen-"
 
 @dataclass(frozen=True)
 class EscapedMutant:
+    """One mutant the target tests did NOT kill, as the oracle run recorded it —
+    the concrete thing a strengthening item asks a human to write a test for."""
+
     mutant_id: str
     op: str
     line: int
@@ -656,6 +708,7 @@ class EscapedMutant:
 
     @property
     def label(self) -> str:
+        """``path:line description`` — how the mutant is named in an item's text."""
         where = f"{self.path}:{self.line}" if self.path else f"line {self.line}"
         desc = self.description or self.op
         return f"{where} {desc}".strip()
@@ -682,6 +735,10 @@ class OracleTaskScore:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> OracleTaskScore:
+        """Tolerant of the three shapes the oracle emits (score dict, report entry,
+        event payload); a score with no mutants is *unscoreable* (``strength=None``),
+        never 0.0."""
+
         def _i(k: str, *alts: str) -> int:
             for key in (k, *alts):
                 v = d.get(key)
@@ -817,6 +874,9 @@ class StrengthenItem:
 
 @dataclass(frozen=True)
 class StrengthenBacklog:
+    """Every strengthening item, with which cells were flagged and which of those had
+    no per-task oracle score (and so got one cell-level item instead)."""
+
     items: tuple[StrengthenItem, ...]
     cells_flagged: tuple[str, ...]
     cells_without_scores: tuple[str, ...]
@@ -866,6 +926,9 @@ def _item_for_task(
     threshold: float,
     registered: str,
 ) -> StrengthenItem:
+    """One item per weak scored task: the escaped mutants become the acceptance
+    criteria and the structural facts (subject under test, behaviour asserted) come
+    from the ledger, so the DoR gate accepts the item without a value from the answer."""
     assert cell.decision is not None
     label = cell.label
     task_short = score.task_id[:10]
@@ -922,6 +985,8 @@ def _item_for_task(
 
 
 def _item_for_cell(cell: CapabilityCell, *, threshold: float, registered: str) -> StrengthenItem:
+    """The one item a held cell gets when no task of it has been scored: its first
+    acceptance criterion is to run the oracle, so the flag is never dropped silently."""
     assert cell.stats is not None
     label = cell.label
     strength = _fmt_strength(cell.stats.oracle_strength_mean)
@@ -1075,6 +1140,9 @@ class RunRequest:
 
 @dataclass(frozen=True)
 class RemeasureCell:
+    """One full cell with stale evidence: how many rows are stale / current, how many
+    more the rule needs, what that costs at the cell's own rate, and the requests."""
+
     cell: CellKey
     stale_versions: tuple[str, ...]
     n_stale: int
@@ -1108,6 +1176,9 @@ class RemeasureCell:
 
 @dataclass(frozen=True)
 class RemeasurePlan:
+    """The re-measurement an apparatus bump implies: the cells to renew (with their
+    requests), the cells whose fresh evidence already suffices, and the totals."""
+
     current_apparatus: str
     min_n: int
     policy_version: str
@@ -1118,14 +1189,17 @@ class RemeasurePlan:
 
     @property
     def n_needed_total(self) -> int:
+        """Rows to grade across every stale cell."""
         return sum(c.n_needed for c in self.cells)
 
     @property
     def est_cost_usd_total(self) -> float:
+        """Sum of the per-cell estimates (cells with no known cost contribute 0)."""
         return sum(c.est_cost_usd for c in self.cells)
 
     @property
     def est_minutes_total(self) -> float:
+        """Sum of the per-cell latency estimates, serial."""
         return sum(c.est_minutes for c in self.cells)
 
     def to_dict(self) -> dict[str, Any]:
@@ -1197,6 +1271,8 @@ def remeasure_plan(
     stale_rows = 0
     for key, group in sorted(group_by_cell(rs, key_fields=CELL_FIELDS).items()):
         cell = CellKey(**dict(zip(CELL_FIELDS, key, strict=True)))
+        # "stale" is by apparatus version, never by date: evidence expires when the
+        # instrument changes (EVIDENCE-AND-CLAIMS §4), not when it gets old
         stale = [r for r in group if _version_key(r.apparatus_version) < cur]
         current = [r for r in group if _version_key(r.apparatus_version) >= cur]
         stale_rows += len(stale)
@@ -1283,6 +1359,7 @@ def remeasure_plan(
 
 
 def render_refusals(report: RefusalReport) -> str:
+    """The triage as a markdown table, ending with how to write the decisions file."""
     lines = [
         "# Refusal triage",
         "",
@@ -1310,6 +1387,7 @@ def render_refusals(report: RefusalReport) -> str:
 
 
 def render_strengthen(backlog: StrengthenBacklog) -> str:
+    """The backlog as a markdown table (id, title, cell, strength, escaped)."""
     lines = [
         "# Strengthening backlog (oracle-held cells → test work)",
         "",
@@ -1333,6 +1411,7 @@ def render_strengthen(backlog: StrengthenBacklog) -> str:
 
 
 def render_remeasure(plan: RemeasurePlan) -> str:
+    """The plan as a markdown table, ``?`` where a cell's cost was never recorded."""
     lines = [
         f"# Re-measurement plan — apparatus {plan.current_apparatus}",
         "",

@@ -23,6 +23,32 @@ Invariants
   mount such as a Secrets Store CSI volume pointed at by ``CRB_SECRETS_DIR``) is
   read like any other; its ``set_at`` is the file's mtime and ``set_by`` is empty.
 * Standard library only (``crb.core``): both the builders and the server use it.
+
+Navigation
+----------
+What it is:   The on-disk secrets store — ``SecretsStore`` (set / get / delete / status of
+              named, owner-only files) and the directory resolution every reader shares.
+What it does: Keeps an operator-supplied credential (today: the Claude Code login token)
+              as a 0600 file under a 0700 directory; refuses to write into, or read from,
+              anything group- or world-accessible; writes atomically; reports presence and
+              a four-character fingerprint but never a value; reads a mounted file with no
+              metadata as an ordinary secret.
+How:          ``resolve_secrets_dir`` (``CRB_SECRETS_DIR`` → ``$CRB_HOME/secrets`` →
+              ``./.crb/secrets``) → ``validate_name`` (closed alphabet, never a path) →
+              ``_check_dir_for_write`` / ``_check_file_for_read`` (stat, mode bits, owner)
+              → ``_write_atomic`` (``mkstemp`` 0600, fsync, rename, fsync the directory).
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   src/crb/server/secrets.py (the server's view: which names exist and the
+              verify step), src/crb/server/routes/admin.py (Settings → Claude Code login),
+              src/crb/builders/claude_code.py (reads the token for ``auth: cli``),
+              src/crb/cli/commands/service.py (``crb doctor`` reports the store's state)
+Tested by:    tests/test_server_secrets.py, tests/test_builders_claude_code.py,
+              tests/test_cli_doctor.py
+Touch when:   never for a new repository; a new secret name is added where it is consumed
+              (the store is name-agnostic) and documented in
+              docs/SECURITY.md#331-secrets-at-rest--crbcoresecrets_file-crbserversecrets;
+              never relax a permission check to accommodate a host — fix the mount.
 """
 
 from __future__ import annotations
@@ -88,6 +114,8 @@ def fingerprint(value: str) -> str:
 
 
 def validate_name(name: str) -> str:
+    """``name`` if it is in the closed alphabet, else :class:`SecretsNameError` — so a
+    name can never carry a separator, a dot-segment or a metadata suffix."""
     if not NAME_RE.match(name or ""):
         raise SecretsNameError(f"invalid secret name {name!r}: expected {NAME_RE.pattern}")
     return name
@@ -98,6 +126,7 @@ def _utc_now() -> str:
 
 
 def _mtime_iso(st: os.stat_result) -> str:
+    """A mounted value file's ``set_at``: its modification time, in UTC."""
     return _dt.datetime.fromtimestamp(st.st_mtime, tz=_dt.UTC).isoformat(timespec="seconds")
 
 
@@ -129,6 +158,7 @@ class SecretsStore:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> SecretsStore:
+        """The store at :func:`resolve_secrets_dir` (the directory is not created)."""
         return cls(resolve_secrets_dir(env))
 
     @property
@@ -140,13 +170,17 @@ class SecretsStore:
 
     # --- paths -------------------------------------------------------------------
     def value_path(self, name: str) -> Path:
+        """``<dir>/<name>`` — the raw value file."""
         return self._dir / validate_name(name)
 
     def meta_path(self, name: str) -> Path:
+        """``<dir>/<name>.meta.json`` — who set it and when; never the value."""
         return self._dir / (validate_name(name) + META_SUFFIX)
 
     # --- permission checks ---------------------------------------------------------
     def _check_dir_for_write(self) -> None:
+        """The directory exists, is a directory, has no group/other bits and is ours;
+        anything else is :class:`SecretsInsecure` (never repaired silently)."""
         try:
             st = os.stat(self._dir)
         except FileNotFoundError:
@@ -192,6 +226,9 @@ class SecretsStore:
 
     # --- atomic write --------------------------------------------------------------
     def _write_atomic(self, path: Path, data: str) -> None:
+        """Temp file in the SAME directory (so the rename is atomic on one filesystem),
+        0600 from creation, fsynced, renamed over ``path``, then the directory entry
+        fsynced; a failure unlinks the temp file so no partial secret remains."""
         fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=self._dir)
         try:
             os.fchmod(fd, FILE_MODE)  # mkstemp already uses 0600; be explicit
@@ -254,6 +291,8 @@ class SecretsStore:
         return existed
 
     def status(self, name: str) -> SecretStatus:
+        """Presence, fingerprint and provenance — what the UI and ``crb doctor`` show.
+        A mounted value with no metadata reports the file's mtime and no ``set_by``."""
         vpath = self.value_path(name)
         st = self._check_file_for_read(vpath)
         if st is None:

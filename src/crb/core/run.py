@@ -22,6 +22,39 @@ views. The independent review pass (2026-09-14, finding 1(b)) found this path
 graded a worktree whose builder had committed the poison ``clean`` while the CLI
 refused it on its own HEAD check; both paths now share the one check inside
 ``grade()`` (``tests/test_run.py`` pins it here).
+
+Navigation
+----------
+What it is:   The replay orchestrator — ``run`` / ``run_task`` drive one task through prep,
+              build, grade, evidence pack and ledger row, with the builder injected as a
+              callable.
+What it does: Creates a fresh worktree per attempt, overlays the tests in sighted mode only,
+              calls the builder, grades the tree under the belts, writes the evidence pack
+              before the row (no pack ⇒ no Q1), appends one ledger row per attempt, climbs
+              the escalation ladder only while the grade is neither clean nor disqualified,
+              and skips tasks whose gold is known-bad. A builder crash is recorded and graded
+              anyway; only a sandbox failure or cancellation stops the run.
+How:          ``run`` iterates tasks (checking ``stop`` and ``gold_clean``) → ``run_task``
+              loops the ladder: ``Workspace.create`` → ``build_fn`` → ``grade`` →
+              ``EvidencePack`` → ``write_pack`` → ``ledger.append(row_from(...))`` →
+              ``Workspace.remove`` → ``RunSummary`` with first-pass and any-attempt counts
+              kept separate.
+Layer:        core — docs/ARCHITECTURE.md#51-a-replay-run-sighted
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
+              docs/adr/0008-stdlib-core-and-downward-layers.md
+Works with:   src/crb/core/grade.py (the belts), src/crb/core/ledger.py (the row and the
+              chain), src/crb/core/evidence.py (the pack and the apparatus stamp),
+              src/crb/core/workspace.py (one worktree per attempt), src/crb/builders/adapter.py
+              (turns a Builder into a BuildFn), src/crb/server/worker.py (the server's caller
+              — a replay run's ``counts_json`` is the RunSummary), src/crb/cli/commands/grade.py
+              (``crb grade``: the same ``grade()`` over a worktree the operator supplies)
+Tested by:    tests/test_run.py, tests/test_builders_adapter.py, tests/test_worker.py,
+              tests/test_worker_budget_ladder.py
+Touch when:   never for a new repository (mode, ladder and budget are run settings); adding a
+              stage between build and ledger, or a field to the pack or the row, changes the
+              evidence every consumer reads — update src/crb/core/evidence.py, the store
+              (src/crb/store/ledger.py) and docs/API.md together.
 """
 
 from __future__ import annotations
@@ -58,12 +91,19 @@ class BuildAttempt:
     labels: Mapping[str, str] = field(default_factory=dict)
 
 
-#: ``build_fn(workspace, task, mode, rung) -> BuildAttempt``
+#: ``build_fn(workspace, task, mode, rung) -> BuildAttempt``. The whole contract between
+#: the core and a builder: it edits ``workspace.root`` and reports what it spent. It is
+#: never given the belt scope, the baseline or the grader (ADR-0004).
 BuildFn = Callable[[Workspace, TaskSpec, str, str], BuildAttempt]
 
 
 @dataclass(frozen=True)
 class RunSpec:
+    """Everything one run holds constant across its tasks: the repository, the
+    instruments (runner, executor), where evidence and rows go, the mode, the
+    escalation ladder and the apparatus provenance (``corpus_sha``,
+    ``policy_version``) stamped into every pack."""
+
     run_id: str
     config: RepoConfig
     runner: BaseRunner
@@ -89,6 +129,7 @@ class RunSpec:
         object.__setattr__(self, "extra", dict(self.extra))
 
     def apparatus(self) -> ApparatusStamp:
+        """The stamp every pack of this run carries: which instrument produced it."""
         return ApparatusStamp(
             runner=self.runner.name,
             executor=self.executor.describe(),
@@ -100,6 +141,9 @@ class RunSpec:
 
 @dataclass(frozen=True)
 class TaskOutcome:
+    """One task's result over the ladder: its rows (one per attempt), the pack hashes,
+    and whether the LAST attempt was clean or disqualified."""
+
     task_id: str
     attempts: int
     clean: bool
@@ -111,6 +155,11 @@ class TaskOutcome:
 
 @dataclass(frozen=True)
 class RunSummary:
+    """The run's counts. ``clean`` is tasks with a clean row at ANY rung (solve rate
+    under the attempt budget); ``first_pass_clean`` is tasks whose ``r1`` row was
+    clean — reported side by side, never blended. ``stopped_reason`` is non-empty
+    when the run ended before its tasks did."""
+
     run_id: str
     tasks: int
     clean: int
@@ -141,6 +190,9 @@ def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
 
 
 def write_pack(pack: EvidencePack, evidence_dir: Path) -> Path:
+    """Store the pack content-addressed (``<pack_hash>.json``). Written to a temp file
+    and renamed so a crash mid-write cannot leave a half pack under the hash the
+    ledger row will cite; an existing pack with that hash is by definition identical."""
     evidence_dir.mkdir(parents=True, exist_ok=True)
     p = evidence_dir / f"{pack.pack_hash}.json"
     if not p.exists():
@@ -159,6 +211,9 @@ def row_from(
     attempt: BuildAttempt,
     trial: str,
 ) -> GradeRow:
+    """The one mapping from a graded attempt to its ledger row (delegates to
+    :func:`~crb.core.ledger.grade_row_from_result` so the CLI, worker and this
+    orchestrator cannot drift)."""
     return grade_row_from_result(
         result,
         task,
@@ -182,6 +237,10 @@ def run_task(
     *,
     on_event: EventFn | None = None,
 ) -> TaskOutcome:
+    """Climb the ladder for one task: a fresh worktree, a build, a grade, a pack and
+    a row per rung, stopping at the first clean or disqualified attempt. Raises only
+    :class:`SandboxUnavailable` (the run cannot continue); every other failure is a
+    recorded row."""
     started = time.monotonic()
     rows: list[GradeRow] = []
     packs: list[str] = []
@@ -192,6 +251,7 @@ def run_task(
         _emit(on_event, "prep.start", task=task.task_id, trial=trial, rung=rung)
         ws = Workspace.create(repo, task.task_id, dest, config=spec.config)
         try:
+            # blind: the held-out tests reach the worktree only inside grade()
             if spec.mode == MODE_SIGHTED:
                 ws.overlay_tests(task.test_files)
             _emit(
@@ -244,6 +304,7 @@ def run_task(
                 if attempt.transcript_ref
                 else {"rung": rung},
             )
+            # pack first, row second: a row exists only for a pack that is on disk
             write_pack(pack, spec.evidence_dir)
             row = spec.ledger.append(
                 row_from(spec, task, result, pack=pack, attempt=attempt, trial=trial)
@@ -264,6 +325,8 @@ def run_task(
         finally:
             if not spec.keep_worktrees:
                 ws.remove()
+        # a disqualified attempt is excluded, not retried: climbing would let a
+        # tampering builder buy itself another observation
         if clean or disqualified:
             break
     return TaskOutcome(
@@ -302,6 +365,7 @@ def run(
         if stop is not None and stop():
             stopped = "cancelled"
             break
+        # None (never gold-checked) is allowed through; only a MEASURED bad gold skips
         if task.gold_clean is False:
             _emit(
                 on_event,

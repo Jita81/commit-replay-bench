@@ -54,6 +54,39 @@ touched still counts, exactly as the repository's CI would count it on the PR.
 
 Everything here is standard-library only and decides nothing about ``clean`` —
 :mod:`crb.core.grade` folds :attr:`LintRun.ok` into the belts.
+
+Navigation
+----------
+What it is:   Belt 5 — the plan (``LintTool`` / ``LintPlan``), the record (``LintStep`` /
+              ``LintRun``), the runner (``run_plan``) and the per-language detectors that
+              find the repository's OWN formatter / linter from its configuration.
+What it does: Runs the linter the repository configures over the changed non-test files
+              and reads every exit code by one table — accepted, rejected, timed out, or
+              could not run (a harness error, never a verdict); attributes a whole-project
+              tool's findings to changed files so pre-existing debt elsewhere is recorded,
+              not charged; leaves the belt *not evaluated* when the repository enforces
+              nothing. Never decides ``clean`` itself.
+How:          ``RepoConfig.lint`` → ``plan_from_config``, else the runner's ``lint_plan``
+              calls ``go_plan`` / ``python_plan`` / ``js_plan`` / ``jvm_plan`` / ``rust_plan``
+              on the worktree → ``run_plan`` builds one ``Command`` per tool (changed files
+              appended for ``paths="changed"``), runs it through the executor, ``_read_exit``
+              → verdict, ``attribute_findings`` for ``findings_re`` tools → ``LintRun``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/grade.py (folds ``LintRun.ok`` into belt 5),
+              src/crb/core/mine.py (the same plan on the gold, so maintainers' lint debt
+              excludes the task instead of blaming the builder), src/crb/core/runners/base.py
+              (``lint_plan`` / ``detect_lint`` reach the detectors; the venv-first ruff
+              resolution), src/crb/core/execution.py (Command / ExecResult), src/crb/core/spec.py
+              (validates the declared ``lint`` block at config time), src/crb/core/ledger.py
+              (the ``lint`` failure kind)
+Tested by:    tests/test_lint.py, tests/test_grade.py, tests/test_mine.py, tests/test_runners_node.py
+Touch when:   onboarding a repository whose linter detection is wrong or missing — declare it
+              in the repo config (``lint: {command, paths, exts, findings_rc, findings_re,
+              timeout}`` or ``{disabled: true}``, the shape under ``plan_from_config``;
+              docs/adr/0011-repo-lint-belt.md#decision) before adding a detector here; a new
+              detector or exit-code rule needs a test with the real tool's exit codes
+              (tests/test_lint.py) and an amendment to docs/adr/0011-repo-lint-belt.md.
 """
 
 from __future__ import annotations
@@ -260,6 +293,8 @@ class LintStep:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> LintStep:
+        """Rebuild from a stored pack; the attribution counts default to 0 for steps
+        recorded before they existed."""
         return cls(
             tool=str(d.get("tool", "")),
             argv=tuple(d.get("argv", ())),
@@ -295,6 +330,7 @@ class LintRun:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "steps", tuple(self.steps))
+        # the belt-5 poka-yoke: ``ok`` cannot contradict the steps that produced it
         if self.ok is True and (self.error or any(s.verdict is not True for s in self.steps)):
             raise ValueError("a LintRun cannot be ok with a rejecting, failed or errored step")
         if self.error and self.ok is not False:
@@ -312,6 +348,7 @@ class LintRun:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> LintRun:
+        """Rebuild from a stored pack (the invariants run again)."""
         return cls(
             detected=str(d.get("detected", "")),
             steps=tuple(LintStep.from_dict(s) for s in d.get("steps", ()) or ()),
@@ -328,11 +365,13 @@ class LintRun:
 
 
 def _tail(text: str, n: int = 40) -> str:
+    """The last ``n`` lines — where a linter puts its summary."""
     lines = text.strip().splitlines()
     return "\n".join(lines[-n:])
 
 
 def _first_line(res: ExecResult) -> str:
+    """The first line of stderr (else stdout), for a one-line error message."""
     text = (res.stderr or res.stdout).strip()
     return text.splitlines()[0][:160] if text else ""
 
@@ -346,11 +385,13 @@ def _read_exit(tool: LintTool, res: ExecResult) -> tuple[bool | None, str]:
         return None, "lint cancelled"
     if res.returncode in _NOT_RUNNABLE_RCS:
         return None, f"{tool.name}: not runnable (rc={res.returncode})"
+    # checked BEFORE the rc table: a rustup proxy says "not installed" with the
+    # findings code, and that must not read as "the patch is not formatted"
     if tool.unrunnable_re and re.search(tool.unrunnable_re, res.combined):
         return None, f"{tool.name}: not runnable (rc={res.returncode}: {_first_line(res)})"
     if res.returncode == 0:
         if tool.stdout_is_findings and res.stdout.strip():
-            return False, ""
+            return False, ""  # gofmt -l: exit 0, the files it would rewrite on stdout
         return True, ""
     if res.returncode in tool.findings_rcs:
         return False, ""
@@ -416,7 +457,7 @@ def run_plan(
     for tool in plan.tools:
         files = tool.files_for(changed_files)
         if not tool.concerns(changed_files):
-            continue
+            continue  # nothing of this tool's kind changed: the step is not evaluated
         ran += 1
         argv = (*tool.argv, *files)
         cmd = Command(
@@ -567,6 +608,8 @@ def lint_disabled(lint: Mapping[str, Any] | None) -> bool:
 
 
 def _read_text(p: Path, limit: int = 1_000_000) -> str:
+    """A config file's text, or ``""`` when absent, unreadable or over ``limit`` —
+    detection reads the repository's evidence, it never fails on it."""
     try:
         if p.stat().st_size > limit:
             return ""
@@ -576,6 +619,7 @@ def _read_text(p: Path, limit: int = 1_000_000) -> str:
 
 
 def _read_toml(p: Path) -> dict[str, Any]:
+    """Parsed TOML table, or ``{}`` for anything that is not one."""
     try:
         data = tomllib.loads(_read_text(p))
     except (ValueError, TypeError):
@@ -584,6 +628,7 @@ def _read_toml(p: Path) -> dict[str, Any]:
 
 
 def _read_json(p: Path) -> dict[str, Any]:
+    """Parsed JSON object, or ``{}`` for anything that is not one."""
     try:
         data = json.loads(_read_text(p) or "{}")
     except ValueError:
@@ -619,6 +664,8 @@ def go_plan(root: Path, gofmt: str) -> LintPlan | None:
     (``RepoConfig.lint``), never assumed."""
     if not (Path(root) / "go.mod").is_file():
         return None
+    # gofmt exits 2 on a parse error of the input (a findings code: the file is not
+    # gofmt-able) and lists unformatted files on stdout with exit 0
     tool = LintTool(
         "gofmt",
         (gofmt, "-l"),
@@ -766,6 +813,7 @@ def python_plan(root: Path, ruff: str | None) -> LintPlan | None:
     version = ruff_version(ruff)
     tag = f"ruff@{version}" if version else "ruff"
     if check:
+        # --no-fix: the belt observes the tree, it never edits it
         tools.append(LintTool("ruff", (ruff, "check", "--no-fix"), exts=(".py",)))
         names.append(tag)
     if fmt:
@@ -916,6 +964,8 @@ def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
         return None
 
     def have(tool: str) -> bool:
+        """Is the tool installed in the repository's own node_modules? (Always yes
+        under a sandbox, where the image's PATH answers.)"""
         return bin_dir is None or (Path(bin_dir) / tool).exists()
 
     def binary(tool: str) -> str:

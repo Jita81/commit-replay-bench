@@ -47,6 +47,39 @@ A later review of the same row is a new record; the latest per row is the standi
 verdict (:func:`latest_reviews`), which :func:`review_cell_stats` joins onto the
 graded rows so a capability cell can say how many of its accepted rows a human has
 read and how many of those had a defect.
+
+Navigation
+----------
+What it is:   The review ledger — ``ReviewRecord`` (one human's verdict on one graded row,
+              anchored to the bytes they read), its append-only JSONL ledger, the anchor
+              rule both ledgers apply, and the per-cell review statistics.
+What it does: Derives a record's headline verdict from its findings by one rule and refuses
+              a record that contradicts them; refuses any verdict whose patch hash is not
+              the reviewed row's pack ``diff_sha256`` or whose pack is not that row's own;
+              chains records; joins the standing verdict per row onto cells so the map can
+              show how many accepted rows a human read and how many had a defect. Records
+              are kept forever.
+How:          ``ReviewRecord.__post_init__`` (vocabulary, ``derive_verdict``, hash shape,
+              regression ⇒ not mergeable) → ``check_review_anchor`` (row match, pack
+              self-certifies via ``verify_pack``, ``check_patch_anchor``) → ``chained`` +
+              fsync; readers: ``latest_reviews`` → ``review_cell_stats`` projected like the
+              capability map.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/core/ledger.py (the GradeRow a review names; the chain helpers),
+              src/crb/core/evidence.py (the pack whose ``diff_sha256`` is the anchor;
+              ``verify_pack``), src/crb/store/ledger.py (``DbReviewLedger`` — same records,
+              resolves the row and pack itself), src/crb/server/routes/reviews.py (the
+              write boundary; ``ReviewRefused`` → 422), src/crb/core/capability.py (the
+              cell projection the statistics mirror), src/crb/core/redact.py (notes and
+              statements are redacted at construction)
+Tested by:    tests/test_review.py, tests/test_store_reviews.py, tests/test_server_routes_reviews.py
+Touch when:   never for a new repository; adding a verdict or finding kind changes
+              ``SEVERITY`` and every consumer's copy (docs/API.md#reviews-human-verdicts-on-graded-rows,
+              the UI) — bump ``REVIEW_SCHEMA`` if the hashed body changes; the anchor rule
+              is a governance control (docs/reviews/human-review-guide.md) and is never
+              relaxed for convenience.
 """
 
 from __future__ import annotations
@@ -135,6 +168,7 @@ REFUSAL_PACK_REQUIRED = "pack_required"
 
 
 def is_sha256(value: str) -> bool:
+    """A 64-character lowercase hex digest — the only shape a patch hash may take."""
     return len(value) == _SHA256_LEN and all(ch in _HEX for ch in value)
 
 
@@ -264,6 +298,7 @@ class ReviewRecord:
 
     @property
     def reviewed(self) -> bool:
+        """Did the reviewer actually read the patch (anything but ``not_reviewed``)?"""
         return self.verdict != VERDICT_NOT_REVIEWED
 
     # --- hashing ---------------------------------------------------------------------
@@ -278,24 +313,29 @@ class ReviewRecord:
         return out
 
     def compute_hash(self) -> str:
+        """SHA-256 of the canonical JSON of :meth:`body` (``prev_hash`` included)."""
         return sha256_text(canonical_json(self.body()))
 
     def chained(self, prev_hash: str) -> ReviewRecord:
+        """A copy with ``prev_hash`` set and ``row_hash`` computed (the ledger's job)."""
         rec = replace(self, prev_hash=prev_hash)
         object.__setattr__(rec, "row_hash", rec.compute_hash())
         return rec
 
     def verify_hash(self) -> bool:
+        """``True`` iff the stored ``row_hash`` is the hash of the body as read back."""
         return bool(self.row_hash) and self.row_hash == self.compute_hash()
 
     # --- serialisation -----------------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
+        """The body plus ``row_hash`` — the stored line."""
         d = self.body()
         d["row_hash"] = self.row_hash
         return d
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> ReviewRecord:
+        """Rebuild from a stored line; the construction rules run again on the way in."""
         kw = {k: d[k] for k in cls.__dataclass_fields__ if k in d}
         raw = kw.get("findings") or ()
         kw["findings"] = tuple(f if isinstance(f, Finding) else Finding.from_dict(f) for f in raw)
@@ -418,6 +458,8 @@ class JsonlReviewLedger:
         self.path = Path(path)
 
     def _last_hash(self) -> str:
+        """The last record's ``row_hash`` (tail read, as the grade ledger does), or
+        :data:`GENESIS_HASH` for an empty or absent file."""
         if not self.path.exists() or self.path.stat().st_size == 0:
             return GENESIS_HASH
         last = ""
@@ -465,6 +507,7 @@ class JsonlReviewLedger:
         return chained
 
     def records(self) -> Iterator[ReviewRecord]:
+        """Every record in file order; nothing for an absent file."""
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as f:
@@ -473,10 +516,13 @@ class JsonlReviewLedger:
                     yield ReviewRecord.from_dict(json.loads(line))
 
     def verify(self) -> int:
+        """Walk the chain; return the record count; raise on any break."""
         return verify_review_chain(self.records())
 
 
 def verify_review_chain(records: Iterable[ReviewRecord]) -> int:
+    """Prove ``records`` is an unbroken chain from genesis (the review twin of
+    :func:`~crb.core.ledger.verify_chain`); raises :class:`LedgerIntegrityError`."""
     prev = GENESIS_HASH
     n = 0
     for rec in records:
@@ -539,6 +585,7 @@ class ReviewCellStats:
 
     @property
     def reviewed_share(self) -> float:
+        """The share of the cell's eligible rows a human actually read."""
         return self.n_reviewed / self.n_rows if self.n_rows else 0.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -560,6 +607,8 @@ class ReviewCellStats:
 
 
 def _projected(key: CellKey, projection: Sequence[str]) -> CellKey:
+    """The key with every non-projected field wildcarded (the capability map's
+    ``projected_key``, repeated here so this module does not import the map)."""
     proj = set(projection)
     return CellKey(**{f: (getattr(key, f) if f in proj else "*") for f in CELL_FIELDS})
 

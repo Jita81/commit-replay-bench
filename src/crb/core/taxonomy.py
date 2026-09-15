@@ -18,6 +18,30 @@ a class here changes the instrument (see ``docs/ARCHITECTURE.md`` §7.4).
 
 This module is pure data so that :mod:`crb.core.classify` (labels) and
 :mod:`crb.core.spec` (task spec) can both import it without a cycle.
+
+Navigation
+----------
+What it is:   The change-class vocabulary — the path classes, the intent classes, their
+              closed union, one definition per class, and the alias table a labeller's
+              answer is folded through.
+What it does: Fixes the ``capability_class`` axis of every cell key as data; maps any
+              labeller answer onto a member or ``(unclassified)`` and never invents a
+              class; supplies the definitions shown verbatim to a model or a human.
+How:          Tuples and mappings; ``normalise_class`` lower-cases, strips quotes, then
+              exact member → alias → ``(unclassified)``.
+Layer:        core — docs/ARCHITECTURE.md#75-change-class-two-axes-one-resolved-value
+ADRs:         none
+Works with:   src/crb/core/spec.py (``classify_path`` returns members of ALL_CLASSES),
+              src/crb/core/classify.py (labels are normalised through here; the prompt
+              lists CLASS_DEFINITIONS), src/crb/builders/labeller.py (the transports that
+              ask a model), src/crb/core/ledger.py (the cell key's class field),
+              data/census-2026-07-08/class_labels.json (the vocabulary the census numbers
+              were measured on)
+Tested by:    tests/test_classify.py, tests/test_spec.py
+Touch when:   never for a new repository; adding a class changes the instrument — every
+              existing cell keeps its class, new tasks may take the new one, so bump
+              src/crb/core/version.py, add the definition (tests/test_classify.py enforces
+              one per member) and record it in docs/adr/README.md.
 """
 
 from __future__ import annotations

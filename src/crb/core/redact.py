@@ -3,12 +3,37 @@
 Conservative regexes for the credential shapes that show up in CI logs. This is
 defence in depth — the executors already strip the operator's environment — and
 it runs on every string an evidence pack stores.
+
+Navigation
+----------
+What it is:   The redactor — ``redact`` and its two capping variants, applied to every
+              string that leaves an execution sandbox before it is stored.
+What it does: Replaces bearer / basic authorisation values, well-known API-key prefixes,
+              JWTs, ``key=value`` secrets, URL userinfo and private-key blocks with
+              ``[REDACTED…]`` markers; ``redact_and_cap`` keeps the tail (test output's
+              verdict is last), ``redact_and_cap_head`` the head (an error's kind is its
+              prefix). Never raises; never claims completeness.
+How:          An ordered tuple of compiled patterns applied in sequence; the caps cut
+              after redaction so a secret straddling the cut cannot survive.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/core/grade.py (test-run tails), src/crb/core/lint.py (lint tails),
+              src/crb/core/services.py (service logs), src/crb/core/signoff.py and
+              src/crb/core/review.py (human free text), src/crb/observability/logging.py
+              (log lines), src/crb/builders/base.py (builder error strings, head-capped)
+Tested by:    tests/test_redact.py, tests/test_execution.py, tests/test_services.py
+Touch when:   a client's CI output carries a credential shape not in the table (add the
+              pattern with a fixture in tests/test_redact.py and a line in
+              docs/DATA-RETENTION.md#3-redaction); never loosen a pattern to make output
+              more readable.
 """
 
 from __future__ import annotations
 
 import re
 
+#: ``(pattern, replacement)`` in the order applied. Specific shapes (known prefixes,
+#: JWTs) come before the generic ``key=value`` rule so a token keeps its family marker.
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # bearer / basic auth headers
     (
@@ -42,6 +67,7 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def redact(text: str) -> str:
+    """``text`` with every matched credential shape replaced by its marker."""
     out = text
     for pat, repl in _PATTERNS:
         out = pat.sub(repl, out)
