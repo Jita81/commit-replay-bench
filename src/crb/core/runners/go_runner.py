@@ -4,6 +4,26 @@ Setup is ``go mod download`` (the module cache under ``$GOMODCACHE``; the
 host's, since the cache is keyed by module path + version and shared safely).
 Ready means ``go list ./...`` resolves with ``GOPROXY=off`` — the exact question
 "can the test command build without the network".
+
+Navigation
+----------
+What it is:   The Go runner — ``GoRunner`` over ``go test -json``.
+What it does: Maps test files to their packages (Go addresses packages, not files), runs
+              ``go test -json`` with build caching disabled and the toolchain pinned to the
+              host's, parses the event stream into ``<package>::<Test>`` ids, warms the module
+              cache in setup and detects ``gofmt`` for belt 5.
+How:          ``target_scope``: directory of each test file → ``./pkg``. ``command``: env
+              (``-count=1``, ``GOTOOLCHAIN=local``, ``CGO_ENABLED``) → ``go test -json``.
+              ``parse``: one JSON event per line; ``Action == "fail"`` with a ``Test`` name.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/runners/base.py (the contract), src/crb/core/lint.py (``go_plan``),
+              src/crb/core/execution.py (``Executor.tool``), src/crb/core/spec.py
+              (``BELT_AFFECTED_DIRS`` is reinterpreted here), src/crb/core/runners/__init__.py
+Tested by:    tests/test_runners_go.py, tests/test_runners_parsers.py, tests/test_runners_setup.py
+Touch when:   a Go repository needs cgo, a pinned ``go`` binary or a module cache path —
+              set ``runner_opts`` (``cgo``, ``go``, ``gofmt``, ``gomodcache``; docs/OPERATOR.md);
+              a change to how packages are addressed needs a parser/scope test.
 """
 
 from __future__ import annotations
@@ -26,10 +46,14 @@ from crb.core.runners.base import (
 )
 from crb.core.spec import BELT_AFFECTED_DIRS
 
+#: ``-mod=mod`` lets go.mod be updated from the cache; ``GOTOOLCHAIN=local`` refuses the
+#: silent toolchain download a newer ``go`` directive would otherwise trigger.
 _GO_BASE_ENV: dict[str, str] = {"GOFLAGS": "-mod=mod", "GOTOOLCHAIN": "local"}
 
 
 class GoRunner(BaseRunner):
+    """``RepoConfig.runner == "go"``. Scopes are package patterns (``./calc``), not files."""
+
     name = "go"
     default_timeout = 600
 
@@ -38,6 +62,7 @@ class GoRunner(BaseRunner):
         return executor.tool("go", self.opts.get("go"))
 
     def environment_ready(self, root: Path, env_dir: Path) -> bool:
+        """``go list ./...`` with ``GOPROXY=off`` — resolves offline or it is not ready."""
         go = str(self.opts.get("go") or "go")
         return host_check([go, "list", "./..."], Path(root), env={**_GO_BASE_ENV, "GOPROXY": "off"})
 
@@ -50,6 +75,7 @@ class GoRunner(BaseRunner):
         timeout: int,
         on_step: Callable[[SetupStep], None] | None = None,
     ) -> SetupResult:
+        """``go mod download`` into the host's shared module cache."""
         refusal = self.sandbox_refusal(executor)
         if refusal is not None:
             return refusal
@@ -75,6 +101,7 @@ class GoRunner(BaseRunner):
         return go_plan(root, executor.tool("gofmt", self.opts.get("gofmt")))
 
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
+        """The package of each test file (``a/b/x_test.go`` → ``./a/b``; root → ``./``)."""
         pkgs = set()
         for f in test_files:
             d = os.path.dirname(f)
@@ -82,6 +109,7 @@ class GoRunner(BaseRunner):
         return tuple(sorted(pkgs))
 
     def belt_scope(self, target_tests: Sequence[str], test_files: Sequence[str]) -> tuple[str, ...]:
+        """As the base rule, except ``affected_dirs`` becomes the target packages."""
         # A bare directory ("calc/") is read by `go test` as an import path, not a
         # package pattern; AFFECTED_DIRS therefore means the target packages themselves.
         if self.config.belt_scope == BELT_AFFECTED_DIRS:
@@ -91,15 +119,18 @@ class GoRunner(BaseRunner):
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
+        """``go test -json <packages>``; an empty scope is ``./...`` (bare discovery)."""
         go = self._go(executor)
         pkgs = list(scope) or ["./..."]
         env = {
+            # -count=1: never a cached "(cached) ok" — a green must come from this tree.
             "GOFLAGS": "-count=1 -mod=mod",
             "GOTOOLCHAIN": "local",
             "CGO_ENABLED": str(self.opts.get("cgo", "0")),
         }
         writable: tuple[str, ...] = ()
         if executor.name == "docker":
+            # The sandbox filesystem is read-only outside /tmp and the writable paths.
             env["GOCACHE"] = "/tmp/gocache"
             env["GOMODCACHE"] = str(self.opts.get("gomodcache", "/tmp/gomod"))
             env["GOFLAGS"] = "-count=1 -mod=mod"
@@ -108,6 +139,8 @@ class GoRunner(BaseRunner):
         )
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
+        """``<Package>::<Test>`` for every ``fail`` event that names a test (a package-level
+        ``fail`` without a ``Test`` is a build failure — left to the fail-closed rule)."""
         failing = set()
         for line in result.stdout.splitlines():
             try:

@@ -13,6 +13,32 @@ gets a **dependency era**: ``<env_dir>/node_eras/<lock hash>/node_modules``,
 installed once from that commit's manifest and re-pointed for every worktree
 sharing the lockfile. A failed era install is a harness error (the row is
 ``harness``, outside ``n``), never a silent fall-back to HEAD's tree.
+
+Navigation
+----------
+What it is:   The four JavaScript/TypeScript runners (``node``, ``vitest``, ``jest``, ``mocha``)
+              on one base, ``_NodeBase``, that owns ``node_modules`` and dependency eras.
+What it does: Builds each tool's machine-readable command (JUnit XML for ``node --test``, JSON
+              for the rest), parses failing ids — a suite that failed to load is attributed to
+              its file, never "unattributed"; maps a snapshot to the test that owns it;
+              installs the clone's ``node_modules`` in setup and a per-lockfile era when a
+              task commit's manifest differs; detects eslint/prettier/standard/tsc for belt 5.
+How:          ``run``: ``ensure_era`` (hash the worktree's lockfile → install/re-point the
+              symlink) → base ``run``. ``parse``: locate the JSON/XML in stdout → walk the
+              reporter's result tree → ids. ``setup``: ``npm ci``/``install`` in the clone.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/runners/base.py (the contract), src/crb/core/workspace.py (symlinks
+              each worktree's ``node_modules`` to the clone's — what an era re-points),
+              src/crb/core/lint.py (``js_plan``), src/crb/core/execution.py (``Executor.tool``),
+              src/crb/core/runners/__init__.py (the four registry names)
+Tested by:    tests/test_runners_node.py, tests/test_node_eras.py, tests/test_runners_parsers.py,
+              tests/test_runners_setup.py
+Touch when:   a JavaScript repository needs a different invocation — prefer ``runner_opts``
+              (``extra_args``, ``env``, ``npm``/``node``, ``mocha_require``, ``era_keep``,
+              ``era_min_free_mb``; docs/OPERATOR.md) over editing; a new reporter shape or a
+              fifth test tool means a new subclass, a parser test on canned output and a
+              registry entry.
 """
 
 from __future__ import annotations
@@ -57,6 +83,7 @@ def declares_dependencies(root: Path) -> bool:
 
 
 def _json_after_first_brace(text: str) -> dict[str, Any] | None:
+    """The first JSON object in ``text`` — reporters print banners and warnings before it."""
     start = text.find("{")
     if start < 0:
         return None
@@ -68,6 +95,7 @@ def _json_after_first_brace(text: str) -> dict[str, Any] | None:
 
 
 def _list(d: Mapping[str, Any], key: str) -> list[dict[str, Any]]:
+    """``d[key]`` as a list of dicts, tolerating a missing or malformed reporter field."""
     v = d.get(key)
     return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
 
@@ -120,9 +148,13 @@ ERA_KEEP = 8
 
 
 class _NodeBase(BaseRunner):
+    """What the four tools share: ``node_modules`` resolution, dependency eras, npm setup,
+    the belt 5 plan and the test-time environment. Subclasses add ``command``/``parse``."""
+
     default_timeout = 420
 
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
+        """Test files as the tool addresses them; a ``.snap`` maps to the test that owns it."""
         return tuple(sorted({snapshot_to_test(f) for f in test_files}))
 
     # --- dependency eras -----------------------------------------------------------
@@ -142,6 +174,8 @@ class _NodeBase(BaseRunner):
         if not link.is_symlink():
             return None  # the worktree owns a real tree (or has none to re-point)
         clone_nm = link.resolve()
+        # The link's target sits next to the manifest its tree was installed from (the clone
+        # or an earlier era), so hashing that manifest says whether the tree matches.
         key, clone_key = lock_key(root), lock_key(clone_nm.parent)
         if key is None or key == clone_key:
             return None
@@ -157,6 +191,9 @@ class _NodeBase(BaseRunner):
         return era
 
     def _install_era(self, root: Path, era: Path, executor: Executor) -> None:
+        """``npm ci``/``install`` of the worktree's manifest into ``era`` (network on, scripts
+        off). Refuses below the free-space floor; a failed install removes the partial tree
+        and raises :class:`NodeEraError` so the row reads ``harness``."""
         self._evict_eras(era)
         min_free = int(self.opts.get("era_min_free_mb", ERA_MIN_FREE_MB)) * 1024 * 1024
         era.parent.mkdir(parents=True, exist_ok=True)
@@ -190,6 +227,7 @@ class _NodeBase(BaseRunner):
         except OSError as exc:
             raise NodeEraError(f"node era {era.name}: {type(exc).__name__}: {exc}") from exc
         if res.returncode != 0 or not (era / "node_modules" / ".bin").is_dir():
+            # A partial tree would read as "installed" next time; remove it so the retry is real.
             shutil.rmtree(era / "node_modules", ignore_errors=True)
             raise NodeEraError(
                 f"node era {era.name}: npm {verb} rc={res.returncode}: {tail_of(res.combined)[-400:]}"
@@ -209,6 +247,7 @@ class _NodeBase(BaseRunner):
     def run(
         self, executor: Executor, root: Path, scope: Sequence[str], *, timeout: int = 0
     ) -> TestRun:
+        """Base ``run`` once the worktree's ``node_modules`` matches its own lockfile."""
         self.ensure_era(root, executor)
         return super().run(executor, root, scope, timeout=timeout)
 
@@ -230,6 +269,8 @@ class _NodeBase(BaseRunner):
         timeout: int,
         on_step: Callable[[SetupStep], None] | None = None,
     ) -> SetupResult:
+        """One ``npm ci`` (lockfile committed) or ``npm install`` in the clone; every worktree
+        inherits the tree through the workspace's symlink."""
         refusal = self.sandbox_refusal(executor)
         if refusal is not None:
             return refusal
@@ -270,6 +311,7 @@ class _NodeBase(BaseRunner):
         return js_plan(root, bin_dir)
 
     def _bin(self, root: Path, executor: Executor, tool: str) -> str:
+        """The repo's own ``node_modules/.bin/<tool>`` when present, else the executor's."""
         if executor.name == "docker":
             return tool
         local = root / "node_modules" / ".bin" / tool
@@ -281,6 +323,8 @@ class _NodeBase(BaseRunner):
         return [str(a) for a in (self.opts.get("extra_args") or [])]
 
     def _env(self, root: Path, executor: Executor) -> dict[str, str]:
+        """The test command's environment: ``NODE_PATH`` at the resolved tree, ``NODE_ENV=test``,
+        then ``runner_opts.env`` on top."""
         nm = "/work/node_modules" if executor.name == "docker" else str(root / "node_modules")
         env = {"NODE_PATH": nm, "NODE_ENV": "test"}
         for k, v in dict(self.opts.get("env", {})).items():
@@ -296,6 +340,8 @@ class NodeTestRunner(_NodeBase):
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
+        """``node --test`` with the JUnit reporter on stdout (the machine-readable reporter
+        every supported node version ships)."""
         node = executor.tool("node", self.opts.get("node"))
         paths = [] if tuple(scope) == BARE else list(scope)
         argv = [
@@ -308,6 +354,7 @@ class NodeTestRunner(_NodeBase):
         return Command(tuple(argv), root, env=self._env(root, executor), timeout=timeout)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
+        """Every ``<testcase>`` carrying a ``<failure>`` or ``<error>`` child is a failing id."""
         failing: set[str] = set()
         try:
             xml_root = ET.fromstring(result.stdout or "<testsuites/>")  # noqa: S314 — our own reporter output
@@ -331,11 +378,14 @@ class NodeTestRunner(_NodeBase):
 
 
 class VitestRunner(_NodeBase):
+    """``vitest run --reporter=json``; coverage off so the JSON is the whole of stdout."""
+
     name = "vitest"
 
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
+        """``vitest run --reporter=json --coverage.enabled=false <extra_args> <scope>``."""
         vitest = self._bin(root, executor, "vitest")
         argv = [
             vitest,
@@ -348,6 +398,8 @@ class VitestRunner(_NodeBase):
         return Command(tuple(argv), root, env=self._env(root, executor), timeout=timeout)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
+        """Failed assertions by ``fullName``; a file whose suite failed with no assertion
+        recorded (it did not load) is attributed as ``suite:<file>``."""
         data = _json_after_first_brace(result.stdout)
         if data is None:
             return TestRun(
@@ -365,6 +417,7 @@ class VitestRunner(_NodeBase):
                     had_assertion_failure = True
                     failing.add(str(a.get("fullName") or a.get("title") or ""))
             if tr.get("status") == "failed" and not had_assertion_failure:
+                # load failure (import/syntax): attributable to the file, same rule as jest
                 failing.add(f"suite:{tr.get('name', '')}")
         return TestRun(
             result.returncode,
@@ -375,11 +428,14 @@ class VitestRunner(_NodeBase):
 
 
 class JestRunner(_NodeBase):
+    """``jest --json --ci``; the JSON shape is the one vitest's reporter reproduces."""
+
     name = "jest"
 
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
+        """``jest --json --silent --ci <extra_args> -- <scope>``."""
         jest = self._bin(root, executor, "jest")
         # `--` ends option parsing: without it a variadic option in extra_args
         # (jest --selectProjects A B) swallows the path patterns and EVERY suite runs.
@@ -389,6 +445,9 @@ class JestRunner(_NodeBase):
         return Command(tuple(argv), root, env=self._env(root, executor), timeout=timeout)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
+        """Failed assertions by ``fullName`` (jest names the per-file list ``testResults``
+        or ``assertionResults`` depending on version); a suite that failed to load is
+        attributed as ``suite:<file>``."""
         data = _json_after_first_brace(result.stdout)
         if data is None:
             return TestRun(
@@ -418,11 +477,15 @@ class JestRunner(_NodeBase):
 
 
 class MochaRunner(_NodeBase):
+    """``mocha --reporter json``; ``runner_opts.mocha_require`` preloads the register hook
+    (``ts-node/register``, a babel register) the repository's own test script would."""
+
     name = "mocha"
 
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
+        """``mocha [--require X] --reporter json --check-leaks <extra_args> <scope>``."""
         mocha = self._bin(root, executor, "mocha")
         argv = [mocha]
         req = self.opts.get("mocha_require")
@@ -432,6 +495,7 @@ class MochaRunner(_NodeBase):
         return Command(tuple(argv), root, env=self._env(root, executor), timeout=timeout)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
+        """Every entry of the reporter's ``failures`` list, by ``fullTitle``."""
         data = _json_after_first_brace(result.stdout)
         if data is None:
             return TestRun(
