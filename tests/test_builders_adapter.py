@@ -462,6 +462,53 @@ def test_sighted_test_command_is_best_effort(harness: dict[str, Any], tmp_path: 
     )
 
 
+def test_sighted_test_command_brings_the_services_up_and_exports_their_env(
+    harness: dict[str, Any], tmp_path: Path
+) -> None:
+    """mesh-client: the grader had the MESH sandbox and the builder did not, so it ran
+    `docker ps` / `curl localhost:8701` itself and was refused (2026-09-15). With
+    services declared, the era's services are ensured before the build and their
+    environment is part of the command the brief shows."""
+    calls: list[tuple[Path, str | None]] = []
+
+    class WithServices(PytestRunner):
+        def has_services(self) -> bool:
+            return True
+
+        def ensure_services(
+            self, executor: Any, root: Path, *, authored: Any = None, on_command: Any = None
+        ) -> Any:  # type: ignore[override]
+            calls.append((Path(root), authored))
+            return ()
+
+        def service_env(self) -> dict[str, str]:
+            return {"MESH_SANDBOX_URL": "https://localhost:8701", "MESH_CA": "/certs/ca.pem"}
+
+    cmd = adapter.sighted_test_command(
+        WithServices(harness["config"]),
+        harness["executor"],
+        tmp_path,
+        ("tests/test_x.py",),
+        authored="2025-01-02T03:04:05+00:00",
+    )
+    assert calls == [(tmp_path, "2025-01-02T03:04:05+00:00")]
+    assert "MESH_SANDBOX_URL=https://localhost:8701" in cmd and "MESH_CA=/certs/ca.pem" in cmd
+    assert cmd.endswith("tests/test_x.py")
+
+    class ServiceDown(WithServices):
+        def ensure_services(self, *a: Any, **k: Any) -> Any:  # type: ignore[override]
+            raise RuntimeError("compose failed")
+
+    # a service that cannot come up is the grader's harness error to record, not a
+    # brief with a half-environment: best effort yields ""
+    assert (
+        adapter.sighted_test_command(
+            ServiceDown(harness["config"]), harness["executor"], tmp_path, ("t",)
+        )
+        == ""
+    )
+
+
 def test_as_run_ledger_is_a_typed_passthrough(tmp_path: Path) -> None:
     class Duck:
         def __init__(self) -> None:

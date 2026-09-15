@@ -285,7 +285,12 @@ the same record onto every `TestRun` (`target_run.services` / `belt_run.services
 evidence). A service that cannot be started, built, staged or probed healthy is
 `ServiceUnavailable` (a `SandboxUnavailable`): the run stops `failed` with the reason and the
 service's last log lines; nothing is graded against a missing oracle, and nothing reads as
-red *or* green because of it.
+red *or* green because of it. **The builder gets the same service:** in a sighted build the
+era's services are brought up before the builder starts and their `export` environment is part
+of the test command the brief shows, so the builder runs the oracle the grader will run — it
+never has to (and is never allowed to) start the service itself. Measured on mesh-client
+(2026-09-15): without this, 2 of 4 sighted attempts were refused for reaching for `docker ps` /
+`curl localhost:8701`.
 
 **The shape.** One entry per service, exactly one of `image` | `compose` | `build`:
 

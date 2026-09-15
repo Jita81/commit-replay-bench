@@ -285,22 +285,37 @@ def _write_transcript(
 
 
 def sighted_test_command(
-    runner: BaseRunner, executor: Executor, root: Path, target_tests: Sequence[str]
+    runner: BaseRunner,
+    executor: Executor,
+    root: Path,
+    target_tests: Sequence[str],
+    *,
+    authored: str | None = None,
 ) -> str:
     """A human-readable command for the target tests (sighted briefs only).
 
     Best effort: any runner error yields ``""`` — the brief still lists the test
     files, and agentic adapters run the tests through the injected runner anyway.
+
+    With services declared (``runner_opts.services``) the era's services are brought
+    up HERE, before the builder starts, and their environment is part of the command:
+    the grader gets the MESH sandbox, so the builder must too — otherwise it reaches
+    for ``docker`` / ``curl localhost:8701`` itself and the sealed posture refuses it
+    (mesh-client, 2 of 4 sighted attempts, 2026-09-15).
     """
     try:
         timeout = int(runner.opts.get("timeout", runner.default_timeout))
         cmd = runner.command(root, tuple(target_tests), executor=executor, timeout=timeout)
+        env = dict(cmd.env)
+        if runner.has_services():
+            runner.ensure_services(executor, root, authored=authored)
+            env.update(runner.service_env())
     except Exception:
         return ""
     # The runner's environment (PYTHONPATH, GOFLAGS, NODE_PATH …) is part of the command:
     # without it a builder sees ImportErrors and reaches for `pip install`, which the
     # no-network rule then refuses — measured on pallets/click (5/5 attempts errored).
-    env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in sorted(cmd.env.items()))
+    env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in sorted(env.items()))
     argv = " ".join(shlex.quote(a) for a in cmd.argv)
     return f"{env_prefix} {argv}".strip()
 
@@ -452,12 +467,16 @@ def build_fn_for(
                 rung_label, mode, f"builder unavailable: {type(exc).__name__}: {exc}"
             )
         test_command = (
-            sighted_test_command(runner, executor, ws.root, task.target_tests)
+            sighted_test_command(
+                runner, executor, ws.root, task.target_tests, authored=task.authored
+            )
             if mode == MODE_SIGHTED
             else ""
         )
         # the harness command without a scope discloses the environment, never the oracle
-        harness_command = sighted_test_command(runner, executor, ws.root, ())
+        harness_command = sighted_test_command(
+            runner, executor, ws.root, (), authored=task.authored
+        )
         brief = BuildBrief.from_task(
             task,
             mode=mode,
