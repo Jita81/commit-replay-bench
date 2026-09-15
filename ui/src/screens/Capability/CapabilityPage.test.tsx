@@ -1,3 +1,27 @@
+/**
+ * ui/src/screens/Capability/CapabilityPage.tsx — absence is NOT_YET_MEASURED, false-Q1 is red, and the controls verdict is shown as it is.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Screen tests for the capability map against a mocked API.
+ * What it does: Pins that a cell absent from the map renders NOT_YET_MEASURED with n = 0 (never
+ *               a zero rate), that a cell with false-Q1 > 0 is red with the page alert, that
+ *               the summary tiles carry value + n + apparatus, that no repo gives the designed
+ *               empty state, that a 503 renders the envelope (message, HTTP status, code), and
+ *               — after A2 — that a failed / thin / escaped / unmeasured controls verdict gets
+ *               its own pill and the split and model point appear next to the point.
+ * How:          `mockApi` answers `GET /capability-map` with hand-built maps; `renderApp` at
+ *               `/capability?repo=…`; assertions on the `cell-*`, `tile-*`, `kind-*` and
+ *               `controls-*` test ids.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md
+ * Works with:   ui/src/screens/Capability/CapabilityPage.tsx (the code under test),
+ *               ui/src/screens/Capability/contract.ts (the fixture shapes),
+ *               ui/src/test/utils.tsx (`mockApi`, `renderApp`, `PRINCIPAL`)
+ * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx
+ * Touch when:   a cell field or controls state is added — extend the fixtures and assert its
+ *               rendering here.
+ */
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CapabilityCell, CapabilityMap } from '../../api/types'

@@ -1,3 +1,31 @@
+/**
+ * The failure split, the model point and the controls pill — shown wherever a rate is shown.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Three small components: `FailureSplitPills` (red · lint · budget · protocol ·
+ *               harness · outage · DQ), `ModelPointLine` (the model's rate on fair attempts,
+ *               next to the routing rate) and `ControlsPill` (the repo's controls verdict).
+ * What it does: Puts the WHY behind every pass rate on the page: how many misses were the
+ *               model's, how many the budget's, how many the instrument's (protocol /
+ *               harness) and how many were disqualified. Zero counts stay visible so "no
+ *               harness errors" is a statement; the model point is always smaller and beside
+ *               the all-rows point, never instead of it.
+ * How:          `KIND_DISPLAY` fixes the order and wording; counts come straight from the
+ *               cell's `failure_split`; `controlsDisplay` gives the pill its state.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md
+ * Works with:   ui/src/screens/Capability/contract.ts (`KIND_DISPLAY`, `controlsDisplay`, the
+ *               types), ui/src/screens/Capability/CapabilityPage.tsx and
+ *               ui/src/screens/Routing/RoutingPage.tsx (a split per cell / decision),
+ *               ui/src/screens/Runs/RunDetailPage.tsx (a run's split tiles),
+ *               ui/src/screens/Signoff/SignoffPage.tsx (the evidence an approver sees),
+ *               ui/src/components/Pill.tsx
+ * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx (`kind-*`, `model-point`,
+ *               `controls-*` test ids), ui/src/screens/Routing/RoutingPage.test.tsx
+ * Touch when:   a failure kind is added — one row in `KIND_DISPLAY`
+ *               (ui/src/screens/Capability/contract.ts); never for a new repository.
+ */
 import { Pill } from '../../components/Pill'
 import { fmtInt, fmtPct } from '../../lib/format'
 import { TONE_TEXT } from '../../lib/verdict'

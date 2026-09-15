@@ -6,6 +6,37 @@
  * Lives beside the screens (not in `api/types.ts` / `api/hooks.ts`, which another
  * workstream owns in this wave) — fold it in when the wave merges. Every field here is
  * `@contract` with `crb.server.schemas_capability`.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The UI's reading of the capability / routing responses AFTER the A2 amendment
+ *               (failure-kind split, `model_point`, the repo's negative-controls verdict,
+ *               `reason_code`), plus the display vocabulary for kinds, controls states and
+ *               reason codes.
+ * What it does: Re-types `useCapabilityMap` / `useRoutes` to the extended shapes (one cast
+ *               point) and adds `useFailureSplit` (`GET /failure-split`); `controlsDisplay`
+ *               turns a verdict into the pill wording (passed k of N / FAILED / thin / escaped
+ *               / unmeasured), and `REASON_DISPLAY` gives every reason code one sentence. It
+ *               never invents a verdict: no report → `unmeasured`, which withholds `deliver`.
+ * How:          Interfaces extend ui/src/api/types.ts; hooks wrap the base ones; the display
+ *               tables are plain records keyed by the server's closed vocabularies.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0011-repo-lint-belt.md
+ * Works with:   src/crb/server/schemas_capability.py (the server side of every `@contract`
+ *               field), src/crb/core/routing.py (`REASON_CODES`, `CONTROLS_STATES`),
+ *               src/crb/core/ledger.py (`FAILURE_KINDS`), ui/src/api/types.ts and
+ *               ui/src/api/hooks.ts (the base shapes and hooks this extends — fold in when the
+ *               wave merges), ui/src/screens/Capability/FailureSplit.tsx (renders the split
+ *               and the controls pill), ui/src/screens/Routing/RoutingPage.tsx (decisions
+ *               with reason codes), ui/src/screens/Runs/RunDetailPage.tsx (`useFailureSplit`
+ *               for one run)
+ * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx (controls verdict + split),
+ *               ui/src/screens/Routing/RoutingPage.test.tsx, ui/src/screens/Runs/RunDetailPage.test.tsx
+ * Touch when:   a failure kind, reason code or controls state is added on the server (an ADR
+ *               amendment; docs/API.md "/capability-map") — extend the union and its display
+ *               row here; never for a new repository.
+ * Claims:       The controls verdict shown is the one every cell was routed under; a pass-rate
+ *               is shown with its split, never alone (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
  */
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
@@ -137,14 +168,17 @@ export interface FailureSplitReport extends FailureSplit {
 // Hooks — the base hooks re-typed to the extended shapes (one cast point)
 // ---------------------------------------------------------------------------
 
+/** `GET /capability-map` re-typed to the A2 shape (cells carry the split, the map carries `controls`). */
 export function useCapabilityMapWithControls(repo: string, by: CellField[]): UseQueryResult<CapabilityMapWithControls, ApiError> {
   return useCapabilityMap(repo, by) as unknown as UseQueryResult<CapabilityMapWithControls, ApiError>
 }
 
+/** `GET /routes` re-typed to the A2 shape (decisions carry `reason_code` and the controls verdict). */
 export function useRoutesWithControls(repo: string): UseQueryResult<RoutesWithControls, ApiError> {
   return useRoutes(repo) as unknown as UseQueryResult<RoutesWithControls, ApiError>
 }
 
+/** `GET /failure-split?repo=[&run_id=]` — the split over a repo or one run; an unknown run is an empty split (n = 0), never invented. */
 export function useFailureSplit(repo: string, runId = ''): UseQueryResult<FailureSplitReport, ApiError> {
   return useQuery({
     queryKey: ['failure-split', repo, runId] as const,
