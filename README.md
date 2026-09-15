@@ -212,8 +212,7 @@ before the next begins.
 
 ## Licence
 
-Source-available: **Business Source License 1.1** (Apache-2.0 change licence, three-year
-change date, free non-production and verification use) — adopted, text with legal
-([DECISION-LOG](docs/DECISION-LOG.md) DL-015/DL-025, [LICENSING](docs/LICENSING.md)). Until
-the text is committed, `LICENSE` is a reservation of rights: read, evaluate and review only.
-Nothing in this tree is MIT (that applied to v1, tag `v1.0.0-legacy`).
+**Apache License 2.0** ([LICENSE](LICENSE), [NOTICE](NOTICE)) — open source, with a patent
+grant; chosen so that the instrument that graded a client's evidence can be read, re-run and
+improved by anyone, including the client ([DECISION-LOG](docs/DECISION-LOG.md) DL-028,
+[LICENSING](docs/LICENSING.md)). The v1 contents (tag `v1.0.0-legacy`) were MIT.

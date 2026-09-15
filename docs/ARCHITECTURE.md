@@ -501,7 +501,7 @@ vocabulary changes the instrument (§7.4).
 | **Builder runs on the host in v1 of P3** (throwaway worktree). | A builder could read the host. | Builder-in-container with egress allowlist lands in P5; until then documented as `[aspiration]`. |
 | **Flaky suites** | A flake can look like a regression (belt 3) or a spurious pass. | Baseline-relative belt; fixed retry policy (never rerun-until-green); flakiness recorded, not smoothed. |
 | **Docker on the customer's platform** | Rootless / DinD constraints may differ. | Compose + Helm reference; fail-closed means the run stops rather than degrades. |
-| **Licence** | BSL 1.1 adopted (DL-015/DL-025); `LICENSE` is a reservation of rights until the text lands. | [LICENSING](LICENSING.md). |
+| **Licence** | Apache-2.0 (DL-028); contributions need a CLA/DCO before external commits. | [LICENSING](LICENSING.md). |
 
 ### 9.3 Known debt (tracked)
 

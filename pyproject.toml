@@ -8,10 +8,12 @@ version = "2.0.0a1"
 description = "Commit Replay Bench — grade an AI builder against a repository's own held-out tests, ledger every verdict, route change-classes on measured evidence, and manufacture new work under the same governance."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { file = "LICENSE" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Automated Agile", email = "paul@automatedagile.co.uk" }]
 keywords = ["benchmark", "commit-replay", "software-factory", "ai-coding", "evaluation"]
 classifiers = [
+  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
