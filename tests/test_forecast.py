@@ -3,6 +3,27 @@
 Ports the upstream test_benchmark_forecast cases onto crb types. The forecast
 routes every component through the ONE rule; the readiness gate never relaxes
 false-Q1 = 0 and reports the specific gaps, not a vibe.
+
+Navigation
+----------
+What it is:   The forecast's test suite — the ex-ante build forecast and the readiness punch-list.
+What it does: Pins component-key parsing, that cost, variance and route come through the ONE rule
+              per component, the cheapest-passing config choice, class-only keys, uncosted cells
+              reported rather than priced, the single-rep band, the special routes, that the
+              thresholds are frozen and never relax false-Q1, and that readiness lists the
+              specific gaps, passes only when the bar is met (or relaxed with a sign-off) and
+              treats false-Q1 as cardinal.
+How:          Rows built per cell with alternating costs so σ is known; ``forecast_build`` /
+              ``assess_readiness`` over a capability map, with ``crb.core.signoff`` for the
+              sign-off overlay.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/forecast.py (under test), src/crb/core/capability.py (the map it
+              reads), src/crb/core/signoff.py (the overlay), src/crb/core/routing.py (the
+              routes), tests/test_server_routes_forecast.py (the same numbers served)
+Tested by:    tests/test_forecast.py
+Touch when:   a readiness gap kind is added (a punch-list case); the forecast's cost model
+              changes (re-derive the known σ values).
 """
 
 from __future__ import annotations

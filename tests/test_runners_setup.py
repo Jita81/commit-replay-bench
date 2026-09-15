@@ -10,6 +10,31 @@ Real parts run the actual toolchains on the fixture repos and are marked
 pytest / the fixture distribution, ``npm install`` of mocha, Maven's warm-up) or
 ``@pytest.mark.toolchain(...)`` when they only need the binary. Each skips with
 its reason when the tool is missing; none decides a verdict.
+
+Navigation
+----------
+What it is:   The environment-setup phase's test suite (``setup`` / ``environment_ready`` on every
+              runner).
+What it does: Pins the setup records and their redaction, the ``network=True`` marking, that
+              setup fails closed under a sandbox executor, the pytest install plan (declared
+              extras, ``pip`` / ``pip_fallback`` / ``uninstall``), interpreter resolution
+              (explicit > venv > never the crb interpreter), that every registered runner answers
+              the contract, that only pytest creates ``env_dir``, and the ``dist_info_stubs``
+              option; the network- and toolchain-marked cases build a real venv, ``npm install``
+              mocha, warm Maven and check go / cargo readiness.
+How:          ``FakeExecutor`` scripts answers by argv substring for the hermetic half; the real
+              half runs the toolchains on the fixture repositories and skips with the reason.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/core/runners/base.py (``SetupSession`` / ``SetupResult``),
+              src/crb/core/runners/pytest_runner.py (the install plan under test),
+              src/crb/core/runners/node_runners.py (the npm plan), tests/fixtures/pyrepo.py (the
+              ``add_pyproject_commit`` shape), docs/OPERATOR.md (environment setup — the only
+              network phase, §2.1)
+Tested by:    tests/test_runners_setup.py
+Touch when:   onboarding a repository whose environment needs an option the plan lacks (add the
+              ``runner_opts`` key, its hermetic case and its docs/OPERATOR.md entry); adding a
+              runner (it must answer the setup contract).
 """
 
 from __future__ import annotations

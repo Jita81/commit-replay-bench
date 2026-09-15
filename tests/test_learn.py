@@ -6,6 +6,32 @@ and the NHS row of 2026-09-14), (b) determinism — same rows → byte-identical
 and (c) the property that the product NEVER decides for a human: every refusal
 verdict is ``unsure``, ``apply_triage`` writes only a named human's decisions, the
 strengthening items are proposals, the re-measurement plan queues nothing.
+
+Navigation
+----------
+What it is:   The learning loop's test suite — refusal triage, oracle-strengthening backlog and
+              the re-measurement plan, over synthetic ledgers.
+What it does: Pins the parser on the exact ``builder_error`` shapes the live rows carried on
+              2026-09-13/14 (quoted parens, two violations in one row, the recorder cap),
+              triage's counts, grouping and corpus-format candidates, that ``apply_triage`` writes
+              only a named human's decisions (idempotent; a contradiction with the other corpus is
+              refused loudly), that oracle-weak cells become ``test.add`` items that pass the
+              factory's DoR gate, that only oracle reasons are flagged, that the re-measurement
+              plan queues nothing, determinism (same rows → byte-identical output), and the
+              ``rows_to_clear_bar`` Wilson minimum (three 10/10 cells read ``ci_low_below_bar``
+              on 2.2, 2026-09-15).
+How:          Rows as a ledger returns them (hashed, chained) → ``triage_refusals`` /
+              ``strengthening_backlog`` / ``remeasure_plan``; a temp corpus directory for apply.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/learn.py (under test), src/crb/core/ledger.py (the failure labels
+              it reads), src/crb/core/capability.py (the map it flags cells on),
+              src/crb/factory/readiness.py (the DoR gate the items must pass),
+              tests/test_cli_learn.py (the same derivations at the CLI), docs/LEARNING-LOOP.md
+              (the properties this file pins, §5)
+Tested by:    tests/test_learn.py
+Touch when:   a builder refusal shape changes (a parser case with the row verbatim); a
+              derivation gains an input; never so that the loop decides for a human.
 """
 
 from __future__ import annotations
@@ -155,6 +181,8 @@ def _chained(rows: list[GradeRow], tmp_path: Path) -> list[GradeRow]:
 
 
 class TestParse:
+    """The refusal parser on the exact ``builder_error`` texts the live rows carried."""
+
     def test_single_violation_with_quoted_parens(self) -> None:
         (v,) = learn.parse_violations(ERR_QUOTED_PARENS)
         assert v.prefix == "archaeology"
@@ -263,6 +291,8 @@ def _tonight(tmp_path: Path) -> list[GradeRow]:
 
 
 class TestTriage:
+    """``triage_refusals``: counts, grouping, corpus-format candidates, and never an auto-accept."""
+
     def test_counts_cost_and_the_denominator(self, tmp_path: Path) -> None:
         rows = _tonight(tmp_path)
         rep = learn.triage_refusals(rows)
@@ -368,6 +398,7 @@ class TestTriage:
 
 @pytest.fixture
 def corpus(tmp_path: Path) -> Path:
+    """A corpus directory with one honest and one refused line, for the apply round trips."""
     d = tmp_path / "fixtures"
     d.mkdir()
     (d / learn.CORPUS_HONEST_FILE).write_text("# honest\npwd\nls\n", encoding="utf-8")
@@ -378,6 +409,8 @@ def corpus(tmp_path: Path) -> Path:
 
 
 class TestApply:
+    """``apply_triage``: appends only a named human's decisions, idempotently, refusing contradictions."""
+
     def test_appends_only_the_decided_lines_with_provenance(
         self, tmp_path: Path, corpus: Path
     ) -> None:
@@ -612,6 +645,8 @@ def _score(
 
 
 class TestStrengthen:
+    """``strengthening_backlog``: oracle-weak cells become ``test.add`` proposals the DoR gate accepts."""
+
     def test_oracle_weak_cell_becomes_test_add_items(self) -> None:
         rows = _weak_cell_rows()
         cmap = build_capability_map(rows, projection=PROJECTION_CLASS_SIZE)
@@ -843,6 +878,8 @@ def _stale_ledger(tmp_path: Path) -> list[GradeRow]:
 
 
 class TestRemeasure:
+    """``remeasure_plan``: stale cells, rows needed, cost, and valid ``POST /runs`` bodies — nothing queued."""
+
     def test_cells_n_needed_cost_and_requests(self, tmp_path: Path) -> None:
         plan = learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")
         assert plan.rows_stale == 16 and plan.min_n == 10

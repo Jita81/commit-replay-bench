@@ -4,6 +4,29 @@ The command builders for go/node/jvm/cargo belong to the toolchain workstream;
 here we pin the *parsers* (what turns raw output into failing test ids), the
 scope resolution, the pytest command builder, and the fail-closed rule that an
 unattributed non-zero exit is never "no new failures".
+
+Navigation
+----------
+What it is:   The runners' parser suite — every ``parse()`` on canned toolchain output, plus the
+              base contract.
+What it does: Pins ``TestRun`` shapes, the registry, sorted / deduped target scopes, the belt
+              scope policies, that a non-zero exit with no attributed ids is never "no new
+              failures" (compile error, crash), timeout resolution, oracle validity (a test file
+              must define a test), the pytest command locally and under docker, and each parser —
+              pytest short summary (stdout and stderr), go ``-json``, node JUnit, vitest / jest /
+              mocha JSON, surefire XML, cargo — including snapshot paths mapping to their owning
+              test (nhsuk-react-components #253).
+How:          ``ScriptedExecutor`` returns a canned ``ExecResult``; one case runs the real pytest
+              on ``pyrepo`` as the end-to-end anchor.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   src/crb/core/runners/base.py (the contract), src/crb/core/runners/pytest_runner.py,
+              src/crb/core/runners/go_runner.py, src/crb/core/runners/node_runners.py,
+              src/crb/core/runners/jvm_runner.py and src/crb/core/runners/cargo_runner.py (the
+              parsers under test), tests/test_runners_go.py (the same runners on real toolchains)
+Tested by:    tests/test_runners_parsers.py
+Touch when:   adding a runner (docs/CONTRIBUTING.md — a parser case on its real output, a
+              fail-closed case, a scope case); a reporter's output format changes.
 """
 
 from __future__ import annotations
@@ -120,6 +143,8 @@ def test_belt_scope_policies() -> None:
 
 
 class ScriptedExecutor:
+    """An executor that returns one canned ``ExecResult`` for every command — the parser's input."""
+
     name = "local"
 
     def __init__(self, result: ExecResult) -> None:

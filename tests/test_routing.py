@@ -1,4 +1,27 @@
-"""crb.core.routing — every branch of the ONE published routing rule."""
+"""crb.core.routing — every branch of the ONE published routing rule.
+
+Navigation
+----------
+What it is:   The routing rule's test suite — every clause of the ONE published rule, and the
+              controls-verdict amendment.
+What it does: Pins the clause order — do-not-ship on any false-Q1, granularize XL, calibrate
+              below ``min_n``, human when the oracle is weak even if green, calibrate below the
+              point bar or with a wide interval (the essay's 10/10 example), deliver at 48/50 and
+              on the boundary values — the policy override, the reason codes, and the controls
+              clauses (a failed gate routes human even when green — the click case; thin or
+              unmeasured controls calibrate; an escape routes human; ``controls=None`` means the
+              caller evaluated none).
+How:          ``CellStats`` built directly from counts; every case is ``route(stats, policy)``.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/routing.py (under test), src/crb/core/ledger.py (``CellStats`` /
+              ``CellKey``), src/crb/core/stats.py (the interval), tests/test_capability.py (the
+              rule applied over a map), tests/test_signoff.py (the rule inside the sign-off policy)
+Tested by:    tests/test_routing.py
+Touch when:   never to make a threshold LESS strict without an ADR (docs/CONTRIBUTING.md); a
+              clause or reason code is added (a case per branch here and a reason-code coverage
+              update).
+"""
 
 from __future__ import annotations
 
@@ -20,6 +43,9 @@ def stats(
     strength: float | None = None,
     **kw: Any,
 ) -> CellStats:
+    """A ``CellStats`` from counts alone (``clean`` of ``n``; size, false-Q1 and oracle strength
+    as named overrides) — the routing rule's only input.
+    """
     base: dict[str, Any] = {
         "cell": CellKey("replay", "bug.fix", size, "python", "agentic", "m", "p"),
         "n": n,
@@ -167,6 +193,9 @@ def verdict(
     run_id: str = "0" * 32,
     **kw: Any,
 ) -> rt.ControlsVerdict:
+    """A ``ControlsVerdict`` that PASSES with every control constructible and no escape unless
+    overridden — the controls-clause input the numeric clauses are combined with.
+    """
     return rt.ControlsVerdict(
         passed=passed,
         constructible=constructible,

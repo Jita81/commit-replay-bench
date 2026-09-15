@@ -8,6 +8,27 @@ the worktree's link re-pointed; an install that fails is a harness error.
 
 No node/npm on the host is needed: the executor is a stub that records the npm
 call and fabricates the tree.
+
+Navigation
+----------
+What it is:   The JavaScript dependency-era suite (``_NodeBase.ensure_era``).
+What it does: Pins that a worktree whose lockfile matches the clone keeps the clone's link, that
+              a differing lockfile installs an era once under ``env_dir`` and re-points the link
+              (nhsuk-react-components: the commit's eslint config needed ``@eslint/compat``,
+              absent from HEAD — rc 2, 2026-09-15), that a failed install is a harness error,
+              that no ``env_dir`` or no real tree means no era, that an install is refused when
+              the volume is nearly full (two eras took the stack down), and LRU eviction beyond
+              ``era_keep``.
+How:          An executor stub records the ``npm ci`` call and fabricates the tree; no node or
+              npm on the host.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/runners/node_runners.py (under test), src/crb/core/workspace.py
+              (the ``node_modules`` link it re-points), tests/test_runners_node.py (the runners on
+              real toolchains), docs/OPERATOR.md (environment setup)
+Tested by:    tests/test_node_eras.py
+Touch when:   another package manager's lockfile is supported (a ``lock_key`` case); the
+              eviction or free-space policy changes.
 """
 
 from __future__ import annotations

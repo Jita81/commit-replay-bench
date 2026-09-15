@@ -12,6 +12,30 @@ real service for the Python fixture repository — its test reads the service UR
 from the environment and fetches a fixture the session staged and mounted — and
 proves the evidence records the image digest and that an unhealthy service is a
 harness error, never a verdict.
+
+Navigation
+----------
+What it is:   The oracle-services suite (``runner_opts.services`` → ``crb.core.services``).
+What it does: Pins, through an in-memory docker simulator, parsing and its error messages, era
+              selection by authored date, fixture staging from the clone and from history, the
+              compose override, adoption of a running instance, variant switching (a worker
+              restart between eras left the other variant bound to the port), log capture with
+              redaction, and every fail-closed branch (unhealthy, failed start, failed build with
+              the bit-rot hint, missing fixture, sandbox executor, malformed config); the
+              docker-marked cases start ``python:3.12-slim`` as a real service for the fixture and
+              prove the evidence records the image digest.
+How:          ``FakeDocker`` answers the docker commands the session issues and runs everything
+              else for real; the runner hooks are exercised through ``PytestRunner`` on ``pyrepo``.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/core/services.py (under test), src/crb/core/runners/base.py
+              (``SetupSession`` and the run hooks), src/crb/core/runners/pytest_runner.py (the
+              runner that merges the service env), tests/test_builders_adapter.py (the builder
+              gets the same services, DL-024), docs/OPERATOR.md (services the oracle needs, §2.2)
+Tested by:    tests/test_services.py
+Touch when:   onboarding a repository whose tests need a service the spec cannot express (a
+              parse case, a session case through ``FakeDocker`` and a docs/OPERATOR.md entry);
+              the health or era rules change.
 """
 
 from __future__ import annotations
@@ -177,6 +201,7 @@ class FakeDocker:
         raise AssertionError("no image in docker run argv")
 
     def argvs(self) -> list[str]:
+        """Every command issued so far, one string each, for asserting the docker call sequence."""
         return [" ".join(c.argv) for c in self.commands]
 
 
@@ -442,6 +467,7 @@ def test_small_helpers() -> None:
 
 @pytest.fixture
 def repo(tmp_path: Path) -> pr.PyRepo:
+    """A fresh ``pyrepo`` standing in for the clone the services are staged from."""
     return pr.build(tmp_path / "clone")
 
 
@@ -896,6 +922,9 @@ def _free_port() -> int:
 
 @pytest.fixture(scope="module")
 def docker_root() -> Iterator[Path]:
+    """A bind-mountable scratch root under the tests cache for the docker-marked cases; skipped
+    with the probe's reason when no daemon answers.
+    """
     reason = langs.docker_unavailable_reason()
     if reason:
         pytest.skip(reason)

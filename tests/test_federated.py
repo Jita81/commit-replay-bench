@@ -9,6 +9,28 @@ Ports the upstream test_federated cases onto crb types:
   (d) CARDINAL — any contributor with false_q1 > 0 ⇒ trusted=False, false_q1 summed;
   (e) DIFFERENTIAL PRIVACY — seeded, reproducible, bounded; counts never noised;
   (f) OPT-IN — an opted-out org never contributes nor counts toward the cohort.
+
+Navigation
+----------
+What it is:   The federated export boundary's test suite — abstract cells only, k-anonymity,
+              exact pooling, the cardinal false-Q1 rule, optional differential privacy, opt-in.
+What it does: Pins that ``AbstractCell``'s fields equal ``ABSTRACT_ALLOWLIST`` and that a cell
+              built from rows stamped with real identifiers serialises to JSON containing none of
+              them, that fewer than k DISTINCT organisations suppresses a cell, that pooled counts
+              sum and means are n-weighted, that any contributor with false-Q1 > 0 makes the
+              shared cell untrusted, that DP noise is seeded, bounded and never applied to counts,
+              that an opted-out organisation never contributes, and that consumption of shared
+              priors is deliberately not implemented.
+How:          Synthetic ``GradeRow`` cells → ``to_abstract_cell`` / ``export_abstract`` /
+              ``aggregate_abstract_cells``; zero I/O, zero network.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0007-abstract-cell-export-only.md
+Works with:   src/crb/core/federated.py (under test), src/crb/core/ledger.py (``CELL_FIELDS``
+              and ``cell_stats`` the abstraction is taken from), tests/test_server_routes_ledger.py
+              (the abstract export served), docs/DATA-RETENTION.md (cross-organisation sharing)
+Tested by:    tests/test_federated.py
+Touch when:   a field is proposed for export (it must be added to the allowlist HERE with an ADR
+              amendment — the allowlist test is the ratchet); k or ε defaults change.
 """
 
 from __future__ import annotations

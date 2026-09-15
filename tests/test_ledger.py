@@ -1,4 +1,32 @@
-"""crb.core.ledger — GradeRow invariants, the hash chain, cell statistics."""
+"""crb.core.ledger — GradeRow invariants, the hash chain, cell statistics.
+
+Navigation
+----------
+What it is:   The ledger's test suite — ``GradeRow`` invariants, the hash chain and cell
+              statistics.
+What it does: Pins that a clean row must carry every belt ``True`` and an evidence-pack hash
+              (anything else is ``FalseQ1Violation``), the belt-set ⇄ apparatus coupling
+              (a measured 2.2 row cannot claim ``v3-legacy`` — the sign-off's reproduction; belt 5
+              is unrecorded on v4 and census rows, and a v4 body hashes byte-identically to the
+              four-belt apparatus), the JSONL chain's detection of an edited, deleted, reordered
+              or truncated line, that a forged false-Q1 row is counted at read time, the
+              failure-kind and cost-known derivations and their labels, the failure split, that
+              the mirrored builder constants cannot drift, and that outage rows (237 usage-limit
+              refusals in one evening) are not observations.
+How:          In-memory rows and a temp JSONL file; nothing runs a test or a model.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
+              docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/ledger.py (under test), src/crb/core/grade.py (``FalseQ1Violation``
+              and the result rows derive from), src/crb/core/stats.py (the Wilson bound in
+              ``cell_stats``), src/crb/builders/base.py (the constants the core mirrors),
+              tests/test_store_ledger.py (the same chain in the database),
+              docs/EVIDENCE-AND-CLAIMS.md (the apparatus stamp rule the coupling enforces)
+Tested by:    tests/test_ledger.py
+Touch when:   a field is added to ``GradeRow`` (it is hashed: pin the old rows still verify and
+              the new ones commit to it); a belt set or apparatus version is introduced (extend
+              ``expected_belt_sets`` and its table here); a failure kind is added.
+"""
 
 from __future__ import annotations
 
