@@ -1368,8 +1368,10 @@ def controls_for_task(
                 detail = result.error or result.dq_reason or result.note
                 note = f"{note + '; ' if note else ''}observed={observed} {detail}".strip()
                 if name == REGRESSION and observed == OBS_CLEAN:
-                    scope = config.belt_scope
-                    if scope == BELT_TARGET_ONLY:
+                    # the scope belt 3 actually RAN is the task's (mined under the config of
+                    # its day), not the repo config's now (CodeRabbit on PR #7)
+                    scope: Any = task.belt_scope or "BARE"
+                    if task.belt_scope == tuple(task.target_tests):
                         note = (
                             "belt_scope=TARGET_ONLY: belt 3 re-runs only the target tests, so a "
                             "regression outside them is invisible — widen belt_scope "
