@@ -1,0 +1,26 @@
+apiVersion: v2
+name: crb
+description: >-
+  Commit Replay Bench — grade an AI builder against a repository's own held-out tests
+  under four mechanical belts (false-Q1 = 0), ledger every verdict append-only with a hash
+  chain, and route change-classes on measured evidence. API + worker + migration Job,
+  hardened for a regulated, self-hosting organisation.
+type: application
+version: 0.1.0
+appVersion: "2.0.0a1"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/Jita81/commit-replay-bench
+sources:
+  - https://github.com/Jita81/commit-replay-bench
+maintainers:
+  - name: Automated Agile
+    email: paul@automatedagile.co.uk
+keywords:
+  - benchmark
+  - ai-coding
+  - evaluation
+  - append-only-ledger
+annotations:
+  # No subcharts on purpose: the chart lints and installs offline. PostgreSQL is external
+  # (managed, recommended) or the evaluation-only embedded StatefulSet (values.postgresql).
+  crb.dev/postgres: "external | embedded (evaluation only)"

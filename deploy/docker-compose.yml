@@ -1,0 +1,194 @@
+# Commit Replay Bench — single-host reference deployment (Docker Compose v2).
+#
+#   cp deploy/.env.example deploy/.env && $EDITOR deploy/.env     # secrets + endpoint
+#   sudo install -d -o 10001 -g 10001 -m 0750 /srv/crb             # state dir (same path in-container)
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# Services
+#   db        PostgreSQL 16 (the only stateful service besides $CRB_HOST_DIR); internal only
+#   migrate   one-shot `alembic upgrade head` (+ append-only triggers); api waits for it
+#   api       HTTP API + UI on 127.0.0.1:8000 by default — put TLS in front (see README)
+#   worker    queue consumer; needs a Docker daemon socket to sandbox tests — OPT-IN (below)
+#
+# Hardening applied to every crb container: read-only root filesystem, tmpfs /tmp + $HOME,
+# no-new-privileges, all capabilities dropped, non-root uid 10001, pids/cpu/memory limits.
+# Nothing publishes a port except `api`, and that only on the loopback address.
+
+name: crb
+
+x-crb-image: &crb-image
+  image: ${CRB_IMAGE:-crb:local}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+
+x-crb-common: &crb-common
+  <<: *crb-image
+  env_file:
+    - .env
+  environment: &crb-env
+    CRB_ENV: ${CRB_ENV:-prod}
+    CRB_HOME: /srv/crb
+    CRB_DATABASE_URL: postgresql+psycopg://crb:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@db:5432/crb
+    CRB_LOG_FORMAT: json
+  user: "10001:10001"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+    - /home/crb:rw,nosuid,nodev,size=64m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+  networks:
+    - crb
+
+services:
+  db:
+    image: postgres:16.10-alpine3.22
+    # Run as the image's postgres user from the start so no root step and no capabilities
+    # are needed. The named volume inherits this ownership on first use.
+    user: "70:70"
+    environment:
+      POSTGRES_DB: crb
+      POSTGRES_USER: crb
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_INITDB_ARGS: --data-checksums
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - crb-pg:/var/lib/postgresql/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+      - /run/postgresql:rw,nosuid,nodev,size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crb -d crb -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+          pids: 256
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - crb
+    # No `ports:` — PostgreSQL is reachable only from the crb network. For backups use
+    # `docker compose exec db pg_dump …` (deploy/README.md).
+
+  migrate:
+    <<: *crb-common
+    command: ["migrate", "upgrade"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+          pids: 64
+
+  api:
+    <<: *crb-common
+    command: ["serve"]
+    environment:
+      <<: *crb-env
+      CRB_ROLE: api  # the api container has no docker socket: /health reports the sandbox probe as skipped, never degraded
+      CRB_BIND_HOST: 0.0.0.0
+      CRB_BIND_PORT: "8000"
+      # Trust X-Forwarded-* only from your reverse proxy. `*` is acceptable ONLY because the
+      # port is bound to loopback below; if you expose it directly, set the proxy's address.
+      CRB_FORWARDED_ALLOW_IPS: ${CRB_FORWARDED_ALLOW_IPS:-127.0.0.1}
+      CRB_WEB_CONCURRENCY: ${CRB_WEB_CONCURRENCY:-2}
+    ports:
+      - "${CRB_BIND_ADDR:-127.0.0.1}:${CRB_PORT:-8000}:8000"
+    volumes:
+      # Evidence/exports directory, shared with the worker. Same path on host and container
+      # (the worker's sandbox mounts are resolved by the HOST daemon — see worker notes).
+      - ${CRB_HOST_DIR:-/srv/crb}:/srv/crb
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+          pids: 256
+
+  worker:
+    <<: *crb-common
+    command: ["worker"]
+    environment:
+      <<: *crb-env
+      # `docker` (default) = tests run in child containers with --network=none --read-only
+      # --cap-drop=ALL --user 65534. WITHOUT the socket mount below the executor fails CLOSED:
+      # runs become `blocked`, nothing runs on the host, no verdict is recorded (OPERATOR.md §7).
+      # `local` runs untrusted repository tests inside THIS container — development only.
+      CRB_SANDBOX__EXECUTOR: ${CRB_SANDBOX__EXECUTOR:-docker}
+      CRB_SANDBOX__IMAGE: ${CRB_SANDBOX__IMAGE:-}
+      CRB_WORKER_ID: ${CRB_WORKER_ID:-worker-1}
+    volumes:
+      - ${CRB_HOST_DIR:-/srv/crb}:/srv/crb
+      # ---------------------------------------------------------------------------------
+      # OPT-IN: the Docker daemon socket. Uncomment BOTH lines (and set DOCKER_GID in .env
+      # to the gid of /var/run/docker.sock on the host) to let the worker create sandbox
+      # containers.
+      #
+      # SECURITY TRADE-OFF — read before enabling. Access to the daemon socket is root-
+      # equivalent on the host: a compromised worker could start any container with any
+      # mount. crb mitigates, not removes, this: the worker never mounts the socket into the
+      # sandboxes it creates (DockerSettings refuses docker.sock, / and $HOME), sandboxes run
+      # with --network=none --read-only --cap-drop=ALL as uid 65534, and the worker itself
+      # runs read-only, capability-less, as uid 10001. Deploy the worker on a host dedicated
+      # to crb, or use a rootless daemon / a socket proxy limited to `containers` + `images`
+      # endpoints (e.g. tecnativa/docker-socket-proxy) and point DOCKER_HOST at it.
+      # - /var/run/docker.sock:/var/run/docker.sock
+    # group_add:
+    #   - "${DOCKER_GID:-999}"
+    # ---------------------------------------------------------------------------------
+    healthcheck:
+      # The worker serves no HTTP; its liveness is the `heartbeat` it writes to `runs`
+      # (surfaced by /api/v1/health as worker_heartbeat_stale_s). Disable the image default.
+      disable: true
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4g
+          pids: 1024
+
+volumes:
+  crb-pg:
+
+networks:
+  crb:
+    driver: bridge

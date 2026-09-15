@@ -1,0 +1,124 @@
+# CodeRabbit — third-party review of every pull request into this repository.
+#
+# Three things it is here to verify (the operator's intent, 2026-09-15):
+#   1. the product's own code (is the instrument built the way its documents say?);
+#   2. the tests (do they pin the invariants, or were they weakened to pass?);
+#   3. the software factory's OUTPUT (a PR the factory opens is reviewed by someone that
+#      neither built it nor graded it).
+# CodeRabbit's verdict is advisory to humans and is NEVER read by the grader or the routing
+# rule: a model's opinion of a model's work is not evidence in this product
+# (docs/EVIDENCE-AND-CLAIMS.md). What it CAN do is what an independent reviewer does —
+# notice what the tests do not cover, and say so on the PR.
+#
+# Schema: https://docs.coderabbit.ai/reference/configuration
+language: en-GB
+early_access: false
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+      - reboot/v2
+  path_filters:
+    - "!**/node_modules/**"
+    - "!ui/dist/**"
+    - "!docs/CODE-MAP.md"
+    - "!**/*.lock"
+    - "!uv.lock"
+  path_instructions:
+    - path: "src/crb/core/**"
+      instructions: |
+        This package is the instrument and is STANDARD-LIBRARY ONLY (import-linter enforces it;
+        ADR-0008). Flag any third-party import. The five belts and the clean rule live in
+        grade.py: any change to what "clean" means, to a belt, to the routing rule (routing.py),
+        to the sign-off policy (signoff.py) or to the ledger row shape (ledger.py) needs an ADR
+        and an apparatus-version bump (docs/EVIDENCE-AND-CLAIMS.md §4) — flag a change to these
+        files that arrives without one. false-Q1 = 0 is enforced at construction
+        (GradeResult.__post_init__, GradeRow.assert_invariants): flag anything that could let a
+        clean row exist with a belt that is not True. Fail-closed is the default: a harness
+        error, timeout or unparseable output must never read as a pass.
+    - path: "src/crb/builders/**"
+      instructions: |
+        The builder never sees the held-out tests, never edits a test file, never reaches the
+        network or the git history (the tamper and archaeology guards). Flag any path by which
+        a builder could learn the answer or move the goalposts. A change to a guard needs a
+        line in the corpus (tests/fixtures/shell_corpus*.txt) with the incident that motivated it.
+    - path: "src/crb/factory/**"
+      instructions: |
+        Forward mode. The order is fixed: readiness gate → RED proof → build under the belts →
+        (opt-in) delivery as a branch + PR, never the default branch → independent review with
+        the verdict RECORDED BEFORE ANY EDIT. Flag anything that skips a step, merges, pushes to
+        a default branch, or lets a value slot be signed into readiness. Every step must append
+        to the evidence chain.
+    - path: "src/crb/server/**"
+      instructions: |
+        Every write is append-only and hash-chained (grades, events, signoffs, reviews, factory
+        evidence); flag an UPDATE/DELETE path on those tables. Every route is role-gated
+        (viewer/operator/approver/admin); flag a route without a *Dep. Secrets are never
+        returned or logged. A change to a response shape must change docs/API.md and
+        ui/src/api/types.ts in the same PR.
+    - path: "src/crb/store/**"
+      instructions: |
+        Migrations may add nullable columns and indexes; they may never rewrite, drop or alter
+        rows of an append-only table. Flag a migration without a real downgrade, and any schema
+        change without its Alembic revision.
+    - path: "tests/**"
+      instructions: |
+        Tests are the evidence that the instrument is honest. Flag: an assertion loosened or
+        removed, a test skipped or marked xfail without a linked incident, a fixture that
+        bypasses the ledger or the grader, a "regression" test that would pass on the code
+        before the fix, and any test that reads a verdict from a builder's self-report instead
+        of the grader. Every test file ends its docstring with a Navigation block
+        (docs/FILE-HEADER-STANDARD.md).
+    - path: "ui/**"
+      instructions: |
+        Every number rendered carries its n, its interval and its apparatus (StatTile has no
+        variant without them). Flag a rate shown without n, a route or verdict decided in the
+        UI rather than read from the API, and a type in ui/src/api/types.ts that no longer
+        matches docs/API.md.
+    - path: "docs/**"
+      instructions: |
+        Claims carry a tag — [measured], [hypothesis], [aspiration] — and a measured claim
+        carries n, method and apparatus version. Flag a number without its method, a rate
+        blended across apparatus versions or across sighted/blind rows, and any sentence that
+        reads as a capability score ("the AI can do X%").
+    - path: "**/*.py"
+      instructions: |
+        Every module docstring ends with a Navigation block (docs/FILE-HEADER-STANDARD.md) whose
+        links resolve; scripts/code_map.py --check is the gate. Docstrings state invariants as
+        rules, in British English, without marketing.
+  tools:
+    ruff:
+      enabled: true
+    eslint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    hadolint:
+      enabled: true
+    yamllint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    markdownlint:
+      enabled: false
+    github-checks:
+      enabled: true
+      timeout_ms: 300000
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: local
+  issues:
+    scope: local

@@ -1,0 +1,27 @@
+# Applies to `docker build -f deploy/Dockerfile .` (BuildKit reads <Dockerfile>.dockerignore
+# next to the Dockerfile before falling back to <context>/.dockerignore).
+# Keep the context small and, above all, keep local state and secrets OUT of the image.
+.git
+.github
+.venv
+.audit
+.crb
+.env
+deploy/.env
+deploy/secrets
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/node_modules
+ui/dist
+tests/.cache
+coverage.xml
+*.db
+*.db-wal
+*.db-shm
+*.jsonl
+docs
+scripts
+data
