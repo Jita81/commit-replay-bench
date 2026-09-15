@@ -1474,7 +1474,7 @@ def render_remeasure(plan: RemeasurePlan) -> str:
     for c in plan.cells:
         per = f"{c.cost_usd_mean:.2f}" if c.cost_known else "?"
         est = f"{c.est_cost_usd:.2f}" if c.cost_known else "?"
-        moved = f" −{len(c.relabelled)} relabelled" if c.relabelled else ""
+        moved = f", {len(c.relabelled)} relabelled" if c.relabelled else ""
         lines.append(
             f"| {c.cell.label} | {c.mode} | {c.n_stale} ({','.join(c.stale_versions)}; "
             f"{c.tasks_stale} tasks{moved}) | {c.n_current} ({c.tasks_current} tasks) | "
