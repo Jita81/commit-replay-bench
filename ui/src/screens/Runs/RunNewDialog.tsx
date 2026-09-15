@@ -1,3 +1,39 @@
+/**
+ * Start a run — POST /runs: kind, builder, model, ladder, the run-level budget, object rungs, builder config, sampling knobs.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The `RunNewDialog` (the "Start run" modal) plus the exported vocabulary it
+ *               mirrors from the server: `BUDGET_DEFAULTS`, `BLIND_SWEEP_TOOL_CALLS`, the
+ *               claude_code model ids, and `budgetFromDraft`.
+ * What it does: Builds a `POST /runs` body: for build kinds the builder / model / provider,
+ *               the rung LABELS plus object rungs `{builder, model, provider?, budget?}` (the
+ *               same model at 25 → 50 → 100 tool calls is the blind budget sweep preset —
+ *               the tier every ledger row is stamped with), the run-level caps (only the
+ *               typed ones are sent; blank = the builder's default shown), and a validated
+ *               builder-config JSON with a one-click "Use my Claude Code login (dev)" toggle.
+ *               A non-build kind hides all of that. The executor default shown is the
+ *               server's `sandbox_mode` when the viewer may read `/settings`.
+ * How:          Local state per field; `parseBuilderConfig` validates the JSON with the
+ *               server's rules; `valid` gates the submit; `rungToEntry` and `budgetFromDraft`
+ *               emit only what was set; on 201 the caller navigates to the run.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+ * Works with:   ui/src/api/hooks.ts (`useCreateRun`, `useSettings`), ui/src/api/types.ts
+ *               (`RunCreateRequest`, `LadderRung`, `RunBudget`), ui/src/lib/jsonObject.ts
+ *               (the builder-config rules), src/crb/server/schemas.py (`RunCreateRequest`
+ *               validation, `BUDGET_DEFAULTS`), src/crb/builders/base.py (`Budget`
+ *               defaults), src/crb/builders/claude_code.py (`DEFAULT_MODEL`, `KNOWN_MODELS`
+ *               — mirrored in `CLAUDE_CODE_MODELS`), ui/src/screens/Runs/RunsPage.tsx and
+ *               ui/src/screens/Repos/RepoDetail.tsx (the openers)
+ * Tested by:    ui/src/screens/Runs/RunNewDialog.test.tsx, ui/e2e/walkthrough/03-mine.spec.ts
+ *               (`startRun`), ui/e2e/walkthrough/09-budget-sweep.spec.ts (the sweep preset
+ *               end to end)
+ * Touch when:   a builder is registered or a model id changes (src/crb/builders/*) — update
+ *               `BUILDER_NAMES` / `CLAUDE_CODE_MODELS` and `BUILDER_CONFIG_HELP`; a budget
+ *               field is added (`RunBudget` in ui/src/api/types.ts first); never for a new
+ *               repository.
+ */
 import { useEffect, useState, type FormEvent } from 'react'
 import { useCreateRun, useRepos, useSettings } from '../../api/hooks'
 import { RUN_KINDS, type GradeMode, type LadderEntry, type LadderRung, type Run, type RunBudget, type RunCreateRequest, type RunKind } from '../../api/types'
@@ -25,9 +61,13 @@ export const BUDGET_DEFAULTS: Required<RunBudget> = { max_turns: 25, max_tool_ca
 /** The "Blind budget sweep" preset: one model, escalating tool-call caps, one attempt per rung until clean. */
 export const BLIND_SWEEP_TOOL_CALLS = [25, 50, 100] as const
 
+/** The five cap fields of `RunBudget`. */
 type BudgetKey = keyof RunBudget
+/** The caps as typed (text; blank = inherit). */
 type BudgetDraft = Record<BudgetKey, string>
+/** Form order of the caps. */
 const BUDGET_KEYS: BudgetKey[] = ['max_turns', 'max_tool_calls', 'max_tokens', 'max_cost_usd', 'wall_clock_s']
+/** Labels per cap. */
 const BUDGET_LABELS: Record<BudgetKey, string> = {
   max_turns: 'Max turns',
   max_tool_calls: 'Max tool calls',
@@ -35,6 +75,7 @@ const BUDGET_LABELS: Record<BudgetKey, string> = {
   max_cost_usd: 'Max cost (USD)',
   wall_clock_s: 'Wall clock (s)',
 }
+/** Nothing typed. */
 const EMPTY_BUDGET: BudgetDraft = { max_turns: '', max_tool_calls: '', max_tokens: '', max_cost_usd: '', wall_clock_s: '' }
 
 /** A rung row in the editor: identity + the tier caps (tool calls / turns / wall clock). */
@@ -60,6 +101,7 @@ export function budgetFromDraft(draft: Partial<BudgetDraft>): RunBudget | undefi
   return Object.keys(out).length ? out : undefined
 }
 
+/** A draft → the object rung sent: trimmed identity, provider only if set, budget only for typed caps. */
 function rungToEntry(r: RungDraft): LadderRung {
   const rung: LadderRung = { builder: r.builder.trim(), model: r.model.trim() }
   if (r.provider.trim()) rung.provider = r.provider.trim()
@@ -76,6 +118,7 @@ interface Props {
   onCreated?: (run: Run) => void
 }
 
+/** One sentence per run kind, shown under the Kind select. */
 const KIND_HELP: Record<RunKind, string> = {
   mine: 'Walk history for replayable commits (RED at parent, GREEN with the commit).',
   replay: 'Sighted replay: the builder sees the target tests; graded under four belts.',
@@ -85,8 +128,10 @@ const KIND_HELP: Record<RunKind, string> = {
   probe: 'Prove the toolchain on a known-green scope.',
 }
 
+/** The kinds that need a builder (and show the builder / ladder / budget block). */
 const BUILD_KINDS: RunKind[] = ['replay', 'blind']
 
+/** The constructor keys each builder accepts, for the builder-config hint. */
 const BUILDER_CONFIG_HELP: Record<string, string> = {
   claude_code: 'claude_code keys: auth ("api_key" — production, --bare, needs ANTHROPIC_API_KEY on the worker; "cli" — the operator’s own CLI login, developer/evaluation only), effort, bare, keep_transcript, extra_args.',
   openai_agent: 'openai_agent keys: endpoint, temperature, max_tokens, keep_transcript (see the adapter).',

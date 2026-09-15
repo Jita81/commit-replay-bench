@@ -7,6 +7,38 @@
  * Lives beside the screen (not in `api/types.ts` / `api/hooks.ts`, which another
  * workstream owns in this wave) — fold it in when the wave merges. Every field here is
  * `@contract` with `crb.server.schemas_review` / `crb.server.routes.grades`.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The UI's reading of the retained-artefact and review endpoints: types
+ *               (`Review`, `RetainedStatus`, `RetainedPatch`), the hooks, a dependency-free
+ *               SHA-256, the patch fetcher and the unified-diff parser.
+ * What it does: Fetches `GET /grades/{row_hash}/patch` as BYTES, hashes them in the browser
+ *               and compares with the pack's `diff_sha256` header — `matches` is what unlocks a
+ *               review, because a reviewer attests to the exact bytes the instrument graded,
+ *               never to a description of them. `parseUnifiedDiff` counts +/− with the
+ *               grader's own rule so the view can agree with the pack. `deriveVerdict` mirrors
+ *               the core's one rule (most severe finding wins) for the preview.
+ * How:          Pure JS SHA-256 (Web Crypto is not in every test runtime) → `fetchRetainedPatch`
+ *               reads the `X-CRB-*` headers → TanStack hooks keyed under `['grades', rowHash, …]`
+ *               and `['reviews', …]`; `useCreateReview` invalidates every reviews query.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+ * Works with:   src/crb/server/routes/grades.py (the patch / transcript / retained routes and
+ *               their headers), src/crb/server/routes/reviews.py and
+ *               src/crb/server/schemas_review.py (the review records), src/crb/core/review.py
+ *               (`derive_verdict`, `SEVERITY` — mirrored here), ui/src/screens/Runs/EvidenceDrawer.tsx
+ *               (the Patch and Transcript tabs), ui/src/screens/Runs/ReviewPanel.tsx (the
+ *               review form), ui/src/api/client.ts (`ApiError`, `API_BASE`)
+ * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx (SHA-256 test vectors, the diff
+ *               parser's counting rule, `deriveVerdict`, the anchor flow),
+ *               ui/e2e/walkthrough/09-review.spec.ts (a real retained worktree end to end)
+ * Touch when:   a finding kind or the anchor rule changes (src/crb/core/review.py,
+ *               docs/API.md "Reviews") — change the vocabulary here and in
+ *               ui/src/screens/Runs/ReviewPanel.tsx; never for a new repository.
+ * Claims:       A review is a human's verdict on one row, anchored to the patch hash — it is
+ *               not part of the grade and never changes `clean`
+ *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
  */
 
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
@@ -17,12 +49,15 @@ import type { Page } from '../../api/types'
 // Vocabulary (crb.core.review)
 // ---------------------------------------------------------------------------
 
+/** The closed set of finding kinds (`crb.core.review`); a verdict is the most severe present. */
 export type FindingKind = 'regression' | 'defect' | 'api_change' | 'style'
+/** A review's headline: `ok`, a finding kind, or `not_reviewed` (looked, could not review). */
 export type Verdict = 'ok' | FindingKind | 'not_reviewed'
 
 /** `crb.core.review.SEVERITY` — most severe first; the headline is the first kind present. */
 export const FINDING_KINDS: readonly FindingKind[] = ['regression', 'defect', 'api_change', 'style']
 
+/** Display names per kind. */
 export const FINDING_LABELS: Record<FindingKind, string> = {
   regression: 'Regression',
   defect: 'Defect',
@@ -30,6 +65,7 @@ export const FINDING_LABELS: Record<FindingKind, string> = {
   style: 'Style',
 }
 
+/** Display names per verdict. */
 export const VERDICT_LABELS: Record<Verdict, string> = {
   ok: 'OK',
   regression: 'Regression',
@@ -46,6 +82,7 @@ export function deriveVerdict(kinds: Iterable<FindingKind>): Verdict {
   return 'ok'
 }
 
+/** One finding as stored: kind, note, optional file and line. */
 export interface Finding {
   kind: FindingKind
   note: string
@@ -75,6 +112,7 @@ export interface Review {
   row_hash: string
 }
 
+/** `POST /reviews` body; `patch_sha256` must equal the pack's `diff_sha256` or the server answers 422. */
 export interface ReviewCreateRequest {
   grade_row_hash: string
   statement: string
@@ -85,6 +123,7 @@ export interface ReviewCreateRequest {
   not_reviewed?: boolean
 }
 
+/** `GET /reviews/verify` — chain intact and every verdict anchored. */
 export interface ReviewVerify {
   rows: number
   ok: boolean
@@ -96,6 +135,7 @@ export interface ReviewVerify {
   verified_at: string
 }
 
+/** `GET /reviews/stats` — the standing verdict per row joined onto one cell. */
 export interface ReviewCellStats {
   process_step: string
   capability_class: string
@@ -118,6 +158,7 @@ export interface ReviewCellStats {
   n_not_mergeable: number
 }
 
+/** `GET /reviews/stats?repo=` — one entry per cell under the same projection as the map. */
 export interface ReviewStats {
   repo: string
   by: string[]
@@ -143,6 +184,7 @@ export interface RetainedStatus {
 // SHA-256 (dependency-free; Web Crypto is not available in every test runtime)
 // ---------------------------------------------------------------------------
 
+/** SHA-256 round constants (FIPS 180-4). */
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
   0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -218,6 +260,7 @@ export const PATCH_HEADERS = {
   truncated: 'x-crb-truncated',
 } as const
 
+/** The served patch plus every hash involved; `matches` (our own hash == the pack's anchor) is the only flag that unlocks a review. */
 export interface RetainedPatch {
   /** The served bytes, decoded. */
   text: string
@@ -235,6 +278,7 @@ export interface RetainedPatch {
   matches: boolean
 }
 
+/** `GET /grades/{row_hash}/patch` as bytes (not through `api<T>`, which parses JSON): hash the bytes here, read the `X-CRB-*` headers, and map a non-2xx to `ApiError` like the client does. */
 export async function fetchRetainedPatch(rowHash: string, signal?: AbortSignal): Promise<RetainedPatch> {
   const path = `/grades/${encodeURIComponent(rowHash)}/patch`
   let res: Response
@@ -269,13 +313,16 @@ export async function fetchRetainedPatch(rowHash: string, signal?: AbortSignal):
   }
 }
 
+/** Line classes of a unified diff for colouring. */
 export type DiffLineKind = 'add' | 'del' | 'ctx' | 'hunk' | 'meta'
 
+/** One line of the parsed diff. */
 export interface DiffLine {
   kind: DiffLineKind
   text: string
 }
 
+/** One file of the parsed diff with its own +/− counts; `excluded` = not in the pack's `diff.files` (shown, not counted). */
 export interface DiffFile {
   path: string
   additions: number
@@ -285,6 +332,7 @@ export interface DiffFile {
   excluded: boolean
 }
 
+/** The files plus the counts over the files the pack lists — so the view can agree with the pack. */
 export interface ParsedDiff {
   files: DiffFile[]
   /** Counts over the files the pack lists — the pack's own counting rule. */
@@ -344,6 +392,7 @@ export function parseUnifiedDiff(text: string, packFiles: readonly string[] = []
 // Hooks
 // ---------------------------------------------------------------------------
 
+/** Query keys for the retained artefacts and the reviews (nested under `['grades', rowHash]` / `['reviews']`). */
 export const reviewKeys = {
   retained: (rowHash: string) => ['grades', rowHash, 'retained'] as const,
   patch: (rowHash: string) => ['grades', rowHash, 'patch'] as const,
@@ -353,6 +402,7 @@ export const reviewKeys = {
   stats: (repo: string, by: string) => ['reviews', 'stats', repo, by] as const,
 }
 
+/** `GET /grades/{row_hash}/retained` — what stands behind the row right now, with a reason each. */
 export function useRetainedStatus(rowHash: string): UseQueryResult<RetainedStatus, ApiError> {
   return useQuery({
     queryKey: reviewKeys.retained(rowHash),
@@ -362,6 +412,7 @@ export function useRetainedStatus(rowHash: string): UseQueryResult<RetainedStatu
   })
 }
 
+/** The patch, fetched only once `enabled` (the tab was opened) — content-addressed, never refetched. */
 export function useRetainedPatch(rowHash: string, enabled: boolean): UseQueryResult<RetainedPatch, ApiError> {
   return useQuery({
     queryKey: reviewKeys.patch(rowHash),
@@ -372,11 +423,13 @@ export function useRetainedPatch(rowHash: string, enabled: boolean): UseQueryRes
   })
 }
 
+/** The transcript as text, and parsed when it was JSON. */
 export interface RetainedTranscript {
   text: string
   json: unknown | null
 }
 
+/** `GET /grades/{row_hash}/transcript` — served only from inside the transcripts directory; a 404 carries the reason. */
 export function useRetainedTranscript(rowHash: string, enabled: boolean): UseQueryResult<RetainedTranscript, ApiError> {
   return useQuery({
     queryKey: reviewKeys.transcript(rowHash),
@@ -391,6 +444,7 @@ export function useRetainedTranscript(rowHash: string, enabled: boolean): UseQue
   })
 }
 
+/** `GET /reviews` filters. */
 export interface ReviewListParams {
   repo?: string
   task_id?: string
@@ -398,6 +452,7 @@ export interface ReviewListParams {
   limit?: number
 }
 
+/** `GET /reviews` in chain order (the latest per row is the standing verdict). */
 export function useReviews(p: ReviewListParams, enabled = true): UseQueryResult<Page<Review>, ApiError> {
   return useQuery({
     queryKey: reviewKeys.reviews(p),
@@ -408,6 +463,7 @@ export function useReviews(p: ReviewListParams, enabled = true): UseQueryResult<
   })
 }
 
+/** `POST /reviews`; invalidates every reviews query (lists, stats, the drawer's count). */
 export function useCreateReview(): UseMutationResult<Review, ApiError, ReviewCreateRequest> {
   const qc = useQueryClient()
   return useMutation({
@@ -418,6 +474,7 @@ export function useCreateReview(): UseMutationResult<Review, ApiError, ReviewCre
   })
 }
 
+/** `GET /reviews/stats?repo=&by=`. */
 export function useReviewStats(repo: string, by = 'class,size'): UseQueryResult<ReviewStats, ApiError> {
   return useQuery({
     queryKey: reviewKeys.stats(repo, by),

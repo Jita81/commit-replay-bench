@@ -1,3 +1,30 @@
+/**
+ * Task detail — one replayable commit: its spec and every graded trial against it (/tasks/:repo/:taskId).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /tasks/:repo/:taskId.
+ * What it does: Renders `GET /tasks/{repo}/{task_id}`: the spec (target tests, belt scope,
+ *               test and source files, RED-checked, gold status, the full JSON behind a
+ *               disclosure) and every grade row in chain order — clean / DQ / error, belts,
+ *               cost, latency, provenance, the STANDING review verdict per row (the latest
+ *               review wins) and the evidence link that opens the drawer on that row.
+ * How:          `useTask` + `useReviews({repo, task_id})` → a `Map` of row hash → latest review
+ *               → `DataTable`; the drawer is opened with both the pack hash and the row hash
+ *               so the Patch / Review tabs need no resolution.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/hooks.ts (`useTask`), ui/src/api/types.ts (`TaskSpec`, `GradeRow`,
+ *               `beltsOf`), ui/src/screens/Runs/contract.ts (`useReviews`),
+ *               ui/src/screens/Runs/EvidenceDrawer.tsx and ui/src/screens/Runs/ReviewPanel.tsx
+ *               (`VerdictPill`), src/crb/server/routes/grades.py (the task route),
+ *               src/crb/core/spec.py (`TaskSpec`)
+ * Tested by:    ui/e2e/walkthrough/09-review.spec.ts (the task page shows the recorded
+ *               verdict); the rest is untested — a read-only table over two hooks each pinned
+ *               elsewhere
+ * Touch when:   `TaskSpec` gains a field worth showing (src/crb/core/spec.py, then
+ *               ui/src/api/types.ts); never for a new repository.
+ */
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { useTask } from '../../api/hooks'

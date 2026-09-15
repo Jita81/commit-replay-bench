@@ -1,3 +1,29 @@
+/**
+ * ui/src/screens/Runs/RunNewDialog.tsx — the POST body carries exactly what was set: config, budget caps, rungs.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Screen tests for the run dialog against a mocked API.
+ * What it does: Pins that `builder_config` is sent only when given and as a parsed object,
+ *               that invalid JSON / an identity key / a credential key block submit with the
+ *               reason, that the executor default and configured builders show for an admin
+ *               and "server default" otherwise, that the Claude Code login toggle merges
+ *               `{"auth": "cli"}` (and is disabled on invalid JSON), that non-build kinds hide
+ *               the builder block, that the Budget section shows the defaults and sends only
+ *               typed caps (omitted when all blank), that the blind sweep preset replaces the
+ *               ladder with three object rungs at 25 → 50 → 100 tool calls, that object rungs
+ *               follow the labels with provider and typed caps only, and that an empty
+ *               ladder or an incomplete rung blocks submit.
+ * How:          `mockApi` records the POST body; `userEvent` drives the form; assertions on
+ *               the body and the field errors.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/screens/Runs/RunNewDialog.tsx (the code under test),
+ *               ui/src/lib/jsonObject.ts (the rules the JSON cases pin), ui/src/test/utils.tsx
+ * Tested by:    ui/src/screens/Runs/RunNewDialog.test.tsx
+ * Touch when:   a field is added to `POST /runs` (docs/API.md) — assert its presence and
+ *               absence in the body.
+ */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'

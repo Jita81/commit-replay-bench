@@ -1,3 +1,29 @@
+/**
+ * Runs — every mine, replay, blind, oracle and controls run: status, progress, counts (/runs).
+ *
+ * Navigation
+ * ----------
+ * What it is:   The screen at /runs (the list with repo / kind / status filters in the URL)
+ *               and the `Progress` bar the run page reuses.
+ * What it does: Lists `GET /runs` newest first with status, progress (done / total), clean /
+ *               tasks, DQ / errors, builder, cost; polls only while a listed run is
+ *               non-terminal; rows open the run page. `?new=<kind>` opens the run dialog
+ *               pre-set to that kind (how "Start a replay run" links from empty states
+ *               arrive here); operators get "Start run".
+ * How:          `useRepoParam` + `useSearchParams` for the filters → `useRuns` → `DataTable`;
+ *               `RunNewDialog` navigates to the new run on success.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/api/hooks.ts (`useRuns` and its polling rule), ui/src/api/types.ts
+ *               (`Run`, `RUN_KINDS`), ui/src/screens/Runs/RunNewDialog.tsx,
+ *               ui/src/screens/Runs/RunDetailPage.tsx (where a row leads; imports `Progress`),
+ *               src/crb/server/routes/runs.py
+ * Tested by:    ui/e2e/walkthrough/03-mine.spec.ts (the Runs list shows the run, the progress
+ *               bar reports the run's own counts), ui/e2e/walkthrough/06-cancel.spec.ts,
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ * Touch when:   a run kind is added (src/crb/core/run.py, docs/API.md "Runs") — extend
+ *               `RunKind` in ui/src/api/types.ts; never for a new repository.
+ */
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useRuns } from '../../api/hooks'
@@ -16,8 +42,10 @@ import { fmtDate, fmtInt, fmtPct, fmtUsd, shortId } from '../../lib/format'
 import { runStatusDisplay } from '../../lib/verdict'
 import { RunNewDialog } from './RunNewDialog'
 
+/** The status filter's options. */
 const STATUSES: RunStatus[] = ['queued', 'running', 'succeeded', 'failed', 'cancelled']
 
+/** Done / total as a bar with `role="progressbar"`; red when failed, green when succeeded. */
 export function Progress({ done, total, status }: { done: number; total: number; status: RunStatus }) {
   const pct = total > 0 ? done / total : 0
   return (
@@ -32,6 +60,7 @@ export function Progress({ done, total, status }: { done: number; total: number;
   )
 }
 
+/** The screen; filters live in the URL, `?new=<kind>` opens the dialog. */
 export function RunsPage() {
   const [repo, setRepo] = useRepoParam()
   const [params, setParams] = useSearchParams()
