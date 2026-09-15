@@ -9,6 +9,23 @@ single ``/metrics`` scrape carries engine and server metrics together:
 
 ``route`` is the matched route template (``/api/v1/users/{user_id}``), never the
 raw path, so cardinality stays bounded and ids never reach the metrics endpoint.
+
+Navigation
+----------
+What it is:   The two HTTP Prometheus series, registered on the engine's shared registry.
+What it does: Counts requests by method / matched route template / status and observes
+              their duration, so one ``/metrics`` scrape carries server and engine metrics
+              together; falls back to no-ops when ``prometheus_client`` is absent.
+How:          Module-level ``Counter`` / ``Histogram`` on ``crb.observability.metrics.registry``
+              when available; ``observe`` is the one call the middleware makes.
+Layer:        server — docs/ARCHITECTURE.md#72-observability
+ADRs:         none
+Works with:   src/crb/observability/metrics.py (the registry and the no-op fallback),
+              src/crb/server/app.py (``ObservabilityMiddleware`` calls ``observe`` with the
+              route template), src/crb/server/routes/system.py (serves ``/metrics``)
+Tested by:    tests/test_server_system.py
+Touch when:   never for a new repository; only when a new HTTP series is wanted — keep labels
+              bounded (templates, never raw paths or ids).
 """
 
 from __future__ import annotations
@@ -41,6 +58,7 @@ else:  # pragma: no cover
 
 
 def observe(method: str, route: str, status: int, duration_s: float) -> None:
+    """Record one finished request (``route`` must be the template, not the path)."""
     http_requests_total.labels(method, route, str(status)).inc()
     http_request_duration_seconds.labels(method, route).observe(duration_s)
 

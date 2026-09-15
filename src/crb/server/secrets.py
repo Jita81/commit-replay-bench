@@ -25,6 +25,30 @@ Invariants
   ``CRB_HOME``), so the API host and a worker that shares ``CRB_HOME`` see one file.
   A worker on another host needs the token in its own environment or its own
   ``CRB_SECRETS_DIR`` mount — see ``docs/OPERATOR.md``.
+
+Navigation
+----------
+What it is:   The admin-facing wrapper over the owner-only secrets file — the registry of
+              secrets the API will hold, their shape checks, and the verify rate limit.
+What it does: Lets an admin store, inspect (presence + fingerprint only), delete and verify
+              the Claude Code login token without the value ever reaching the database, an
+              event, a log line or a response; the verify probe runs the real CLI once and is
+              rate-limited deployment-wide.
+How:          ``SecretsFile`` checks the name against ``SECRETS``, validates the shape, then
+              delegates to ``crb.core.secrets_file.SecretsStore``; ``verify`` reads the value
+              back and calls the builder's ``verify_login``; ``VerifyRateLimiter`` is one
+              monotonic timestamp behind a lock.
+Layer:        server — docs/ARCHITECTURE.md#71-security
+ADRs:         none
+Works with:   src/crb/core/secrets_file.py (the store and its permission checks),
+              src/crb/builders/claude_code.py (``CLI_TOKEN_SECRET``, ``verify_login`` — the
+              consumer of the token), src/crb/server/routes/admin.py (the HTTP surface),
+              src/crb/server/settings.py (``home`` for the directory default),
+              docs/SECURITY.md#33-credentials (the posture this implements)
+Tested by:    tests/test_server_secrets.py, tests/test_server_routes_admin_secrets.py
+Touch when:   never for a new repository; adding a secret means a ``SecretSpec`` here (name,
+              label, shape validator), a consumer in src/crb/builders/, the admin route's
+              docs in docs/API.md and the credentials section of docs/SECURITY.md.
 """
 
 from __future__ import annotations
@@ -121,10 +145,12 @@ class SecretsFile:
 
     @classmethod
     def for_settings(cls, settings: Settings) -> SecretsFile:
+        """The store at :func:`secrets_dir_for` (``settings``)."""
         return cls(secrets_dir_for(settings))
 
     @property
     def path(self) -> Path:
+        """The secrets file's path (safe to show: it holds no value)."""
         return self._store.path
 
     def __repr__(self) -> str:
@@ -132,6 +158,7 @@ class SecretsFile:
 
     @staticmethod
     def spec(name: str) -> SecretSpec:
+        """The registry entry for ``name``; ``KeyError`` for a secret the API does not hold."""
         try:
             return SECRETS[name]
         except KeyError:
@@ -155,12 +182,14 @@ class SecretsFile:
         return self._store.get(name)
 
     def delete(self, name: str) -> SecretStatus:
+        """Remove the value; returns the (now absent) status."""
         self.spec(name)
         existed = self._store.delete(name)
         log.info("secret removed", extra={"secret": name, "existed": existed})
         return self._store.status(name)
 
     def status(self, name: str) -> SecretStatus:
+        """Presence, fingerprint and provenance of one secret — never its value."""
         self.spec(name)
         return self._store.status(name)
 
@@ -210,6 +239,7 @@ class VerifyRateLimiter:
 
 
 def get_secrets_file(settings: SettingsDep) -> SecretsFile:
+    """Dependency: a fresh ``SecretsFile`` per request (the file is the state, not the object)."""
     return SecretsFile.for_settings(settings)
 
 
