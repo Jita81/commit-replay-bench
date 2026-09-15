@@ -54,6 +54,8 @@ class BuildAttempt:
     builder: BuilderRef
     error: str = ""
     transcript_ref: str = ""
+    #: attempt-level facts for the row's ``labels`` (a pre-flight record); never a verdict
+    labels: Mapping[str, str] = field(default_factory=dict)
 
 
 #: ``build_fn(workspace, task, mode, rung) -> BuildAttempt``
@@ -168,6 +170,7 @@ def row_from(
         process_step=spec.process_step,
         language=task.language or spec.config.language.value,
         builder_error=attempt.error,
+        labels=dict(attempt.labels),
     )
 
 

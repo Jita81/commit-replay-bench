@@ -163,6 +163,10 @@ class BuildBrief:
     spec_facts: tuple[str, ...] = ()
     rules: str = DEFAULT_RULES
     config: RepoConfig | None = None
+    #: Pre-flight repair (belt 5): the repository's own linter/formatter rejected the
+    #: patch and the fixers could not clear it. Set on a SECOND, bounded build call: the
+    #: builder is told the findings and asked to fix only those. Empty on a first build.
+    repair_note: str = ""
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -271,6 +275,14 @@ class BuildBrief:
             ]
         if self.spec_facts:
             lines += ["", "Known facts:"] + [f"  - {f}" for f in self.spec_facts]
+        if self.repair_note.strip():
+            lines += [
+                "",
+                "REPAIR: your previous edits are in the worktree and the target tests pass, but "
+                "the repository's OWN linter/formatter rejects the changed files. Fix ONLY these "
+                "findings (no other changes, no new features, never touch tests):",
+                self.repair_note.strip(),
+            ]
         lines += ["", self.rules]
         return "\n".join(lines)
 
@@ -290,6 +302,7 @@ class BuildBrief:
             "spec_facts": list(self.spec_facts),
             "rules": self.rules,
             "config": self.config.to_dict() if self.config else None,
+            **({"repair_note": self.repair_note} if self.repair_note else {}),
         }
 
 

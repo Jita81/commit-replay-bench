@@ -81,6 +81,7 @@ import json
 import shlex
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -105,9 +106,10 @@ from crb.builders.container import (
     SessionFactory,
 )
 from crb.core.evidence import BuilderRef
-from crb.core.execution import Executor, SandboxUnavailable
+from crb.core.execution import Command, Executor, SandboxUnavailable
 from crb.core.grade import MODE_SIGHTED
 from crb.core.ledger import GradeRow, JsonlLedger
+from crb.core.lint import fix_commands, run_plan
 from crb.core.redact import redact_and_cap_head
 from crb.core.run import BuildAttempt, BuildFn
 from crb.core.runners.base import BaseRunner
@@ -356,6 +358,54 @@ def sighted_test_command(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class Preflight:
+    """Belt-5 pre-flight — the builder's counterpart of DL-024 for the repository's own
+    linter/formatter. OFF by default; a run that switches it on is a DIFFERENT arm
+    (the builder is recorded as ``<name>+preflight`` so its rows never pool with plain
+    rows), stamped ``labels.preflight`` with what happened.
+
+    After an honest build (no violation, no error) and before the grade:
+
+    1. run belt 5's plan on the changed non-test files — clean: nothing to do;
+    2. ``fix``: apply the plan's tools in FIX mode (``prettier --write``, ``ruff check
+       --fix`` + ``ruff format``, ``gofmt -w``, ``cargo fmt`` … — :func:`fix_commands`)
+       and re-run the plan;
+    3. still rejected and ``repair_turns`` > 0: ONE more bounded build call with the
+       findings (``BuildBrief.repair_note``), then re-run the plan.
+
+    Measured (Stage A, 2026-09-15, four NHS lint misses): the fixers alone flip 2 of 4
+    (both prettier); a type error and a ruff rule need the repair turn.
+    """
+
+    fix: bool = True
+    repair_turns: int = 1
+    #: the repair call's budget: the rung's, capped at these
+    repair_max_turns: int = 10
+    repair_max_tool_calls: int = 15
+    repair_wall_clock_s: int = 300
+
+    @property
+    def label(self) -> str:
+        return f"fix={int(self.fix)},repair={self.repair_turns}"
+
+    @classmethod
+    def from_params(cls, raw: Any) -> Preflight | None:
+        """``params.preflight``: ``true`` → defaults; an object → fields; else ``None``."""
+        if raw is True:
+            return cls()
+        if isinstance(raw, Mapping):
+            return cls(
+                fix=bool(raw.get("fix", True)),
+                repair_turns=int(raw.get("repair_turns", 1)),
+            )
+        return None
+
+
+def _changed_source_files(ws: Workspace, config: RepoConfig) -> list[str]:
+    return [f for f in ws.touched_files() if not config.is_test(f) and (ws.root / f).is_file()]
+
+
 def build_fn_for(
     ladder: EscalationLadder,
     *,
@@ -369,6 +419,7 @@ def build_fn_for(
     builder_overrides: Mapping[str, Any] | None = None,
     container: BuilderContainerSettings | None = None,
     session_factory: SessionFactory = ContainerSession,
+    preflight: Preflight | None = None,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -539,21 +590,160 @@ def build_fn_for(
                 error=_prefixed(f"builder raised {type(exc).__name__}: ", str(exc)),
             )
             return discard(ws, task, failed)
+        labels: dict[str, str] = {}
+        if preflight is not None and not outcome.violated and not attempt_error(outcome):
+            outcome, labels = run_preflight(
+                ws, task, brief, builder, rung, rung_budget, outcome, sealed=sealed
+            )
         ref = _write_transcript(tdir, task, rung, outcome) if tdir is not None else ""
         attempt = BuildAttempt(
             outcome.builder_ref(transcript_ref=ref),
             error=attempt_error(outcome),
             transcript_ref=ref,
+            labels=labels,
         )
         return discard(ws, task, attempt)
 
+    def run_preflight(  # noqa: PLR0917 — one step of the build, many collaborators
+        ws: Workspace,
+        task: TaskSpec,
+        brief: BuildBrief,
+        builder: Builder,
+        rung: Rung,
+        rung_budget: Budget,
+        outcome: BuildOutcome,
+        *,
+        sealed: bool,
+    ) -> tuple[BuildOutcome, dict[str, str]]:
+        """See :class:`Preflight`. Never raises into the grade: a fixer or repair that
+        fails leaves the worktree as it is and the record says so."""
+        assert preflight is not None
+        pf = preflight
+        record: dict[str, Any] = {"policy": pf.label, "before": None, "fixers": [], "repair": 0}
+        merged = replace(outcome, builder=f"{outcome.builder}+preflight")
+        try:
+            files = _changed_source_files(ws, config)
+            plan = runner.lint_plan(ws.root, executor) if files else None
+            if plan is None:
+                record["before"] = "no_plan" if files else "no_changed_files"
+                return merged, {"preflight": _preflight_label(record)}
+            before = run_plan(plan, executor, ws.root, files)
+            record["before"] = _verdict(before)
+            if before.ok is not False:
+                return merged, {"preflight": _preflight_label(record)}
+            emit(
+                on_event,
+                BUILDER_EVENT_PREFIX + "preflight.rejected",
+                task=task.task_id,
+                note=before.note,
+            )
+            if pf.fix:
+                for name, argv in fix_commands(plan, files):
+                    res = executor.run(
+                        Command(argv, ws.root, timeout=plan.timeout, writable_paths=(".",))
+                    )
+                    record["fixers"].append(f"{name}:{res.returncode}")
+                after = run_plan(plan, executor, ws.root, files)
+                record["after_fix"] = _verdict(after)
+                if after.ok is not False:
+                    emit(
+                        on_event,
+                        BUILDER_EVENT_PREFIX + "preflight.fixed",
+                        task=task.task_id,
+                        fixers=record["fixers"],
+                    )
+                    return merged, {"preflight": _preflight_label(record)}
+                before = after
+            if pf.repair_turns > 0:
+                findings = "\n".join(
+                    f"[{st.tool}] rc={st.rc}\n{st.tail}"
+                    for st in before.steps
+                    if st.verdict is not True
+                )
+                repair_brief = replace(brief, repair_note=findings[-4000:])
+                repair_budget = Budget(
+                    max_turns=min(rung_budget.max_turns, pf.repair_max_turns),
+                    max_tool_calls=min(rung_budget.max_tool_calls, pf.repair_max_tool_calls),
+                    max_tokens=rung_budget.max_tokens,
+                    max_cost_usd=rung_budget.max_cost_usd,
+                    wall_clock_s=min(rung_budget.wall_clock_s, pf.repair_wall_clock_s),
+                )
+                if sealed:
+                    second = sealed_build(ws, task, rung, repair_brief, repair_budget)
+                else:
+                    second = builder.build(
+                        ws, repair_brief, repair_budget, on_event=builder_on_event
+                    )
+                record["repair"] = 1
+                merged = _merge_outcomes(merged, second)
+                if second.violated:
+                    record["after_repair"] = "violated"
+                    return merged, {"preflight": _preflight_label(record)}
+                after = run_plan(plan, executor, ws.root, _changed_source_files(ws, config))
+                record["after_repair"] = _verdict(after)
+                emit(
+                    on_event,
+                    BUILDER_EVENT_PREFIX + "preflight.repaired",
+                    task=task.task_id,
+                    ok=after.ok,
+                    cost_usd=second.cost_usd,
+                )
+        except SandboxUnavailable:
+            raise
+        except Exception as exc:  # the grade still runs on whatever is in the worktree
+            record["error"] = f"{type(exc).__name__}: {exc}"[:200]
+            emit(
+                on_event,
+                BUILDER_EVENT_PREFIX + "preflight.error",
+                task=task.task_id,
+                error=record["error"],
+            )
+        return merged, {"preflight": _preflight_label(record)}
+
     return build
+
+
+def _verdict(run: Any) -> str:
+    return "clean" if run.ok else ("rejected" if run.ok is False else "not_evaluated")
+
+
+def _preflight_label(record: Mapping[str, Any]) -> str:
+    """A compact, greppable label: ``fix=1,repair=1;before=rejected;fix=prettier:0;after_fix=clean``."""
+    parts = [str(record.get("policy", "")), f"before={record.get('before')}"]
+    if record.get("fixers"):
+        parts.append("fix=" + "+".join(record["fixers"]))
+    for k in ("after_fix", "after_repair", "error"):
+        if record.get(k) is not None:
+            parts.append(f"{k}={record[k]}")
+    if record.get("repair"):
+        parts.append(f"repair={record['repair']}")
+    return ";".join(parts)[:300]
+
+
+def _merge_outcomes(first: BuildOutcome, second: BuildOutcome) -> BuildOutcome:
+    """The two calls of a pre-flight repair as ONE attempt: spend, turns and latency
+    summed, errors concatenated, the repair's stop reason kept (it ran last)."""
+    return replace(
+        first,
+        attempts=first.attempts + second.attempts,
+        turns=first.turns + second.turns,
+        tokens_in=first.tokens_in + second.tokens_in,
+        tokens_out=first.tokens_out + second.tokens_out,
+        tokens_cached=first.tokens_cached + second.tokens_cached,
+        cost_usd=first.cost_usd + second.cost_usd,
+        latency_s=first.latency_s + second.latency_s,
+        errors=tuple(first.errors) + tuple(second.errors),
+        stop_reason=second.stop_reason or first.stop_reason,
+        done=second.done,
+        transcript=tuple(first.transcript) + tuple(second.transcript),
+    )
 
 
 __all__ = [
     "BUILDER_EVENT_PREFIX",
     "LedgerLike",
     "MessageFn",
+    "Preflight",
     "as_run_ledger",
     "attempt_error",
     "build_fn_for",

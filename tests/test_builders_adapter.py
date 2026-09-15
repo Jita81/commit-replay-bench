@@ -25,6 +25,7 @@ from crb.builders.base import (
 )
 from crb.core.execution import LocalExecutor
 from crb.core.ledger import JsonlLedger, verify_chain
+from crb.core.lint import LintPlan, LintTool
 from crb.core.run import BuildAttempt, RunSpec, run
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
@@ -70,6 +71,22 @@ class FakeBuilder:
             "provider": self.provider,
             "mode": brief.mode,
         }
+        if self.behaviour == "ugly_gold":
+            # a correct patch the repository's formatter rejects; a REPAIR call cleans it
+            src = workspace.root / pr.SRC
+            if brief.repair_note:
+                src.write_text(src.read_text().replace("UGLY = 1\n", ""), encoding="utf-8")
+            else:
+                pr.apply_gold(workspace)
+                src.write_text(src.read_text() + "UGLY = 1\n", encoding="utf-8")
+            return BuildOutcome(
+                **base,
+                done=True,
+                stop_reason=STOP_DONE,
+                cost_usd=0.01,
+                latency_s=0.1,
+                budget=budget,
+            )
         if self.behaviour == "gold":
             pr.apply_gold(workspace)
             return BuildOutcome(
@@ -673,3 +690,111 @@ def test_model_error_after_a_correct_patch_is_error_not_clean(
 def test_build_attempt_shape() -> None:
     a = BuildAttempt(adapter._failed_attempt("x:y", "blind", "why").builder, error="why")
     assert a.builder.name == "x:y" and a.builder.mode == "blind" and a.error == "why"
+
+
+# --- belt-5 pre-flight ------------------------------------------------------------------
+
+
+_FAKE_RUFF = """#!/usr/bin/env python3
+import sys
+args = sys.argv[1:]
+files = [a for a in args if a.endswith(".py")]
+fix = "--fix" in args or (args[:1] == ["format"] and "--check" not in args)
+rc = 0
+for f in files:
+    text = open(f, encoding="utf-8").read()
+    if "UGLY" in text:
+        if fix:
+            open(f, "w", encoding="utf-8").write(text.replace("UGLY = 1\\n", ""))
+        else:
+            print(f"{f}:1:1: X001 ugly")
+            rc = 1
+sys.exit(rc)
+"""
+
+
+class _RuffRunner(PytestRunner):
+    """The fixture repo declares no linter; this runner plans a fake ``ruff`` whose check
+    rejects a file containing ``UGLY`` and whose ``--fix`` removes it."""
+
+    script: str = ""
+
+    def lint_plan(self, root: Path, executor: Any) -> LintPlan | None:
+        return LintPlan(
+            (LintTool("ruff", (self.script, "check", "--no-fix"), exts=(".py",)),),
+            detected="fake-ruff",
+        )
+
+
+def _preflight_run(
+    pyrepo: pr.PyRepo, tmp_path: Path, preflight: adapter.Preflight | None, behaviour: str
+) -> tuple[list[Any], list[tuple[str, dict[str, Any]]]]:
+    script = tmp_path / "fake-ruff"
+    script.write_text(_FAKE_RUFF, encoding="utf-8")
+    script.chmod(0o755)
+    runner = _RuffRunner(pyrepo.config)
+    runner.script = str(script)
+    ladder = _ladder(behaviour)
+    ledger = JsonlLedger(tmp_path / "ledger.jsonl")
+    spec = RunSpec(
+        run_id="run-preflight",
+        config=pyrepo.config,
+        runner=runner,
+        executor=LocalExecutor(),
+        scratch=tmp_path / "scratch",
+        ledger=ledger,
+        evidence_dir=tmp_path / "evidence",
+        ladder=adapter.ladder_labels(ladder),
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    fn = adapter.build_fn_for(
+        ladder,
+        budget=Budget(),
+        runner=runner,
+        executor=LocalExecutor(),
+        config=pyrepo.config,
+        on_event=lambda a, p: events.append((a, dict(p))),
+        preflight=preflight,
+    )
+    run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
+    return list(ledger.rows()), events
+
+
+def test_without_preflight_a_correct_but_unformatted_patch_fails_belt_5(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    (row,), _ = _preflight_run(pyrepo, tmp_path, None, "ugly_gold")
+    assert row.target_green is True and row.repo_lint_clean is False and row.clean is False
+    assert row.builder == "fake" and "preflight" not in row.labels
+
+
+def test_preflight_fixers_clear_a_formatter_rejection(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    """Stage A (2026-09-15): the repository's own fixer flips a prettier/ruff-format
+    rejection with no model call. The arm is recorded as a different builder."""
+    (row,), events = _preflight_run(
+        pyrepo, tmp_path, adapter.Preflight(fix=True, repair_turns=0), "ugly_gold"
+    )
+    assert row.clean is True and row.repo_lint_clean is True
+    assert row.builder == "fake+preflight"
+    assert row.labels["preflight"] == "fix=1,repair=0;before=rejected;fix=ruff:0;after_fix=clean"
+    assert [a for a, _ in events if a.startswith("builder.preflight")] == [
+        "builder.preflight.rejected",
+        "builder.preflight.fixed",
+    ]
+    assert len(FakeBuilder.briefs) == 1  # no repair call was needed
+    assert row.cost_usd == 0.01
+
+
+def test_preflight_repair_turn_is_one_bounded_build_with_the_findings(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    (row,), events = _preflight_run(
+        pyrepo, tmp_path, adapter.Preflight(fix=False, repair_turns=1), "ugly_gold"
+    )
+    assert row.clean is True and row.repo_lint_clean is True and row.builder == "fake+preflight"
+    assert row.labels["preflight"] == "fix=0,repair=1;before=rejected;after_repair=clean;repair=1"
+    first, second = FakeBuilder.briefs
+    assert first.repair_note == "" and "[ruff] rc=1" in second.repair_note
+    assert "X001 ugly" in second.repair_note and "REPAIR:" in second.task_text()
+    assert row.cost_usd == 0.02  # both calls are one attempt's spend
+    assert any(a == "builder.preflight.repaired" for a, _ in events)

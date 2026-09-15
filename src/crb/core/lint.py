@@ -1082,6 +1082,43 @@ def which(name: str) -> str | None:
     return shutil.which(name)
 
 
+# --- the repository's own fixers (pre-flight) ------------------------------------------
+
+#: How each belt-5 tool's FIX mode is spelled — the same binary the plan's check step
+#: runs, in write mode, on the same files. Tools with no safe fix mode (a type checker,
+#: clippy, spotless/checkstyle, an operator-declared command) have no entry: a
+#: pre-flight can only apply what the maintainers' own formatter would apply.
+_FIXERS: dict[str, tuple[str, ...]] = {
+    "ruff": ("check", "--fix", "-q"),
+    "ruff-format": ("format", "-q"),
+    "prettier": ("--write", "--log-level=warn"),
+    "eslint": ("--fix",),
+    "standard": ("--fix",),
+    "gofmt": ("-w",),
+    "cargo-fmt": ("fmt", "--"),
+}
+
+
+def fix_commands(plan: LintPlan, files: Sequence[str]) -> list[tuple[str, tuple[str, ...]]]:
+    """``[(tool name, argv)]`` — the plan's tools in fix mode over ``files`` (changed,
+    lintable). Empty when the plan has no fixable tool. The binary is the check step's
+    own (``argv[0]``), so the version is the one belt 5 will apply."""
+    out: list[tuple[str, tuple[str, ...]]] = []
+    for tool in plan.tools:
+        fix = _FIXERS.get(tool.name)
+        if fix is None:
+            continue
+        scoped = [f for f in files if not tool.exts or f.endswith(tool.exts)]
+        if not scoped:
+            continue
+        binary = tool.argv[0]
+        if tool.name == "cargo-fmt":
+            out.append((tool.name, (binary, *fix, *scoped)))
+        else:
+            out.append((tool.name, (binary, *fix, *scoped)))
+    return out
+
+
 __all__ = [
     "DEFAULT_LINT_TIMEOUT_S",
     "PATHS_ALL",
@@ -1092,6 +1129,7 @@ __all__ = [
     "LintStep",
     "LintTool",
     "attribute_findings",
+    "fix_commands",
     "go_plan",
     "js_plan",
     "jvm_plan",
