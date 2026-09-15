@@ -210,6 +210,10 @@ INSTRUMENT_FAILURE_KINDS: tuple[str, ...] = (FAILURE_PROTOCOL, FAILURE_HARNESS)
 
 #: ``crb.builders.adapter.attempt_error`` prefixes every guard refusal with this.
 PROTOCOL_VIOLATION_PREFIX = "protocol violation:"
+#: The longest ``trial`` a row may carry: the rung POSITION label (``r1`` … ``r16``);
+#: ``grades.trial`` is ``VARCHAR(16)``, which PostgreSQL enforces at INSERT and SQLite
+#: does not — refused at the row so both dialects fail the same way (CI, 2026-09-15).
+TRIAL_MAX_LEN = 16
 #: The builder stop reasons that mean "the Budget ran out" — mirrors
 #: ``crb.builders.base.STOP_MAX_TURNS`` … ``STOP_WALL_CLOCK`` (the core is
 #: stdlib-only and cannot import them; ``tests/test_ledger.py`` pins the mirror).
@@ -423,6 +427,10 @@ class GradeRow:
         object.__setattr__(self, "labels", dict(self.labels))
         if not self.row_id:
             object.__setattr__(self, "row_id", uuid.uuid4().hex)
+        if len(self.trial) > TRIAL_MAX_LEN:
+            raise ValueError(
+                f"trial longer than {TRIAL_MAX_LEN} (the rung position, r1…): {self.trial[:20]!r}…"
+            )
         if self.belt_set not in BELT_SETS:
             raise ValueError(f"belt_set must be one of {BELT_SETS}")
         if self.belt_set != BELT_SET_V5 and self.repo_lint_clean is not None:

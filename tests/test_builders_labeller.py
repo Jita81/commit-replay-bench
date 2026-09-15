@@ -321,7 +321,8 @@ def test_claude_labeller_missing_key_is_a_model_error_label(
     monkeypatch.delenv(cc.API_KEY_ENV, raising=False)
     monkeypatch.delenv(cc.AUTH_ENV, raising=False)
     spawn = FakeSpawn([ev_result(structured={"class": "perf", "confidence": 0.9, "rationale": ""})])
-    out = _label(lb.ClaudeCodeLabeller(spawn=spawn))
+    # claude_binary pinned: a faked spawn must not depend on a real CLI on PATH (CI has none)
+    out = _label(lb.ClaudeCodeLabeller(spawn=spawn, claude_binary="claude"))
     assert out.unclassified and "ANTHROPIC_API_KEY is not set" in out.rationale
     assert spawn.calls == []  # never spawned
 
@@ -384,7 +385,7 @@ def test_claude_labeller_failures_are_unclassified_never_raised(
     api_key: None, lines: list[str], handle_kw: dict[str, Any], why: str
 ) -> None:
     spawn = FakeSpawn(lines, **handle_kw)
-    lab = lb.ClaudeCodeLabeller(spawn=spawn)
+    lab = lb.ClaudeCodeLabeller(spawn=spawn, claude_binary="claude")  # no real CLI needed
     out = _label(lab)
     assert out.unclassified and out.confidence == 0.0 and why in out.rationale
     assert out.evidence_hash == _DIGEST and out.labeller == lab.name

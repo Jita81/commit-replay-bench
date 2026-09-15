@@ -126,7 +126,13 @@ class GitRepo:
         return churn
 
     def author_date(self, sha: str) -> str:
-        return self.run("show", "-s", "--format=%aI", sha, check=True).stdout.strip()
+        """The author date as strict ISO 8601 with a numeric offset, always.
+
+        git ≥ 2.5x renders a UTC ``%aI`` as ``…Z`` (older git: ``…+00:00``). The date is
+        stored on every task, hashed into evidence and compared for era selection, so
+        one spelling is kept whatever git the host runs (CI, 2026-09-15)."""
+        raw = self.run("show", "-s", "--format=%aI", sha, check=True).stdout.strip()
+        return raw[:-1] + "+00:00" if raw.endswith("Z") else raw
 
     def subject(self, sha: str) -> str:
         return self.run("show", "-s", "--format=%s", sha, check=True).stdout.strip()

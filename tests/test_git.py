@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -86,6 +87,25 @@ def test_author_date_subject_message(pyrepo: pr.PyRepo) -> None:
     )
     assert repo.subject(pyrepo.feat_sha) == "feat: add subtract"
     assert repo.subject(pyrepo.docs_sha) == "docs: describe the calculator"
+    # a UTC author date is spelled ``+00:00`` whatever git renders (2.53 prints ``Z``):
+    # the date is stored, hashed and compared for era selection
+    env = {**os.environ, "GIT_AUTHOR_DATE": "2026-09-15T13:10:00Z"}
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(pyrepo.path),
+            *pr.GIT_IDENTITY,
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "chore: utc",
+        ],
+        check=True,
+        env=env,
+    )
+    assert repo.author_date(repo.rev_parse("HEAD")) == "2026-09-15T13:10:00+00:00"
     assert repo.message(pyrepo.feat_sha).startswith("feat: add subtract")
 
 

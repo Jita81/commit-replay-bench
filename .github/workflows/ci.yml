@@ -137,11 +137,12 @@ jobs:
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: coverage-py${{ matrix.python }}
           path: coverage.xml
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7
 
   security:
     name: security (gitleaks + pip-audit)
@@ -187,10 +188,11 @@ jobs:
       - name: Upload resolved requirements
         if: always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: resolved-requirements
           path: resolved-requirements.txt
-          retention-days: 30
+          retention-days: 7
 
   sbom:
     name: sbom (CycloneDX)
@@ -217,10 +219,11 @@ jobs:
           .venv/bin/python
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: sbom-cyclonedx
           path: sbom.cdx.json
-          retention-days: 90
+          retention-days: 7
 
   test-postgres:
     name: test-postgres (store suite on PostgreSQL 16)
@@ -265,11 +268,12 @@ jobs:
       - name: Upload junit
         if: always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: store-postgres-junit
           path: store-postgres.xml
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7
 
   container:
     name: container (docker build + smoke + helm lint)
@@ -278,7 +282,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: hadolint deploy/Dockerfile
-        uses: hadolint/hadolint-action@v3
+        uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: deploy/Dockerfile
       - uses: docker/setup-buildx-action@v3
@@ -363,10 +367,11 @@ jobs:
       - name: Upload the Playwright report + traces
         if: failure()
         uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: walkthrough-playwright-report
           path: |
             ui/playwright-report-walkthrough
             ui/test-results-walkthrough
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7

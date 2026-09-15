@@ -297,7 +297,12 @@ def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
     assert old.trial == "four-belt" and old.belt_set == "v4" and old.repo_lint_clean is None
     assert old.verify_hash() and ledger.verify() == 1
     ledger.append(grade_row(trial="five-belt", repo_lint_clean=True))
-    ledger.append(grade_row(trial="five-belt-rejected", clean=False, repo_lint_clean=False))
+    # ≤ 16 characters: ``grades.trial`` is VARCHAR(16), which PostgreSQL enforces at INSERT
+    # (an 18-character label failed the store suite on PostgreSQL 16, CI 2026-09-15) and
+    # the row now refuses on every dialect
+    ledger.append(grade_row(trial="five-belt-rej", clean=False, repo_lint_clean=False))
+    with pytest.raises(ValueError, match="trial longer than 16"):
+        grade_row(trial="five-belt-rejected")
     rows = list(ledger.rows())
     assert [r.repo_lint_clean for r in rows] == [None, True, False]
     assert [r.belt_set for r in rows] == ["v4", "v5", "v5"]
