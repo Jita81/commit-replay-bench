@@ -11,6 +11,29 @@ Workdir layout (``./.crb`` by default; ``CRB_HOME`` or ``--workdir`` override)::
       evidence/<pack_hash>.json  evidence packs (measured and imported)
       aggregates.jsonl         imported AggregateRows (reference only, never graded)
       scratch/                 disposable mining worktrees
+
+Navigation
+----------
+What it is:   The shared plumbing of the ``crb`` subcommands — the file workdir, the executor
+              factory, output helpers, the exit codes and ``CliError``.
+What it does: ``Workdir`` owns the on-disk layout the CLI uses without a server (repo
+              configs, task files, the JSONL ledger, evidence packs, scratch) and its
+              read / append rules (tasks append-only and idempotent by id, packs written
+              once); ``build_executor`` fails closed when docker is asked for without an
+              image; ``parse_kv`` decodes ``KEY=VALUE`` with JSON values.
+How:          Pure helpers over ``pathlib`` and ``json``; nothing here computes a verdict.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/core/spec.py (``RepoConfig`` / ``TaskSpec`` — what the files hold),
+              src/crb/core/execution.py (``LocalExecutor``, ``DockerSettings``,
+              ``make_executor``), src/crb/cli/commands/repo.py (``save_repo`` /
+              ``require_clone`` callers), src/crb/cli/commands/mine.py (``append_tasks``),
+              src/crb/cli/commands/grade.py (``write_pack``, ``ledger_path``),
+              src/crb/cli/main.py (maps ``CliError`` to exit 2)
+Tested by:    tests/test_cli.py, tests/test_cli_repo_setup.py, tests/test_cli_tasks.py
+Touch when:   never for a new repository (``crb repo add`` writes the files); when the
+              workdir layout gains a file or directory (update the docstring table,
+              ``describe`` and docs/OPERATOR.md together).
 """
 
 from __future__ import annotations
@@ -48,6 +71,9 @@ class CliError(Exception):
 
 @dataclass(frozen=True)
 class Workdir:
+    """The CLI's state directory (the layout in the module docstring) and the reads and
+    writes the verbs are allowed to make on it."""
+
     root: Path
 
     @classmethod
@@ -82,12 +108,15 @@ class Workdir:
         return self.root / "aggregates.jsonl"
 
     def repo_file(self, name: str) -> Path:
+        """``repos/<name>.json``."""
         return self.repos_dir / f"{name}.json"
 
     def task_file(self, name: str) -> Path:
+        """``tasks/<name>.jsonl``."""
         return self.tasks_dir / f"{name}.jsonl"
 
     def describe(self) -> dict[str, Any]:
+        """The layout as ``crb config show`` prints it."""
         return {
             "workdir": str(self.root),
             "exists": self.root.is_dir(),
@@ -125,6 +154,7 @@ class Workdir:
         return config, (Path(raw_path) if raw_path else None)
 
     def require_clone(self, name: str) -> tuple[RepoConfig, Path]:
+        """``load_repo`` for a verb that needs the clone on disk (mine, prep, grade, probe)."""
         config, path = self.load_repo(name)
         if path is None:
             raise CliError(
@@ -135,12 +165,14 @@ class Workdir:
         return config, path
 
     def repo_names(self) -> list[str]:
+        """Registered repo names, sorted."""
         if not self.repos_dir.is_dir():
             return []
         return sorted(p.stem for p in self.repos_dir.glob("*.json"))
 
     # --- tasks -----------------------------------------------------------------
     def load_tasks(self, name: str) -> list[TaskSpec]:
+        """Every task on file for ``name`` (empty when never mined)."""
         f = self.task_file(name)
         if not f.is_file():
             return []
@@ -152,6 +184,7 @@ class Workdir:
         return out
 
     def known_task_ids(self, name: str) -> frozenset[str]:
+        """The ids ``crb mine`` must not re-mine."""
         return frozenset(t.task_id for t in self.load_tasks(name))
 
     def append_tasks(self, name: str, tasks: Iterable[TaskSpec]) -> int:
@@ -168,7 +201,7 @@ class Workdir:
                 known.add(t.task_id)
                 n += 1
             fh.flush()
-            os.fsync(fh.fileno())
+            os.fsync(fh.fileno())  # a proved task must survive a crash right after it is found
         return n
 
     def find_task(self, name: str, task_id: str) -> TaskSpec:
@@ -213,6 +246,7 @@ def build_executor(kind: str, config: RepoConfig) -> Executor:
 
 
 def executor_defaults() -> dict[str, Any]:
+    """The executor kinds and the docker sandbox's default limits, for ``crb config``."""
     dummy = DockerSettings(image="<sandbox_image>")
     return {
         "default": DEFAULT_EXECUTOR,
@@ -234,12 +268,14 @@ def executor_defaults() -> dict[str, Any]:
 
 
 def print_json(obj: Any, stream: IO[str] | None = None) -> None:
+    """Pretty, sorted-keys JSON to stdout (``--json`` output)."""
     out = stream or sys.stdout
     out.write(json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
     out.flush()
 
 
 def print_lines(lines: Iterable[str], stream: IO[str] | None = None) -> None:
+    """Plain lines to stdout (the human output)."""
     out = stream or sys.stdout
     for line in lines:
         out.write(line + "\n")
@@ -273,6 +309,7 @@ def table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> Iterator[str
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:
+    """``--workdir`` and ``--json`` — on every verb."""
     parser.add_argument(
         "--workdir",
         default=None,
@@ -282,6 +319,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
 
 
 def add_executor(parser: argparse.ArgumentParser) -> None:
+    """``--executor`` and ``--timeout`` — on every verb that runs repository tests."""
     parser.add_argument(
         "--executor",
         choices=EXECUTOR_KINDS,
@@ -297,6 +335,7 @@ def add_executor(parser: argparse.ArgumentParser) -> None:
 
 
 def workdir_of(args: argparse.Namespace) -> Workdir:
+    """The ``Workdir`` a parsed command line resolves to."""
     return Workdir.resolve(getattr(args, "workdir", None))
 
 
@@ -325,6 +364,7 @@ def parse_kv(items: Sequence[str] | None) -> dict[str, Any]:
 
 
 def _looks_numeric(s: str) -> bool:
+    """Whether ``s`` parses as a float (so ``parse_kv`` decodes it as JSON)."""
     try:
         float(s)
     except ValueError:

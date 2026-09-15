@@ -18,6 +18,35 @@ Responsibilities (and nothing else — domain routes live in :mod:`crb.server.ro
   A missing package is tolerated; a broken module is not (fail closed at startup).
 
 Invariant: the server never computes a verdict and never rewrites a ledger row.
+
+Navigation
+----------
+What it is:   The FastAPI application factory — ``create_app`` and the pure-ASGI middleware
+              stack, error envelope and router seam it assembles.
+What it does: Opens the store in the lifespan and refuses to start unless the append-only
+              triggers are provably live; seeds the bootstrap admin once; wraps every
+              request in request-id, access-log + metrics, security headers, CSRF and
+              domain-error middleware; converts every failure into the one error envelope;
+              mounts each ``crb.server.routes.*`` router under ``/api/v1`` and the built UI
+              (if present) at ``/``.
+How:          ``create_app`` builds the app and middleware (last added = outermost), registers
+              the exception handlers, then ``register_routers`` walks the routes package;
+              ``_lifespan_factory`` does the database work at startup, not import time.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md (the 409 mapping),
+              docs/adr/0005-fail-closed-docker-sandbox.md (the 503 mapping)
+Works with:   src/crb/server/deps.py (``ApiError`` and the envelope this renders),
+              src/crb/server/auth.py (cookies, CSRF check, bootstrap admin, OIDC client),
+              src/crb/server/settings.py (everything the factory reads), src/crb/store/db.py
+              + src/crb/store/ledger.py (``init_db`` and ``assert_append_only`` at boot),
+              src/crb/server/routes/__init__.py (the mounting contract),
+              src/crb/server/http_metrics.py (the middleware's metrics sink), docs/API.md
+              (the envelope and the reserved codes)
+Tested by:    tests/test_server_app.py, tests/test_server_auth.py, tests/test_server_system.py
+Touch when:   never for a new repository; adding a middleware means deciding its position in
+              the stack (comment the order) and keeping it pure ASGI so SSE is not buffered;
+              mapping a new engine exception to a reserved code means adding its NAME to the
+              frozensets here and the code to docs/API.md.
 """
 
 from __future__ import annotations
@@ -118,6 +147,8 @@ class RequestIdMiddleware:
             await self.app(scope, receive, send)
             return
         incoming = Headers(scope=scope).get("x-request-id", "")
+        # A caller's id is honoured only when well-formed: a free-text header would
+        # otherwise flow straight into every log line and the error envelope.
         rid = incoming if _REQUEST_ID_RE.match(incoming) else uuid.uuid4().hex
         scope.setdefault("state", {})["request_id"] = rid
 
@@ -173,9 +204,12 @@ class ObservabilityMiddleware:
         try:
             await self.app(scope, receive, send_tracking)
         finally:
+            # In ``finally`` so an exception that escapes the app is still one logged
+            # request (status stays 500 unless a response start was seen).
             self._record(scope, status["code"], time.perf_counter() - started)
 
     def _record(self, scope: Scope, status: int, duration_s: float) -> None:
+        """One log line + one metrics observation; never raises (see the except below)."""
         method = str(scope.get("method", ""))
         template = route_template(scope)
         state = scope.get("state") or {}
@@ -221,6 +255,8 @@ class SecurityHeadersMiddleware:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 for name, value in SECURITY_HEADERS.items():
+                    # The dev-only Swagger page loads its assets from a CDN; the strict
+                    # CSP would blank it, so it is the one path allowed to skip the header.
                     if name == "Content-Security-Policy" and path in self.skip_csp_paths:
                         continue
                     headers.setdefault(name, value)
@@ -229,6 +265,8 @@ class SecurityHeadersMiddleware:
                         "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
                     )
                 if path.startswith(API_PREFIX):
+                    # API responses carry evidence and principals; a shared cache must
+                    # never serve one caller's response to another.
                     headers.setdefault("Cache-Control", "no-store")
             await send(message)
 
@@ -268,6 +306,7 @@ class CsrfMiddleware:
 
 
 def _parse_cookies(header: str) -> dict[str, str]:
+    """``Cookie`` header → ``{name: value}``; a malformed header is an empty jar."""
     jar: SimpleCookie = SimpleCookie()
     try:
         jar.load(header)
@@ -277,6 +316,8 @@ def _parse_cookies(header: str) -> dict[str, str]:
 
 
 def _mro_names(exc: BaseException) -> set[str]:
+    """Class names up the exception's MRO — matched by NAME so this module never imports
+    the core or store types it maps (the layering rule, ADR-0008)."""
     return {klass.__name__ for klass in type(exc).__mro__}
 
 
@@ -302,6 +343,8 @@ class DomainErrorMiddleware:
         except Exception as exc:
             names = _mro_names(exc)
             if started["yes"]:
+                # Headers already went out (an SSE stream, say): a JSON body now would
+                # corrupt the response, so let the server close the connection instead.
                 raise
             if names & FALSE_Q1_EXCEPTIONS:
                 status, code = 409, "false_q1_refused"
@@ -321,15 +364,19 @@ class DomainErrorMiddleware:
 
 
 def _envelope(status: int, code: str, message: str, detail: dict[str, Any] | None = None) -> Any:
+    """A ``JSONResponse`` carrying the error envelope."""
     return JSONResponse(status_code=status, content=error_body(code, message, detail))
 
 
 async def _handle_api_error(_: Request, exc: Exception) -> Any:
+    """``ApiError`` → its own status, code and headers (e.g. ``Retry-After``)."""
     assert isinstance(exc, ApiError)
     return JSONResponse(status_code=exc.status_code, content=exc.body(), headers=exc.headers)
 
 
 async def _handle_http_exception(_: Request, exc: Exception) -> Any:
+    """Starlette / FastAPI ``HTTPException`` (404, 405, auth-less 401 …) → the envelope,
+    with the status translated to a stable snake_case code."""
     assert isinstance(exc, StarletteHTTPException)
     code = _STATUS_CODES.get(exc.status_code, "http_error")
     message = exc.detail if isinstance(exc.detail, str) else code.replace("_", " ")
@@ -353,6 +400,7 @@ def _scrub_validation_errors(errors: Iterable[Any]) -> list[dict[str, Any]]:
 
 
 async def _handle_validation(_: Request, exc: Exception) -> Any:
+    """422 with the scrubbed pydantic errors (no echoed input)."""
     assert isinstance(exc, RequestValidationError)
     errors = _scrub_validation_errors(jsonable_encoder(exc.errors()))
     return _envelope(422, "validation_error", "request validation failed", {"errors": errors})
@@ -412,6 +460,9 @@ def register_routers(app: FastAPI, *, prefix: str = API_PREFIX) -> list[str]:
 def _lifespan_factory(
     settings: Settings, session_factory: sessionmaker[Session] | None
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    """The startup / shutdown context: open (or adopt) the engine, prove the triggers,
+    seed the admin, mount the UI; dispose the engine only if we opened it."""
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         owns_engine = session_factory is None
@@ -426,6 +477,8 @@ def _lifespan_factory(
                 raise RuntimeError("session_factory must be bound to an Engine")
             engine = bound
         init_db(engine)
+        # A server whose ledger accepts UPDATE must not come up: the API would then be
+        # serving verdicts it cannot vouch for. This is the only startup-time proof.
         assert_append_only(factory)  # raises LedgerIntegrityError → refuse to start
         app.state.engine = engine
         app.state.session_factory = factory
@@ -478,6 +531,7 @@ def create_app(
     app.state.engine = None
     app.state.started_at = 0.0
     app.state.login_limiter = LoginRateLimiter()
+    # An injected client (tests) wins; else a real one only when OIDC is configured.
     if oidc_client is not None:
         app.state.oidc_client = oidc_client
     elif settings.oidc.enabled:
@@ -532,6 +586,8 @@ class _SpaStaticFiles(StaticFiles):
 
 
 def resolve_ui_dist(settings: Settings) -> Path | None:
+    """The built UI directory: ``CRB_UI_DIST`` if set, else the dev and container defaults;
+    ``None`` when no ``index.html`` is found."""
     candidates = [settings.ui_dist] if settings.ui_dist else ["ui/dist", "/app/ui/dist"]
     for c in candidates:
         p = Path(c)

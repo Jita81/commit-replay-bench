@@ -13,6 +13,34 @@ The change profile (:func:`crb.core.capability.profile_repo`) walks the clone's
 git history; it is cached in ``config_json["profile"]`` with a timestamp and
 recomputed on ``?refresh=true``. It is measurement INPUT (what the repo's work
 looks like), never a verdict.
+
+Navigation
+----------
+What it is:   The ``/repos`` route module — register, read, update, probe and profile a
+              repository; list its tasks and its configuration audit trail.
+What it does: Validates every config through ``RepoConfig.from_dict`` (an invalid config is
+              never stored), records each change as a ``system/repo.updated`` event
+              carrying the redacted field diff, enqueues a probe run, computes and caches
+              the change profile (measurement INPUT, never a verdict), and pages mined
+              tasks. Also the home of ``get_repo_or_404`` and ``cached_profile`` that
+              other route modules import.
+How:          ``_validated_config`` → ``Repo`` row + ``append_system_event`` on the repo's
+              system trace; ``compute_profile`` walks the clone with ``profile_repo`` and
+              stores the result under ``config_json["profile"]``.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/core/spec.py (``RepoConfig`` — the shape stored in ``config_json``),
+              src/crb/core/capability.py (``profile_repo`` / ``RepoChangeProfile``),
+              src/crb/server/routes/runs.py (``new_run`` / ``append_system_event`` /
+              ``system_trace_id``), src/crb/server/schemas.py (``RepoCreateRequest`` and the
+              ``Repo*`` shapes), src/crb/store/models.py (``Repo``, ``Task``),
+              docs/OPERATOR.md#20-configuring-a-repository-from-the-ui,
+              ui/src/screens/Repos
+Tested by:    tests/test_server_routes_repos.py, tests/test_server_routes_w3b.py
+Touch when:   THIS is the route a new repository goes through — but adding one is
+              configuration (docs/OPERATOR.md#2-configure-a-repository), not code; edit
+              this file only when ``RepoConfig`` gains a field (the request schema, the UI
+              form and docs/API.md#repos change with it).
 """
 
 from __future__ import annotations
@@ -90,6 +118,7 @@ def _validated_config(name: str, raw: Mapping[str, Any]) -> RepoConfig:
 
 
 def _config_of(repo: Repo) -> RepoConfig:
+    """The row's ``RepoConfig`` (the cached profile is not part of the config)."""
     raw = {k: v for k, v in dict(repo.config_json or {}).items() if k != PROFILE_KEY}
     raw.setdefault("path", repo.clone_path)
     raw.setdefault("url", repo.url)
@@ -97,6 +126,7 @@ def _config_of(repo: Repo) -> RepoConfig:
 
 
 def _stored_config(config: RepoConfig, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """What goes into ``config_json``: the config dict plus any cache entry to keep."""
     d = config.to_dict()
     if extra:
         d.update(extra)
@@ -120,6 +150,7 @@ def config_diff(old: Mapping[str, Any], new: Mapping[str, Any]) -> dict[str, dic
 
 
 def _task_counts(session: Session, name: str) -> RepoTaskCounts:
+    """Task totals by pool and gold status, in one grouped query."""
     rows = session.execute(
         select(Task.pool, Task.gold_clean, func.count(Task.task_id))
         .where(Task.repo == name)
@@ -150,6 +181,7 @@ def _task_counts(session: Session, name: str) -> RepoTaskCounts:
 
 
 def _latest_run(session: Session, name: str, *, kind: str | None = None) -> Run | None:
+    """The repo's newest run (optionally of one kind), or ``None``."""
     q = select(Run).where(Run.repo == name)
     if kind:
         q = q.where(Run.kind == kind)
@@ -159,6 +191,8 @@ def _latest_run(session: Session, name: str, *, kind: str | None = None) -> Run 
 
 
 def _probe(repo: Repo, probe_run: Run | None) -> RepoProbe:
+    """The probe state: the worker's recorded verdict wins; else derived from the latest
+    probe run's status; ``not_probed`` when there has never been one."""
     if repo.probe_status in PROBE_STATES:
         status_ = repo.probe_status
     elif probe_run is None:
@@ -177,6 +211,7 @@ def _probe(repo: Repo, probe_run: Run | None) -> RepoProbe:
 
 
 def repo_summary(session: Session, repo: Repo) -> RepoSummary:
+    """The list-row view: identity, probe, task counts, last run."""
     last = _latest_run(session, repo.name)
     return RepoSummary(
         name=repo.name,
@@ -199,6 +234,7 @@ def repo_summary(session: Session, repo: Repo) -> RepoSummary:
 
 
 def repo_detail(session: Session, repo: Repo) -> RepoDetail:
+    """The summary plus the validated config and when the profile was last computed."""
     summary = repo_summary(session, repo)
     cached = dict(repo.config_json or {}).get(PROFILE_KEY) or {}
     return RepoDetail(
@@ -209,6 +245,7 @@ def repo_detail(session: Session, repo: Repo) -> RepoDetail:
 
 
 def get_repo_or_404(session: Session, name: str) -> Repo:
+    """The repo row, or 404 — the guard every repo-scoped route starts with."""
     repo = session.get(Repo, name)
     if repo is None:
         raise ApiError(404, "not_found", f"no repo {name!r}")
@@ -222,6 +259,7 @@ def get_repo_or_404(session: Session, name: str) -> Repo:
 
 @router.get("/repos", response_model=Page[RepoSummary], responses={401: _ERR})
 def list_repos(viewer: ViewerDep, db: DbDep, page: PageDep) -> Page[RepoSummary]:
+    """Every configured repository, by name."""
     del viewer
     total = int(db.execute(select(func.count(Repo.name))).scalar_one())
     repos = list(
@@ -243,6 +281,7 @@ def list_repos(viewer: ViewerDep, db: DbDep, page: PageDep) -> Page[RepoSummary]
     summary="Register a repository (config validated; recorded as a system event)",
 )
 def create_repo(body: RepoCreateRequest, operator: OperatorDep, db: DbDep) -> RepoDetail:
+    """Register a repository; the full config is the ``repo.created`` event's payload."""
     if db.get(Repo, body.name) is not None:
         raise ApiError(409, "already_exists", f"repo {body.name!r} already exists")
     config = _validated_config(body.name, body.config_updates())
@@ -270,6 +309,7 @@ def create_repo(body: RepoCreateRequest, operator: OperatorDep, db: DbDep) -> Re
 
 @router.get("/repos/{name}", response_model=RepoDetail, responses={401: _ERR, 404: _ERR})
 def get_repo(name: str, viewer: ViewerDep, db: DbDep) -> RepoDetail:
+    """One repository with its config."""
     del viewer
     return repo_detail(db, get_repo_or_404(db, name))
 
@@ -281,6 +321,8 @@ def get_repo(name: str, viewer: ViewerDep, db: DbDep) -> RepoDetail:
     summary="Update the config (partial); the redacted diff is appended to the events table",
 )
 def update_repo(name: str, body: RepoUpdateRequest, operator: OperatorDep, db: DbDep) -> RepoDetail:
+    """Partial update: merge, re-validate, store, and append the field diff as an event.
+    The cached profile survives a config change (it is history, not config)."""
     repo = get_repo_or_404(db, name)
     old = _config_of(repo).to_dict()
     merged = {**old, **body.config_updates()}
@@ -349,6 +391,7 @@ def list_repo_events(name: str, viewer: ViewerDep, db: DbDep, page: PageDep) -> 
     summary="Enqueue a probe run (proves the toolchain on the configured known-green scope)",
 )
 def probe_repo(name: str, operator: OperatorDep, db: DbDep, factory: SessionFactoryDep) -> RunOut:
+    """Enqueue a ``probe`` run carrying the config's probe scope and runner."""
     repo = get_repo_or_404(db, name)
     config = _config_of(repo)
     req = RunCreateRequest(repo=name, kind="probe")
@@ -360,6 +403,7 @@ def probe_repo(name: str, operator: OperatorDep, db: DbDep, factory: SessionFact
 
 
 def _profile_out(name: str, cached: Mapping[str, Any]) -> RepoProfile:
+    """The cache entry as the API serves it (classes sorted, sizes in tier order)."""
     profile = RepoChangeProfile.from_dict(dict(cached.get("profile") or {}))
     d = profile.to_dict()
     classes = sorted({c["capability_class"] for c in d["cells"]})
@@ -431,6 +475,7 @@ def get_profile(
     del viewer
     repo = get_repo_or_404(db, name)
     cached = cached_profile(repo)
+    # Computed on demand (a git walk) and cached in the config row; only ?refresh redoes it.
     if cached is None or refresh:
         cached = compute_profile(repo, _config_of(repo), log_n=log_n)
         repo.config_json = {**dict(repo.config_json or {}), PROFILE_KEY: cached}

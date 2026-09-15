@@ -17,6 +17,26 @@ Rules for crb migrations (docs/ARCHITECTURE.md §7.3, ADR-0002):
   ``crb.store.migrate.install_append_only_triggers_on(op.get_bind(), <tables>)`` with the
   append-only tables that exist AT THAT REVISION (pinned in the script);
 * ``downgrade`` must be real or must raise — never a silent ``pass`` on a data table.
+
+Navigation
+----------
+What it is:   Revision ``0001`` — the base schema: every table of the first release plus the
+              append-only triggers.
+What it does: Creates ``repos``, ``runs``, ``tasks``, ``grades``, ``evidence``, ``events``,
+              ``signoffs``, ``users`` and their indexes, then installs the triggers on the
+              four append-only tables that exist at this revision. ``downgrade`` refuses
+              while any append-only table holds a row.
+How:          ``op.create_table`` per table in dependency order → ``create_index`` →
+              ``install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0001)``.
+Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/store/models.py (what this revision plus its successors must equal),
+              src/crb/store/migrate.py (``install_append_only_triggers_on``; adoption stamps
+              an ``init_db`` database here),
+              src/crb/store/migrations/versions/v0002_belt5_repo_lint_clean.py (the next
+              revision)
+Tested by:    tests/test_store_migrate.py
+Touch when:   never — a released revision is immutable; schema changes are new revisions.
 """
 
 from __future__ import annotations
@@ -40,6 +60,7 @@ APPEND_ONLY_AT_0001: tuple[str, ...] = ("grades", "events", "signoffs", "evidenc
 
 
 def upgrade() -> None:
+    """Create the release-1 schema. Table order follows the foreign keys (``repos`` first)."""
     # --- reference data ---------------------------------------------------------
     op.create_table(
         "repos",

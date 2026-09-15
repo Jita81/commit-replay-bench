@@ -9,6 +9,27 @@ databases can live in one process (which is exactly what the tests do).
 the app converts it (and every other error) into the API.md envelope::
 
     {"error": {"code": "<snake_case>", "message": "...", "detail": {...}}}
+
+Navigation
+----------
+What it is:   The request-scoped dependencies every route module imports, and the shared
+              error / principal response models.
+What it does: Hands a route its ``Settings``, session factory or per-request ORM session off
+              ``request.app.state``; defines ``ApiError`` (status + stable snake_case code +
+              detail) as the only way a route reports a non-success; resolves the caller's
+              address honouring ``X-Forwarded-For`` only from a trusted proxy.
+How:          FastAPI ``Depends`` accessors over ``app.state``; ``get_db`` yields one session
+              per request and rolls back on any exception (routes commit explicitly).
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/server/app.py (populates ``app.state`` in the lifespan and converts
+              ``ApiError`` into the envelope), src/crb/server/settings.py (``Settings`` and
+              ``trusted_proxies``), src/crb/server/auth.py (builds ``current_user`` on these),
+              docs/API.md (the error envelope shape and codes)
+Tested by:    tests/test_server_app.py, tests/test_server_auth.py
+Touch when:   never for a new repository; when a new app-state object must reach routes (add
+              an accessor + ``Annotated`` alias here, populate it in the lifespan); adding an
+              error code means adding it to docs/API.md too.
 """
 
 from __future__ import annotations
@@ -43,14 +64,18 @@ class ApiError(Exception):
         self.headers: dict[str, str] = dict(headers or {})
 
     def body(self) -> dict[str, Any]:
+        """The response body — the envelope of the module docstring."""
         return error_body(self.code, self.message, self.detail)
 
 
 def error_body(code: str, message: str, detail: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The one error shape (docs/API.md); middleware and handlers all build it here."""
     return {"error": {"code": code, "message": message, "detail": dict(detail or {})}}
 
 
 class ErrorBody(BaseModel):
+    """The ``error`` object of the envelope, as the OpenAPI schema documents it."""
+
     code: str
     message: str
     detail: dict[str, Any] = Field(default_factory=dict)
@@ -78,11 +103,13 @@ class Principal(BaseModel):
 
 
 def get_settings(request: Request) -> Settings:
+    """The app's ``Settings`` (set by ``create_app``)."""
     settings: Settings = request.app.state.settings
     return settings
 
 
 def get_session_factory(request: Request) -> sessionmaker[Session]:
+    """The app's bound ``sessionmaker`` (set by the lifespan; a caller-supplied one in tests)."""
     factory: sessionmaker[Session] = request.app.state.session_factory
     return factory
 

@@ -29,6 +29,34 @@ transient builder outage) restarts a healthy process.
 ``status`` is ``down`` → HTTP 503 so a load balancer can act on it; ``degraded``
 still answers 200 (the instrument can measure, with caveats); ``skipped`` is neither
 (a probe this role does not own) and never lowers the aggregate.
+
+Navigation
+----------
+What it is:   The ``/health``, ``/health/live``, ``/metrics`` and ``/version`` routes — the
+              unauthenticated operational surface.
+What it does: Readiness aggregates the store probes (db, append-only triggers proven live,
+              ledger false-Q1 = 0, worker heartbeats) with the observability probes
+              (sandbox — skipped for the ``api`` role — toolchains, builders) and answers
+              503 when any is ``down``; liveness checks the database only; ``/metrics``
+              refreshes the ledger gauges then renders the shared registry.
+How:          ``collect_health`` = the probe list → ``probes.aggregate`` → stamp;
+              ``ledger_counts`` is the SQL twin of ``false_q1_total`` over the stored
+              belts; ``process_role`` reads ``CRB_ROLE`` so the API container never fails
+              on the docker socket it is not meant to have.
+Layer:        server — docs/ARCHITECTURE.md#72-observability
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate)
+Works with:   src/crb/observability/probes.py (the probe vocabulary and ``aggregate``),
+              src/crb/store/ledger.py (``assert_append_only``), src/crb/observability/metrics.py
+              (the gauges and the registry), src/crb/server/routes/signoffs.py (the same
+              false-Q1 predicate, kept in step), deploy/entrypoint.sh + deploy/Dockerfile
+              (``CRB_ROLE`` per container and the ``HEALTHCHECK`` on ``/health/live``),
+              docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface
+Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py
+Touch when:   never for a new repository; adding a probe means deciding which role owns it
+              (``skipped`` elsewhere) and whether it may fail readiness; a new belt means
+              extending the predicate here AND in ``FALSE_Q1_PREDICATE`` (signoffs.py) AND
+              ``false_q1_total`` in src/crb/core/ledger.py together.
 """
 
 from __future__ import annotations
@@ -97,6 +125,8 @@ def process_role(environ: Mapping[str, str] | None = None) -> str:
 
 
 def probe_db(factory: sessionmaker[Session]) -> ProbeResult:
+    """``db``: the database answers ``SELECT 1`` (plus the user count as a data point)."""
+
     def _ping() -> dict[str, Any]:
         with factory() as s:
             s.execute(text("SELECT 1"))
@@ -107,6 +137,7 @@ def probe_db(factory: sessionmaker[Session]) -> ProbeResult:
 
 
 def _count_triggers(s: Session) -> int:
+    """How many of the expected ``<table>_no_update`` / ``_no_delete`` triggers exist."""
     dialect = s.get_bind().dialect.name
     names = [f"{t}_{kind}" for t in APPEND_ONLY_TABLES for kind in ("no_update", "no_delete")]
     if dialect == "sqlite":
@@ -120,6 +151,8 @@ def _count_triggers(s: Session) -> int:
 
 
 def probe_append_only(factory: sessionmaker[Session]) -> ProbeResult:
+    """``append_only``: every trigger present AND an UPDATE on ``grades`` refused —
+    counting alone would pass a trigger that exists but does not fire."""
     expected = 2 * len(APPEND_ONLY_TABLES)
     try:
         with factory() as s:
@@ -164,12 +197,14 @@ def ledger_counts(factory: sessionmaker[Session]) -> tuple[int, int]:
 
 
 def refresh_ledger_gauges(factory: sessionmaker[Session]) -> tuple[int, int]:
+    """Recount and push ``crb_ledger_rows`` / ``crb_false_q1_total``; returns the pair."""
     rows, fq1 = ledger_counts(factory)
     metrics.set_ledger_health(rows=rows, false_q1=fq1)
     return rows, fq1
 
 
 def probe_ledger(factory: sessionmaker[Session]) -> ProbeResult:
+    """``ledger``: ``down`` on any false-Q1 row — the honesty floor is a readiness condition."""
     try:
         rows, fq1 = refresh_ledger_gauges(factory)
     except Exception as exc:
@@ -181,6 +216,7 @@ def probe_ledger(factory: sessionmaker[Session]) -> ProbeResult:
 
 
 def _parse_ts(value: str) -> _dt.datetime | None:
+    """ISO-8601 → aware UTC datetime, ``None`` when unparseable (treated as stale)."""
     try:
         ts = _dt.datetime.fromisoformat(value)
     except ValueError:
@@ -189,6 +225,8 @@ def _parse_ts(value: str) -> _dt.datetime | None:
 
 
 def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
+    """``worker``: ``degraded`` when a running run's heartbeat is older than ``stale_s``
+    (the queue will reclaim it; the probe is the early warning)."""
     try:
         with factory() as s:
             running = list(
@@ -245,6 +283,7 @@ def probe_sandbox(settings: Settings, role: str = ROLE_ALL) -> ProbeResult:
 
 
 def _stamp(out: dict[str, Any], role: str) -> dict[str, Any]:
+    """Add version, apparatus, role and time to an aggregated probe result."""
     out["version"] = __version__
     out["apparatus"] = APPARATUS_VERSION
     out["role"] = role
@@ -285,6 +324,7 @@ def collect_liveness(factory: sessionmaker[Session], *, role: str | None = None)
     summary="Deep health / readiness (503 when any probe is down; sandbox skipped for CRB_ROLE=api)",
 )
 def health(response: Response, factory: SessionFactoryDep, settings: SettingsDep) -> dict[str, Any]:
+    """Readiness: 503 only on ``down`` — ``degraded`` still serves (with caveats)."""
     out = collect_health(factory, settings)
     if out["status"] == DOWN:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -296,6 +336,7 @@ def health(response: Response, factory: SessionFactoryDep, settings: SettingsDep
     summary="Liveness: process up + database reachable (503 otherwise); never probes the sandbox",
 )
 def health_live(response: Response, factory: SessionFactoryDep) -> dict[str, Any]:
+    """Liveness: the process and its database, nothing else (see ``collect_liveness``)."""
     out = collect_liveness(factory)
     if out["status"] == DOWN:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -309,6 +350,8 @@ def health_live(response: Response, factory: SessionFactoryDep) -> dict[str, Any
     summary="Prometheus exposition (crb_false_q1_total must read 0)",
 )
 def prometheus_metrics(factory: SessionFactoryDep, settings: SettingsDep) -> Response:
+    """The exposition; the ledger gauges are refreshed on every scrape so
+    ``crb_false_q1_total`` is never stale."""
     if not settings.metrics_enabled:
         raise ApiError(404, "metrics_disabled", "CRB_METRICS_ENABLED is false")
     if not metrics.available():
@@ -319,6 +362,7 @@ def prometheus_metrics(factory: SessionFactoryDep, settings: SettingsDep) -> Res
 
 @router.get("/version", summary="Package, apparatus and routing-policy versions")
 def version(request: Request) -> dict[str, Any]:
+    """Package, apparatus and routing-policy versions plus uptime — what a claim cites."""
     started = float(getattr(request.app.state, "started_at", 0.0) or 0.0)
     return {
         "crb": __version__,

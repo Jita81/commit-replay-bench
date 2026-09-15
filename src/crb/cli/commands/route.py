@@ -1,4 +1,24 @@
-"""``crb route`` — apply the ONE published routing rule to every measured cell."""
+"""``crb route`` — apply the ONE published routing rule to every measured cell.
+
+Navigation
+----------
+What it is:   ``crb route`` — the ONE routing rule applied to every measured cell of a
+              JSONL ledger, with its reason.
+What it does: Reads the ledger, rolls rows up into cells, routes each under the default
+              policy (or a JSON override whose fields must all be known), prints the
+              table, and exits 1 when any cell is ``do_not_ship``. ``load_policy`` is also
+              what ``crb learn`` uses for its ``--policy-json``.
+How:          ``JsonlLedger.rows`` → ``all_cell_stats`` → ``route`` per cell → table / JSON.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/routing.py (``route``, ``RoutingPolicy``), src/crb/core/ledger.py
+              (``all_cell_stats``), src/crb/cli/commands/learn.py (imports ``load_policy``),
+              src/crb/server/routes/capability.py (the same rule over the database),
+              docs/OPERATOR.md#4-read-the-capability-map
+Tested by:    tests/test_cli.py, tests/test_cli_learn.py
+Touch when:   never for a new repository; a policy threshold is a ``--policy-json`` value
+              for an experiment and an ADR + apparatus bump for a change of default.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +42,7 @@ from crb.core.routing import DEFAULT_POLICY, ROUTE_DO_NOT_SHIP, RoutingPolicy, r
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add ``crb route``."""
     p = sub.add_parser("route", help="route decision per measured cell")
     p.add_argument("--path", default="", help="ledger path (default <workdir>/ledger.jsonl)")
     p.add_argument(
@@ -59,6 +80,7 @@ def load_policy(spec: str) -> RoutingPolicy:
 
 
 def cmd_route(args: argparse.Namespace) -> int:
+    """Route every measured cell; exit 1 when any is ``do_not_ship``."""
     wd = workdir_of(args)
     path = Path(args.path).expanduser() if args.path else wd.ledger_path
     policy = load_policy(args.policy_json)

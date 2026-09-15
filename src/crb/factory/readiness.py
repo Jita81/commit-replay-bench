@@ -29,6 +29,36 @@ Routing hints (:data:`ROUTE_HINTS`):
 Gap sign-offs are an append-only, hash-chained JSONL ledger of
 :class:`GapSignoff` records (the same discipline as :mod:`crb.core.signoff`),
 so the audit trail shows which fact came from whom and when.
+
+Navigation
+----------
+What it is:   The Definition-of-Ready gate — per-class catalogue of structural and value
+              slots, the append-only gap sign-off ledger, and the routed assessment.
+What it does: Refuses to build an item with an unsigned STRUCTURAL gap (``NotReady``);
+              never blocks on a VALUE gap (that routes to test-first authoring); routes
+              operator-kind, uncatalogued and weak-oracle classes to ``human``. A gap is
+              always reported as a question, never an invented answer; a signed fact
+              carries who supplied it and when, hash-chained.
+How:          ``assess`` = catalogue slots − (item facts ∪ active sign-offs) → gaps → route
+              hint by the precedence in the module docstring; ``JsonlGapSignoffLedger``
+              chains ``GapSignoff`` records like the grade ledger.
+Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/factory/backlog.py (``BacklogItem`` and ``KIND_OPERATOR``),
+              src/crb/factory/loop.py (``_assess`` — the first step of every item),
+              src/crb/factory/evidence.py (``record_readiness`` / ``record_gap_signoff``),
+              src/crb/factory/testfirst.py (where a value gap is resolved),
+              src/crb/cli/commands/learn.py (runs ``assess`` on the items it emits),
+              docs/OPERATOR.md#31-oracle-adequacy--mutation-scoring (what a weak oracle
+              means for a class)
+Tested by:    tests/test_factory_readiness.py, tests/test_factory_loop.py, tests/test_cli_learn.py
+Touch when:   onboarding a repository whose change classes need different structural
+              facts — extend ``CATALOGUE`` (a slot is a question a product owner can
+              answer without seeing the implementation) and add the class to
+              ``WEAK_ORACLE_CLASSES`` if green proves only the build; a catalogue change
+              needs a note in docs/EVIDENCE-AND-CLAIMS.md.
+Claims:       ``ready`` licenses an attempt, not a delivery; the route hint says who should
+              act, never what the answer is (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
 """
 
 from __future__ import annotations
@@ -71,6 +101,9 @@ class NotReady(ValueError):
 
 @dataclass(frozen=True)
 class Slot:
+    """One fact a class needs: its name, the question a product owner answers, and
+    whether an open slot blocks (``structural``) or routes (``value``)."""
+
     name: str
     question: str
     kind: str = SLOT_STRUCTURAL
@@ -81,10 +114,12 @@ class Slot:
 
 
 def _s(name: str, question: str) -> Slot:
+    """A structural slot (catalogue shorthand)."""
     return Slot(name, question, SLOT_STRUCTURAL)
 
 
 def _v(name: str, question: str) -> Slot:
+    """A value slot (catalogue shorthand)."""
     return Slot(name, question, SLOT_VALUE)
 
 
@@ -210,29 +245,36 @@ class GapSignoff:
             object.__setattr__(self, "record_id", uuid.uuid4().hex)
 
     def key(self) -> tuple[str, str]:
+        """``(item_id, slot)`` — the scope a later record supersedes."""
         return (self.item_id, self.slot)
 
     def body(self) -> dict[str, Any]:
+        """Every field but ``row_hash`` — what is hashed."""
         return {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "row_hash"}
 
     def compute_hash(self) -> str:
+        """SHA-256 of the canonical JSON of :meth:`body`."""
         return sha256_text(canonical_json(self.body()))
 
     def chained(self, prev_hash: str) -> GapSignoff:
+        """A copy with ``prev_hash`` set and ``row_hash`` computed."""
         rec = replace(self, prev_hash=prev_hash)
         object.__setattr__(rec, "row_hash", rec.compute_hash())
         return rec
 
     def verify_hash(self) -> bool:
+        """Whether the stored ``row_hash`` matches the body."""
         return bool(self.row_hash) and self.row_hash == self.compute_hash()
 
     def to_dict(self) -> dict[str, Any]:
+        """The stored line: body plus ``row_hash``."""
         d = self.body()
         d["row_hash"] = self.row_hash
         return d
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> GapSignoff:
+        """Inverse of :meth:`to_dict` (unknown keys ignored)."""
         return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
 
 
@@ -243,6 +285,8 @@ class JsonlGapSignoffLedger:
         self.path = Path(path)
 
     def _last_hash(self) -> str:
+        """The chain head from the file's last line (reads only the tail, so appending to a
+        long ledger stays O(1))."""
         if not self.path.exists() or self.path.stat().st_size == 0:
             return GENESIS_HASH
         last = ""
@@ -264,6 +308,7 @@ class JsonlGapSignoffLedger:
         return row_hash
 
     def append(self, record: GapSignoff) -> GapSignoff:
+        """Chain ``record`` onto the head and append one fsync'd line."""
         chained = record.chained(self._last_hash())
         self.path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(chained.to_dict(), sort_keys=True, ensure_ascii=False)
@@ -274,6 +319,7 @@ class JsonlGapSignoffLedger:
         return chained
 
     def records(self) -> Iterator[GapSignoff]:
+        """Every record in file order (an absent file is an empty ledger)."""
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as f:
@@ -282,6 +328,7 @@ class JsonlGapSignoffLedger:
                     yield GapSignoff.from_dict(json.loads(line))
 
     def verify(self) -> int:
+        """Walk the chain; return the count; raise ``LedgerIntegrityError`` on a break."""
         prev = GENESIS_HASH
         n = 0
         for rec in self.records():
@@ -294,6 +341,7 @@ class JsonlGapSignoffLedger:
         return n
 
     def for_item(self, item_id: str) -> list[GapSignoff]:
+        """The item's records (attestations and revocations), in order."""
         return [r for r in self.records() if r.item_id == item_id]
 
 
@@ -312,12 +360,15 @@ def active_signoffs(records: Iterable[GapSignoff]) -> dict[tuple[str, str], GapS
 
 @dataclass(frozen=True)
 class Gap:
+    """An open slot, reported as its question."""
+
     slot: str
     question: str
     kind: str
 
     @property
     def blocking(self) -> bool:
+        """Structural gaps block the build; value gaps only route."""
         return self.kind == SLOT_STRUCTURAL
 
     def to_dict(self) -> dict[str, Any]:
@@ -349,10 +400,12 @@ class Readiness:
 
     @property
     def blocking_gaps(self) -> tuple[Gap, ...]:
+        """The structural gaps (empty whenever ``ready``)."""
         return tuple(g for g in self.gaps if g.blocking)
 
     @property
     def value_gaps(self) -> tuple[Gap, ...]:
+        """The value gaps (what test-first authoring must pin)."""
         return tuple(g for g in self.gaps if not g.blocking)
 
     def fact_lines(self) -> tuple[str, ...]:
@@ -374,6 +427,7 @@ class Readiness:
 
 
 def slots_for(capability_class: str) -> tuple[Slot, ...]:
+    """The catalogue's slots for a class; empty for an uncatalogued class."""
     return CATALOGUE.get(capability_class, ())
 
 
@@ -394,6 +448,8 @@ def assess(item: BacklogItem, signoffs: Iterable[GapSignoff] = ()) -> Readiness:
     blocking = [g for g in gaps if g.blocking]
     ready = not blocking
 
+    # Route precedence is deliberate: the reasons a HUMAN must act come first, so a
+    # fully-filled operator item or weak-oracle class can never read as "build".
     if item.kind == KIND_OPERATOR:
         route, reason = ROUTE_HUMAN, "operator-kind work is never delegated to the factory"
     elif not catalogued:

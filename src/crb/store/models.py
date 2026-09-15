@@ -13,6 +13,35 @@ signoffs   — APPEND-ONLY: human attestations (revocations are new rows)
 reviews    — APPEND-ONLY: human post-hoc verdicts on ONE graded row each, hash-chained
              (``ReviewRecord`` columns; revision 0003)
 users      — local accounts / OIDC subjects and their role
+
+Navigation
+----------
+What it is:   The SQLAlchemy 2.0 declarative models — the store's schema, one class per table.
+What it does: Declares every table the server, worker and CLI persist to, mirroring the
+              core's dataclasses column-for-column (``GradeRow`` → ``grades``, ``StepEvent`` →
+              ``events``, ``ReviewRecord`` → ``reviews``, ``RepoConfig``/``TaskSpec`` as JSON).
+              Names the append-only tables (``APPEND_ONLY_TABLES``) whose triggers the store
+              installs. Carries no behaviour.
+How:          ``DeclarativeBase`` subclasses with ``Mapped[...]`` columns; timestamps are
+              second-precision UTC ISO-8601 strings so SQLite and PostgreSQL sort them
+              identically; JSON columns hold the core's ``to_dict()`` shapes unchanged.
+Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/ledger.py (``GradeRow`` — the ``grades`` columns must stay in
+              step), src/crb/store/ledger.py (maps rows ↔ models), src/crb/store/db.py (the
+              triggers on ``APPEND_ONLY_TABLES``),
+              src/crb/store/migrations/versions/v0001_initial_schema.py (must equal
+              ``create_all`` — the parity test), src/crb/observability/events.py
+              (``StepEvent`` — the ``events`` columns), src/crb/core/review.py
+              (``ReviewRecord`` — the ``reviews`` columns)
+Tested by:    tests/test_store_migrate.py, tests/test_store_db.py, tests/test_store_ledger.py,
+              tests/test_store_events.py, tests/test_store_reviews.py
+Touch when:   never for a new repository (``repos.config_json`` absorbs any ``RepoConfig``
+              change); adding a column or table means a new Alembic revision under
+              src/crb/store/migrations/versions/ plus a ``REVISION_MARKERS`` /
+              ``REVISION_TABLES`` entry in src/crb/store/migrate.py, and — for an append-only
+              table — a pinned tuple in that revision; a ``grades`` column also changes the
+              hashed body in src/crb/core/ledger.py and needs an ADR.
 """
 
 from __future__ import annotations
@@ -35,14 +64,20 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 def _now() -> str:
+    # Second precision on purpose: the JSONL ledger's stamps are second-precision too, so
+    # a row round-trips DB → JSONL → DB without changing its hashed body.
     return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()
 
 
 class Base(DeclarativeBase):
-    pass
+    """The declarative base; ``Base.metadata`` is what ``init_db`` and Alembic compare."""
 
 
 class Repo(Base):
+    """One configured repository. ``config_json`` is ``RepoConfig.to_dict()`` verbatim so
+    the core's config shape never has to be flattened into columns; ``probe_status`` /
+    ``probe_detail`` record the last toolchain probe (``unknown`` until one runs)."""
+
     __tablename__ = "repos"
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     language: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -57,6 +92,11 @@ class Repo(Base):
 
 
 class Run(Base):
+    """A unit of queued work and its outcome — the row :class:`crb.store.jobs.JobQueue`
+    drives through ``queued → running → succeeded | failed | cancelled``. ``worker_id`` /
+    ``heartbeat`` are the liveness fields; ``apparatus_json`` is the stamp the run's ledger
+    rows carry; ``counts_json`` is the run's summary (plus the queue's ``reclaims``)."""
+
     __tablename__ = "runs"
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     repo: Mapped[str] = mapped_column(
@@ -87,6 +127,10 @@ class Run(Base):
 
 
 class Task(Base):
+    """A mined task, keyed ``(repo, task_id)``. The indexed columns are copies of what
+    ``spec_json`` (``TaskSpec.to_dict()``) already holds, kept for filtering; ``spec_json``
+    is the source of truth and a ``label`` run rewrites both together."""
+
     __tablename__ = "tasks"
     repo: Mapped[str] = mapped_column(String(64), ForeignKey("repos.name"), primary_key=True)
     task_id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -169,6 +213,9 @@ class Grade(Base):
 
 
 class EvidencePackRow(Base):
+    """An evidence pack body, content-addressed by its ``pack_hash`` (append-only: a pack
+    is written once by :meth:`crb.store.ledger.DbLedger.store_pack` and never edited)."""
+
     __tablename__ = "evidence"
     pack_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     repo: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -252,6 +299,10 @@ class Review(Base):
 
 
 class User(Base):
+    """An account: an OIDC subject (``issuer`` = the provider) or a local one
+    (``issuer="local"``, ``password_hash`` set — the bootstrap admin). ``role`` is the
+    whole of RBAC; there are no per-repository permissions."""
+
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     subject: Mapped[str] = mapped_column(String(256), nullable=False)  # oidc sub or "local:<name>"

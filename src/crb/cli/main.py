@@ -4,6 +4,28 @@
 tests drive it in-process. It never lets a harness exception escape as a
 traceback: an unexpected error prints one line and exits ``2`` (set
 ``CRB_DEBUG=1`` to re-raise while developing).
+
+Navigation
+----------
+What it is:   The ``crb`` entry point — parser assembly, dispatch, and the one place every
+              failure becomes an exit code.
+What it does: Registers each command module's subparser, runs the chosen ``func``, and maps
+              ``CliError`` / sandbox / git / ledger / false-Q1 exceptions to a one-line
+              stderr message and exit 2 — never a traceback, never a silent pass
+              (``CRB_DEBUG=1`` re-raises for development).
+How:          ``build_parser`` → ``argparse`` → ``main`` try/except ladder → ``_fail``.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/cli/commands/__init__.py (``CliError``, the exit codes),
+              src/crb/cli/commands/repo.py + src/crb/cli/commands/mine.py +
+              src/crb/cli/commands/grade.py + src/crb/cli/commands/ledger.py +
+              src/crb/cli/commands/route.py (the pipeline verbs, in order),
+              src/crb/cli/commands/service.py (``serve`` / ``worker`` / ``migrate`` /
+              ``doctor``), src/crb/core/execution.py (``SandboxUnavailable`` → exit 2)
+Tested by:    tests/test_cli.py, tests/test_cli_doctor.py, tests/test_cli_tasks.py
+Touch when:   never for a new repository; adding a verb means a ``register`` in a new
+              commands module and one line here; a new core exception class that should
+              exit 2 with a clean message needs a clause in the ladder.
 """
 
 from __future__ import annotations
@@ -37,6 +59,7 @@ PROG = "crb"
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """The top-level parser with every verb registered (order = the help's order)."""
     parser = argparse.ArgumentParser(
         prog=PROG,
         description=(
@@ -61,6 +84,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Parse, dispatch, and return the exit code (see the package docstring for the codes).
+    Every known failure class is caught below and reported in one line."""
     parser = build_parser()
     try:
         args = parser.parse_args(list(argv) if argv is not None else None)
@@ -94,6 +119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _fail(message: str) -> int:
+    """Print one error line on stderr and return the harness-error code."""
     sys.stderr.write(f"{PROG}: error: {message}\n")
     sys.stderr.flush()
     return EXIT_ERROR

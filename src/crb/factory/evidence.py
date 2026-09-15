@@ -19,6 +19,34 @@ Two invariants live here rather than in the loop, so no caller can skip them:
 
 Persistence is behind the :class:`FactoryStore` protocol; :class:`JsonlFactoryStore`
 is the stdlib reference. The database store is a later workstream.
+
+Navigation
+----------
+What it is:   The factory evidence ledger — one hash-chained event per governed step, and
+              the home of the verdict-before-edit invariant.
+What it does: Appends ``FactoryEvent`` rows (freeze, sign-off, readiness, route, RED proof,
+              build, delivery, verdict, edit, checkpoint, outcome) through a typed front
+              door; redacts every payload string at construction; refuses to record an edit
+              for a build with no verdict, and refuses a verdict that claims to precede an
+              edit already on the record; ``verify`` proves the chain.
+How:          ``FactoryEvidence.record_*`` → ``FactoryStore.append`` (``JsonlFactoryStore``
+              fsyncs a line per event; ``MemoryFactoryStore`` for tests) → ``chained`` with
+              the previous ``row_hash``; ``verify_events`` re-walks.
+Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/factory/loop.py (calls a ``record_*`` at every arrow),
+              src/crb/factory/review.py (``record_verdict`` before returning; ``permit_edit``),
+              src/crb/core/ledger.py (``GENESIS_HASH``, ``LedgerIntegrityError`` — the shared
+              chain vocabulary), src/crb/core/redact.py (the payload scrub),
+              src/crb/server/routes/factory.py (will serve the events — a 501 stub until P6)
+Tested by:    tests/test_factory_review.py, tests/test_factory_loop.py
+Touch when:   never for a new repository; adding a governed step means a new ``EV_*`` kind,
+              a ``record_*`` method, and a call from the loop — all in one change (an
+              unknown kind is refused at construction).
+Claims:       A verified factory ledger proves the ORDER of steps and that none was edited —
+              the grade itself is in the grade ledger, cited by pack hash and row id
+              (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
 """
 
 from __future__ import annotations
@@ -82,6 +110,7 @@ class VerdictBeforeEditViolation(RuntimeError):
 
 
 def _redact_value(v: Any) -> Any:
+    """Redact every string anywhere in a payload (nested mappings and sequences too)."""
     if isinstance(v, str):
         return redact(v)
     if isinstance(v, Mapping):
@@ -93,6 +122,9 @@ def _redact_value(v: Any) -> Any:
 
 @dataclass(frozen=True)
 class FactoryEvent:
+    """One governed step's record: a known ``kind``, the item, a redacted payload, and the
+    chain fields (``prev_hash`` / ``row_hash``) the store fills in."""
+
     kind: str
     item_id: str = ""
     payload: Mapping[str, Any] = field(default_factory=dict)
@@ -113,29 +145,35 @@ class FactoryEvent:
 
     # --- hashing ---------------------------------------------------------------
     def body(self) -> dict[str, Any]:
+        """Every field but ``row_hash`` — what is hashed."""
         d = {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "row_hash"}
         d["payload"] = dict(self.payload)
         return d
 
     def compute_hash(self) -> str:
+        """SHA-256 of the canonical JSON of :meth:`body`."""
         return sha256_text(canonical_json(self.body()))
 
     def chained(self, prev_hash: str) -> FactoryEvent:
+        """A copy with ``prev_hash`` set and ``row_hash`` computed."""
         ev = replace(self, prev_hash=prev_hash)
         object.__setattr__(ev, "row_hash", ev.compute_hash())
         return ev
 
     def verify_hash(self) -> bool:
+        """Whether the stored ``row_hash`` matches the body."""
         return bool(self.row_hash) and self.row_hash == self.compute_hash()
 
     # --- serialisation -----------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
+        """The stored line: body plus ``row_hash``."""
         d = self.body()
         d["row_hash"] = self.row_hash
         return d
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> FactoryEvent:
+        """Inverse of :meth:`to_dict` (unknown keys ignored)."""
         return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
 
 
@@ -173,6 +211,7 @@ class JsonlFactoryStore:
         self._lock = threading.Lock()
 
     def _last_hash(self) -> str:
+        """The chain head from the file's last line (tail read only, so appends stay O(1))."""
         if not self.path.exists() or self.path.stat().st_size == 0:
             return GENESIS_HASH
         last = ""
@@ -194,6 +233,7 @@ class JsonlFactoryStore:
         return row_hash
 
     def append(self, event: FactoryEvent) -> FactoryEvent:
+        """Chain onto the head and append one fsync'd line, under the store's lock."""
         with self._lock:
             ev = event.chained(self._last_hash())
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -205,6 +245,7 @@ class JsonlFactoryStore:
             return ev
 
     def events(self) -> Iterator[FactoryEvent]:
+        """Every event in file order (an absent file is an empty ledger)."""
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as f:
@@ -214,6 +255,7 @@ class JsonlFactoryStore:
 
 
 def verify_events(events: Iterable[FactoryEvent]) -> int:
+    """Walk a chain; return the count; raise ``LedgerIntegrityError`` on the first break."""
     prev = GENESIS_HASH
     n = 0
     for ev in events:
@@ -241,6 +283,7 @@ class FactoryEvidence:
 
     # --- generic ---------------------------------------------------------------
     def append(self, kind: str, item_id: str = "", **payload: Any) -> FactoryEvent:
+        """Append one event of ``kind`` stamped with this ledger's actor and repo."""
         return self.store.append(
             FactoryEvent(
                 kind=kind, item_id=item_id, payload=payload, actor=self.actor, repo=self.repo
@@ -248,9 +291,11 @@ class FactoryEvidence:
         )
 
     def events(self) -> list[FactoryEvent]:
+        """Every event, in chain order."""
         return list(self.store.events())
 
     def events_for(self, item_id: str, kind: str = "") -> list[FactoryEvent]:
+        """An item's events, optionally of one kind, in chain order."""
         return [e for e in self.events() if e.item_id == item_id and (not kind or e.kind == kind)]
 
     def verify(self) -> int:
@@ -377,6 +422,7 @@ class FactoryEvidence:
         )
 
     def record_item_outcome(self, item_id: str, **outcome: Any) -> FactoryEvent:
+        """The loop's final status for an item (the last event of its run)."""
         return self.append(EV_ITEM_OUTCOME, item_id, **outcome)
 
     # --- queries -----------------------------------------------------------------
@@ -389,6 +435,7 @@ class FactoryEvidence:
         return found
 
     def edits_for(self, item_id: str, pack_hash: str = "") -> list[FactoryEvent]:
+        """Every permitted edit for the item (optionally for one build)."""
         return [
             e
             for e in self.events_for(item_id, EV_EDIT)

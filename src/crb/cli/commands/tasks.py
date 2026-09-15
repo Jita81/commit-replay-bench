@@ -14,6 +14,31 @@ Where the tasks live: the file workdir (``<workdir>/tasks/<repo>.jsonl``, what
 ``--database-url`` is given or ``CRB_DATABASE_URL`` is set. ``--file`` forces the
 workdir. Either way a label rewrites the task record in place — the ledger is
 untouched (a class is a property of the task, not of a verdict).
+
+Navigation
+----------
+What it is:   ``crb tasks classes | label | label-llm`` — audit and label the change-class
+              axes of mined tasks, over the file workdir or the database.
+What it does: Prints the per-task table (path class · intent · confidence · resolved ·
+              source · labeller) a reviewer audits; records a HUMAN label (highest
+              precedence, never overwritten by a model); labels unlabelled tasks through
+              the same labeller the worker's ``label`` run uses. A label rewrites the task
+              record only — the ledger is untouched.
+How:          ``store_of`` picks ``FileStore`` (atomic rewrite of the JSONL) or ``DbStore``
+              (the ``tasks`` table via the worker's merge); ``commit_evidence`` +
+              ``human_label`` / ``make_labeller`` from the core and builders.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/core/classify.py (``IntentLabel``, ``human_label``, the resolution
+              rule), src/crb/core/spec.py (``TaskSpec`` and ``CLASS_VOCABULARY``),
+              src/crb/builders/labeller.py (``make_labeller`` for ``label-llm``),
+              src/crb/store/models.py (``Task`` for ``DbStore``), src/crb/server/worker.py
+              (the ``label`` run kind — the same path with a queue),
+              docs/ARCHITECTURE.md#75-change-class-two-axes-one-resolved-value
+Tested by:    tests/test_cli_tasks.py
+Touch when:   never for a new repository; when the class vocabulary changes (that is the
+              instrument — src/crb/core/taxonomy.py plus an ADR and apparatus bump);
+              when a task store gains a field the table should show.
 """
 
 from __future__ import annotations
@@ -57,6 +82,8 @@ _SERVER_HINT = "the store layer is not installed — `pip install 'commit-replay
 
 
 class TaskStore(Protocol):
+    """Where tasks live for this invocation: the workdir file or the database."""
+
     def describe(self) -> str: ...
 
     def load(self, repo: str) -> list[TaskSpec]: ...
@@ -79,6 +106,8 @@ class FileStore:
         return self.wd.load_tasks(repo)
 
     def save(self, task: TaskSpec) -> None:
+        """Replace the task's line by rewriting the whole file to a temp path and
+        renaming it over — a crash mid-write leaves the original intact."""
         f = self.wd.task_file(task.repo)
         tasks = self.wd.load_tasks(task.repo)
         if task.task_id not in {t.task_id for t in tasks}:
@@ -93,6 +122,7 @@ class FileStore:
         os.replace(tmp, f)
 
     def clone_path(self, repo: str) -> Path | None:
+        """The registered clone path (``None`` when the repo is unknown or config-only)."""
         try:
             _, path = self.wd.load_repo(repo)
         except CliError:
@@ -115,6 +145,7 @@ class DbStore:
         self._factory = make_session_factory(make_engine(url))
 
     def describe(self) -> str:
+        """The URL with any credentials removed."""
         return self._url.split("@")[-1] if "@" in self._url else self._url
 
     def load(self, repo: str) -> list[TaskSpec]:
@@ -133,6 +164,7 @@ class DbStore:
         return [TaskSpec.from_dict(r.spec_json) for r in rows]
 
     def save(self, task: TaskSpec) -> None:
+        """Merge the task row (columns + ``spec_json``) exactly as the worker's upsert does."""
         with self._factory() as s:
             if s.get(self._Task, (task.repo, task.task_id)) is None:
                 raise CliError(f"task {task.short_id} is not in the database for {task.repo!r}")
@@ -174,6 +206,7 @@ def store_of(args: argparse.Namespace) -> TaskStore:
 
 
 def _find(tasks: Sequence[TaskSpec], task_id: str) -> TaskSpec:
+    """Resolve a sha or a unique prefix (≥ 7 chars) among ``tasks``."""
     if len(task_id) < 7:
         raise CliError("task id must be a git sha or a prefix of at least 7 characters")
     matches = [t for t in tasks if t.task_id.startswith(task_id)]
@@ -185,6 +218,8 @@ def _find(tasks: Sequence[TaskSpec], task_id: str) -> TaskSpec:
 
 
 def _git(store: TaskStore, repo: str) -> GitRepo | None:
+    """The repo's clone as a ``GitRepo`` when it is present on this host (labelling
+    needs the commit message and paths); ``None`` otherwise."""
     path = store.clone_path(repo)
     if path is None or not path.is_dir():
         return None
@@ -198,6 +233,7 @@ def _git(store: TaskStore, repo: str) -> GitRepo | None:
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add ``crb tasks classes | label | label-llm``."""
     p = sub.add_parser("tasks", help="audit and label the change-class axes of mined tasks")
     ts = p.add_subparsers(dest="tasks_command", metavar="<subcommand>")
 
@@ -238,6 +274,7 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 
 
 def _add_store(parser: argparse.ArgumentParser) -> None:
+    """``--database-url`` / ``--file`` plus the common flags."""
     parser.add_argument(
         "--database-url", default=None, help=f"use the database (default: ${DB_URL_ENV})"
     )
@@ -251,6 +288,7 @@ def _add_store(parser: argparse.ArgumentParser) -> None:
 
 
 def _row(t: TaskSpec) -> dict[str, Any]:
+    """One task's class axes as the ``classes`` table shows them."""
     i = t.intent
     return {
         "task_id": t.task_id,
@@ -268,6 +306,7 @@ def _row(t: TaskSpec) -> dict[str, Any]:
 
 
 def cmd_classes(args: argparse.Namespace) -> int:
+    """The audit table: path class, intent, confidence, resolved class, source, labeller."""
     store = store_of(args)
     tasks = store.load(args.name)
     if not tasks:
@@ -331,6 +370,7 @@ def cmd_classes(args: argparse.Namespace) -> int:
 
 
 def cmd_label(args: argparse.Namespace) -> int:
+    """Record a human label (confidence 1.0, ``human:<by>``) and rewrite the task record."""
     store = store_of(args)
     tasks = store.load(args.name)
     task = _find(tasks, args.task_id)
@@ -371,6 +411,7 @@ def cmd_label(args: argparse.Namespace) -> int:
 
 
 def cmd_label_llm(args: argparse.Namespace) -> int:
+    """Label tasks lacking an intent label with a model; a human label is never touched."""
     from crb.builders.labeller import make_labeller  # noqa: PLC0415 — SDK-bearing layer
 
     store = store_of(args)

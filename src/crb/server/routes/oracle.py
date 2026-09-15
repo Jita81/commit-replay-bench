@@ -19,6 +19,35 @@ route under (ADR-0003 amendment) — ONE source for the controls screen and the
 router, so they can never disagree. When no report event exists it falls back to
 the latest finished ``controls`` run's ``counts_json``; when neither exists it
 returns :meth:`ControlsVerdict.unmeasured` (an honest absence, never a pass).
+
+Navigation
+----------
+What it is:   The ``/oracle/{repo}`` and ``/oracle/{repo}/controls`` route module, and the
+              home of ``latest_controls_verdict`` — the one source the router uses.
+What it does: Reduces the store's ``oracle.score`` events to the latest strength per task
+              and per (class × size) cell, banded and gated by the frozen adequacy policy;
+              serves the latest negative-controls report with its routing-reduced
+              verdict; answers ``unmeasured`` (never a pass) when no report exists. An
+              unscoreable oracle is reported, never averaged in.
+How:          ``select(Event)`` by stage / action in insertion order → latest per task →
+              ``classify_oracle`` / ``routing_decision`` → grouped cells;
+              ``latest_controls_verdict`` = latest ``controls.report`` event, else the
+              latest finished ``controls`` run's counts, else ``ControlsVerdict.unmeasured``.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0010-polyglot-negative-controls.md,
+              docs/adr/0009-text-level-mutators.md
+Works with:   src/crb/core/oracle/adequacy.py (the bands and the gate),
+              src/crb/core/routing.py (``ControlsVerdict``), src/crb/server/worker.py (emits
+              the events this reads), src/crb/server/routes/capability.py and
+              src/crb/server/routes/signoffs.py (route under ``latest_controls_verdict`` and
+              ``oracle_by_task``), src/crb/server/routes/learn.py (same score reader),
+              ui/src/screens/Oracle, docs/API.md#oracle-adequacy
+Tested by:    tests/test_server_routes_oracle.py, tests/test_server_routes_capability.py,
+              tests/test_server_routes_signoffs.py
+Touch when:   never for a new repository (mutation scoring is configured per run —
+              docs/OPERATOR.md#31-oracle-adequacy--mutation-scoring); when the worker's
+              event payload shape changes (both ``_task_row`` and the CLI's reader change
+              with it); when the adequacy bands move (that is the core policy + an ADR).
 """
 
 from __future__ import annotations
@@ -58,6 +87,7 @@ CONTROLS_FINISHED: tuple[str, ...] = ("succeeded", "failed")
 
 
 def _latest_controls_event(session: Session, repo: str) -> Event | None:
+    """The newest ``controls.report`` event for ``repo``, or ``None``."""
     return session.execute(
         select(Event)
         .where(Event.repo == repo, Event.action == CONTROLS_ACTION)
@@ -105,6 +135,7 @@ def verdict_dict(
 
 
 def _float_or_none(v: Any) -> float | None:
+    """Lenient float from an event payload; ``None`` for absent or unparseable."""
     if v is None or v == "":
         return None
     try:
@@ -114,6 +145,7 @@ def _float_or_none(v: Any) -> float | None:
 
 
 def _int(v: Any) -> int:
+    """Lenient int from an event payload; ``0`` for absent or unparseable."""
     try:
         return int(v or 0)
     except (TypeError, ValueError):
@@ -121,6 +153,7 @@ def _int(v: Any) -> int:
 
 
 def _score_events(session: Session, repo: str) -> list[Event]:
+    """Every ``oracle.score`` event for ``repo`` in insertion order (latest last)."""
     return list(
         session.execute(
             select(Event)
@@ -131,6 +164,7 @@ def _score_events(session: Session, repo: str) -> list[Event]:
 
 
 def _task_index(session: Session, repo: str, task_ids: set[str]) -> dict[str, Task]:
+    """``task_id → Task`` for the scored tasks (class / size fall back to the spec)."""
     if not task_ids:
         return {}
     return {
@@ -142,6 +176,7 @@ def _task_index(session: Session, repo: str, task_ids: set[str]) -> dict[str, Ta
 
 
 def _task_row(ev: Event, payload: Mapping[str, Any], spec: Task | None) -> OracleTaskOut:
+    """One scored task from its event: strength, band and gate under the frozen policy."""
     strength = _float_or_none(payload.get("oracle_strength", payload.get("strength")))
     total = _int(payload.get("total", payload.get("mutants")))
     if total == 0:
@@ -165,6 +200,7 @@ def _task_row(ev: Event, payload: Mapping[str, Any], spec: Task | None) -> Oracl
 
 
 def _apparatus_of(payload: Mapping[str, Any]) -> str:
+    """The apparatus stamp a score carries (``provenance.apparatus_version`` or top-level)."""
     prov = payload.get("provenance")
     if isinstance(prov, Mapping) and prov.get("apparatus_version"):
         return str(prov["apparatus_version"])
@@ -180,6 +216,8 @@ def oracle_by_task(session: Session, repo: str) -> dict[str, float | None]:
 
 
 def oracle_report(session: Session, repo: str) -> OracleReportOut:
+    """The full ``GET /oracle/{repo}`` body: latest task rows, cells grouped by
+    (class × size) in tier order, the apparatus versions and runs seen."""
     events = _score_events(session, repo)
     payloads = [(ev, dict(ev.payload_json or {})) for ev in events]
     task_ids = {

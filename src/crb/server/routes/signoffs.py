@@ -45,6 +45,42 @@ A deployment relaxes the numeric thresholds through ``CRB_SIGNOFF__*`` (see
 non-overridable clause — makes every sign-off answer **503 signoff_policy_invalid**
 rather than run under a bar nobody chose. A record signed under ``signoff-policy.v1``
 is served with the version it was signed under; its chain still verifies.
+
+Navigation
+----------
+What it is:   The ``/signoffs`` route module — human attestations of a cell under
+              ``signoff-policy.v2``, refused at write, on their own hash chain.
+What it does: ``POST`` runs the five steps of the module docstring: the false-Q1 floor over
+              the STORED belts (409, non-overridable) → the cell routed under the repo's
+              latest controls verdict and task-level oracle strength → the approver's
+              attestation resolved to an accepted row of THIS cell → the policy's clauses
+              (409 ``signoff_refused`` with every failing clause, recorded as an event) →
+              the whole decision stamped into the row and chained. ``preview`` runs steps
+              1–4 without writing; a revocation is a new row; at read every attestation
+              says whether it is still ``active`` (latest, not revoked, false-Q1 still 0).
+How:          ``_floor`` → ``cell_rows`` (sighted, current apparatus) → ``measured_cell`` +
+              ``cell_oracle_strength`` → ``resolve_attestation`` → ``evaluate_signoff`` →
+              ``stamp_evidence`` → ``_lock`` / ``_chain_and_add`` → ``signoff.created``.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0003-one-routing-rule.md,
+              docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/core/signoff.py (the policy, ``SignoffRecord``, ``evaluate_signoff``,
+              ``stamp_evidence``), src/crb/core/capability.py (``measure_cell``,
+              ``task_oracle_strength``), src/crb/server/routes/oracle.py
+              (``latest_controls_verdict`` / ``oracle_by_task`` — shared with the map),
+              src/crb/server/routes/capability.py (overlays ``load_signoff_records``),
+              src/crb/server/schemas_signoff.py (the v2 shapes), src/crb/store/models.py
+              (``Signoff``), ui/src/screens/Signoff,
+              docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity (§6a)
+Tested by:    tests/test_server_routes_signoffs.py, tests/test_server_routes_capability.py
+Touch when:   never for a new repository; relaxing a threshold is deployment configuration
+              (``CRB_SIGNOFF__*``, docs/API.md), not code; adding a policy clause means
+              src/crb/core/signoff.py + a snapshot key here + the schema + the UI + the
+              EVIDENCE-AND-CLAIMS section; a new belt means ``FALSE_Q1_PREDICATE`` here
+              and the twin in src/crb/server/routes/system.py.
+Claims:       An active sign-off licenses auto-delivery of that cell under the recorded
+              policy and thresholds — and nothing once its cell's false-Q1 is > 0
+              (docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity, §6a).
 """
 
 from __future__ import annotations
@@ -214,6 +250,7 @@ def signoff_body(row: Signoff) -> dict[str, Any]:
 
 
 def signoff_hash(row: Signoff) -> str:
+    """SHA-256 of the canonical JSON of :func:`signoff_body`."""
     return sha256_text(canonical_json(signoff_body(row)))
 
 
@@ -232,6 +269,7 @@ def verify_signoff_rows(rows: Iterable[Signoff]) -> int:
 
 
 def _lock(session: Session) -> None:
+    """Serialise sign-off writes so two approvers cannot both chain onto one head."""
     dialect = session.get_bind().dialect.name
     if dialect == "sqlite":
         session.execute(text("BEGIN IMMEDIATE"))
@@ -240,6 +278,7 @@ def _lock(session: Session) -> None:
 
 
 def _last_hash(session: Session) -> str:
+    """The sign-off chain's head, or the genesis hash."""
     last = session.execute(
         select(Signoff.row_hash).order_by(Signoff.seq.desc()).limit(1)
     ).scalar_one_or_none()
@@ -247,6 +286,7 @@ def _last_hash(session: Session) -> str:
 
 
 def _chain_and_add(session: Session, row: Signoff) -> Signoff:
+    """Set ``prev_hash`` / ``row_hash`` and stage the row (the caller commits)."""
     row.prev_hash = _last_hash(session)
     row.row_hash = signoff_hash(row)
     session.add(row)
@@ -259,11 +299,13 @@ def _chain_and_add(session: Session, row: Signoff) -> Signoff:
 
 
 def scope_of(row: Signoff) -> CellKey:
+    """The cell a sign-off names (wildcards for the fields it leaves open)."""
     cj = dict(row.cell_json or {})
     return CellKey(**{f: str(cj.get(f, WILDCARD) or WILDCARD) for f in CELL_FIELDS})
 
 
 def _scope_key(row: Signoff) -> tuple[str, ...]:
+    """``(repo, *cell)`` — what "latest per scope" is keyed on."""
     return (row.repo, *scope_of(row).to_tuple())
 
 
@@ -284,6 +326,7 @@ def _int(v: Any, default: int = 0) -> int:
 
 
 def _thresholds_of(cj: dict[str, str]) -> dict[str, Any]:
+    """The policy thresholds snapshot (stored as a JSON string inside ``cell_json``)."""
     raw = cj.get(_POLICY_THRESHOLDS, "")
     if not raw:
         return {}
@@ -295,6 +338,7 @@ def _thresholds_of(cj: dict[str, str]) -> dict[str, Any]:
 
 
 def _attestation_of(cj: dict[str, str]) -> Attestation | None:
+    """The stamped attestation, or ``None`` on a pre-policy row."""
     if not cj.get(_ATT_ROW):
         return None
     return Attestation(
@@ -349,6 +393,7 @@ def to_record(row: Signoff) -> SignoffRecord:
 
 
 def load_signoff_rows(session: Session, repo: str | None = None) -> list[Signoff]:
+    """Every sign-off row in chain order; a ``repo`` filter also keeps wildcard rows."""
     q = select(Signoff).order_by(Signoff.seq)
     if repo:
         q = q.where(Signoff.repo.in_([repo, WILDCARD]))
@@ -368,6 +413,7 @@ def load_signoff_records(session: Session, repo: str | None = None) -> list[Sign
 
 
 def _scope_where(q: Any, repo: str, scope: CellKey) -> Any:
+    """Restrict a ``Grade`` query to the scope's non-wildcard fields."""
     q = q.where(Grade.repo == repo)
     for field in CELL_FIELDS:
         value = getattr(scope, field)
@@ -400,6 +446,7 @@ def cell_rows(session: Session, repo: str, scope: CellKey) -> list[GradeRow]:
 
 
 def _projection(scope: CellKey) -> tuple[str, ...]:
+    """The cell fields a scope pins — the projection its cell is measured under."""
     return tuple(f for f in CELL_FIELDS if getattr(scope, f) != WILDCARD)
 
 
@@ -419,6 +466,7 @@ def measured_cell(
 
 
 def _grade_key(g: Grade) -> CellKey:
+    """The full cell key of a stored row."""
     return CellKey(**{f: str(getattr(g, f) or "") for f in CELL_FIELDS})
 
 
@@ -500,6 +548,7 @@ def accepted_rows(
 
 
 def _attestation_422(msg: str) -> ApiError:
+    """A 422 located at ``body.attestation.reviewed_row_hash``."""
     return ApiError(
         422,
         "validation_error",
@@ -561,6 +610,7 @@ def resolve_attestation(
 
 
 def _evidence(row: Signoff) -> SignoffEvidenceWithOracle:
+    """The evidence snapshot a row was signed on (never recomputed at read)."""
     cj = dict(row.cell_json or {})
     apparatus = str(cj.get(_EV_APPARATUS, "") or "")
     return SignoffEvidenceWithOracle(
@@ -575,6 +625,7 @@ def _evidence(row: Signoff) -> SignoffEvidenceWithOracle:
 
 
 def _attestation_out(session: Session, row: Signoff) -> AttestationOut | None:
+    """The stamped attestation with the task's subject joined, for display."""
     cj = dict(row.cell_json or {})
     att = _attestation_of(cj) if not row.revoke else None
     if att is None:
@@ -584,6 +635,7 @@ def _attestation_out(session: Session, row: Signoff) -> AttestationOut | None:
 
 
 def _revocation_for(row: Signoff, all_rows: Sequence[Signoff]) -> Signoff | None:
+    """The later revocation row for the same scope, if any."""
     key = _scope_key(row)
     for r in all_rows:
         if r.seq > row.seq and r.revoke and _scope_key(r) == key:
@@ -592,6 +644,7 @@ def _revocation_for(row: Signoff, all_rows: Sequence[Signoff]) -> Signoff | None
 
 
 def _superseded(row: Signoff, all_rows: Sequence[Signoff]) -> bool:
+    """Whether a later attestation of the same scope exists (latest wins)."""
     key = _scope_key(row)
     return any(r.seq > row.seq and not r.revoke and _scope_key(r) == key for r in all_rows)
 
@@ -599,6 +652,9 @@ def _superseded(row: Signoff, all_rows: Sequence[Signoff]) -> bool:
 def signoff_out(
     session: Session, row: Signoff, all_rows: Sequence[Signoff]
 ) -> SignoffWithPolicyOut:
+    """One attestation as served: the stored snapshot plus the LIVE ``active`` /
+    ``current_false_q1`` — a cell that has since acquired a false-Q1 row is shown
+    inactive even though its row is untouched."""
     revocation = _revocation_for(row, all_rows)
     current_fq1, _ = (
         cell_false_q1(session, row.repo, scope_of(row)) if row.repo != WILDCARD else (0, [])
@@ -642,12 +698,15 @@ def signoff_out(
 
 
 def _refusal_out(r: SignoffRefusal) -> SignoffRefusalOut:
+    """A policy refusal as the API serves it."""
     return SignoffRefusalOut(**r.to_dict())
 
 
 def _observed(
     cell: CapabilityCell, controls: ControlsVerdict, oracle: CellOracle, policy: SignoffPolicy
 ) -> dict[str, Any]:
+    """What the policy saw — served in ``detail.observed`` next to the thresholds so a
+    refused approver can see exactly which number fell short."""
     s = cell.stats
     d = cell.decision
     strength = resolve_oracle_strength(cell, oracle_strength=oracle.strength)
@@ -720,6 +779,8 @@ def _refuse(
 def _record_from(
     repo: str, cell: dict[str, str], *, verifier: str, tier: str, note: str
 ) -> SignoffRecord:
+    """The unstamped core record for a request body; the core's own validation errors
+    become 409 (a refusal) or 422 (a malformed scope)."""
     try:
         return SignoffRecord(
             repo=repo,
@@ -789,6 +850,7 @@ def list_signoffs(
     repo: str | None = Query(default=None, max_length=64),
     include_revoked: bool = Query(default=False),
 ) -> Page[SignoffWithPolicyOut]:
+    """Attestation rows (revocation rows are folded into ``revoked`` on their target)."""
     del viewer
     rows = load_signoff_rows(db, repo)
     items = [signoff_out(db, r, rows) for r in rows if not r.revoke]
@@ -810,6 +872,7 @@ def list_signoffs(
     summary="The sign-off policy in force (signoff-policy.v2 defaults, or the deployment's relaxed thresholds)",
 )
 def signoff_policy(viewer: ViewerDep) -> SignoffPolicyOut:
+    """The thresholds every sign-off is judged under (503 if misconfigured)."""
     del viewer
     return SignoffPolicyOut(**effective_policy().to_dict())
 
@@ -961,6 +1024,7 @@ def preview_signoff(
     summary="One attestation with the snapshot it was made on",
 )
 def get_signoff(signoff_id: str, viewer: ViewerDep, db: DbDep) -> SignoffWithPolicyOut:
+    """One attestation (a revocation row's id is not addressable here)."""
     del viewer
     row = db.execute(
         select(Signoff).where(Signoff.signoff_id == signoff_id, Signoff.revoke.is_(False))
@@ -980,6 +1044,7 @@ def get_signoff(signoff_id: str, viewer: ViewerDep, db: DbDep) -> SignoffWithPol
 def create_signoff(
     body: SignoffCreateWithAttestationRequest, approver: ApproverDep, db: DbDep
 ) -> SignoffWithPolicyOut:
+    """The five-step decision of the module docstring; writes only when no clause fails."""
     if db.get(Repo, body.repo) is None:
         raise ApiError(404, "not_found", f"no repo {body.repo!r}")
     policy = effective_policy()
@@ -1117,6 +1182,8 @@ def revoke_signoff(
     db: DbDep,
     body: SignoffRevokeRequest | None = None,
 ) -> SignoffWithPolicyOut:
+    """Append a revocation row for the attestation's scope; the original row is untouched
+    and is returned with ``revoked: true``."""
     row = db.execute(
         select(Signoff).where(Signoff.signoff_id == signoff_id, Signoff.revoke.is_(False))
     ).scalar_one_or_none()

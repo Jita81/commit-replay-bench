@@ -15,6 +15,39 @@ each row's own hash still verifies, the ``prev_hash`` links do not.
 ``/ledger/import`` accepts crb JSONL rows only. Census rows (``repo/task/clean`` with
 no ``schema``) need their task files and repo configs to be classified honestly;
 the error points at ``crb ledger import-census``.
+
+Navigation
+----------
+What it is:   The ``/ledger/*`` route module — verify the chain, export it, export the
+              abstract cells, import crb JSONL rows.
+What it does: ``verify`` walks the stored rows recomputing every hash from the columns (a
+              tampered or false-Q1 row is REPORTED, never hidden behind an exception) and
+              re-counts false-Q1 in SQL; ``export`` streams rows verbatim as JSONL (verifies
+              standalone when unfiltered) or formula-safe CSV; ``export/abstract`` emits
+              only the allowlisted cell fields; ``import`` re-chains foreign rows, skips
+              ones already held, and refuses census rows (they need tasks and configs).
+How:          Batched ``select(Grade)`` by ``seq`` → ``row_hash_from_stored`` (belt-set
+              aware, as ``GradeRow.body`` is) → the ``LedgerVerifyOut``; export = generator
+              → ``StreamingResponse``; import = ``parse_import`` → dedupe → ``import_rows``.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0007-abstract-cell-export-only.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/ledger.py (``GradeRow.body`` — the hashing this must mirror),
+              src/crb/store/ledger.py (``import_rows`` / ``count``),
+              src/crb/core/federated.py (``export_abstract`` and its allowlist),
+              src/crb/server/routes/grades.py (``grade_to_dict`` / ``ROW_FIELDS``),
+              src/crb/server/routes/signoffs.py (``FALSE_Q1_PREDICATE``),
+              src/crb/cli/commands/ledger.py (the CLI twin, incl. ``import-census``),
+              docs/REPRODUCING-THE-CENSUS.md (the verify procedure end to end)
+Tested by:    tests/test_server_routes_ledger.py
+Touch when:   never for a new repository; when ``GradeRow.body`` changes what it hashes
+              (``row_hash_from_stored`` must change identically, and the ADR); when a
+              field is added to the abstract export (that is the allowlist in
+              src/crb/core/federated.py plus docs/DATA-RETENTION.md#5-cross-organisation-sharing).
+Claims:       ``ok: true`` from verify means the chain is intact and false-Q1 = 0 over the
+              stored belts at that moment — a statement about the ledger's integrity, not
+              about any cell's capability
+              (docs/EVIDENCE-AND-CLAIMS.md#2-clean-semantic-q1-and-false-q1).
 """
 
 from __future__ import annotations
@@ -87,6 +120,7 @@ def row_hash_from_stored(g: Grade) -> str:
 
 
 def _iter_grades(session: Session, batch: int = EXPORT_BATCH) -> Iterator[Grade]:
+    """Every row in ``seq`` order, keyset-paged so a large ledger never loads at once."""
     last = 0
     while True:
         chunk = list(
@@ -101,6 +135,8 @@ def _iter_grades(session: Session, batch: int = EXPORT_BATCH) -> Iterator[Grade]
 
 
 def verify_ledger(session: Session) -> LedgerVerifyOut:
+    """The chain walk + the two SQL counts (false-Q1, clean-without-pack); never raises —
+    the first break is reported by ``seq`` and the walk continues to count rows."""
     rows = 0
     prev = GENESIS_HASH
     broken_at: int | None = None
@@ -159,6 +195,8 @@ def ledger_verify(viewer: ViewerDep, db: DbDep) -> LedgerVerifyOut:
 
 
 def _export_rows(factory: sessionmaker[Session], repo: str | None) -> Iterator[dict[str, Any]]:
+    """Stored rows as ``GradeRow.to_dict`` shapes (the store's ``seq`` removed), streamed
+    from their own session so the response can outlive the request's session."""
     with factory() as s:
         last = 0
         while True:
@@ -176,6 +214,7 @@ def _export_rows(factory: sessionmaker[Session], repo: str | None) -> Iterator[d
 
 
 def _jsonl(factory: sessionmaker[Session], repo: str | None) -> Iterator[bytes]:
+    """One sorted-keys JSON object per line — byte-identical to ``DbLedger.export_jsonl``."""
     for d in _export_rows(factory, repo):
         yield (json.dumps(d, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
 
@@ -200,6 +239,7 @@ def _csv_value(v: Any) -> str:
 
 
 def _csv(factory: sessionmaker[Session], repo: str | None) -> Iterator[bytes]:
+    """Header row then one row per grade, every cell through ``_csv_value``."""
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(ROW_FIELDS)
@@ -267,6 +307,7 @@ def ledger_export_abstract(operator: OperatorDep, factory: SessionFactoryDep) ->
 
 
 def _looks_like_census(d: Mapping[str, Any]) -> bool:
+    """A ``bench.py`` verdict line (no schema, no task_id, census-only keys)."""
     return "schema" not in d and "task_id" not in d and bool(_CENSUS_KEYS & set(d))
 
 
@@ -330,7 +371,7 @@ def ledger_import(
     file: UploadFile, admin: AdminDep, db: DbDep, factory: SessionFactoryDep
 ) -> LedgerImportOut:
     del admin
-    raw = file.file.read(MAX_IMPORT_BYTES + 1)
+    raw = file.file.read(MAX_IMPORT_BYTES + 1)  # read one byte past the cap to detect overflow
     if len(raw) > MAX_IMPORT_BYTES:
         raise ApiError(413, "payload_too_large", f"import exceeds {MAX_IMPORT_BYTES} bytes")
     try:
@@ -362,6 +403,8 @@ def ledger_import(
             )
         ).scalars()
     }
+    # Dedupe on row_id AND on pack hash: a re-import of a re-chained export carries new
+    # row hashes but the same ids and packs, and must not double-count.
     fresh = [
         r
         for r in rows

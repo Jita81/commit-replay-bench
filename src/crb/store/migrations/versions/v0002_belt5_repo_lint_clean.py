@@ -21,6 +21,23 @@ Rules for crb migrations (docs/ARCHITECTURE.md §7.3, ADR-0002):
 
 ``ALTER TABLE … ADD COLUMN`` is in-place on both SQLite and PostgreSQL: no row is
 rewritten and no trigger fires. The triggers are re-asserted anyway (rule 2).
+
+Navigation
+----------
+What it is:   Revision ``0002`` — belt 5's ``grades.repo_lint_clean`` column (nullable).
+What it does: Adds one nullable column in place (no row rewritten, no trigger fired) and
+              re-asserts the append-only triggers. ``downgrade`` refuses while any ``v5`` row
+              exists, since dropping the column would erase a recorded belt.
+How:          ``op.add_column`` → ``install_append_only_triggers_on``; downgrade uses batch
+              mode (SQLite's move-and-copy) then re-installs the triggers on the new table.
+Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0011-repo-lint-belt.md, docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/store/models.py (``Grade.repo_lint_clean`` is declared LAST so the
+              column order matches), src/crb/core/ledger.py (``GradeRow.body`` hashes the
+              column only for ``v5`` rows), src/crb/store/migrate.py (the ``0002`` marker),
+              src/crb/store/migrations/versions/v0001_initial_schema.py (the previous revision)
+Tested by:    tests/test_store_migrate.py
+Touch when:   never — a released revision is immutable.
 """
 
 from __future__ import annotations
@@ -42,6 +59,7 @@ APPEND_ONLY_AT_0002: tuple[str, ...] = ("grades", "events", "signoffs", "evidenc
 
 
 def upgrade() -> None:
+    """Add the nullable belt-5 column; NULL on every existing row by construction."""
     op.add_column("grades", sa.Column("repo_lint_clean", sa.Boolean(), nullable=True))
     install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0002)
 

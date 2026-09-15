@@ -11,6 +11,31 @@ Invariants
   dialect because a PostgreSQL URL can embed a password.
 * Nested groups use ``__`` as the delimiter: ``CRB_OIDC__ISSUER``,
   ``CRB_OIDC__ROLE_MAP='{"crb-admins": "admin"}'``, ``CRB_SANDBOX__EXECUTOR=docker``.
+
+Navigation
+----------
+What it is:   The server's configuration model — every ``CRB_*`` variable the API and its
+              ``/settings`` view know about, with the fail-closed rules attached.
+What it does: Parses the environment into typed, nested settings (OIDC, bootstrap admin,
+              retention, sandbox, builder container); refuses to start in ``prod`` without a
+              strong ``CRB_SECRET_KEY`` or with a short bootstrap password; keeps secret
+              values as ``SecretStr`` and exposes only ``redacted_dict`` for display. Defines
+              the role ladder and ``MIN_PASSWORD_LENGTH`` the auth module enforces.
+How:          ``pydantic-settings`` with ``CRB_`` prefix and ``__`` nesting; CSV-or-JSON
+              list fields via ``NoDecode`` + a ``before`` validator; an ``after`` validator
+              generates a dev-only ephemeral key and logs the prod warnings.
+Layer:        server — docs/ARCHITECTURE.md#71-security
+ADRs:         docs/adr/0012-builder-in-a-sealed-container.md
+Works with:   src/crb/server/app.py (reads ``resolved_database_url``, cookie security, CORS),
+              src/crb/server/auth.py (``ROLE_RANK``, ``session_ttl``, ``secret_key_value``),
+              src/crb/server/routes/system.py (serves ``redacted_dict``),
+              src/crb/builders/container.py (the worker reads the same ``CRB_BUILDER__*``),
+              docs/DEPLOYMENT.md#21-environment-reference (the operator-facing list)
+Tested by:    tests/test_server_app.py, tests/test_server_system.py, tests/test_server_auth.py
+Touch when:   never for a new repository (repositories are configured in the database, not
+              the environment); adding a variable means adding it here, to ``redacted_dict``
+              (never a secret value), to docs/DEPLOYMENT.md#21-environment-reference and to
+              the Helm/compose templates under deploy/.
 """
 
 from __future__ import annotations
@@ -77,11 +102,16 @@ class BootstrapAdmin(BaseModel):
 
 
 class RetentionSettings(BaseModel):
+    """Zero-raw-retention defaults (ADR-0006); only transcripts have a knob today."""
+
     #: Days to keep builder transcripts referenced from evidence packs. 0 = keep none (default).
     transcripts_days: int = Field(default=0, ge=0)
 
 
 class SandboxSettings(BaseModel):
+    """Where repository TESTS run (ADR-0005) — distinct from ``BuilderSettings``, which is
+    where the builder's attempt runs."""
+
     #: ``docker`` (default, fail-closed isolation) or ``local`` (host execution; dev only).
     executor: Literal["local", "docker"] = "docker"
     image: str = ""
@@ -130,6 +160,8 @@ class BuilderSettings(BaseModel):
         return self
 
     def redacted(self) -> dict[str, Any]:
+        """The ``/settings`` view of the builder posture (nothing here is secret, but the
+        derived ``egress_network: none`` reading is what an operator needs to see)."""
         return {
             "executor": self.executor,
             "image": self.image,
@@ -144,6 +176,9 @@ class BuilderSettings(BaseModel):
 
 
 class Settings(BaseSettings):
+    """The top-level settings object: one instance per app, built from the environment
+    (or by a test with keyword arguments). See the module docstring for the invariants."""
+
     model_config = SettingsConfigDict(
         env_prefix="CRB_",
         env_nested_delimiter="__",
@@ -192,6 +227,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _secrets_fail_closed(self) -> Settings:
+        # The fail-closed rules of the module docstring live here so that a Settings that
+        # constructed at all is one the server may run with.
         if self.secret_key is None or not self.secret_key.get_secret_value():
             if self.env == "prod":
                 raise ValueError(
@@ -222,25 +259,30 @@ class Settings(BaseSettings):
     # --- derived ---------------------------------------------------------------
     @property
     def is_dev(self) -> bool:
+        """``CRB_ENV=dev`` — the only mode that relaxes a secret or cookie rule."""
         return self.env == "dev"
 
     @property
     def resolved_cookie_secure(self) -> bool:
+        """``Secure`` on cookies: explicit setting, else ``True`` outside dev."""
         return (not self.is_dev) if self.cookie_secure is None else self.cookie_secure
 
     @property
     def resolved_database_url(self) -> str:
+        """``CRB_DATABASE_URL`` or the SQLite file under ``home`` (same rule as the store)."""
         if self.database_url:
             return self.database_url
         return f"sqlite:///{self.home / 'crb.db'}"
 
     @property
     def secret_key_value(self) -> str:
+        """The signing key as text — for the cookie serialisers only, never for display."""
         assert self.secret_key is not None  # guaranteed by the validator
         return self.secret_key.get_secret_value()
 
     @property
     def database_dialect(self) -> str:
+        """``sqlite`` / ``postgresql`` — all of the URL that may be shown or logged."""
         return self.resolved_database_url.split(":", 1)[0].split("+", 1)[0]
 
     def redacted_dict(self) -> dict[str, Any]:

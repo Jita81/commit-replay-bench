@@ -29,6 +29,30 @@ Guarantees
 Timestamps are ISO-8601 UTC strings (second precision) as in
 :mod:`crb.store.models`; staleness is computed from them in Python so SQLite and
 PostgreSQL behave identically.
+
+Navigation
+----------
+What it is:   The job queue — the ``runs`` table driven as a durable, crash-safe work queue.
+What it does: Enqueues runs, hands each to exactly one worker, measures liveness by
+              heartbeat, re-queues (then abandons) runs whose worker died, refuses a stale
+              worker's writes, and supports cooperative cancellation. Every reclaim and
+              abandonment is recorded as a ``system`` event, never silently.
+How:          ``claim_next`` flips ``queued → running`` in one locked transaction (``BEGIN
+              IMMEDIATE`` / ``FOR UPDATE SKIP LOCKED``); ``heartbeat`` / ``progress`` refresh
+              the stamp; ``reclaim_stale`` compares stamps to a threshold in Python;
+              ``finish`` is idempotent on a terminal run.
+Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         none
+Works with:   src/crb/store/models.py (the ``Run`` row and its liveness columns),
+              src/crb/server/worker.py (the consumer: claim → execute → heartbeat → finish),
+              src/crb/store/events.py (``append_event`` for the reclaim / cancel notes),
+              src/crb/server/routes/runs.py (enqueues, lists and cancels over HTTP),
+              src/crb/server/worker_main.py (the process that polls this queue)
+Tested by:    tests/test_store_jobs.py, tests/test_server_routes_runs.py
+Touch when:   never for a new repository; adding a run kind means extending ``RUN_KINDS``
+              here and the executor table in src/crb/server/worker.py together (and
+              docs/API.md); changing the reclaim threshold or ``max_reclaims`` default is an
+              operator-visible behaviour — note it in docs/OPERATOR.md.
 """
 
 from __future__ import annotations
@@ -92,6 +116,7 @@ class StaleClaim(RuntimeError):
 
 
 def new_run_id() -> str:
+    """A fresh 32-hex run id (also the run's ``trace_id`` in the event stream)."""
     return uuid.uuid4().hex
 
 
@@ -115,17 +140,22 @@ def parse_ts(value: str) -> _dt.datetime | None:
 
 
 def age_s(value: str, now: _dt.datetime) -> float | None:
+    """Seconds between the stamp ``value`` and ``now``; ``None`` when unparseable."""
     d = parse_ts(value)
     return None if d is None else (now - d).total_seconds()
 
 
 def _cancelled(run: Run, now: str) -> None:
+    """Move ``run`` to ``cancelled`` in place (the caller commits)."""
     run.status = STATUS_CANCELLED
     run.finished = now
     run.heartbeat = ""
 
 
 class JobQueue:
+    """The queue API over the ``runs`` table — see the module docstring for the state
+    machine and the guarantees each method upholds."""
+
     def __init__(
         self, factory: sessionmaker[Session], *, max_reclaims: int = DEFAULT_MAX_RECLAIMS
     ) -> None:
@@ -134,6 +164,7 @@ class JobQueue:
 
     # --- plumbing -----------------------------------------------------------------
     def _lock(self, s: Session) -> None:
+        # Serialises claim and reclaim so two workers cannot both take one run.
         dialect = s.get_bind().dialect.name
         if dialect == "sqlite":
             s.execute(text("BEGIN IMMEDIATE"))
@@ -141,6 +172,7 @@ class JobQueue:
             s.execute(text("SELECT pg_advisory_xact_lock(7333)"))
 
     def _get_owned(self, s: Session, run_id: str, worker_id: str) -> Run:
+        """The run, or ``StaleClaim`` when ``worker_id`` is given and no longer owns it."""
         run = s.get(Run, run_id)
         if run is None:
             raise LookupError(f"run {run_id!r} does not exist")
@@ -178,6 +210,7 @@ class JobQueue:
         return run
 
     def get(self, run_id: str) -> Run | None:
+        """One run by id, or ``None``."""
         with self._factory() as s:
             return s.get(Run, run_id)
 
@@ -235,6 +268,7 @@ class JobQueue:
                     q = q.where(Run.repo == repo)
                 q = q.order_by(Run.created, Run.id).limit(1)
                 if s.get_bind().dialect.name == "postgresql":
+                    # SKIP LOCKED: a second worker sees the next queued run, not a wait.
                     q = q.with_for_update(skip_locked=True)
                 run = s.execute(q).scalar_one_or_none()
                 if run is None:
@@ -289,6 +323,7 @@ class JobQueue:
     def set_apparatus(
         self, run_id: str, apparatus: Mapping[str, Any], *, worker_id: str = ""
     ) -> None:
+        """Record the apparatus stamp the run's ledger rows will carry (owner-scoped)."""
         with self._factory() as s:
             run = self._get_owned(s, run_id, worker_id)
             run.apparatus_json = dict(apparatus)
@@ -296,6 +331,8 @@ class JobQueue:
 
     @staticmethod
     def _merge_counts(existing: Mapping[str, Any] | None, new: Mapping[str, Any]) -> dict[str, Any]:
+        """``new`` replaces ``existing`` wholesale, except the queue-owned ``reclaims``
+        counter, which a worker's summary must not be able to erase."""
         out = dict(new)
         old = dict(existing or {})
         if RECLAIMS_KEY in old and RECLAIMS_KEY not in out:
@@ -342,6 +379,8 @@ class JobQueue:
             elif run.status == STATUS_RUNNING:
                 run.cancel_requested = True
             s.commit()
+        # The event is written after the commit: the flag is the mechanism, the event is the
+        # record — a dropped event must not undo a cancel.
         if run.status == STATUS_RUNNING:
             append_event(
                 self._factory,
@@ -354,6 +393,7 @@ class JobQueue:
         return run
 
     def is_cancel_requested(self, run_id: str) -> bool:
+        """The worker's between-tasks poll: has someone asked this run to stop?"""
         with self._factory() as s:
             v = s.execute(select(Run.cancel_requested).where(Run.id == run_id)).scalar_one_or_none()
             return bool(v)
@@ -396,6 +436,8 @@ class JobQueue:
                 run.heartbeat = ""
                 touched.append((run, prev_worker, stale, reclaims))
             s.commit()
+        # Events after the commit and outside the lock, for the same reason as in
+        # request_cancel: the state change must not depend on the event write.
         for run, prev_worker, stale, reclaims in touched:
             abandoned = run.status == STATUS_FAILED
             append_event(

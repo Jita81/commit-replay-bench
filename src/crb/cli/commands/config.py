@@ -1,4 +1,23 @@
-"""``crb config`` — show where state lives and what the defaults are."""
+"""``crb config`` — show where state lives and what the defaults are.
+
+Navigation
+----------
+What it is:   ``crb config show`` — where the CLI's state lives and what the defaults are.
+What it does: Prints the resolved workdir (and which of ``--workdir`` / ``CRB_HOME`` / the
+              default chose it), its files, the registered repos, the executor and docker
+              defaults, the runner names, the routing policy and the two versions —
+              the first thing to run when a command behaves unexpectedly.
+How:          ``describe`` assembles a dict from ``Workdir.describe`` and the core's
+              constants; ``cmd_show`` prints it as JSON or aligned text.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/cli/commands/__init__.py (``Workdir``, ``executor_defaults``),
+              src/crb/core/routing.py (``DEFAULT_POLICY``), src/crb/core/version.py (the
+              versions), src/crb/core/runners/__init__.py (``runner_names``)
+Tested by:    tests/test_cli.py
+Touch when:   never for a new repository; when a new default is added to the CLI (list it
+              here so an operator can see it).
+"""
 
 from __future__ import annotations
 
@@ -22,6 +41,7 @@ from crb.core.version import APPARATUS_VERSION, __version__
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add ``crb config show``."""
     p = sub.add_parser("config", help="show the effective configuration")
     cs = p.add_subparsers(dest="config_cmd", metavar="<subcommand>")
     show = cs.add_parser("show", help="workdir, ledger path, executor defaults, versions")
@@ -31,11 +51,13 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 
 
 def _usage(p: argparse.ArgumentParser) -> int:
+    """``crb config`` with no subcommand: help + usage-error exit."""
     p.print_help()
     return 2
 
 
 def describe(args: argparse.Namespace) -> dict[str, Any]:
+    """The effective configuration as a dict (the ``--json`` body)."""
     wd = workdir_of(args)
     source = (
         "--workdir"
@@ -57,6 +79,7 @@ def describe(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_show(args: argparse.Namespace) -> int:
+    """Print :func:`describe` as JSON or an aligned text block."""
     d = describe(args)
     if args.json:
         print_json(d)

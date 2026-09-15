@@ -18,6 +18,30 @@ Invariants
 * Out-of-band system events (a reclaim, a worker note) go through
   :func:`append_event`, which allocates the next ``seq`` under the same write
   lock the ledger uses, so they never collide with a live emitter's sequence.
+
+Navigation
+----------
+What it is:   The database ``EventSink`` and the readers the SSE route and the worker use.
+What it does: Writes every ``StepEvent`` as one ``events`` row and never raises into the run
+              (drops are counted and logged); reads a trace's events in ``seq`` order with a
+              resume cursor; allocates the next ``seq`` for out-of-band system events under
+              the same write lock the ledger uses.
+How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one transaction
+              with a per-row fallback; ``read_events`` = ``seq > after`` ordered by
+              ``(seq, id)`` with a clamped limit; ``append_event`` = lock → ``max(seq)+1`` →
+              insert.
+Layer:        store — docs/ARCHITECTURE.md#72-observability
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/observability/events.py (``StepEvent`` / ``Emitter`` — the envelope
+              and the sequence assigner), src/crb/store/models.py (the ``Event`` columns),
+              src/crb/store/jobs.py (writes reclaim / cancel notes through ``append_event``),
+              src/crb/server/worker.py (installs the sink and resumes from ``last_seq``),
+              src/crb/server/routes/runs.py (serves ``read_events`` over SSE)
+Tested by:    tests/test_store_events.py, tests/test_store_jobs.py, tests/test_server_routes_runs.py
+Touch when:   never for a new repository; when ``StepEvent`` gains a field (a migration and
+              both mappers change together); when a new out-of-band system action is
+              introduced (use ``append_event``, never a raw insert — the ``seq`` cursor must
+              stay monotonic per trace).
 """
 
 from __future__ import annotations
@@ -39,6 +63,8 @@ MAX_READ_LIMIT = 5000
 
 
 def _to_model(e: StepEvent) -> Event:
+    # Field-by-field on purpose (no **asdict): the envelope and the row must stay explicit
+    # so a new StepEvent field is a visible decision here, not a silent JSON spill.
     return Event(
         event_id=e.event_id,
         trace_id=e.trace_id,
@@ -161,7 +187,7 @@ def read_events(
 ) -> list[StepEvent]:
     """Events of one trace with ``seq > after_seq``, ascending by ``seq`` (ties by
     insertion order). ``limit`` is clamped to ``MAX_READ_LIMIT``."""
-    lim = max(1, min(int(limit), MAX_READ_LIMIT))
+    lim = max(1, min(int(limit), MAX_READ_LIMIT))  # a caller cannot ask for the whole table
     with factory() as s:
         q = (
             select(Event)
@@ -182,6 +208,7 @@ def last_seq(factory: sessionmaker[Session], trace_id: str) -> int:
 
 
 def count_events(factory: sessionmaker[Session], trace_id: str) -> int:
+    """How many events a trace holds (the run detail's counter)."""
     with factory() as s:
         return int(
             s.execute(select(func.count(Event.id)).where(Event.trace_id == trace_id)).scalar_one()

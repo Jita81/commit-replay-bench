@@ -26,6 +26,38 @@ The pack's hash is the anchor; a review attests to it (``/reviews``).
 ``/grades/{row_hash}/transcript`` serves the retained transcript file the pack refers
 to — only from inside the transcripts directory. Both answer **404** with a one-line
 ``reason`` when the artefact was never retained or is gone.
+
+Navigation
+----------
+What it is:   The audit route module — ``/grades``, ``/tasks/{repo}/{task_id}``,
+              ``/evidence/{hash}`` and the retained patch / transcript behind a graded row.
+What it does: Serves ledger rows exactly as stored (column by column, without the core
+              type, so a false-Q1 row that bypassed the write path stays VISIBLE to an
+              auditor); serves a pack with ``verified`` = its recomputed hash equals its
+              key; recomputes a retained worktree's diff on demand by the grader's own
+              procedure and says in headers whether it still hashes to the pack's anchor;
+              refuses any transcript reference outside the transcripts directory.
+How:          Filtered ``select(Grade)`` pages → ``grade_to_dict``; ``retained_status``
+              decides reachability with a reason per artefact; ``build_retained_patch`` =
+              ``retained_patch_text`` → hash → redact → cap → headers.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
+              docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/core/ledger.py (``GradeRow`` field order = ``ROW_FIELDS``),
+              src/crb/core/evidence.py (``verify_pack``, canonical hashing),
+              src/crb/core/workspace.py (``diff_stats`` — the procedure the patch route
+              must match byte-for-byte), src/crb/core/review.py (``pack_diff_sha256``, the
+              anchor), src/crb/server/routes/reviews.py (attests to the served patch),
+              src/crb/server/routes/ledger.py (reuses ``grade_to_dict`` for verify / export),
+              ui/src/screens/Runs (the evidence drill-down), docs/API.md#tasks--grades--evidence
+Tested by:    tests/test_server_routes_grades.py, tests/test_server_routes_reviews.py
+Touch when:   never for a new repository; when ``Workspace.diff_stats`` changes how it
+              assembles the hashed text (``retained_patch_text`` must change identically —
+              the reviews test is the drift guard); when ``GradeRow`` gains a field (the
+              filters and docs/API.md).
+Claims:       ``verified: true`` on a pack means the stored bytes hash to their key — not
+              that the pack's contents are a sound measurement
+              (docs/EVIDENCE-AND-CLAIMS.md#4-the-apparatus-stamp--evidence-expires).
 """
 
 from __future__ import annotations
@@ -87,10 +119,13 @@ def grade_to_dict(g: Grade) -> dict[str, Any]:
 
 
 def grade_out(g: Grade) -> GradeRowOut:
+    """The ORM row as the API serves it (no ``GradeRow`` construction — see the module
+    docstring for why a false-Q1 row must still be readable here)."""
     return GradeRowOut(**grade_to_dict(g))
 
 
 def _apply_filters(q: Select[Any], filters: dict[str, Any]) -> Select[Any]:
+    """Equality filters over ``Grade`` columns; ``None`` / ``""`` means "no filter"."""
     for name, value in filters.items():
         if value is None or value == "":
             continue
@@ -194,6 +229,7 @@ def pack_verified(pack_hash: str, body: dict[str, Any]) -> bool:
 
 
 def evidence_out(row: EvidencePackRow) -> EvidenceResponse:
+    """The stored pack with ``verified`` recomputed on every read."""
     body = dict(row.body_json or {})
     return EvidenceResponse(
         pack=body,
@@ -208,6 +244,7 @@ def evidence_out(row: EvidencePackRow) -> EvidenceResponse:
 
 
 def get_pack_row(session: Session, pack_hash: str) -> EvidencePackRow:
+    """The pack row, or 404."""
     row = session.get(EvidencePackRow, pack_hash)
     if row is None:
         raise ApiError(404, "not_found", f"no evidence pack {pack_hash!r}")
@@ -237,6 +274,7 @@ def worktree_path(scratch: Path, *, repo: str, task_id: str, run_id: str, trial:
 
 
 def _worktree_of(home: Path, g: Grade) -> Path:
+    """Where row ``g``'s retained worktree would be under ``<home>/scratch``."""
     return worktree_path(
         home / "scratch", repo=g.repo, task_id=g.task_id, run_id=g.run_id, trial=g.trial
     )
@@ -284,6 +322,8 @@ class RetainedPatch:
         return sha256_text(self.body)
 
     def headers(self) -> dict[str, str]:
+        """The hash check as response headers, so a client can trust (or not) the body
+        without re-reading the pack."""
         return {
             HDR_DIFF_SHA: self.diff_sha256,
             HDR_PATCH_SHA: self.patch_sha256,
@@ -298,6 +338,8 @@ class RetainedPatch:
 def build_retained_patch(
     root: Path, diff_sha256: str, *, cap: int = PATCH_MAX_BYTES
 ) -> RetainedPatch:
+    """Recompute, hash, redact, cap — in that order: the hash must be of the FULL,
+    unredacted text so it can equal what the grader hashed at grade time."""
     text = retained_patch_text(root)
     full_hash = sha256_text(text)
     body = redact(text)
@@ -310,6 +352,7 @@ def build_retained_patch(
 
 
 def _grade_by_hash(session: Session, row_hash: str) -> Grade:
+    """The row by its chain hash (the identity a review attests to), or 404."""
     g = session.execute(select(Grade).where(Grade.row_hash == row_hash)).scalar_one_or_none()
     if g is None:
         raise ApiError(404, "not_found", f"no grade row with row_hash {row_hash[:12]}…")
@@ -331,6 +374,7 @@ def _run_retention(session: Session, run_id: str) -> tuple[bool, bool]:
 
 
 def _transcript_ref(pack: dict[str, Any] | None) -> str:
+    """The transcript path a pack refers to (``builder.transcript_ref``, else ``notes``)."""
     if not pack:
         return ""
     builder = pack.get("builder")

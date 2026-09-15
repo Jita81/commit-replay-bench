@@ -17,6 +17,34 @@ Every arrow above appends to :class:`~crb.factory.evidence.FactoryEvidence`;
 every stage emits :class:`~crb.observability.events.StepEvent` rows with
 ``stage="factory"``. Nothing here decides a verdict: the grader, the probes and
 the reviewer do; the loop only sequences them and refuses to skip a step.
+
+Navigation
+----------
+What it is:   The governed loop — one backlog item end to end, every step evidenced, no
+              step skippable.
+What it does: Sequences readiness → RED proof (authored or test-first rung) → build ladder
+              → optional delivery (default OFF, fails closed) → independent review →
+              rework (edit permitted only after a recorded verdict; bounded by
+              ``max_rework``), turning every governed refusal into an ``ItemOutcome`` status
+              rather than an exception; ``run_backlog`` requires a frozen, verifying
+              backlog and records a blocked item explicitly when a dependency was not
+              accepted. Emits a ``factory``-stage ``StepEvent`` per step.
+How:          ``FactorySpec`` carries every collaborator; ``FactoryLoop.run_item`` walks the
+              private ``_assess`` / ``_oracle`` / ``_prove`` / ``_build`` / ``_deliver`` /
+              ``_review`` steps under a ``_Stop`` exception that maps to a status.
+Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
+              docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory/readiness.py
+              + src/crb/factory/testfirst.py + src/crb/factory/build.py +
+              src/crb/factory/delivery.py + src/crb/factory/review.py (the steps, in order),
+              src/crb/observability/events.py (``Emitter`` for the step events),
+              src/crb/server/routes/factory.py (the HTTP surface — a 501 stub until P6)
+Tested by:    tests/test_factory_loop.py
+Touch when:   never for a new repository (delivery is switched on per run, not per repo);
+              adding a status means ``STATUSES`` here, the UI's factory screen and
+              docs/API.md#factory-phase-p6; changing the step order is a governance change
+              — an ADR.
 """
 
 from __future__ import annotations
@@ -154,6 +182,9 @@ class FactorySpec:
 
 @dataclass(frozen=True)
 class ItemOutcome:
+    """How one item ended: a ``STATUSES`` value plus everything that was observed on the
+    way (readiness, proof, per-build summaries, delivery, every verdict)."""
+
     item_id: str
     status: str
     readiness: Readiness | None = None
@@ -173,10 +204,12 @@ class ItemOutcome:
 
     @property
     def accepted(self) -> bool:
+        """The only status that counts as delivered work."""
         return self.status == STATUS_ACCEPTED
 
     @property
     def final_verdict(self) -> ReviewVerdict | None:
+        """The last review verdict (after any rework), or ``None``."""
         return self.verdicts[-1] if self.verdicts else None
 
     def to_dict(self) -> dict[str, Any]:
@@ -204,6 +237,9 @@ class _Stop(Exception):
 
 
 class FactoryLoop:
+    """The orchestrator: ``run_item`` for one item, ``run_backlog`` for a frozen backlog,
+    ``checkpoint`` for a horizon transition. Holds no state beyond its spec."""
+
     def __init__(self, spec: FactorySpec, repo: GitRepo, *, emitter: Emitter | None = None) -> None:
         self.spec = spec
         self.repo = repo
@@ -213,17 +249,21 @@ class FactoryLoop:
     def _emit(
         self, action: str, item_id: str, *, status: StepStatus = StepStatus.OK, **payload: Any
     ) -> None:
+        """One ``factory``-stage StepEvent (the item id is the step id)."""
         self.emitter.emit(STAGE, action, status=status, task_id=item_id, **payload)
 
     def _cb(self, item_id: str) -> Callable[[str, Mapping[str, Any]], None]:
+        """The ``on_event`` callback handed to the core / builders for this item."""
         return self.emitter.on_event(STAGE, task_id=item_id)
 
     # --- steps -----------------------------------------------------------------
     def _signoffs(self, item: BacklogItem) -> list[GapSignoff]:
+        """The item's gap sign-offs from the configured ledger (none when there is none)."""
         gl = self.spec.gap_ledger
         return gl.for_item(item.id) if gl is not None else []
 
     def _assess(self, item: BacklogItem) -> Readiness:
+        """Step 1: readiness; stops the item on an unsigned structural gap or a human route."""
         ev = self.spec.evidence
         r = assess(item, self._signoffs(item))
         ev.record_readiness(r.to_dict())
@@ -255,6 +295,8 @@ class FactoryLoop:
     def _oracle(
         self, item: BacklogItem, r: Readiness, authored: AuthoredTest | None
     ) -> AuthoredTest:
+        """Step 2a: the oracle — the caller's authored test, else the test-author rung;
+        stops with ``no_oracle`` when neither exists."""
         if authored is not None:
             return authored
         ta = self.spec.test_author
@@ -278,6 +320,7 @@ class FactoryLoop:
         return res.authored
 
     def _prove(self, item: BacklogItem, r: Readiness, authored: AuthoredTest) -> RedProof:
+        """Step 2b: the RED proof; a refusal is recorded and stops the item (``not_red``)."""
         s = self.spec
         try:
             proof = prove_red(
@@ -308,6 +351,7 @@ class FactoryLoop:
         *,
         trial_prefix: str,
     ) -> list[BuildResult]:
+        """Step 3: the build ladder; every attempt is recorded, the final one's tree kept."""
         s = self.spec
         results = build_ladder(
             self.repo,
@@ -348,6 +392,8 @@ class FactoryLoop:
         return results
 
     def _deliver(self, item: BacklogItem, final: BuildResult) -> tuple[DeliveryResult | None, str]:
+        """Step 4: delivery — skipped and RECORDED when opt-in is off; a failure stops the
+        item (``delivery_failed``). Returns ``(result, pr_ref)``."""
         s = self.spec
         if not s.deliver:
             s.evidence.record_delivery_refused(
@@ -381,6 +427,7 @@ class FactoryLoop:
     def _review(
         self, item: BacklogItem, final: BuildResult, proof: RedProof, pr_ref: str
     ) -> ReviewVerdict:
+        """Step 5: independent review; the verdict is on the ledger before this returns."""
         s = self.spec
         v = review(
             final,

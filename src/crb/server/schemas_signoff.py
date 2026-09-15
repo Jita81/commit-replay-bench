@@ -13,6 +13,28 @@ the non-relaxable ``require_oracle_measured`` switch on the policy.
 
 Nothing here is computed: every field is a core ``to_dict`` value re-typed so the
 OpenAPI document is honest and a drift is a diff.
+
+Navigation
+----------
+What it is:   The request / response models for ``/signoffs`` under ``signoff-policy.v2`` —
+              the attestation input, the policy, the refusals, the preview.
+What it does: Validates the approver's attestation at the edge (64-hex row hash, non-blank
+              statement, no extra fields) and re-types every core ``to_dict`` the sign-off
+              carries (policy thresholds, refusal codes, route, controls snapshot, oracle
+              measurement, accepted rows) so the OpenAPI document is exact; ``null``
+              attestations pass the parser so the POLICY refuses them, with a reason.
+How:          Pydantic subclasses of the base sign-off shapes in src/crb/server/schemas.py;
+              validators pin ``code`` / ``state`` to the core's closed sets.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/server/routes/signoffs.py (the producer and consumer),
+              src/crb/core/signoff.py (``REFUSAL_CODES``, ``refusal_family``),
+              src/crb/core/routing.py (``CONTROLS_STATES``), src/crb/server/schemas.py (the
+              base ``SignoffOut`` / ``SignoffCreateRequest``), ui/src/api/types.ts (the
+              TypeScript twin), docs/API.md#capability-routing-forecast-sign-off
+Tested by:    tests/test_server_routes_signoffs.py
+Touch when:   never for a new repository; when a policy clause or snapshot field is added in
+              src/crb/core/signoff.py (mirror it here, then the UI type and docs/API.md).
 """
 
 from __future__ import annotations

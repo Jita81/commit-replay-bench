@@ -22,6 +22,31 @@ is recorded. From then on:
 
 Everything here is a frozen dataclass or a pure function; persistence is the
 caller's (see :mod:`crb.factory.evidence`).
+
+Navigation
+----------
+What it is:   The frozen, hashed backlog — the integrity anchor of forward mode.
+What it does: Validates items (id shape, kind, level, size, no self-dependency), freezes the
+              record under a SHA-256 of its canonical JSON, refuses any mutation of a
+              frozen item (``BacklogFrozen``), admits change only as a new item chained
+              onto the frozen hash (``evolve``), and orders the active items by dependency
+              (cycles raise). Pure dataclasses and functions; the caller persists.
+How:          ``BacklogItem.__post_init__`` checks the shape; ``Backlog.freeze`` stamps
+              ``backlog_hash``; ``evolve`` extends ``evolutions_hash``; ``verify`` recomputes
+              both; ``ordered`` is a stable topological sort with supersession resolved.
+Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md (the same hash discipline)
+Works with:   src/crb/factory/readiness.py (reads ``structural_facts`` and ``kind``),
+              src/crb/factory/loop.py (``run_backlog`` requires a frozen, verifying record),
+              src/crb/factory/evidence.py (``record_freeze`` / ``record_evolution``),
+              src/crb/core/evidence.py (``canonical_json`` / ``sha256_text``),
+              src/crb/cli/commands/learn.py (emits items in this shape),
+              src/crb/server/routes/factory.py (the HTTP surface — a 501 stub until P6)
+Tested by:    tests/test_factory_backlog.py, tests/test_factory_loop.py
+Touch when:   never for a new repository; adding an item field changes the frozen hash of
+              every future record — bump ``BACKLOG_SCHEMA`` and note it in
+              docs/EVIDENCE-AND-CLAIMS.md; adding a kind or level extends the tuples and
+              the loop's routing.
 """
 
 from __future__ import annotations
@@ -144,6 +169,8 @@ def backlog_hash(items: Iterable[BacklogItem]) -> str:
 
 
 def _check_items(items: Sequence[BacklogItem], *, known: Iterable[str] = ()) -> None:
+    """Unique ids, and every ``depends_on`` / ``supersedes`` target known (``known`` = ids
+    registered before this batch)."""
     seen: set[str] = set(known)
     for it in items:
         if it.id in seen:
@@ -186,6 +213,7 @@ class Backlog:
     # --- freeze / verify ---------------------------------------------------------
     @property
     def frozen(self) -> bool:
+        """Whether ``freeze`` has stamped a hash (the record is then immutable)."""
         return bool(self.backlog_hash)
 
     def freeze(self, *, at: str = "") -> Backlog:
@@ -214,6 +242,7 @@ class Backlog:
         return self._evolutions_chain() == self.evolutions_hash
 
     def _evolutions_chain(self) -> str:
+        """Fold every evolution onto the frozen hash; empty when there are none."""
         h = self.backlog_hash
         for ev in self.evolutions:
             h = sha256_text(h + canonical_json(ev.to_dict()))
@@ -247,15 +276,18 @@ class Backlog:
 
     # --- queries ---------------------------------------------------------------
     def all_items(self) -> tuple[BacklogItem, ...]:
+        """Frozen items then evolutions, in registration order (superseded ones included)."""
         return (*self.items, *self.evolutions)
 
     def get(self, item_id: str) -> BacklogItem | None:
+        """The item (frozen or evolution) with ``item_id``, or ``None``."""
         for it in self.all_items():
             if it.id == item_id:
                 return it
         return None
 
     def superseded_ids(self) -> frozenset[str]:
+        """Ids that a later evolution replaced."""
         return frozenset(e.supersedes for e in self.evolutions if e.supersedes)
 
     def active_items(self) -> tuple[BacklogItem, ...]:
@@ -268,6 +300,8 @@ class Backlog:
         on a superseded item resolves to its latest evolution. Cycles raise."""
         active = self.active_items()
         by_id = {i.id: i for i in active}
+        # ``latest`` maps a superseded id to the END of its supersession chain, so a
+        # dependency on an old id follows the chain to whatever replaced it last.
         latest: dict[str, str] = {}
         for e in self.evolutions:
             if e.supersedes:
@@ -311,6 +345,7 @@ class Backlog:
 
     # --- serialisation -----------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
+        """The on-disk shape (what the evidence ledger's freeze event also records)."""
         return {
             "schema": self.schema,
             "repo": self.repo,
@@ -323,6 +358,7 @@ class Backlog:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Backlog:
+        """Inverse of :meth:`to_dict`; the stored hashes are kept and checked by ``verify``."""
         return cls(
             items=tuple(BacklogItem.from_dict(i) for i in d.get("items", ())),
             repo=str(d.get("repo", "")),

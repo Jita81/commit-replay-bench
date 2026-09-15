@@ -27,6 +27,36 @@ from the STORED columns, so a tampered row is reported, not hidden). ``GET
 /reviews/stats`` joins the standing verdict per row onto the repo's cells
 (:func:`crb.core.review.review_cell_stats`) under the same ``by`` projection the
 capability map uses — ``n_reviewed`` / ``n_review_defects`` per cell.
+
+Navigation
+----------
+What it is:   The ``/reviews`` route module — a human's post-hoc verdict on ONE graded row,
+              written as its own hash-chained ledger row.
+What it does: Resolves the graded row and its stored pack, derives the verdict from the
+              findings (a client-sent verdict must agree), anchors the review to the exact
+              patch bytes the reviewer loaded (``patch_sha256`` must equal the pack's
+              ``diff_sha256`` — else 422 ``review_refused`` and a ``review.refused`` event,
+              nothing written), then chains and inserts through ``DbReviewLedger``. Reads
+              serve rows column by column; ``verify`` re-checks every hash and anchor.
+How:          ``POST`` = lookup → ``Finding`` / ``derive_verdict`` → ``ReviewRecord`` →
+              ``DbReviewLedger.append(record, pack=…)`` → ``review.created`` event;
+              ``stats`` joins the standing verdict per row onto the capability projection.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
+              docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/core/review.py (``ReviewRecord``, the verdict rule, the anchor),
+              src/crb/store/ledger.py (``DbReviewLedger`` — the write path and its lock),
+              src/crb/server/routes/grades.py (serves the patch whose hash is attested),
+              src/crb/server/schemas_review.py (request / response shapes),
+              src/crb/server/routes/capability.py (``parse_by`` for ``/reviews/stats``),
+              docs/API.md#reviews-human-verdicts-on-graded-rows
+Tested by:    tests/test_server_routes_reviews.py, tests/test_store_reviews.py
+Touch when:   never for a new repository; adding a finding kind or verdict is a core change
+              (src/crb/core/review.py) mirrored in src/crb/server/schemas_review.py and the
+              UI; changing the anchor rule needs an ADR amendment.
+Claims:       A review verdict is one named human's statement about one patch — it is
+              recorded, never aggregated into a cell's pass rate
+              (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
 """
 
 from __future__ import annotations
@@ -102,10 +132,12 @@ def review_body_from_stored(m: Review) -> dict[str, Any]:
 
 
 def review_hash_from_stored(m: Review) -> str:
+    """Recompute ``row_hash`` from the stored columns (the verify walk's comparison)."""
     return sha256_text(canonical_json(review_body_from_stored(m)))
 
 
 def _subjects(session: Session, pairs: Iterable[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """``(repo, task_id) → commit subject`` for the listed reviews, one query per repo."""
     keys = sorted(set(pairs))
     if not keys:
         return {}
@@ -119,6 +151,7 @@ def _subjects(session: Session, pairs: Iterable[tuple[str, str]]) -> dict[tuple[
 
 
 def _clean_of(session: Session, hashes: Iterable[str]) -> dict[str, bool]:
+    """``row_hash → clean`` for the reviewed rows (shown next to the human verdict)."""
     hs = sorted(set(hashes))
     if not hs:
         return {}
@@ -161,6 +194,7 @@ def review_out(m: Review, *, subject: str = "", grade_clean: bool | None = None)
 
 
 def _outs(session: Session, rows: list[Review]) -> list[ReviewOut]:
+    """Serialise a page of reviews with subjects and grade verdicts joined in bulk."""
     subjects = _subjects(session, ((r.repo, r.task_id) for r in rows))
     cleans = _clean_of(session, (r.grade_row_hash for r in rows))
     return [
@@ -215,6 +249,7 @@ def list_reviews(
 
 
 def _iter_reviews(session: Session, batch: int = 1000) -> Iterator[Review]:
+    """Every review in ``seq`` order, keyset-paged."""
     last = 0
     while True:
         chunk = list(
@@ -342,6 +377,7 @@ def get_review(review_id: str, viewer: ViewerDep, db: DbDep) -> ReviewOut:
 
 
 def _validation_422(msg: str, loc: list[str]) -> ApiError:
+    """A 422 in the same ``errors`` shape pydantic's validation handler produces."""
     return ApiError(
         422,
         "validation_error",
@@ -402,6 +438,8 @@ def create_review(
         )
     except ValueError as exc:
         raise _validation_422(str(exc), ["findings"]) from exc
+    # The verdict is the core's function of the findings; a client may state it only to
+    # be checked against that derivation — it can never override it.
     verdict = "not_reviewed" if body.not_reviewed else derive_verdict(findings)
     if body.verdict is not None and body.verdict != verdict:
         raise _validation_422(

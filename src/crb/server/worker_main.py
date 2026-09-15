@@ -15,6 +15,28 @@ Environment fallbacks: ``CRB_DATABASE_URL`` (see :func:`crb.store.db.database_ur
 
 The CLI package wires ``crb worker`` to :func:`main`; this module does not
 import :mod:`crb.cli`.
+
+Navigation
+----------
+What it is:   ``crb worker`` — the argument parser and process entry point for the queue
+              consumer.
+What it does: Turns flags and ``CRB_*`` fallbacks into ``WorkerSettings``, refuses unknown run
+              kinds, builds a ``Worker`` (a bad database URL is reported and exits 2), then
+              either processes one run (``--once``; exit 3 when idle) or polls until a stop
+              signal arrives.
+How:          ``build_parser`` → ``settings_from_args`` (sets ``CRB_HOME`` for the builders'
+              secrets lookup) → ``Worker`` → ``run_once`` | ``run_forever(stop)``.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/server/worker.py (``Worker`` / ``WorkerSettings`` — everything this
+              file configures), src/crb/store/jobs.py (``RUN_KINDS`` for ``--kinds``),
+              src/crb/cli/commands/service.py (``crb worker`` forwards its argv here),
+              deploy/entrypoint.sh (the container's ``worker`` role),
+              src/crb/core/execution.py (``DockerSettings`` for ``--image``)
+Tested by:    tests/test_worker.py
+Touch when:   never for a new repository (the sandbox image is per repository, set in its
+              config); adding a worker flag means adding it to ``WorkerSettings`` and to the
+              ``crb worker`` forwarding table in src/crb/cli/commands/service.py.
 """
 
 from __future__ import annotations
@@ -46,6 +68,7 @@ WORKER_ID_ENV = "CRB_WORKER_ID"
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """The ``crb worker`` parser (defaults are blank so the environment can fill them)."""
     p = argparse.ArgumentParser(
         prog="crb worker",
         description="Execute queued runs: probe, mine, replay, blind, oracle, controls.",
@@ -91,6 +114,8 @@ def build_parser() -> argparse.ArgumentParser:
 def settings_from_args(
     args: argparse.Namespace, env: dict[str, str] | None = None
 ) -> WorkerSettings:
+    """Flags win over ``env`` (``os.environ`` by default) win over the built-in defaults.
+    ``ValueError`` names an unknown run kind; the parser turns it into exit 2."""
     e = env if env is not None else dict(os.environ)
     home = Path(args.home or e.get(HOME_ENV) or ".crb").expanduser()
     # Builders resolve the secrets dir from the environment only (core has no settings
@@ -119,6 +144,7 @@ def settings_from_args(
 
 
 def _run_summary(run: Any) -> dict[str, Any]:
+    """What ``--once`` prints on stdout (one JSON object; a CI job can parse it)."""
     return {
         "run_id": run.id,
         "repo": run.repo,
@@ -130,6 +156,7 @@ def _run_summary(run: Any) -> dict[str, Any]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Process entry point; see the module docstring for the exit codes."""
     parser = build_parser()
     args = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
     configure_logging(fmt=args.log_format, level=args.log_level)

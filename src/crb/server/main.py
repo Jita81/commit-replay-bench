@@ -6,6 +6,26 @@ process managers that prefer to own the server loop.
 
 Access logging is ours (JSON, redacted, with request ids) so uvicorn's own access
 log is off. Proxy headers are honoured only from ``CRB_TRUSTED_PROXIES``.
+
+Navigation
+----------
+What it is:   ``crb serve`` — the uvicorn runner for the API, and the ``--factory`` entry.
+What it does: Builds ``Settings`` from the environment, configures JSON logging, creates the
+              app and blocks in uvicorn with uvicorn's own access log off (ours is the
+              redacted one) and proxy headers honoured only from ``CRB_TRUSTED_PROXIES``.
+How:          ``serve`` → ``Settings()`` → ``configure_logging`` → ``create_app`` →
+              ``uvicorn.run``; ``build_app`` is the same minus the run, for process managers.
+Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/server/app.py (``create_app``), src/crb/server/settings.py (bind host /
+              port, log format, trusted proxies), src/crb/cli/commands/service.py (the ``crb
+              serve`` command that calls ``serve``), deploy/entrypoint.sh (the container's
+              ``serve`` role), src/crb/observability/logging.py (``configure_logging``)
+Tested by:    untested — a blocking uvicorn loop; ``create_app`` and the settings it passes are
+              covered by tests/test_server_app.py and the container role by
+              tests/test_deploy_health_probes.py
+Touch when:   never for a new repository; only when a uvicorn option changes (document it in
+              docs/DEPLOYMENT.md).
 """
 
 from __future__ import annotations

@@ -23,6 +23,32 @@ per-cell roll-up) and the repo's negative-controls verdict (its latest
 two exports — ``GET /oracle/{repo}`` (or a run's ``events/log``) and
 ``GET /oracle/{repo}/controls`` — so the CLI and the route produce the same items
 with the same ids from the same evidence.
+
+Navigation
+----------
+What it is:   ``crb learn refusals | strengthen | remeasure`` — the learning loop's three
+              reports over a JSONL ledger, plus the one write a human authorises.
+What it does: Triages protocol rows into candidate guard-corpus lines (``--apply`` appends
+              a named human's decisions with provenance); derives ``test.add`` backlog
+              items for oracle-weak cells from the ledger plus the oracle / controls
+              exports the server holds (validated through the factory's ``BacklogItem``
+              and DoR gate before they are written); plans re-measurement for cells on an
+              older apparatus. Queues nothing.
+How:          ``_rows`` → the ``crb.core.learn`` derivation → ``render_*`` / JSON; exports
+              are read by ``_read_json`` (JSON or JSON lines) and reduced by
+              ``load_oracle_export`` / ``load_controls_export`` exactly as the routes do.
+Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/learn.py (the derivations and renderers),
+              src/crb/server/routes/learn.py (the HTTP twin — same ids over the same
+              evidence), src/crb/factory/backlog.py (``BacklogItem`` + ``assess`` for the
+              strengthening items), src/crb/cli/commands/route.py (``load_policy``),
+              docs/LEARNING-LOOP.md (the contract, incl. what a bare export cannot carry)
+Tested by:    tests/test_cli_learn.py
+Touch when:   never for a new repository; when a new derivation lands in
+              src/crb/core/learn.py (add the subcommand, the route, and the
+              docs/LEARNING-LOOP.md section together); when the server's oracle / controls
+              export shapes change (``load_*_export`` must follow).
 """
 
 from __future__ import annotations
@@ -76,6 +102,7 @@ ORACLE_SCORE_ACTIONS: frozenset[str] = frozenset({"oracle.score", "oracle.mutati
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add ``crb learn refusals | strengthen | remeasure``."""
     p = sub.add_parser("learn", help="refusal triage, strengthening backlog, re-measurement plan")
     ls = p.add_subparsers(dest="learn_command", metavar="<report>")
 
@@ -163,11 +190,13 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 
 
 def _usage(parser: argparse.ArgumentParser) -> int:
+    """``crb learn`` with no subcommand: help + usage-error exit."""
     parser.print_help()
     return 2
 
 
 def _ledger_args(p: argparse.ArgumentParser) -> None:
+    """``--path`` and ``--policy-json`` — the same pair ``crb route`` takes."""
     p.add_argument("--path", default="", help="ledger path (default <workdir>/ledger.jsonl)")
     p.add_argument(
         "--policy-json",
@@ -177,12 +206,14 @@ def _ledger_args(p: argparse.ArgumentParser) -> None:
 
 
 def _rows(args: argparse.Namespace) -> tuple[Path, list[Any]]:
+    """``(ledger path, rows)`` for the command line."""
     wd = workdir_of(args)
     path = Path(args.path).expanduser() if args.path else wd.ledger_path
     return path, list(JsonlLedger(path).rows())
 
 
 def _read_json(spec: str, *, what: str) -> Any:
+    """A JSON document, or a JSON-lines file as a list — ``CliError`` otherwise."""
     p = Path(spec).expanduser()
     if not p.is_file():
         raise CliError(f"{what} {p} is not a file")
@@ -203,6 +234,7 @@ def _read_json(spec: str, *, what: str) -> Any:
 
 
 def _write(spec: str, text: str) -> Path:
+    """Write ``text`` to ``spec`` (parents created); returns the path."""
     p = Path(spec).expanduser()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(text, encoding="utf-8")
@@ -215,6 +247,7 @@ def _write(spec: str, text: str) -> Path:
 
 
 def cmd_refusals(args: argparse.Namespace) -> int:
+    """Triage the protocol rows; with ``--apply`` append a human's decisions to the corpus."""
     path, rows = _rows(args)
     report = triage_refusals(rows)
     out: dict[str, Any] = {"ledger": str(path), **report.to_dict()}
@@ -256,6 +289,7 @@ def cmd_refusals(args: argparse.Namespace) -> int:
 
 
 def _subjects(wd: Workdir, repo: str) -> dict[str, str]:
+    """``task_id → commit subject`` from the workdir's task file (empty when no ``--repo``)."""
     if not repo:
         return {}
     return {t.task_id: t.subject for t in wd.load_tasks(repo)}
@@ -356,6 +390,7 @@ def validate_items(items: list[dict[str, Any]]) -> list[str]:
 
 
 def cmd_strengthen(args: argparse.Namespace) -> int:
+    """Derive ``test.add`` items for oracle-held cells; validate them before writing."""
     path, rows = _rows(args)
     wd = workdir_of(args)
     policy = load_policy(args.policy_json)
@@ -405,6 +440,7 @@ def cmd_strengthen(args: argparse.Namespace) -> int:
 
 
 def cmd_remeasure(args: argparse.Namespace) -> int:
+    """Plan re-measurement for cells on an older apparatus; nothing is queued."""
     path, rows = _rows(args)
     policy = load_policy(args.policy_json)
     plan = remeasure_plan(rows, current_apparatus=args.apparatus, policy=policy)

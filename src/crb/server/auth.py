@@ -17,6 +17,34 @@
 * **Login rate limit** — 5 failures per minute per ``(username, ip)``, in memory.
   It bounds online guessing on one node; a multi-node deployment fronts this with the
   proxy's limiter as well.
+
+Navigation
+----------
+What it is:   The authentication and authorisation primitives every route depends on —
+              local accounts, signed cookie sessions, CSRF tokens, the role ladder, the login
+              rate limit, and the OIDC (PKCE) client behind a protocol.
+What it does: Verifies passwords in constant time (an unknown user pays for a verification
+              too), issues and reads the timestamped session cookie, admits a caller by role
+              rank, maps IdP claims to a role (``admin_groups`` wins, default ``viewer``),
+              upserts OIDC users by ``(issuer, subject)``, and seeds the bootstrap admin only
+              while the users table is empty. Never logs or returns a password or token.
+How:          argon2id via ``argon2-cffi``; ``itsdangerous`` timed serialisers with a salt
+              per cookie kind; ``require_role`` is a dependency factory over ``ROLE_RANK``;
+              ``AuthlibOidcClient`` does discovery → PKCE authorization URL → code exchange
+              → ID-token validation against the JWKS → optional userinfo merge.
+Layer:        server — docs/ARCHITECTURE.md#71-security
+ADRs:         none
+Works with:   src/crb/server/routes/auth.py (login / logout / OIDC start + callback — the
+              HTTP surface over these primitives), src/crb/server/settings.py (``ROLE_RANK``,
+              ``OidcSettings``, ``session_ttl``, the secret key), src/crb/server/app.py
+              (``CsrfMiddleware`` uses ``csrf_matches``; the lifespan seeds the admin),
+              src/crb/store/models.py (``User``), src/crb/server/deps.py (``ApiError``,
+              ``Principal``), docs/SECURITY.md#34-authentication-and-authorisation--crbserverauth
+Tested by:    tests/test_server_auth.py, tests/test_server_app.py
+Touch when:   never for a new repository; adding a role means extending ``ROLE_LADDER`` in
+              settings.py, adding a ``*Dep`` alias here, and updating docs/API.md and
+              docs/SECURITY.md; changing cookie or session semantics needs a note in
+              docs/SECURITY.md and the UI's auth flow (ui/src/api/client.ts).
 """
 
 from __future__ import annotations
@@ -87,6 +115,7 @@ _DUMMY_HASH = hasher.hash(secrets.token_urlsafe(24))
 
 
 def hash_password(password: str) -> str:
+    """argon2id hash of ``password``; refuses one shorter than ``MIN_PASSWORD_LENGTH``."""
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ValueError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
     return hasher.hash(password)
@@ -101,6 +130,7 @@ def verify_password(password_hash: str, password: str) -> bool:
 
 
 def validate_username(username: str) -> str:
+    """The stripped username, or 422 (``validation_error``) for a bad length or character."""
     name = username.strip()
     if not (2 <= len(name) <= USERNAME_MAX) or any(c not in _USERNAME_ALLOWED for c in name):
         raise ApiError(
@@ -113,6 +143,7 @@ def validate_username(username: str) -> str:
 
 
 def validate_role(role: str) -> str:
+    """``role`` unchanged, or 422 listing the allowed ladder."""
     if role not in ROLE_RANK:
         raise ApiError(
             422,
@@ -127,14 +158,18 @@ def validate_role(role: str) -> str:
 
 
 def local_subject(username: str) -> str:
+    """The ``users.subject`` of a local account (namespaced so it cannot collide with an
+    OIDC ``sub``)."""
     return f"local:{username}"
 
 
 def new_user_id() -> str:
+    """A fresh 32-hex user id."""
     return uuid.uuid4().hex
 
 
 def find_local_user(db: Session, username: str) -> User | None:
+    """The local account for ``username``, or ``None``."""
     return db.execute(
         select(User).where(User.issuer == LOCAL_ISSUER, User.subject == local_subject(username))
     ).scalar_one_or_none()
@@ -176,19 +211,24 @@ def authenticate_local(db: Session, username: str, password: str) -> User | None
     """Return the user on success, else ``None``; timing does not depend on existence."""
     user = find_local_user(db, username)
     stored = user.password_hash if user is not None else ""
+    # Always verify — against the dummy hash when there is no user — so the cost is the
+    # same on both paths; the checks are combined AFTER, not short-circuited before.
     ok = verify_password(stored, password)
     if user is None or not ok or not user.active:
         return None
+    # Transparent upgrade when argon2's parameters have moved on since the hash was made.
     if hasher.check_needs_rehash(user.password_hash):
         user.password_hash = hasher.hash(password)
     return user
 
 
 def count_users(db: Session) -> int:
+    """All accounts (active or not) — the bootstrap gate counts every row."""
     return int(db.execute(select(func.count(User.id))).scalar_one())
 
 
 def count_active_admins(db: Session) -> int:
+    """Active admins — the admin routes refuse to demote or disable the last one."""
     return int(
         db.execute(
             select(func.count(User.id)).where(User.role == "admin", User.active.is_(True))
@@ -228,10 +268,13 @@ def bootstrap_admin_if_empty(factory: sessionmaker[Session], settings: Settings)
 
 
 def _serializer(settings: Settings, salt: str) -> URLSafeTimedSerializer:
+    # One key, a salt per cookie kind: a session token can never be replayed as an OIDC
+    # state cookie or vice versa.
     return URLSafeTimedSerializer(settings.secret_key_value, salt=salt)
 
 
 def issue_session(settings: Settings, user_id: str) -> str:
+    """A signed, timestamped session token for ``user_id`` (nothing stored server-side)."""
     return str(
         _serializer(settings, _SESSION_SALT).dumps({"uid": user_id, "iat": int(time.time())})
     )
@@ -272,6 +315,7 @@ def _set_cookie(
 
 
 def set_session_cookie(response: Response, settings: Settings, user_id: str) -> None:
+    """Issue a session and set it as the HttpOnly ``crb_session`` cookie."""
     _set_cookie(
         response,
         settings,
@@ -283,10 +327,12 @@ def set_session_cookie(response: Response, settings: Settings, user_id: str) -> 
 
 
 def new_csrf_token() -> str:
+    """A random double-submit token."""
     return secrets.token_urlsafe(32)
 
 
 def set_csrf_cookie(response: Response, settings: Settings, token: str | None = None) -> str:
+    """Set the readable (non-HttpOnly) ``crb_csrf`` cookie the UI echoes as a header."""
     token = token or new_csrf_token()
     _set_cookie(
         response, settings, CSRF_COOKIE, token, max_age=settings.session_ttl, httponly=False
@@ -295,6 +341,7 @@ def set_csrf_cookie(response: Response, settings: Settings, token: str | None = 
 
 
 def clear_auth_cookies(response: Response, settings: Settings) -> None:
+    """Logout: expire all three cookies with the same attributes they were set with."""
     for name in (SESSION_COOKIE, CSRF_COOKIE, OIDC_COOKIE):
         response.delete_cookie(
             name, path="/", secure=settings.resolved_cookie_secure, samesite="lax"
@@ -302,6 +349,7 @@ def clear_auth_cookies(response: Response, settings: Settings) -> None:
 
 
 def csrf_matches(cookie_token: str | None, header_token: str | None) -> bool:
+    """The double-submit check: both present and equal (constant-time compare)."""
     if not cookie_token or not header_token:
         return False
     return hmac.compare_digest(cookie_token.encode(), header_token.encode())
@@ -394,11 +442,13 @@ class LoginRateLimiter:
             return None
 
     def record_failure(self, username: str, ip: str) -> None:
+        """Count one failed login for the key."""
         now = self._clock()
         with self._lock:
             self._failures.setdefault((username, ip), deque()).append(now)
 
     def reset(self, username: str, ip: str) -> None:
+        """Forget the key's failures (a successful login)."""
         with self._lock:
             self._failures.pop((username, ip), None)
 
@@ -430,6 +480,7 @@ class OidcState:
     next_path: str = "/"
 
     def to_dict(self) -> dict[str, str]:
+        """The cookie payload (short keys: the cookie is size-limited)."""
         return {
             "state": self.state,
             "nonce": self.nonce,
@@ -439,6 +490,7 @@ class OidcState:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> OidcState:
+        """Inverse of :meth:`to_dict`; ``KeyError`` on a payload missing a field."""
         return cls(
             state=str(d["state"]),
             nonce=str(d["nonce"]),
@@ -448,6 +500,7 @@ class OidcState:
 
     @classmethod
     def fresh(cls, next_path: str = "/") -> OidcState:
+        """New random state, nonce and PKCE verifier; ``next_path`` sanitised."""
         return cls(
             state=secrets.token_urlsafe(32),
             nonce=secrets.token_urlsafe(24),
@@ -466,11 +519,13 @@ def safe_next_path(candidate: str | None) -> str:
 
 
 def set_oidc_cookie(response: Response, settings: Settings, st: OidcState) -> None:
+    """Carry the pending login's state between ``/start`` and ``/callback`` (10 minutes)."""
     token = str(_serializer(settings, _OIDC_SALT).dumps(st.to_dict()))
     _set_cookie(response, settings, OIDC_COOKIE, token, max_age=OIDC_STATE_TTL_S, httponly=True)
 
 
 def read_oidc_cookie(settings: Settings, token: str | None) -> OidcState:
+    """The pending login's state, or 400 with a code saying what is wrong with the cookie."""
     if not token:
         raise ApiError(400, "oidc_state_missing", "no pending OIDC login (cookie missing)")
     try:
@@ -486,6 +541,7 @@ def read_oidc_cookie(settings: Settings, token: str | None) -> OidcState:
 
 
 def _claim_values(claims: Mapping[str, Any], name: str) -> list[str]:
+    """A claim as a list of strings whether the IdP sent a string, a list or nothing."""
     raw = claims.get(name)
     if raw is None:
         return []
@@ -549,6 +605,7 @@ class AuthlibOidcClient:
     _discovery: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def discovery(self) -> dict[str, Any]:
+        """The issuer's ``.well-known/openid-configuration`` (fetched once, then cached)."""
         if self._discovery:
             return self._discovery
         url = self.oidc.issuer.rstrip("/") + "/.well-known/openid-configuration"
@@ -561,6 +618,7 @@ class AuthlibOidcClient:
         return doc
 
     def _client(self, redirect_uri: str) -> Any:
+        """An authlib ``OAuth2Client`` for one round-trip (PKCE S256 always on)."""
         secret = self.oidc.client_secret.get_secret_value() if self.oidc.client_secret else None
         return OAuth2Client(
             client_id=self.oidc.client_id,
@@ -574,6 +632,7 @@ class AuthlibOidcClient:
     def authorization_url(
         self, *, state: str, nonce: str, code_verifier: str, redirect_uri: str
     ) -> str:
+        """Where to send the browser (``code_verifier`` becomes the S256 challenge)."""
         endpoint = str(self.discovery()["authorization_endpoint"])
         url, _ = self._client(redirect_uri).create_authorization_url(
             endpoint, state=state, code_verifier=code_verifier, nonce=nonce
@@ -591,6 +650,8 @@ class AuthlibOidcClient:
         id_token = token.get("id_token")
         if not id_token:
             raise ApiError(502, "oidc_exchange_failed", "token response carries no id_token")
+        # The ID token is verified against the issuer's published keys, with issuer,
+        # audience and nonce all required — never trusted because it arrived over TLS.
         jwks_resp = httpx.get(str(doc["jwks_uri"]), timeout=self.timeout_s)
         jwks_resp.raise_for_status()
         key_set = JsonWebKey.import_key_set(jwks_resp.json())
@@ -615,6 +676,8 @@ class AuthlibOidcClient:
                 timeout=self.timeout_s,
             )
             if r.status_code == 200 and isinstance(r.json(), dict):
+                # setdefault: userinfo may ADD claims (groups, email) but never override
+                # what the signed ID token said.
                 for k, v in r.json().items():
                     merged.setdefault(k, v)
         return merged

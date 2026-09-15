@@ -11,6 +11,29 @@ who/when), never the value. ``PUT``/``DELETE``/``verify`` are admin-only; the st
 list is readable by any signed-in role (it is non-secret by construction). ``verify``
 runs the builder's own login probe and is rate-limited to one per 10 s so it cannot
 be used to burn quota.
+
+Navigation
+----------
+What it is:   The admin route module — ``/users``, ``/settings`` and ``/settings/secrets``.
+What it does: Lists and creates local accounts, changes roles without ever orphaning the
+              last active admin (409 ``last_admin``), serves the redacted settings view
+              with the builders' configured flags, and stores / removes / verifies the
+              Claude Code login token while answering only statuses (never a value).
+How:          Every handler takes ``AdminDep`` (the secrets status list takes ``ViewerDep``
+              because a status is non-secret); the secrets handlers delegate to
+              src/crb/server/secrets.py and translate its exceptions into 422 / 409 / 429.
+Layer:        server — docs/ARCHITECTURE.md#71-security
+ADRs:         none
+Works with:   src/crb/server/auth.py (``create_local_user``, ``count_active_admins``),
+              src/crb/server/secrets.py (``SecretsFile``, the verify limiter),
+              src/crb/server/settings.py (``redacted_dict``), src/crb/observability/probes.py
+              (``probe_builders`` for the configured flags), ui/src/api/types.ts (the
+              ``Settings`` shape the UI renders), docs/API.md#admin
+Tested by:    tests/test_server_routes_admin_secrets.py, tests/test_server_auth.py,
+              tests/test_server_system.py
+Touch when:   never for a new repository; adding a secret means a route pair here plus a
+              ``SecretSpec`` in src/crb/server/secrets.py; adding a settings field means
+              ``redacted_dict`` first, then the UI type.
 """
 
 from __future__ import annotations
@@ -48,6 +71,8 @@ _ERR = {"model": ErrorEnvelope}
 
 
 class UserOut(BaseModel):
+    """A user as the admin API reports it — never ``password_hash``."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -62,11 +87,15 @@ class UserOut(BaseModel):
 
 
 class UserList(BaseModel):
+    """``GET /users`` body."""
+
     items: list[UserOut]
     total: int
 
 
 class CreateUserRequest(BaseModel):
+    """``POST /users`` body; the password bound mirrors ``MIN_PASSWORD_LENGTH``."""
+
     username: str = Field(min_length=2, max_length=64)
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=1024)
     role: str = "viewer"
@@ -75,6 +104,8 @@ class CreateUserRequest(BaseModel):
 
 
 class RoleChange(BaseModel):
+    """``PUT /users/{id}/role`` body; ``active`` omitted leaves the flag as it is."""
+
     role: str
     active: bool | None = None
 
@@ -94,6 +125,8 @@ class SecretStatusOut(BaseModel):
 
 
 class SecretsStatusList(BaseModel):
+    """``GET /settings/secrets`` body."""
+
     items: list[SecretStatusOut]
     #: Where the files live on the API host (admins only — so they can find / mount /
     #: rotate); ``""`` for every other role.
@@ -121,6 +154,7 @@ class LoginCheckOut(BaseModel):
 
 @router.get("/users", response_model=UserList, responses={401: _ERR, 403: _ERR})
 def list_users(admin: AdminDep, db: DbDep) -> UserList:
+    """Every account, oldest first."""
     del admin
     users = list(db.execute(select(User).order_by(User.created, User.id)).scalars())
     return UserList(items=[UserOut.model_validate(u) for u in users], total=len(users))
@@ -134,6 +168,7 @@ def list_users(admin: AdminDep, db: DbDep) -> UserList:
     summary="Create a local account",
 )
 def create_user(body: CreateUserRequest, admin: AdminDep, db: DbDep) -> UserOut:
+    """Create a local account (409 when the username is taken)."""
     del admin
     user = create_local_user(
         db,
@@ -154,6 +189,7 @@ def create_user(body: CreateUserRequest, admin: AdminDep, db: DbDep) -> UserOut:
     summary="Change a user's role (and optionally active flag); never orphans the last admin",
 )
 def set_role(user_id: str, body: RoleChange, admin: AdminDep, db: DbDep) -> UserOut:
+    """Change role and/or active flag; refuses the change that would leave no admin."""
     del admin
     validate_role(body.role)
     user = db.get(User, user_id)
@@ -202,6 +238,7 @@ _CLAUDE_TOKEN_PATH = "/settings/secrets/claude-code-token"  # noqa: S105 — a U
 
 
 def _status_out(status: Any) -> SecretStatusOut:
+    """``SecretStatus`` → the response model."""
     return SecretStatusOut(**status.to_dict())
 
 
@@ -230,6 +267,7 @@ def list_secrets(user: ViewerDep, secrets: SecretsDep) -> SecretsStatusList:
 def put_claude_code_token(
     body: ClaudeCodeTokenIn, admin: AdminDep, secrets: SecretsDep
 ) -> SecretStatusOut:
+    """Store the token; the response is its status, never the value."""
     try:
         stored = secrets.set(CLI_TOKEN_SECRET, body.token, set_by=admin.display_name or admin.id)
     except ValueError as exc:
@@ -246,6 +284,7 @@ def put_claude_code_token(
     summary="Remove the stored Claude Code login token",
 )
 def delete_claude_code_token(admin: AdminDep, secrets: SecretsDep) -> SecretStatusOut:
+    """Remove the stored token (idempotent)."""
     del admin
     try:
         return _status_out(secrets.delete(CLI_TOKEN_SECRET))
@@ -262,6 +301,7 @@ def delete_claude_code_token(admin: AdminDep, secrets: SecretsDep) -> SecretStat
 def verify_claude_code_token(
     admin: AdminDep, secrets: SecretsDep, limiter: VerifyLimiterDep
 ) -> LoginCheckOut:
+    """Run the builder's login probe with the stored token (429 inside the rate window)."""
     del admin
     retry = limiter.acquire()
     if retry is not None:
