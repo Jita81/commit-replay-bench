@@ -1,6 +1,35 @@
 """The builder→orchestrator adapter: label parsing, brief construction (no src_files,
 blind carries no tests), every failure a recorded non-pass, and an end-to-end
-``crb.core.run.run`` with a fake builder that the grader marks clean."""
+``crb.core.run.run`` with a fake builder that the grader marks clean.
+
+Navigation
+----------
+What it is:   The builder→orchestrator adapter's test suite — rung labels, brief construction,
+              every failure a recorded non-pass, and ``crb.core.run.run`` end to end with a fake
+              builder.
+What it does: Pins that a sighted brief carries the tests and the test command but never
+              ``src_files`` and a blind brief carries no tests and no command; that an unknown
+              rung, an unregistered builder, a builder exception, a model error or a protocol
+              violation each become a recorded error row (redacted) — and that a violation which
+              landed the gold patch is discarded before grading, so "clean + error" is impossible
+              by construction; that ``attempt_error`` caps the detail never the prefix; that the
+              transcript is written to a file, never inlined; that the sighted test command is
+              best-effort and brings the oracle services up (mesh-client, DL-024); and that a
+              run climbs the ladder (rung 1 red → rung 2 gold clean) into two chained rows.
+How:          ``FakeBuilder`` registered as ``fake`` with a scripted behaviour → ``adapter`` /
+              ``run`` over ``pyrepo`` with the real ``PytestRunner`` and ``LocalExecutor``.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0001-four-belts-and-false-q1-at-write.md
+Works with:   src/crb/builders/adapter.py (under test), src/crb/builders/base.py (the brief,
+              budget, ladder and outcome contract), src/crb/core/run.py (the orchestrator the
+              adapter feeds), src/crb/core/ledger.py (the rows and chain asserted),
+              tests/fixtures/pyrepo.py, tests/test_worker.py (the same adapter under the worker)
+Tested by:    tests/test_builders_adapter.py
+Touch when:   adding a builder (its outcome shapes must map to these error rules — add a case
+              per new stop reason); the brief gains a field (the no-leakage cases must still
+              hold in both modes).
+"""
 
 from __future__ import annotations
 
@@ -119,6 +148,7 @@ def _register(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def harness(pyrepo: pr.PyRepo) -> dict[str, Any]:
+    """The real instrument as keyword arguments: ``PytestRunner``, ``LocalExecutor`` and the config."""
     return {
         "runner": PytestRunner(pyrepo.config),
         "executor": LocalExecutor(),

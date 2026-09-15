@@ -14,6 +14,37 @@
   tunnels, anything else is 403, non-CONNECT is 405.
 * The adapter's sealed path with a fake session: the builder never sees the real
   worktree, the result is graded clean on it, and a sandbox failure propagates.
+
+Navigation
+----------
+What it is:   The sealed-container builder's test suite (ADR-0012) — everything that needs no
+              daemon.
+What it does: Pins that a ``SealedCheckout`` holds exactly one reachable commit with the gold
+              commit and its source blob ABSENT from the object store, its own ``.git``
+              directory, byte-identical overlaid tests, export attributes undone and harness
+              fix-ups replicated; that ``copy_back`` transfers modified / added / deleted files
+              (a tampered test too — belt 1 must see it), keeps the executable bit and refuses
+              symlinks and ``.git``; the ``docker run`` shape (every hardening flag, secrets as
+              ``--env NAME`` only, never a value on argv), the settings' fail-closed parsing, the
+              probe; the egress proxy in process (CONNECT to an allowlisted ``host:port``
+              tunnels, anything else 403, non-CONNECT 405); and the adapter's sealed path with a
+              fake session — the builder never sees the real worktree, the result is graded
+              clean on it, a sandbox failure propagates, an unsealable builder keeps the real
+              worktree.
+How:          ``SealedCheckout`` on a ``pyrepo`` trial; a local HTTP upstream + the proxy on
+              ephemeral ports; ``FakeSession`` stands in for ``ContainerSession``.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
+              docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/builders/container.py (under test), src/crb/builders/egress_proxy.py
+              (the sidecar policy), src/crb/builders/adapter.py (the sealed path),
+              src/crb/core/workspace.py (the real worktree the checkout is exported from),
+              tests/test_builders_container_docker.py (the same contract against a daemon),
+              docs/SECURITY.md (builder containment, §3.2)
+Tested by:    tests/test_builders_container.py
+Touch when:   a hardening flag, mount or environment rule of the builder container changes
+              (the argv case lists every one; update docs/SECURITY.md and the ADR); the export
+              gains a fix-up kind.
 """
 
 from __future__ import annotations
@@ -68,6 +99,7 @@ def _git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.fixture
 def sealed(trial: Workspace, tmp_path: Path) -> Iterator[SealedCheckout]:
+    """A ``SealedCheckout`` of the sighted trial (the feat test overlaid), removed afterwards."""
     s = SealedCheckout.create(trial, tmp_path / "sealed", test_files=[pr.TEST_SUBTRACT])
     try:
         yield s
@@ -441,6 +473,8 @@ def test_stream_stats_translates_container_paths(trial: Workspace) -> None:
 
 
 class _Quiet(http.server.BaseHTTPRequestHandler):
+    """A silent HTTP handler for the upstream the proxy tunnels to."""
+
     def do_GET(self) -> None:
         body = b"model-endpoint-ok"
         self.send_response(200)
@@ -454,6 +488,7 @@ class _Quiet(http.server.BaseHTTPRequestHandler):
 
 @pytest.fixture
 def upstream() -> Iterator[int]:
+    """A local HTTP server on an ephemeral port — the only host the proxy's allowlist names."""
     srv = http.server.HTTPServer(("127.0.0.1", 0), _Quiet)
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
@@ -465,6 +500,7 @@ def upstream() -> Iterator[int]:
 
 @pytest.fixture
 def proxy(upstream: int) -> Iterator[tuple[int, list[str]]]:
+    """An ``EgressProxy`` allowing only ``127.0.0.1:<upstream>``; yields its port and captured log lines."""
     lines: list[str] = []
     server = egress_proxy.EgressProxy(("127.0.0.1", 0), {"127.0.0.1": upstream})
     server.log = lines.append  # type: ignore[method-assign]
@@ -613,6 +649,9 @@ class FakeSession:
 
 @pytest.fixture
 def sealed_fake(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Register ``SealedFakeBuilder`` as ``fake``, mark it sealable, and reset the fake session's
+    recorded lifecycle.
+    """
     monkeypatch.setitem(builders_pkg._REGISTRY, "fake", SealedFakeBuilder)
     monkeypatch.setattr(adapter, "SEALABLE_BUILDERS", frozenset({"fake"}))
     SealedFakeBuilder.seen = []

@@ -1,5 +1,31 @@
 """The in-process tool loop: guards through tools, budget caps, the loop producing an
-edit the core grader marks clean, and the OpenAI-compatible client's retry/metering."""
+edit the core grader marks clean, and the OpenAI-compatible client's retry/metering.
+
+Navigation
+----------
+What it is:   The in-process tool-loop builder's test suite — guards through tools, budget caps,
+              the loop producing an edit the grader marks clean, and the OpenAI-compatible
+              client's retry and metering.
+What it does: Pins that edit-then-green is graded clean, that blind mode offers no test tool and
+              holds out the oracle, that test writes are refused via tools in both modes, the
+              ``run_command`` allowlist (archaeology and network refused; a tamper through an
+              allowed command is caught post hoc), every cap (turns, tool calls mid-turn, cost,
+              tokens, wall clock), model errors and nudges, malformed tool arguments and unknown
+              tools, file paging and search, the opt-in redacted transcript, the tool schema; and
+              the client's retry-then-meter, non-retryable and exhausted paths, tolerant tool-call
+              parsing, Azure deployments and the missing-credential model error. The ``live``
+              case spends real tokens.
+How:          ``ScriptedModel`` returns scripted turns and records the history; ``FakeClient``
+              mimics ``chat.completions.create``; ``fixtures.builders_repo`` for the build.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/openai_agent.py (under test), src/crb/builders/openai_client.py
+              (the transport), src/crb/builders/base.py (guards and budget),
+              src/crb/builders/budget.py (the caps), tests/fixtures/builders_repo.py
+Tested by:    tests/test_builders_openai_agent.py
+Touch when:   a tool is added to the loop (a schema case, a guard case if it can write or run,
+              and a cap case if it counts); a provider's error shape changes the retry rule.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +57,7 @@ from builders_repo import make_fixture  # noqa: E402
 
 
 def call(name: str, **args: Any) -> oc.ToolCall:
+    """A ``ToolCall`` with a deterministic id derived from its name and arguments."""
     return oc.ToolCall(
         id=f"c{abs(hash((name, json.dumps(args, sort_keys=True)))) % 10_000}",
         name=name,
@@ -41,6 +68,7 @@ def call(name: str, **args: Any) -> oc.ToolCall:
 def turn(
     *calls: oc.ToolCall, content: str = "", tokens: tuple[int, int] = (100, 20)
 ) -> oc.ModelTurn:
+    """A scripted ``ModelTurn``: tool calls, optional content, and the token counts the meter sums."""
     return oc.ModelTurn(
         content=content, tool_calls=calls, tokens_in=tokens[0], tokens_out=tokens[1]
     )
@@ -390,6 +418,8 @@ _UNPRICED = bud.Pricing(0.0, 0.0, known=False)
 
 
 class _FakeStatusError(Exception):
+    """An exception carrying ``status_code`` the way the OpenAI SDK's API errors do."""
+
     def __init__(self, status: int) -> None:
         super().__init__(f"status {status}")
         self.status_code = status
