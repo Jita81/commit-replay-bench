@@ -15,6 +15,33 @@ stamped at the revision it is at and receives the missing revisions; one created
 release is stamped at head.
 
 Parametrised over SQLite and (when ``CRB_TEST_POSTGRES_URL`` is set) PostgreSQL.
+
+Navigation
+----------
+What it is:   The migrations' test suite — Alembic parity with ``init_db``, adoption of
+              unversioned databases, idempotence and the CLI, on SQLite and PostgreSQL.
+What it does: Pins the load-bearing parity — the chain at head and ``create_all`` produce the
+              same schema (inspector-identical in order; on SQLite definition-for-definition,
+              since revision 0002's ``ADD COLUMN`` is spliced into the stored ``CREATE TABLE``) —
+              both carrying the triggers; that the migration files ship in the package; that
+              ``current`` / ``check`` answer on a fresh database; idempotent upgrade; that a
+              migrated database is append-only and chains; adoption of an ``init_db`` database
+              from this release (stamped at head) and from before belt 5 (stamped at 0001 and
+              upgraded) while a schema matching no release or a partial one is refused; triggers
+              re-asserted; downgrade refused while the ledger holds rows (0002 while a v5 row
+              exists) and dropping the schema otherwise; the URL from the environment; offline
+              SQL including triggers; and the CLI's ``upgrade`` / ``current`` / ``check``.
+How:          ``conftest_store`` backends; ``_snapshot`` compares schemas through the inspector;
+              ``_drop_column`` fakes an older release's schema.
+Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/store/migrate.py (under test), src/crb/store/migrations/env.py and
+              src/crb/store/migrations/versions/v0002_belt5_repo_lint_clean.py (the chain),
+              src/crb/store/db.py (``init_db``), tests/conftest_store.py, docs/DEPLOYMENT.md
+              (upgrade, §6)
+Tested by:    tests/test_store_migrate.py
+Touch when:   a model changes (write the revision, add its marker to ``REVISION_MARKERS``, and
+              let the parity case prove head == ``create_all``); never edit a shipped revision.
 """
 
 from __future__ import annotations

@@ -1,5 +1,26 @@
 """The DB event sink: round-trip fidelity, seq-ordered resumable reads, append-only
-enforcement, and the never-raise contract."""
+enforcement, and the never-raise contract.
+
+Navigation
+----------
+What it is:   The database event sink's test suite — round-trip fidelity, seq-ordered resumable
+              reads, append-only enforcement and the never-raise contract.
+What it does: Pins that every ``StepEvent`` field survives the round trip, that reads are ordered
+              by ``seq`` and resumable from ``after``, that the read limit is clamped, that
+              ``emit_many`` batches and falls back row by row, that a failed insert is logged and
+              dropped — never raised into the run — even when the factory itself is broken, that
+              the table is append-only, and that ``append_event`` allocates the next ``seq`` and
+              never raises.
+How:          A temp SQLite session factory; ``DbEventSink`` through an ``Emitter``.
+Layer:        tests — docs/ARCHITECTURE.md#72-observability
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/store/events.py (under test), src/crb/observability/events.py (the
+              ``StepEvent`` envelope and ``Emitter``), src/crb/server/routes/runs.py (SSE reads
+              the same table), tests/test_server_routes_runs.py
+Tested by:    tests/test_store_events.py
+Touch when:   a field is added to ``StepEvent`` (the round-trip case must list it); the read
+              limit or batching changes.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +45,7 @@ from crb.store.events import (
 
 @pytest.fixture
 def factory(tmp_path: Path) -> sessionmaker[Session]:
+    """A session factory over a fresh SQLite file with every table and trigger installed."""
     engine = make_engine(f"sqlite:///{tmp_path / 'events.db'}")
     init_db(engine)
     return make_session_factory(engine)

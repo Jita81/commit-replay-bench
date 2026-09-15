@@ -4,7 +4,33 @@ which overrides the builder's defaults (rung > run > default, per field); every 
 is stamped ``labels.budget_tier`` (``<max_tool_calls>/<max_turns>/<wall_clock_s>``) and
 ``labels.rung_index`` so a blind sweep can be split by tier after the fact. Read with
 the NHS review (§3): 6 of 8 blind misses were ``budget`` — before any blind claim, the
-budget has to be a measured variable. No docker, no network, no model."""
+budget has to be a measured variable. No docker, no network, no model.
+
+Navigation
+----------
+What it is:   The budget ladder's test suite (Wave C8) — object rungs, precedence and the
+              ``labels.budget_tier`` / ``labels.rung_index`` stamps.
+What it does: Pins the tier string (``<max_tool_calls>/<max_turns>/<wall_clock_s>`` plus any
+              extra cap), that trial labels are positional and use the effective budget, that
+              ``rung_from_object`` keeps only budget fields in the config, that object rungs mix
+              with labels, that the precedence is rung > run > default per field, that a ladder
+              of object rungs needs no run builder, that a bad rung budget fails the run closed
+              before any task (end to end too), that a 25 → 50 → 100 sweep stamps tier and index
+              on every row, that a plain ladder is stamped with the run budget, and that the stamp
+              can never change a verdict. Read with the NHS review (§3): six of eight blind misses
+              were ``budget``.
+How:          ``test_worker``'s harness with the fake builder re-registered per test;
+              ``RunContext`` built directly for the ladder-only cases.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/server/worker.py (under test), src/crb/builders/budget.py
+              (``budget_for_rung``), src/crb/builders/base.py (``Budget`` / ``Rung``),
+              tests/test_server_routes_runs.py (the API's half of the ladder), tests/test_worker.py
+              (the harness)
+Tested by:    tests/test_worker_budget_ladder.py
+Touch when:   a budget cap is added (the tier string and the precedence case); the rung shape
+              accepted by ``POST /runs`` changes (mirror the route suite).
+"""
 
 from __future__ import annotations
 
@@ -43,6 +69,7 @@ def _register(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def h(tmp_path: Path, pyrepo: pr.PyRepo) -> Harness:
+    """The worker harness with the repo registered and its one mined task on file."""
     harness = Harness(tmp_path, pyrepo)
     harness.add_repo()
     harness.add_task(pyrepo.feat_task())
@@ -60,6 +87,7 @@ def ctx_for(h: Harness, **fields: Any) -> RunContext:
 
 
 def tiers(rows: list[GradeRow]) -> list[tuple[str, str, str]]:
+    """``(trial, rung_index, budget_tier)`` per row — what a blind sweep is split by after the fact."""
     return [(r.trial, r.labels[LABEL_RUNG_INDEX], r.labels[LABEL_BUDGET_TIER]) for r in rows]
 
 

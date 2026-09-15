@@ -2,7 +2,32 @@
 intent label is labelled through a (scripted) labeller, ``tasks.spec_json`` and the
 ``capability_class`` column are rewritten with the RESOLVED class, one ``label.task``
 event per task carries the label, ``counts_json`` carries the per-class summary with
-its n, human labels are never overwritten, and an all-errors run is not a success."""
+its n, human labels are never overwritten, and an all-errors run is not a success.
+
+Navigation
+----------
+What it is:   The worker's ``label`` run kind's test suite on the temp SQLite harness.
+What it does: Pins that the kind is registered, that every unlabelled task is labelled through
+              the (scripted) labeller with ``tasks.spec_json`` and the ``capability_class``
+              column rewritten to the RESOLVED class and one ``label.task`` event per task, that
+              labelled tasks are skipped unless ``relabel`` and a human label is never
+              overwritten, ``task_ids`` and ``limit``, that a run where every call errors is
+              ``failed`` not ``succeeded``, cancel between tasks keeping partial counts, and that
+              a run whose labels are all outage text is failed and relabels without ``relabel``
+              (three live runs "succeeded" with every label reading the CLI's usage-limit
+              message).
+How:          ``test_worker``'s harness plus a second task (the fixture's bad-gold commit);
+              ``ScriptedLabeller`` returns the scripted label per call.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/server/worker.py (under test), src/crb/core/classify.py (the resolution
+              rule), src/crb/builders/labeller.py (the labellers the scripted one stands in
+              for), src/crb/store/models.py (the ``tasks`` row), tests/test_cli_tasks.py (the
+              same labelling over the file workdir), tests/test_worker.py
+Tested by:    tests/test_worker_label.py
+Touch when:   the label event or the task row's label fields change; a new outage text shape
+              must be recognised as not-a-label.
+"""
 
 from __future__ import annotations
 
@@ -78,6 +103,8 @@ class ScriptedLabeller:
 
 
 class _Usage:
+    """A minimal usage meter in the labeller's shape (calls, errors, cost)."""
+
     def __init__(self) -> None:
         self.calls = 0
         self.errors = 0
@@ -98,6 +125,9 @@ def h(tmp_path: Path, pyrepo: pr.PyRepo) -> Harness:
 
 @pytest.fixture
 def scripted(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Install a ``make_labeller`` that returns one ``ScriptedLabeller`` and records the calls;
+    returns ``{"labeller", "calls"}`` so a test can re-script it.
+    """
     box: dict[str, Any] = {"labeller": ScriptedLabeller([("feature.add", 0.9)]), "calls": []}
 
     def fake_make(builder: str, **kw: Any) -> ScriptedLabeller:
