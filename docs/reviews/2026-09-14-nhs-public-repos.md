@@ -65,3 +65,52 @@ Consistent with the cobra finding in the critical-friend review: mechanically cl
 
 ## 7. Next (priced by the product itself)
 `crb learn remeasure` on the live ledger: 64 of 94 rows are stamped 2.0; renewing the ten stale public-repo cells to n ≥ 10 on the current apparatus is **82 rows ≈ $37 ≈ 4 h**; the NHS cells are of the same order. Then a blind budget sweep, then B15 (services) so mesh-client is reproducible from its config, then the human review of the accepted NHS diffs using `docs/reviews/human-review-guide.md`.
+
+## 8. Restated on apparatus 2.2 (2026-09-15) — the repo-lint belt, dependency eras, support files
+
+Every 2.1 row above is superseded (`crb learn remeasure`). What changed in the instrument between the two
+measurements, all found by NHS code: **belt 5** (the repository's own linter/formatter/type checker at the
+version the commit pins — ADR-0011 and amendments a–c); **JavaScript dependency eras** (a task commit whose
+lockfile differs from HEAD gets its own `node_modules` — without it every nhsuk-react-components row read
+`harness`: eslint `rc=2`, `@eslint/compat` missing from HEAD's tree); **support files** under the test layout
+(`tests/mock_server.py`, `tests/helpers.py`) overlaid but never targets — as targets they disqualified a
+mesh-client task and all three of its negative controls; **the `outage` kind** (usage-limit rows are neither
+`harness` nor `n`); and the mesh-client sandbox now reproducible from `runner_opts.services` (both cert eras).
+
+Sighted, Sonnet 5, one attempt per task (latest attempt where a task was re-run after an instrument fix):
+
+| Repo | gold-clean tasks | attempted | clean | lint (belt 5) | budget | protocol | harness | $ / attempt | s / attempt |
+|---|---|---|---|---|---|---|---|---|---|
+| nhsuk-frontend | 6 of 8 | 6 | **4** | 1 (`feature.add` S) | 1 (`component.add` L, 25 turns) | 0 | 0 | 0.15–0.56 | 33–900 |
+| nhsuk-react-components | 8 of 14 (was 3: eras recovered 4, one hard-pool task re-qualified) | 8 | **5** | 2 (prettier, `feature.add` M+L) | 1 (`component.add` L) | 0 | 0 | 0.40–0.61 | 87–199 |
+| mesh-client | 4 of 14 | 4 | **1** | 1 (`ruff@0.1.15`, XS) | 0 | 1 (builder ran `docker ps` / `curl :8701` — refused) | 1 (same refusal, recorded before the head-first cap fix) | 0.11–0.58 | 21–177 |
+| **all** | 18 | **18** | **10** | **4** | **2** | **1** | **1** | | |
+
+Controls on 2.2: nhsuk-frontend passed 42 rows / 0 escapes / 19 not-constructible; nhsuk-react-components
+passed 21 / 0 / 11; **mesh-client passed 28 / 0 / 5** (was FAILED with 3 violations before the support-file
+rule). Oracle strength (task-level, the number the map and the sign-off now share): frontend 0.62 over 2 of 6
+scoreable tasks, react-components 0.64 over 3 (the 5 newly gold-clean tasks are not yet scored), mesh-client
+0.64 over 5. NHS spend to date, every row: **91 rows, $24.64**; 2.2 build rows $9.46. Ledger false-Q1: **0 of 532**.
+
+Readings:
+- **The tests pass more often than the repository would accept the patch.** Of the 8 non-clean attempts, 4 are
+  belt 5: the builder reproduced the behaviour and did not run the maintainers' formatter (prettier on
+  react-components twice, ruff on mesh-client, one on nhsuk-frontend). This is the cobra `gofmt` finding again,
+  now measured on three NHS repositories with the maintainers' own tool at the commit's own pin. It is the
+  cheapest lever there is (run the formatter before finishing) and it is the builder's, not the model's.
+- **Two protocol/harness rows on mesh-client are one finding:** the builder tried to reach the MESH sandbox
+  (`docker ps`, `curl localhost:8701`) to run the integration tests it was pointed at, and the sealed posture
+  refused it. The grader gets the service; the builder does not. For service-backed repositories the builder's
+  test loop is broken by design today — a product gap (the harness command should reach the runner's services),
+  not a model reading. Both rows sit outside `n`.
+- **Budget rows are both L `frontend.component.add`** — a 25-turn / 25-tool-call cap on a component that ships
+  with stories, types and docs. The blind budget ladder (25 → 50 → 100) is the priced next step and it is
+  the operator's call (DL-019).
+- **Cells:** the largest is react-components `frontend.component.add` XS (3 of 3 clean) — n = 3, nothing
+  routes. mesh-client's `bug.fix` XS is 0 of 3 fair attempts clean once the lint row is counted, from 3 rows.
+  No per-class or per-repo claim is licensed by n this small; §6's licence stands, restated on 2.2.
+
+**Two re-qualification residues, deliberately left:** nhsuk-frontend `f3b6316d25` / `6aaae56e4f` and
+react-components `97f19db5e3` are "gold target not green (rc=1)" even under their own dependency era — the
+oracle needs something the worktree does not provide (a built asset, a browser); they stay out of the pool
+with the note on the task. `35a4fdc306` is green at its parent (not RED) and was dropped.
