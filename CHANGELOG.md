@@ -10,7 +10,7 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 Nothing yet — everything on `reboot/v2` up to the rc pin is in 2.0.0a1 below.
 
-## [2.0.0a1] — unreleased — first releasable v2 (dated on the day it is tagged; pinned as `2.0.0a1-rc1`)
+## [2.0.0a1] — 2026-09-15 — first releasable v2 (pinned as `2.0.0a1-rc1`; the `v` tag follows the licence text)
 
 ### 2026-09-15 — the NHS measurement's instrument findings (DL-020..025)
 - **CI green.** Red on every push since 2026-09-13: labeller tests needed a real `claude` on

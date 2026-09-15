@@ -82,6 +82,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.builders.adapter import (
+    Preflight,
     as_run_ledger,
     build_fn_for,
     container_settings_from_env,
@@ -1039,6 +1040,9 @@ class Worker:
             runner.name,
             trial_labels=rungs,
         )
+        # belt-5 pre-flight (adapter.Preflight): OFF unless the run asks; a run with it on is
+        # a different arm (builder '<name>+preflight') and the apparatus stamp says so
+        preflight = Preflight.from_params(p.get("preflight"))
         spec = RunSpec(
             run_id=run.id,
             config=ctx.config,
@@ -1060,6 +1064,11 @@ class Worker:
                 "worker": self.worker_id,
                 "budget": budget.to_dict(),
                 "builder_config": dict(p.get("builder_config") or {}),
+                **(
+                    {"preflight": {"fix": preflight.fix, "repair_turns": preflight.repair_turns}}
+                    if preflight is not None
+                    else {}
+                ),
                 # one entry per rung, in order: what climbed, under which tier
                 "ladder": [
                     {
@@ -1088,6 +1097,7 @@ class Worker:
             ),
             builder_overrides=dict(p.get("builder_config") or {}),
             container=container_settings_from_env(),  # CRB_BUILDER__EXECUTOR=docker (ADR-0012)
+            preflight=preflight,
         )
         self._progress(ctx, 0, total)
 

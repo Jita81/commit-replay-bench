@@ -482,6 +482,13 @@ class RunRetention(BaseModel):
     transcripts: bool = False
 
 
+class PreflightIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fix: bool = True
+    repair_turns: int = Field(default=1, ge=0, le=3)
+
+
 class RunCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -521,6 +528,11 @@ class RunCreateRequest(BaseModel):
     #: attempts the provider refused (``failure_kind: outage``); ``0`` disables; ``None`` =
     #: the worker's default (3). Stored as ``params.outage_stop`` only when set.
     outage_stop: int | None = Field(default=None, ge=0, le=1000)
+    #: Belt-5 pre-flight for build kinds (``crb.builders.adapter.Preflight``): ``true`` =
+    #: apply the repository's own fixers then one bounded repair turn; an object sets
+    #: ``{fix, repair_turns}``. OFF when absent. A run with it on is recorded as the
+    #: builder ``<name>+preflight`` — a different arm, never pooled with plain rows.
+    preflight: bool | PreflightIn | None = None
 
     @field_validator("kind")
     @classmethod

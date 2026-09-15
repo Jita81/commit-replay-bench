@@ -57,6 +57,7 @@ from crb.server.schemas import (
     Page,
     PageDep,
     PageQuery,
+    PreflightIn,
     RunCounts,
     RunCreateRequest,
     RunOut,
@@ -468,6 +469,10 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["retain"] = body.retain.model_dump()
     if body.outage_stop is not None:
         params["outage_stop"] = body.outage_stop
+    if body.preflight is True:
+        params["preflight"] = True
+    elif isinstance(body.preflight, PreflightIn):
+        params["preflight"] = body.preflight.model_dump()
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,
