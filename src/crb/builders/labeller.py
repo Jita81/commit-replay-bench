@@ -24,6 +24,34 @@ Two transports, no new SDK code:
 Both are total: a transport error, an auth failure, a timeout or a malformed reply
 yields an ``unclassified`` label with confidence 0 and the reason in its rationale
 (so the path class stands and the run continues), never an exception.
+
+Navigation
+----------
+What it is:   The two LLM intent labellers (``OpenAILabeller``, ``ClaudeCodeLabeller``) that
+              implement the core's ``Labeller`` protocol, and ``make_labeller``, which picks
+              one from a run's builder/model/provider triple.
+What it does: Asks a model for one ``{class, confidence, rationale}`` over the commit's
+              subject, message, paths and line counts — never the diff — and stamps the
+              evidence digest on the label; meters tokens and cost per run; turns every
+              failure into an ``unclassified`` label with the reason, never an exception.
+How:          ``LabelEvidence`` → ``render_label_prompt`` (core) → one chat call / one
+              tool-less ``claude -p`` with a JSON schema → ``parse_label_reply`` (core) →
+              ``IntentLabel``; ``_Usage`` accumulates through ``CostMeter``.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   src/crb/core/classify.py (the protocol, the prompt, the parser and
+              ``resolve()`` — human > intent > path), src/crb/core/taxonomy.py (the closed
+              vocabulary the prompt carries), src/crb/builders/openai_client.py (the chat
+              transport), src/crb/builders/claude_code.py (the CLI's auth/env, reused
+              verbatim), src/crb/builders/budget.py (metering), src/crb/server/worker.py
+              (the ``label`` run kind)
+Tested by:    tests/test_builders_labeller.py, tests/test_worker_label.py
+Touch when:   never for a new repository (a label run is started per repo from the UI or
+              ``crb tasks label`` — docs/OPERATOR.md); a new class in the vocabulary is a
+              change to src/crb/core/taxonomy.py, not here; a new transport implements
+              ``label()`` with the same total-failure contract and joins ``make_labeller``.
+Claims:       An intent label is a model's reading of metadata; the class a row carries is
+              the resolved one, and a human label always wins (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -102,6 +130,7 @@ def _evidence(
     changed_paths: Sequence[str],
     path_class: str,
 ) -> LabelEvidence:
+    """The auditable "what the labeller saw" record (its digest goes on the label)."""
     return LabelEvidence(
         subject=subject,
         message=message,
@@ -130,6 +159,7 @@ class _Usage:
         latency_s: float,
         error: str = "",
     ) -> None:
+        """Record one labelling call (a failed one counts, with zero tokens)."""
         self.calls += 1
         if error:
             self.errors += 1
@@ -143,6 +173,7 @@ class _Usage:
         }
 
     def to_dict(self) -> dict[str, Any]:
+        """The run's ``counts_json`` usage block: calls, errors, tokens, cost with its flag."""
         return {
             "calls": self.calls,
             "errors": self.errors,
@@ -192,9 +223,11 @@ class OpenAILabeller:
 
     @property
     def name(self) -> str:
+        """``builder:model@provider`` — the labeller id stamped on every label."""
         return f"{self.builder}:{self.model}@{self.provider}"
 
     def describe(self) -> dict[str, Any]:
+        """The apparatus stamp for a label run."""
         return {
             "labeller": self.name,
             "builder": self.builder,
@@ -206,6 +239,7 @@ class OpenAILabeller:
         }
 
     def _chat(self) -> ChatFn:
+        """The chat callable, built lazily so construction needs no credential."""
         if self._chat_fn is None:
             ep = self.endpoint or EndpointConfig.from_env()
             self._chat_fn = make_chat(
@@ -222,6 +256,7 @@ class OpenAILabeller:
         changed_paths: Sequence[str],
         path_class: str,
     ) -> IntentLabel:
+        """One chat call → an ``IntentLabel``; any failure → ``unclassified`` with the reason."""
         ev = _evidence(subject, message, diff_stats, changed_paths, path_class)
         digest = ev.digest()
         messages = [
@@ -326,9 +361,11 @@ class ClaudeCodeLabeller:
 
     @property
     def name(self) -> str:
+        """``claude_code:<model>`` — the labeller id stamped on every label."""
         return f"{self.builder}:{self.model}"
 
     def describe(self) -> dict[str, Any]:
+        """The apparatus stamp for a label run (auth posture included)."""
         return {
             "labeller": self.name,
             "builder": self.builder,
@@ -375,6 +412,7 @@ class ClaudeCodeLabeller:
         return args
 
     def _binary(self) -> str:
+        """The configured binary, else ``claude`` on PATH; missing → a failed label."""
         if self.claude_binary:
             return self.claude_binary
         import shutil  # noqa: PLC0415 — keep the module import-light
@@ -393,6 +431,8 @@ class ClaudeCodeLabeller:
         changed_paths: Sequence[str],
         path_class: str,
     ) -> IntentLabel:
+        """One tool-less ``claude -p`` in an empty temp dir → an ``IntentLabel``; any
+        failure (no CLI, no credential, timeout, bad JSON) → ``unclassified``."""
         ev = _evidence(subject, message, diff_stats, changed_paths, path_class)
         digest = ev.digest()
         started = time.monotonic()
@@ -480,6 +520,7 @@ class ClaudeCodeLabeller:
 
 
 def _parse_line(line: str) -> dict[str, Any] | None:
+    """One stream-json line as a dict, or ``None`` when blank or not an object."""
     line = line.strip()
     if not line:
         return None
@@ -491,6 +532,8 @@ def _parse_line(line: str) -> dict[str, Any] | None:
 
 
 def _usage_of(result: Mapping[str, Any]) -> tuple[int, int, int]:
+    """``(tokens_in, tokens_out, cached_in)`` from a result event, cache creation counted
+    as input (the same reading as ``claude_code.StreamStats``)."""
     usage = result.get("usage")
     if not isinstance(usage, dict):
         return 0, 0, 0

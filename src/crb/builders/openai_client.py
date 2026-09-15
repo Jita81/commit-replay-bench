@@ -13,6 +13,33 @@ start and fail half-way with a 401.
 
 Retries: 429 and 5xx (and connection/timeout errors) back off exponentially with
 jitter up to ``max_retries``; 4xx other than 429 are not retried.
+
+Navigation
+----------
+What it is:   The one OpenAI-compatible transport — ``OpenAIChat`` over a lazily imported
+              ``openai`` client — and the provider-neutral wire types (``ToolCall``,
+              ``ModelTurn``, ``ChatReply``) the tool loop, the edit-block builder and the
+              labeller consume.
+What it does: Builds a client for Cerebras / Azure OpenAI / any base URL from an
+              ``EndpointConfig``, refuses to start without the named credential, retries
+              transient failures with jittered backoff, decodes tool calls tolerantly (bad
+              JSON → ``parse_error``, not a crash) and meters every attempt.
+How:          ``make_chat`` → ``make_client`` (imports ``openai`` here only) → ``OpenAIChat``:
+              ``_create`` (kwargs + ``with_retries``) → ``__call__`` parses usage, content and
+              tool calls into a ``ModelTurn``; ``text`` narrows it to a ``ChatReply``.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/openai_agent.py and src/crb/builders/editblock.py (the
+              builders on this client), src/crb/builders/labeller.py (the labeller on it),
+              src/crb/builders/budget.py (``CostMeter``/``price_for`` — the meter here is
+              per client), src/crb/server/settings.py (the ``CRB_OPENAI_*``/``CRB_AZURE_*``
+              variables ``EndpointConfig.from_env`` reads)
+Tested by:    tests/test_builders_openai_agent.py, tests/test_builders_editblock.py,
+              tests/test_builders_labeller.py
+Touch when:   pointing the factory at another OpenAI-compatible provider — set
+              ``CRB_OPENAI_BASE_URL`` / ``CRB_OPENAI_KEY_ENV`` (docs/OPERATOR.md), not the
+              defaults here; a new retryable status joins ``RETRY_STATUSES``; a provider
+              whose usage block differs changes ``_usage_of`` with a fake-response test.
 """
 
 from __future__ import annotations
@@ -66,6 +93,7 @@ class ToolCall:
         object.__setattr__(self, "arguments", dict(self.arguments))
 
     def to_openai(self) -> dict[str, Any]:
+        """The wire shape, re-encoded — needed to echo the call back in the history."""
         return {
             "id": self.id,
             "type": "function",
@@ -132,6 +160,7 @@ class AzureConfig:
             raise ValueError("azure config needs api_version and deployment")
 
     def to_dict(self) -> dict[str, Any]:
+        """The apparatus-stamp shape (the key's NAME, never its value)."""
         return {
             "endpoint": self.endpoint,
             "api_version": self.api_version,
@@ -141,6 +170,7 @@ class AzureConfig:
 
 
 def _require_key(env_name: str) -> str:
+    """The credential from the environment, or ``MissingCredential`` before any call."""
     key = os.environ.get(env_name, "").strip()
     if not key:
         raise MissingCredential(
@@ -187,6 +217,7 @@ def make_client(
 
 
 def _status_of(exc: BaseException) -> int | None:
+    """The HTTP status an SDK exception carries, wherever this SDK version puts it."""
     for attr in ("status_code", "status"):
         v = getattr(exc, attr, None)
         if isinstance(v, int):
@@ -197,6 +228,7 @@ def _status_of(exc: BaseException) -> int | None:
 
 
 def _is_retryable(exc: BaseException) -> bool:
+    """Rate limits, server errors and transport failures retry; other 4xx do not."""
     status = _status_of(exc)
     if status is not None:
         return status in RETRY_STATUSES
@@ -238,6 +270,7 @@ def with_retries(
 
 
 def _usage_of(resp: Any) -> tuple[int, int, int]:
+    """``(prompt, completion, cached prompt)`` tokens from a response, zeros when absent."""
     u = getattr(resp, "usage", None)
     if u is None:
         return 0, 0, 0
@@ -320,6 +353,8 @@ class OpenAIChat:
     def _create(
         self, messages: list[dict[str, Any]], tools: Sequence[Mapping[str, Any]] | None
     ) -> Any:
+        """One ``chat.completions.create`` under the retry policy (``temperature`` is
+        omitted when ``None`` — newer models reject the parameter)."""
         kwargs: dict[str, Any] = {
             "model": self.deployment or self.model,
             "messages": messages,
@@ -343,6 +378,7 @@ class OpenAIChat:
         messages: list[dict[str, Any]],
         tools: Sequence[Mapping[str, Any]] | None = None,
     ) -> ModelTurn:
+        """The ``ModelFn``: one assistant turn with its tool calls and metered cost."""
         resp = self._create(messages, tools)
         tin, tout, cached = _usage_of(resp)
         choice = resp.choices[0] if getattr(resp, "choices", None) else None
@@ -363,6 +399,7 @@ class OpenAIChat:
         )
 
     def text(self, messages: list[dict[str, Any]]) -> ChatReply:
+        """The ``ChatFn``: a tool-less completion as text plus usage."""
         turn = self(messages, None)
         return ChatReply(
             text=turn.content,
@@ -373,6 +410,7 @@ class OpenAIChat:
         )
 
     def describe(self) -> dict[str, Any]:
+        """The apparatus-stamp shape (no client, no key)."""
         return {
             "model": self.model,
             "deployment": self.deployment,
@@ -396,12 +434,14 @@ class EndpointConfig:
 
     @property
     def provider(self) -> str:
+        """``azure`` | ``cerebras`` | the base URL's host — the ledger's provider column."""
         if self.azure is not None:
             return "azure"
         host = self.base_url.split("//", 1)[-1].split("/", 1)[0]
         return "cerebras" if "cerebras" in host else host
 
     def to_dict(self) -> dict[str, Any]:
+        """The apparatus-stamp shape (the key's NAME, never its value)."""
         return {
             "base_url": self.base_url,
             "api_key_env": self.api_key_env,

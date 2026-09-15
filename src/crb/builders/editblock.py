@@ -13,6 +13,32 @@ by this builder: the only feedback is apply/compile.
 
 The model call goes through an injected ``chat_fn(messages) -> str | ChatReply``
 seam; the OpenAI-compatible default lives in :mod:`crb.builders.openai_client`.
+
+Navigation
+----------
+What it is:   The cheapest builder — ``EditBlockBuilder`` — and its pure parts: the tolerant
+              SEARCH/REPLACE parser, the fuzzy applier, the Python compile check and the
+              name-overlap file chooser.
+What it does: Shows a model a few likely source files (never the task's ``src_files``) and
+              applies the edit blocks it returns through the ``TestFileGuard``; retries with
+              the apply/compile failure as feedback up to ``max_turns``; never runs the
+              tests. A refused write or an un-compilable result is feedback, not a pass.
+How:          ``candidate_source_files`` → ``build_messages`` → ``chat_fn`` →
+              ``parse_file_edit_blocks`` → ``apply_edit_blocks`` (exact, then
+              indentation-insensitive with re-indent) → ``compile_check`` → write via
+              ``guard.resolve_write`` → outcome with the meter's totals.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/base.py (brief, budget, outcome, ``TestFileGuard``),
+              src/crb/builders/openai_client.py (the default ``chat_fn``),
+              src/crb/builders/budget.py (``BudgetTracker``/``CostMeter``),
+              src/crb/builders/openai_agent.py (the agentic sibling on the same client),
+              src/crb/builders/__init__.py (registered as ``"editblock"``)
+Tested by:    tests/test_builders_editblock.py
+Touch when:   never for a new repository; a marker shape a model emits that the parser
+              drops is a parser test first (the strict regex once silently dropped valid
+              edits); a language other than Python that needs a compile check extends
+              ``compile_check``.
 """
 
 from __future__ import annotations
@@ -99,6 +125,7 @@ def parse_file_edit_blocks(text: str, *, default_path: str) -> list[tuple[str, s
 
 
 def _find_window(lines: list[str], search: list[str], key: Callable[[str], str]) -> int:
+    """First index where ``search`` matches ``lines`` under ``key``, or ``-1``."""
     for i in range(len(lines) - len(search) + 1):
         if all(key(lines[i + j]) == key(search[j]) for j in range(len(search))):
             return i
@@ -106,6 +133,7 @@ def _find_window(lines: list[str], search: list[str], key: Callable[[str], str])
 
 
 def _leading_ws(line: str) -> str:
+    """The indentation prefix of a line."""
     return line[: len(line) - len(line.lstrip())]
 
 
@@ -195,6 +223,7 @@ _IMPORT_RE = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", r
 
 
 def _tokens(text: str) -> set[str]:
+    """Lower-cased identifier parts (camelCase and snake_case split), stop words dropped."""
     out: set[str] = set()
     for w in _WORD_RE.findall(text):
         for part in re.split(r"(?<=[a-z])(?=[A-Z])|_", w):
@@ -277,6 +306,8 @@ def build_messages(
     tests: dict[str, str],
     prior_failure: str | None,
 ) -> list[dict[str, Any]]:
+    """The chat messages: task text, the (read-only) target tests, the candidate sources,
+    and the previous attempt's failure when retrying."""
     parts = [brief.task_text()]
     if tests:
         parts.append("\nThe target tests (executable spec — read-only):")
@@ -323,6 +354,7 @@ class EditBlockBuilder:
         self.keep_transcript = keep_transcript
 
     def describe(self) -> dict[str, Any]:
+        """The apparatus stamp."""
         return {
             "builder": self.name,
             "model": self.model,
@@ -332,6 +364,7 @@ class EditBlockBuilder:
         }
 
     def _chat(self) -> ChatFn:
+        """The chat callable, built lazily so construction needs no credential."""
         if self._chat_fn is not None:
             return self._chat_fn
         chat = make_chat(self.model, self.endpoint)  # needs the openai extra + credential
@@ -346,6 +379,8 @@ class EditBlockBuilder:
         *,
         on_event: EventFn | None = None,
     ) -> BuildOutcome:
+        """Up to ``budget.max_turns`` chat → parse → apply → compile rounds; stops on the
+        first fully applied, compilable edit set or the first budget cap."""
         started = time.monotonic()
         config = brief.repo_config()
         guard = TestFileGuard(workspace.root, config, brief.test_files, mode=brief.mode)
