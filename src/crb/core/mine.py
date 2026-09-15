@@ -134,7 +134,17 @@ def qualify(
     _emit(on_event, "mine.candidate", repo=config.name, sha=sha, pool=pool)
     with Workspace.create(repo, sha, dest, config=config) as ws:
         ws.overlay_tests(cand.test_files)
-        target_scope = runner.target_scope(cand.test_files)
+        # a file under the test layout that defines no tests (tests/mock_server.py,
+        # tests/helpers.py) is SUPPORT: overlaid alongside the oracle, never a target —
+        # graded as a target it disqualified every mesh-client control as a "malformed
+        # oracle" (2026-09-15)
+        oracles = [t for t in cand.test_files if runner.is_valid_oracle(ws.root, t)]
+        if not oracles:
+            _emit(on_event, "mine.skip", sha=sha, reason="no test file defines a test (support only)")
+            return MineOutcome(
+                sha, None, "no test file defines a test (support only)", time.monotonic() - started
+            )
+        target_scope = runner.target_scope(oracles)
         red = runner.run_for(
             executor, ws.root, target_scope, timeout=timeout, authored=repo.author_date(cand.sha)
         )

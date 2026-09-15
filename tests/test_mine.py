@@ -778,3 +778,42 @@ def test_python_gold_that_ruff_rejects_is_not_gold_clean(tmp_path: Path) -> None
     assert [p["lint"] for k, p in events if k == "mine.gold"] == [False]
     # the gold source stays as the maintainers wrote it: `ruff check --no-fix` never edits
     assert (root / "pkg" / "mul.py").read_text().startswith("import os\n")
+
+
+def test_support_file_under_the_test_layout_is_overlaid_but_never_a_target(
+    tmp_path: Path,
+) -> None:
+    """mesh-client commits change ``tests/mock_server.py`` (no tests) alongside real test
+    files; graded as a target it disqualified every negative control as a 'malformed
+    oracle' (2026-09-15). Support files ride along with the overlay; only files that
+    define tests are targets, and a candidate with no such file is skipped."""
+    root, _feat_sha = _pyrepo_min.build(tmp_path)
+    repo = GitRepo(root)
+    config = _pyrepo_min.config(runner_opts={"python": sys.executable})
+    _fx.write_files(
+        root,
+        {
+            "pkg/mul.py": "def mul(a: int, b: int) -> int:\n    return a * b\n",
+            "tests/helpers.py": "def three() -> int:\n    return 3\n",
+            "tests/test_mul.py": (
+                "from pkg.mul import mul\nfrom tests.helpers import three\n\n\n"
+                "def test_mul():\n    assert mul(three(), 2) == 6\n"
+            ),
+        },
+    )
+    sha = _fx.commit_all(root, "feat: add mul with a helper")
+    out, _ = _qualify_sha(repo, config, sha, tmp_path / "mine-support")
+    assert out.task is not None, out.skipped_reason
+    assert set(out.task.test_files) == {"tests/helpers.py", "tests/test_mul.py"}
+    assert out.task.target_tests == ("tests/test_mul.py",)
+    # a commit whose only test-layout change is support is not a task
+    _fx.write_files(
+        root,
+        {
+            "pkg/mul.py": "def mul(a: int, b: int) -> int:\n    return b * a\n",
+            "tests/helpers.py": "def three() -> int:\n    return 1 + 2\n",
+        },
+    )
+    sha2 = _fx.commit_all(root, "chore: helper tweak")
+    out2, _ = _qualify_sha(repo, config, sha2, tmp_path / "mine-support-only")
+    assert out2.task is None and "support only" in (out2.skipped_reason or "")

@@ -344,7 +344,15 @@ def grade(
             ws.overlay_tests(task.test_files)
 
         # --- oracle validity (poka-yoke: a non-test file is never an oracle) -----
-        bad = [t for t in task.test_files if not runner.is_valid_oracle(ws.root, t)]
+        # the oracle is the TARGET set; a support file overlaid with the tests (a mock
+        # server, a helpers module) defines no test and is not required to
+        targets = set(task.target_tests)
+        file_targets = bool(targets) and targets <= set(task.test_files)  # pytest/jest style
+        bad = [
+            t
+            for t in task.test_files
+            if (t in targets or not file_targets) and not runner.is_valid_oracle(ws.root, t)
+        ]
         if bad:
             _emit(on_event, "grade.malformed_oracle", task=task.task_id, files=bad)
             return done(disqualified=True, dq_reason=f"malformed oracle: {bad[:5]}")
