@@ -16,6 +16,30 @@ grade with a RED oracle; adequacy governs how much a GREEN one is worth.
 The thresholds live in one frozen :class:`AdequacyPolicy`. Its auto-ship floor is,
 by construction, the same number as ``RoutingPolicy.min_oracle_strength`` in
 :mod:`crb.core.routing` — the two gates cannot drift apart silently.
+
+Navigation
+----------
+What it is:   The oracle-adequacy gate — pure functions from a measured ``oracle_strength`` to
+              a band (``strong``/``adequate``/``weak``/``unscoreable``) and a per-trial
+              routing decision.
+What it does: Decides how much a GREEN oracle is worth: a clean grade auto-ships only at or
+              above the auto-ship floor; below it (or unmeasured) the pass routes to a human.
+              It never touches whether a grade is clean — that is false-Q1's floor.
+How:          ``AdequacyPolicy`` (frozen, validated, auto-ship floor imported from the routing
+              policy) → ``classify_oracle`` → ``licenses_autoship`` → ``routing_decision`` →
+              the self-describing ``AdequacyVerdict``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/routing.py (``RoutingPolicy.min_oracle_strength`` is the auto-ship
+              floor — the two are one number), src/crb/core/oracle/mutation.py (produces the
+              strength this consumes), src/crb/server/routes/oracle.py (serves the verdict),
+              src/crb/factory/review.py (applies it to manufactured work)
+Tested by:    tests/test_oracle_adequacy.py
+Touch when:   never for a new repository; moving a floor is a change to the routing policy
+              first (docs/adr/0003-one-routing-rule.md) and to
+              docs/EVIDENCE-AND-CLAIMS.md — then ``ADEQUACY_POLICY_VERSION`` bumps.
+Claims:       ``auto_ship`` is a routing recommendation on measured evidence, not a
+              statement that the patch is correct (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -63,9 +87,11 @@ class AdequacyPolicy:
         return cls(autoship_floor=routing.min_oracle_strength, adequate_floor=adequate_floor)
 
     def consistent_with(self, routing: RoutingPolicy) -> bool:
+        """``True`` iff this policy's auto-ship floor is the routing policy's — the drift check."""
         return self.autoship_floor == routing.min_oracle_strength
 
     def to_dict(self) -> dict[str, Any]:
+        """The policy as stored next to a verdict (so a reader sees the floors that applied)."""
         return {
             "autoship_floor": self.autoship_floor,
             "adequate_floor": self.adequate_floor,
@@ -131,6 +157,7 @@ class AdequacyVerdict:
     policy_version: str = ADEQUACY_POLICY_VERSION
 
     def to_dict(self) -> dict[str, Any]:
+        """The API/report shape; strength rounded so the JSON is stable across platforms."""
         return {
             "clean": self.clean,
             "oracle_strength": (

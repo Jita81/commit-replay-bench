@@ -68,6 +68,42 @@ no ``VIOLATION``. Escapes leave it ``True`` and land in ``escapes``.
 
 Every transform is a pure function over file text so it can be unit-tested without
 a repository; the runner is the thin I/O shell around them.
+
+Navigation
+----------
+What it is:   The negative-controls gate — seven deterministic submissions per task through
+              the real replay path, the Python AST transforms, and the report the CI gate
+              reads.
+What it does: Proves the instrument rejects what it must (gold clean, noop red, tamper DQ,
+              stub red, regression regressed) and measures what the oracle lets through
+              (``hardcode_cheat``, ``env_poison``): a VIOLATION fails the gate, an ESCAPE is
+              reported and never hidden, a cheat that cannot honestly be built reads
+              ``not_constructible``, a harness error is always a VIOLATION.
+How:          Per task: RED check at the parent (else ``skip``) → per control: fresh
+              ``Workspace`` + tests overlaid → ``TamperGuard.snapshot`` → the control's edit
+              (dispatched on ``RepoConfig.language``; Go/JS compile- or syntax-checked) →
+              ``guard.check`` → ``grade(..., evaluate_lint=False)`` → ``observe`` →
+              verdict + the belt that caught it → ``ControlRow`` → ``ControlsReport``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0010-polyglot-negative-controls.md,
+              docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/grade.py (the grader every control goes through),
+              src/crb/core/workspace.py (the fresh trial tree per control),
+              src/crb/core/oracle/controls_go.py and src/crb/core/oracle/controls_js.py (the
+              text-level transforms this dispatches to), src/crb/core/test_infra.py (belt 1b
+              — why an ``env_poison`` row is expected ``caught by belt 1``),
+              src/crb/core/runners/base.py (the RED check and the compile probes),
+              src/crb/server/worker.py (the ``controls`` run kind)
+Tested by:    tests/test_oracle_controls.py, tests/test_oracle_controls_go.py,
+              tests/test_oracle_controls_js.py
+Touch when:   never for a new repository (a repo whose regression control reads
+              ``not_constructible`` needs a wider ``belt_scope`` in its config, not an edit
+              here — docs/OPERATOR.md); a new language needs its own transform module and a
+              ``_apply_<lang>`` branch; a new control or a changed expectation bumps
+              ``CONTROLS_VERSION`` and needs an ADR.
+Claims:       ``passed`` says the instrument held on this task set; an ESCAPE is a finding
+              about the oracle (``hardcode_cheat``) or a belt-1 coverage gap (``env_poison``),
+              never a false pass (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -147,6 +183,8 @@ EXPECTED: dict[str, tuple[str, ...]] = {
 
 
 def expected_label(control: str) -> str:
+    """The ``expected`` column of a row: the accepted outcomes, or ``caught_or_flagged``
+    for a measurement control (whose "expected" is a probe, not an assertion)."""
     return CAUGHT_OR_FLAGGED if control in MEASURE_CONTROLS else "|".join(EXPECTED[control])
 
 
@@ -360,10 +398,12 @@ def pick_regression_poison_target(ws: Workspace, task: TaskSpec, config: RepoCon
 
 # --- hardcode cheat --------------------------------------------------------------------
 
+#: ``(function name, positional literal args, expected literal)`` — one pinned input/output.
 Fact = tuple[str, tuple[Any, ...], Any]
 
 
 def _literal(node: ast.AST) -> tuple[bool, Any]:
+    """``(True, value)`` when ``node`` is a literal ``ast.literal_eval`` accepts."""
     try:
         return True, ast.literal_eval(node)
     except (ValueError, SyntaxError, TypeError):
@@ -514,6 +554,10 @@ def env_poison_conftest(module: str, src_path: str, gold_src: str) -> str:
 
 @dataclass(frozen=True)
 class ControlRow:
+    """One (task × control) cell of the matrix: what was expected, what was observed, the
+    verdict, the note naming the belt (or the reason it was not constructible), and the
+    full ``GradeResult`` when one was earned."""
+
     task_id: str
     repo: str
     control: str
@@ -529,6 +573,7 @@ class ControlRow:
             raise ValueError(f"unknown control {self.control!r}")
 
     def to_dict(self) -> dict[str, Any]:
+        """The row as the report and the API carry it."""
         return {
             "task_id": self.task_id,
             "repo": self.repo,
@@ -559,29 +604,36 @@ class ControlsReport:
 
     @property
     def violations(self) -> tuple[ControlRow, ...]:
+        """Rows where the instrument did not do what it must — each one is a bug."""
         return self._with(VERDICT_VIOLATION)
 
     @property
     def escapes(self) -> tuple[ControlRow, ...]:
+        """Measurement controls that graded clean — findings, reported never hidden."""
         return self._with(VERDICT_ESCAPE)
 
     @property
     def not_constructible(self) -> tuple[ControlRow, ...]:
+        """Rows where the cheat could not honestly be built for the task."""
         return self._with(VERDICT_NOT_CONSTRUCTIBLE)
 
     @property
     def skipped(self) -> tuple[ControlRow, ...]:
+        """Rows of tasks with no RED oracle at the parent (controls vacuous)."""
         return self._with(VERDICT_SKIP)
 
     @property
     def passed(self) -> bool:
+        """The CI gate: no VIOLATION. Escapes, not-constructible and skips do not fail it."""
         return not self.violations
 
     @property
     def task_ids(self) -> tuple[str, ...]:
+        """Distinct task ids in row order."""
         return tuple(dict.fromkeys(r.task_id for r in self.rows))
 
     def to_dict(self) -> dict[str, Any]:
+        """The JSON report: counts, the gate, the escape rows first, then every row."""
         return {
             "schema": CONTROLS_SCHEMA,
             "apparatus": dict(self.apparatus),
@@ -597,6 +649,7 @@ class ControlsReport:
         }
 
     def render_markdown(self) -> str:
+        """The human report: counts, the gate, the matrix, and the escapes explained."""
         lines = [
             "# Negative-control matrix",
             "",
@@ -672,6 +725,7 @@ _SYNTAX_CHECK_TIMEOUT_S = 120
 
 
 def _primary_source(task: TaskSpec) -> str | None:
+    """The first Python source file of the task — the one the cheat and the poison target."""
     for p in task.src_files:
         if p.endswith(".py"):
             return p
@@ -679,6 +733,7 @@ def _primary_source(task: TaskSpec) -> str | None:
 
 
 def _write(ws: Workspace, rel: str, text: str) -> None:
+    """Write ``text`` at ``rel`` in the trial tree, creating directories (a builder would)."""
     path = ws.root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -727,6 +782,7 @@ def _apply_control(
 
 
 def _apply_python(name: str, ws: Workspace, task: TaskSpec, config: RepoConfig) -> str:
+    """The four language-specific controls for Python, using the AST transforms above."""
     if name == STUB:
         edited = 0
         for p in task.src_files:
@@ -810,6 +866,7 @@ def _go_compile_error(
 
 
 def _repo_files(ws: Workspace) -> list[str]:
+    """Every path in the parent tree (git's view, so a builder cannot hide a file)."""
     return ws.repo.run("ls-tree", "-r", "--name-only", ws.parent, cwd=ws.root, check=True).lines
 
 
@@ -823,6 +880,9 @@ def _apply_go(
     executor: Executor,
     timeout: int,
 ) -> str:
+    """The four language-specific controls for Go: text transforms from ``controls_go``,
+    each compile-checked with ``go test -run '^$'`` so a non-building cheat is
+    ``not_constructible`` rather than a red the oracle never saw."""
     src_files = [p for p in task.src_files if p.endswith(".go")]
     if not src_files:
         raise _NotConstructible("no .go source file in the task")
@@ -963,6 +1023,8 @@ def _js_syntax_error(
 def _apply_js(
     name: str, ws: Workspace, task: TaskSpec, config: RepoConfig, *, executor: Executor
 ) -> str:
+    """The four language-specific controls for JavaScript/TypeScript: text transforms from
+    ``controls_js``, each syntax-checked (``node --check`` where node can parse the file)."""
     src_files = [p for p in task.src_files if p.endswith(controls_js.JS_SUFFIXES)]
     if not src_files:
         raise _NotConstructible("no JavaScript/TypeScript source file in the task")
@@ -1127,6 +1189,7 @@ def _caught_note(observed: str, guard: TamperGuard, grade_result: GradeResult) -
 
 
 def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
+    """Fire a ``controls.*`` event when a sink is attached (no-op otherwise)."""
     if on_event is not None:
         on_event(action, payload)
 
@@ -1272,6 +1335,8 @@ def controls_for_task(
             rows.append(row(name, OBS_ERROR, VERDICT_VIOLATION, err, started=started))
             continue
 
+        # The guard's out-of-band detection wins over the grader's projection: a touched
+        # oracle is disqualified whatever the belts then said.
         observed = OBS_DISQUALIFIED if guard.tests_touched else observe(result)
         if name in MEASURE_CONTROLS:
             if observed in EXPECTED[name]:
