@@ -17,6 +17,29 @@ Only ``node --test`` is dependency-free. The other three need ``node_modules``:
 pass the session cache from :func:`conftest_langs.npm_cache` as ``node_modules``
 and ``build`` symlinks it into the repo (``.gitignore`` hides the link, and
 :class:`~crb.core.workspace.Workspace` re-links it into every worktree).
+
+Navigation
+----------
+What it is:   The JavaScript fixture in four flavours: ``node --test``, vitest, jest and mocha.
+What it does: Builds the same two-commit shape per tool with the module system and test
+              directory each runner discovers by default (CommonJS + ``__tests__`` for three,
+              ESM for vitest, ``test/`` for mocha); links a session ``node_modules`` cache into
+              the repo for the three tools that need dependencies; ``ts_extra`` turns it into a
+              TypeScript-gated repository in the NHS shape for the belt 5 tests.
+How:          ``build(tmp_path, tool=…, node_modules=…, extra=…)`` writes ``package.json`` for the
+              flavour, symlinks the cache and commits twice; ``config`` returns the matching
+              ``RepoConfig`` (runner, test layout, belt scope).
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0010-polyglot-negative-controls.md, docs/adr/0011-repo-lint-belt.md
+Works with:   tests/fixtures/langs/__init__.py (the shape),
+              src/crb/core/runners/node_runners.py (the four runners under test),
+              tests/conftest_langs.py (``npm_cache``), src/crb/core/workspace.py (re-links
+              ``node_modules`` into every worktree), tests/test_runners_node.py and
+              tests/test_oracle_controls_js.py (the consumers)
+Tested by:    tests/test_runners_node.py, tests/test_oracle_controls_js.py, tests/test_lint.py,
+              tests/test_grade.py
+Touch when:   a fifth JavaScript runner is added (add its flavour here and to ``npm_cache``); a
+              runner's default discovery changes (the test directory per tool must follow).
 """
 
 from __future__ import annotations
@@ -44,10 +67,12 @@ _TEST_SCRIPT = {
 
 
 def test_dir(tool: str) -> str:
+    """The test directory each runner discovers by default: ``test`` for mocha, else ``__tests__``."""
     return "test" if tool == "mocha" else "__tests__"
 
 
 def is_esm(tool: str) -> bool:
+    """Only vitest gets ESM (it transforms test files through vite); the rest stay CommonJS."""
     return tool == "vitest"
 
 
@@ -95,14 +120,17 @@ SRC_SUB = "src/sub.js"
 
 
 def test_add(tool: str) -> str:
+    """Repo-relative path of the initial commit's test file for ``tool``."""
     return f"{test_dir(tool)}/calc.test.js"
 
 
 def test_sub(tool: str) -> str:
+    """Repo-relative path of the feat commit's test file for ``tool`` — the RED target."""
     return f"{test_dir(tool)}/sub.test.js"
 
 
 def add_source(tool: str, *, broken: bool = False) -> str:
+    """``src/calc.js`` in the flavour's module system; ``broken=True`` is the belt 3 regression edit."""
     return src_module("add", "a + b + 1" if broken else "a + b", tool)
 
 
@@ -191,6 +219,7 @@ def build(
 
 
 def config(tool: str = "node", belt_scope: str | tuple[str, ...] = BELT_BARE) -> RepoConfig:
+    """The ``RepoConfig`` for the flavour: ``runner=tool`` and the test prefix that tool discovers."""
     if tool not in TOOLS:
         raise ValueError(f"tool must be one of {TOOLS}, got {tool!r}")
     return RepoConfig(

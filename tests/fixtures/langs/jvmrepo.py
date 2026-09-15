@@ -16,6 +16,24 @@ XML, e.g. ``ex.CalcTest::addWorks``.
 Maven is the one toolchain that needs a warm local repository (``~/.m2``):
 the tests call :func:`conftest_langs.maven_warmup` once per session and skip
 with the reason when the plugins/junit cannot be resolved.
+
+Navigation
+----------
+What it is:   The JVM fixture: a single-module Maven project on JUnit Jupiter 5 with surefire.
+What it does: Builds the two-commit shape for the Maven runner with every plugin version pinned
+              in ``pom.xml``; ``java_home`` chooses the JDK the runner is handed. Maven is the one
+              toolchain that needs a warm ``~/.m2`` — consumers call
+              ``conftest_langs.maven_warmup`` first.
+How:          ``two_commit_repo`` over inline Java sources and a pinned POM; ``config`` returns a
+              ``RepoConfig`` whose target scope is the surefire class name.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         none
+Works with:   tests/fixtures/langs/__init__.py (the shape), src/crb/core/runners/jvm_runner.py
+              (the runner under test), tests/conftest_langs.py (``maven_warmup``),
+              tests/test_runners_jvm.py and tests/test_oracle_mutation_text.py (the consumers)
+Tested by:    tests/test_runners_jvm.py, tests/test_oracle_mutation_text.py, tests/test_grade.py
+Touch when:   a plugin or JUnit version is bumped (bump every pin together and re-warm the
+              cache); a JVM test needs a second module or a profile in the parent.
 """
 
 from __future__ import annotations
@@ -141,10 +159,14 @@ def java_home() -> str:
 
 
 def build(tmp_path: Path) -> tuple[Path, str]:
+    """The two-commit Maven fixture under ``tmp_path / "jvmrepo"``; returns ``(root, feat_sha)``."""
     return two_commit_repo(Path(tmp_path) / "jvmrepo", _INITIAL, _FEAT)
 
 
 def config(belt_scope: str | tuple[str, ...] = BELT_BARE, *, offline: bool = False) -> RepoConfig:
+    """The ``RepoConfig`` for the fixture: the ``maven`` runner over the standard layout, with the
+    JDK from :func:`java_home` and ``offline`` (``mvn -o``) when the caller has warmed ``~/.m2``.
+    """
     opts: dict[str, object] = {"offline": offline}
     jh = java_home()
     if jh:

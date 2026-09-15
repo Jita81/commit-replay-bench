@@ -14,6 +14,30 @@ Every store test is parametrised over two backends:
 
 Same tests, same assertions, both dialects — the append-only triggers, the write lock and
 the chain must behave identically or the production store is not the store we tested.
+
+Navigation
+----------
+What it is:   Shared backend fixtures and row builders for the ``crb.store`` suites (imported
+              explicitly; not a conftest).
+What it does: Parametrises every store test over SQLite (always) and PostgreSQL (only when
+              ``CRB_TEST_POSTGRES_URL`` is set), each test starting from an EMPTY database, and
+              supplies a clean fully-evidenced ``GradeRow``, a ``TaskSpec`` and an
+              ``EvidencePack`` so the append-only, lock and chain behaviour is asserted
+              identically on both dialects.
+How:          A session-scoped throw-away PostgreSQL schema (``crb_test_<hex>``) reached through
+              ``search_path`` and reset per test; SQLite as a fresh file under ``tmp_path`` with
+              WAL and foreign keys on; ``Backend`` wraps the engine and session factory.
+Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/store/db.py (the engines and session factory under test),
+              src/crb/store/ledger.py (``DbLedger`` the row builders feed), src/crb/core/ledger.py
+              (``GradeRow``), tests/test_store_ledger.py and tests/test_store_migrate.py (typical
+              callers), .github/workflows/ci.yml (the ``test-postgres`` job that sets the URL)
+Tested by:    tests/test_store_db.py, tests/test_store_ledger.py, tests/test_store_migrate.py,
+              tests/test_store_reviews.py (every consumer)
+Touch when:   never for a new repository; a new dialect is supported (add it to the ``backend``
+              parametrisation and CI); the ``GradeRow`` evidence fields change (``grade_row``
+              must stay a row the write-time invariant accepts).
 """
 
 from __future__ import annotations
@@ -67,6 +91,7 @@ class Backend:
 
     @property
     def dialect(self) -> str:
+        """``"sqlite"`` or ``"postgresql"`` — the tests branch on it only for dialect-specific SQL."""
         return self.engine.dialect.name
 
     def new_engine(self) -> Engine:
@@ -74,6 +99,7 @@ class Backend:
         return make_engine(self.url)
 
     def trigger_names(self) -> set[str]:
+        """The append-only triggers present on this database, read from the catalogue of the dialect."""
         with self.engine.connect() as c:
             if self.dialect == "sqlite":
                 q = "SELECT name FROM sqlite_master WHERE type = 'trigger'"
@@ -87,6 +113,9 @@ class Backend:
             return {str(r[0]) for r in c.execute(text(q))}
 
     def drop_grades_triggers(self) -> None:
+        """Remove the ``grades`` append-only triggers — for tests that prove tampering is still
+        caught (by the chain) once the database-level protection is gone.
+        """
         with self.engine.begin() as c:
             for name in ("grades_no_update", "grades_no_delete"):
                 on = " ON grades" if self.dialect == "postgresql" else ""
@@ -175,6 +204,7 @@ def grade_row(**kw: Any) -> GradeRow:
 
 
 def task_spec() -> TaskSpec:
+    """A minimal valid ``TaskSpec`` for rows and packs that need one."""
     return TaskSpec(
         task_id=SHA,
         repo="r",
@@ -190,6 +220,7 @@ def task_spec() -> TaskSpec:
 
 
 def evidence_pack(**kw: Any) -> ev.EvidencePack:
+    """A clean, fully-stamped ``EvidencePack`` (grade matches the belts) unless overridden."""
     base: dict[str, Any] = {
         "task": task_spec(),
         "grade": GradeResult(SHA, "r", "sighted", clean=True, belts=Belts(True, True, True, True)),

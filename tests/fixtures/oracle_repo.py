@@ -23,6 +23,33 @@ negative controls and the mutation scorer need is a known red→green commit sha
 
 Tasks are produced through the real miner path (:func:`crb.core.mine.qualify`), so
 ``baseline_failing`` and ``red_checked`` are measured, never assumed.
+
+Navigation
+----------
+What it is:   The hermetic Python fixture repository for the oracle programme (negative controls
+              and mutation scoring).
+What it does: Provides one commit per shape the controls and the scorer must handle — ``fix``,
+              ``bad_gold``, ``new``, ``green``, ``sub`` (a root conftest other tests depend on),
+              ``poly``, ``alone`` and ``mut`` (a strong ``is_admin`` oracle beside a weak
+              ``discount`` one) — and builds ``TaskSpec``s through the REAL miner path so
+              ``red_checked`` and ``baseline_failing`` are measured, never assumed.
+How:          Real ``git`` + real pytest subprocess via ``PytestRunner`` and ``LocalExecutor``;
+              ``build_controls_repo`` commits every shape once (session-scoped by callers),
+              ``make_task`` runs ``crb.core.mine.qualify``, ``make_task_unchecked`` skips the RED
+              check for commits the miner would refuse.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0010-polyglot-negative-controls.md
+Works with:   src/crb/core/oracle/controls.py and src/crb/core/oracle/mutation.py (what runs on
+              it), src/crb/core/mine.py (``qualify`` builds the tasks),
+              tests/test_oracle_controls.py and tests/test_oracle_mutation.py (the consumers),
+              tests/test_oracle_sealed_corpus.py (borrows ``init_repo`` / ``commit`` for the
+              authored-date lookup)
+Tested by:    tests/test_oracle_controls.py, tests/test_oracle_mutation.py,
+              tests/test_oracle_sealed_corpus.py
+Touch when:   a new control or mutation operator needs a commit shape not listed in the
+              docstring — add the commit and its ``*_LINES`` constants, and pin the expected
+              verdict in the consumer; never re-order the existing commits (line numbers are
+              asserted).
 """
 
 from __future__ import annotations
@@ -78,6 +105,7 @@ MUT_ALL_LINES = MUT_IS_ADMIN_LINES | MUT_DISCOUNT_LINES
 
 
 def git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
+    """Run one git command in ``repo`` (``check=True``: a failing git call is a fixture bug)."""
     full_env = {**os.environ, **(env or {})}
     r = subprocess.run(
         ["git", "-C", str(repo), *args],
@@ -90,6 +118,7 @@ def git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
 
 
 def init_repo(repo: Path) -> None:
+    """``git init`` with a fixed local identity and signing off, so shas are reproducible."""
     repo.mkdir(parents=True)
     git(repo, "init", "-q", "-b", "main")
     git(repo, "config", "user.email", "t@t")
@@ -98,6 +127,9 @@ def init_repo(repo: Path) -> None:
 
 
 def commit(repo: Path, files: dict[str, str], msg: str, *, author_date: str | None = None) -> str:
+    """Write ``files``, stage them and commit; ``author_date`` pins both dates for the sealed-corpus
+    tests. Returns the new HEAD sha.
+    """
     for rel, content in files.items():
         p = repo / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -124,6 +156,8 @@ def fixture_config() -> RepoConfig:
 
 @dataclass(frozen=True)
 class ControlsRepo:
+    """The built repository and the sha of every shape the docstring lists."""
+
     path: Path
     fix: str
     bad_gold: str
@@ -136,10 +170,14 @@ class ControlsRepo:
 
     @property
     def git(self) -> GitRepo:
+        """The core's ``GitRepo`` wrapper over the fixture path."""
         return GitRepo(self.path)
 
 
 def build_controls_repo(base: Path) -> ControlsRepo:
+    """Commit every shape once under ``base / "r"``; callers scope it to the session and never
+    mutate it (tasks are built from shas, worktrees are opened elsewhere).
+    """
     repo = base / "r"
     init_repo(repo)
     # base: buggy impl + a smoke test (so `tests/` is a runnable belt) plus an ADJACENT
