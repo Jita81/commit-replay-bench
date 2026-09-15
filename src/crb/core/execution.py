@@ -15,6 +15,40 @@ an :class:`Executor`. The executor decides *where* it runs:
 
 Only a dep-install phase may ask for network (``Command.network=True``); the
 DockerExecutor still applies every other cap to it.
+
+Navigation
+----------
+What it is:   The executors — ``LocalExecutor`` (host subprocess) and ``DockerExecutor``
+              (hardened, network-less container), the ``Command`` / ``ExecResult`` contract
+              between them and the runners, and ``DockerStream`` for a long-lived container
+              whose output is read as it runs.
+What it does: Runs one command with a wall clock and a cancel token and reports exit code,
+              output, timeout and cancellation honestly; strips the host environment down
+              to an allowlist so a repository's tests never see the operator's secrets; and
+              refuses — ``SandboxUnavailable`` — whenever the container cannot be provided
+              exactly as hardened (no binary, no daemon, root user, forbidden mount, launch
+              failure). It never falls back to the host.
+How:          ``Command`` (argv, root, writable paths, network flag) → ``build_argv`` (the
+              full ``docker run`` hardening set, asserted on by tests) → ``Popen`` with a
+              drain thread polled against the deadline and the cancel token → ``docker
+              kill <name>`` / process-group kill → ``ExecResult``; ``make_executor`` picks
+              the kind from configuration and fails closed on ``docker`` without settings.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
+              docs/adr/0012-builder-in-a-sealed-container.md
+Works with:   src/crb/core/runners/base.py (builds the Command, parses the result),
+              src/crb/builders/container.py (the sealed builder over ``DockerStream``),
+              src/crb/core/grade.py and src/crb/core/mine.py (let SandboxUnavailable
+              propagate so a run stops), src/crb/server/worker.py (constructs the executor
+              from settings and ends the run ``failed: sandbox unavailable``),
+              src/crb/observability/probes.py (the health probe that reports the daemon)
+Tested by:    tests/test_execution.py, tests/test_sandbox_docker.py,
+              tests/test_builders_container.py, tests/test_builders_container_docker.py
+Touch when:   never for a new repository (its image, memory and cpu limits are
+              ``DockerSettings`` from the repo / deployment config; a toolchain that must
+              write somewhere declares ``writable_paths`` in its runner); loosening any
+              flag in ``build_argv`` is a security decision — docs/SECURITY.md#31-sandboxed-test-execution--crbcoreexecutiondockerexecutor
+              and ADR-0005 must change with it.
 """
 
 from __future__ import annotations
@@ -72,6 +106,10 @@ class SandboxUnavailable(RuntimeError):
 
 @dataclass(frozen=True)
 class ExecResult:
+    """What a command did. ``returncode`` is 124 on timeout and 130 on cancellation
+    (the shell conventions) so a runner that only looks at the code still fails
+    closed; ``timed_out`` / ``cancelled`` say which."""
+
     returncode: int
     stdout: str
     stderr: str
@@ -81,10 +119,12 @@ class ExecResult:
 
     @property
     def ok(self) -> bool:
+        """Exit 0 AND neither enforced stop — a killed command is never ok."""
         return self.returncode == 0 and not self.timed_out and not self.cancelled
 
     @property
     def combined(self) -> str:
+        """stdout then stderr, for parsers and the redacted tail in evidence."""
         return self.stdout + ("\n" + self.stderr if self.stderr else "")
 
 
@@ -116,6 +156,9 @@ class Command:
 
 
 class Executor(Protocol):
+    """The contract a runner programs against. ``name`` appears on every apparatus
+    stamp, so which executor graded a row is always visible."""
+
     name: str
 
     def run(self, cmd: Command) -> ExecResult: ...
@@ -129,6 +172,8 @@ class Executor(Protocol):
         ...
 
 
+#: The ``subprocess.run``-shaped callable the DockerExecutor uses for its probes and
+#: non-cancellable runs — injectable so tests assert on argv without a daemon.
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 
@@ -150,6 +195,9 @@ class LocalExecutor:
 
     @staticmethod
     def _host_base_env() -> dict[str, str]:
+        """The allowlisted slice of the host environment plus the flags that make test
+        output parseable (``CI``, ``NO_COLOR``) and keep the worktree clean of
+        bytecode."""
         env = {k: v for k, v in os.environ.items() if k in _HOST_ENV_PASSTHROUGH}
         env.setdefault("LANG", "C.UTF-8")
         env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -159,6 +207,7 @@ class LocalExecutor:
         return env
 
     def tool(self, name: str, host_override: str | None = None) -> str:
+        """A configured override, else the binary on PATH, else the bare name."""
         return host_override or shutil.which(name) or name
 
     def describe(self) -> dict[str, Any]:
@@ -170,6 +219,9 @@ class LocalExecutor:
         return self._cancel
 
     def run(self, cmd: Command) -> ExecResult:
+        """Run ``cmd`` on the host under its wall clock and the cancel token. Never
+        raises for what the command did; a timeout or cancellation kills the whole
+        process group (``start_new_session``) so no test child outlives the run."""
         env = dict(self._base_env)
         env.update(cmd.env)
         cwd = cmd.root / cmd.cwd_rel
@@ -222,6 +274,8 @@ class LocalExecutor:
 
     @staticmethod
     def _kill_group(proc: subprocess.Popen[str]) -> None:
+        """SIGKILL the session the command leads (its children included); fall back to
+        the process alone if the group is already gone or not ours."""
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
@@ -235,6 +289,9 @@ class LocalExecutor:
 
 @dataclass(frozen=True)
 class DockerSettings:
+    """The sandbox's shape. Construction itself fails closed: no image, a root user or
+    a forbidden mount is :class:`SandboxUnavailable` before any container exists."""
+
     image: str
     memory: str = "2g"
     cpus: str = "2"
@@ -289,6 +346,8 @@ class DockerExecutor:
             self._verify_daemon()
 
     def _verify_daemon(self) -> None:
+        """One ``docker info`` at construction: a dead daemon is found before the first
+        task, not by the first task."""
         try:
             r = self._runner(
                 [self.docker, "info", "--format", "{{.ServerVersion}}"],
@@ -314,6 +373,7 @@ class DockerExecutor:
         return self._cancel
 
     def describe(self) -> dict[str, Any]:
+        """The apparatus-stamp view of the sandbox (image and limits; no host paths)."""
         s = self.settings
         return {
             "executor": self.name,
@@ -344,6 +404,8 @@ class DockerExecutor:
             "--tmpfs",
             f"/tmp:rw,nosuid,nodev,size={s.tmp_size}",
         ]
+        # the worktree is read-only inside: the builder edits it BEFORE grading, the
+        # tests only read it; a test that writes into the tree fails, never mutates it
         argv += ["--mount", f"type=bind,src={cmd.root},dst={s.workdir},readonly"]
         # Writable paths are bind-mounted rw from the (disposable) worktree so the
         # runner can parse reports the toolchain writes there (surefire XML, …).
@@ -366,6 +428,9 @@ class DockerExecutor:
         return argv
 
     def _run_cancellable(self, argv: list[str], cmd: Command, started: float) -> ExecResult:
+        """``docker run`` under the cancel token. The container gets a name so the
+        deadline and the token can ``docker kill`` IT — killing the client process
+        alone would leave the container running (the same rule as :class:`DockerStream`)."""
         name = f"crb-{uuid.uuid4().hex[:12]}"
         argv = [*argv[:3], "--name", name, *argv[3:]]  # docker run --rm --name …
         proc = subprocess.Popen(
@@ -471,8 +536,12 @@ class DockerExecutor:
         )
 
     def run(self, cmd: Command) -> ExecResult:
+        """Run ``cmd`` in the sandbox. A timeout is a result (124); a failure of docker
+        itself to launch (exit 125, a missing binary) is :class:`SandboxUnavailable`."""
         argv = self.build_argv(cmd)
         started = time.monotonic()
+        # the cancellable path drives Popen itself; an injected runner (tests) cannot
+        # be polled, so it takes the plain timeout path
         if self._cancel is not None and self._runner is subprocess.run:
             return self._run_cancellable(argv, cmd, started)
         try:
@@ -553,6 +622,9 @@ class DockerStream:
 
     # --- lifecycle ---------------------------------------------------------------
     def lines(self) -> Iterator[str]:
+        """Yield stdout line by line until the container exits or is killed; then reap
+        the client, keep the stderr tail, and raise for a launch failure. Consume it
+        fully (or stop early — the ``finally`` still cleans up)."""
         assert self._proc.stdout is not None
         saw_output = False
         try:
@@ -581,6 +653,8 @@ class DockerStream:
 
     @property
     def _enforced(self) -> bool:
+        """Did WE end it (deadline or cancel)? A 125 after an enforced kill is not a
+        launch failure."""
         return self._timed_out or self._cancelled
 
     def _poll_cancel(self) -> None:

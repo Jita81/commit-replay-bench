@@ -37,6 +37,41 @@ profile* — a (class × size) histogram of its recent history, see
 :func:`profile_repo` — that routes to ``deliver``. ``earned_coverage`` is the
 stricter share whose cells also carry an earned verification tier (a human
 signed off — see :mod:`crb.core.signoff`).
+
+Navigation
+----------
+What it is:   The capability map — the read side of the ledger: every cell of a projection
+              with its statistics, route and verification tier; the cheapest-passing
+              config pick; a repository's change profile; Trusted Autonomy Coverage.
+What it does: Groups rows by a projection of the cell key, reduces each group with
+              ``cell_stats`` and routes it with the one rule; reports a cell with no rows as
+              ``not_yet_measured`` (never zero-filled); grants at most ``automated-pass``
+              (earned tiers come only from sign-off); picks a config by cost then latency
+              only among configs whose own cell routes ``deliver``; joins a repo's
+              (class × size) histogram to the map to give a volume-weighted coverage.
+              Nothing here re-derives a belt, a verdict or a row.
+How:          ``build_capability_map`` (``group_by_cell`` → ``measure_cell`` → ``route``) →
+              ``CapabilityMap.lookup`` / ``get`` → ``best_config`` (``config_candidates`` →
+              ``pareto_frontier``) → ``profile_repo`` (git log + ``classify_commit`` +
+              ``size_tier``) → ``trusted_autonomy_coverage`` → the markdown renderers.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0007-abstract-cell-export-only.md
+Works with:   src/crb/core/ledger.py (CellStats, group_by_cell, false_q1_total),
+              src/crb/core/routing.py (the rule and the controls verdict),
+              src/crb/core/signoff.py (overlays earned tiers on these cells),
+              src/crb/core/forecast.py (reads the map to plan measurement),
+              src/crb/core/learn.py (reads it to propose strengthening work),
+              src/crb/server/routes/capability.py (serves it; supplies the controls
+              verdict and per-task oracle scores), src/crb/core/git.py (the profile walk)
+Tested by:    tests/test_capability.py, tests/test_signoff.py, tests/test_forecast.py,
+              tests/test_server_routes_capability.py
+Touch when:   never for a new repository (its profile and cells appear from its rows —
+              docs/OPERATOR.md#4-read-the-capability-map); adding a projection means a new
+              entry in ``PROJECTIONS`` and the API/UI view; adding a tier or changing what
+              "deliverable" means needs an ADR and a docs/EVIDENCE-AND-CLAIMS.md update.
+Claims:       A ``deliver`` cell is a high-confidence candidate under the published bar,
+              not "safe to automate"; coverage is a share of change volume, not of
+              correctness (docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity).
 """
 
 from __future__ import annotations
@@ -81,6 +116,9 @@ NOT_YET_MEASURED = "not_yet_measured"
 #: Every state a cell can be in: the five routes plus the honest-empty one.
 CELL_STATES: tuple[str, ...] = (*ROUTES, NOT_YET_MEASURED)
 
+#: A projection is the subset of cell-key fields a view groups on; every other field
+#: reads ``"*"`` in the projected key. The full cell is the finest; class × size is
+#: the one the router, the sign-off and the coverage number use.
 PROJECTION_CELL: tuple[str, ...] = CELL_FIELDS
 PROJECTION_CLASS: tuple[str, ...] = ("capability_class",)
 PROJECTION_CLASS_SIZE: tuple[str, ...] = ("capability_class", "size")
@@ -107,12 +145,15 @@ TIER_AB_CONFIRMED = "ab-confirmed"
 EARNED_TIERS: tuple[str, ...] = (TIER_HUMAN_VERIFIED, TIER_AB_CONFIRMED)
 TIERS: tuple[str, ...] = (TIER_UNTRUSTED, TIER_AUTOMATED_PASS, *EARNED_TIERS)
 
+#: How a :class:`ConfigPick` was chosen: by economics (only when cost AND latency were
+#: measured) or by evidence alone (no economic claim is then made).
 SELECTION_COST_THEN_LATENCY = "cost_then_latency"
 SELECTION_POINT = "point"
 SELECTIONS: tuple[str, ...] = (SELECTION_COST_THEN_LATENCY, SELECTION_POINT)
 
 
 def _check_projection(projection: Sequence[str]) -> tuple[str, ...]:
+    """Validate and normalise a projection (non-empty, cell-key fields only)."""
     proj = tuple(projection)
     if not proj:
         raise ValueError("a projection needs at least one cell-key field")
@@ -177,6 +218,8 @@ class CapabilityCell:
     latency_known: bool
 
     def __post_init__(self) -> None:
+        # the invariants of the module docstring, enforced at construction: honest-empty
+        # (no stats ⇒ no decision, no tier) and untrusted-on-false-Q1
         object.__setattr__(self, "projection", _check_projection(self.projection))
         if self.verification_tier is not None and self.verification_tier not in TIERS:
             raise ValueError(f"verification_tier {self.verification_tier!r} not in {TIERS}")
@@ -191,7 +234,8 @@ class CapabilityCell:
         ):
             raise ValueError("a cell with false_q1 > 0 is 'untrusted' — no other tier is possible")
 
-    # --- convenience -----------------------------------------------------------
+    # --- convenience: every accessor reads through to ``stats`` / ``decision`` and
+    # returns the honest-empty value (0, None, not_yet_measured) for an unmeasured cell
     @property
     def measured(self) -> bool:
         return self.stats is not None
@@ -259,10 +303,12 @@ class CapabilityCell:
 
     @property
     def earned(self) -> bool:
+        """A human has attested this cell (sign-off), not just the ledger."""
         return self.verification_tier in EARNED_TIERS
 
     @property
     def label(self) -> str:
+        """The projected fields joined by ``|`` (the wildcards are left out)."""
         return "|".join(getattr(self.key, f) for f in self.projection)
 
     def with_tier(self, tier: str) -> CapabilityCell:
@@ -381,10 +427,12 @@ def measure_cell(
         stats=stats,
         decision=decision,
         verification_tier=tier,
+        # advisory only: the SPC σ of the clean indicator, never a gate
         sigma=stddev([1.0 if r.clean else 0.0 for r in eligible]) if eligible else None,
         repos=len({r.repo for r in rows}),
         rows=len(rows),
         belt_sets=tuple(sorted({r.belt_set for r in rows})),
+        # an axis nobody recorded (all zeros) is unknown, not free / instant
         cost_known=any(r.cost_usd > 0 for r in eligible),
         latency_known=any(r.latency_s > 0 for r in eligible),
     )
@@ -434,6 +482,7 @@ class CapabilityMap:
         return self.lookup(dict(fields))
 
     def by_route(self) -> dict[str, list[CapabilityCell]]:
+        """Cells bucketed by state, every state present (empty lists included)."""
         out: dict[str, list[CapabilityCell]] = {s: [] for s in CELL_STATES}
         for c in self.cells:
             out[c.route].append(c)
@@ -534,15 +583,18 @@ class ConfigPick:
 
     @property
     def label(self) -> str:
+        """``builder/model@provider`` — how a config is named everywhere it is shown."""
         k = self.cell.key
         return f"{k.builder}/{k.model}@{k.provider}"
 
     @property
     def cost_usd(self) -> float | None:
+        """Mean cost per trial, or ``None`` when the axis was never recorded."""
         return self.cell.stats.cost_usd_mean if self.cell.cost_known and self.cell.stats else None
 
     @property
     def latency_s(self) -> float | None:
+        """Mean latency per trial, or ``None`` when the axis was never recorded."""
         return (
             self.cell.stats.latency_s_mean if self.cell.latency_known and self.cell.stats else None
         )
@@ -721,12 +773,14 @@ class RepoChangeProfile:
             raise ValueError("n_commits must equal the sum of the cell counts")
 
     def class_totals(self) -> dict[str, int]:
+        """Commits per class, most frequent first."""
         out: dict[str, int] = {}
         for (cls, _), n in self.cells.items():
             out[cls] = out.get(cls, 0) + n
         return dict(sorted(out.items(), key=lambda kv: (-kv[1], kv[0])))
 
     def size_totals(self) -> dict[str, int]:
+        """Commits per size tier, most frequent first."""
         out: dict[str, int] = {}
         for (_, size), n in self.cells.items():
             out[size] = out.get(size, 0) + n
@@ -758,6 +812,7 @@ class RepoChangeProfile:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> RepoChangeProfile:
+        """Rebuild from :meth:`to_dict` (the shape the store and the API carry)."""
         cells = {
             (str(c["capability_class"]), str(c["size"])): int(c["count"])
             for c in d.get("cells", [])
@@ -872,10 +927,12 @@ class CoverageSummary:
 
     @property
     def coverage(self) -> float:
+        """TAC: the share of change volume that routes ``deliver`` with a config to use."""
         return self.deliver_volume / self.total_volume if self.total_volume else 0.0
 
     @property
     def earned_coverage(self) -> float:
+        """The share of change volume whose cells a human has also signed off."""
         return self.earned_volume / self.total_volume if self.total_volume else 0.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -955,10 +1012,12 @@ def trusted_autonomy_coverage(
 
 
 def _fmt_pct(x: float | None) -> str:
+    """``None`` renders as a dash, never as 0% — an unmeasured number stays visibly so."""
     return "—" if x is None else f"{x:.1%}"
 
 
 def _fmt_controls(c: ControlsVerdict | None, policy: RoutingPolicy) -> str:
+    """The controls line of the map header: state plus the constructible share."""
     if c is None:
         return "not evaluated"
     state = c.state(min_share=policy.min_controls_share, max_escapes=policy.max_controls_escapes)
@@ -1024,6 +1083,7 @@ def render_markdown(cmap: CapabilityMap) -> str:
 
 
 def render_profile(profile: RepoChangeProfile, *, top: int = 20) -> str:
+    """The change profile as a markdown table of its ``top`` (class × size) cells."""
     lines = [
         f"# Change profile — {profile.repo} ({profile.ref})",
         "",
@@ -1040,6 +1100,8 @@ def render_profile(profile: RepoChangeProfile, *, top: int = 20) -> str:
 
 
 def render_coverage(summary: CoverageSummary) -> str:
+    """Coverage as markdown: the two shares in the header, one row per profiled cell
+    with its route, evidence, tier and the config it would be routed to."""
     lines = [
         f"# Trusted Autonomy Coverage — {summary.repo}",
         "",

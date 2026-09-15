@@ -33,6 +33,40 @@ map always does (fail-closed: it passes :meth:`ControlsVerdict.unmeasured` when
 the repo has no controls report); a caller that evaluates none (a JSONL ledger
 on the CLI, a unit test) gets a decision stamped ``controls_policy=""`` and
 ``controls=None`` so the absence is visible, never mistaken for a pass.
+
+Navigation
+----------
+What it is:   The routing rule — ``route``, the one function that turns a measured cell into
+              ``deliver`` / ``calibrate`` / ``granularize`` / ``human`` / ``do_not_ship``
+              with a reason and a reason code.
+What it does: Applies the published thresholds (``RoutingPolicy``: n, point, Wilson lower
+              bound, oracle strength) and the negative-controls gate (``ControlsVerdict``) in
+              a fixed order, first match wins; refuses ``deliver`` on any false-Q1, on an
+              unmeasured or thin controls report, and on an escaped measurement control.
+              Pure: reads statistics, never rows or a model.
+How:          false-Q1 → granularize by size → controls failed → n → oracle strength →
+              controls escapes → point → CI lower → controls unmeasured → controls thin →
+              deliver; every branch returns a ``RouteDecision`` stamped with the policy
+              versions that produced it.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0010-polyglot-negative-controls.md
+Works with:   src/crb/core/ledger.py (CellStats — the input), src/crb/core/capability.py (the
+              map that routes every cell), src/crb/core/oracle/controls.py (the report a
+              ControlsVerdict reduces), src/crb/core/oracle/adequacy.py (oracle strength),
+              src/crb/core/signoff.py (a signed cell must still route ``deliver``),
+              src/crb/server/routes/capability.py (serves decisions; passes ``unmeasured``
+              when no report exists), src/crb/cli/commands/route.py (``crb route``)
+Tested by:    tests/test_routing.py, tests/test_capability.py, tests/test_signoff.py,
+              tests/test_server_routes_capability.py
+Touch when:   never for a new repository (the rule is the same for every cell; run a
+              ``controls`` run so the gate is measured); changing a threshold, adding a
+              clause or a reason code changes what ``deliver`` means — bump
+              ``POLICY_VERSION`` / ``CONTROLS_POLICY_VERSION``, write an ADR superseding
+              docs/adr/0003-one-routing-rule.md, and update
+              docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity and the UI's
+              reason-code copy.
+Claims:       ``deliver`` licenses auto-delivery as a branch + PR under review, not
+              mergeability (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
 """
 
 from __future__ import annotations
@@ -43,6 +77,8 @@ from typing import Any
 
 from crb.core.ledger import CellStats
 
+#: Stamped on every decision. A decision made under an older version is not comparable
+#: with one made under a newer one; bump on any change to a clause or a threshold.
 POLICY_VERSION = "routing.v1"
 CONTROLS_POLICY_VERSION = "controls-gate.v1"
 
@@ -60,6 +96,8 @@ ROUTES: tuple[str, ...] = (
 )
 
 # --- reason codes: one per clause, in evaluation order ----------------------------
+# A code is the machine-readable half of a decision (the UI keys copy and pills on
+# it; the learning loop groups on it); ``reason`` is the human sentence.
 REASON_FALSE_Q1 = "false_q1"
 REASON_GRANULARIZE = "granularize"
 REASON_CONTROLS_FAILED = "controls_failed"
@@ -158,6 +196,8 @@ class ControlsVerdict:
         rows = _int("n_rows", "rows")
         skipped = _int("skipped")
         not_constructible = _int("not_constructible")
+        # a skipped row (no RED oracle to exercise) is not a control that failed to be
+        # built: it leaves both the numerator and the denominator of ``share``
         total = max(0, rows - skipped)
         apparatus = counts.get("apparatus")
         complete = counts.get("complete")
@@ -179,6 +219,8 @@ class ControlsVerdict:
         return self.constructible / self.total if self.total else 0.0
 
     def thin(self, min_share: float) -> bool:
+        """Fewer than ``min_share`` of the controls could be built — "passed" then
+        says little. Unmeasured is not thin (it has its own clause)."""
         return self.measured and self.share < min_share
 
     def state(self, *, min_share: float, max_escapes: int) -> str:
@@ -209,6 +251,10 @@ class ControlsVerdict:
 
 @dataclass(frozen=True)
 class RoutingPolicy:
+    """The thresholds of the rule. The defaults ARE the published rule (ADR-0003);
+    a caller may tighten them for a deployment, and the ``version`` fields travel
+    with every decision so a relaxed policy can never pass as the standard one."""
+
     min_n: int = 10
     min_point: float = 0.90
     min_ci_low: float = 0.80
@@ -243,6 +289,10 @@ DEFAULT_POLICY = RoutingPolicy()
 
 @dataclass(frozen=True)
 class RouteDecision:
+    """One cell's route with the evidence it was decided on (``n``, ``point``,
+    ``ci_low``, ``false_q1``, ``oracle_strength``, the controls verdict) and the
+    policy versions — enough for a reader to re-derive it from the ledger."""
+
     route: str
     reason: str
     cell: dict[str, str]
@@ -280,6 +330,7 @@ class RouteDecision:
 
 
 def _controls_reason(prefix: str, c: ControlsVerdict, detail: str) -> str:
+    """A controls reason names the run it came from, so the reader can open it."""
     run = f" (controls run {c.run_id[:8]})" if c.run_id else ""
     return f"{prefix}: {detail}{run}"
 
@@ -298,6 +349,7 @@ def route(
     :meth:`ControlsVerdict.unmeasured` to say "we looked and there is none" — the
     fail-closed reading the server's capability map uses.
     """
+    # an explicit strength (the adequacy gate's) outranks the mean the rows carry
     strength = oracle_strength if oracle_strength is not None else stats.oracle_strength_mean
     base: dict[str, Any] = {
         "cell": stats.cell.to_dict(),
@@ -311,6 +363,8 @@ def route(
         "controls_policy": policy.controls_version if controls is not None else "",
     }
     measured_controls = controls is not None and controls.measured
+    # the order below is the ADR's: instrument defects (false-Q1, a failed gate) are
+    # named before sample size, so a broken instrument never reads as "calibrate"
     if stats.false_q1 > 0:
         return RouteDecision(
             ROUTE_DO_NOT_SHIP,

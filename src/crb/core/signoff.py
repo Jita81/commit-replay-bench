@@ -85,6 +85,43 @@ Schema
 snapshot fields only; ``crb.signoff.v2`` records hash everything. :meth:`SignoffRecord.body`
 is schema-aware so an old chain still verifies after this module learned the new
 fields, and :meth:`SignoffRecord.from_dict` tolerates either shape.
+
+Navigation
+----------
+What it is:   The sign-off ledger — the separate append-only, hash-chained record of human
+              attestations (``SignoffRecord``), the policy that decides whether one may be
+              written (``SignoffPolicy`` / ``evaluate_signoff`` / ``check_signable``), and
+              the read-time overlay that lifts a cell's verification tier.
+What it does: Refuses an attestation on a false-Q1 cell, a thin cell, an unmeasured or
+              failed controls gate, an unmeasured or weak oracle, a route other than
+              ``deliver``, or without the approver naming the accepted row they read;
+              stamps the evidence and the thresholds the approver actually cleared into the
+              record; lifts tiers only for cells whose CURRENT false-Q1 is 0, so a later
+              defect silently withdraws the trust. A revocation is another append and
+              always writes.
+How:          ``JsonlSignoffLedger.append`` → ``check_signable`` (first failing clause →
+              ``SignoffRefused``, HTTP 409) → ``stamp_evidence`` (cell stats, route, controls,
+              ``resolve_oracle_strength``, policy) → chain + fsync; readers call
+              ``active_signoffs`` (latest per scope, revoked dropped) → ``apply_signoffs``
+              (``key_matches`` on the cell pattern) → ``CapabilityCell.with_tier``.
+Layer:        core — docs/ARCHITECTURE.md#54-a-sign-off-refused-with-409-p4
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/capability.py (the cell and the tiers it may reach),
+              src/crb/core/routing.py (the decision and the controls verdict a sign-off is
+              judged on), src/crb/server/routes/signoffs.py (the write boundary that holds
+              the ledger and checks the attested row is clean), src/crb/store/models.py (the
+              append-only ``signoffs`` table), src/crb/core/evidence.py (canonical JSON,
+              sha256), src/crb/core/redact.py (notes and statements are redacted at write)
+Tested by:    tests/test_signoff.py, tests/test_server_routes_signoffs.py, tests/test_capability.py
+Touch when:   never for a new repository (run ``controls`` and ``oracle`` runs so its cells
+              become signable — docs/OPERATOR.md#5-sign-off-p4); relaxing a threshold is a
+              deployment setting (``CRB_SIGNOFF__*`` within ``POLICY_BOUNDS``), never an
+              edit here; adding a clause or a snapshot field bumps ``SIGNOFF_POLICY_VERSION``
+              / ``SIGNOFF_SCHEMA``, keeps the old body hashing byte-identical, and updates
+              docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2.
+Claims:       A signed cell licenses exactly the claim shape in
+              docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2
+              — a tier, never a route, a point or an interval.
 """
 
 from __future__ import annotations
@@ -222,6 +259,7 @@ class SignoffRefusal:
 
     @property
     def overridable(self) -> bool:
+        """Could a deployment setting have made this clause pass? (The UI says so.)"""
         return refusal_family(self.code) not in NON_OVERRIDABLE_REFUSALS
 
     def to_dict(self) -> dict[str, Any]:
@@ -463,6 +501,8 @@ class SignoffRecord:
             raise ValueError("verifier is required (who signed, or who revoked)")
         if self.tier not in EARNED_TIERS:
             raise ValueError(f"tier must be one of {EARNED_TIERS}, got {self.tier!r}")
+        # the one clause that holds even on a record rebuilt from disk: a stored
+        # attestation over false-Q1 evidence cannot be re-instantiated, let alone applied
         if self.false_q1_at_signoff > 0 and not self.revoked:
             raise SignoffRefused(
                 "an attestation cannot be made on evidence with false-Q1 > 0",
@@ -512,18 +552,22 @@ class SignoffRecord:
         return out
 
     def compute_hash(self) -> str:
+        """SHA-256 of the canonical JSON of :meth:`body` (``prev_hash`` included)."""
         return sha256_text(canonical_json(self.body()))
 
     def chained(self, prev_hash: str) -> SignoffRecord:
+        """A copy with ``prev_hash`` set and ``row_hash`` computed (the ledger's job)."""
         rec = replace(self, prev_hash=prev_hash)
         object.__setattr__(rec, "row_hash", rec.compute_hash())
         return rec
 
     def verify_hash(self) -> bool:
+        """``True`` iff the stored ``row_hash`` is the hash of the body as read back."""
         return bool(self.row_hash) and self.row_hash == self.compute_hash()
 
     # --- serialisation --------------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
+        """Every field, the attestation and thresholds as plain dicts."""
         d = {k: getattr(self, k) for k in self.__dataclass_fields__}
         d["attestation"] = None if self.attestation is None else self.attestation.to_dict()
         d["policy_thresholds"] = dict(self.policy_thresholds)
@@ -643,6 +687,8 @@ def evaluate_signoff(
     """
     if record.revoked:
         return ()
+    # scope and false-Q1 are returned ALONE: listing thin_cell etc. beside them would
+    # invite fixing the wrong thing
     if not record.matches(cell, repo=repo):
         return (
             SignoffRefusal(
@@ -830,6 +876,8 @@ class JsonlSignoffLedger:
         self.path = Path(path)
 
     def _last_hash(self) -> str:
+        """The last record's ``row_hash`` (tail read, as the grade ledger does), or
+        :data:`GENESIS_HASH` for an empty or absent file."""
         if not self.path.exists() or self.path.stat().st_size == 0:
             return GENESIS_HASH
         last = ""
@@ -896,6 +944,7 @@ class JsonlSignoffLedger:
         return chained
 
     def records(self) -> Iterator[SignoffRecord]:
+        """Every record in file order; nothing for an absent file."""
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as f:
@@ -904,10 +953,13 @@ class JsonlSignoffLedger:
                     yield SignoffRecord.from_dict(json.loads(line))
 
     def verify(self) -> int:
+        """Walk the chain; return the record count; raise on any break."""
         return verify_signoff_chain(self.records())
 
 
 def verify_signoff_chain(records: Iterable[SignoffRecord]) -> int:
+    """Prove ``records`` is an unbroken chain from genesis (the sign-off twin of
+    :func:`~crb.core.ledger.verify_chain`); raises :class:`LedgerIntegrityError`."""
     prev = GENESIS_HASH
     n = 0
     for rec in records:
@@ -950,6 +1002,8 @@ def apply_signoffs(
     active = list(active_signoffs(signoffs).values())
     out: list[CapabilityCell] = []
     for cell in cells:
+        # the read-time half of the invariant: trust is withheld the moment the
+        # cell's own evidence stops deserving it, whatever was signed earlier
         if cell.stats is None or cell.stats.false_q1 > 0:
             out.append(cell)
             continue
@@ -966,4 +1020,5 @@ def apply_signoffs(
 def apply_signoffs_to_map(
     cmap: CapabilityMap, signoffs: Iterable[SignoffRecord], *, repo: str = WILDCARD
 ) -> CapabilityMap:
+    """:func:`apply_signoffs` over a whole map; returns a new map, same projection."""
     return cmap.with_cells(apply_signoffs(cmap.cells, signoffs, repo=repo))
