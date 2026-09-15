@@ -11,6 +11,30 @@
   the outcome records which cap fired.
 * :func:`parse_ladder` / :func:`default_ladder` / :func:`budget_for_rung` — the
   escalation ladder as data (``builder:model@provider,…``).
+
+Navigation
+----------
+What it is:   The spend instruments every adapter shares — the price table, the ``CostMeter``,
+              the ``BudgetTracker`` — and the ladder-as-data helpers.
+What it does: Meters tokens and USD per build (a provider-reported cost wins; an unpriced
+              model is ``cost_known=False`` with a warning, never a silent ``$0.00``), and
+              answers "may the loop continue?" with the cap that fired, in the order wall
+              clock → cost → tokens → turns → tool calls.
+How:          ``price_for``: exact id → longest known prefix → provider placeholder →
+              unknown. ``BudgetTracker.exceeded`` reads the meter and its own counters
+              against the frozen ``Budget``.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+Works with:   src/crb/builders/base.py (``Budget``, ``Rung``, the stop reasons),
+              src/crb/builders/openai_agent.py and src/crb/builders/claude_code.py (the loops
+              that ask the tracker), src/crb/builders/adapter.py (``budget_for_rung`` per
+              attempt), src/crb/server/worker.py (object rungs with a ``budget`` override)
+Tested by:    tests/test_builders_base.py, tests/test_worker_budget_ladder.py
+Touch when:   a model is added or re-priced — prefer ``CRB_PRICING_JSON`` (docs/OPERATOR.md)
+              over editing ``DEFAULT_PRICING``; a new cap needs a stop reason in
+              src/crb/builders/base.py and a place in ``exceeded``'s order.
+Claims:       ``cost_usd`` with ``cost_known=False`` is metered tokens at price zero — it
+              must never be summed as spend (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -50,6 +74,8 @@ class Pricing:
     cached_input_per_m: float | None = None
 
     def cost(self, tokens_in: int, tokens_out: int, *, cached_in: int = 0) -> float:
+        """USD for one call; cached input is billed at its own rate when the table has
+        one, else at the input rate; an unknown price is always ``0.0``."""
         if not self.known:
             return 0.0
         uncached = max(0, tokens_in - cached_in)
@@ -61,6 +87,7 @@ class Pricing:
         return c
 
     def to_dict(self) -> dict[str, Any]:
+        """The shape ``CRB_PRICING_JSON`` uses per model."""
         return {
             "input_per_m": self.input_per_m,
             "output_per_m": self.output_per_m,
@@ -70,6 +97,7 @@ class Pricing:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Pricing:
+        """Inverse of :meth:`to_dict` (missing rates read as 0.0 — pair with ``known``)."""
         return cls(
             input_per_m=float(d.get("input_per_m", 0.0)),
             output_per_m=float(d.get("output_per_m", 0.0)),
@@ -168,6 +196,8 @@ class CostMeter:
         cached_in: int = 0,
         cost_usd: float | None = None,
     ) -> None:
+        """Record one model call. A provider-reported ``cost_usd`` switches the meter to
+        reported mode for the whole build (the table is then only a fallback)."""
         self.tokens_in += max(0, int(tokens_in or 0))
         self.tokens_out += max(0, int(tokens_out or 0))
         self.cached_in += max(0, int(cached_in or 0))
@@ -178,19 +208,23 @@ class CostMeter:
 
     @property
     def cost_known(self) -> bool:
+        """``True`` when a provider reported cost or the model is in the price table."""
         return self._any_reported or self.pricing.known
 
     @property
     def cost_usd(self) -> float:
+        """Reported cost when any call reported one, else the table price of the tokens."""
         if self._any_reported:
             return self._reported_cost
         return self.pricing.cost(self.tokens_in, self.tokens_out, cached_in=self.cached_in)
 
     @property
     def total_tokens(self) -> int:
+        """Input + output (what ``Budget.max_tokens`` caps)."""
         return self.tokens_in + self.tokens_out
 
     def to_dict(self) -> dict[str, Any]:
+        """The meter's totals as an outcome / event carries them."""
         return {
             "model": self.model,
             "calls": self.calls,
@@ -226,19 +260,24 @@ class BudgetTracker:
 
     @property
     def elapsed_s(self) -> float:
+        """Seconds since the tracker was created (the build's start)."""
         return self._clock() - self._started
 
     @property
     def remaining_s(self) -> float:
+        """Wall clock left, floored at 0 — what a subprocess adapter passes as its timeout."""
         return max(0.0, self.budget.wall_clock_s - self.elapsed_s)
 
     def note_turn(self) -> None:
+        """One model round-trip happened."""
         self.turns += 1
 
     def note_tool_call(self) -> None:
+        """One tool call happened (refused calls count too — they cost a turn of attention)."""
         self.tool_calls += 1
 
     def exceeded(self) -> str:
+        """The first cap hit, as a stop reason, or ``""`` (the class docstring has the order)."""
         b = self.budget
         if self.elapsed_s >= b.wall_clock_s:
             return STOP_WALL_CLOCK
@@ -259,6 +298,7 @@ class BudgetTracker:
         return self.exceeded()
 
     def to_dict(self) -> dict[str, Any]:
+        """Counters + meter + the budget they were checked against."""
         return {
             "turns": self.turns,
             "tool_calls": self.tool_calls,

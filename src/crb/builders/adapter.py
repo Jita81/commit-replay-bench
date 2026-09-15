@@ -43,6 +43,35 @@ Honesty properties
   which the unchanged grader then grades. A sandbox that cannot be provided is
   :class:`~crb.core.execution.SandboxUnavailable` and propagates — the run stops —
   rather than becoming a recorded attempt on the host.
+
+Navigation
+----------
+What it is:   The seam between the stdlib orchestrator and the builder registry — rung labels
+              ⇄ ``EscalationLadder``, and ``build_fn_for``, the ``BuildFn`` the run calls.
+What it does: Per attempt: resolves the rung, derives the brief (never ``src_files``; nothing
+              test-shaped in blind mode), runs one ``builder.build`` — on the host or against
+              a sealed checkout in a container — writes the redacted transcript to a file,
+              maps the outcome to a ``BuildAttempt`` and discards the source edits of any
+              errored attempt so it can never grade clean-with-error.
+How:          ``ladder_from_spec`` → ``rung_index`` → ``build``: ``sighted_test_command``
+              (services up, env prefix) → ``BuildBrief.from_task`` → ``budget_for_rung`` →
+              ``builder.build`` / ``sealed_build`` (``SealedCheckout`` + ``ContainerSession``
+              + ``copy_back``) → ``attempt_error`` → ``discard``.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0012-builder-in-a-sealed-container.md,
+              docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/core/run.py (defines ``BuildFn``/``BuildAttempt`` and calls this),
+              src/crb/builders/base.py (brief, budget, outcome), src/crb/builders/__init__.py
+              (``builder_for_rung``), src/crb/builders/container.py (the sealed path),
+              src/crb/builders/budget.py (per-rung budget), src/crb/core/ledger.py (why an
+              errored attempt must not carry a patch), src/crb/server/worker.py (the caller
+              that supplies ``container`` from the environment)
+Tested by:    tests/test_builders_adapter.py, tests/test_builders_container.py, tests/test_run.py
+Touch when:   never for a new repository (the sighted test command comes from the runner);
+              a new builder that must run sealed is added to ``SEALABLE_BUILDERS`` in
+              src/crb/builders/container.py; a new attempt error kind must keep its prefix on
+              the head (the ledger reads it there) and needs a ledger test.
 """
 
 from __future__ import annotations
@@ -146,6 +175,7 @@ def ladder_from_spec(labels: Sequence[str], default_provider: str = "") -> Escal
 
 
 def _aliases(rung: Rung) -> tuple[str, ...]:
+    """Every spelling of a rung's label that ``rung_index`` should resolve."""
     base = rung.label
     if not rung.provider:
         return (base,)
@@ -262,6 +292,7 @@ def discard_source_edits(ws: Workspace, config: RepoConfig, protected: Sequence[
 
 
 def _failed_attempt(rung_label: str, mode: str, error: str) -> BuildAttempt:
+    """An attempt that never reached a builder (unknown rung, un-instantiable builder)."""
     return BuildAttempt(BuilderRef(name=rung_label, mode=mode), error=_prefixed("", error))
 
 
@@ -377,6 +408,8 @@ def build_fn_for(
         emit(on_event, BUILDER_EVENT_PREFIX + action, **dict(payload))
 
     def instantiate(rung: Rung) -> Builder:
+        # One builder per rung for the run (its SDK client is reused across tasks); the
+        # sealed path instantiates per attempt instead because the spawn is session-bound.
         key = id(rung)
         b = builders.get(key)
         if b is None:
@@ -456,6 +489,7 @@ def build_fn_for(
         return outcome
 
     def build(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
+        """The ``BuildFn``: one attempt of ``task`` on ``rung_label`` in ``mode``."""
         rung = index.get(rung_label)
         if rung is None:
             return _failed_attempt(rung_label, mode, f"unknown rung {rung_label!r} (not on ladder)")

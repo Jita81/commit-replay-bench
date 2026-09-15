@@ -26,6 +26,42 @@ short-cut the grade:
   dishonest ones into recorded protocol violations.
 
 Every string that reaches an outcome passes through :mod:`crb.core.redact`.
+
+Navigation
+----------
+What it is:   The builder contract — ``BuildBrief`` (what a builder is told), ``Budget`` and
+              the ``EscalationLadder`` (what it may spend), ``BuildOutcome`` (what it reports,
+              claim labelled untrusted), the ``Builder`` protocol, and the two guards every
+              adapter shares: ``TestFileGuard`` (paths) and ``GitArchaeologyGuard`` (shell).
+What it does: Makes the short-cuts non-constructible: a blind brief cannot carry test paths,
+              a budget cannot be unbounded, an outcome cannot carry a verdict; refuses a test
+              write, a ``.git`` write, a path outside the worktree, git history, the shared
+              stash, the network and package installs before they happen (tool loops) or
+              records them after the fact (subprocess agents). The belts stay the authority.
+How:          Frozen dataclasses with ``__post_init__`` invariants → the guards: path
+              normalisation + symlink resolution for ``TestFileGuard``; for the shell guard,
+              heredoc stripping → substitution hoisting → newline splitting → ``shlex`` →
+              per-segment unwrap (wrappers, assignments, keywords) → per-executable rules
+              (git verbs, package managers, inline-code scan).
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0012-builder-in-a-sealed-container.md
+Works with:   src/crb/builders/adapter.py (turns a ``Builder`` into the core's ``BuildFn``),
+              src/crb/builders/openai_agent.py and src/crb/builders/claude_code.py (the
+              adapters that apply the guards), src/crb/core/workspace.py (the tree a builder
+              edits and ``tests_byte_identical`` behind ``TestFileGuard.tampered``),
+              src/crb/core/evidence.py (``BuilderRef`` — the pack view of an outcome),
+              src/crb/core/grade.py (the verdict this module never produces),
+              tests/fixtures/shell_corpus.txt (the honest-shell corpus the guard must pass)
+Tested by:    tests/test_builders_base.py, tests/test_builders_guard_corpus.py
+Touch when:   never for a new repository; a guard false positive on honest shell is fixed
+              here AND added as a corpus line (tests/fixtures/shell_corpus.txt) first; a new
+              stop reason or outcome field changes ``BuilderRef`` in src/crb/core/evidence.py
+              and the ledger row; a change to ``DEFAULT_RULES`` is a measurement change
+              (docs/EVIDENCE-AND-CLAIMS.md).
+Claims:       A guard refusal is a recorded protocol violation, not a verdict; a guard pass
+              is not a licence — belt 1 re-checks every test byte post hoc
+              (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -142,16 +178,20 @@ class BuildBrief:
         object.__setattr__(self, "message", self.message or self.subject)
 
     def repo_config(self) -> RepoConfig:
+        """The config the guards classify tests with — the attached one, else a minimal
+        one derived from ``repo`` + ``language`` (then only ``test_files`` are protected)."""
         if self.config is not None:
             return self.config
         return RepoConfig(name=self.repo or "repo", language=Language.parse(self.language or "py"))
 
     @property
     def sighted(self) -> bool:
+        """The target tests are in the worktree and listed (the census mode)."""
         return self.mode == MODE_SIGHTED
 
     @property
     def blind(self) -> bool:
+        """The oracle is held out: no test paths, no test command."""
         return self.mode == MODE_BLIND
 
     @classmethod
@@ -235,6 +275,8 @@ class BuildBrief:
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
+        """The brief as recorded in a transcript / evidence pack (``harness_command`` is
+        environment, not task, and is left out)."""
         return {
             "subject": self.subject,
             "message": self.message,
@@ -297,6 +339,7 @@ class Budget:
             raise ValueError("max_tokens / max_cost_usd cannot be negative")
 
     def to_dict(self) -> dict[str, Any]:
+        """The caps as stored on an outcome / a ledger row."""
         return {
             "max_turns": self.max_turns,
             "max_tool_calls": self.max_tool_calls,
@@ -307,6 +350,7 @@ class Budget:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Budget:
+        """Inverse of :meth:`to_dict`; unknown keys are ignored, missing ones default."""
         return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
 
 
@@ -326,9 +370,11 @@ class Rung:
 
     @property
     def label(self) -> str:
+        """``builder:model`` — how a rung is named in notes and the UI."""
         return f"{self.builder}:{self.model}"
 
     def to_dict(self) -> dict[str, Any]:
+        """The rung as stored in a run spec."""
         return {
             "builder": self.builder,
             "model": self.model,
@@ -338,6 +384,7 @@ class Rung:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Rung:
+        """Inverse of :meth:`to_dict` (``builder`` and ``model`` are required)."""
         return cls(
             builder=str(d["builder"]),
             model=str(d["model"]),
@@ -370,19 +417,24 @@ class EscalationLadder:
 
     @property
     def first(self) -> Rung:
+        """The rung every task starts on."""
         return self.rungs[0]
 
     def next_after(self, rung: Rung) -> Rung | None:
+        """The rung to escalate to after ``rung``; ``None`` at the top; ``ValueError`` if
+        ``rung`` is not on this ladder (an orchestrator bug, never silently the first)."""
         for i, r in enumerate(self.rungs):
             if r == rung:
                 return self.rungs[i + 1] if i + 1 < len(self.rungs) else None
         raise ValueError(f"rung {rung.label} is not on this ladder")
 
     def to_dict(self) -> dict[str, Any]:
+        """The ladder as stored in a run spec."""
         return {"rungs": [r.to_dict() for r in self.rungs]}
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> EscalationLadder:
+        """Inverse of :meth:`to_dict`; an empty ``rungs`` list is a ``ValueError``."""
         return cls(tuple(Rung.from_dict(r) for r in d.get("rungs", ())))
 
 
@@ -459,6 +511,9 @@ class BuildOutcome:
         )
 
     def to_dict(self, *, include_transcript: bool = False) -> dict[str, Any]:
+        """The outcome as the worker stores it. The builder's claim is nested under
+        ``claim`` with ``trusted: False`` so no reader can mistake it for a verdict; the
+        transcript is opt-in (evidence packs reference it, never inline it)."""
         d: dict[str, Any] = {
             "builder": self.builder,
             "model": self.model,
@@ -491,6 +546,9 @@ class BuildOutcome:
 
 @runtime_checkable
 class Builder(Protocol):
+    """What the registry hands out and the adapter wraps: ``build`` edits the workspace
+    within ``budget`` and returns an outcome; ``describe`` is the apparatus stamp."""
+
     name: str
     model: str
     provider: str
@@ -502,7 +560,10 @@ class Builder(Protocol):
         budget: Budget,
         *,
         on_event: EventFn | None = None,
-    ) -> BuildOutcome: ...
+    ) -> BuildOutcome:
+        """Edit ``workspace`` as the brief asks, stopping on the first cap in ``budget``.
+        Never raises for a model or protocol failure — it is recorded in the outcome."""
+        ...
 
     def describe(self) -> dict[str, Any]:
         """Apparatus-stamp description (no secrets)."""
@@ -599,6 +660,7 @@ class TestFileGuard:
         return resolved.relative_to(self.root).as_posix()
 
     def check_read(self, rel: str) -> str:
+        """Reads are refused only for traversal and ``.git`` (tests may be read)."""
         return self.check_path(rel)
 
     def is_protected(self, rel: str) -> bool:
@@ -630,12 +692,14 @@ class TestFileGuard:
         return ""
 
     def resolve_read(self, rel: str) -> Path:
+        """The absolute path for a permitted read, else :class:`GuardRefused`."""
         reason = self.check_read(rel)
         if reason:
             raise GuardRefused(reason)
         return self.root / _norm_rel(rel)
 
     def resolve_write(self, rel: str) -> Path:
+        """The absolute path for a permitted write, else :class:`GuardRefused`."""
         reason = self.check_write(rel)
         if reason:
             raise GuardRefused(reason)
@@ -1313,6 +1377,7 @@ def _revisionish(a: str) -> bool:
 
 
 def _worktree_path(here: Path, a: str) -> bool:
+    """Is ``a`` a path that exists under ``here`` (pathspec magic and globs count as paths)?"""
     if a == "." or a.startswith(":") or any(c in a for c in "*?["):
         return True
     try:
@@ -1322,6 +1387,7 @@ def _worktree_path(here: Path, a: str) -> bool:
 
 
 def _leaves_worktree(path: str) -> bool:
+    """Absolute, home-relative or ``..``-climbing — a ``git -C`` target outside the tree."""
     p = path.replace("\\", "/")
     return p.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:", p)) or ".." in p.split("/")
 
@@ -1721,6 +1787,9 @@ class GitArchaeologyGuard:
         piped: bool,
         depth: int = 0,
     ) -> str:
+        """Check one pipeline segment: unwrap → ``GIT_*`` redirects → shells / ``eval`` /
+        ``alias`` → network tools → git → ``.git`` paths and write targets → inline code →
+        ``find -exec`` → package and build tools. First refusal wins."""
         args, assigns = _unwrap(seg)
         redirected = sorted(set(assigns) & _GIT_ENV_REDIRECT)
         if redirected:
@@ -1798,6 +1867,7 @@ class GitArchaeologyGuard:
         return ""
 
     def _find_exec(self, args: list[str], here: Path | None, depth: int) -> str:
+        """Every ``-exec``/``-execdir``/``-ok`` command of a ``find`` is a segment of its own."""
         i = 1
         while i < len(args):
             if args[i] in {"-exec", "-execdir", "-ok", "-okdir"}:
@@ -1815,6 +1885,9 @@ class GitArchaeologyGuard:
 
     # --- git -------------------------------------------------------------------------
     def _check_git(self, args: list[str], here: Path | None) -> str:
+        """Global options that re-point git are refused; then the sub-command must be in
+        ``GIT_ALLOWED`` (``stash`` gets its own message with the honest idiom), and the
+        verbs with argument rules dispatch to their handler."""
         i = 0
         while i < len(args) and args[i].startswith("-"):
             a = args[i]
@@ -1859,6 +1932,8 @@ class GitArchaeologyGuard:
 
     @staticmethod
     def _revision_arg(verb: str, a: str, here: Path | None) -> str:
+        """A positional of ``git diff``/``grep``: ``HEAD`` is fine, a ref-shaped word is
+        refused, and with a cwd anything that is not an existing path is refused too."""
         if a == "HEAD":
             return ""
         if _revisionish(a):
@@ -1868,6 +1943,7 @@ class GitArchaeologyGuard:
         return ""
 
     def _git_diff(self, rest: list[str], here: Path | None) -> str:
+        """``git diff`` may compare only the working tree against HEAD/the index."""
         opts, pos, _ = _git_args(rest, _GIT_VALUE_OPTS["diff"])
         if any(n == "--all" for n, _ in opts):
             return "archaeology: 'git diff --all' is not allowed"
@@ -1878,6 +1954,8 @@ class GitArchaeologyGuard:
         return ""
 
     def _git_grep(self, rest: list[str], here: Path | None) -> str:
+        """``git grep`` may not name a tree-ish; the first positional is the pattern unless
+        ``-e``/``-f`` gave it."""
         opts, pos, _ = _git_args(rest, _GIT_VALUE_OPTS["grep"])
         explicit_pattern = any(n in {"-e", "-f"} for n, _ in opts)
         for a in pos if explicit_pattern else pos[1:]:
@@ -1887,6 +1965,8 @@ class GitArchaeologyGuard:
         return ""
 
     def _git_checkout(self, rest: list[str], here: Path | None) -> str:
+        """Only ``git checkout [HEAD] -- <paths>`` (restore files); never a branch or
+        revision. Without ``--`` a word must be a verifiable path."""
         opts, pos, _ = _git_args(rest, _GIT_VALUE_OPTS["checkout"])
         for n, _v in opts:
             if n not in _CHECKOUT_OK:
@@ -1911,6 +1991,7 @@ class GitArchaeologyGuard:
         return ""
 
     def _git_restore(self, rest: list[str]) -> str:
+        """``git restore`` only from HEAD (``--source`` of anything else is history)."""
         opts, _pos, _ = _git_args(rest, _GIT_VALUE_OPTS["restore"])
         for n, v in opts:
             if n in {"-s", "--source"}:
@@ -1921,6 +2002,7 @@ class GitArchaeologyGuard:
         return ""
 
     def _git_rev_parse(self, rest: list[str]) -> str:
+        """Layout queries (``--show-toplevel`` …) and ``HEAD`` only — never another rev."""
         opts, pos, after = _git_args(rest, frozenset())
         for n, _v in opts:
             if n not in _REV_PARSE_OK:
@@ -1933,6 +2015,7 @@ class GitArchaeologyGuard:
         return ""
 
     def _git_config(self, rest: list[str]) -> str:
+        """Read-only: the clone's config is shared with every other worktree."""
         opts, pos, after = _git_args(rest, _GIT_VALUE_OPTS["config"])
         names = {n for n, _ in opts}
         if names & _CONFIG_WRITE or (
@@ -1956,6 +2039,8 @@ class GitArchaeologyGuard:
         here: Path | None,
         depth: int,
     ) -> str:
+        """Package and build tools: each manager's install/fetch/publish verbs are
+        ``network:`` refusals; everything else they do is honest."""
         if _PIP_RE.match(exe):
             return self._pip(args)
         if _PYTHON_RE.match(exe):
@@ -2006,6 +2091,7 @@ class GitArchaeologyGuard:
         return ""
 
     def _pip(self, args: list[str]) -> str:
+        """``pip install/download/…/uninstall`` refused; ``list``/``show``/``freeze`` honest."""
         pos = _positionals(args)
         if pos and pos[0] in _PIP_REFUSED:
             what = (
@@ -2019,6 +2105,8 @@ class GitArchaeologyGuard:
     def _python(
         self, args: list[str], assigns: Mapping[str, str], here: Path | None, depth: int
     ) -> str:
+        """``python -m pip/ensurepip/pipx/…`` is the tool it names (inline code was scanned
+        by the caller)."""
         if "-m" not in args:
             return ""
         i = args.index("-m")
@@ -2034,6 +2122,8 @@ class GitArchaeologyGuard:
         return ""
 
     def _uv(self, args: list[str]) -> str:
+        """``uv pip list/show/…`` and ``uv venv/cache/version`` honest; ``uv run/sync/add``
+        and ``uv pip install`` refused (they resolve from the network)."""
         pos = _positionals(args)
         if not pos:
             return ""
@@ -2047,6 +2137,8 @@ class GitArchaeologyGuard:
         return f"network: 'uv {sub}' installs or syncs from the network"
 
     def _npm(self, args: list[str], here: Path | None, depth: int) -> str:
+        """``npm run/test/ls`` honest; ``npm exec`` follows the ``npx`` rule; ``npm explore``
+        checks the wrapped command; the install/registry/account verbs are refused."""
         pos = _positionals(args)
         if not pos:
             return ""
@@ -2066,6 +2158,8 @@ class GitArchaeologyGuard:
         return ""
 
     def _npx(self, args: list[str], here: Path | None, depth: int, *, verb: str) -> str:
+        """The ``npx`` policy from the class docstring: a bare binary name is honest only
+        when it exists in ``node_modules/.bin`` at a known cwd (or ``--no-install``)."""
         i, no_install = 0, False
         while i < len(args):
             a = args[i]
@@ -2118,6 +2212,7 @@ class GitArchaeologyGuard:
         return False
 
     def _yarn(self, args: list[str]) -> str:
+        """Bare ``yarn`` installs; ``workspace <x> <verb>`` unwraps to the verb."""
         pos = _positionals(args)
         if not pos:
             return (
@@ -2137,6 +2232,7 @@ class GitArchaeologyGuard:
         return ""
 
     def _pnpm(self, args: list[str]) -> str:
+        """The pnpm install/registry verbs and ``store prune`` are refused."""
         pos = _positionals(args, _PNPM_VALUE_OPTS)
         if not pos:
             return ""
@@ -2148,6 +2244,8 @@ class GitArchaeologyGuard:
         return ""
 
     def _go(self, args: list[str], assigns: Mapping[str, str]) -> str:
+        """``go get/install``, ``go mod download/tidy/vendor`` (unless ``GOPROXY=off``),
+        ``pkg@version`` forms and cache/config writes are refused."""
         pos = _positionals(args)
         if not pos:
             return ""
@@ -2173,6 +2271,7 @@ class GitArchaeologyGuard:
         return ""
 
     def _cargo(self, args: list[str]) -> str:
+        """Registry verbs refused always; resolution verbs refused unless ``--offline``."""
         pos = _positionals(args)
         if not pos:
             return ""
@@ -2185,6 +2284,7 @@ class GitArchaeologyGuard:
         return ""
 
     def _mvn(self, exe: str, args: list[str]) -> str:
+        """``deploy`` and ``-U`` refused; ``dependency:*``-style goals refused unless ``-o``."""
         goals = _positionals(args, _MVN_VALUE_OPTS)
         offline = "-o" in args or "--offline" in args
         if any(g == "deploy" or g.startswith("deploy:") for g in goals):
@@ -2198,6 +2298,8 @@ class GitArchaeologyGuard:
         return ""
 
     def _gradle(self, exe: str, args: list[str]) -> str:
+        """``publish*`` and lock/refresh flags refused; dependency tasks refused unless
+        ``--offline``."""
         tasks = _positionals(args, _GRADLE_VALUE_OPTS)
         offline = "--offline" in args
         for flag in ("--refresh-dependencies", "--write-locks", "--update-locks"):

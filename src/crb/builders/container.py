@@ -34,6 +34,42 @@ thing between a builder and the answer.
 Configuration comes from the worker's environment (``CRB_BUILDER__*``, mirrored by
 ``crb.server.settings.BuilderSettings``) — it is a deployment posture, never a run
 parameter: a per-run downgrade to host execution would be a hole, not a feature.
+
+Navigation
+----------
+What it is:   The sealed-container path: ``SealedCheckout`` (an export of the parent tree as
+              its own repository), ``ContainerSession`` (the hardened builder container and
+              its egress sidecar) and ``BuilderContainerSettings`` (the worker's posture).
+What it does: Makes archaeology impossible rather than forbidden — the builder edits a tree
+              whose object store does not contain the commit under test, inside a read-only,
+              capability-dropped, non-root container whose only route is a CONNECT-only
+              allowlisting proxy; copies regular files back (never symlinks, never ``.git``)
+              for the unchanged grader. Every failure to provide that isolation is
+              ``SandboxUnavailable`` — the run stops; there is no host fallback.
+How:          ``SealedCheckout.create``: ``git archive <parent>`` → ``git init`` + one commit
+              → overlay tests (a dangling oracle commit for byte-identity checks) → replicate
+              harness fix-ups. ``ContainerSession.__enter__``: verify images → per-attempt
+              ``--internal`` network → sidecar on the egress network → wait for ``READY``.
+              ``spawn``/``tools_executor`` hand the builder a container-bound transport.
+Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
+              docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/builders/egress_proxy.py (the sidecar's script, mounted read-only),
+              src/crb/builders/adapter.py (the caller: ``sealed_build``),
+              src/crb/core/execution.py (``DockerExecutor``/``DockerStream``/``DockerSettings``),
+              src/crb/core/workspace.py (the source worktree and ``touched_files``),
+              src/crb/builders/claude_code.py and src/crb/builders/openai_agent.py (receive
+              ``overrides_for``), src/crb/server/settings.py (mirrors ``CRB_BUILDER__*``),
+              deploy/Dockerfile.builder (the image the settings name)
+Tested by:    tests/test_builders_container.py, tests/test_builders_container_docker.py
+Touch when:   onboarding a repository whose tests need a toolchain cache — add it to
+              ``CRB_BUILDER__*`` ``extra_ro_mounts`` / the builder image, never a mount of
+              ``docker.sock``, ``/`` or ``$HOME`` (refused here); a new host the model
+              endpoint needs goes in ``CRB_BUILDER__ALLOW_HOSTS`` (docs/DEPLOYMENT.md); a
+              new sealable builder is added to ``SEALABLE_BUILDERS`` with an
+              ``overrides_for`` branch.
+Claims:       Sealing removes the archaeology vector; it does not make a clean grade
+              mergeability (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -96,6 +132,7 @@ SEALABLE_BUILDERS: frozenset[str] = frozenset({"claude_code", "openai_agent", "e
 
 
 def is_secret_env_name(name: str) -> bool:
+    """Names that look like credentials are passed to docker by NAME only (never on argv)."""
     return bool(_SECRET_ENV_RE.search(name))
 
 
@@ -159,6 +196,7 @@ class BuilderContainerSettings:
 
     @property
     def networked(self) -> bool:
+        """An empty allowlist means no sidecar and ``--network=none`` for the builder."""
         return bool(self.allow_hosts)
 
     @classmethod
@@ -232,6 +270,7 @@ class CopyBack:
     refused: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
+        """The ``builder.copy_back`` event payload."""
         return {
             "copied": list(self.copied),
             "deleted": list(self.deleted),
@@ -590,6 +629,7 @@ class SealedCheckout:
         return CopyBack(tuple(copied), tuple(deleted), tuple(unchanged), tuple(refused))
 
     def remove(self) -> None:
+        """Delete the checkout (best effort; a leftover is disk, not a leak of anything)."""
         shutil.rmtree(self.root, ignore_errors=True)
 
     def __enter__(self) -> SealedCheckout:
@@ -600,6 +640,7 @@ class SealedCheckout:
 
 
 def _mode(p: Path) -> int:
+    """The execute bits of a file — the only mode ``copy_back`` preserves."""
     return stat.S_IMODE(p.stat().st_mode) & 0o111
 
 
@@ -721,6 +762,7 @@ class ContainerSession:
 
     # --- docker plumbing ---------------------------------------------------------
     def _docker(self, *args: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+        """One docker CLI call with the client's minimal environment (no secrets)."""
         return subprocess.run(
             [self.executor.docker, *args],
             capture_output=True,
@@ -731,6 +773,7 @@ class ContainerSession:
         )
 
     def _must(self, *args: str, what: str, timeout: int = 120) -> str:
+        """``_docker`` that fails closed: any error is ``SandboxUnavailable(what: …)``."""
         try:
             r = self._docker(*args, timeout=timeout)
         except (OSError, subprocess.SubprocessError) as exc:
@@ -741,6 +784,7 @@ class ContainerSession:
 
     @property
     def proxy_url(self) -> str:
+        """The sidecar as the builder sees it on the internal network (``""`` unnetworked)."""
         return f"http://{PROXY_ALIAS}:{PROXY_PORT}" if self.settings.networked else ""
 
     @property
@@ -764,6 +808,9 @@ class ContainerSession:
         return self
 
     def _start_proxy(self) -> None:
+        """Create the internal network, start the sidecar on the egress network, join it to
+        the internal one as ``proxy`` and wait for its ``READY`` line — fail closed at
+        every step."""
         s = self.settings
         script = self.checkout.root.parent / f"crb-egress-{self.id}.py"
         script.write_bytes(Path(egress_proxy.__file__).read_bytes())
@@ -860,6 +907,7 @@ class ContainerSession:
 
     # --- what the builders get -----------------------------------------------------
     def run_args(self, env: Mapping[str, str], *, timeout_s: int) -> list[str]:
+        """The ``docker run`` options for this session's builder container."""
         return builder_run_args(
             self.settings,
             checkout=self.checkout.root,
