@@ -1,7 +1,3 @@
-import AxeBuilder from '@axe-core/playwright'
-import type { Page } from '@playwright/test'
-import { env, expect, primary, test } from './support'
-
 /**
  * 07 — the instrument describes itself honestly, and every screen the walkthrough
  * touched is accessible. Proves: the Settings page shows each builder credential as
@@ -12,7 +8,33 @@ import { env, expect, primary, test } from './support'
  * then axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a Run detail (with real
  * rows), Capability, Ledger and Sign-off — against the live data these specs
  * produced, not fixtures.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Walkthrough spec 07 (settings and accessibility).
+ * What it does: Pins that the Settings page shows each builder credential as configured
+ *               yes / no (never a value), the sandbox mode and the apparatus / policy
+ *               versions the footer also carries; that the Claude Code login card
+ *               round-trips a shape-valid FAKE `claude setup-token` value — status, ≤ 4-char
+ *               fingerprint, provenance, remove — without the value ever appearing in the
+ *               page; and that axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a run
+ *               detail with real rows, Capability, Ledger and Sign-off — against the live
+ *               data the earlier specs produced.
+ * How:          `AxeBuilder` with the WCAG tags per screen; the fake token is shape-valid and
+ *               deliberately not real.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Settings/SettingsPage.tsx and
+ *               ui/src/screens/Settings/ClaudeCodeLoginCard.tsx (the screens under test),
+ *               ui/src/components/Layout.tsx (the footer versions), src/crb/server/routes/admin.py
+ *               (the secrets routes)
+ * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ * Touch when:   a screen is added (add it to the axe sweep) or the settings fields change.
  */
+import AxeBuilder from '@axe-core/playwright'
+import type { Page } from '@playwright/test'
+import { env, expect, primary, test } from './support'
+
 test.describe.configure({ mode: 'serial' })
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']

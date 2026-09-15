@@ -1,12 +1,31 @@
-import { expect, expectLogAction, primary, runStatus, startRun, test, waitForRun } from './support'
-
 /**
  * 06 — cancellation is cooperative, prompt and recorded. Proves: a long mine run
  * (large task limit) can be cancelled from the run page while it is RUNNING; the
  * page shows "cancel requested"; the worker's cancel token kills the in-flight test
  * command and the run ends `cancelled` (not `failed`, not `succeeded`) within 30 s;
  * the log carries `mine.cancelled` and the Runs list agrees.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Walkthrough spec 06 (cancel) on the primary repo.
+ * What it does: Pins that a long mine run can be cancelled from the run page while RUNNING;
+ *               that the page shows "cancel requested"; that the worker's cancel token kills
+ *               the in-flight test command and the run ends `cancelled` (not `failed`, not
+ *               `succeeded`) within 30 s; and that the log carries `mine.cancelled` and the
+ *               Runs list agrees.
+ * How:          `startRun` (mine, limit 500); poll `runStatus` until the worker claims it;
+ *               click "Cancel run"; `waitForRun('cancelled', 30 s)`.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Runs/RunDetailPage.tsx (the
+ *               cancel button and the pill), ui/src/api/hooks.ts (`useCancelRun`),
+ *               src/crb/server/worker.py (the cancel token between tasks)
+ * Tested by:    ui/e2e/walkthrough/06-cancel.spec.ts
+ * Touch when:   the cancel semantics or the 30 s bound change (docs/API.md
+ *               "/runs/{id}/cancel").
  */
+import { expect, expectLogAction, primary, runStatus, startRun, test, waitForRun } from './support'
+
 test.describe.configure({ mode: 'serial' })
 
 const CANCEL_WITHIN_MS = 30_000

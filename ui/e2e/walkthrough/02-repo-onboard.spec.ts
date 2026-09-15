@@ -1,5 +1,3 @@
-import { expect, expectLogAction, field, liveLog, targets, test, waitForRun, type RepoTarget } from './support'
-
 /**
  * 02 — onboarding a repository by URL. Proves, for every target repo: the Add-repo
  * dialog (preset + runner options JSON) creates the repo and lands on its page; the
@@ -9,7 +7,31 @@ import { expect, expectLogAction, field, liveLog, targets, test, waitForRun, typ
  * runner's own summary ("N passed").
  *
  * Tier 1: tests/fixtures/pyrepo.py over file://. Tier 2 (CRB_E2E_PUBLIC=1): cobra + click.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Walkthrough spec 02 (repo onboarding), for every tier target.
+ * What it does: Pins that the Add-repo dialog (preset + runner-options JSON) creates the repo
+ *               and lands on its page; that the worker clones a URL-only repo on its first
+ *               run (`repo.clone.done` on the probe's live log), prepares the environment
+ *               when it must (`setup.auto` → `setup.done`) and the probe goes green
+ *               (`probe.done`); and that the probe pill then reads OK with the runner's own
+ *               summary ("N passed").
+ * How:          `addRepo` fills the dialog through `field()`; "Probe now" queues the run;
+ *               `waitForRun` + `expectLogAction` on the live log; the `repo-probe` /
+ *               `repo-probe-detail` test ids.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/e2e/walkthrough/support.ts (`targets`, `field`, `waitForRun`),
+ *               ui/src/screens/Repos/RepoNewDialog.tsx and ui/src/screens/Repos/RepoDetail.tsx
+ *               (the screens under test), ui/src/lib/repoPresets.ts (the preset ids the
+ *               targets name), src/crb/server/worker.py (the clone-on-first-run and probe)
+ * Tested by:    ui/e2e/walkthrough/02-repo-onboard.spec.ts
+ * Touch when:   the dialog's fields or the clone / probe event names change; a new tier-2
+ *               repository needs its target in ui/e2e/walkthrough/support.ts.
  */
+import { expect, expectLogAction, field, liveLog, targets, test, waitForRun, type RepoTarget } from './support'
+
 test.describe.configure({ mode: 'serial' })
 
 async function addRepo(page: import('@playwright/test').Page, t: RepoTarget): Promise<void> {

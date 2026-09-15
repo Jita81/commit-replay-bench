@@ -1,10 +1,3 @@
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import type { Locator } from '@playwright/test'
-import { env, expect, expectLogAction, field, primary, startRun, test, waitForRun } from './support'
-
 /**
  * 05 — the whole pipeline, mine → build → grade → pack → ledger → map, driven from
  * the UI. Tier 1 replays with the test-only `fixture_gold` builder (it overlays the
@@ -27,7 +20,40 @@ import { env, expect, expectLogAction, field, primary, startRun, test, waitForRu
  * REAL replay (claude-sonnet-5, limit 2, {"auth":"cli"}) and asserts ≥1 ledger row
  * plus builder turns / tokens / cost > 0 on the evidence — not a clean grade, which
  * is the measurement, not a precondition.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Walkthrough spec 05 (replay with the test-only `fixture_gold` builder), the
+ *               spine of the story.
+ * What it does: Pins that a replay run grades clean with all four belts ✓ and cost $0; that
+ *               the Evidence drawer opens with belts, apparatus and the `verified` badge;
+ *               that the Ledger gate is OPEN with false-Q1 = 0 and rows listed; that the
+ *               Capability page renders the (class × size) cell with n, Wilson interval and
+ *               route `calibrate` (n < 10) — never a fabricated cell; that the Sign-off page
+ *               refuses a thin cell with the clauses listed and the action disabled; and
+ *               that the JSONL export verifies with `crb ledger verify --path`. Tier 2 with
+ *               `CRB_E2E_BUILDER=claude_code` runs a REAL replay instead.
+ * How:          `startRun` (kind replay, builder `fixture_gold`); `waitForRun`; then each
+ *               screen in turn by its test ids; the export downloaded and verified through
+ *               the CLI named by `CRB_E2E_CRB`.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+ * Works with:   ui/e2e/walkthrough/support.ts, src/crb/builders/fixture_gold.py (the
+ *               hermetic builder — registered only under `CRB_ENABLE_FIXTURE_BUILDER=1`),
+ *               ui/src/screens/Runs/RunDetailPage.tsx, ui/src/screens/Runs/EvidenceDrawer.tsx,
+ *               ui/src/screens/Ledger/LedgerPage.tsx, ui/src/screens/Capability/CapabilityPage.tsx,
+ *               ui/src/screens/Signoff/SignoffPage.tsx (the screens under test)
+ * Tested by:    ui/e2e/walkthrough/05-replay-fake.spec.ts
+ * Touch when:   a screen's test ids change, or the thin-cell refusal wording changes (08
+ *               asserts on the same cell's n = 2).
  */
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { Locator } from '@playwright/test'
+import { env, expect, expectLogAction, field, primary, startRun, test, waitForRun } from './support'
+
 test.describe.configure({ mode: 'serial' })
 
 const REAL = env.builder === 'claude_code'

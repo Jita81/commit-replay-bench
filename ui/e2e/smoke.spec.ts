@@ -1,11 +1,32 @@
-import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page } from '@playwright/test'
-
 /**
  * Smoke: the login page renders against a mocked API, the brand is present,
  * the OIDC button points at the contract's start URL, and the page has no
  * WCAG 2.1 AA violations (axe). Then a logged-in shell renders the nav.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The hermetic Playwright smoke suite (`npm run e2e`) over the built bundle
+ *               served by `vite preview`.
+ * What it does: Pins that the login page renders with the brand, links to the contract's
+ *               OIDC start URL and passes axe; that a protected route redirects to `/login`
+ *               with `?next=`; that a logged-in shell shows the nav, the user chip with its
+ *               role and the ledger gate, and passes axe; and that an unknown route renders
+ *               the 404 inside the shell. No server is contacted.
+ * How:          `page.route` intercepts every `/api/v1` request and answers from inline
+ *               fixtures (`/auth/me` 401 or a principal, `/ledger/verify`, `/health`,
+ *               `/version`); `AxeBuilder` with the WCAG 2.1 AA tags.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/playwright.config.ts (builds, serves `dist/` and ignores the walkthrough),
+ *               ui/src/screens/Login/LoginPage.tsx and ui/src/components/Layout.tsx (the
+ *               screens under test), ui/src/lib/auth.tsx (the redirect), .github/workflows/ci.yml
+ *               (runs this in CI)
+ * Tested by:    ui/e2e/smoke.spec.ts
+ * Touch when:   the login page, the shell's nav or the auth redirect changes; never for a
+ *               new repository.
  */
+import AxeBuilder from '@axe-core/playwright'
+import { expect, test, type Page } from '@playwright/test'
 
 const envelope = (status: number, code: string, message: string) => ({
   status,
