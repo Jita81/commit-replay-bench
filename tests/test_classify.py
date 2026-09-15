@@ -1,5 +1,28 @@
 """crb.core.classify + crb.core.taxonomy — the closed vocabulary, the label, the
-evidence hash, the reply parser, the prompt (no diff body), and the precedence rule."""
+evidence hash, the reply parser, the prompt (no diff body), and the precedence rule.
+
+Navigation
+----------
+What it is:   The intent-label test suite — the closed vocabulary, ``IntentLabel``, the evidence
+              hash, the reply parser, the prompt and the precedence rule.
+What it does: Pins that the vocabulary is exactly path ∪ intent classes with one definition each
+              and covers every census label, that an unknown class is refused (explicit
+              ``unclassified`` is not), that the evidence digest is deterministic, redacted and
+              capped before hashing and reads git WITHOUT the diff body, that ``parse_label_reply``
+              never raises, that the prompt shows vocabulary and evidence but no diff, and that
+              resolution is human > intent > path, deterministically.
+How:          Pure cases over ``crb.core.classify`` / ``crb.core.taxonomy``; one case runs on
+              ``pyrepo`` for the git-backed evidence.
+Layer:        tests — docs/ARCHITECTURE.md#75-change-class-two-axes-one-resolved-value
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/core/classify.py and src/crb/core/taxonomy.py (under test),
+              src/crb/core/spec.py (where the resolved class lands), tests/test_builders_labeller.py
+              (the LLM labellers that produce the label), tests/test_worker_label.py (the run
+              kind that stores it)
+Tested by:    tests/test_classify.py
+Touch when:   a class is added to the vocabulary (definition + census-coverage case); the prompt
+              or reply shape changes (the no-diff rule must survive).
+"""
 
 from __future__ import annotations
 

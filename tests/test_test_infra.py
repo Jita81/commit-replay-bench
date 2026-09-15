@@ -1,7 +1,33 @@
 """crb.core.test_infra — the test-infrastructure pattern table and the section-aware
 compare, as pure functions. Every rule in the table has a positive AND a negative
 case here; every section-aware file has an honest edit (not tamper) and an
-oracle-relevant edit (tamper)."""
+oracle-relevant edit (tamper).
+
+Navigation
+----------
+What it is:   The test-infrastructure table's test suite — every rule with a positive and a
+              negative case, and the section-aware compare on every file it knows.
+What it does: Pins that each rule has a reason and known runners, that rules are per language
+              and narrowed per runner, that whole-file rules beat partial ones, and — per
+              section-aware file (``pyproject.toml``, ``setup.cfg`` / ``tox.ini``,
+              ``package.json``, ``go.mod``, ``pom.xml``, ``Cargo.toml``) — that an honest edit
+              (version bump, dependency add, comment) is not tamper while an oracle-relevant edit
+              (pytest tables, ``filterwarnings``, test scripts, surefire, ``replace``,
+              dev-dependencies) is, that an unparsable or oversize side fails closed, and the
+              ADR-0011 amendment (2026-09-14) that lint configuration is belt 5's definition.
+How:          Pure calls to ``is_test_infra`` / ``matching_rule`` / ``infra_sections_changed`` over
+              inline before/after texts; no git.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/test_infra.py (under test), src/crb/core/grade.py (belt 1 consumes
+              the verdict), tests/test_grade.py (the same rules as disqualifications on a real
+              worktree), src/crb/core/runners/__init__.py (``runner_names`` the table is checked
+              against)
+Tested by:    tests/test_test_infra.py
+Touch when:   onboarding a repository whose test configuration lives in a file the table does not
+              know (add the rule WITH a reason, a positive and a negative case, and a section
+              parser if only part of the file is oracle-relevant).
+"""
 
 from __future__ import annotations
 
@@ -314,6 +340,8 @@ line-length = 100
 
 
 class TestPyprojectToml:
+    """``pyproject.toml``: only the pytest tables, plugin entry points and lint config are the oracle."""
+
     def test_version_bump_and_dependency_add_are_honest(self) -> None:
         after = PYPROJECT.replace('version = "0.1.0"', 'version = "0.2.0"').replace(
             'dependencies = ["requests>=2"]', 'dependencies = ["requests>=2", "rich"]'
@@ -392,6 +420,10 @@ max-line-length = 100
 
 
 class TestSetupCfgAndToxIni:
+    """``setup.cfg`` / ``tox.ini``: the ``[tool:pytest]`` / ``[pytest]`` section is the oracle, the
+    rest is packaging.
+    """
+
     def test_metadata_edit_is_honest(self) -> None:
         after = SETUP_CFG.replace("version = 0.1.0", "version = 0.2.0")
         assert not ti.infra_sections_changed("setup.cfg", SETUP_CFG, after, "python")
@@ -447,6 +479,10 @@ PACKAGE_JSON = """{
 
 
 class TestPackageJson:
+    """``package.json``: the test script and each runner's own key are the oracle; a dependency bump
+    is honest.
+    """
+
     def test_version_and_dependency_edits_are_honest(self) -> None:
         after = PACKAGE_JSON.replace('"version": "0.1.0"', '"version": "0.2.0"').replace(
             '"lodash": "^4"', '"lodash": "^4", "dayjs": "^1"'
@@ -532,6 +568,10 @@ require (
 
 
 class TestGoMod:
+    """``go.mod``: ``replace`` / ``exclude`` / ``godebug`` / ``toolchain`` redirect what the tests run
+    against; ``require`` and ``go`` directives are honest.
+    """
+
     def test_require_and_go_directive_edits_are_honest(self) -> None:
         after = GO_MOD.replace("go 1.22", "go 1.23").replace(
             "\tgolang.org/x/text v0.14.0", "\tgolang.org/x/text v0.15.0\n\tgithub.com/a/b v1.0.0"
@@ -590,6 +630,8 @@ POM = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 class TestPomXml:
+    """``pom.xml``: surefire configuration, properties, profiles and the parent are the oracle."""
+
     def test_version_and_dependency_edits_are_honest(self) -> None:
         after = POM.replace("<version>0.1.0</version>", "<version>0.2.0</version>").replace(
             "  </dependencies>",
@@ -650,6 +692,10 @@ default = []
 
 
 class TestCargoToml:
+    """``Cargo.toml``: dev-dependencies, the test / bench tables, ``build`` and ``[lints]`` are the
+    oracle; version, dependency and feature edits are honest.
+    """
+
     def test_version_dependency_and_feature_edits_are_honest(self) -> None:
         after = (
             CARGO.replace('version = "0.1.0"', 'version = "0.2.0"')
@@ -699,6 +745,8 @@ class TestCargoToml:
 
 
 class TestWholeFileAndNonInfra:
+    """Whole-file rules (``conftest.py``, ``pytest.ini``) always count; non-infra paths never do."""
+
     def test_whole_file_rule_is_always_changed(self) -> None:
         assert ti.infra_sections_changed("conftest.py", "", "# empty\n", "python")
         assert ti.infra_sections_changed("pytest.ini", "[pytest]\n", "[pytest]\n", "python")

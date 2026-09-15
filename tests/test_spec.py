@@ -1,4 +1,28 @@
-"""crb.core.spec — languages, size tiers, change classes, RepoConfig, TaskSpec."""
+"""crb.core.spec — languages, size tiers, change classes, RepoConfig, TaskSpec.
+
+Navigation
+----------
+What it is:   The domain vocabulary's test suite — languages, size tiers, path classes,
+              ``RepoConfig`` and ``TaskSpec``.
+What it does: Pins language aliases, the size-tier boundaries (monotone, total), that every class
+              in the taxonomy is reachable by a path and the twins static classification cannot
+              see, the CI / Terraform / Helm / docs / test / migration path rules (including the
+              migration-tool domain trap), commit-level majority classification, per-language
+              config defaults and layouts, the census-shaped ``from_dict`` entries, and that a
+              ``TaskSpec`` normalises, round-trips, derives size and class, resolves
+              ``capability_class`` from path and intent, and still loads records written before
+              labels existed.
+How:          Pure-function and dataclass cases, heavily parametrised; no git, no runner.
+Layer:        tests — docs/ARCHITECTURE.md#75-change-class-two-axes-one-resolved-value
+ADRs:         none
+Works with:   src/crb/core/spec.py (under test), src/crb/core/taxonomy.py (the closed
+              vocabulary the classes come from), src/crb/core/classify.py (the intent axis
+              ``capability_class`` resolves with), tests/test_classify.py (that axis's tests)
+Tested by:    tests/test_spec.py
+Touch when:   onboarding a repository whose layout the path rules misclassify (add the path to
+              the right parametrised table — the table IS the rule); a class or tier is added
+              (update the taxonomy, its definition and the reachability case together).
+"""
 
 from __future__ import annotations
 

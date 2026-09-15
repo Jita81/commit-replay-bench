@@ -11,6 +11,37 @@ Three layers, each proving one thing:
 * **the toolchains** (gated on PATH): the maintainers' own patch with its formatting
   broken grades ``repo_lint_clean=False`` under the real ``gofmt``, ``ruff`` and
   ``cargo fmt``; the untouched gold grades ``True``.
+
+Navigation
+----------
+What it is:   Belt 5's test suite — the lint rule, its wiring into the grader and the miner, and
+              the real toolchains.
+What it does: Pins that an exit code is interpreted in exactly one place, the plan from
+              ``RepoConfig.lint`` and the per-language detection on synthetic cobra / click / koa
+              shapes; that on the grader a rejecting linter is ``repo_lint_clean=False`` with
+              ``failure_kind="lint"``, a timeout is ``False``, a linter that cannot run is a
+              harness error, no linter is ``None`` with ``clean`` unchanged, deleted files are
+              never linted and a builder cannot rewrite the linter's configuration (review
+              finding 2, 2026-09-14); that ``tsc`` findings are attributed to changed files only
+              (the NHS repositories' type debt); and, with the toolchains present, that the
+              maintainers' own patch misformatted grades ``False`` under gofmt (cobra #1559),
+              ruff (click) and ``cargo fmt``, and that a pinned ruff spec reads the commit, not
+              the host (mesh-client).
+How:          ``FakeExecutor`` for the pure layer, small executable scripts standing in for
+              linters on a real ``LocalExecutor`` for the grader layer, PATH-gated real tools for
+              the third.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/lint.py (under test), src/crb/core/grade.py (belt 5's wiring),
+              src/crb/core/mine.py (the gold check's lint), src/crb/core/runners/node_runners.py
+              and src/crb/core/runners/pytest_runner.py (``detect_lint`` per runner),
+              tests/fixtures/langs/noderepo.py (``ts_extra``), tests/test_test_infra.py (lint
+              configuration as belt 1 tamper)
+Tested by:    tests/test_lint.py
+Touch when:   onboarding a repository whose linter the detection misses (add a detection case on
+              its shape, or declare ``lint`` in the repo config — docs/OPERATOR.md); a linter's
+              output format changes (the attribution regex); a new language runner adds
+              ``detect_lint``.
 """
 
 from __future__ import annotations
@@ -416,6 +447,7 @@ def test_pytest_runner_prefers_the_configured_interpreters_ruff(tmp_path: Path) 
 
 @pytest.fixture
 def pyfix(tmp_path: Path) -> tuple[GitRepo, str, RepoConfig]:
+    """The minimal Python fixture as ``(repo, feat_sha, config)`` for the grader-layer cases."""
     root, feat_sha = pyrepo_min.build(tmp_path)
     return GitRepo(root), feat_sha, pyrepo_min.config()
 

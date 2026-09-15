@@ -1,4 +1,24 @@
-"""crb.core.evidence — the per-task pack: stable hash, verification, tamper detection."""
+"""crb.core.evidence — the per-task pack: stable hash, verification, tamper detection.
+
+Navigation
+----------
+What it is:   The evidence pack's test suite — canonical JSON, the stable pack hash, verification
+              and tamper detection.
+What it does: Pins that ``canonical_json`` is key-order independent, that the pack hash is stable
+              under key order and repeat but changes with content, the ``to_dict`` shape, a JSON
+              round trip through ``verify_pack``, that every mutated field fails verification, and
+              that a pack without a hash never verifies.
+How:          Small in-memory packs over a fixed ``TaskSpec`` and ``GradeResult``; the mutations
+              are parametrised.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/core/evidence.py (under test), src/crb/core/ledger.py (the row that
+              carries ``evidence_pack_hash``), src/crb/core/version.py (the apparatus stamp),
+              tests/test_server_routes_grades.py (the pack served and re-verified by the API)
+Tested by:    tests/test_evidence.py
+Touch when:   a field is added to the pack (it is hashed — add it to the mutation table and note
+              the apparatus consequence in docs/EVIDENCE-AND-CLAIMS.md).
+"""
 
 from __future__ import annotations
 

@@ -3,6 +3,29 @@
 No docker daemon is needed: the DockerExecutor is driven through an injected
 ``runner`` and a fake ``docker`` binary path, and every fail-closed branch is
 asserted to raise :class:`SandboxUnavailable`.
+
+Navigation
+----------
+What it is:   The executors' test suite: ``LocalExecutor`` on real subprocesses and
+              ``DockerExecutor`` through a fake ``docker`` binary and an injected runner.
+What it does: Pins ``Command`` validation, that the local executor filters the environment (an
+              operator's secret never reaches a test run), layers command env over the base,
+              kills the whole process group on timeout and on cancel, closes stdin so a test that
+              blocks on input fails fast (click's termui tests); and that the docker executor
+              probes the daemon, refuses root, dangerous mounts and a missing image, builds every
+              hardening flag into ``docker run``, and raises ``SandboxUnavailable`` on a missing
+              binary, a failed probe, exit 125 or a vanishing binary — a timeout is rc 124, never
+              a pass.
+How:          Real ``subprocess`` for the local half; ``FakeRunner`` records argv and scripts the
+              daemon's answers for the docker half — no daemon is needed.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+Works with:   src/crb/core/execution.py (under test), tests/test_sandbox_docker.py (the same
+              executor against a real daemon), docs/SECURITY.md (the sandbox flags the argv test
+              pins)
+Tested by:    tests/test_execution.py
+Touch when:   a hardening flag is added or removed (the argv test lists every one; update
+              docs/SECURITY.md with it); a new executor kind is registered in ``make_executor``.
 """
 
 from __future__ import annotations

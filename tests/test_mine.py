@@ -1,4 +1,29 @@
-"""crb.core.mine — candidate discovery, RED-check, baseline, gold on the fixture repo."""
+"""crb.core.mine — candidate discovery, RED-check, baseline, gold on the fixture repo.
+
+Navigation
+----------
+What it is:   The miner's test suite — candidate discovery, the RED check, the baseline and the
+              gold check on the fixture repository.
+What it does: Pins the pool caps, which commits are candidates (the feat commit, never the docs
+              or root commit; the hard pool excludes single-file commits), that ``qualify`` skips
+              a target that is green at the parent or times out, that a gold which breaks the
+              belt, fails its target, times out or errors is never ``gold_clean``, that a
+              declared linter's verdict reaches the gold check only after the core belts hold,
+              that support files under the test layout are overlaid but never targets
+              (mesh-client, DL-023) and that three consecutive harness-errored candidates stop
+              the run instead of failing it. Toolchain cases pin gofmt / ruff on the gold.
+How:          ``iter_candidates`` / ``qualify`` / ``mine`` on ``pyrepo`` through the real
+              ``PytestRunner`` and ``LocalExecutor``; a fake lint script stands in for the
+              repository's linter.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+Works with:   src/crb/core/mine.py (under test), tests/fixtures/pyrepo.py (the history and its
+              opt-in green / bad-gold commits), src/crb/core/lint.py (the gold's belt 5),
+              src/crb/core/spec.py (``POOL_*`` and ``RepoConfig``), tests/conftest.py
+Tested by:    tests/test_mine.py
+Touch when:   the candidate rule changes (what counts as coupled source + test, the pools); the
+              gold check gains a belt; a new repository layout needs a support-file rule.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,21 @@
-"""crb.core.stats — Wilson intervals, mean/stddev, two-proportion z (known values)."""
+"""crb.core.stats — Wilson intervals, mean/stddev, two-proportion z (known values).
+
+Navigation
+----------
+What it is:   The statistics test suite — Wilson intervals, mean / stddev and the two-proportion
+              z against known values.
+What it does: Pins the essay's example (10/10 licenses only ≈ 0.722 at 95 %), 48/50, the
+              degenerate 0/10 and 5/10 cases, that a smaller z narrows the interval, that
+              impossible counts are refused, and the interval's properties over random counts.
+How:          Known values to three decimals plus a small property loop; no fixtures.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0003-one-routing-rule.md
+Works with:   src/crb/core/stats.py (under test), src/crb/core/routing.py (consumes the lower
+              bound), docs/EVIDENCE-AND-CLAIMS.md (every number carries its method)
+Tested by:    tests/test_stats.py
+Touch when:   never for a new repository; an estimator is added (pin a textbook value, not the
+              implementation's own output).
+"""
 
 from __future__ import annotations
 

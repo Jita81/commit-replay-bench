@@ -1,5 +1,26 @@
 """crb.core.git cloning: URL policy, credential redaction, and ``clone_repo`` against a
-local bare remote (full history, ``--no-tags``, idempotent, atomic, fail-closed)."""
+local bare remote (full history, ``--no-tags``, idempotent, atomic, fail-closed).
+
+Navigation
+----------
+What it is:   The clone policy's test suite: URL validation, credential redaction and
+              ``clone_repo`` against a local bare remote.
+What it does: Pins that only HTTPS and SSH URLs are accepted (``file://`` only under the
+              ``CRB_ALLOW_LOCAL_CLONE`` developer switch), that refusals and errors never echo an
+              embedded credential, that ``redact_url`` / ``redact_urls_in`` scrub free text, and
+              that a clone takes the full history without tags, is idempotent, refuses a
+              non-empty non-repository destination, and cleans up on failure or timeout (rc 124).
+How:          ``bare_remote`` from ``fixtures.remote`` serves ``pyrepo``; a URL to a closed port
+              proves the fail-fast error path without a network.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/core/git.py (under test), tests/fixtures/remote.py (the bare remote),
+              tests/test_cli_repo_url.py and tests/test_worker_clone.py (the same policy at the
+              CLI and worker), docs/SECURITY.md (the credential rules)
+Tested by:    tests/test_git_clone.py
+Touch when:   a URL scheme or host policy is added (a case in the accepted and refused tables);
+              the clone options change (``--no-tags``, depth).
+"""
 
 from __future__ import annotations
 

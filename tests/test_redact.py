@@ -1,4 +1,21 @@
-"""crb.core.redact — every credential shape, and the cap keeps the tail."""
+"""crb.core.redact — every credential shape, and the cap keeps the tail.
+
+Navigation
+----------
+What it is:   The redaction test suite — every credential shape, and the cap keeps the tail.
+What it does: Pins that each pattern in ``redact`` scrubs its shape to the marker, that short or
+              benign values are left alone, that redaction is idempotent across lines, and that
+              ``redact_and_cap`` redacts BEFORE capping and keeps the tail (where a test run's
+              failure summary is).
+How:          A parametrised table of ``(text, gone, marker)`` over ``crb.core.redact``.
+Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+Works with:   src/crb/core/redact.py (under test), src/crb/core/grade.py (run tails are
+              redacted into the result), docs/DATA-RETENTION.md (the redaction rules)
+Tested by:    tests/test_redact.py
+Touch when:   a provider's credential shape is added (a row in the table; the pattern must not
+              match benign text — add a negative case too).
+"""
 
 from __future__ import annotations
 
