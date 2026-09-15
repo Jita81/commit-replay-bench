@@ -141,3 +141,50 @@ def test_no_env_dir_or_real_tree_means_no_era(clone: tuple[Path, Path], tmp_path
     os.unlink(wt / "node_modules")
     (wt / "node_modules").mkdir()
     assert r.ensure_era(wt, _Npm()) is None
+
+
+def test_era_install_refuses_when_the_volume_is_nearly_full(
+    clone: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two react-components eras on a nearly full disk took the whole stack down
+    (2026-09-15): below ``era_min_free_mb`` the install is refused as a harness error."""
+    import shutil as _shutil
+
+    _root, wt = clone
+    (wt / "package.json").write_text('{"devDependencies": {"x": "1"}}', encoding="utf-8")
+    r = _runner(tmp_path / "env")
+    usage = _shutil.disk_usage(tmp_path)
+    monkeypatch.setattr(
+        "crb.core.runners.node_runners.shutil.disk_usage",
+        lambda _p: usage._replace(free=100 * 2**20),
+    )
+    ex = _Npm()
+    with pytest.raises(NodeEraError, match=r"100 MB free .* < 2048 MB"):
+        r.ensure_era(wt, ex)
+    assert ex.calls == []
+
+
+def test_eras_are_evicted_lru_beyond_era_keep(clone: tuple[Path, Path], tmp_path: Path) -> None:
+    _root, wt = clone
+    env = tmp_path / "env"
+    eras = env / "node_eras"
+    for i, name in enumerate(("old1", "old2", "old3")):
+        (eras / name / "node_modules" / ".bin").mkdir(parents=True)
+        os.utime(eras / name, (1_000_000 + i, 1_000_000 + i))
+    (wt / "package.json").write_text('{"devDependencies": {"y": "1"}}', encoding="utf-8")
+    cfg = RepoConfig(
+        name="era",
+        language=Language.JAVASCRIPT,
+        runner="jest",
+        src_prefix="src/",
+        ext=".js",
+        test_mode="suffix",
+        test_suffix=".test.js",
+        runner_opts={"era_keep": 2},
+    )
+    r = get_runner(cfg)
+    r.env_dir = env
+    era = r.ensure_era(wt, _Npm())
+    assert era is not None and era.is_dir()
+    # keep = 2: the new era + the most recently used old one; the two oldest are gone
+    assert sorted(d.name for d in eras.iterdir()) == sorted([era.name, "old3"])

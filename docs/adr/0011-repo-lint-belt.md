@@ -292,5 +292,8 @@ lockfile (else `package.json`) hashes differently from the clone's, `<env_dir>/n
 is installed once from that commit's manifest (`npm ci --ignore-scripts`, network on as in
 setup) and the worktree's `node_modules` link is re-pointed to it, before the tests and before
 belt 5. An era that fails to install is a harness error on the row (outside `n`), never a
-silent fall-back to HEAD's tree. Under a docker executor the image's tree is used as before
-(an era-aware image is a follow-up).
+silent fall-back to HEAD's tree. An install is refused below `era_min_free_mb` (2 GiB) of free
+space on the env volume and at most `era_keep` (8) eras are kept per repository, least recently
+used evicted first — a tree that fills the disk takes the worker, the API and the ledger down
+with it. Under a docker executor the image's tree is used as before (an era-aware image is a
+follow-up).

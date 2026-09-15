@@ -17,8 +17,10 @@ sharing the lockfile. A failed era install is a harness error (the row is
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import os
 import shutil
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping, Sequence
@@ -108,6 +110,15 @@ class NodeEraError(RuntimeError):
     """A dependency era could not be installed: a harness error, never a verdict."""
 
 
+#: An era install is refused below this much free space on the env volume: a tree
+#: that fills the disk takes the worker, the API and the ledger down with it
+#: (2026-09-15). ``runner_opts.era_min_free_mb`` overrides.
+ERA_MIN_FREE_MB = 2048
+#: Eras kept per repository; the least recently used beyond this are evicted before a
+#: new one is installed. ``runner_opts.era_keep`` overrides.
+ERA_KEEP = 8
+
+
 class _NodeBase(BaseRunner):
     default_timeout = 420
 
@@ -141,9 +152,20 @@ class _NodeBase(BaseRunner):
         if link.resolve() != era_nm.resolve():
             link.unlink()
             link.symlink_to(era_nm)
+        with contextlib.suppress(OSError):
+            os.utime(era)  # most recently used: eviction is LRU
         return era
 
     def _install_era(self, root: Path, era: Path, executor: Executor) -> None:
+        self._evict_eras(era)
+        min_free = int(self.opts.get("era_min_free_mb", ERA_MIN_FREE_MB)) * 1024 * 1024
+        era.parent.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(era.parent).free
+        if free < min_free:
+            raise NodeEraError(
+                f"node era {era.name}: {free // 2**20} MB free on the env volume < "
+                f"{min_free // 2**20} MB (era_min_free_mb) — refusing to install"
+            )
         era.mkdir(parents=True, exist_ok=True)
         for name in (*_LOCKFILES, ".npmrc"):
             src = root / name
@@ -172,6 +194,17 @@ class _NodeBase(BaseRunner):
             raise NodeEraError(
                 f"node era {era.name}: npm {verb} rc={res.returncode}: {tail_of(res.combined)[-400:]}"
             )
+
+    def _evict_eras(self, keep_for: Path) -> None:
+        """Drop the least recently used eras beyond ``era_keep`` (never ``keep_for``)."""
+        keep = int(self.opts.get("era_keep", ERA_KEEP))
+        eras_dir = keep_for.parent
+        if not eras_dir.is_dir():
+            return
+        others = [d for d in eras_dir.iterdir() if d.is_dir() and d != keep_for]
+        others.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+        for stale in others[max(0, keep - 1) :]:
+            shutil.rmtree(stale, ignore_errors=True)
 
     def run(
         self, executor: Executor, root: Path, scope: Sequence[str], *, timeout: int = 0
