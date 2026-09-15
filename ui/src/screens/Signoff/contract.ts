@@ -22,7 +22,7 @@
  *               the false-Q1 floor) so the gate renders REFUSED rather than a generic error.
  * How:          Interfaces extend `Signoff` from ui/src/api/types.ts; the preview query is
  *               keyed by repo, cell and the named row so it re-fetches as the form changes;
- *               a successful POST invalidates the sign-offs, the preview and the map.
+ *               a successful POST invalidates the sign-offs and the preview.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md,
  *               docs/adr/0001-four-belts-and-false-q1-at-write.md
@@ -236,7 +236,12 @@ export function useSignoffPolicy(enabled = true): UseQueryResult<SignoffPolicy, 
   })
 }
 
-/** `POST /signoffs` with the attestation; a 409 arrives as `ApiError` for the gate to render. Invalidates the sign-offs, the preview and the map (a sign-off lifts the tier). */
+/**
+ * `POST /signoffs` with the attestation; a 409 arrives as `ApiError` for the gate to render.
+ * Invalidates the sign-offs and the preview. It also names `['capability-map', repo]`, but
+ * the map is keyed `['capability', repo, by]` (`keys.capability`), so that invalidation
+ * matches nothing — the map refreshes on its own stale time (30 s) or a remount.
+ */
 export function useCreateSignoffWithAttestation(): UseMutationResult<SignoffWithPolicy, ApiError, SignoffCreateWithAttestation> {
   const qc = useQueryClient()
   return useMutation({

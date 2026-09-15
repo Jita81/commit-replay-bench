@@ -26,9 +26,9 @@
  * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (builders as configured yes /
  *               no, sandbox mode, versions; axe), ui/e2e/walkthrough/01-login.spec.ts (the
  *               health probes it relies on)
- * Touch when:   `GET /settings` gains a non-secret field (docs/API.md "Admin"; note the
- *               contract note there — the UI's reading is ahead of what is served) — type it
- *               in ui/src/api/types.ts and add its `<dt>`; never for a new repository.
+ * Touch when:   `GET /settings` gains a non-secret field (src/crb/server/routes/admin.py
+ *               `get_settings_view`, docs/API.md "Admin") — type it in ui/src/api/types.ts
+ *               and add its `<dt>`; never for a new repository.
  */
 import { useMemo, useState, type FormEvent } from 'react'
 import { useCreateUser, useHealth, useSetUserRole, useSettings, useUsers, useVersion } from '../../api/hooks'
