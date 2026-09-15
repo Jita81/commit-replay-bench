@@ -873,12 +873,18 @@ class Worker:
         # runner). They are walked again whether or not they are known, and `_upsert_task`
         # replaces the stored spec; a sha that no longer qualifies stays as it was and the
         # run's `mine.skip` event says why. Grade rows are never touched.
-        only: frozenset[str] | None = None
         ids = [str(i) for i in (p.get("task_ids") or [])]
+        # one walk per pool: a re-qualified task keeps the pool it was mined under (the
+        # pool's shape caps decide what the walk yields), unknown ids take the run's
+        jobs: list[tuple[str, frozenset[str] | None]] = [(pool, None)]
         if ids:
-            only = frozenset(ids)
             known = frozenset()
-            want = target or len(only)
+            want = target or len(ids)
+            by_pool: dict[str, set[str]] = {}
+            stored = self._task_pools(ctx.run.repo, ids)
+            for tid in ids:
+                by_pool.setdefault(stored.get(tid, pool), set()).add(tid)
+            jobs = [(pl, frozenset(tids)) for pl, tids in sorted(by_pool.items())]
         counts: dict[str, Any] = {
             "examined": 0,
             "found": 0,
@@ -886,60 +892,68 @@ class Worker:
             "gold_dirty": 0,
             "skipped": 0,
             "known": len(known),
-            "pool": pool,
+            "pool": pool if not ids else ",".join(pl for pl, _ in jobs),
         }
         ctx.counts.update(counts)
         self._progress(ctx, 0, want)
-        outcomes: Iterator[MineOutcome] = mine(
-            ctx.git,
-            ctx.config,
-            runner=runner,
-            executor=executor,
-            scratch=self.scratch_dir,
-            pool=pool,
-            target_count=target,
-            max_candidates=max_candidates,
-            known=known,
-            only=only,
-            gold=gold,
-            timeout=ctx.timeout,
-            ref=ref,
-            on_event=ctx.on_event,
-        )
         cancelled = False
-        while True:
-            if self._cancelled(ctx):
-                cancelled = True
+        for job_pool, only in jobs:
+            outcomes: Iterator[MineOutcome] = mine(
+                ctx.git,
+                ctx.config,
+                runner=runner,
+                executor=executor,
+                scratch=self.scratch_dir,
+                pool=job_pool,
+                target_count=target,
+                max_candidates=max_candidates,
+                known=known,
+                only=only,
+                gold=gold,
+                timeout=ctx.timeout,
+                ref=ref,
+                on_event=ctx.on_event,
+            )
+            while True:
+                if self._cancelled(ctx):
+                    cancelled = True
+                    break
+                try:
+                    out = next(outcomes)
+                except StopIteration:
+                    break
+                counts["examined"] += 1
+                if out.task is None:
+                    counts["skipped"] += 1
+                else:
+                    counts["found"] += 1
+                    if out.task.gold_clean is False:
+                        counts["gold_dirty"] += 1
+                    elif out.task.gold_clean is True:
+                        counts["gold_clean"] += 1
+                    self._upsert_task(out.task)
+                    ctx.emit(
+                        "mine",
+                        "mine.task",
+                        task_id=out.task.task_id,
+                        size=out.task.size,
+                        capability_class=out.task.capability_class,
+                        gold_clean=out.task.gold_clean,
+                        duration_ms=int(out.duration_s * 1000),
+                    )
+                ctx.counts.update(counts)
+                self._progress(ctx, counts["found"], want)
+            if cancelled:
                 break
-            try:
-                out = next(outcomes)
-            except StopIteration:
-                break
-            counts["examined"] += 1
-            if out.task is None:
-                counts["skipped"] += 1
-            else:
-                counts["found"] += 1
-                if out.task.gold_clean is False:
-                    counts["gold_dirty"] += 1
-                elif out.task.gold_clean is True:
-                    counts["gold_clean"] += 1
-                self._upsert_task(out.task)
-                ctx.emit(
-                    "mine",
-                    "mine.task",
-                    task_id=out.task.task_id,
-                    size=out.task.size,
-                    capability_class=out.task.capability_class,
-                    gold_clean=out.task.gold_clean,
-                    duration_ms=int(out.duration_s * 1000),
-                )
-            ctx.counts.update(counts)
-            self._progress(ctx, counts["found"], want)
         if cancelled:
             ctx.emit("mine", "mine.cancelled", **counts)
             return STATUS_CANCELLED, counts, ""
         return STATUS_SUCCEEDED, counts, ""
+
+    def _task_pools(self, repo: str, task_ids: Sequence[str]) -> dict[str, str]:
+        with self.factory() as s:
+            q = select(Task.task_id, Task.pool).where(Task.repo == repo, Task.task_id.in_(task_ids))
+            return {str(tid): str(pl) for tid, pl in s.execute(q)}
 
     def _ladder(self, ctx: RunContext) -> EscalationLadder:
         """The run's escalation ladder. Each entry of ``params.ladder`` / ``ladder_json`` is

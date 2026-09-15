@@ -399,11 +399,14 @@ def test_mine_run_upserts_tasks(h: Harness) -> None:
         stale["target_tests"] = ["tests/stale.py"]
         row.spec_json = stale
         s.commit()
-    h.enqueue("mine", params_json={"task_ids": [h.pyrepo.feat_sha]})
+    # the walk uses the pool the task was STORED under (its shape caps), not the run's:
+    # under the hard pool's caps (4–8 source files) this one-file commit is no candidate
+    h.enqueue("mine", params_json={"task_ids": [h.pyrepo.feat_sha], "pool": "hard"})
     requal = h.run_one()
     assert requal.status == STATUS_SUCCEEDED, requal.error
     assert requal.counts_json["examined"] == 1 and requal.counts_json["found"] == 1
-    assert requal.counts_json["known"] == 0
+    assert requal.counts_json["known"] == 0 and requal.counts_json["pool"] == "standard"
+    assert next(t for t in h.tasks() if t.task_id == h.pyrepo.feat_sha).pool == "standard"
     fresh = next(t for t in h.tasks() if t.task_id == h.pyrepo.feat_sha)
     assert TaskSpec.from_dict(fresh.spec_json).target_tests == (pr.TEST_SUBTRACT,)
     assert (requal.progress_done, requal.progress_total) == (1, 1)
