@@ -2,10 +2,37 @@
  * Number and date formatting with compute-guards (STANDARD law 1: `NaN`,
  * `Infinity` and `undefined` must be impossible in render). Every formatter
  * returns the em-dash for an absent value rather than a fabricated zero.
+ *
+ * Navigation
+ * ----------
+ * What it is:   The formatters every screen renders numbers through (`fmtPct`, `fmtInt`,
+ *               `fmtUsd`, `fmtSeconds`, `fmtMs`, `fmtRatio`, `fmtCi`, `fmtDate`, `fmtTime`,
+ *               `shortId`) and the client-side Wilson interval.
+ * What it does: Guarantees `NaN`, `Infinity` and `undefined` cannot reach the page: an absent
+ *               or non-finite value renders as the em-dash, never as a fabricated `0` or
+ *               `0.0%`. `wilson` reproduces `crb.core.stats.wilson_interval` (95 %, same z) so
+ *               a tile can show an interval for a count the API did not pre-compute.
+ * How:          One `finite()` guard at the top of every formatter; fixed en-GB locale so the
+ *               output is the same in tests and in production.
+ * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/components/StatTile.tsx (value + n + interval, always through these),
+ *               ui/src/components/CiBar.tsx (the interval bar), src/crb/core/stats.py (the
+ *               Wilson formula this file mirrors — keep the two identical),
+ *               ui/src/screens/Runs/RunDetailPage.tsx (a heavy user of every formatter)
+ * Tested by:    ui/src/components/StatTile.test.tsx (the dash for an absent value and the
+ *               interval text), ui/src/screens/Capability/CapabilityPage.test.tsx (percentages
+ *               and intervals as rendered)
+ * Touch when:   the Wilson z or method changes in src/crb/core/stats.py (an apparatus change —
+ *               docs/EVIDENCE-AND-CLAIMS.md#4-the-apparatus-stamp--evidence-expires); never for a
+ *               new repository.
+ * Claims:       Every rate the UI shows is accompanied by n and a Wilson interval
+ *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
  */
 
 export const DASH = '—'
 
+/** The render guard: only a finite number is ever formatted; everything else is the dash. */
 function finite(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n)
 }

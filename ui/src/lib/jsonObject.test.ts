@@ -1,3 +1,23 @@
+/**
+ * ui/src/lib/jsonObject.ts — the JSON-object editors' parser and the builder-config rules.
+ *
+ * Navigation
+ * ----------
+ * What it is:   Unit tests for `parseJsonObject`, `validateBuilderConfig`, `parseBuilderConfig`
+ *               and `formatJsonObject`.
+ * What it does: Pins that blank text is `{}`, that arrays / scalars / invalid JSON are refused
+ *               with a readable reason, that the builder-config rules refuse identity keys,
+ *               credential-shaped keys, non-identifier keys and more than 32 keys with the
+ *               server's wording, and that `{}` formats back to empty text.
+ * How:          Table-driven `it.each` over the refusal cases; direct calls otherwise.
+ * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ * ADRs:         none
+ * Works with:   ui/src/lib/jsonObject.ts (the code under test), src/crb/server/schemas.py (the
+ *               server rules these cases must agree with)
+ * Tested by:    ui/src/lib/jsonObject.test.ts
+ * Touch when:   a rule is added on the server (src/crb/server/schemas.py) — add the case here
+ *               and the check in ui/src/lib/jsonObject.ts together.
+ */
 import { describe, expect, it } from 'vitest'
 import { formatJsonObject, parseBuilderConfig, parseJsonObject, validateBuilderConfig } from './jsonObject'
 
