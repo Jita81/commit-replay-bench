@@ -1,0 +1,1398 @@
+diff --git a/src/__tests__/index.test.ts b/src/__tests__/index.test.ts
+index 5eab14f..5755e98 100644
+--- a/src/__tests__/index.test.ts
++++ b/src/__tests__/index.test.ts
+@@ -96,7 +96,9 @@ describe('Index', () => {
+       'NotificationBannerLink',
+       'NotificationBannerTitle',
+       'Pagination',
++      'PaginationItem',
+       'PaginationLink',
++      'PaginationLinkText',
+       'Panel',
+       'PanelTitle',
+       'Radios',
+diff --git a/src/components/navigation/pagination/Pagination.tsx b/src/components/navigation/pagination/Pagination.tsx
+index a202b43..b8522a8 100644
+--- a/src/components/navigation/pagination/Pagination.tsx
++++ b/src/components/navigation/pagination/Pagination.tsx
+@@ -1,63 +1,51 @@
+ import classNames from 'classnames';
+-import { forwardRef, type ComponentPropsWithoutRef } from 'react';
+-import { ArrowLeftIcon, ArrowRightIcon } from '#components/content-presentation/index.js';
+-import { type AsElementLink } from '#util/types/LinkTypes.js';
+-
+-export interface PaginationLinkProps extends AsElementLink<HTMLAnchorElement> {
+-  previous?: boolean;
+-  next?: boolean;
+-}
+-
+-export const PaginationLink = forwardRef<HTMLAnchorElement, PaginationLinkProps>(
+-  ({ className, children, asElement: Element = 'a', previous, next, ...rest }, forwardedRef) => (
+-    <li
+-      className={classNames(
+-        { 'nhsuk-pagination-item--previous': previous },
+-        { 'nhsuk-pagination-item--next': next },
+-      )}
+-    >
+-      <Element
++import { Children, forwardRef, type ComponentPropsWithoutRef } from 'react';
++import { childIsOfComponentType } from '#util/types/index.js';
++import { PaginationItem, PaginationLink, PaginationLinkText } from './components/index.js';
++
++export type PaginationProps = ComponentPropsWithoutRef<'nav'>;
++
++const PaginationComponent = forwardRef<HTMLElement, PaginationProps>(
++  ({ className, children, 'aria-label': ariaLabel = 'Pagination', ...rest }, forwardedRef) => {
++    const items = Children.toArray(children);
++
++    const previousLink = items.find(
++      (child) => childIsOfComponentType(child, PaginationLink) && child.props.previous,
++    );
++    const nextLink = items.find(
++      (child) => childIsOfComponentType(child, PaginationLink) && child.props.next,
++    );
++
++    const numbered = Boolean(previousLink || nextLink);
++
++    const listItems = items.filter((child) => child !== previousLink && child !== nextLink);
++
++    return (
++      <nav
+         className={classNames(
+-          'nhsuk-pagination__link',
+-          { 'nhsuk-pagination__link--prev': previous },
+-          { 'nhsuk-pagination__link--next': next },
++          'nhsuk-pagination',
++          { 'nhsuk-pagination--numbered': numbered },
+           className,
+         )}
++        role="navigation"
++        aria-label={ariaLabel}
+         ref={forwardedRef}
+         {...rest}
+       >
+-        <span className="nhsuk-pagination__title">
+-          {previous ? 'Previous' : null}
+-          {next ? 'Next' : null}
+-        </span>
+-        <span className="nhsuk-u-visually-hidden">:</span>
+-        <span className="nhsuk-pagination__page">{children}</span>
+-        {previous ? <ArrowLeftIcon /> : null}
+-        {next ? <ArrowRightIcon /> : null}
+-      </Element>
+-    </li>
+-  ),
+-);
+-
+-export type PaginationProps = ComponentPropsWithoutRef<'nav'>;
+-
+-const PaginationComponent = forwardRef<HTMLElement, PaginationProps>(
+-  ({ className, children, 'aria-label': ariaLabel = 'Pagination', ...rest }, forwardedRef) => (
+-    <nav
+-      className={classNames('nhsuk-pagination', className)}
+-      role="navigation"
+-      aria-label={ariaLabel}
+-      ref={forwardedRef}
+-      {...rest}
+-    >
+-      <ul className="nhsuk-list nhsuk-pagination__list">{children}</ul>
+-    </nav>
+-  ),
++        {previousLink}
++        <ul className={classNames({ 'nhsuk-list': !numbered }, 'nhsuk-pagination__list')}>
++          {listItems}
++        </ul>
++        {nextLink}
++      </nav>
++    );
++  },
+ );
+ 
+ PaginationComponent.displayName = 'Pagination';
+-PaginationLink.displayName = 'Pagination.Link';
+ 
+ export const Pagination = Object.assign(PaginationComponent, {
++  Item: PaginationItem,
+   Link: PaginationLink,
++  LinkText: PaginationLinkText,
+ });
+diff --git a/src/components/navigation/pagination/__tests__/Pagination.test.tsx b/src/components/navigation/pagination/__tests__/Pagination.test.tsx
+index a435ffd..582ce20 100644
+--- a/src/components/navigation/pagination/__tests__/Pagination.test.tsx
++++ b/src/components/navigation/pagination/__tests__/Pagination.test.tsx
+@@ -1,5 +1,6 @@
+ import { render } from '@testing-library/react';
+ import { Pagination } from '..';
++import { createRef } from 'react';
+ 
+ describe('Pagination', () => {
+   it('matches snapshot', () => {
+@@ -8,45 +9,267 @@ describe('Pagination', () => {
+     expect(container).toMatchSnapshot('Pagination');
+   });
+ 
++  it('matches snapshot with next item', () => {
++    const { container } = render(
++      <Pagination>
++        <Pagination.Item href="#" labelText="Page name" next />
++      </Pagination>,
++    );
++
++    expect(container).toMatchSnapshot();
++  });
++
++  it('matches snapshot with previous item', () => {
++    const { container } = render(
++      <Pagination>
++        <Pagination.Item href="#" labelText="Page name" previous />
++      </Pagination>,
++    );
++
++    expect(container).toMatchSnapshot();
++  });
++
++  it('matches snapshot with previous and next items', () => {
++    const { container } = render(
++      <Pagination>
++        <Pagination.Item href="#" labelText="Treatments" previous />
++        <Pagination.Item href="#" labelText="Symptoms" next />
++      </Pagination>,
++    );
++
++    expect(container).toMatchSnapshot();
++  });
++
++  it('matches snapshot with previous and next items (translated)', () => {
++    const { container } = render(
++      <Pagination>
++        <Pagination.Item href="#" labelText="Driniaethau" previous>
++          Blaenorol
++        </Pagination.Item>
++        <Pagination.Item href="#" labelText="Symptomau" next>
++          Nesaf
++        </Pagination.Item>
++      </Pagination>,
++    );
++
++    expect(container).toMatchSnapshot();
++  });
++
++  it('matches snapshot with numbered items', () => {
++    const { container } = render(
++      <Pagination>
++        <Pagination.Link href="/results?page=1" previous />
++        <Pagination.Item href="/results?page=1" number={1} />
++        <Pagination.Item href="/results?page=2" number={2} current />
++        <Pagination.Item href="/results?page=3" number={3} />
++        <Pagination.Link href="/results?page=3" next />
++      </Pagination>,
++    );
++
++    expect(container).toMatchSnapshot();
++  });
++
++  it('matches snapshot with numbered items (translated)', () => {
++    const { container } = render(
++      <Pagination>
++        <Pagination.Link href="/results?page=1" previous>
++          Blaenorol
++        </Pagination.Link>
++        <Pagination.Item href="/results?page=1" number={1} />
++        <Pagination.Item href="/results?page=2" number={2} current />
++        <Pagination.Item href="/results?page=3" number={3} />
++        <Pagination.Link href="/results?page=3" next>
++          Nesaf
++        </Pagination.Link>
++      </Pagination>,
++    );
++
++    expect(container).toMatchSnapshot();
++  });
++
++  it('forwards refs', () => {
++    const ref = createRef<HTMLElement>();
++
++    const { container } = render(
++      <Pagination ref={ref}>
++        <Pagination.Item href="#" labelText="Treatments" previous />
++        <Pagination.Item href="#" labelText="Symptoms" next />
++      </Pagination>,
++    );
++
++    const paginationEl = container.querySelector('nav');
++
++    expect(ref.current).toBe(paginationEl);
++    expect(ref.current).toHaveClass('nhsuk-pagination');
++  });
++
++  it('forwards refs with numbered items', () => {
++    const ref = createRef<HTMLElement>();
++
++    const { container } = render(
++      <Pagination ref={ref}>
++        <Pagination.Link href="/results?page=1" previous />
++        <Pagination.Item href="/results?page=1" number={1} />
++        <Pagination.Item href="/results?page=2" number={2} current />
++        <Pagination.Item href="/results?page=3" number={3} />
++        <Pagination.Link href="/results?page=3" next />
++      </Pagination>,
++    );
++
++    const paginationEl = container.querySelector('nav');
++
++    expect(ref.current).toBe(paginationEl);
++    expect(ref.current).toHaveClass('nhsuk-pagination', 'nhsuk-pagination--numbered');
++  });
++
++  describe('Pagination.Item', () => {
++    it('matches snapshot with previous item', () => {
++      const { container } = render(<Pagination.Item href="#" labelText="Page name" previous />);
++
++      expect(container).toMatchSnapshot();
++    });
++
++    it('matches snapshot with previous item (no label text)', () => {
++      const { container } = render(<Pagination.Item href="#" previous />);
++
++      expect(container).toMatchSnapshot();
++    });
++
++    it('matches snapshot with next item', () => {
++      const { container } = render(<Pagination.Item href="#" labelText="Page name" next />);
++
++      expect(container).toMatchSnapshot();
++    });
++
++    it('matches snapshot with next item (no label text)', () => {
++      const { container } = render(<Pagination.Item href="#" next />);
++
++      expect(container).toMatchSnapshot();
++    });
++
++    it('matches snapshot with number', () => {
++      const { container } = render(<Pagination.Item href="#" number={10} />);
++
++      expect(container).toMatchSnapshot();
++    });
++
++    it('matches snapshot with ellipsis', () => {
++      const { container } = render(<Pagination.Item ellipsis />);
++
++      expect(container).toMatchSnapshot();
++    });
++
++    it('renders previous elements', () => {
++      const { container } = render(<Pagination.Item href="#" labelText="Page name" previous />);
++
++      const itemEl = container.querySelector('li');
++      const linkEl = container.querySelector('a');
++      const titleEl = container.querySelector('.nhsuk-pagination__title');
++      const pageEl = container.querySelector('.nhsuk-pagination__page');
++      const iconEl = container.querySelector('.nhsuk-icon');
++
++      expect(itemEl).toHaveClass('nhsuk-pagination-item--previous');
++      expect(itemEl).not.toHaveClass('nhsuk-pagination-item--next');
++
++      expect(linkEl).toHaveClass('nhsuk-pagination__link', 'nhsuk-pagination__link--prev');
++      expect(linkEl).not.toHaveClass('nhsuk-pagination__link--next');
++
++      expect(titleEl).toHaveTextContent('Previous');
++      expect(pageEl).toHaveTextContent('Page name');
++
++      expect(iconEl).toHaveClass('nhsuk-icon--arrow-left');
++      expect(iconEl).not.toHaveClass('nhsuk-icon--arrow-right');
++    });
++
++    it('renders next elements', () => {
++      const { container } = render(<Pagination.Item href="#" labelText="Page name" next />);
++
++      const itemEl = container.querySelector('li');
++      const linkEl = container.querySelector('a');
++      const titleEl = container.querySelector('.nhsuk-pagination__title');
++      const pageEl = container.querySelector('.nhsuk-pagination__page');
++      const iconEl = container.querySelector('.nhsuk-icon');
++
++      expect(itemEl).not.toHaveClass('nhsuk-pagination-item--previous');
++      expect(itemEl).toHaveClass('nhsuk-pagination-item--next');
++
++      expect(linkEl).not.toHaveClass('nhsuk-pagination__link--prev');
++      expect(linkEl).toHaveClass('nhsuk-pagination__link', 'nhsuk-pagination__link--next');
++
++      expect(titleEl).toHaveTextContent('Next');
++      expect(pageEl).toHaveTextContent('Page name');
++
++      expect(iconEl).not.toHaveClass('nhsuk-icon--arrow-left');
++      expect(iconEl).toHaveClass('nhsuk-icon--arrow-right');
++    });
++
++    it('renders number elements', () => {
++      const { container } = render(<Pagination.Item href="#" number={10} />);
++
++      const itemEl = container.querySelector('li');
++      const linkEl = container.querySelector('a');
++
++      expect(itemEl).toHaveClass('nhsuk-pagination__item');
++      expect(linkEl).toHaveClass('nhsuk-pagination__link');
++      expect(linkEl).toHaveTextContent('10');
++      expect(linkEl).toHaveAccessibleName('Page 10');
++    });
++
++    it('renders ellipsis elements', () => {
++      const { container } = render(<Pagination.Item ellipsis />);
++
++      const itemEl = container.querySelector('li');
++      const linkEl = container.querySelector('a');
++
++      expect(itemEl).toHaveClass('nhsuk-pagination__item', 'nhsuk-pagination__item--ellipsis');
++      expect(itemEl).toHaveTextContent('⋯');
++      expect(linkEl).toBeNull();
++    });
++  });
++
+   describe('Pagination.Link', () => {
+-    it('matches snapshot', () => {
+-      const { container } = render(<Pagination.Link />);
++    it('matches snapshot with previous link', () => {
++      const { container } = render(<Pagination.Link href="#" previous />);
++
++      expect(container).toMatchSnapshot();
++    });
++
++    it('matches snapshot with next link', () => {
++      const { container } = render(<Pagination.Link href="#" next />);
+ 
+-      expect(container).toMatchSnapshot('Pagination.Link');
++      expect(container).toMatchSnapshot();
+     });
+ 
+     it('renders previous elements', () => {
+-      const { container } = render(<Pagination.Link previous>PreviousText</Pagination.Link>);
+-
+-      expect(container.querySelector('.nhsuk-pagination-item--previous')).toBeTruthy();
+-      expect(container.querySelector('.nhsuk-pagination-item--next')).toBeFalsy();
+-      expect(container.querySelector('.nhsuk-pagination__title')?.textContent).toBe('Previous');
+-      expect(container.querySelector('.nhsuk-icon--arrow-left')).toBeTruthy();
+-      expect(container.querySelector('.nhsuk-icon--arrow-right')).toBeFalsy();
+-      expect(container.querySelector('.nhsuk-pagination__page')?.textContent).toBe('PreviousText');
+-      expect(
+-        container.querySelector('.nhsuk-pagination__link.nhsuk-pagination__link--prev'),
+-      ).toBeTruthy();
+-      expect(
+-        container.querySelector('.nhsuk-pagination__link.nhsuk-pagination__link--next'),
+-      ).toBeFalsy();
++      const { container } = render(<Pagination.Link href="#" previous />);
++
++      const linkEl = container.querySelector('a');
++      const titleEl = container.querySelector('.nhsuk-pagination__title');
++      const iconEl = container.querySelector('.nhsuk-icon');
++
++      expect(linkEl).toHaveClass('nhsuk-pagination__previous');
++      expect(linkEl).not.toHaveClass('nhsuk-pagination__next');
++
++      expect(titleEl).toHaveTextContent('Previous');
++
++      expect(iconEl).toHaveClass('nhsuk-icon--arrow-left');
++      expect(iconEl).not.toHaveClass('nhsuk-icon--arrow-right');
+     });
+ 
+     it('renders next elements', () => {
+-      const { container } = render(<Pagination.Link next>NextText</Pagination.Link>);
+-
+-      expect(container.querySelector('.nhsuk-pagination-item--previous')).toBeFalsy();
+-      expect(container.querySelector('.nhsuk-pagination-item--next')).toBeTruthy();
+-      expect(container.querySelector('.nhsuk-pagination__title')?.textContent).toBe('Next');
+-      expect(container.querySelector('.nhsuk-icon--arrow-left')).toBeFalsy();
+-      expect(container.querySelector('.nhsuk-icon--arrow-right')).toBeTruthy();
+-      expect(container.querySelector('.nhsuk-pagination__page')?.textContent).toBe('NextText');
+-      expect(
+-        container.querySelector('.nhsuk-pagination__link.nhsuk-pagination__link--prev'),
+-      ).toBeFalsy();
+-      expect(
+-        container.querySelector('.nhsuk-pagination__link.nhsuk-pagination__link--next'),
+-      ).toBeTruthy();
++      const { container } = render(<Pagination.Link href="#" next />);
++
++      const linkEl = container.querySelector('a');
++      const titleEl = container.querySelector('.nhsuk-pagination__title');
++      const iconEl = container.querySelector('.nhsuk-icon');
++
++      expect(linkEl).not.toHaveClass('nhsuk-pagination__previous');
++      expect(linkEl).toHaveClass('nhsuk-pagination__next');
++
++      expect(titleEl).toHaveTextContent('Next');
++
++      expect(iconEl).not.toHaveClass('nhsuk-icon--arrow-left');
++      expect(iconEl).toHaveClass('nhsuk-icon--arrow-right');
+     });
+   });
+ });
+diff --git a/src/components/navigation/pagination/__tests__/__snapshots__/Pagination.test.tsx.snap b/src/components/navigation/pagination/__tests__/__snapshots__/Pagination.test.tsx.snap
+index 6bc03fa..9bc5159 100644
+--- a/src/components/navigation/pagination/__tests__/__snapshots__/Pagination.test.tsx.snap
++++ b/src/components/navigation/pagination/__tests__/__snapshots__/Pagination.test.tsx.snap
+@@ -1,16 +1,175 @@
+ // Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+ 
+-exports[`Pagination Pagination.Link matches snapshot: Pagination.Link 1`] = `
++exports[`Pagination Pagination.Item matches snapshot with ellipsis 1`] = `
+ <div>
+   <li
+-    class=""
++    class="nhsuk-pagination__item nhsuk-pagination__item--ellipsis"
++  >
++    ⋯
++  </li>
++</div>
++`;
++
++exports[`Pagination Pagination.Item matches snapshot with next item (no label text) 1`] = `
++<div>
++  <li
++    class="nhsuk-pagination-item--next"
++  >
++    <a
++      class="nhsuk-pagination__link nhsuk-pagination__link--next"
++      href="#"
++      rel="next"
++    >
++      <span
++        class="nhsuk-pagination__title"
++      >
++        Next
++        <span
++          class="nhsuk-u-visually-hidden"
++        >
++           page
++        </span>
++      </span>
++      <svg
++        aria-hidden="true"
++        class="nhsuk-icon nhsuk-icon--arrow-right"
++        focusable="false"
++        height="16"
++        viewBox="0 0 24 24"
++        width="16"
++        xmlns="http://www.w3.org/2000/svg"
++      >
++        <path
++          d="m14.7 6.3 5 5c.2.2.3.4.3.7 0 .3-.1.5-.3.7l-5 5a1 1 0 0 1-1.4-1.4l3.3-3.3H5a1 1 0 0 1 0-2h11.6l-3.3-3.3a1 1 0 1 1 1.4-1.4Z"
++        />
++      </svg>
++    </a>
++  </li>
++</div>
++`;
++
++exports[`Pagination Pagination.Item matches snapshot with next item 1`] = `
++<div>
++  <li
++    class="nhsuk-pagination-item--next"
+   >
+     <a
++      class="nhsuk-pagination__link nhsuk-pagination__link--next"
++      href="#"
++      rel="next"
++    >
++      <span
++        class="nhsuk-pagination__title"
++      >
++        Next
++        <span
++          class="nhsuk-u-visually-hidden"
++        >
++           page
++        </span>
++      </span>
++      <span
++        class="nhsuk-u-visually-hidden"
++      >
++        :
++      </span>
++      <span
++        class="nhsuk-pagination__page"
++      >
++        Page name
++      </span>
++      <svg
++        aria-hidden="true"
++        class="nhsuk-icon nhsuk-icon--arrow-right"
++        focusable="false"
++        height="16"
++        viewBox="0 0 24 24"
++        width="16"
++        xmlns="http://www.w3.org/2000/svg"
++      >
++        <path
++          d="m14.7 6.3 5 5c.2.2.3.4.3.7 0 .3-.1.5-.3.7l-5 5a1 1 0 0 1-1.4-1.4l3.3-3.3H5a1 1 0 0 1 0-2h11.6l-3.3-3.3a1 1 0 1 1 1.4-1.4Z"
++        />
++      </svg>
++    </a>
++  </li>
++</div>
++`;
++
++exports[`Pagination Pagination.Item matches snapshot with number 1`] = `
++<div>
++  <li
++    class="nhsuk-pagination__item"
++  >
++    <a
++      aria-label="Page 10"
+       class="nhsuk-pagination__link"
++      href="#"
++    >
++      10
++    </a>
++  </li>
++</div>
++`;
++
++exports[`Pagination Pagination.Item matches snapshot with previous item (no label text) 1`] = `
++<div>
++  <li
++    class="nhsuk-pagination-item--previous"
++  >
++    <a
++      class="nhsuk-pagination__link nhsuk-pagination__link--prev"
++      href="#"
++      rel="prev"
+     >
+       <span
+         class="nhsuk-pagination__title"
+-      />
++      >
++        Previous
++        <span
++          class="nhsuk-u-visually-hidden"
++        >
++           page
++        </span>
++      </span>
++      <svg
++        aria-hidden="true"
++        class="nhsuk-icon nhsuk-icon--arrow-left"
++        focusable="false"
++        height="16"
++        viewBox="0 0 24 24"
++        width="16"
++        xmlns="http://www.w3.org/2000/svg"
++      >
++        <path
++          d="M10.7 6.3c.4.4.4 1 0 1.4L7.4 11H19a1 1 0 0 1 0 2H7.4l3.3 3.3c.4.4.4 1 0 1.4a1 1 0 0 1-1.4 0l-5-5A1 1 0 0 1 4 12c0-.3.1-.5.3-.7l5-5a1 1 0 0 1 1.4 0Z"
++        />
++      </svg>
++    </a>
++  </li>
++</div>
++`;
++
++exports[`Pagination Pagination.Item matches snapshot with previous item 1`] = `
++<div>
++  <li
++    class="nhsuk-pagination-item--previous"
++  >
++    <a
++      class="nhsuk-pagination__link nhsuk-pagination__link--prev"
++      href="#"
++      rel="prev"
++    >
++      <span
++        class="nhsuk-pagination__title"
++      >
++        Previous
++        <span
++          class="nhsuk-u-visually-hidden"
++        >
++           page
++        </span>
++      </span>
+       <span
+         class="nhsuk-u-visually-hidden"
+       >
+@@ -18,12 +177,605 @@ exports[`Pagination Pagination.Link matches snapshot: Pagination.Link 1`] = `
+       </span>
+       <span
+         class="nhsuk-pagination__page"
+-      />
++      >
++        Page name
++      </span>
++      <svg
++        aria-hidden="true"
++        class="nhsuk-icon nhsuk-icon--arrow-left"
++        focusable="false"
++        height="16"
++        viewBox="0 0 24 24"
++        width="16"
++        xmlns="http://www.w3.org/2000/svg"
++      >
++        <path
++          d="M10.7 6.3c.4.4.4 1 0 1.4L7.4 11H19a1 1 0 0 1 0 2H7.4l3.3 3.3c.4.4.4 1 0 1.4a1 1 0 0 1-1.4 0l-5-5A1 1 0 0 1 4 12c0-.3.1-.5.3-.7l5-5a1 1 0 0 1 1.4 0Z"
++        />
++      </svg>
+     </a>
+   </li>
+ </div>
+ `;
+ 
++exports[`Pagination Pagination.Link matches snapshot with next link 1`] = `
++<div>
++  <a
++    class="nhsuk-pagination__next"
++    href="#"
++    rel="next"
++  >
++    <span
++      class="nhsuk-pagination__title"
++    >
++      Next
++      <span
++        class="nhsuk-u-visually-hidden"
++      >
++         page
++      </span>
++    </span>
++    <svg
++      aria-hidden="true"
++      class="nhsuk-icon nhsuk-icon--arrow-right"
++      focusable="false"
++      height="16"
++      viewBox="0 0 24 24"
++      width="16"
++      xmlns="http://www.w3.org/2000/svg"
++    >
++      <path
++        d="m14.7 6.3 5 5c.2.2.3.4.3.7 0 .3-.1.5-.3.7l-5 5a1 1 0 0 1-1.4-1.4l3.3-3.3H5a1 1 0 0 1 0-2h11.6l-3.3-3.3a1 1 0 1 1 1.4-1.4Z"
++      />
++    </svg>
++  </a>
++</div>
++`;
++
++exports[`Pagination Pagination.Link matches snapshot with previous link 1`] = `
++<div>
++  <a
++    class="nhsuk-pagination__previous"
++    href="#"
++    rel="prev"
++  >
++    <svg
++      aria-hidden="true"
++      class="nhsuk-icon nhsuk-icon--arrow-left"
++      focusable="false"
++      height="16"
++      viewBox="0 0 24 24"
++      width="16"
++      xmlns="http://www.w3.org/2000/svg"
++    >
++      <path
++        d="M10.7 6.3c.4.4.4 1 0 1.4L7.4 11H19a1 1 0 0 1 0 2H7.4l3.3 3.3c.4.4.4 1 0 1.4a1 1 0 0 1-1.4 0l-5-5A1 1 0 0 1 4 12c0-.3.1-.5.3-.7l5-5a1 1 0 0 1 1.4 0Z"
++      />
++    </svg>
++    <span
++      class="nhsuk-pagination__title"
++    >
++      Previous
++      <span
++        class="nhsuk-u-visually-hidden"
++      >
++         page
++      </span>
++    </span>
++  </a>
++</div>
++`;
++
++exports[`Pagination matches snapshot with next item 1`] = `
++<div>
++  <nav
++    aria-label="Pagination"
++    class="nhsuk-pagination"
++    role="navigation"
++  >
++    <ul
++      class="nhsuk-list nhsuk-pagination__list"
++    >
++      <li
++        class="nhsuk-pagination-item--next"
++      >
++        <a
++          class="nhsuk-pagination__link nhsuk-pagination__link--next"
++          href="#"
++          rel="next"
++        >
++          <span
++            class="nhsuk-pagination__title"
++          >
++            Next
++            <span
++              class="nhsuk-u-visually-hidden"
++            >
++               page
++            </span>
++          </span>
++          <span
++            class="nhsuk-u-visually-hidden"
++          >
++            :
++          </span>
++          <span
++            class="nhsuk-pagination__page"
++          >
++            Page name
++          </span>
++          <svg
++            aria-hidden="true"
++            class="nhsuk-icon nhsuk-icon--arrow-right"
++            focusable="false"
++            height="16"
++            viewBox="0 0 24 24"
++            width="16"
++            xmlns="http://www.w3.org/2000/svg"
++          >
++            <path
++              d="m14.7 6.3 5 5c.2.2.3.4.3.7 0 .3-.1.5-.3.7l-5 5a1 1 0 0 1-1.4-1.4l3.3-3.3H5a1 1 0 0 1 0-2h11.6l-3.3-3.3a1 1 0 1 1 1.4-1.4Z"
++            />
++          </svg>
++        </a>
++      </li>
++    </ul>
++  </nav>
++</div>
++`;
++
++exports[`Pagination matches snapshot with numbered items (translated) 1`] = `
++<div>
++  <nav
++    aria-label="Pagination"
++    class="nhsuk-pagination nhsuk-pagination--numbered"
++    role="navigation"
++  >
++    <a
++      class="nhsuk-pagination__previous"
++      href="/results?page=1"
++      rel="prev"
++    >
++      <svg
++        aria-hidden="true"
++        class="nhsuk-icon nhsuk-icon--arrow-left"
++        focusable="false"
++        height="16"
++        viewBox="0 0 24 24"
++        width="16"
++        xmlns="http://www.w3.org/2000/svg"
++      >
++        <path
++          d="M10.7 6.3c.4.4.4 1 0 1.4L7.4 11H19a1 1 0 0 1 0 2H7.4l3.3 3.3c.4.4.4 1 0 1.4a1 1 0 0 1-1.4 0l-5-5A1 1 0 0 1 4 12c0-.3.1-.5.3-.7l5-5a1 1 0 0 1 1.4 0Z"
++        />
++      </svg>
++      <span
++        class="nhsuk-pagination__title"
++      >
++        Blaenorol
++      </span>
++    </a>
++    <ul
++      class="nhsuk-pagination__list"
++    >
++      <li
++        class="nhsuk-pagination__item"
++      >
++        <a
++          aria-label="Page 1"
++          class="nhsuk-pagination__link"
++          href="/results?page=1"
++        >
++          1
++        </a>
++      </li>
++      <li
++        class="nhsuk-pagination__item nhsuk-pagination__item--current"
++      >
++        <a
++          aria-label="Page 2"
++          class="nhsuk-pagination__link"
++          href="/results?page=2"
++        >
++          2
++        </a>
++      </li>
++      <li
++        class="nhsuk-pagination__item"
++      >
++        <a
++          aria-label="Page 3"
++          class="nhsuk-pagination__link"
++          href="/results?page=3"
++        >
++          3
++        </a>
++      </li>
++    </ul>
++    <a
++      class="nhsuk-pagination__next"
++      href="/results?page=3"
++      rel="next"
++    >
++      <span
++        class="nhsuk-pagination__title"
++      >
++        Nesaf
++      </span>
++      <svg
++        aria-hidden="true"
++        class="nhsuk-icon nhsuk-icon--arrow-right"
++        focusable="false"
++        height="16"
++        viewBox="0 0 24 24"
++        width="16"
++        xmlns="http://www.w3.org/2000/svg"
++      >
++        <path
++          d="m14.7 6.3 5 5c.2.2.3.4.3.7 0 .3-.1.5-.3.7l-5 5a1 1 0 0 1-1.4-1.4l3.3-3.3H5a1 1 0 0 1 0-2h11.6l-3.3-3.3a1 1 0 1 1 1.4-1.4Z"
++        />
++      </svg>
++    </a>
++  </nav>
++</div>
++`;
++
++exports[`Pagination matches snapshot with numbered items 1`] = `
++<div>
++  <nav
++    aria-label="Pagination"
++    class="nhsuk-pagination nhsuk-pagination--numbered"
++    role="navigation"
++  >
++    <a
++      class="nhsuk-pagination__previous"
++      href="/results?page=1"
++      rel="prev"
++    >
++      <svg
++        aria-hidden="true"
++        class="nhsuk-icon nhsuk-icon--arrow-left"
++        focusable="false"
++        height="16"
++        viewBox="0 0 24 24"
++        width="16"
++        xmlns="http://www.w3.org/2000/svg"
++      >
++        <path
++          d="M10.7 6.3c.4.4.4 1 0 1.4L7.4 11H19a1 1 0 0 1 0 2H7.4l3.3 3.3c.4.4.4 1 0 1.4a1 1 0 0 1-1.4 0l-5-5A1 1 0 0 1 4 12c0-.3.1-.5.3-.7l5-5a1 1 0 0 1 1.4 0Z"
++        />
++      </svg>
++      <span
++        class="nhsuk-pagination__title"
++      >
++        Previous
++        <span
++          class="nhsuk-u-visually-hidden"
++        >
++           page
++        </span>
++      </span>
++    </a>
++    <ul
++      class="nhsuk-pagination__list"
++    >
++      <li
++        class="nhsuk-pagination__item"
++      >
++        <a
++          aria-label="Page 1"
++          class="nhsuk-pagination__link"
++          href="/results?page=1"
++        >
++          1
++        </a>
++      </li>
++      <li
++        class="nhsuk-pagination__item nhsuk-pagination__item--current"
++      >
++        <a
++          aria-label="Page 2"
++          class="nhsuk-pagination__link"
++          href="/results?page=2"
++        >
++          2
++        </a>
++      </li>
++      <li
++        class="nhsuk-pagination__item"
++      >
++        <a
++          aria-label="Page 3"
++          class="nhsuk-pagination__link"
++          href="/results?page=3"
++        >
++          3
++        </a>
++      </li>
++    </ul>
++    <a
++      class="nhsuk-pagination__next"
++      href="/results?page=3"
++      rel="next"
++    >
++      <span
++        class="nhsuk-pagination__title"
++      >
++        Next
++        <span
++          class="nhsuk-u-visually-hidden"
++        >
++           page
++        </span>
++      </span>
++      <svg
++        aria-hidden="true"
++        class="nhsuk-icon nhsuk-icon--arrow-right"
++        focusable="false"
++        height="16"
++        viewBox="0 0 24 24"
++        width="16"
++        xmlns="http://www.w3.org/2000/svg"
++      >
++        <path
++          d="m14.7 6.3 5 5c.2.2.3.4.3.7 0 .3-.1.5-.3.7l-5 5a1 1 0 0 1-1.4-1.4l3.3-3.3H5a1 1 0 0 1 0-2h11.6l-3.3-3.3a1 1 0 1 1 1.4-1.4Z"
++        />
++      </svg>
++    </a>
++  </nav>
++</div>
++`;
++
++exports[`Pagination matches snapshot with previous and next items (translated) 1`] = `
++<div>
++  <nav
++    aria-label="Pagination"
++    class="nhsuk-pagination"
++    role="navigation"
++  >
++    <ul
++      class="nhsuk-list nhsuk-pagination__list"
++    >
++      <li
++        class="nhsuk-pagination-item--previous"
++      >
++        <a
++          class="nhsuk-pagination__link nhsuk-pagination__link--prev"
++          href="#"
++          rel="prev"
++        >
++          <span
++            class="nhsuk-pagination__title"
++          >
++            Blaenorol
++          </span>
++          <span
++            class="nhsuk-u-visually-hidden"
++          >
++            :
++          </span>
++          <span
++            class="nhsuk-pagination__page"
++          >
++            Driniaethau
++          </span>
++          <svg
++            aria-hidden="true"
++            class="nhsuk-icon nhsuk-icon--arrow-left"
++            focusable="false"
++            height="16"
++            viewBox="0 0 24 24"
++            width="16"
++            xmlns="http://www.w3.org/2000/svg"
++          >
++            <path
++              d="M10.7 6.3c.4.4.4 1 0 1.4L7.4 11H19a1 1 0 0 1 0 2H7.4l3.3 3.3c.4.4.4 1 0 1.4a1 1 0 0 1-1.4 0l-5-5A1 1 0 0 1 4 12c0-.3.1-.5.3-.7l5-5a1 1 0 0 1 1.4 0Z"
++            />
++          </svg>
++        </a>
++      </li>
++      <li
++        class="nhsuk-pagination-item--next"
++      >
++        <a
++          class="nhsuk-pagination__link nhsuk-pagination__link--next"
++          href="#"
++          rel="next"
++        >
++          <span
++            class="nhsuk-pagination__title"
++          >
++            Nesaf
++          </span>
++          <span
++            class="nhsuk-u-visually-hidden"
++          >
++            :
++          </span>
++          <span
++            class="nhsuk-pagination__page"
++          >
++            Symptomau
++          </span>
++          <svg
++            aria-hidden="true"
++            class="nhsuk-icon nhsuk-icon--arrow-right"
++            focusable="false"
++            height="16"
++            viewBox="0 0 24 24"
++            width="16"
++            xmlns="http://www.w3.org/2000/svg"
++          >
++            <path
++              d="m14.7 6.3 5 5c.2.2.3.4.3.7 0 .3-.1.5-.3.7l-5 5a1 1 0 0 1-1.4-1.4l3.3-3.3H5a1 1 0 0 1 0-2h11.6l-3.3-3.3a1 1 0 1 1 1.4-1.4Z"
++            />
++          </svg>
++        </a>
++      </li>
++    </ul>
++  </nav>
++</div>
++`;
++
++exports[`Pagination matches snapshot with previous and next items 1`] = `
++<div>
++  <nav
++    aria-label="Pagination"
++    class="nhsuk-pagination"
++    role="navigation"
++  >
++    <ul
++      class="nhsuk-list nhsuk-pagination__list"
++    >
++      <li
++        class="nhsuk-pagination-item--previous"
++      >
++        <a
++          class="nhsuk-pagination__link nhsuk-pagination__link--prev"
++          href="#"
++          rel="prev"
++        >
++          <span
++            class="nhsuk-pagination__title"
++          >
++            Previous
++            <span
++              class="nhsuk-u-visually-hidden"
++            >
++               page
++            </span>
++          </span>
++          <span
++            class="nhsuk-u-visually-hidden"
++          >
++            :
++          </span>
++          <span
++            class="nhsuk-pagination__page"
++          >
++            Treatments
++          </span>
++          <svg
++            aria-hidden="true"
++            class="nhsuk-icon nhsuk-icon--arrow-left"
++            focusable="false"
++            height="16"
++            viewBox="0 0 24 24"
++            width="16"
++            xmlns="http://www.w3.org/2000/svg"
++          >
++            <path
++              d="M10.7 6.3c.4.4.4 1 0 1.4L7.4 11H19a1 1 0 0 1 0 2H7.4l3.3 3.3c.4.4.4 1 0 1.4a1 1 0 0 1-1.4 0l-5-5A1 1 0 0 1 4 12c0-.3.1-.5.3-.7l5-5a1 1 0 0 1 1.4 0Z"
++            />
++          </svg>
++        </a>
++      </li>
++      <li
++        class="nhsuk-pagination-item--next"
++      >
++        <a
++          class="nhsuk-pagination__link nhsuk-pagination__link--next"
++          href="#"
++          rel="next"
++        >
++          <span
++            class="nhsuk-pagination__title"
++          >
++            Next
++            <span
++              class="nhsuk-u-visually-hidden"
++            >
++               page
++            </span>
++          </span>
++          <span
++            class="nhsuk-u-visually-hidden"
++          >
++            :
++          </span>
++          <span
++            class="nhsuk-pagination__page"
++          >
++            Symptoms
++          </span>
++          <svg
++            aria-hidden="true"
++            class="nhsuk-icon nhsuk-icon--arrow-right"
++            focusable="false"
++            height="16"
++            viewBox="0 0 24 24"
++            width="16"
++            xmlns="http://www.w3.org/2000/svg"
++          >
++            <path
++              d="m14.7 6.3 5 5c.2.2.3.4.3.7 0 .3-.1.5-.3.7l-5 5a1 1 0 0 1-1.4-1.4l3.3-3.3H5a1 1 0 0 1 0-2h11.6l-3.3-3.3a1 1 0 1 1 1.4-1.4Z"
++            />
++          </svg>
++        </a>
++      </li>
++    </ul>
++  </nav>
++</div>
++`;
++
++exports[`Pagination matches snapshot with previous item 1`] = `
++<div>
++  <nav
++    aria-label="Pagination"
++    class="nhsuk-pagination"
++    role="navigation"
++  >
++    <ul
++      class="nhsuk-list nhsuk-pagination__list"
++    >
++      <li
++        class="nhsuk-pagination-item--previous"
++      >
++        <a
++          class="nhsuk-pagination__link nhsuk-pagination__link--prev"
++          href="#"
++          rel="prev"
++        >
++          <span
++            class="nhsuk-pagination__title"
++          >
++            Previous
++            <span
++              class="nhsuk-u-visually-hidden"
++            >
++               page
++            </span>
++          </span>
++          <span
++            class="nhsuk-u-visually-hidden"
++          >
++            :
++          </span>
++          <span
++            class="nhsuk-pagination__page"
++          >
++            Page name
++          </span>
++          <svg
++            aria-hidden="true"
++            class="nhsuk-icon nhsuk-icon--arrow-left"
++            focusable="false"
++            height="16"
++            viewBox="0 0 24 24"
++            width="16"
++            xmlns="http://www.w3.org/2000/svg"
++          >
++            <path
++              d="M10.7 6.3c.4.4.4 1 0 1.4L7.4 11H19a1 1 0 0 1 0 2H7.4l3.3 3.3c.4.4.4 1 0 1.4a1 1 0 0 1-1.4 0l-5-5A1 1 0 0 1 4 12c0-.3.1-.5.3-.7l5-5a1 1 0 0 1 1.4 0Z"
++            />
++          </svg>
++        </a>
++      </li>
++    </ul>
++  </nav>
++</div>
++`;
++
+ exports[`Pagination matches snapshot: Pagination 1`] = `
+ <div>
+   <nav
+diff --git a/src/components/navigation/pagination/index.ts b/src/components/navigation/pagination/index.ts
+index 454be17..cd064a9 100644
+--- a/src/components/navigation/pagination/index.ts
++++ b/src/components/navigation/pagination/index.ts
+@@ -1 +1,2 @@
++export * from './components/index.js';
+ export * from './Pagination.js';
+diff --git a/src/components/navigation/pagination/components/PaginationItem.tsx b/src/components/navigation/pagination/components/PaginationItem.tsx
+new file mode 100644
+index 0000000..466596b
+--- /dev/null
++++ b/src/components/navigation/pagination/components/PaginationItem.tsx
+@@ -0,0 +1,90 @@
++import classNames from 'classnames';
++import { forwardRef } from 'react';
++import { ArrowLeftIcon, ArrowRightIcon } from '#components/content-presentation/index.js';
++import { type AsElementLink } from '#util/types/index.js';
++import { PaginationLinkText } from './PaginationLinkText.js';
++
++export interface PaginationItemProps extends Partial<AsElementLink<HTMLAnchorElement>> {
++  previous?: boolean;
++  next?: boolean;
++  labelText?: string;
++  number?: number;
++  current?: boolean;
++  ellipsis?: boolean;
++}
++
++export const PaginationItem = forwardRef<HTMLAnchorElement, PaginationItemProps>(
++  (
++    {
++      className,
++      children,
++      asElement: Element = 'a',
++      previous,
++      next,
++      labelText,
++      number,
++      current,
++      ellipsis,
++      ...rest
++    },
++    forwardedRef,
++  ) => {
++    if (ellipsis) {
++      return <li className="nhsuk-pagination__item nhsuk-pagination__item--ellipsis">⋯</li>;
++    }
++
++    if (number != null) {
++      return (
++        <li
++          className={classNames('nhsuk-pagination__item', {
++            'nhsuk-pagination__item--current': current,
++          })}
++        >
++          <Element
++            className={classNames('nhsuk-pagination__link', className)}
++            aria-label={`Page ${number}`}
++            ref={forwardedRef}
++            {...rest}
++          >
++            {number}
++          </Element>
++        </li>
++      );
++    }
++
++    return (
++      <li
++        className={classNames(
++          { 'nhsuk-pagination-item--previous': previous },
++          { 'nhsuk-pagination-item--next': next },
++        )}
++      >
++        <Element
++          className={classNames(
++            'nhsuk-pagination__link',
++            { 'nhsuk-pagination__link--prev': previous },
++            { 'nhsuk-pagination__link--next': next },
++            className,
++          )}
++          rel={previous ? 'prev' : 'next'}
++          ref={forwardedRef}
++          {...rest}
++        >
++          <PaginationLinkText previous={previous} next={next}>
++            {children}
++          </PaginationLinkText>
++          {labelText ? (
++            <>
++              <span className="nhsuk-u-visually-hidden">:</span>
++              <span className="nhsuk-pagination__page">{labelText}</span>
++            </>
++          ) : null}
++          {previous ? <ArrowLeftIcon /> : null}
++          {next ? <ArrowRightIcon /> : null}
++        </Element>
++      </li>
++    );
++  },
++);
++
++PaginationItem.displayName = 'Pagination.Item';
+diff --git a/src/components/navigation/pagination/components/PaginationLink.tsx b/src/components/navigation/pagination/components/PaginationLink.tsx
+new file mode 100644
+index 0000000..67dcc18
+--- /dev/null
++++ b/src/components/navigation/pagination/components/PaginationLink.tsx
+@@ -0,0 +1,33 @@
++import classNames from 'classnames';
++import { forwardRef } from 'react';
++import { ArrowLeftIcon, ArrowRightIcon } from '#components/content-presentation/index.js';
++import { type AsElementLink } from '#util/types/index.js';
++import { PaginationLinkText } from './PaginationLinkText.js';
++
++export interface PaginationLinkProps extends AsElementLink<HTMLAnchorElement> {
++  previous?: boolean;
++  next?: boolean;
++}
++
++export const PaginationLink = forwardRef<HTMLAnchorElement, PaginationLinkProps>(
++  ({ className, children, asElement: Element = 'a', previous, next, ...rest }, forwardedRef) => (
++    <Element
++      className={classNames(
++        { 'nhsuk-pagination__previous': previous },
++        { 'nhsuk-pagination__next': next },
++        className,
++      )}
++      rel={previous ? 'prev' : 'next'}
++      ref={forwardedRef}
++      {...rest}
++    >
++      {previous ? <ArrowLeftIcon /> : null}
++      <PaginationLinkText previous={previous} next={next}>
++        {children}
++      </PaginationLinkText>
++      {next ? <ArrowRightIcon /> : null}
++    </Element>
++  ),
++);
++
++PaginationLink.displayName = 'Pagination.Link';
+diff --git a/src/components/navigation/pagination/components/PaginationLinkText.tsx b/src/components/navigation/pagination/components/PaginationLinkText.tsx
+new file mode 100644
+index 0000000..f225dc6
+--- /dev/null
++++ b/src/components/navigation/pagination/components/PaginationLinkText.tsx
+@@ -0,0 +1,22 @@
++import classNames from 'classnames';
++import { forwardRef, type ComponentPropsWithoutRef } from 'react';
++
++export interface PaginationLinkTextProps extends ComponentPropsWithoutRef<'span'> {
++  previous?: boolean;
++  next?: boolean;
++}
++
++export const PaginationLinkText = forwardRef<HTMLSpanElement, PaginationLinkTextProps>(
++  ({ className, children, previous, next, ...rest }, forwardedRef) => (
++    <span
++      className={classNames('nhsuk-pagination__title', className)}
++      ref={forwardedRef}
++      {...rest}
++    >
++      {children || (previous ? 'Previous' : null) || (next ? 'Next' : null)}
++      {!children ? <span className="nhsuk-u-visually-hidden"> page</span> : null}
++    </span>
++  ),
++);
++
++PaginationLinkText.displayName = 'Pagination.LinkText';
+diff --git a/src/components/navigation/pagination/components/index.ts b/src/components/navigation/pagination/components/index.ts
+new file mode 100644
+index 0000000..36aa7ca
+--- /dev/null
++++ b/src/components/navigation/pagination/components/index.ts
+@@ -0,0 +1,3 @@
++export * from './PaginationItem.js';
++export * from './PaginationLink.js';
++export * from './PaginationLinkText.js';
