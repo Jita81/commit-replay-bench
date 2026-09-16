@@ -26,7 +26,6 @@ reviews:
     drafts: false
     base_branches:
       - main
-      - reboot/v2
   path_filters:
     - "!**/node_modules/**"
     - "!ui/dist/**"

@@ -124,15 +124,19 @@ characters; body explains *why*. Breaking apparatus changes use `!` and referenc
 End commit messages with the attribution line required by the session/tooling that
 authored them, when one is in force.
 
-Branches: `reboot/v2` is the integration branch for the reboot; feature branches
-`feat/<area>-<topic>`; one PR per file-disjoint workstream where possible. CI green before
-merge; the adversarial verify pass (re-run the full suite on the merged tree) before each
-release tag.
+Branches: **`main` is the trunk** (from 2026-09-16; `reboot/v2` was the reboot's
+integration branch until then and is kept as history). Feature branches
+`feat/<area>-<topic>` / `fix/<area>-<topic>` / `docs/<topic>`; one PR per file-disjoint
+workstream where possible. The gates green before merge — in CI when the repository has
+minutes, otherwise run locally and stated in the PR (`pytest tests`, `ruff check`, `ruff
+format --check`, `mypy --strict src scripts`, `scripts/code_map.py --check`, `lint-imports`,
+`cd ui && npx tsc -b && npx vitest run`, `helm lint --strict`); the adversarial verify pass
+(re-run the full suite on the merged tree) before each release tag.
 
 ## Pull requests and third-party review (CodeRabbit)
 
-From 2026-09-15 every change lands through a pull request into `reboot/v2` (and
-`reboot/v2` into `main` for a release). **CodeRabbit** is attached to the repository and
+From 2026-09-15 every change lands through a pull request into the trunk (`main`; a
+release is a tag on `main`). **CodeRabbit** is attached to the repository and
 reviews every PR automatically under `.coderabbit.yaml`, which carries per-package
 instructions written from this product's own invariants (stdlib-only core, false-Q1 at
 write, append-only stores, never-weaken-a-test, the header standard, the claims policy).

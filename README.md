@@ -11,23 +11,27 @@ Wilson 95% interval, and the version of the apparatus that produced it. On that 
 it **routes** each class of change to `deliver` / `calibrate` / `granularize` / `human`, and
 — in a later phase — manufactures new work under the same governance.
 
-> Status: **2.0.0a1 — release candidate** on branch `reboot/v2` (apparatus **2.2**, belt set
-> v5). Every phase of the product plan has shipped (P0–P7: engine, oracle, builders, store,
-> server, UI, factory, deployment); the `v2.0.0a1` tag follows the licence text and a human
-> review of the pinned commit. See [Status by phase](#status-by-phase) and the
-> [Changelog](CHANGELOG.md). The June 2026 v1 contents are tagged `v1.0.0-legacy`.
+> Status: **2.0.0a1 on `main`** (apparatus **2.2**, belt set v5), merged from the
+> `reboot/v2` integration branch on 2026-09-16 with the gates run locally and every change
+> since 2026-09-15 reviewed by CodeRabbit (ADR-0013). Every phase of the product plan has
+> shipped (P0–P7: engine, oracle, builders, store, server, UI, factory, deployment). The
+> `v2.0.0a1` tag and the signed container image follow when the repository's CI minutes
+> are restored (the release workflow builds and signs the image; DL-035). See
+> [Status by phase](#status-by-phase) and the [Changelog](CHANGELOG.md). The June 2026 v1
+> contents are tagged `v1.0.0-legacy`.
 
 ## Start here
 
 | You are… | Read, in this order |
 |---|---|
-| **Anyone** — what is this and what does it claim? | this page → [Evidence & claims](docs/EVIDENCE-AND-CLAIMS.md) → the [NHS measurement](docs/reviews/2026-09-14-nhs-public-repos.md) |
+| **Anyone** — what is this and what does it claim? | the one-page [**explainer for practitioners**](https://claude.ai/artifact/DUaMMWkMXGk25djQYLfZQk) (how it works, the mechanics an expert will ask about, what has been measured, what it refuses to claim) → this page → [Evidence & claims](docs/EVIDENCE-AND-CLAIMS.md) → the [NHS measurement](docs/reviews/2026-09-14-nhs-public-repos.md) |
 | **A developer** taking it to a client's repository | [Onboarding a repository](docs/ONBOARDING-A-REPO.md) → [Operator guide](docs/OPERATOR.md) → [API](docs/API.md) → [Code map](docs/CODE-MAP.md) |
 | **A developer** changing the product | [Architecture](docs/ARCHITECTURE.md) → [ADRs](docs/adr/README.md) → [Code map](docs/CODE-MAP.md) (every file's header says what it is, what proves it, when you touch it) → [Contributing](docs/CONTRIBUTING.md) |
 | **Governance / assurance** | [Evidence & claims](docs/EVIDENCE-AND-CLAIMS.md) → [Security](docs/SECURITY.md) → [Data retention](docs/DATA-RETENTION.md) → [Licensing](docs/LICENSING.md) → the [decision log](docs/DECISION-LOG.md) and the [reviews](docs/reviews/) (an independent critical-friend review and two independent decider passes are on record) |
 | **An operator** deploying it | [Deployment](docs/DEPLOYMENT.md) → [Operator guide](docs/OPERATOR.md) |
 
-Related documents: [Architecture](docs/ARCHITECTURE.md) ·
+Related documents: [Explainer for practitioners](https://claude.ai/artifact/DUaMMWkMXGk25djQYLfZQk) ·
+[Architecture](docs/ARCHITECTURE.md) ·
 [Evidence & claims policy](docs/EVIDENCE-AND-CLAIMS.md) · [ADRs](docs/adr/README.md) ·
 [Operator guide](docs/OPERATOR.md) · [Onboarding a repository](docs/ONBOARDING-A-REPO.md) ·
 [Code map](docs/CODE-MAP.md) · [Contributing](docs/CONTRIBUTING.md) ·
@@ -250,7 +254,7 @@ each shipped as a set of PRs with the gates green.
 | P4 | Store (SQLAlchemy + Alembic, append-only triggers, hash chain, census import), FastAPI, OIDC + local admin, RBAC, SSE, `/metrics`, worker | Done |
 | P5 | Observability UI (14 routed screens — see `ui/src/App.tsx`), evidence drill-down, capability map, sign-off, reviews; sealed builder container (ADR-0012) | Done |
 | P6 | Forward-mode factory: frozen backlog, DoR gate, RED proof, build under belts, opt-in PR delivery, review-before-edit — as a run kind with its API | Done (no model-backed test author yet; delivery credentials operator-provisioned) |
-| P7 | Dockerfile, compose, Helm, SECURITY / DATA-RETENTION / OPERATOR / DEPLOYMENT / REPRODUCING-THE-CENSUS; `2.0.0a1-rc1` | Done; `v2.0.0a1` tag pending (DL-026) |
+| P7 | Dockerfile, compose, Helm, SECURITY / DATA-RETENTION / OPERATOR / DEPLOYMENT / REPRODUCING-THE-CENSUS; `2.0.0a1` on `main` | Done; `v2.0.0a1` tag + signed image follow CI minutes (DL-035) |
 
 **Open, honestly:** every measurement to date is on the host executor posture; the sealed
 posture is built and tested but not yet measured on. A human has not yet signed a cell. The

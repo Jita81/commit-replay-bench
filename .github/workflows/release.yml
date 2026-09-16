@@ -41,7 +41,7 @@ permissions:
 env:
   IMAGE: ghcr.io/jita81/commit-replay-bench
   CANONICAL_REPO: Jita81/commit-replay-bench
-  # Artifact names may not contain `/`; a dispatch from `reboot/v2` would. Tag name on a
+  # Artifact names may not contain `/`; a dispatch from a `feat/…` branch would. Tag name on a
   # tag, commit sha otherwise.
   ARTIFACT_SUFFIX: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
 

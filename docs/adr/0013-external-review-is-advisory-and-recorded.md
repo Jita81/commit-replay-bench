@@ -29,7 +29,7 @@ An AI reviewer fits the second and third of these exactly and the first not at a
 
 ## Decision
 
-1. **CodeRabbit reviews every pull request** into `reboot/v2` and `main`, under
+1. **CodeRabbit reviews every pull request** into `main` (and, until 2026-09-16, `reboot/v2`), under
    `.coderabbit.yaml`, whose per-package instructions are written from this product's own
    invariants (stdlib-only core; false-Q1 at write; append-only stores; never weaken a test;
    the header standard; the claims policy). It is the reviewer that *did not build and did
