@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-339 files with a header · 1 exempt (listed at the end).
+340 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -164,7 +164,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/server/worker.py`](../src/crb/server/worker.py) | The worker process — the only thing that executes a run (the API never does). | [`tests/test_worker.py`](../tests/test_worker.py), [`tests/test_worker_budget_ladder.py`](../tests/test_worker_budget_ladder.py), [`tests/test_worker_label.py`](../tests/test_worker_label.py), [`tests/test_worker_clone.py`](../tests/test_worker_clone.py), [`tests/test_store_jobs.py`](../tests/test_store_jobs.py) | a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in [`src/crb/store/jobs.py`](../src/crb/store/jobs.py) and [`src/crb/server/schemas.py`](../src/crb/server/schemas.py), [`docs/API.md`](../docs/API.md)); a row label every run must carry is added (``_RunLedger._stamp``); never for a new repository — repository behaviour lives in the runner and the repo config. |
 | [`src/crb/server/worker_main.py`](../src/crb/server/worker_main.py) | ``crb worker`` — the argument parser and process entry point for the queue consumer. | [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (the sandbox image is per repository, set in its config); adding a worker flag means adding it to ``WorkerSettings`` and to the ``crb worker`` forwarding table in [`src/crb/cli/commands/service.py`](../src/crb/cli/commands/service.py). |
 
-## `src/crb/store` (13 files)
+## `src/crb/store` (14 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -180,6 +180,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/migrations/versions/v0001_initial_schema.py`](../src/crb/store/migrations/versions/v0001_initial_schema.py) | Revision ``0001`` — the base schema: every table of the first release plus the append-only triggers. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py) | never — a released revision is immutable; schema changes are new revisions. |
 | [`src/crb/store/migrations/versions/v0002_belt5_repo_lint_clean.py`](../src/crb/store/migrations/versions/v0002_belt5_repo_lint_clean.py) | Revision ``0002`` — belt 5's ``grades.repo_lint_clean`` column (nullable). | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py) | never — a released revision is immutable. |
 | [`src/crb/store/migrations/versions/v0003_reviews.py`](../src/crb/store/migrations/versions/v0003_reviews.py) | Revision ``0003`` — the ``reviews`` table (human verdicts, append-only, hash-chained). | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py) | never — a released revision is immutable. |
+| [`src/crb/store/migrations/versions/v0004_events_trace_seq_unique.py`](../src/crb/store/migrations/versions/v0004_events_trace_seq_unique.py) | Revision ``0004`` — the unique ``(trace_id, seq)`` index on ``events``. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_events.py`](../tests/test_store_events.py) | never — a released revision is immutable. |
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 
 ## `tests` (114 files)

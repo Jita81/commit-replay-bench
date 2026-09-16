@@ -250,7 +250,9 @@ class Event(Base):
     cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
-    __table_args__ = (Index("ix_events_trace_seq", "trace_id", "seq"),)
+    # UNIQUE: ``seq`` is the SSE resume cursor; two rows of a trace with one ``seq`` would
+    # lose one on ``?after=`` (revision 0004; ``DbEventSink`` re-allocates on collision).
+    __table_args__ = (Index("uq_events_trace_seq", "trace_id", "seq", unique=True),)
 
 
 class Signoff(Base):

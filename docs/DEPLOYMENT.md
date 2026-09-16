@@ -56,7 +56,7 @@ server and never appear in logs or `/settings`.
 | `CRB_ENV` | | `prod` (default: Secure cookies, key required) or `dev` |
 | `CRB_HOME` | | state dir; `/srv/crb` in the image |
 | `CRB_BIND_HOST` / `CRB_BIND_PORT` | | `0.0.0.0:8000` in the image |
-| `CRB_FORWARDED_ALLOW_IPS` / `CRB_TRUSTED_PROXIES` | | addresses whose `X-Forwarded-*` are believed (uvicorn / app) |
+| `CRB_FORWARDED_ALLOW_IPS` / `CRB_TRUSTED_PROXIES` | | addresses whose `X-Forwarded-*` are believed (uvicorn / app). Set both to the proxy's CIDR; empty = believe nobody. Never `*` — a wildcard lets any client spoof its address and scheme (Helm ships empty; compose `127.0.0.1`) |
 | `CRB_WEB_CONCURRENCY` | | uvicorn workers (default 1; 2 in compose/Helm) |
 | `CRB_BOOTSTRAP_ADMIN__USERNAME` / `__PASSWORD` | first boot | seeds the first admin **only while `users` is empty** (≥ 12 chars) |
 | `CRB_LOCAL_AUTH_ENABLED` | | set `false` once OIDC works |
@@ -240,7 +240,9 @@ Set `serviceAccount.annotations: {azure.workload.identity/client-id: <uami>}` an
 
 * **PostgreSQL**: Azure Database for PostgreSQL Flexible Server, *public access disabled*,
   private endpoint in the AKS VNet, `sslmode=require`; its NIC IP goes in
-  `networkPolicy.postgres.cidrs`. Enable PITR (7–35 days) — this is the ledger's backup.
+  `networkPolicy.postgres.cidrs` — the chart REFUSES to render an external-postgres
+  release without it (under default deny every pod would lose its database silently).
+  Enable PITR (7–35 days) — this is the ledger's backup.
 * **Azure OpenAI**: private endpoint + `privatelink.openai.azure.com` DNS zone; public
   network access disabled; NIC IP in `networkPolicy.modelEndpoint.cidrs`. Content
   filtering/abuse monitoring settings are your data-protection decision — record it in the

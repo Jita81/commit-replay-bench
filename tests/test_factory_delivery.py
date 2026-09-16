@@ -172,6 +172,17 @@ def test_credentials_never_leak_and_env_provider() -> None:
         dv.GitCredentials(remote="", token=TOKEN)
     with pytest.raises(ValueError):
         dv.GitCredentials(remote=REMOTE, token=" ")
+    # a clear-text transport is refused at construction, before any push can leak the
+    # token (CodeRabbit on PR #4, 2026-09-15); ssh forms are fine
+    for bad in (
+        "http://github.com/acme/calc.git",
+        "git://github.com/acme/calc.git",
+        "/srv/calc.git",
+    ):
+        with pytest.raises(ValueError, match="https:// or ssh"):
+            dv.GitCredentials(remote=bad, token=TOKEN)
+    for ok in ("git@github.com:acme/calc.git", "ssh://git@github.com/acme/calc.git"):
+        assert dv.GitCredentials(remote=ok, token=TOKEN).remote == ok
     env = dv.EnvProvider(environ={"CRB_GIT_TOKEN": TOKEN, "CRB_GIT_REMOTE": REMOTE})
     assert env.resolve("x").remote == REMOTE
     with pytest.raises(dv.NoGitCredentialsError):

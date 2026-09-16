@@ -98,6 +98,10 @@ REVISION_MARKERS: tuple[tuple[str, str, str], ...] = (
 #: release's ``create_all`` schema lacks it and is still a complete schema *for its
 #: release*: adoption tolerates its absence (the revision that adds it will create it).
 REVISION_TABLES: tuple[tuple[str, str], ...] = (("0003", "reviews"),)
+#: ``(revision, table, index)`` — the INDEX a revision adds when it adds no column or table.
+#: Walked after :data:`REVISION_MARKERS` in the same way: a ``create_all`` schema that
+#: carries the index is at least at that revision.
+REVISION_INDEXES: tuple[tuple[str, str, str], ...] = (("0004", "events", "uq_events_trace_seq"),)
 
 
 class SchemaStateError(RuntimeError):
@@ -190,7 +194,11 @@ def _unversioned_revision(connection: Connection) -> str:
     revision = INITIAL_REVISION
     for rev, table, column in REVISION_MARKERS:
         if table not in tables or column not in {c["name"] for c in insp.get_columns(table)}:
-            break
+            return revision
+        revision = rev
+    for rev, table, index in REVISION_INDEXES:
+        if table not in tables or index not in {ix["name"] for ix in insp.get_indexes(table)}:
+            return revision
         revision = rev
     return revision
 
@@ -332,6 +340,7 @@ if __name__ == "__main__":  # pragma: no cover — exercised via tests calling m
 
 __all__ = [
     "INITIAL_REVISION",
+    "REVISION_INDEXES",
     "REVISION_MARKERS",
     "REVISION_TABLES",
     "SchemaStateError",

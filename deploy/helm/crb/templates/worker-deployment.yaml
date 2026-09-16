@@ -3,6 +3,10 @@
 {{- if not (has $mode (list "none" "dind" "hostSocket")) }}
 {{- fail (printf "worker.sandbox.mode must be none | dind | hostSocket (got %q)" $mode) }}
 {{- end }}
+{{- $wd := .Values.worker.workDir }}
+{{- if and (gt (int .Values.worker.replicaCount) 1) (eq $wd.type "pvc") (eq $wd.accessMode "ReadWriteOnce") }}
+{{- fail (printf "worker.replicaCount=%d needs worker.workDir.accessMode=ReadWriteMany (or workDir.type=emptyDir): a ReadWriteOnce volume cannot back two workers" (int .Values.worker.replicaCount)) }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

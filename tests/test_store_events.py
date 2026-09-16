@@ -205,3 +205,30 @@ def test_append_event_error_status_and_never_raises(
     with caplog.at_level(logging.WARNING):
         assert append_event(broken, trace_id="e", stage="system", action="x") is None  # type: ignore[arg-type]
     assert any("system event dropped" in r.message for r in caplog.records)
+
+
+def test_seq_collision_is_reallocated_under_the_lock_never_dropped(
+    factory: sessionmaker[Session],
+) -> None:
+    """``(trace_id, seq)`` is UNIQUE (revision 0004): when an out-of-band ``append_event``
+    takes the number a live emitter was about to use, the sink re-numbers the live event
+    under the write lock instead of dropping it — the resume cursor stays dense."""
+    sink = DbEventSink(factory)
+    em = Emitter(sink, trace_id="t")
+    em.emit("system", "live.1")  # seq 1
+    assert append_event(factory, trace_id="t", stage="system", action="cancel.requested")
+    em.emit("system", "live.2")  # the emitter's counter says 2 — already taken
+    seqs = [(e.action, e.seq) for e in read_events(factory, "t")]
+    assert seqs == [("live.1", 1), ("cancel.requested", 2), ("live.2", 3)]
+    assert sink.written == 2 and sink.dropped == 0 and sink.realloc == 1
+    # and the database refuses a raw duplicate outright
+    with factory() as s, pytest.raises(Exception, match=r"uq_events_trace_seq|UNIQUE|unique"):
+        s.execute(
+            text(
+                "INSERT INTO events (event_id, trace_id, seq, timestamp, stage, action, status, "
+                "step_id, parent_step_id, actor, repo, task_id, input_ref, output_ref, "
+                "error_code, error_message, payload_json) VALUES ('x', 't', 3, 'ts', 'system', "
+                "'dup', 'ok', '', '', '', '', '', '', '', '', '', '{}')"
+            )
+        )
+        s.commit()

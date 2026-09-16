@@ -185,3 +185,26 @@ def test_gap_signoff_lands_in_ledger_and_evidence_value_slots_refused(env: Env) 
         f"/factory/{ALPHA}/tasks/I-9/signoff-gap", json={"slot": "reproduction", "answer": "x"}
     )
     assert r.status_code == 404
+
+
+def test_factory_run_pins_the_active_backlog_hash_at_enqueue(env: Env) -> None:
+    """The API stamps ``params.backlog_hash`` when a factory run is queued and refuses a
+    run that names a different (stale) backlog; the worker re-verifies the stamp on
+    claim (CodeRabbit on PR #4, 2026-09-15 — closes the register/enqueue window)."""
+    login(env.client, "operator")
+    body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "m"}
+    r = env.post("/runs", json=body)
+    assert r.status_code == 409 and envelope(r)["code"] == "no_frozen_backlog"
+    assert _register(env, [ITEM]).status_code == 201
+    active = env.get(f"/factory/{ALPHA}/backlog").json()["hash"]
+    r = env.post("/runs", json={**body, "backlog_hash": "0" * 64})
+    assert r.status_code == 409 and envelope(r)["code"] == "backlog_hash_mismatch"
+    assert envelope(r)["detail"]["active"] == active
+    r = env.post("/runs", json=body)
+    assert r.status_code == 201, r.text
+    with env.factory() as s:
+        run = s.get(Run, r.json()["id"])
+        assert run is not None and run.params_json["backlog_hash"] == active
+    # the pin is a factory-only field
+    r = env.post("/runs", json={"repo": ALPHA, "kind": "mine", "backlog_hash": active})
+    assert r.status_code == 422 and "factory runs only" in envelope(r)["message"]

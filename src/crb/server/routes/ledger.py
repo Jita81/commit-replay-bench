@@ -387,22 +387,10 @@ def ledger_import(
         source_chain_ok = False
     if not rows:
         source_chain_ok = None
-    existing_ids = {
-        str(r)
-        for r in db.execute(
-            select(Grade.row_id).where(Grade.row_id.in_([r.row_id for r in rows]))
-        ).scalars()
-    }
-    existing_packs = {
-        str(r)
-        for r in db.execute(
-            select(Grade.evidence_pack_hash).where(
-                Grade.evidence_pack_hash.in_(
-                    [r.evidence_pack_hash for r in rows if r.evidence_pack_hash]
-                )
-            )
-        ).scalars()
-    }
+    existing_ids = _existing(db, Grade.row_id, [r.row_id for r in rows])
+    existing_packs = _existing(
+        db, Grade.evidence_pack_hash, [r.evidence_pack_hash for r in rows if r.evidence_pack_hash]
+    )
     # Dedupe on row_id AND on pack hash: a re-import of a re-chained export carries new
     # row hashes but the same ids and packs, and must not double-count.
     fresh = [
@@ -420,6 +408,22 @@ def ledger_import(
         rows=ledger.count(),
         source_chain_ok=source_chain_ok,
     )
+
+
+#: ``IN (...)`` lists are chunked to this many values: SQLite caps bound parameters
+#: (999 on older builds, 32766 now) and Postgres dislikes a 100k-value list; a census
+#: import carries thousands of rows (CodeRabbit on PR #4, 2026-09-15).
+IN_CHUNK = 500
+
+
+def _existing(db: Session, column: Any, values: list[str]) -> set[str]:
+    """The subset of ``values`` already present in ``column``, queried in chunks."""
+    found: set[str] = set()
+    wanted = sorted(set(values))
+    for i in range(0, len(wanted), IN_CHUNK):
+        chunk = wanted[i : i + IN_CHUNK]
+        found.update(str(v) for v in db.execute(select(column).where(column.in_(chunk))).scalars())
+    return found
 
 
 __all__ = [

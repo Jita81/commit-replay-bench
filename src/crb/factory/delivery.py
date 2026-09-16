@@ -94,6 +94,19 @@ class DeliveryRefused(DeliveryError):
 # ---------------------------------------------------------------------------
 
 
+def remote_carries_token_safely(remote: str) -> bool:
+    """True when ``remote`` is a transport that does not expose a push token in clear
+    text: ``https://``, ``ssh://`` or the scp-like ``git@host:owner/repo`` form. Everything
+    else (``http://``, ``git://``, ``ftp://``, a bare local path) is refused."""
+    r = remote.strip()
+    lower = r.lower()
+    if lower.startswith(("https://", "ssh://")):
+        return True
+    # scp-like: user@host:path — no scheme, exactly one "@" before the first ":"
+    head, sep, _rest = r.partition(":")
+    return bool(sep) and "@" in head and "/" not in head and not lower.startswith("//")
+
+
 @dataclass(frozen=True)
 class GitCredentials:
     """A push token for one remote. ``token`` is excluded from ``repr`` and from
@@ -108,6 +121,13 @@ class GitCredentials:
             raise ValueError("credentials need a remote URL")
         if not self.token.strip():
             raise ValueError("credentials need a non-empty token")
+        if not remote_carries_token_safely(self.remote):
+            # Fail closed at construction: a `http://` or `git://` remote would send the
+            # Basic header in clear text (CodeRabbit on PR #4, 2026-09-15).
+            raise ValueError(
+                "credentials need an https:// or ssh (git@ / ssh://) remote — "
+                f"refusing to send a token over {self.remote.split(':', 1)[0]!r}"
+            )
 
     def basic_auth_header(self) -> str:
         """The one-shot ``Authorization`` header value the push seam passes to git."""

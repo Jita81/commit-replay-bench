@@ -69,7 +69,8 @@ from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import OperatorDep, ViewerDep
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
+from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
+from crb.server.factory_state import FactoryHome
 from crb.server.schemas import (
     BUILD_KINDS,
     TERMINAL_STATUSES,
@@ -87,6 +88,7 @@ from crb.server.schemas import (
     RunTaskRow,
     StepEventOut,
 )
+from crb.store.jobs import KIND_FACTORY
 from crb.store.models import Event, Grade, Repo, Run, Task
 
 log = logging.getLogger("crb.server.runs")
@@ -457,6 +459,26 @@ def default_model_for(builder: str) -> str:
     return ""
 
 
+def active_backlog_hash(settings: Any, repo: str, expected: str | None) -> str:
+    """The hash of ``repo``'s active frozen backlog — 409 ``no_frozen_backlog`` when there
+    is none, 409 ``backlog_hash_mismatch`` when the caller named a different one."""
+    backlog = FactoryHome(settings.home, repo).load_backlog()
+    if backlog is None or not backlog.frozen:
+        raise ApiError(
+            409,
+            "no_frozen_backlog",
+            f"no frozen backlog registered for {repo!r}: POST /factory/{repo}/backlog first",
+        )
+    if expected is not None and expected != backlog.backlog_hash:
+        raise ApiError(
+            409,
+            "backlog_hash_mismatch",
+            "the active backlog is not the one this run names — re-read it and re-submit",
+            detail={"active": backlog.backlog_hash, "requested": expected},
+        )
+    return str(backlog.backlog_hash)
+
+
 def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     """A ``queued`` Run row from a validated request (id assigned here so the response
     can name it even if the queue does not). A build kind without a model gets the
@@ -518,12 +540,27 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     summary="Enqueue a run (status queued); the worker executes it",
 )
 def create_run(
-    body: RunCreateRequest, operator: OperatorDep, db: DbDep, factory: SessionFactoryDep
+    body: RunCreateRequest,
+    operator: OperatorDep,
+    db: DbDep,
+    factory: SessionFactoryDep,
+    settings: SettingsDep,
 ) -> RunOut:
     if db.get(Repo, body.repo) is None:
         raise ApiError(404, "not_found", f"no repo {body.repo!r}")
+    if body.backlog_hash is not None and body.kind != KIND_FACTORY:
+        raise ApiError(422, "validation_error", "backlog_hash applies to factory runs only")
     api = require_jobs()
-    run = api.enqueue(factory, new_run(body, actor=operator.id))
+    run = new_run(body, actor=operator.id)
+    if body.kind == KIND_FACTORY:
+        # Pin the backlog the run will work at ENQUEUE time; the worker re-verifies the
+        # stamp on claim. Closes the window between the register route's
+        # "no active run" check and this enqueue (CodeRabbit on PR #4, 2026-09-15).
+        run.params_json = {
+            **dict(run.params_json or {}),
+            "backlog_hash": active_backlog_hash(settings, body.repo, body.backlog_hash),
+        }
+    run = api.enqueue(factory, run)
     stored = db.get(Run, run.id)
     return run_out(db, stored if stored is not None else run)
 

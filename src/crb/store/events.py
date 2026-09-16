@@ -51,6 +51,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.observability.events import StepEvent, StepStatus
@@ -133,12 +134,22 @@ class DbEventSink:
         self._factory = factory
         self.dropped = 0
         self.written = 0
+        #: Events whose ``seq`` collided with a concurrent writer and were re-numbered.
+        self.realloc = 0
 
     def emit(self, event: StepEvent) -> None:
         try:
-            with self._factory() as s:
-                s.add(_to_model(event))
-                s.commit()
+            try:
+                with self._factory() as s:
+                    s.add(_to_model(event))
+                    s.commit()
+            except IntegrityError as exc:
+                if "uq_events_trace_seq" not in str(exc) and "trace_id" not in str(exc):
+                    raise
+                # Another writer (an out-of-band ``append_event``) took this ``seq``:
+                # re-allocate under the write lock so the resume cursor stays dense
+                # instead of dropping the event (revision 0004, 2026-09-15).
+                self._emit_reallocated(event)
         except Exception as exc:  # an observer must never break a run
             self.dropped += 1
             _LOG.warning(
@@ -152,6 +163,24 @@ class DbEventSink:
             )
             return
         self.written += 1
+
+    def _emit_reallocated(self, event: StepEvent) -> None:
+        with self._factory() as s:
+            _lock(s)
+            nxt = (
+                int(
+                    s.execute(
+                        select(func.max(Event.seq)).where(Event.trace_id == event.trace_id)
+                    ).scalar_one_or_none()
+                    or 0
+                )
+                + 1
+            )
+            m = _to_model(event)
+            m.seq = nxt
+            s.add(m)
+            s.commit()
+        self.realloc += 1
 
     def emit_many(self, events: Iterable[StepEvent]) -> int:
         """Insert a batch in one transaction; on failure fall back to one-by-one so a

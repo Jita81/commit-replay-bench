@@ -125,13 +125,19 @@ class FactoryHome:
         backlog = Backlog(items=tuple(items), repo=self.repo).freeze()
         self.dir.mkdir(parents=True, exist_ok=True)
         body = json.dumps(backlog.to_dict(), sort_keys=True, ensure_ascii=False, indent=1)
+        # Order matters: history file, then the freeze EVENT, and only then the active
+        # pointer. A failure in the evidence append leaves the previous active backlog
+        # intact and one unreferenced history file behind — never an active backlog the
+        # chain does not cover (CodeRabbit on PR #4, 2026-09-15).
         (self.dir / f"backlog-{backlog.backlog_hash[:16]}.json").write_text(body, encoding="utf-8")
-        self.backlog_path.write_text(body, encoding="utf-8")
         self.evidence(actor=actor).record_freeze(
             backlog_hash=backlog.backlog_hash,
             item_ids=[i.id for i in backlog.items],
             frozen_at=backlog.frozen_at,
         )
+        tmp = self.backlog_path.with_suffix(".json.tmp")
+        tmp.write_text(body, encoding="utf-8")
+        tmp.replace(self.backlog_path)  # atomic on POSIX: readers see old or new, never half
         return backlog
 
     # --- evidence / sign-offs / authored tests ----------------------------------------

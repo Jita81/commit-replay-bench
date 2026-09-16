@@ -48,6 +48,7 @@ from crb.core.ledger import CELL_FIELDS, GradeRow
 from crb.core.routing import DEFAULT_POLICY
 from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepEvent, StepStatus
+from crb.store.events import last_seq
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
 from fixtures import pyrepo as pr
@@ -143,6 +144,8 @@ def controls_report(
     )
     d = ev.to_dict()
     payload = d.pop("payload")
+    # (trace_id, seq) is unique (revision 0004): each newer report takes the next seq
+    d["seq"] = last_seq(env.factory, run_id) + 1
     with env.factory() as s:
         s.add(Event(**d, payload_json=payload))
         s.commit()

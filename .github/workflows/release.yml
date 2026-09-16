@@ -53,6 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
@@ -107,6 +108,8 @@ jobs:
       pushed: ${{ env.PUSH }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@v3
 
       - name: Image tags and OCI labels
@@ -194,6 +197,21 @@ jobs:
           provenance: mode=max
           sbom: true
           cache-from: type=gha
+
+      - name: Smoke the PUSHED digest — what a user pulls is what was tested
+        # The push re-runs the build from cache and attaches provenance + SBOM; the bytes
+        # users pull are addressed by THIS digest, so the same checks run on it, not on the
+        # local candidate (CodeRabbit on PR #4, 2026-09-15).
+        if: env.PUSH == 'true'
+        env:
+          REF: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test -n "${{ steps.push.outputs.digest }}"
+          docker pull "$REF"
+          docker run --rm "$REF" python -c "import os; assert os.getuid() == 10001, os.getuid(); print('uid ok')"
+          docker run --rm --read-only --tmpfs /tmp --tmpfs /srv/crb:rw,uid=10001,gid=10001,mode=0750 "$REF" migrate upgrade -v
+          docker run --rm "$REF" python -c "import crb.store.migrate, crb.core, crb.builders, crb.core.version as v; print('pushed image ok', v.__version__, 'apparatus', v.APPARATUS_VERSION)"
 
       - name: Summary
         env:

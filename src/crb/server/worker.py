@@ -1269,6 +1269,15 @@ class Worker:
             raise ValueError(
                 f"no frozen backlog registered for {run.repo!r}: POST /factory/{run.repo}/backlog first"
             )
+        pinned = str(p.get("backlog_hash") or "")
+        if pinned and pinned != backlog.backlog_hash:
+            # The API stamped the active hash at enqueue; a backlog re-registered since
+            # (the register route's active-run check has a window) must not be worked
+            # under the old run's evidence (CodeRabbit on PR #4, 2026-09-15).
+            raise ValueError(
+                f"backlog changed since this run was queued: pinned {pinned[:16]}…, "
+                f"active {backlog.backlog_hash[:16]}… — re-queue against the active backlog"
+            )
         ladder = self._ladder(ctx)
         budget = self._budget(ctx)
         rungs = trial_labels_for(ladder, budget)

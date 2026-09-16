@@ -242,14 +242,14 @@ each shipped as a set of PRs with the gates green.
 | P2 | Oracle (mutation strength, adequacy, controls), routing, forecast, federated export, evidence packs; `crb` CLI end to end | Done |
 | P3 | Builders: `claude_code`, `openai_agent`, `editblock`; budget ladders; sighted / blind; tamper and archaeology guards | Done |
 | P4 | Store (SQLAlchemy + Alembic, append-only triggers, hash chain, census import), FastAPI, OIDC + local admin, RBAC, SSE, `/metrics`, worker | Done |
-| P5 | Observability UI (12 screens), evidence drill-down, capability map, sign-off, reviews; sealed builder container (ADR-0012) | Done |
+| P5 | Observability UI (14 routed screens — see `ui/src/App.tsx`), evidence drill-down, capability map, sign-off, reviews; sealed builder container (ADR-0012) | Done |
 | P6 | Forward-mode factory: frozen backlog, DoR gate, RED proof, build under belts, opt-in PR delivery, review-before-edit — as a run kind with its API | Done (no model-backed test author yet; delivery credentials operator-provisioned) |
 | P7 | Dockerfile, compose, Helm, SECURITY / DATA-RETENTION / OPERATOR / DEPLOYMENT / REPRODUCING-THE-CENSUS; `2.0.0a1-rc1` | Done; `v2.0.0a1` tag pending (DL-026) |
 
 **Open, honestly:** every measurement to date is on the host executor posture; the sealed
 posture is built and tested but not yet measured on. A human has not yet signed a cell. The
-file-header programme ([FILE-HEADER-STANDARD](docs/FILE-HEADER-STANDARD.md), CI job
-`code-map`) is landing across the 337 source files.
+file-header programme ([FILE-HEADER-STANDARD](docs/FILE-HEADER-STANDARD.md)) is complete —
+every source file carries a Navigation block and the CI job `code-map` keeps it so.
 
 ## Licence
 

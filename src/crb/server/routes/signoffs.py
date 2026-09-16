@@ -853,13 +853,17 @@ def list_signoffs(
     """Attestation rows (revocation rows are folded into ``revoked`` on their target)."""
     del viewer
     rows = load_signoff_rows(db, repo)
-    items = [signoff_out(db, r, rows) for r in rows if not r.revoke]
-    if not include_revoked:
-        items = [s for s in items if not s.revoked]
-    items.reverse()  # newest first
+    # Filter and slice on the in-memory chain first; ``signoff_out`` runs the live
+    # false-Q1 query per row, so it is called for the page only (CodeRabbit on PR #4,
+    # 2026-09-15 — the whole table used to be serialised per request).
+    attestations = [
+        r for r in rows if not r.revoke and (include_revoked or _revocation_for(r, rows) is None)
+    ]
+    attestations.reverse()  # newest first
+    window = attestations[page.offset : page.offset + page.limit]
     return Page[SignoffWithPolicyOut](
-        items=items[page.offset : page.offset + page.limit],
-        total=len(items),
+        items=[signoff_out(db, r, rows) for r in window],
+        total=len(attestations),
         limit=page.limit,
         offset=page.offset,
     )

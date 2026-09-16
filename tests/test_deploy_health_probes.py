@@ -86,8 +86,25 @@ def test_helm_renders_the_probes_and_lints_strict() -> None:
         check=False,
     )
     assert lint.returncode == 0, lint.stdout + lint.stderr
-    render = subprocess.run(
+    # the default (external postgres) needs its CIDR under the default-deny policy;
+    # without one the chart refuses to render rather than deny every pod its database
+    bare = subprocess.run(
         ["helm", "template", "crb", str(CHART)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert bare.returncode != 0 and "postgres.cidrs is empty" in bare.stderr
+    render = subprocess.run(
+        [
+            "helm",
+            "template",
+            "crb",
+            str(CHART),
+            "--set",
+            "networkPolicy.postgres.cidrs={10.0.0.0/8}",
+        ],
         capture_output=True,
         text=True,
         timeout=120,

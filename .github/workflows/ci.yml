@@ -48,6 +48,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -68,6 +70,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -90,6 +94,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -102,6 +108,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -125,6 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0 # fixture replays and mining tests walk git history
       - uses: astral-sh/setup-uv@v6
         with:
@@ -170,6 +179,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0 # gitleaks scans the full history
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
@@ -220,6 +230,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -267,6 +279,8 @@ jobs:
       CRB_TEST_POSTGRES_URL: postgresql+psycopg://crb:crb@127.0.0.1:5432/crb_test
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -301,6 +315,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: hadolint deploy/Dockerfile
         uses: hadolint/hadolint-action@v3.5.0
         with:
@@ -334,9 +350,13 @@ jobs:
       - name: helm lint (strict) + template every sandbox / postgres mode
         run: |
           helm lint deploy/helm/crb --strict
-          helm template crb deploy/helm/crb > /dev/null
+          # external postgres (the default) must name its CIDR under the default-deny policy
+          helm template crb deploy/helm/crb --set 'networkPolicy.postgres.cidrs={10.0.0.0/8}' > /dev/null
           helm template crb deploy/helm/crb --set worker.sandbox.mode=dind --set postgresql.mode=embedded --set ingress.enabled=true > /dev/null
-          helm template crb deploy/helm/crb --set worker.sandbox.mode=hostSocket --set worker.workDir.type=emptyDir > /dev/null
+          helm template crb deploy/helm/crb --set worker.sandbox.mode=hostSocket --set worker.workDir.type=emptyDir --set 'networkPolicy.postgres.cidrs={10.0.0.0/8}' > /dev/null
+          # the chart refuses the two silent misconfigurations (an unreachable database, two workers on one RWO volume)
+          if helm template crb deploy/helm/crb > /dev/null 2>&1; then echo "expected render failure: external postgres without cidrs"; exit 1; fi
+          if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set worker.replicaCount=2 > /dev/null 2>&1; then echo "expected render failure: replicaCount=2 on RWO"; exit 1; fi
       - name: docker compose config
         run: |
           printf 'POSTGRES_PASSWORD=ci\nCRB_SECRET_KEY=ci\n' > deploy/.env
@@ -349,6 +369,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"

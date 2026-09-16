@@ -55,6 +55,7 @@ from crb.server.auth import (
     ViewerDep,
     count_active_admins,
     create_local_user,
+    lock_users_table,
     validate_role,
 )
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep
@@ -192,6 +193,10 @@ def set_role(user_id: str, body: RoleChange, admin: AdminDep, db: DbDep) -> User
     """Change role and/or active flag; refuses the change that would leave no admin."""
     del admin
     validate_role(body.role)
+    # Count and update in one serialised transaction: two concurrent demotions of the two
+    # remaining admins each saw "2 admins" and together left none (CodeRabbit on PR #4,
+    # 2026-09-15). SQLite takes the write lock up front; Postgres an advisory lock.
+    lock_users_table(db)
     user = db.get(User, user_id)
     if user is None:
         raise ApiError(404, "not_found", f"no user {user_id!r}")

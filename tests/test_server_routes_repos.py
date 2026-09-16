@@ -387,9 +387,11 @@ class TestProfile:
             assert r3.status_code == 200 and r3.json()["examined"] == 1
             assert r3.json()["n_commits"] == 0 and r3.json()["cells"] == []
             assert r3.json()["computed_at"] >= computed_at
-            # a viewer may read the profile
+            # a viewer may read the profile but not force the git walk + config write
             login(env.client, "viewer")
             assert env.get(f"/repos/{ALPHA}/profile").status_code == 200
+            r4 = env.get(f"/repos/{ALPHA}/profile?refresh=true")
+            assert r4.status_code == 403 and envelope(r4)["code"] == "forbidden"
 
     def test_not_a_repo_409(self, tmp_path: Path) -> None:
         (tmp_path / "plain").mkdir()

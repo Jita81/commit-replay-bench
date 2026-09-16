@@ -61,7 +61,12 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
-from crb.core.ledger import GENESIS_HASH, LedgerIntegrityError
+from crb.core.ledger import (
+    GENESIS_HASH,
+    LedgerIntegrityError,
+    jsonl_append_lock,
+    jsonl_last_line,
+)
 from crb.core.redact import redact
 
 FACTORY_EVIDENCE_SCHEMA = "crb.factory.evidence.v1"
@@ -211,20 +216,9 @@ class JsonlFactoryStore:
         self._lock = threading.Lock()
 
     def _last_hash(self) -> str:
-        """The chain head from the file's last line (tail read only, so appends stay O(1))."""
-        if not self.path.exists() or self.path.stat().st_size == 0:
-            return GENESIS_HASH
-        last = ""
-        with self.path.open("rb") as f:
-            f.seek(0, os.SEEK_END)
-            size = f.tell()
-            step = min(size, 65536)
-            f.seek(size - step)
-            chunk = f.read().decode("utf-8", errors="replace")
-        for line in reversed(chunk.splitlines()):
-            if line.strip():
-                last = line
-                break
+        """The ``row_hash`` of the last non-blank line (tail read via
+        :func:`crb.core.ledger.jsonl_last_line`), or :data:`GENESIS_HASH`."""
+        last = jsonl_last_line(self.path)
         if not last:
             return GENESIS_HASH
         row_hash = str(json.loads(last).get("row_hash", ""))
@@ -233,8 +227,11 @@ class JsonlFactoryStore:
         return row_hash
 
     def append(self, event: FactoryEvent) -> FactoryEvent:
-        """Chain onto the head and append one fsync'd line, under the store's lock."""
-        with self._lock:
+        """Chain onto the head and append one fsync'd line, under the store's thread
+        lock AND an OS file lock — the API process and the worker process append to the
+        same evidence file, and a thread lock cannot order two processes (CodeRabbit on
+        PR #4, 2026-09-15)."""
+        with self._lock, jsonl_append_lock(self.path):
             ev = event.chained(self._last_hash())
             self.path.parent.mkdir(parents=True, exist_ok=True)
             line = json.dumps(ev.to_dict(), sort_keys=True, ensure_ascii=False)

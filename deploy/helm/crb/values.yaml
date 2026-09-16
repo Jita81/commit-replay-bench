@@ -44,9 +44,13 @@ config:
   CRB_OIDC__ROLE_CLAIM: "roles"
   CRB_OIDC__ROLE_MAP: '{"crb.viewer": "viewer", "crb.operator": "operator", "crb.approver": "approver", "crb.admin": "admin"}'
   CRB_CORS_ORIGINS: ""
-  # Ingress controller pod CIDR(s) whose X-Forwarded-* headers are trusted.
+  # Ingress controller pod CIDR(s) whose X-Forwarded-* headers are trusted. Set BOTH to the
+  # same value: the app (CRB_TRUSTED_PROXIES) and uvicorn (CRB_FORWARDED_ALLOW_IPS) each
+  # decide whom to believe. Empty = believe nobody (the app sees plain HTTP behind TLS
+  # termination and refuses a Secure cookie — set them, never "*": a wildcard lets any
+  # client spoof its address and scheme; CodeRabbit on PR #4, 2026-09-15).
   CRB_TRUSTED_PROXIES: ""
-  CRB_FORWARDED_ALLOW_IPS: "*"
+  CRB_FORWARDED_ALLOW_IPS: ""
   CRB_RETENTION__TRANSCRIPTS_DAYS: "0"
   # Model endpoint (BYOK). OpenAI-compatible:
   CRB_OPENAI_BASE_URL: ""
@@ -127,6 +131,9 @@ worker:
     type: pvc
     size: 20Gi
     storageClassName: ""
+    # ReadWriteOnce binds the volume to one node: worker.replicaCount > 1 with a RWO PVC
+    # fails to render (the second pod would never schedule, or two workers would share
+    # one worktree directory). Use ReadWriteMany, or emptyDir, to scale out.
     accessMode: ReadWriteOnce
   sandbox:
     # How the worker reaches a Docker daemon for sandbox containers. READ docs/DEPLOYMENT.md §3.4.
@@ -199,7 +206,9 @@ networkPolicy:
   oidc:
     cidrs: []
     port: 443
-  # Arbitrary extra egress rules (networking.k8s.io/v1 NetworkPolicyEgressRule) for all pods.
+  # Arbitrary extra egress rules (networking.k8s.io/v1 NetworkPolicyEgressRule) applied to
+  # EVERY crb pod (api, worker, migrate job, embedded postgres) — e.g. an internal registry
+  # for dind sandbox images, or a corporate proxy.
   extraEgress: []
 
 # ---------------------------------------------------------------------------------------

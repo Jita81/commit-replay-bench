@@ -556,6 +556,12 @@ class RunCreateRequest(BaseModel):
     #: ``{fix, repair_turns}``. OFF when absent. A run with it on is recorded as the
     #: builder ``<name>+preflight`` — a different arm, never pooled with plain rows.
     preflight: bool | PreflightIn | None = None
+    #: ``factory`` runs only: the frozen backlog this run is meant to work. When set it
+    #: must equal the repo's ACTIVE backlog hash or the request is refused (409
+    #: ``backlog_hash_mismatch``); the active hash is always stamped into
+    #: ``params.backlog_hash`` at enqueue and re-verified by the worker on claim, so a
+    #: backlog re-registered between the two fails the run instead of being worked.
+    backlog_hash: str | None = Field(default=None, min_length=8, max_length=64)
 
     @field_validator("kind")
     @classmethod
