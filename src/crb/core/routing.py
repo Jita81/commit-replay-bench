@@ -72,7 +72,7 @@ Claims:       ``deliver`` licenses auto-delivery as a branch + PR under review, 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from crb.core.ledger import CellStats
@@ -270,6 +270,49 @@ class RoutingPolicy:
     max_controls_escapes: int = 0
     controls_version: str = CONTROLS_POLICY_VERSION
 
+    def __post_init__(self) -> None:
+        # A policy that is LOOSER than the published one on any clause cannot travel under
+        # the published version string: every decision it produces would read as
+        # ``routing.v1`` while clearing a lower bar. Tightening is allowed (the same name
+        # is honest — the rule holds and more); loosening needs its own version name.
+        # Mirrors ``SignoffPolicy.relaxed`` (external review 2026-09-16, point 9).
+        if self.version == POLICY_VERSION and self.relaxed_clauses():
+            raise ValueError(
+                f"a routing policy looser than the published rule cannot use version "
+                f"{POLICY_VERSION!r}: relaxed {self.relaxed_clauses()} — give it its own "
+                "version string so every decision names the bar it cleared"
+            )
+
+    def relaxed_clauses(self) -> tuple[str, ...]:
+        """The clauses on which this policy is LOOSER than the published defaults."""
+        d = _PUBLISHED
+        out: list[str] = []
+        if self.min_n < d["min_n"]:
+            out.append("min_n")
+        if self.min_point < d["min_point"]:
+            out.append("min_point")
+        if self.min_ci_low < d["min_ci_low"]:
+            out.append("min_ci_low")
+        if self.min_oracle_strength < d["min_oracle_strength"]:
+            out.append("min_oracle_strength")
+        if self.min_controls_share < d["min_controls_share"]:
+            out.append("min_controls_share")
+        if self.max_controls_escapes > d["max_controls_escapes"]:
+            out.append("max_controls_escapes")
+        return tuple(out)
+
+    def thresholds(self) -> dict[str, Any]:
+        """The bar as numbers — stamped into every decision (``policy_thresholds``)."""
+        return {
+            "min_n": self.min_n,
+            "min_point": self.min_point,
+            "min_ci_low": self.min_ci_low,
+            "min_oracle_strength": self.min_oracle_strength,
+            "granularize_sizes": list(self.granularize_sizes),
+            "min_controls_share": self.min_controls_share,
+            "max_controls_escapes": self.max_controls_escapes,
+        }
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "min_n": self.min_n,
@@ -284,6 +327,15 @@ class RoutingPolicy:
         }
 
 
+#: The published bar, by number — what ``RoutingPolicy.relaxed_clauses`` compares against.
+_PUBLISHED: dict[str, Any] = {
+    "min_n": 10,
+    "min_point": 0.90,
+    "min_ci_low": 0.80,
+    "min_oracle_strength": 0.80,
+    "min_controls_share": 0.5,
+    "max_controls_escapes": 0,
+}
 DEFAULT_POLICY = RoutingPolicy()
 
 
@@ -305,6 +357,9 @@ class RouteDecision:
     reason_code: str = ""
     controls: ControlsVerdict | None = None
     controls_policy: str = ""
+    #: The bar this decision cleared or failed, as numbers — a reader never has to look
+    #: the version up, and a tightened deployment policy is visible on every decision.
+    policy_thresholds: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.reason_code and self.reason_code not in REASON_CODES:
@@ -324,6 +379,7 @@ class RouteDecision:
             if self.oracle_strength is None
             else round(self.oracle_strength, 4),
             "policy_version": self.policy_version,
+            "policy_thresholds": dict(self.policy_thresholds),
             "controls_policy": self.controls_policy,
             "controls": None if self.controls is None else self.controls.to_dict(),
         }
@@ -359,6 +415,7 @@ def route(
         "false_q1": stats.false_q1,
         "oracle_strength": strength,
         "policy_version": policy.version,
+        "policy_thresholds": policy.thresholds(),
         "controls": controls,
         "controls_policy": policy.controls_version if controls is not None else "",
     }

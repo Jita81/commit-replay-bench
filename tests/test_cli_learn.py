@@ -346,7 +346,15 @@ def test_strengthen_since_and_policy(run: Run, tmp_path: Path) -> None:
     _, d = _json(run, ["learn", "strengthen", "--since", "3.0"])
     assert d["items"] == [] and d["since"] == "3.0"
     # a policy with a lower oracle floor: nothing is oracle-held any more
-    _, d2 = _json(run, ["learn", "strengthen", "--policy-json", '{"min_oracle_strength": 0.4}'])
+    _, d2 = _json(
+        run,
+        [
+            "learn",
+            "strengthen",
+            "--policy-json",
+            '{"min_oracle_strength": 0.4, "version": "routing.v1-weak"}',
+        ],
+    )
     assert d2["cells_flagged"] == [] and d2["threshold"] == 0.4
 
 
@@ -593,7 +601,7 @@ def test_remeasure_policy_override(run: Run) -> None:
             "--apparatus",
             "2.1",
             "--policy-json",
-            '{"min_n": 3, "min_ci_low": 0.0}',
+            '{"min_n": 3, "min_ci_low": 0.0, "version": "routing.v1-small"}',
         ],
     )
     assert d["cells"][0]["n_needed"] == 3

@@ -8,6 +8,38 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-16 (evening) — the external assessment: the map gates the factory; a policy names its bar
+
+An external reviewer's forty-point assessment of the explainer was checked point by point
+against the source (docs/reviews/2026-09-16-external-assessment.md; DL-038). Most of it the
+repository already answered; two gaps were real and are closed here:
+
+- **The capability map now gates factory delivery** (ADR-0003 amendment 2026-09-16). With
+  `deliver` on, a clean build gets a branch and pull request only when its (class × size)
+  cell routes `deliver` on the repository's signed map — sighted rows, current apparatus,
+  the latest controls verdict, sign-offs overlaid, the same map `GET /capability-map`
+  serves. Any other route, or a cell nobody has measured, withholds delivery: the build is
+  still graded and reviewed, and the withholding is a `delivery.refused` event carrying the
+  measured route, its reason code and the policy version. An **approver** may override for
+  one run (`deliver_override: true` on `POST /runs`; 403 below approver); the override is a
+  `route.decided` event naming who and what it overrode. Before this the route was rendered
+  in the PR body and never consulted.
+- **A routing policy names its bar.** `RoutingPolicy` refuses to be looser than the published
+  rule under `routing.v1` (`crb route --policy-json '{"min_n": 3}'` needs a `"version"`);
+  tightening keeps the name. Every `RouteDecision` carries `policy_thresholds` beside
+  `policy_version` — the symmetry the sign-off policy already had.
+- `POST /runs` accepts `deliver`, `deliver_override` and `max_rework` for factory runs (they
+  were documented and rejected by the schema).
+- Documents: README "Not a licence to deploy"; EVIDENCE-AND-CLAIMS §6b (domain of validity),
+  §6c (the evidence ladder — hash-chained means unaltered, never verified), the
+  conditioning list in §3, the throughput-headline and mutation-strength bars in §7; the
+  README's blind number carries its budget; ARCHITECTURE's stale apparatus numbers.
+- The dogfood measurement (docs/reviews/2026-09-16-dogfood.md, DL-036) and the review's
+  ranked backlog (sealed-posture campaign, sign-off anchored to a review, review defects as
+  a routing clause, environment in the stamp, time-based staleness, context arms, an
+  independent-oracle arm, generative controls, complexity facets) are recorded for the
+  operator.
+
 ### 2026-09-16 — sign in with a Claude account from the browser; the repository is public; CI runs again
 
 - **Settings → Sign in with your Claude account.** An admin no longer needs a terminal

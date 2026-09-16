@@ -140,6 +140,11 @@ def test_policy_override() -> None:
     )
     d = rt.route(stats(5, 5, size="XL", strength=0.4), policy=lenient)
     assert d.route == rt.ROUTE_DELIVER and d.policy_version == "routing.test"
+    # the bar it cleared travels with it as numbers, not just a name
+    assert (
+        d.policy_thresholds["min_n"] == 5 and d.to_dict()["policy_thresholds"]["min_ci_low"] == 0.5
+    )
+    assert rt.route(stats(*GREEN)).to_dict()["policy_thresholds"] == rt.DEFAULT_POLICY.thresholds()
     strict = rt.RoutingPolicy(granularize_sizes=("L", "XL"))
     assert rt.route(stats(50, 50, size="L"), policy=strict).route == rt.ROUTE_GRANULARIZE
     assert lenient.to_dict() == {
@@ -284,8 +289,14 @@ def test_escapes_route_human_conservatively() -> None:
     assert "3 measurement control(s) graded clean" in d.reason
     # escapes come after n (like oracle strength): a thin cell still calibrates on n
     assert rt.route(stats(3, 4), controls=verdict(escapes=3)).route == rt.ROUTE_CALIBRATE
-    # a stricter-or-laxer bar is a policy choice, stamped on the decision
-    lax = rt.RoutingPolicy(max_controls_escapes=3)
+    # a laxer bar is a policy choice that must NAME itself: under the published version
+    # string it is refused, so no decision can read `routing.v1` while clearing a lower
+    # bar (external review 2026-09-16, point 9); the thresholds travel on every decision
+    with pytest.raises(ValueError, match=r"cannot use version 'routing.v1'.*max_controls_escapes"):
+        rt.RoutingPolicy(max_controls_escapes=3)
+    lax = rt.RoutingPolicy(max_controls_escapes=3, version="routing.v1-lax")
+    assert lax.relaxed_clauses() == ("max_controls_escapes",)
+    assert rt.RoutingPolicy(min_n=20).relaxed_clauses() == ()  # tightening keeps the name
     lax_d = rt.route(stats(*GREEN), controls=verdict(escapes=3), policy=lax)
     assert lax_d.route == rt.ROUTE_DELIVER
     assert lax_d.reason.endswith("escapes=3")  # the measured count, never a flattering zero
