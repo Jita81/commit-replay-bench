@@ -25,7 +25,7 @@
  * Touch when:   never for a new repository (a newly added repo appears in the list).
  */
 import { useSearchParams } from 'react-router'
-import { useRepos } from '../api/hooks'
+import { useAllRepos } from '../api/hooks'
 import { InlineSelect } from './Field'
 
 /** Reads/writes `?repo=` and offers the known repos. Returns the selected name. */
@@ -43,7 +43,7 @@ export function useRepoParam(): [string, (name: string) => void] {
 
 /** The select for the actions slot; an unknown `value` from the URL stays selectable so the URL is not silently rewritten. */
 export function RepoPicker({ value, onChange }: { value: string; onChange: (name: string) => void }) {
-  const repos = useRepos()
+  const repos = useAllRepos() // every page, so no repository is missing from the select
   const names = repos.data?.items.map((r) => r.name) ?? []
   const known = value && !names.includes(value) ? [value, ...names] : names
   return (

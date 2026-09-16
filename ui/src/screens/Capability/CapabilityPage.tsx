@@ -38,7 +38,7 @@
  * Claims:       The map shows measured cells only; coverage is `null` until the repo has a
  *               change profile (docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity).
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { NOT_YET_MEASURED, type CapabilityMap, type CellField } from '../../api/types'
 import { AnchorButton, LinkButton } from '../../components/Button'
@@ -91,7 +91,14 @@ export function isMeasured(c: CapabilityCell | undefined): c is CapabilityCell {
 }
 
 /** One grid cell: the NOT_YET_MEASURED placeholder, or the route, n, point, interval bar, model point, split and fQ1 as a clickable button. */
-function CellBox({ cell, policy, onOpen }: { cell: CapabilityCell | undefined; policy: CapabilityMap['policy'] | undefined; onOpen: () => void }) {
+/** `apparatus 2.2 · belts v5` — the provenance every rendered rate keeps (CodeRabbit on PR #6). */
+function provenance(c: { apparatus_versions?: string[]; belt_sets?: string[]; belt_set?: string }): string {
+  const app = c.apparatus_versions?.length ? c.apparatus_versions.join('/') : '—'
+  const belts = c.belt_sets?.length ? c.belt_sets.join('/') : (c.belt_set ?? '—')
+  return `${app} · belts ${belts}`
+}
+
+function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefined; policy: CapabilityMap['policy'] | undefined; onOpen: () => void; dim?: string }) {
   if (!isMeasured(cell)) {
     return (
       <div
@@ -110,7 +117,7 @@ function CellBox({ cell, policy, onOpen }: { cell: CapabilityCell | undefined; p
       type="button"
       onClick={onOpen}
       data-testid={bad ? 'cell-false-q1' : 'cell-measured'}
-      aria-label={`${cell.capability_class} ${cell.size}: ${cell.route}, n ${cell.n}, point ${fmtPct(cell.point)}, false-Q1 ${cell.false_q1}`}
+      aria-label={`${cell.capability_class} ${cell.size}${dim ? ` ${dim}` : ''}: ${cell.route}, n ${cell.n}, point ${fmtPct(cell.point)}, 95% CI ${fmtPct(cell.ci_low)} to ${fmtPct(cell.ci_high)}, false-Q1 ${cell.false_q1}, apparatus ${provenance(cell)}`}
       className={`flex h-full min-h-[92px] w-full flex-col gap-1 rounded-[var(--radius-control)] border px-2 py-2 text-left hover:bg-surface-high ${
         bad ? 'border-status-red bg-status-red-soft' : 'border-border bg-surface-container'
       }`}
@@ -119,6 +126,7 @@ function CellBox({ cell, policy, onOpen }: { cell: CapabilityCell | undefined; p
         <VerdictPill route={cell.route} size="xs" reason={cell.reason} />
         <span className="num text-[10px] text-on-surface-muted">n={fmtInt(cell.n)}</span>
       </div>
+      {dim && <span className="truncate font-mono text-[10px] text-on-surface-muted" title={dim}>{dim}</span>}
       <div className="num flex items-baseline gap-1">
         <span className="text-[15px] font-semibold text-on-surface" title={`clean ${fmtInt(cell.clean)} of ${fmtInt(cell.n)} eligible rows — the all-rows rate that routes`}>{fmtPct(cell.point)}</span>
         <span className="text-[10px] text-on-surface-muted">
@@ -126,10 +134,10 @@ function CellBox({ cell, policy, onOpen }: { cell: CapabilityCell | undefined; p
         </span>
         <span className="text-[10px] text-on-surface-muted">clean {fmtInt(cell.clean)}/{fmtInt(cell.n)}</span>
       </div>
-      <CiBar point={cell.point} low={cell.ci_low} high={cell.ci_high} n={cell.n} minPoint={policy?.min_point} minCiLow={policy?.min_ci_low} width={110} />
+      <CiBar point={cell.point} low={cell.ci_low} high={cell.ci_high} n={cell.n} minPoint={policy?.min_point} minCiLow={policy?.min_ci_low} width={110} provenance={provenance(cell)} />
       {cell.failure_split && (
         <div className="flex flex-wrap items-center gap-x-2">
-          <ModelPointLine modelPoint={cell.model_point ?? null} modelN={cell.model_n ?? 0} clean={cell.clean} />
+          <ModelPointLine modelPoint={cell.model_point ?? null} modelN={cell.model_n ?? 0} clean={cell.clean} ciLow={cell.model_ci_low ?? null} ciHigh={cell.model_ci_high ?? null} apparatus={cell.apparatus_versions} />
           <FailureSplitPills split={cell.failure_split} />
         </div>
       )}
@@ -200,7 +208,7 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
               label="Model rate (fair attempts)"
               value={cell.model_point === null || cell.model_point === undefined ? '—' : fmtPct(cell.model_point)}
               n={cell.model_n ?? 0}
-              ci={cell.model_point === null || cell.model_point === undefined ? null : { low: cell.model_ci_low, high: cell.model_ci_high }}
+              ci={cell.model_point == null || cell.model_ci_low == null || cell.model_ci_high == null ? null : { low: cell.model_ci_low, high: cell.model_ci_high }}
               apparatus={`${fmtInt(cell.clean)} clean of ${fmtInt(cell.model_n ?? 0)} finished attempts (clean + red) · Wilson 95% · diagnostic, not a gate`}
               data-testid="tile-model-point"
             />
@@ -230,7 +238,7 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
 
 /** The negative-controls verdict as a tile: FAILED / escapes / thin / passed / — with constructible k of N and the gate the policy applies. */
 function ControlsTile({ verdict, policy }: { verdict: ControlsVerdict | undefined; policy: CapabilityMap['policy'] | undefined }) {
-  const d = controlsDisplay(verdict)
+  const d = controlsDisplay(verdict, (policy as { min_controls_share?: number } | undefined)?.min_controls_share)
   const measured = Boolean(verdict?.measured)
   const value = !measured ? '—' : verdict!.state === 'failed' ? 'FAILED' : verdict!.state === 'escaped' ? `${verdict!.escapes} escape${verdict!.escapes === 1 ? '' : 's'}` : verdict!.state === 'thin' ? 'thin' : 'passed'
   return (
@@ -262,7 +270,10 @@ export function CapabilityPage() {
   const [byModel, setByModel] = useState(false)
   const [language, setLanguage] = useState('')
   const [model, setModel] = useState('')
-  const [selected, setSelected] = useState<CapabilityCell | null>(null)
+  // The selection is a KEY resolved against the current response, never a stored cell
+  // object: a repo / projection / filter change would otherwise keep showing the old
+  // detail with the new repo's ledger link (CodeRabbit on PR #6).
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
 
   const projection = useMemo<CellField[]>(() => {
     const p: CellField[] = ['capability_class', 'size']
@@ -270,6 +281,10 @@ export function CapabilityPage() {
     if (byModel) p.push('model')
     return p
   }, [byLanguage, byModel])
+
+  useEffect(() => {
+    setSelectedKey(null)
+  }, [repo, byLanguage, byModel, language, model])
 
   const map = useCapabilityMapWithControls(repo, projection)
 
@@ -282,7 +297,7 @@ export function CapabilityPage() {
         actions={
           <>
             <RepoPicker value={repo} onChange={setRepo} />
-            {repo && map.data && <ControlsPill verdict={map.data.controls} />}
+            {repo && map.data && <ControlsPill verdict={map.data.controls} minShare={map.data.policy?.min_controls_share} />}
             {repo && (
               <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=csv&repo=${encodeURIComponent(repo)}`)} download>
                 Export CSV
@@ -302,17 +317,26 @@ export function CapabilityPage() {
           const languages = m.languages ?? []
           const models = m.models ?? []
           const visible = m.cells.filter((c) => (!byLanguage || !language || c.language === language) && (!byModel || !model || c.model === model))
-          const index = new Map(visible.map((c) => [cellKey(c, ['capability_class', 'size']), c]))
+          // A projected dimension with no filter puts several cells behind one class×size
+          // slot: every one is rendered (stacked), never the last one to win a Map key.
+          const index = new Map<string, CapabilityCell[]>()
+          for (const c of visible) {
+            const k = cellKey(c, ['capability_class', 'size'])
+            index.set(k, [...(index.get(k) ?? []), c])
+          }
+          const dimOf = (c: CapabilityCell) => [byLanguage ? c.language : '', byModel ? c.model : ''].filter(Boolean).join(' · ')
+          const selected = selectedKey ? (visible.find((c) => cellKey(c, projection) === selectedKey) ?? null) : null
           const s = m.summary
           const measured = visible.filter(isMeasured)
           const nTotal = measured.reduce((a, c) => a + c.n, 0)
           const badCells = measured.filter((c) => c.false_q1 > 0).length
           const grid = classes.length * sizes.length
-          const covApp = `${fmtInt(s.deliver_cells)} deliver of ${fmtInt(s.total_cells || grid)} cells · policy ${m.policy?.version ?? '—'}`
+          const beltSets = [...new Set(measured.flatMap((c) => c.belt_sets ?? (c.belt_set ? [c.belt_set] : [])))]
+          const covApp = `${fmtInt(s.deliver_cells)} deliver of ${fmtInt(s.total_cells || grid)} cells · policy ${m.policy?.version ?? '—'} · apparatus ${s.apparatus_versions?.join('/') || '—'} · belts ${beltSets.join('/') || '—'}`
           return (
             <div className="space-y-6">
               <div className="flex flex-wrap gap-3">
-                <StatTile label="Trusted autonomy coverage" value={fmtPct(s.trusted_autonomy_coverage)} n={s.n_total ?? nTotal} apparatus={covApp} tone="primary" data-testid="tile-coverage" hint="Share of the repo's change volume whose cell routes to deliver." />
+                <StatTile label="Trusted autonomy coverage" value={fmtPct(s.trusted_autonomy_coverage)} n={s.n_total ?? nTotal} apparatus={covApp} tone="primary" data-testid="tile-coverage" hint="Share of the repo's change volume (its change profile, weighted by commit count) whose cell routes to deliver — a coverage of the profile, not a sampled rate, so it carries no Wilson interval; each cell's rate carries its own." />
                 <StatTile label="Measured cells" value={`${fmtInt(s.measured_cells)} / ${fmtInt(s.total_cells || grid)}`} n={s.n_total ?? nTotal} apparatus={`apparatus ${s.apparatus_versions?.join('/') || '—'}`} />
                 <StatTile
                   label="false-Q1 total"
@@ -394,10 +418,18 @@ export function CapabilityPage() {
                               {cls}
                             </th>
                             {sizes.map((sz) => {
-                              const cell = index.get(`${cls}|${sz}`)
+                              const cells = index.get(`${cls}|${sz}`) ?? []
                               return (
                                 <td key={sz} className="min-w-[150px] align-top">
-                                  <CellBox cell={cell} policy={m.policy} onOpen={() => cell && setSelected(cell)} />
+                                  {cells.length === 0 ? (
+                                    <CellBox cell={undefined} policy={m.policy} onOpen={() => undefined} />
+                                  ) : (
+                                    <div className="flex flex-col gap-1">
+                                      {cells.map((cell) => (
+                                        <CellBox key={cellKey(cell, projection)} cell={cell} policy={m.policy} dim={dimOf(cell) || undefined} onOpen={() => setSelectedKey(cellKey(cell, projection))} />
+                                      ))}
+                                    </div>
+                                  )}
                                 </td>
                               )
                             })}
@@ -412,7 +444,7 @@ export function CapabilityPage() {
                 </p>
               </Card>
 
-              {selected && <CellDetail cell={selected} repo={repo} onClose={() => setSelected(null)} />}
+              {selected && <CellDetail cell={selected} repo={repo} onClose={() => setSelectedKey(null)} />}
             </div>
           )
         }}

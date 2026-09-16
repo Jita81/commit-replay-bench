@@ -9,10 +9,13 @@
 Grading means running a third party's test suite, with a machine-generated patch applied,
 on infrastructure inside an NHS tenant. Repository tests are untrusted code: they can read
 the environment, open sockets, fork, fill disks, or (with a malicious patch) attempt to
-tamper with the grader. The validation standard's G5.3 requires containment for network,
-filesystem/process escape, resource exhaustion, cross-task access and credential theft, and
-names any sandbox escape a launch blocker. Upstream `sandbox_harness.py` had the hardening
-set but was pytest-specific and could be bypassed by configuration.
+tamper with the grader `[threat model — a design premise, not a measurement]`. The
+validation standard's G5.3 requires containment for network, filesystem/process escape,
+resource exhaustion, cross-task access and credential theft, and names any sandbox escape a
+launch blocker `[compliance requirement — what the decision below must meet; the controls
+that meet it are tagged in docs/SECURITY.md §3.1]`. Upstream `sandbox_harness.py` had the
+hardening set but was pytest-specific and could be bypassed by configuration `[observed by
+inspection of AthenaClaude `origin/main`, 2026-09-13]`.
 
 ## Decision
 

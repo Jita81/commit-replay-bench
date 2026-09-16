@@ -218,7 +218,16 @@ function canonical(v: unknown): string {
  */
 export function changedFields(form: RepoConfigForm, repo: RepoDetail): RepoUpdateRequest {
   const now = requestOf(form)
-  const was = requestOf(formFromRepo(repo))
+  // The baseline is what the server HOLDS, not the normalised form: `formFromRepo`
+  // substitutes a default for a stored language/runner it does not know (including
+  // the '' of "not yet chosen"), and a baseline built the same way hid that
+  // substitution — the form showed `pytest`, the diff was empty, Save stayed disabled
+  // and the stored '' lived forever (CodeRabbit on PR #6). Where the stored value is
+  // absent the normalised one stands in, so an untouched field still reads unchanged.
+  const normalised = requestOf(formFromRepo(repo))
+  const was: Record<string, unknown> = { ...normalised }
+  if (typeof repo.config.language === 'string') was.language = repo.config.language
+  if (typeof repo.config.runner === 'string') was.runner = repo.config.runner
   const out: RepoUpdateRequest = {}
   for (const key of Object.keys(now) as Array<keyof RepoUpdateRequest>) {
     if (!sameJson(now[key], was[key])) (out as Record<string, unknown>)[key] = now[key]

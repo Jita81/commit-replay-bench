@@ -129,7 +129,7 @@ export function RoutingPage() {
         cell: (d) =>
           d.failure_split ? (
             <span className="inline-flex flex-col gap-0.5">
-              <ModelPointLine modelPoint={d.model_point ?? null} modelN={d.model_n ?? 0} clean={Math.round(d.point * d.n)} size="xs" />
+              <ModelPointLine modelPoint={d.model_point ?? null} modelN={d.model_n ?? 0} clean={Math.round(d.point * d.n)} ciLow={d.model_ci_low ?? null} ciHigh={d.model_ci_high ?? null} apparatus={d.apparatus_versions} size="xs" />
               <FailureSplitPills split={d.failure_split} />
             </span>
           ) : (
@@ -138,10 +138,10 @@ export function RoutingPage() {
         hideBelowMd: true,
       },
       { key: 'ci_low', header: 'Wilson lower', numeric: true, sortValue: (d) => d.ci_low, cell: (d) => fmtPct(d.ci_low) },
-      // A RouteDecision carries `ci_low` only (the bound that routes), so the bar's upper
-      // end is mirrored from the lower one. The Wilson interval is asymmetric, so this is a
-      // glance aid; the capability page draws the server's true interval.
-      { key: 'bar', header: 'Interval', cell: (d) => <CiBar point={d.point} low={d.ci_low} high={Math.min(1, d.point + (d.point - d.ci_low))} n={d.n} width={80} />, hideBelowMd: true },
+      // The server's own asymmetric Wilson interval (`ci_high` is served beside the
+      // `ci_low` that routes) with the apparatus + belt-set provenance in the label — never
+      // an upper bound mirrored from the lower one (CodeRabbit on PR #6).
+      { key: 'bar', header: 'Interval', cell: (d) => <CiBar point={d.point} low={d.ci_low} high={d.ci_high} n={d.n} width={80} provenance={`apparatus ${d.apparatus_versions?.join('/') || '—'} · belts ${d.belt_sets?.join('/') || '—'}`} />, hideBelowMd: true },
       { key: 'fq1', header: 'false-Q1', numeric: true, sortValue: (d) => d.false_q1, cell: (d) => <span className={d.false_q1 > 0 ? 'font-semibold text-status-red' : ''}>{d.false_q1}{d.false_q1 > 0 ? ' ✗' : ''}</span> },
       { key: 'oracle', header: 'Oracle', numeric: true, sortValue: (d) => d.oracle_strength ?? -1, cell: (d) => fmtRatio(d.oracle_strength), hideBelowMd: true },
       { key: 'reason', header: 'Reason', sortValue: (d) => d.reason, cell: (d) => <span className="text-xs text-on-surface-muted">{d.reason}</span> },

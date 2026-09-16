@@ -172,7 +172,12 @@ All three read the ledger the way `crb route` does: `--path <ledger.jsonl>` or
 `<workdir>/ledger.jsonl` (`--workdir` / `$CRB_HOME`). `--policy-json` overrides the routing
 policy the derivations key on. The API mirrors the reports for the UI:
 `GET /api/v1/learn/refusals?repo=…`, `/learn/strengthen?repo=…`, `/learn/remeasure?repo=…`
-(viewer role; the store's rows, the latest oracle scores and controls verdict).
+(viewer role; the store's rows, the latest oracle scores and controls verdict). The
+refusals report serves its instrument-caused share as a rate with its context — `share:
+{rows_total, rows_protocol, share, ci_low, ci_high}` (Wilson 95 %) and `by_apparatus:
+[{apparatus_version, …the same}]` — so a UI never blends the share across apparatus
+versions or shows it without an interval; `protocol_share` stays for the CLI's one-line
+summary.
 
 ## 5. Properties the tests pin (`tests/test_learn.py`, `tests/test_cli_learn.py`)
 

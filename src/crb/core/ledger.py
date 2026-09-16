@@ -1039,9 +1039,11 @@ class FailureSplit:
             "ci_low": round(self.ci.low, 4),
             "ci_high": round(self.ci.high, 4),
             "model_n": self.model_n,
-            "model_point": round(self.model_point, 4),
-            "model_ci_low": round(self.model_ci.low, 4),
-            "model_ci_high": round(self.model_ci.high, 4),
+            # an unmeasured rate (no fair, finished attempt) is null with its interval — never
+            # a fabricated 0.0 / [0, 1] (CodeRabbit on PR #6, 2026-09-16)
+            "model_point": None if self.model_n == 0 else round(self.model_point, 4),
+            "model_ci_low": None if self.model_n == 0 else round(self.model_ci.low, 4),
+            "model_ci_high": None if self.model_n == 0 else round(self.model_ci.high, 4),
             "cost_known": self.cost_known,
             "cost_unknown": self.cost_unknown,
         }

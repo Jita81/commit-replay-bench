@@ -80,7 +80,7 @@ export function TaskDetailPage() {
         cell: (r) => {
           const rev = standing.get(r.row_hash)
           return rev ? (
-            <button type="button" className="inline-flex" onClick={() => r.evidence_pack_hash && setOpen({ pack: r.evidence_pack_hash, row: r.row_hash })} title={rev.statement} data-testid="row-review">
+            <button type="button" className="inline-flex" onClick={() => setOpen({ pack: rev.evidence_pack_hash || r.evidence_pack_hash, row: r.row_hash })} title={rev.statement} data-testid="row-review">
               <VerdictPill verdict={rev.verdict} />
             </button>
           ) : (

@@ -37,6 +37,8 @@ interface CiBarProps {
   minPoint?: number
   minCiLow?: number
   width?: number
+  /** `apparatus 2.2 · belts v5` — appended to the accessible label so the rate never travels without its provenance. */
+  provenance?: string
 }
 
 /**
@@ -44,12 +46,12 @@ interface CiBarProps {
  * mark, optional policy ticks. Always paired with the numbers in text — the
  * bar is a glance aid, never the only carrier of the value.
  */
-export function CiBar({ point, low, high, n, minPoint, minCiLow, width = 96 }: CiBarProps) {
+export function CiBar({ point, low, high, n, minPoint, minCiLow, width = 96, provenance }: CiBarProps) {
   const clamp = (v: number) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0))
   const p = clamp(point)
   const l = clamp(low)
   const h = clamp(high)
-  const label = `point ${fmtPct(p)}, 95% CI ${fmtPct(l)} to ${fmtPct(h)}, n = ${n}`
+  const label = `point ${fmtPct(p)}, 95% CI ${fmtPct(l)} to ${fmtPct(h)}, n = ${n}${provenance ? `, ${provenance}` : ''}`
   const hgt = 10
   return (
     <svg

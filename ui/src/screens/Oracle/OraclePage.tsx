@@ -48,7 +48,7 @@ import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { StatTile } from '../../components/StatTile'
-import { fmtInt, fmtRatio, fmtSeconds, shortId } from '../../lib/format'
+import { fmtInt, fmtRatio, fmtSeconds, shortId, wilson } from '../../lib/format'
 import { bandDisplay, gateDisplay } from '../../lib/verdict'
 
 /** Sort order for the size column. */
@@ -124,12 +124,21 @@ function ControlsSection({ repo }: { repo: string }) {
     return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
   }
   const c = q.data
+  // The gate's state is the SERVER's verdict (the reduction the capability map and the
+  // routes gate on), rendered first; the counts below it are supporting detail. A report
+  // with no verdict (a bare to_dict) is pending, never derived open from the counts.
+  const v = c.verdict
+  const verdictOk = v ? (v.state === 'passed' ? true : v.state === 'unmeasured' ? null : false) : null
+  const verdictDetail = !v
+    ? 'no verdict served with this report'
+    : `${v.state}${v.measured ? ` · ${fmtInt(v.constructible)} of ${fmtInt(v.total)} constructible (${Math.round(v.share * 100)}%) · ${fmtInt(v.escapes)} escape(s)${v.complete ? '' : ' · run cancelled part-way'}` : ''}${v.run_id ? ` · run ${shortId(v.run_id)}` : ''}`
   return (
     <div className="space-y-4">
       <GateBanner
         title="Negative controls"
         eyebrow="the grader refuses what it must refuse"
         criteria={[
+          { label: 'Routing verdict (from the API)', ok: verdictOk, detail: verdictDetail },
           { label: 'No VIOLATION rows', ok: c.violations === 0, detail: `${fmtInt(c.violations)} violation(s) over ${fmtInt(c.n_rows)} rows` },
           { label: 'Report present', ok: c.n_rows > 0, detail: `${fmtInt(c.n_tasks)} tasks · ${fmtInt(c.n_rows)} control rows` },
           { label: 'Escapes reported (findings, not failures)', ok: true, detail: `${fmtInt(c.escapes)} escape(s) · ${fmtInt(c.not_constructible)} not constructible · ${fmtInt(c.skipped)} skipped` },
@@ -161,8 +170,24 @@ export function OraclePage() {
       { key: 'task', header: 'Task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <Link to={`/tasks/${encodeURIComponent(repo)}/${t.task_id}`} title={t.task_id}>{shortId(t.task_id)}</Link> },
       { key: 'class', header: 'Class', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
       { key: 'size', header: 'Size', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
-      { key: 'strength', header: 'Strength', numeric: true, sortValue: (t) => t.strength ?? -1, cell: (t) => fmtRatio(t.strength) },
-      { key: 'mutants', header: 'Killed / mutants', numeric: true, sortValue: (t) => t.mutants, cell: (t) => `${fmtInt(t.killed)} / ${fmtInt(t.mutants)}` },
+      // strength = killed / mutants, a binomial rate: it is shown with its Wilson 95% interval
+      // (computed from the served counts, never a fabricated bound) and its n
+      {
+        key: 'strength',
+        header: 'Strength [Wilson 95%]',
+        numeric: true,
+        sortValue: (t) => t.strength ?? -1,
+        cell: (t) => {
+          if (t.strength === null || t.mutants <= 0) return fmtRatio(t.strength)
+          const w = wilson(t.killed, t.mutants)
+          return (
+            <span title={`${fmtInt(t.killed)} of ${fmtInt(t.mutants)} mutants killed · Wilson 95% [${fmtRatio(w.low)}, ${fmtRatio(w.high)}]`}>
+              {fmtRatio(t.strength)} <span className="text-[10px] text-on-surface-muted">[{fmtRatio(w.low)}, {fmtRatio(w.high)}]</span>
+            </span>
+          )
+        },
+      },
+      { key: 'mutants', header: 'Killed / mutants (n)', numeric: true, sortValue: (t) => t.mutants, cell: (t) => `${fmtInt(t.killed)} / ${fmtInt(t.mutants)}` },
       { key: 'band', header: 'Band', sortValue: (t) => t.band, cell: (t) => <BandPill band={t.band} /> },
       { key: 'gate', header: 'Gate', sortValue: (t) => t.gate, cell: (t) => <GatePill gate={t.gate} /> },
     ],
@@ -186,7 +211,7 @@ export function OraclePage() {
           return (
             <div className="space-y-6">
               <div className="flex flex-wrap gap-3">
-                <StatTile label="Mean strength" value={fmtRatio(mean)} n={scored.length} apparatus={`kill-rate over ${fmtInt(scored.length)} scored tasks · ${o.policy.version}`} />
+                <StatTile label="Mean strength" value={fmtRatio(mean)} n={scored.length} apparatus={`mean of ${fmtInt(scored.length)} task kill-rates (each carries its own Wilson interval below; a mean of rates has none) · ${o.policy.version} · apparatus ${o.apparatus_versions?.join('/') || '—'}`} />
                 <StatTile label="Strong (≥ auto-ship floor)" value={fmtInt(bands.strong)} n={o.tasks.length} apparatus={`floor ${fmtRatio(o.policy.autoship_floor)}`} tone={bands.strong ? 'green' : undefined} />
                 <StatTile label="Adequate" value={fmtInt(bands.adequate)} n={o.tasks.length} apparatus={`floor ${fmtRatio(o.policy.adequate_floor)}`} tone={bands.adequate ? 'primary' : undefined} />
                 <StatTile label="Weak" value={fmtInt(bands.weak)} n={o.tasks.length} apparatus="a green on these routes to a human" tone={bands.weak ? 'amber' : undefined} />

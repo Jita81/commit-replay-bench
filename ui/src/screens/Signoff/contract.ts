@@ -182,6 +182,9 @@ export interface SignoffPreviewEvidence {
   belt_sets: string[]
   model_n: number
   model_point: number | null
+  /** `null` with `model_point` when unmeasured. */
+  model_ci_low?: number | null
+  model_ci_high?: number | null
   failure_split: FailureSplit
 }
 

@@ -224,6 +224,9 @@ class SignoffPreviewEvidence(BaseModel):
     belt_sets: list[str]
     model_n: int
     model_point: float | None
+    #: ``null`` with ``model_point`` when unmeasured (``model_n == 0``).
+    model_ci_low: float | None = None
+    model_ci_high: float | None = None
     failure_split: FailureSplitOut
 
 

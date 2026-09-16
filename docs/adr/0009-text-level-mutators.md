@@ -11,8 +11,10 @@ and `operator_set_hash` — and the new `uncompilable` outcome is excluded, neve
 Oracle adequacy is the semantic half of false-Q1 = 0: the belts prove a clean grade had a
 GREEN oracle, and mutation scoring measures whether that green was worth anything (ADR-0001;
 `crb.core.oracle.adequacy`). Until now the only mutator was the Python AST mutator, so every
-Go, JavaScript, JVM and Rust task was **unscoreable** — measured on `spf13/cobra`: 25/25
-tasks unscoreable [measured]. A capability map whose non-Python cells can never earn
+Go, JavaScript, JVM and Rust task was **unscoreable** — on `spf13/cobra`, 25/25 tasks
+unscoreable `[measured 2026-09-13; apparatus 2.0; method: a `crb` `oracle` run on the live
+stack — the Python AST mutator over each task's changed lines produced zero mutants for every
+Go file; n = 25 tasks]`. A capability map whose non-Python cells can never earn
 `auto_ship` is not a routing brain for a polyglot enterprise estate; it is a Python tool
 with four languages bolted on.
 

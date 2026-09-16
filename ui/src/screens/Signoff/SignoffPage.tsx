@@ -96,7 +96,7 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
   const p = preview.policy
   const ev = preview.evidence
   const c = preview.controls
-  const cd = controlsDisplay(c)
+  const cd = controlsDisplay(c, p.min_constructible_share)
   const oracle = ev.oracle_strength
   const scored = ev.oracle ? `${ev.oracle.scored} of ${ev.oracle.tasks} task(s) scored` : ''
   return [
@@ -144,7 +144,8 @@ function RefusalList({ refusals, testId = 'signoff-refusals' }: { refusals: Sign
 }
 
 /** "What you would be signing": the tiles, the controls verdict, the route and the split — the snapshot the record will carry. */
-function EvidencePanel({ preview }: { preview: SignoffPreview }) {
+/** `bars` are the routing policy the capability map serves (`min_point`, `min_ci_low`) — read from the API, never a UI constant (CodeRabbit on PR #6). */
+function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { min_point: number; min_ci_low: number } }) {
   const ev = preview.evidence
   const c = preview.controls
   const apparatus = `apparatus ${ev.apparatus_versions.join('/') || '—'} · belt set ${ev.belt_sets.join('/') || '—'} · Wilson 95%`
@@ -152,14 +153,14 @@ function EvidencePanel({ preview }: { preview: SignoffPreview }) {
     <Card title="What you would be signing" id="signoff-evidence">
       <div className="flex flex-wrap gap-3" data-testid="signoff-evidence">
         <StatTile label="Pass rate" value={fmtPct(ev.point)} n={ev.n} ci={ev.ci_low === null || ev.ci_high === null ? null : { low: ev.ci_low, high: ev.ci_high }} apparatus={`${fmtInt(ev.clean)} clean of ${fmtInt(ev.n)} eligible · ${apparatus}`} data-testid="signoff-tile-point" />
-        <StatTile label="Wilson lower" value={fmtPct(ev.ci_low)} n={ev.n} apparatus={`the bound the routing rule reads · ≥ 80% for deliver`} data-testid="signoff-tile-ci-low" />
+        <StatTile label="Wilson lower" value={fmtPct(ev.ci_low)} n={ev.n} apparatus={`the bound the routing rule reads · ${bars ? `≥ ${fmtPct(bars.min_ci_low, 0)} for deliver` : 'bar: see the policy in force'}`} data-testid="signoff-tile-ci-low" />
         <StatTile label="false-Q1" value={ev.measured ? String(ev.false_q1) : '—'} n={ev.n} apparatus="clean rows with a failed belt — must be 0" tone={ev.false_q1 > 0 ? 'red' : 'green'} data-testid="signoff-tile-false-q1" />
         <StatTile label="Oracle strength" value={fmtRatio(ev.oracle_strength)} n={ev.oracle?.scored ?? ev.n} apparatus={`mean mutation kill-rate of the cell's tasks' oracles${ev.oracle ? ` · ${ev.oracle.scored} of ${ev.oracle.tasks} task(s) scored` : ''} · unmeasured is a refusal, never a pass`} data-testid="signoff-tile-oracle" />
       </div>
       <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
         <div data-testid="signoff-controls" className="space-y-1">
           <div className="label">Negative controls</div>
-          <ControlsPill verdict={c} />
+          <ControlsPill verdict={c} minShare={preview.policy.min_constructible_share} />
           <p className="num text-xs text-on-surface-muted">
             {c.measured ? (
               <>
@@ -183,8 +184,8 @@ function EvidencePanel({ preview }: { preview: SignoffPreview }) {
         <div className="space-y-1 sm:col-span-2">
           <div className="label">Failure split</div>
           <div className="flex flex-wrap items-center gap-3">
-            {ev.point !== null && ev.ci_low !== null && ev.ci_high !== null && <CiBar point={ev.point} low={ev.ci_low} high={ev.ci_high} n={ev.n} minPoint={0.9} minCiLow={0.8} width={140} />}
-            <ModelPointLine modelPoint={ev.model_point} modelN={ev.model_n} clean={ev.clean} size="sm" />
+            {ev.point !== null && ev.ci_low !== null && ev.ci_high !== null && <CiBar point={ev.point} low={ev.ci_low} high={ev.ci_high} n={ev.n} minPoint={bars?.min_point} minCiLow={bars?.min_ci_low} width={140} provenance={apparatus} />}
+            <ModelPointLine modelPoint={ev.model_point} modelN={ev.model_n} clean={ev.clean} ciLow={ev.model_ci_low ?? null} ciHigh={ev.model_ci_high ?? null} apparatus={ev.apparatus_versions} size="sm" />
             <FailureSplitPills split={ev.failure_split} size="sm" data-testid="signoff-split" />
           </div>
         </div>
@@ -383,7 +384,7 @@ export function SignoffPage() {
             </div>
           )}
 
-          {previewData && <EvidencePanel preview={previewData} />}
+          {previewData && <EvidencePanel preview={previewData} bars={map.data?.policy ? { min_point: map.data.policy.min_point, min_ci_low: map.data.policy.min_ci_low } : undefined} />}
 
           <Card title="Approver form">
             <form id="signoff-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">

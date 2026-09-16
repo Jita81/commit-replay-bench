@@ -57,18 +57,42 @@ export function FailureSplitPills({ split, size = 'xs', ...rest }: { split: Fail
  * `model n/(n+red)` — the model's rate on fair, finished attempts, smaller and NEXT TO
  * the all-rows point, never instead of it. Reads "—" when no fair attempt exists.
  */
-export function ModelPointLine({ modelPoint, modelN, clean, size = 'xs' }: { modelPoint: number | null; modelN: number; clean: number; size?: 'xs' | 'sm' }) {
+/**
+ * The model's rate on fair, finished attempts, with everything a rendered rate keeps: its
+ * n (`clean/modelN`), its Wilson 95% interval when the server gave one, and the apparatus
+ * versions it was measured under. `null` renders as `—` (unmeasured — never a 0%).
+ */
+export function ModelPointLine({
+  modelPoint,
+  modelN,
+  clean,
+  ciLow = null,
+  ciHigh = null,
+  apparatus = [],
+  size = 'xs',
+}: {
+  modelPoint: number | null
+  modelN: number
+  clean: number
+  ciLow?: number | null
+  ciHigh?: number | null
+  apparatus?: string[]
+  size?: 'xs' | 'sm'
+}) {
   const cls = size === 'xs' ? 'text-[10px]' : 'text-xs'
+  const interval = modelPoint !== null && ciLow !== null && ciHigh !== null ? ` [${fmtPct(ciLow, 0)}–${fmtPct(ciHigh, 0)}]` : ''
+  const app = apparatus.length ? ` · apparatus ${apparatus.join(', ')}` : ''
+  const title = `clean / (clean + builder red): the model's rate where it got a fair, finished attempt — diagnostic, never the routing input.${interval ? ` Wilson 95% interval${interval}.` : ''}${app}`
   return (
-    <span className={`num ${cls} text-on-surface-muted`} data-testid="model-point" title="clean / (clean + builder red): the model's rate where it got a fair, finished attempt — diagnostic, never the routing input">
-      model {modelPoint === null ? '—' : fmtPct(modelPoint, 0)} <span>({fmtInt(clean)}/{fmtInt(modelN)})</span>
+    <span className={`num ${cls} text-on-surface-muted`} data-testid="model-point" title={title} aria-label={`model rate ${modelPoint === null ? 'unmeasured' : fmtPct(modelPoint, 0)}, ${fmtInt(clean)} of ${fmtInt(modelN)}${interval}${app}`}>
+      model {modelPoint === null ? '—' : fmtPct(modelPoint, 0)} <span>({fmtInt(clean)}/{fmtInt(modelN)}{interval})</span>
     </span>
   )
 }
 
 /** The repo-level controls verdict pill: passed k of N / FAILED / thin k of N / escapes / unmeasured. */
-export function ControlsPill({ verdict, size = 'sm', reason }: { verdict: ControlsVerdict | null | undefined; size?: 'xs' | 'sm'; reason?: string }) {
-  const d = controlsDisplay(verdict)
+export function ControlsPill({ verdict, size = 'sm', reason, minShare }: { verdict: ControlsVerdict | null | undefined; size?: 'xs' | 'sm'; reason?: string; minShare?: number }) {
+  const d = controlsDisplay(verdict, minShare)
   const state = verdict?.measured ? verdict.state : 'unmeasured'
   return (
     <Pill tone={d.tone} glyph={d.glyph} size={size} label={reason ? `${d.describe} ${reason}` : d.describe} data-testid={`controls-${state}`}>

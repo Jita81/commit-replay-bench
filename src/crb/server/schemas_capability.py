@@ -120,8 +120,9 @@ class CapabilityCellSplitOut(CapabilityCellOut):
     n_tasks: int = 0
     model_n: int
     model_point: float | None
-    model_ci_low: float
-    model_ci_high: float
+    #: ``null`` with ``model_point`` when ``model_n == 0``: never a fabricated ``0.0`` bound.
+    model_ci_low: float | None
+    model_ci_high: float | None
     failure_split: FailureSplitOut
 
     @field_validator("reason_code")
@@ -151,6 +152,9 @@ class RouteDecisionWithControlsOut(RouteDecisionOut):
     controls: ControlsVerdictOut | None
     model_n: int
     model_point: float | None
+    #: ``null`` with ``model_point`` when ``model_n == 0`` — an unmeasured rate has no interval.
+    model_ci_low: float | None = None
+    model_ci_high: float | None = None
     failure_split: FailureSplitOut
 
 
@@ -182,9 +186,10 @@ class FailureSplitResponse(BaseModel):
     ci_low: float
     ci_high: float
     model_n: int
-    model_point: float
-    model_ci_low: float
-    model_ci_high: float
+    #: ``null`` (with both bounds) when ``model_n == 0`` — unmeasured, never a zero row.
+    model_point: float | None
+    model_ci_low: float | None
+    model_ci_high: float | None
     cost_known: int
     cost_unknown: int
     kinds: list[str] = list(FAILURE_KINDS)

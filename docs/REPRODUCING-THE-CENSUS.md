@@ -330,8 +330,24 @@ rows=1071 · false-Q1=0 · policy=routing.v1 · apparatus=1.0-census
 ```
 
 Two things to read off this table before quoting it. First, every cell in it mixes
-`v3-legacy` and `v4` rows (only §5.1's grouping separates them), so each is a statement
-about three belts on most of its rows. Second, the `capability_class` axis here is `crb`'s
+`v3-legacy` and `v4` rows AND sighted and blind rows (only §5.1's grouping separates
+them), so each is a statement about three belts on most of its rows and about two
+different measurements of the same task. The two `deliver` cells, split the way a claim
+must be quoted (mode × belt set; Wilson 95%; `crb ledger stats --by
+class,size,mode,belt_set`; DQ rows excluded):
+
+| cell | mode | belt set | n | clean | rate | Wilson 95% |
+|---|---|---|---|---|---|---|
+| `bug.fix` XS | sighted | `v3-legacy` | 281 | 274 | 97.5% | [0.95, 0.99] |
+| `bug.fix` XS | sighted | `v4` | 55 | 49 | 89.1% | [0.78, 0.95] |
+| `bug.fix` XS | blind | `v4` | 60 | 51 | 85.0% | [0.74, 0.92] |
+| `bug.fix` S | sighted | `v3-legacy` | 277 | 265 | 95.7% | [0.93, 0.98] |
+| `bug.fix` S | sighted | `v4` | 51 | 45 | 88.2% | [0.77, 0.94] |
+| `bug.fix` S | blind | `v4` | 63 | 53 | 84.1% | [0.73, 0.91] |
+
+The blended 94.4% / 92.8% in the table above is what the map computed under `mode=all`;
+it is not a rate to quote — the four-belt sighted rate is ~89% and the blind rate ~85%,
+each with an interval that does not include the blended number. Second, the `capability_class` axis here is `crb`'s
 deterministic, path-derived class — not the LLM-assigned labels in `class_labels.json`,
 which are kept as labels only — and the critical-friend review (§4.2, point 4) found that
 axis degenerate on library repositories: `bug.fix` absorbs behaviour changes and features.
@@ -388,12 +404,12 @@ the commands shown; they are reproducible, not asserted.
 >   not passed, for the 706." **[measured]**
 > - "Under apparatus `1.0-census`, builder `claude-code-workflow` (Sonnet), the
 >   retrospective commit-replay corpus graded by each repository's own held-out tests
->   shows, for the class × size cell (`bug.fix`, `XS`), 374/396 clean (94.4%, Wilson 95%
->   [0.92, 0.96], false-Q1 = 0) — a cell that mixes sighted and blind rows and three- and
->   four-belt rows" — and likewise for any other cell in §5, *with its n, interval, mode
->   (or the statement that the projection mixes modes), builder and apparatus attached*.
->   Separate modes with `crb ledger stats --by class,size,mode` before quoting a rate as
->   sighted or blind. **[measured, retrospective]**
+>   shows, for the class × size cell (`bug.fix`, `XS`), sighted four-belt rows 49/55 clean
+>   (89.1%, Wilson 95% [0.78, 0.95]), blind four-belt rows 51/60 (85.0%, [0.74, 0.92]),
+>   sighted three-belt legacy rows 274/281 (97.5%, [0.95, 0.99]), false-Q1 = 0 in each" —
+>   and likewise for any other cell in §5, *split by mode and belt set, with its n,
+>   interval, builder and apparatus attached*; never the blended 374/396 (94.4%), which
+>   pools two measurements of the same task and two belt sets. **[measured, retrospective]**
 > - "A forged verdict in this ledger is refused at read, and any edit breaks the chain at
 >   the edited row" (§8). **[measured]**
 >

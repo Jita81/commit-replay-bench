@@ -155,12 +155,17 @@ slow; declare them: `{"command": ["golangci-lint", "run"], "paths": "all"}`).
 
 ### Amendment 2026-09-14 — the type checker (`tsc`) is part of the JavaScript gate
 
-`[measured 2026-09-14]` The independent decider's reading of the ten retained NHS
-patches (`scratchpad/decisions/fable-rationale.md` §3) found that **4 of 10 clean rows
-fail the repository's own `tsc`** — nhsuk-frontend c11684dd28 (blind: TS2417 ×2 in the
-maintainers' own overlaid tests), b65ca47124 (TS2554), b1e02b4e81 (TS2339 at
-`scroll.mjs:47`), nhsuk-react-components 2da48ca336 (TS2322 at `DateInput.tsx:88` —
-jest passes because babel strips types). Both repositories gate PRs on `lint:types`
+`[measured 2026-09-14]` — n = 10 retained clean patches (9 sighted, 1 blind; apparatus
+2.2, belt set v5, builder `claude_code` / claude-sonnet-5; the diffs are in
+`docs/reviews/nhs-patches/`), method: the independent decider ran each repository's
+own `lint:types` script over the patched worktree and read the diagnostics
+(`scratchpad/decisions/fable-rationale.md` §3). Result, split by mode as a rate must be:
+**sighted 3 of 9 clean rows fail `tsc`** — nhsuk-frontend b65ca47124 (TS2554),
+b1e02b4e81 (TS2339 at `scroll.mjs:47`), nhsuk-react-components 2da48ca336 (TS2322 at
+`DateInput.tsx:88` — jest passes because babel strips types); **blind 1 of 1** —
+nhsuk-frontend c11684dd28 (TS2417 ×2 in the maintainers' own overlaid tests). Ten
+patches is a reading, not a rate with an interval worth quoting (Wilson 95% on 4/10 is
+[0.17, 0.69]); the finding is the gap, not the number. Both repositories gate PRs on `lint:types`
 (`tsc --build tsconfig.json --pretty`; nhsuk-frontend's `pull-request.yml` job
 `lint-types`, react-components' `ci.yml` → `yarn lint`). Belt 5's JS detection ran
 eslint / prettier / standard and never the type check, so "clean under 2.2" overstated

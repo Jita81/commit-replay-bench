@@ -199,6 +199,33 @@ export function useRepos(): UseQueryResult<Page<RepoSummary>, ApiError> {
   return useQuery({ queryKey: keys.repos, queryFn: () => api<Page<RepoSummary>>('/repos'), retry: false })
 }
 
+/** The API's page-size ceiling (`PAGE_MAX` in `crb.server.schemas`). */
+export const PAGE_MAX = 500
+
+/**
+ * EVERY repository, walking `/repos` page by page under the documented `limit`/`offset`
+ * contract — for the picker, which must not omit a repo that fell outside the first page
+ * (CodeRabbit on PR #6). The result keeps the `Page` shape with `total` = the count seen.
+ */
+export async function fetchAllRepos(): Promise<Page<RepoSummary>> {
+  const items: RepoSummary[] = []
+  let offset = 0
+  let total = 0
+  for (;;) {
+    const page = await api<Page<RepoSummary>>(`/repos${qs({ limit: PAGE_MAX, offset })}`)
+    items.push(...page.items)
+    total = page.total
+    offset += page.items.length
+    if (page.items.length === 0 || offset >= page.total) break
+  }
+  return { items, total, limit: items.length, offset: 0 }
+}
+
+/** `useRepos` over every page — the picker's source. Shares the repos cache key family so a created repo invalidates it. */
+export function useAllRepos(): UseQueryResult<Page<RepoSummary>, ApiError> {
+  return useQuery({ queryKey: [...keys.repos, 'all'] as const, queryFn: fetchAllRepos, retry: false })
+}
+
 /** `GET /repos/{name}` — the list item plus its `config`. */
 export function useRepo(name: string): UseQueryResult<RepoDetail, ApiError> {
   return useQuery({
@@ -582,10 +609,11 @@ export function useFactoryBacklog(repo: string): UseQueryResult<FactoryBacklog, 
 }
 
 /** `GET /factory/{repo}/tasks` (P6). */
-export function useFactoryTasks(repo: string): UseQueryResult<Page<FactoryTask>, ApiError> {
+export function useFactoryTasks(repo: string): UseQueryResult<FactoryTask[], ApiError> {
   return useQuery({
     queryKey: keys.factoryTasks(repo),
-    queryFn: () => api<Page<FactoryTask>>(`/factory/${enc(repo)}/tasks`),
+    // the server answers a bare list here (docs/API.md), not a Page
+    queryFn: () => api<FactoryTask[]>(`/factory/${enc(repo)}/tasks`),
     enabled: repo.length > 0,
     retry: false,
   })

@@ -68,12 +68,24 @@ export interface RefusalReport {
   rows_total: number
   rows_protocol: number
   protocol_share: number
+  /** The same share with its n and Wilson 95% interval — the form a rate is rendered in. */
+  share: RefusalShare
+  /** The share per apparatus version — never blended across versions on screen. */
+  by_apparatus: Array<RefusalShare & { apparatus_version: string }>
   cost_usd: number
   minutes: number
   unparsed: number
   apparatus_versions: string[]
   groups: RefusalGroup[]
   note: string
+}
+
+export interface RefusalShare {
+  rows_total: number
+  rows_protocol: number
+  share: number
+  ci_low: number
+  ci_high: number
 }
 
 /** One strengthening proposal in the frozen-backlog shape (`test.add`, structural slots only). */
@@ -202,11 +214,25 @@ function RefusalsSection({ repo }: { repo: string }) {
   if (q.isPending) return <Pending what="the refusal triage" />
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
   const r = q.data
-  const apparatus = `apparatus ${r.apparatus_versions.join(', ') || '—'} · failure_kind = protocol`
+  const byApp = r.by_apparatus ?? []
+  // One apparatus → the rate is that apparatus's, with its interval. Several → the tile
+  // shows each version's own rate; the blended number is never the headline
+  // (CodeRabbit on PR #6: a rate is never blended across apparatus versions).
+  const single = byApp.length === 1 ? byApp[0]! : null
+  const headline = single ?? r.share
+  const apparatus = single ? `apparatus ${single.apparatus_version} · failure_kind = protocol · Wilson 95%` : byApp.length > 1 ? `${byApp.length} apparatus versions — see each below · failure_kind = protocol` : 'no rows'
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
-        <StatTile label="Instrument-caused rows" value={r.rows_total ? fmtPct(r.protocol_share) : '—'} n={r.rows_total} apparatus={apparatus} tone={r.protocol_share > 0.05 ? 'amber' : 'green'} hint="review §7.5: read every one until this is < 5%" />
+        <StatTile
+          label={byApp.length > 1 ? 'Instrument-caused rows (per apparatus)' : 'Instrument-caused rows'}
+          value={byApp.length > 1 ? byApp.map((a) => `${a.apparatus_version}: ${fmtPct(a.share)}`).join(' · ') : headline && headline.rows_total ? fmtPct(headline.share) : '—'}
+          n={headline?.rows_total ?? r.rows_total}
+          ci={byApp.length === 1 && headline.rows_total ? { low: headline.ci_low, high: headline.ci_high } : null}
+          apparatus={byApp.length > 1 ? `${byApp.map((a) => `${a.apparatus_version}: ${a.rows_protocol}/${a.rows_total} [${fmtPct(a.ci_low, 0)}–${fmtPct(a.ci_high, 0)}]`).join(' · ')} · Wilson 95%` : apparatus}
+          tone={byApp.some((a) => a.share > 0.05) ? 'amber' : 'green'}
+          hint="review §7.5: read every one until this is < 5%"
+        />
         <StatTile label="Refusal classes" value={r.groups.length ? fmtInt(r.groups.length) : '—'} n={r.rows_protocol} apparatus="grouped by (guard, reason, command shape)" />
         <StatTile label="Spent on refusals" value={r.rows_protocol ? fmtUsd(r.cost_usd) : '—'} n={r.rows_protocol} apparatus={`${fmtInt(Math.round(r.minutes))} builder-minutes`} />
       </div>

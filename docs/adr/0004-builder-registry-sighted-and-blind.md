@@ -10,11 +10,14 @@ The census builder upstream was Claude Code *workflow JavaScript*; no Python bui
 existed. Portable pieces existed for an OpenAI-compatible tool loop
 (`manufacture/agentic_generate.py`, `scripts/model_repro_bench/gptoss_agent.py`) and a
 single-shot SEARCH/REPLACE edit-block generator (v1 `generate.py`,
-`commit_replay.parse_edit_blocks`). `[measured]` upstream: the agentic process (tools, run
-tests, iterate to green) with a capable model was the dominant lever on hard commits
-(replicated across three experiments), while a weak model gained nothing from the same
-process — so the product must be able to run several builders under one contract and
-compare them on the same ledger.
+`commit_replay.parse_edit_blocks`). `[measured]` upstream (AthenaClaude
+`scripts/model_repro_bench/`, 2026-07-02, pre-`crb` apparatus; method: the same 12 hard
+commits reproduced diff-blind and graded by the repositories' own tests; n = 12 tasks per
+arm): the agentic process (tools, run tests, iterate to green) with a capable model was the
+dominant lever — Opus 4.8 agentic 8/12 clean where gpt-oss-120b best-of-6 single-shot was
+0/12 — while the weak model gained nothing from the same process (gpt-oss agentic 0/12);
+replicated across three experiments on that suite — so the product must be able to run
+several builders under one contract and compare them on the same ledger.
 
 The design customer runs in its own tenant: Azure OpenAI in-tenant, a local model, or
 Claude Code must be first-class, and the builder's view of the task must be controlled so

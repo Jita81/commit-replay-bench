@@ -14,8 +14,10 @@ Upstream carried **two** routers with different bars and no shared consumer:
 | `tuning/change_router.py` / `benchmark_capability.py` — the **SPC** rule | `yield ≥ 0.85 ∧ σ ≤ 0.10 ∧ n ≥ 20` | change router |
 
 The oracle-adequacy gate (`scripts/oracle_challenge/adequacy_gate.py`) existed but was wired
-to nothing, although `[measured]` (upstream, n=19 tasks) showed oracle strength varies enough
-across tasks that a clean grade alone must not license auto-delivery. Two rules with
+to nothing, although `[measured]` (upstream AthenaClaude, pre-`crb` apparatus; method:
+`scripts/oracle_challenge/mutation_strength.py` — AST mutants on the changed lines, strength
+= killed / mutants per task; n = 19 tasks) showed oracle strength varies enough across tasks
+that a clean grade alone must not license auto-delivery. Two rules with
 different thresholds cannot both be "the" published bar; an auditor asking "why was this
 class auto-delivered?" needs one answer.
 

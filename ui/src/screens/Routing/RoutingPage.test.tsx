@@ -48,13 +48,19 @@ const decision = (over: Partial<RouteDecisionWithControls>): RouteDecisionWithCo
   n: 40,
   point: 0.95,
   ci_low: 0.835,
+  ci_high: 0.987,
   false_q1: 0,
   oracle_strength: null,
   policy_version: 'routing.v1',
+  verification_tier: 'automated-pass',
+  apparatus_versions: ['2.2'],
+  belt_sets: ['v5'],
   controls_policy: 'controls-gate.v1',
   controls: VERDICT,
   model_n: 40,
   model_point: 0.95,
+  model_ci_low: 0.835,
+  model_ci_high: 0.987,
   failure_split: { builder_red: 2, budget: 0, protocol: 0, harness: 0, disqualified: 0 },
   ...over,
 })
@@ -75,6 +81,8 @@ const ROUTES_BODY: RoutesWithControls = {
       ci_low: 0.15,
       model_n: 3,
       model_point: 0.6667,
+      model_ci_low: null,
+      model_ci_high: null,
       failure_split: { builder_red: 1, budget: 0, protocol: 0, harness: 1, disqualified: 0 },
     }),
   ],
@@ -117,6 +125,9 @@ describe('RoutingPage — reason codes, the controls verdict and the split (A2)'
       expect.arrayContaining(['red 2, lint 0, budget 0, protocol 0, harness 0, outage 0, DQ 0', 'red 1, lint 0, budget 0, protocol 0, harness 1, outage 0, DQ 0']),
     )
     const models = screen.getAllByTestId('model-point').map((m) => m.textContent)
-    expect(models.some((t) => t?.includes('model 67%') && t.includes('(2/3)'))).toBe(true)
+    // the model rate keeps its n and, when served, its interval (the second decision has
+    // model_ci_* from the fixture default: 0.835–0.987 on 40; the third serves none)
+    expect(models.some((t) => t?.includes('model 67%') && t.includes('(2/3'))).toBe(true)
+    expect(models.some((t) => t?.includes('model 95%') && t.includes('[84%–99%]'))).toBe(true)
   })
 })

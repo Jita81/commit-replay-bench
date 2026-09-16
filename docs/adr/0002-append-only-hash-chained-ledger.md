@@ -9,9 +9,13 @@
 An NHS deployment must be able to show an auditor that no verdict was altered, removed or
 reordered after the fact (the validation standard's G0.4 "ledger immutability": attempted
 mutations — deleting failures, altering grades, post-hoc rerouting, editing costs, removing
-disqualifications — must all be detectable and attributable). Upstream, the benchmark
-ledger was JSONL "append-only by convention", with a CWD-dependent path and three disjoint
-stores, and its false-Q1 check ran at read time. Convention is not evidence.
+disqualifications — must all be detectable and attributable) `[design]` — the standard's
+requirement, which this ADR's decision meets and `tests/test_store_ledger.py` /
+`tests/test_ledger.py` prove `[measured]` (the triggers refuse `UPDATE`/`DELETE`; an edited
+row breaks the chain at that row). Upstream, the benchmark ledger was JSONL "append-only by
+convention", with a CWD-dependent path and three disjoint stores, and its false-Q1 check ran
+at read time `[observed by inspection of AthenaClaude `origin/main`, 2026-09-13 — not a
+measurement]`. Convention is not evidence.
 
 ## Decision
 
@@ -34,7 +38,14 @@ stores, and its false-Q1 check ran at read time. Convention is not evidence.
    sign-off is a **new row** referencing the revoked one.
 6. JSONL is the portable interchange: the store imports the census `grades.jsonl` (1,071
    rows, stamped `provenance="imported:…"`, `belt_set="v3-legacy"` where belt 4 is absent)
-   and exports any subset with its chain intact.
+   and exports rows verbatim. **Only the complete ledger verifies standalone from
+   `GENESIS_HASH`**: a filtered export (`?repo=`) carries each row's own `row_hash` and
+   `prev_hash` unchanged, so every row still verifies against its body and names its
+   predecessor, but the chain has gaps where the omitted rows were and `crb ledger verify`
+   on that file reports the first gap. To verify a subset, verify the full export and check
+   the subset's `row_hash` values are in it (`export` + a join), or re-chain it on import
+   (`import` re-chains foreign rows and keeps the source hash in
+   `labels.source_row_hash`).
 7. Statistics are computed only from ledger rows (`cell_stats`, `all_cell_stats`), and
    `cell_stats.false_q1` re-derives `clean == all recorded belts True` at read time.
 

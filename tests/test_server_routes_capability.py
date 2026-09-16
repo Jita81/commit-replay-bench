@@ -643,7 +643,10 @@ class TestFailureSplit:
         assert d["model_n"] == 5 and d["model_point"] == 0.8 and d["harness"] == 0
         failed = env.get(f"/failure-split?repo={ALPHA}&run_id={RUN_IDS['failed']}").json()
         assert failed["rows"] == 1 and failed["harness"] == 1 and failed["clean"] == 0
-        assert failed["point"] == 0.0 and failed["model_n"] == 0 and failed["model_point"] == 0.0
+        # no fair, finished attempt → the model rate is UNMEASURED: null, with null bounds,
+        # never a fabricated 0.0 (CodeRabbit on PR #6)
+        assert failed["point"] == 0.0 and failed["model_n"] == 0 and failed["model_point"] is None
+        assert failed["model_ci_low"] is None and failed["model_ci_high"] is None
         # an unknown run is an empty split, never an invented one
         empty = env.get(f"/failure-split?repo={ALPHA}&run_id={'f' * 32}").json()
         assert empty["rows"] == 0 and empty["n"] == 0 and empty["ci_low"] == 0.0

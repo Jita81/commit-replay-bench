@@ -98,7 +98,7 @@ export function readCookie(name: string, source?: string): string | null {
  * an empty body). Strict on `code` and `message` being strings so a half-shaped body is
  * reported as `invalid_response` rather than as a fabricated code.
  */
-function parseEnvelope(body: unknown): ApiErrorEnvelope['error'] | null {
+export function parseEnvelope(body: unknown): ApiErrorEnvelope['error'] | null {
   if (!body || typeof body !== 'object') return null
   const err = (body as { error?: unknown }).error
   if (!err || typeof err !== 'object') return null
@@ -132,6 +132,56 @@ export function qs(params: Record<string, string | number | boolean | undefined 
  * Fetch `${API_BASE}${path}` and return the parsed JSON body as `T`.
  * 204 / empty bodies resolve to `undefined as T`.
  */
+/**
+ * `fetch` with the client's two guarantees, for the one caller that needs raw bytes
+ * (`fetchRetainedPatch`) as well as `api<T>`: a stall is bounded by `timeoutMs` and
+ * surfaces as `ApiError('timeout')`, and a caller-initiated abort is rethrown raw so React
+ * Query treats it as a cancellation. A network failure is `ApiError('network')`.
+ */
+export async function fetchBounded(path: string, init: RequestInit, opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Response> {
+  const timeoutMs = opts.timeoutMs ?? API_TIMEOUT_MS
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  const upstream = opts.signal
+  let onUpstreamAbort: (() => void) | undefined
+  if (upstream) {
+    if (upstream.aborted) controller.abort()
+    else {
+      onUpstreamAbort = () => controller.abort()
+      upstream.addEventListener('abort', onUpstreamAbort)
+    }
+  }
+  try {
+    return await fetch(`${API_BASE}${path}`, { ...init, credentials: 'include', signal: controller.signal })
+  } catch (err) {
+    if (timedOut) {
+      throw new ApiError(0, 'timeout', `The server did not answer within ${Math.round(timeoutMs / 1000)} s.`, { path, timeout_ms: timeoutMs })
+    }
+    if (upstream?.aborted) throw err
+    throw new ApiError(0, 'network', 'Could not reach the server.', { path, cause: err instanceof Error ? err.message : String(err) })
+  } finally {
+    clearTimeout(timer)
+    if (upstream && onUpstreamAbort) upstream.removeEventListener('abort', onUpstreamAbort)
+  }
+}
+
+/** A non-2xx response → the `ApiError` the envelope describes, or `invalid_response` for a half-shaped body. */
+export async function errorFromResponse(res: Response, path: string): Promise<ApiError> {
+  let parsed: unknown = null
+  try {
+    parsed = await res.json()
+  } catch {
+    parsed = null
+  }
+  const env = parseEnvelope(parsed)
+  if (env) return new ApiError(res.status, env.code, env.message, env.detail ?? {})
+  return new ApiError(res.status, 'invalid_response', res.statusText || `HTTP ${res.status}`, { path })
+}
+
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET'
   const timeoutMs = options.timeoutMs ?? API_TIMEOUT_MS

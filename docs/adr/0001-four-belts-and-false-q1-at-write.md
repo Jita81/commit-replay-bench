@@ -17,8 +17,10 @@ before the fourth belt existed.
 A builder that can edit the tests it is graded against can pass trivially; a "pass" with
 no source change is a build-cache ghost; a green target with a broken neighbour is a
 regression; a harness error that surfaces as rc=0 is a silent pass. Each of these has been
-observed upstream. `[measured]`: the negative-control matrix run 1 (upstream, 3 commits × 4
-controls) agreed 12/12 with expected verdicts only because tamper and no-op were mechanical
+observed upstream. `[measured]` (upstream AthenaClaude, pre-`crb` apparatus — the census
+instrument later stamped `1.0-census`; method: `scripts/oracle_challenge/negative_controls.py`
+run 1, expected-vs-observed verdict per control; n = 3 commits × 4 controls = 12 rows): the
+matrix agreed 12/12 with the expected verdicts only because tamper and no-op were mechanical
 checks, not judgement calls.
 
 ## Decision

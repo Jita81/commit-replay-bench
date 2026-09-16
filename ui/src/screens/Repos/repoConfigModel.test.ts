@@ -123,3 +123,16 @@ describe('repoConfigModel', () => {
     expect(sameJson('1', 1)).toBe(false)
   })
 })
+
+describe('changedFields baseline is the stored config, not the normalised form', () => {
+  it("reports a substituted default as a change so a stored '' runner can be saved over", () => {
+    // a repo registered without a runner: the form shows the language default (pytest),
+    // and that default IS a change relative to what the server holds (CodeRabbit on PR #6)
+    const repo: RepoDetail = { ...REPO, config: { ...REPO.config, runner: '' } }
+    const form = formFromRepo(repo)
+    expect(form.runner).toBe('pytest')
+    expect(changedFields(form, repo)).toEqual({ runner: 'pytest' })
+    // a repo whose stored runner is known reads unchanged
+    expect(changedFields(formFromRepo(REPO), REPO)).toEqual({})
+  })
+})

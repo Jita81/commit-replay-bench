@@ -1,29 +1,30 @@
 /**
- * Factory (phase P6) — the forward-mode surface, rendering an honest "not yet" until the phase
- * ships (/factory).
+ * Factory — the forward-mode surface: one repo's frozen backlog and the state of every item
+ * (/factory).
  *
  * Navigation
  * ----------
- * What it is:   The screen at /factory: the frozen backlog and the factory tasks for one repo.
+ * What it is:   The screen at /factory: the ACTIVE frozen backlog and the factory tasks for
+ *               one repo, read-only (registering a backlog, signing a gap and running the loop
+ *               are API / CLI actions — docs/API.md "Factory").
  * What it does: Reads `GET /factory/{repo}/backlog` and `/tasks` and renders them (frozen
- *               pill, backlog hash, per-task DoR gaps, RED proof, build status, PR link, review
- *               verdict). Until P6 lands the server answers 404 / 501; a 404 is rendered as
- *               the designed "not enabled yet" empty state and any other error as the
- *               envelope — nothing is fabricated in the meantime.
+ *               pill, backlog hash, per-item facts, per-task DoR gaps, route hint, RED proof,
+ *               build status, PR link, review verdict, last event). A 404 on the backlog means
+ *               no backlog is registered for the repo and is rendered as that instruction —
+ *               never as an error, never as fabricated rows; any other error is the envelope.
  * How:          `useRepoParam` → the two hooks → per-card pending / error / data branches
- *               (`notYet` picks the 404 case).
+ *               (`noBacklog` picks the 404 case). `/tasks` is a bare list, not a `Page`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useFactoryBacklog`, `useFactoryTasks`), ui/src/api/types.ts
- *               (`FactoryBacklog`, `FactoryTask` — provisional shapes),
- *               src/crb/server/routes/factory.py
- *               (answers 501 `not_implemented` until P6), docs/API.md (the "Factory (phase P6)"
- *               section)
- * Tested by:    untested — the phase is not implemented server-side; the screen only renders
- *               the contract's empty / error states (tests/test_server_routes_factory.py pins
- *               the 501)
- * Touch when:   P6 lands — the shapes in ui/src/api/types.ts become final and this screen
- *               gains its actions (freeze, sign a gap); never for a new repository.
+ *               (`FactoryBacklog`, `FactoryBacklogItem`, `FactoryTask` — mirror
+ *               `FactoryBacklogOut` / `FactoryTaskOut`), src/crb/server/routes/factory.py,
+ *               src/crb/server/factory_state.py (`task_views` — what a task row folds from),
+ *               docs/API.md (the "Factory" section)
+ * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx
+ * Touch when:   a factory action moves into the UI (freeze, sign a gap, queue the run) — add
+ *               the mutation hook and the operator / approver gate; a field is added to
+ *               `FactoryTaskOut`.
  */
 import { useFactoryBacklog, useFactoryTasks } from '../../api/hooks'
 import { LinkButton } from '../../components/Button'
@@ -47,12 +48,13 @@ export function FactoryPage() {
   const backlog = useFactoryBacklog(repo)
   const tasks = useFactoryTasks(repo)
 
-  const notYet = (e: unknown) => e !== null && typeof e === 'object' && 'status' in e && (e as { status: number }).status === 404
+  // 404 `not_found` = no backlog registered for this repo (the server's documented answer)
+  const noBacklog = (e: unknown) => e !== null && typeof e === 'object' && 'status' in e && (e as { status: number }).status === 404
 
   return (
     <>
       <PageHeader
-        eyebrow="Factory · phase P6"
+        eyebrow="Factory · forward mode"
         title="Factory"
         purpose="Manufacture new work under the same governance as replay: a frozen backlog (hashed), Definition-of-Ready gaps signed by an approver, a RED proof before any build, a branch + PR in the customer's repo, and a review verdict — every step ledgered."
         actions={<RepoPicker value={repo} onChange={setRepo} />}
@@ -62,12 +64,12 @@ export function FactoryPage() {
         <>
           <Card title="Backlog" eyebrow="frozen · hashed">
             {backlog.isPending && <p className="text-sm text-on-surface-muted">Loading…</p>}
-            {backlog.isError && (notYet(backlog.error) ? (
+            {backlog.isError && (noBacklog(backlog.error) ? (
               <EmptyState
                 glyph="⚙"
-                title="Factory not enabled yet (phase P6)"
-                reason="This surface is wired to the contract's factory endpoints and will populate when the server ships phase P6. Nothing is fabricated in the meantime."
-                data-testid="factory-not-yet"
+                title="No backlog registered for this repo"
+                reason={`Freeze one with POST /factory/${repo}/backlog (or the CLI): the items are validated, hashed and recorded as the first event of the evidence chain; a factory run then works them in dependency order.`}
+                data-testid="factory-no-backlog"
               />
             ) : (
               <ErrorState error={backlog.error} onRetry={() => void backlog.refetch()} />
@@ -103,14 +105,17 @@ export function FactoryPage() {
           </Card>
           <Card title="Tasks" eyebrow="DoR · RED proof · build · PR · review">
             {tasks.isPending && <p className="text-sm text-on-surface-muted">Loading…</p>}
-            {tasks.isError && (notYet(tasks.error) ? <EmptyState compact glyph="⚙" title="No factory tasks (phase P6)" /> : <ErrorState error={tasks.error} onRetry={() => void tasks.refetch()} />)}
-            {tasks.data && tasks.data.items.length === 0 && <EmptyState compact title="No factory tasks yet" />}
-            {tasks.data && tasks.data.items.length > 0 && (
+            {tasks.isError && (noBacklog(tasks.error) ? <EmptyState compact glyph="⚙" title="No factory tasks — no backlog registered" /> : <ErrorState error={tasks.error} onRetry={() => void tasks.refetch()} />)}
+            {tasks.data && tasks.data.length === 0 && <EmptyState compact title="No factory tasks yet" />}
+            {tasks.data && tasks.data.length > 0 && (
               <ul className="m-0 list-none divide-y divide-border p-0 text-sm">
-                {tasks.data.items.map((t) => (
+                {tasks.data.map((t) => (
                   <li key={t.id} className="flex flex-wrap items-center gap-2 py-1.5">
                     <span className="font-mono text-xs text-on-surface-muted">{t.id}</span>
                     <span>{t.title}</span>
+                    <span className="font-mono text-xs text-on-surface-muted" title={`route hint: ${t.route_hint}`}>
+                      {t.status} · {t.route_hint}
+                    </span>
                     {t.dor_gaps.length > 0 && (
                       <Pill tone="amber" glyph="⚠" size="xs" label={`${t.dor_gaps.length} Definition-of-Ready gap(s)`}>
                         {t.dor_gaps.length} DoR gap{t.dor_gaps.length === 1 ? '' : 's'}
