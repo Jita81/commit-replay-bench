@@ -255,7 +255,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Download the SBOM produced from the pushed candidate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: crb-image-sbom-${{ env.ARTIFACT_SUFFIX }}
       - name: cosign sign (keyless, by digest)
