@@ -297,6 +297,32 @@ manifests; it does **not** downgrade the schema — the initial revision's `down
 refuses while the ledger holds rows by design. Schema changes are forward-only and additive
 on append-only tables (migration rules are in each revision's docstring).
 
+**If revision `0004` refuses** (`refusing to upgrade 0004: events holds N duplicated
+(trace_id, seq) pair(s)`): a database written by a release before 2.0.0a1's batch-2 fixes
+can hold an out-of-band system event (a cancel request) and a worker event on the same
+`seq` — the collision `0004` exists to forbid. Rows in `events` are append-only, so the
+upgrade will not renumber them for you; it lists the pairs. The remedy is an explicit,
+recorded operator action on a backup-first copy: for each pair, move the LATER row (the
+higher `id`) to `max(seq) + 1` of its trace — `events` carries no hash chain, so the
+row's content and its `event_id` are untouched and only its position in the SSE resume
+order moves to the trace's end. On SQLite:
+
+```sql
+BEGIN;
+DROP TRIGGER events_no_update;
+UPDATE events SET seq = (SELECT MAX(seq) FROM events e WHERE e.trace_id = events.trace_id) + 1 WHERE id = <later id>;
+-- …one UPDATE per pair…
+CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+COMMIT;
+```
+
+On PostgreSQL the same statements with `DROP TRIGGER events_no_update ON events` /
+`CREATE TRIGGER events_no_update BEFORE UPDATE ON events FOR EACH ROW EXECUTE FUNCTION
+crb_append_only()`. Record the ids you moved in your change log; then re-run `migrate
+upgrade`. (The dev stack that produced the NHS measurement needed exactly three such
+moves on 2026-09-16 — three `run.cancel_requested` notes that had collided with the
+worker's next event.)
+
 Compose: `docker compose run --rm migrate check` → `run --rm migrate` → `up -d`
 ([deploy/README.md §5](../deploy/README.md#5-upgrade)).
 
