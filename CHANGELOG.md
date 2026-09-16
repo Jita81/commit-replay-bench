@@ -31,7 +31,11 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   batch 4 (the cell's accessible label now carries its interval and provenance; the
   controls gate renders the API's verdict — `thin` keeps it closed, as routing withholds
   deliver).
-- Dependabot's GitHub Actions bumps arrive as one grouped PR.
+- Dependabot's GitHub Actions bumps arrive as one grouped PR; the first one (checkout,
+  upload/download-artifact, setup-python, setup-uv, docker actions, gitleaks-action v3)
+  merged green.
+- **Branch protection on `main`**: the eleven CI jobs are required and the branch must be
+  up to date; no force-push, no deletion (DL-037).
 
 ## [2.0.0a1] — 2026-09-16 — first releasable v2, on `main`
 
