@@ -84,7 +84,7 @@ jobs:
       - name: Install (server + postgres + dev extras)
         run: |
           uv venv -q .venv --python 3.12
-          uv pip install -q -e '.[server,postgres,dev]' --python .venv/bin/python
+          uv pip install -q -e '.[server,postgres,mcp,dev]' --python .venv/bin/python
       - name: mypy
         run: .venv/bin/mypy
 
@@ -149,7 +149,7 @@ jobs:
       - name: Install (server + postgres + dev extras)
         run: |
           uv venv -q .venv --python ${{ matrix.python }}
-          uv pip install -q -e '.[server,postgres,dev]' --python .venv/bin/python
+          uv pip install -q -e '.[server,postgres,mcp,dev]' --python .venv/bin/python
       - name: Configure git identity for fixture repositories
         run: |
           git config --global user.email "ci@crb.invalid"
@@ -211,7 +211,7 @@ jobs:
         run: |
           uv venv -q .audit --python 3.12
           uv pip install -q -r pyproject.toml \
-            --extra openai --extra claude --extra server --extra postgres --extra dev \
+            --extra openai --extra claude --extra server --extra postgres --extra mcp --extra dev \
             --python .audit/bin/python
           uv pip install -q pip pip-audit --python .audit/bin/python
       - name: Record the resolved environment
@@ -298,7 +298,7 @@ jobs:
       - name: Install (server + postgres + dev extras)
         run: |
           uv venv -q .venv --python 3.12
-          uv pip install -q -e '.[server,postgres,dev]' --python .venv/bin/python
+          uv pip install -q -e '.[server,postgres,mcp,dev]' --python .venv/bin/python
       - name: pytest — store suite, SQLite AND PostgreSQL parametrisations
         # The same assertions run on both dialects. A skip here would hide a divergence, so
         # the step fails if the postgres parametrisation was skipped for any reason.

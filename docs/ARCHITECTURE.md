@@ -194,7 +194,8 @@ punch-list), `federated` (abstract-cell export).
 | `crb.store` | SQLAlchemy 2 models + Alembic; append-only triggers; hash chain identical to the JSONL ledger; JSONL import (census) / export. | P4 |
 | `crb.factory` | Forward mode: frozen hashed backlog, DoR gate (structural gaps only), test-first RED proof, build under belts, branch + PR delivery (never the default branch), independent review with verdict-before-edit, `factory_evidence`. | P6 |
 | `crb.server` | FastAPI: OIDC + local admin, RBAC, routes, SSE from the events table, `/metrics`, `/health`; `worker.py`. | P4 |
-| `crb.cli` | `crb repo add\|probe · mine · run · grade · oracle · route · forecast · ledger export\|verify\|stats · factory … · worker · serve`. | P2 |
+| `crb.cli` | `crb repo add\|probe · mine · run · grade · oracle · route · forecast · ledger export\|verify\|stats · factory … · worker · serve · mcp`. | P2 |
+| `crb.mcp` | The API as Model Context Protocol tools (`crb mcp`, stdio): a client of `/api/v1` over HTTP — never an importer of `crb.server` — under the deployment's RBAC; sign-offs and reviews deliberately not tools ([MCP](MCP.md)). | P8 |
 | `ui/` | Vite + React + TanStack Query + Tailwind; screens listed in the plan. | P5 |
 
 ---

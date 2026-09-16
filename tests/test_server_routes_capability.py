@@ -563,6 +563,11 @@ class TestRoutes:
         assert green["cell"] == env.info.deliver_cell
         assert green["point"] == 0.95 and green["ci_low"] == pytest.approx(0.835, abs=0.001)
         assert green["false_q1"] == 0 and green["policy_version"] == "routing.v1"
+        # the bar as numbers travels with the name (ADR-0003 amendment 2026-09-16)
+        assert (
+            green["policy_thresholds"]["min_n"] == 10
+            and green["policy_thresholds"]["min_ci_low"] == 0.8
+        )
         assert green["verification_tier"] == "automated-pass"
         assert green["apparatus_versions"] == [APPARATUS_VERSION]
         assert green["model_n"] == 40 and green["model_point"] == 0.95

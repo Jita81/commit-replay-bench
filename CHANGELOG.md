@@ -8,6 +8,22 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-16 (night) — the MCP server: drive a deployment from Claude Code
+
+- **`crb mcp`** — the API as Model Context Protocol tools on stdio (`claude mcp add crb --
+  crb mcp`; [MCP](docs/MCP.md)). Thirty-eight tools, each a one-line pass-through to
+  `/api/v1` that returns the API's JSON unchanged: repositories, tasks, runs, ledger rows
+  and evidence packs, the capability map and routes (with `policy_thresholds`), the oracle
+  and controls, the learning-loop plans, ledger verify, sign-offs and reviews (read), the
+  factory. The tools act as a local service account under the deployment's RBAC; a
+  refusal comes back as `{"error": true, status, code, message, detail}`. Creating a
+  sign-off or a review is deliberately **not** a tool (a human attestation; EVIDENCE §2).
+  The server's instructions carry the claims policy. New layer `crb.mcp` (a client of the
+  server over HTTP, never an importer of it — import-linter enforces the direction); extra
+  `[mcp]`; `docs/MCP.md`; ADR-0008 layer table.
+- `GET /routes` decisions now serve `policy_thresholds` (the field was added to
+  `RouteDecision` in #28 and dropped by the response schema — found by the MCP tests).
+
 ### 2026-09-16 (evening) — the external assessment: the map gates the factory; a policy names its bar
 
 An external reviewer's forty-point assessment of the explainer was checked point by point

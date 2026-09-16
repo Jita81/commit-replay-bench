@@ -26,6 +26,7 @@ dependencies = []
 [project.optional-dependencies]
 openai = ["openai>=1.40"]
 claude = ["claude-agent-sdk>=0.1"]
+mcp = ["mcp>=2.0", "httpx>=0.27"]
 server = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
@@ -51,7 +52,7 @@ dev = [
   "import-linter>=2.0",
   "hypothesis>=6.100",
 ]
-all = ["commit-replay-bench[openai,claude,server,postgres,dev]"]
+all = ["commit-replay-bench[openai,claude,server,postgres,mcp,dev]"]
 
 [project.scripts]
 crb = "crb.cli.main:main"
@@ -139,9 +140,10 @@ name = "crb.core is standard-library only"
 type = "forbidden"
 source_modules = ["crb.core"]
 forbidden_modules = [
-  "crb.builders", "crb.store", "crb.server", "crb.factory", "crb.cli", "crb.observability",
+  "crb.builders", "crb.store", "crb.server", "crb.factory", "crb.cli", "crb.mcp",
+  "crb.observability",
   "openai", "anthropic", "claude_agent_sdk", "sqlalchemy", "alembic", "fastapi", "pydantic",
-  "httpx", "requests", "yaml", "authlib", "prometheus_client",
+  "httpx", "requests", "yaml", "authlib", "prometheus_client", "mcp",
 ]
 
 [[tool.importlinter.contracts]]
@@ -150,6 +152,7 @@ type = "layers"
 # Parenthesised layers are optional: packages land phase by phase (cli/server/factory/store).
 layers = [
   "(crb.cli)",
+  "(crb.mcp)",
   "(crb.server)",
   "(crb.factory)",
   "(crb.store)",
