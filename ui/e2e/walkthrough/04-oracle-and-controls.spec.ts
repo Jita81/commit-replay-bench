@@ -74,12 +74,15 @@ test.describe('04 oracle + controls', () => {
     await expect(banner).toContainText('0 violation(s)')
     // The gate's state is the API's routing verdict (the reduction the capability map and
     // the routes gate on), rendered — never derived in the UI from the counts: OPEN only
-    // when the verdict is `passed`; a `thin` verdict on a one-task fixture (fewer than
-    // half the controls constructible) keeps it CLOSED, as routing withholds deliver.
+    // when the verdict is `passed`. On the one-task fixture the verdict is `thin` (fewer
+    // than half the controls constructible) or `escaped` (a measurement control graded
+    // clean — a finding, not a violation): both keep the gate CLOSED, exactly as routing
+    // withholds deliver under them. Before batch 4 the banner derived OPEN from "no
+    // violations" alone and hid that.
     const res = await page.request.get(`${env.baseUrl}/api/v1/oracle/${encodeURIComponent(t.name)}/controls`)
     expect(res.ok(), `GET /oracle/{repo}/controls → ${res.status()}`).toBeTruthy()
     const verdict = ((await res.json()) as { verdict: { state: string; violations?: number } }).verdict
-    expect(verdict.state, 'the fixture has no violations; the verdict is passed or thin').toMatch(/^(passed|thin)$/)
+    expect(verdict.state, 'the fixture has no violations; the verdict is passed, thin or escaped').toMatch(/^(passed|thin|escaped)$/)
     await expect(banner).toHaveAttribute('data-state', verdict.state === 'passed' ? 'OPEN' : 'CLOSED')
     await expect(banner).toContainText(`Routing verdict (from the API)`)
     await expect(banner).toContainText(verdict.state)
