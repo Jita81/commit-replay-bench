@@ -208,11 +208,16 @@ Readings:
   (DL-029's concern): 22 of 22, every new task clean. cobra `bug.fix` S lost the route by
   one miss — Wilson-low 0.798 against the 0.80 bar — which is the rule doing exactly what it
   is for: a 95.8 % point on 24 rows is not yet 80 % with 95 % confidence.
-- **click's cells are held at `human` by the instrument, not the model**: the live stack
-  still runs the code from before PR #7, whose controls run picked a regression-poison
-  target the belt never re-ran (§5-class defect, fixed and CodeRabbit-approved, not yet
-  deployed). 17 of 19 XS and 11 of 13 S are clean; the route waits for the controls re-run
-  on the merged code.
+- **click's cells were held at `human` by the instrument, not the model** — the live
+  stack was still running the code from before PR #7, whose controls run picked a
+  regression-poison target the belt never re-ran. **Re-run on the merged code (2026-09-16
+  morning, $0): controls PASSED — 224 rows, 0 violations, 0 escapes, 43 not constructible
+  (81 % constructible).** With a real verdict the two cells route on their own numbers:
+  `bug.fix` S 11 of 13 → `calibrate` (point 0.846 < 0.90); `bug.fix` XS 17 of 19 →
+  `human`, **`oracle_weak`** — the cell's task-level mutation strength is 0.76 against the
+  0.80 bar, so a green on those tasks does not prove enough and the rule sends the change
+  to a person. That is the reading the map is for: the model passes 89 % of these; the
+  tests are not strong enough for the map to say so unsupervised.
 - **koa produced the campaign's first belt-3 catch on a new task**: `ff25eb4a7f` made the
   target green and a neighbouring test red — `no_new_failures = False`, recorded as a
   regression, never as clean. That is the belt working, and the row the map shows a human.
