@@ -219,16 +219,22 @@ per-repository or per-model capability claim.
   mesh-client) mined, oracle-scored and negative-controlled; **false-Q1 = 0** across every
   ledger row; controls **passed with 0 escapes** on every repository they were run on
   ([NHS measurement](docs/reviews/2026-09-14-nhs-public-repos.md), [critical-friend review](docs/reviews/2026-09-13-critical-friend.md)).
-- **The first `deliver` routes exist** — cobra `bug.fix` XS and S: 16/16 clean, Wilson-low
-  0.81, controls 31/56 constructible, 0 escapes — on **3 tasks each**, which the map now
-  says next to `n` (`n_tasks`). No sign-off has been made: the policy requires a human
-  attestation and a task minimum the operator has not yet set.
-- **NHS, sighted, Sonnet 5, 18 gold-clean tasks:** 12 clean, 4 failed the repository's own
-  formatter/linter, 2 exhausted the budget; two service refusals were an instrument gap,
-  fixed and re-measured clean. The dominant non-test miss is *the maintainers' formatter*,
-  now addressed by an opt-in belt-5 pre-flight (a distinct, labelled arm).
-- **Blind mode is not a capability measurement yet** — its rows measure the budget, not the
-  model; the re-shaped ladder is staged and priced in the decision log (DL-027).
+- **The first `deliver` route holds on new tasks** — cobra `bug.fix` XS: 22/22 clean on
+  **9 distinct tasks** (the map says `n_tasks` next to `n`) after one attempt on each of six
+  NEW gold-clean tasks; cobra `bug.fix` S is 23/24 on 11 tasks and routes `calibrate` by one
+  miss (Wilson-low 0.798 against the 0.80 bar — the rule doing its job). The top-up over
+  koa/cobra/click cost $0.21–0.23 per attempt, 29 of 35 clean
+  ([NHS report §11](docs/reviews/2026-09-14-nhs-public-repos.md)). No sign-off has been
+  made: the policy requires a human attestation and a task minimum the operator has not yet
+  set (DL-029).
+- **NHS, sighted, Sonnet 5, 18 gold-clean tasks:** 15 of 18 clean counting the belt-5
+  pre-flight arm (12 plain; the pre-flight — the repository's own fixers plus one bounded
+  repair — flipped 3 of 4 formatter misses); the remaining misses are the model's, not the
+  budget's (§9).
+- **Blind is a different measurement, and the honest one for "could it have done the
+  PR":** the same 14 NHS tasks read 12/14 sighted and **2/14 blind** at rung 0 — from the
+  commit message alone the builder cannot reconstruct what the maintainers' tests will check
+  (§10). The blind rows are stamped as their own mode and never pooled with sighted ones.
 
 ## Status by phase
 
