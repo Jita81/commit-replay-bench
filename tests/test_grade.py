@@ -554,7 +554,8 @@ def test_runner_exception_is_recorded_not_raised(
     assert res.belts.tests_unmodified is True  # belt 1 had already been recorded
     assert res.belts.target_green is None
     assert events[-1][0] == "grade.error"
-    assert "abcdef123456" in events[-1][1]["error"] or "RuntimeError" in events[-1][1]["error"]
+    # the callback sees the REDACTED text: the raw seam never carries the token either
+    assert "RuntimeError" in events[-1][1]["error"] and "abcdef123456" not in events[-1][1]["error"]
     with pytest.raises(g.FalseQ1Violation):
         g.GradeResult(res.task_id, res.repo, res.mode, clean=True, belts=_ALL_TRUE, error=res.error)
 

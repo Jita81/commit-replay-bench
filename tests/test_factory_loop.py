@@ -509,7 +509,8 @@ def test_full_loop_on_frozen_backlog(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     assert len(rows) == 3 and all(r.clean and r.process_step == PROCESS_FACTORY for r in rows)
     assert false_q1_total(rows) == 0 and rig.ledger.verify() == 3
     assert pyrepo.repo.rev_parse("main") == pyrepo.docs_sha
-    assert not any((tmp_path / "scratch").iterdir()) if (tmp_path / "scratch").exists() else True
+    # every build made a scratch directory and the loop cleaned it: present AND empty
+    assert (tmp_path / "scratch").is_dir() and not any((tmp_path / "scratch").iterdir())
     # running again does not re-record the freeze
     loop.run_backlog(backlog, authored={"I-1": authored_multiply()})
     assert sum(1 for e in rig.evidence.events() if e.kind == fe.EV_BACKLOG_FROZEN) == 1

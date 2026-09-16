@@ -346,7 +346,7 @@ def test_belt_3_catches_a_regression_and_belt_4_a_no_change(harness: Harness) ->
     assert not reg.clean and reg.grade.belts.no_new_failures is False
     assert set(reg.grade.new_failures) == set(pr.TEST_CALC_IDS)
     # baseline captured at HEAD with the oracle overlaid: the oracle's own RED is the baseline
-    assert reg.task.baseline_failing == (f"{TEST_MULTIPLY}",) or reg.task.baseline_failing
+    assert reg.task.baseline_failing == (f"{TEST_MULTIPLY}",)
     non = harness.build(item, authored, proof, FakeBuilder(edit=noop), trial="r2")
     non.close()
     assert non.task.src_files == (fb.NO_SOURCE_CHANGE,)

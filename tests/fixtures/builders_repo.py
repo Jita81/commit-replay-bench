@@ -8,16 +8,17 @@ History:
 
 At the parent with ``tests/test_calc.py`` overlaid the target is RED; with the
 commit's ``pkg/calc.py`` overlaid it is GREEN. ``make_task`` records exactly that
-(``red_checked=True``, empty baseline), so :func:`crb.core.grade.grade` can be
-run against a builder's edit in the tests.
+(``red_checked=True``; ``baseline_failing`` holds the RED target
+``tests/test_calc.py::test_add`` — the baseline is the oracle's own red, never
+empty), so :func:`crb.core.grade.grade` can be run against a builder's edit.
 
 Navigation
 ----------
 What it is:   A two-commit Python fixture repository for the builder tests, built inline.
 What it does: Gives every builder test the same parent (buggy ``add``, an unrelated module, one
               green test) and task (the fix plus its RED oracle ``tests/test_calc.py``), with a
-              ``TaskSpec`` that already records ``red_checked=True`` and an empty baseline so
-              ``crb.core.grade.grade`` can judge a builder's edit directly.
+              ``TaskSpec`` that already records ``red_checked=True`` and the target test as the
+              baseline failure so ``crb.core.grade.grade`` can judge a builder's edit directly.
 How:          ``make_fixture`` runs ``git init`` + two commits under a temp dir and returns a
               ``Fixture`` whose ``workspace(dest, mode)`` opens a trial worktree at the parent
               (tests overlaid only in sighted mode).

@@ -100,8 +100,14 @@ def test_read_limit_is_clamped(factory: sessionmaker[Session]) -> None:
     sink = DbEventSink(factory)
     em = Emitter(sink, trace_id="t")
     em.emit("system", "a")
+    # one batch (a single transaction) rather than 5000 fsync'd commits
+    sink.emit_many(
+        StepEvent(trace_id="t", seq=i + 2, stage="system", action=f"a{i}")
+        for i in range(MAX_READ_LIMIT + 4)
+    )
     assert len(read_events(factory, "t", limit=0)) == 1  # min 1
-    assert len(read_events(factory, "t", limit=MAX_READ_LIMIT * 10)) == 1
+    # the upper clamp is MEASURED: more rows than the cap exist, and the cap wins
+    assert len(read_events(factory, "t", limit=MAX_READ_LIMIT * 10)) == MAX_READ_LIMIT
 
 
 def test_emit_many_batches(factory: sessionmaker[Session]) -> None:

@@ -14,9 +14,11 @@ Proves, on :mod:`tests.fixtures.langs.jvmrepo` with a :class:`LocalExecutor`:
 Maven needs its plugins and JUnit in ``~/.m2``: the module warms them up once,
 online, and skips with Maven's own tail when that is impossible (offline host).
 
-Two MavenRunner defects are pinned as strict xfails: the generic
-``AFFECTED_DIRS`` scope selects ZERO tests and exits 0 (a silent-green belt),
-and ``parse`` reads surefire XML left by a previous run in the same worktree.
+Two MavenRunner defects found by this suite are FIXED and pinned here as passes:
+the generic ``AFFECTED_DIRS`` scope selected ZERO tests and exited 0 (a
+silent-green belt — the runner now emits surefire package globs), and ``parse``
+read surefire XML left by a previous run in the same worktree (the runner now
+deletes ``target/surefire-reports`` before executing). No xfails in this module.
 
 Runs only when ``mvn`` is on PATH (``@pytest.mark.toolchain("mvn")``).
 
@@ -28,9 +30,9 @@ What it does: Pins, on ``fixtures.langs.jvmrepo``, that the miner finds the feat
               GREEN, that gold grades clean, noop is not green, tamper is disqualified, a
               regression in ``Calc.add`` fails belt 3 with ``ex.CalcTest::addWorks``, the scope
               mapping (``SubTest.java`` → ``-Dtest=SubTest``), the belt-scope policies, the
-              command shape, and ``parse`` of the real surefire XML. Two ``MavenRunner`` defects
-              are pinned as strict xfails (``AFFECTED_DIRS`` selects zero tests and exits 0; stale
-              surefire XML from a previous run is read).
+              command shape, and ``parse`` of the real surefire XML — including the two fixed
+              ``MavenRunner`` defects (``AFFECTED_DIRS`` really runs the directory; stale
+              surefire XML from a previous run is never read).
 How:          Maven warmed once per session (``conftest_langs.maven_warmup``; skipped with
               Maven's own tail offline) → module-scoped fixture → ``qualify`` / ``grade`` with a
               ``LocalExecutor``; skipped without ``mvn`` on PATH.
@@ -41,9 +43,8 @@ Works with:   src/crb/core/runners/jvm_runner.py (under test), tests/fixtures/la
               tests/test_runners_parsers.py (the surefire parser on canned output),
               docs/CONTRIBUTING.md (how to add a runner)
 Tested by:    tests/test_runners_jvm.py
-Touch when:   the maven runner's goals or parser change (an xfail turning into a pass is the
-              signal to remove the marker); a Gradle runner is added (a new module, not an
-              option here).
+Touch when:   the maven runner's goals or parser change; a Gradle runner is added (a new
+              module, not an option here).
 """
 
 from __future__ import annotations
@@ -75,22 +76,6 @@ pytestmark = [
         not jvmrepo.java_home(), reason="no JDK: neither brew openjdk nor $JAVA_HOME"
     ),
 ]
-
-_AFFECTED_DIRS_DEFECT = (
-    "DEFECT (src/crb/core/runners/jvm_runner.py): MavenRunner inherits BaseRunner.belt_scope, "
-    "so AFFECTED_DIRS yields 'src/test/java/ex/'; surefire's -Dtest= matches NO class for a "
-    "path, and with failIfNoSpecifiedTests=false the run exits 0 having run zero tests — "
-    "belt 3 is silently green (a false-Q1 vector). Fix: override belt_scope for AFFECTED_DIRS "
-    "to strip test_prefix and emit surefire package globs ('ex/**/*'), verified to select "
-    "every class in the directory."
-)
-_STALE_REPORTS_DEFECT = (
-    "DEFECT (src/crb/core/runners/jvm_runner.py): parse() reads every target/surefire-reports/"
-    "TEST-*.xml under root, and surefire does not clear that directory, so a narrower run "
-    "after a wider failing run in the same worktree reports the previous run's failures. "
-    "Fix: delete **/target/surefire-reports before executing (override run()), or only parse "
-    "reports with mtime >= the run's start."
-)
 
 
 # ---------------------------------------------------------------------------

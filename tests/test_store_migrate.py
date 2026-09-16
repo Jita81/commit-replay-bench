@@ -192,7 +192,10 @@ def test_packaged_migration_files_exist() -> None:
     assert migrate.INI_PATH.is_file()
     assert (migrate.MIGRATIONS_DIR / "env.py").is_file()
     assert (migrate.MIGRATIONS_DIR / "script.py.mako").is_file()
-    assert migrate.head_revision() == migrate.INITIAL_REVISION or migrate.head_revision()
+    # the single head is a packaged revision file (not a number that drifts per branch)
+    head = migrate.head_revision()
+    assert head.isdigit() and len(head) == 4
+    assert list((migrate.MIGRATIONS_DIR / "versions").glob(f"v{head}_*.py")), head
 
 
 def test_upgrade_head_equals_init_db(backend: Backend, tmp_path: Path) -> None:

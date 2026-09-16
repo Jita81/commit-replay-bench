@@ -498,25 +498,20 @@ class TestNodeFixMatrix:
     def test_env_poison_takes_effect_through_the_runner_hook(self, fix_matrix, tool):
         """The hook file is test infrastructure, so belt 1b disqualifies the row before a
         test runs (``caught by belt 1: test infrastructure modified: [<hook>]``) with the
-        graded ``src/mul.js`` byte-identical to the parent. A ``clean`` row is the other
-        acceptable outcome — an ESCAPE the note labels a belt-1 coverage gap to report
-        (the vectors were measured to flip the target before belt 1b landed). ``red``
-        would mean the poison never took effect: the one outcome that must not pass."""
+        graded ``src/mul.js`` byte-identical to the parent. That is the CURRENT measured
+        behaviour for jest, mocha and vitest and it is pinned exactly: a ``clean`` row
+        would be belt 1b no longer treating the runner hook as infrastructure — an ESCAPE
+        (the vectors were measured to flip the target before belt 1b landed) — and must
+        FAIL here, not be accepted as an alternative (CodeRabbit on PR #5, 2026-09-16).
+        ``red`` would mean the poison never took effect."""
         if tool == "node":
             pytest.skip("node --test has no collection-time hook (asserted above)")
         row = fix_matrix[nc.ENV_POISON]
-        assert row.observed in (nc.OBS_CLEAN, nc.OBS_DISQUALIFIED), row.note
+        assert row.observed == nc.OBS_DISQUALIFIED, (row.observed, row.verdict, row.note)
         assert f"{nodefix.SRC_MUL} left byte-identical" in row.note
         hook = {"jest": "jest.config.cjs", "mocha": ".mocharc.json", "vitest": "vitest.config.mjs"}[
             tool
         ]
         assert hook in row.note
-        g_ = row.grade
-        assert g_ is not None
-        if row.observed == nc.OBS_CLEAN:
-            assert row.verdict == nc.VERDICT_ESCAPE
-            assert "belt-1 coverage gap" in row.note  # never "the repo's tests are weak"
-            assert nodefix.SRC_MUL not in g_.changed_files
-            assert hook in g_.changed_files
-        else:
-            assert row.verdict == nc.VERDICT_OK and row.note.startswith("caught by belt 1")
+        assert row.grade is not None
+        assert row.verdict == nc.VERDICT_OK and row.note.startswith("caught by belt 1")

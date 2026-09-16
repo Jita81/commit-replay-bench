@@ -515,6 +515,7 @@ def _live_labeller() -> c.Labeller | None:
     return None
 
 
+@pytest.mark.live  # spends real tokens and may clone cobra over the network: opt in
 @pytest.mark.timeout(600)
 def test_real_llm_labels_the_review_cobra_commits(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]

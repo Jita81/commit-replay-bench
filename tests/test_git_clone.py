@@ -224,8 +224,9 @@ def test_clone_error_never_carries_credentials(tmp_path: Path) -> None:
     with pytest.raises(GitError) as ei:
         clone_repo(url, tmp_path / "dest", timeout=60)
     err = ei.value
-    assert "s3cretT0ken" not in str(err) and "s3cretT0ken" not in err.stderr
-    assert all("s3cretT0ken" not in a for a in err.argv)
+    for secret in ("s3cretT0ken", "alice"):  # the token AND the username stay out of every field
+        assert secret not in str(err) and secret not in err.stderr, secret
+        assert all(secret not in a for a in err.argv), secret
     assert "https://127.0.0.1:1/org/repo.git" in err.argv
 
 

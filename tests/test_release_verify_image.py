@@ -127,6 +127,14 @@ def test_script_and_release_workflow_agree_on_identity() -> None:
 
 def test_release_workflow_pushes_and_signs_only_on_canonical_tags() -> None:
     release = RELEASE.read_text(encoding="utf-8")
+    # the trigger itself is restricted to ``v*`` tags — a workflow that fired on every tag
+    # would still satisfy the string checks below (CodeRabbit on PR #5)
+    trigger = re.search(r"^on:\n((?:[ \t]+.*\n)+)", release, re.M)
+    assert trigger, "no top-level on: block"
+    assert re.search(r'^  push:\n(?:    .*\n)*?    tags: \["v\*"\]\n', trigger.group(1), re.M), (
+        trigger.group(1)
+    )
+    assert "branches:" not in trigger.group(1).split("workflow_dispatch")[0]
     assert (
         "PUSH: ${{ github.ref_type == 'tag' && github.repository == 'Jita81/commit-replay-bench' }}"
         in release

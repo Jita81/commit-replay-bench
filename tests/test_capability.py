@@ -37,7 +37,6 @@ Touch when:   a cell field is added (``CELL_FIELDS`` and every projection here);
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -48,6 +47,7 @@ import pytest
 from crb.core import capability as cap
 from crb.core.git import GitRepo
 from crb.core.ledger import CELL_FIELDS, CellKey, GradeRow
+from crb.core.legacy import import_census
 from crb.core.routing import (
     ROUTE_CALIBRATE,
     ROUTE_DELIVER,
@@ -555,66 +555,24 @@ def test_tac_requires_class_size_map() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The REAL census ledger (skipped when absent)
+# The shipped census through the SHIPPED importer (always runs; no private copy)
 # ---------------------------------------------------------------------------
 
-_CENSUS = Path.home() / ".expansion-bench"
+_CENSUS_DATA = Path(__file__).resolve().parents[1] / "data" / "census-2026-07-08"
 
 
-def _import_census() -> list[GradeRow]:
-    """Tiny inline importer: grades.jsonl ⋈ <repo>_tasks.json ⋈ configs.json → GradeRow."""
-    grades = _CENSUS / "state" / "grades.jsonl"
-    configs = json.loads((_CENSUS / "configs.json").read_text())
-    tasks: dict[str, dict[str, dict]] = {}
-    for f in (_CENSUS / "state").glob("*_tasks.json"):
-        d = json.loads(f.read_text())
-        repo = f.name[: -len("_tasks.json")]
-        tasks[repo] = d if isinstance(d, dict) else {t["task"]: t for t in d}
-    rows: list[GradeRow] = []
-    for line in grades.read_text().splitlines():
-        if not line.strip():
-            continue
-        d = json.loads(line)
-        task = tasks.get(d["repo"], {}).get(d["task"], {})
-        lang = configs.get(d["repo"], {}).get("lang", "")
-        legacy = "source_changed" not in d
-        rows.append(
-            GradeRow(
-                repo=d["repo"],
-                task_id=d["task"],
-                clean=bool(d["clean"]),
-                tests_unmodified=d.get("tests_unmodified"),
-                target_green=d.get("target_green"),
-                no_new_failures=d.get("no_new_failures"),
-                source_changed=d.get("source_changed"),
-                capability_class=classify_commit(list(task.get("src_files", []))),
-                size=str(d.get("size") or task.get("size") or ""),
-                language=Language.parse(lang).value if lang else "",
-                pool=str(d.get("pool", "standard")),
-                mode="blind" if d.get("blind_mode") else "sighted",
-                builder="claude-code",
-                model=str(d.get("model", "")),
-                provider="anthropic",
-                trial=str(d.get("trial", "")),
-                disqualified=bool(d.get("disqualified", False)),
-                dq_reason=str(d.get("dq_reason", "")),
-                error=str(d.get("error", "")),
-                new_failures_count=len(d.get("new_failures") or []),
-                gold_clean=task.get("gold_clean"),
-                evidence_pack_hash=hashlib.sha256(line.encode()).hexdigest(),
-                belt_set="v3-legacy" if legacy else "v4",
-                apparatus_version="1.0-census",
-                provenance="imported:expansion-bench/grades.jsonl",
-            )
-        )
-    return rows
-
-
-@pytest.mark.skipif(
-    not (_CENSUS / "state" / "grades.jsonl").exists(), reason="census ledger absent"
-)
 def test_real_census_map_has_zero_false_q1_and_no_thin_deliver() -> None:
-    rows = _import_census()
+    """The 1,071-row census, imported by ``crb.core.legacy.import_census`` (the importer
+    the product ships — a private re-implementation here could not catch an importer
+    regression, and ``~/.expansion-bench`` made the case skip everywhere but one machine;
+    CodeRabbit on PR #5, 2026-09-16). ``tests/test_census_gate.py`` is the invariant gate on
+    the same data; this case pins what the capability map says about it."""
+    rows = [
+        g.row
+        for g in import_census(
+            _CENSUS_DATA / "grades.jsonl", _CENSUS_DATA / "tasks", _CENSUS_DATA / "configs.json"
+        )
+    ]
     assert len(rows) >= 1000
     for name, m in cap.capability_views(rows).items():
         assert m.false_q1_total == 0, name

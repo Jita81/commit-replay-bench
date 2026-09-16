@@ -381,8 +381,9 @@ def test_strengthen_reproducible_bytes(run: Run, tmp_path: Path) -> None:
 
 
 def test_score_actions_mirror_the_server_routes() -> None:
-    """The CLI cannot import the server package; the two constants must not drift."""
-    pytest.importorskip("fastapi")
+    """The CLI cannot import the server package; the two constants must not drift. A hard
+    import: the hermetic suite installs ``.[dev]`` which carries the server extra, so a
+    missing ``fastapi`` is a broken environment, not a reason to skip the drift guard."""
     from crb.cli.commands.learn import ORACLE_SCORE_ACTIONS
     from crb.server.routes.oracle import SCORE_ACTIONS
 
@@ -510,7 +511,7 @@ def test_strengthen_controls_flag_routes_the_cells_as_the_server_does(
     bad = tmp_path / "bad.json"
     bad.write_text("{}", encoding="utf-8")
     code, _, err = run(["learn", "strengthen", "--controls", str(bad)])
-    assert code != 0 and "--controls must be" in err
+    assert code == 2 and "--controls must be" in err  # a usage error, never the verdict's 1
 
 
 def test_strengthen_oracle_accepts_a_run_events_log_page(run: Run, tmp_path: Path) -> None:

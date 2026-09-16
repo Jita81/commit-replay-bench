@@ -11,9 +11,10 @@ Proves, on :mod:`tests.fixtures.langs.rustrepo` with a :class:`LocalExecutor`:
 7. scope mapping (``tests/sub.rs`` → ``--test sub``) and ``parse`` against the real
    harness output.
 
-Two CargoRunner defects are pinned as strict xfails (see the reasons): the
-``--quiet`` harness format hides the ``test … FAILED`` lines the parser needs,
-and without ``--no-fail-fast`` cargo stops at the first failing binary.
+Two CargoRunner defects found by this suite are FIXED and pinned here as passes:
+``--quiet`` hid the ``test … FAILED`` lines the parser needs (the runner no longer
+passes it), and without ``--no-fail-fast`` cargo stopped at the first failing
+binary (the runner passes it). There are no xfails in this module.
 
 Runs only when ``cargo`` is on PATH (``@pytest.mark.toolchain("cargo")``).
 
@@ -26,9 +27,9 @@ What it does: Pins, on ``fixtures.langs.rustrepo``, that the miner finds the fea
               tamper is disqualified, a regression in ``add`` fails belt 3 naming the broken
               tests, the scope mapping (``tests/sub.rs`` → ``--test sub``), the belt-scope
               policies (``AFFECTED_DIRS`` fails closed), the command shape, and ``parse`` on the
-              real harness output including every failing binary. Two ``CargoRunner`` defects
-              are pinned as strict xfails (``--quiet`` hides the lines the parser needs; no
-              ``--no-fail-fast`` stops at the first failing binary).
+              real harness output including every failing binary — including the two fixed
+              ``CargoRunner`` defects (no ``--quiet``, so the parser sees ``test … FAILED``;
+              ``--no-fail-fast``, so every failing binary is reported).
 How:          Module-scoped fixture build → ``iter_candidates`` / ``qualify`` / ``grade`` with a
               ``LocalExecutor``; skipped without ``cargo`` on PATH.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -37,9 +38,8 @@ Works with:   src/crb/core/runners/cargo_runner.py (under test), tests/fixtures/
               (the fixture), tests/conftest_langs.py (the probes), tests/test_runners_parsers.py
               (the parser on canned output), docs/CONTRIBUTING.md (how to add a runner)
 Tested by:    tests/test_runners_cargo.py
-Touch when:   the cargo runner's argv or parser changes (an xfail here turning into a pass is
-              the signal to remove the marker); onboarding a Rust workspace whose layout the
-              scope mapping cannot address.
+Touch when:   the cargo runner's argv or parser changes; onboarding a Rust workspace whose
+              layout the scope mapping cannot address.
 """
 
 from __future__ import annotations
@@ -68,19 +68,6 @@ pytestmark = [
     pytest.mark.toolchain("cargo"),
     pytest.mark.skipif(not langs.has_tool("cargo"), reason="cargo not on PATH"),
 ]
-
-_QUIET_FORMAT_DEFECT = (
-    "DEFECT (src/crb/core/runners/cargo_runner.py): `cargo test --quiet` makes the harness "
-    "print `name --- FAILED` (rustc ≥1.8x), not `test name ... FAILED`, so _FAILED never "
-    "matches and every RED run is 'unattributed' (baseline can never record a pre-existing "
-    "failure). Fix: drop `--quiet` (the stable verbose format) — or match both formats: "
-    r"r'^(?:test )?(\S+) (?:\.\.\.|---) FAILED$'."
-)
-_FAIL_FAST_DEFECT = (
-    "DEFECT (src/crb/core/runners/cargo_runner.py): without `--no-fail-fast` cargo stops "
-    "after the first failing test binary, so belt 3's failing set is truncated (the "
-    "integration binary never runs once the lib unit tests fail). Fix: add `--no-fail-fast`."
-)
 
 
 # ---------------------------------------------------------------------------

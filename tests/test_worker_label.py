@@ -355,7 +355,7 @@ def test_label_run_whose_labels_are_all_outage_text_is_failed_and_relabels_witho
     scripted["labeller"] = ScriptedLabeller([("feature.add", 0.9)])
     h.enqueue("label", builder="openai_agent", model="m")  # no relabel flag
     done2 = h.run_one()
-    assert done2.status != STATUS_FAILED
+    assert done2.status == STATUS_SUCCEEDED
     assert done2.counts_json["kept_labelled"] == 0 and done2.counts_json["labelled"] == 1
     spec = TaskSpec.from_dict(_task_row(h, h.pyrepo.feat_sha).spec_json)
-    assert spec.capability_class == "feature.add" and spec.class_source != "path"
+    assert spec.capability_class == "feature.add" and spec.class_source == "intent"

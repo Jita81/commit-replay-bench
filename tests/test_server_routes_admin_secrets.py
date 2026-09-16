@@ -175,14 +175,15 @@ class TestAccess:
                 r = client.request(method, path, **kw)
                 assert r.status_code == 403, (username, method, r.text)
                 assert _envelope(r)["code"] == "forbidden"
+        # the non-admin roles never got a file written — checked BEFORE the admin's own
+        # PUT/DELETE, which would otherwise mask a leak (CodeRabbit on PR #5)
+        assert (client.app.state.settings.home / "secrets" / NAME).exists() is False
         login(client)
         r = client.get(f"{API_PREFIX}/settings/secrets")
         assert r.status_code == 200 and r.json()["secrets_dir"].endswith("/secrets")
         assert client.put(PATH_, json={"token": GOOD}).status_code == 200
         assert client.post(PATH_ + "/verify").status_code == 200
         assert client.delete(PATH_).status_code == 200
-        # the non-admin roles never got a file written
-        assert (client.app.state.settings.home / "secrets" / NAME).exists() is False
 
     def test_csrf_required_on_every_mutating_route(self, client: TestClient) -> None:
         login(client)

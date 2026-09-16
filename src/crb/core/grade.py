@@ -544,5 +544,8 @@ def grade(
     except SandboxUnavailable:
         raise
     except Exception as exc:  # every harness error is a recorded non-pass
-        _emit(on_event, "grade.error", task=task.task_id, error=f"{type(exc).__name__}: {exc}")
-        return done(error=redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=2000))
+        # Redacted BEFORE the callback: the StepEvent envelope redacts too, but the raw
+        # ``on_event`` seam may be any callable (a debug sink), so nothing raw leaves here.
+        error = redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=2000)
+        _emit(on_event, "grade.error", task=task.task_id, error=error)
+        return done(error=error)

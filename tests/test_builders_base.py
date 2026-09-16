@@ -852,9 +852,8 @@ def test_guard_quoted_parens_are_text_not_sub_shells() -> None:
     assert flat is not None and "(" not in flat and inners == []
     assert _unsentinel(flat) == "grep '(' f"
     # the segment sees the real text — a quoted git verb is still a git verb
-    assert "history" in g.check_shell("sh -c 'git log (x)'") or "archaeology" in g.check_shell(
-        "sh -c 'git log (x)'"
-    )
+    quoted = g.check_shell("sh -c 'git log (x)'")
+    assert quoted.startswith("archaeology:") and "log" in quoted, quoted
     assert "archaeology" in g.check_shell("echo '(' | git log")
 
 
