@@ -58,9 +58,11 @@ from crb.server.auth import (
     lock_users_table,
     validate_role,
 )
+from crb.server.claude_login import LoginError
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep
 from crb.server.secrets import (
     CLAUDE_CODE_TOKEN_MAX_LEN,
+    LoginBrokerDep,
     SecretsDep,
     VerifyLimiterDep,
 )
@@ -138,6 +140,30 @@ class ClaudeCodeTokenIn(BaseModel):
     """The pasted ``claude setup-token`` value. Validated for shape in the route."""
 
     token: str = Field(min_length=1, max_length=CLAUDE_CODE_TOKEN_MAX_LEN)
+
+
+class LoginSessionOut(BaseModel):
+    """A Claude sign-in session (``crb.server.claude_login.SessionState``): its state, the
+    URL to open while ``awaiting_code``, a redacted ``detail``, and — once ``done`` — the
+    stored token's four-character fingerprint. Never a code, never the token."""
+
+    id: str
+    state: str = Field(
+        description="pending_url | awaiting_code | exchanging | done | failed | expired | cancelled"
+    )
+    url: str = ""
+    detail: str = ""
+    started_at: str = ""
+    expires_at: str = ""
+    fingerprint: str = Field(default="", max_length=4)
+
+
+class LoginCodeIn(BaseModel):
+    """The code Anthropic's page shows after the person approves (optionally ``#state``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=8, max_length=512)
 
 
 class LoginCheckOut(BaseModel):
@@ -297,6 +323,90 @@ def delete_claude_code_token(admin: AdminDep, secrets: SecretsDep) -> SecretStat
         raise ApiError(409, "secrets_insecure", str(exc)) from None
 
 
+_LOGIN_PATH = _CLAUDE_TOKEN_PATH + "/login"
+
+
+def _session_out(state: Any) -> LoginSessionOut:
+    return LoginSessionOut(**state.to_dict())
+
+
+def _login_error(exc: LoginError) -> ApiError:
+    status = {
+        "not_found": 404,
+        "cli_missing": 503,
+        "cli_timeout": 503,
+        "cli_failed": 503,
+        "login_in_progress": 409,
+        "wrong_state": 409,
+        "invalid_code": 422,
+    }.get(exc.code, 500)
+    return ApiError(status, exc.code, str(exc))
+
+
+@router.post(
+    _LOGIN_PATH,
+    response_model=LoginSessionOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={401: _ERR, 403: _ERR, 409: _ERR, 503: _ERR},
+    summary="Start a Claude sign-in: runs `claude setup-token` on the API host and returns the URL to open",
+)
+def start_claude_login(admin: AdminDep, broker: LoginBrokerDep) -> LoginSessionOut:
+    """The front end opens ``url`` in a new tab; the person approves on Anthropic's page
+    and pastes the code it shows into ``POST …/login/{id}/code``. The minted token goes
+    straight into the owner-only secrets store on the API host — it is never returned."""
+    try:
+        broker.sweep()
+        return _session_out(broker.start(started_by=admin.display_name or admin.id))
+    except LoginError as exc:
+        raise _login_error(exc) from None
+
+
+@router.get(
+    _LOGIN_PATH + "/{session_id}",
+    response_model=LoginSessionOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR},
+    summary="The sign-in session's state (poll while `exchanging`)",
+)
+def get_claude_login(session_id: str, admin: AdminDep, broker: LoginBrokerDep) -> LoginSessionOut:
+    del admin
+    try:
+        return _session_out(broker.state(session_id))
+    except LoginError as exc:
+        raise _login_error(exc) from None
+
+
+@router.post(
+    _LOGIN_PATH + "/{session_id}/code",
+    response_model=LoginSessionOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
+    summary="Deliver the code Anthropic showed; the helper exchanges it and stores the token",
+)
+def submit_claude_login_code(
+    session_id: str, body: LoginCodeIn, admin: AdminDep, broker: LoginBrokerDep
+) -> LoginSessionOut:
+    del admin
+    try:
+        return _session_out(broker.submit_code(session_id, body.code))
+    except LoginError as exc:
+        raise _login_error(exc) from None
+
+
+@router.delete(
+    _LOGIN_PATH + "/{session_id}",
+    response_model=LoginSessionOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR},
+    summary="Cancel a sign-in session (stops the helper; nothing is stored)",
+)
+def cancel_claude_login(
+    session_id: str, admin: AdminDep, broker: LoginBrokerDep
+) -> LoginSessionOut:
+    del admin
+    try:
+        return _session_out(broker.cancel(session_id))
+    except LoginError as exc:
+        raise _login_error(exc) from None
+
+
 @router.post(
     _CLAUDE_TOKEN_PATH + "/verify",
     response_model=LoginCheckOut,
@@ -304,7 +414,7 @@ def delete_claude_code_token(admin: AdminDep, secrets: SecretsDep) -> SecretStat
     summary="Test the stored token: one no-tool Haiku turn through the builder's own environment",
 )
 def verify_claude_code_token(
-    admin: AdminDep, secrets: SecretsDep, limiter: VerifyLimiterDep
+    admin: AdminDep, secrets: SecretsDep, limiter: VerifyLimiterDep, settings: SettingsDep
 ) -> LoginCheckOut:
     """Run the builder's login probe with the stored token (429 inside the rate window)."""
     del admin
@@ -319,7 +429,7 @@ def verify_claude_code_token(
             headers={"Retry-After": str(wait)},
         )
     try:
-        check = secrets.verify(CLI_TOKEN_SECRET)
+        check = secrets.verify(CLI_TOKEN_SECRET, binary=settings.builder.claude_binary)
     except SecretsInsecure as exc:
         raise ApiError(409, "secrets_insecure", str(exc)) from None
     if check is None:

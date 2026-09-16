@@ -79,6 +79,7 @@ from crb.core.secrets_file import (
     SecretsStore,
     SecretStatus,
 )
+from crb.server.claude_login import LoginBroker
 from crb.server.deps import SettingsDep
 from crb.server.settings import Settings
 
@@ -205,12 +206,15 @@ class SecretsFile:
                 out.append(SecretStatus(name=name, present=False))
         return out
 
-    def verify(self, name: str, *, timeout_s: int = VERIFY_TIMEOUT_S) -> LoginCheck | None:
-        """Run the builder's login probe with the stored token; ``None`` when absent."""
+    def verify(
+        self, name: str, *, timeout_s: int = VERIFY_TIMEOUT_S, binary: str = ""
+    ) -> LoginCheck | None:
+        """Run the builder's login probe with the stored token; ``None`` when absent.
+        ``binary`` is the configured CLI (``CRB_BUILDER__CLAUDE_BINARY``), else PATH."""
         value = self.get(name)
         if not value:
             return None
-        return verify_login(token=value, timeout_s=timeout_s)
+        return verify_login(token=value, timeout_s=timeout_s, binary=binary)
 
 
 class VerifyRateLimiter:
@@ -243,6 +247,12 @@ def get_secrets_file(settings: SettingsDep) -> SecretsFile:
     return SecretsFile.for_settings(settings)
 
 
+def get_login_broker(settings: SettingsDep) -> LoginBroker:
+    """Dependency: the login-session broker over the same secrets directory the store uses
+    (the CLI binary comes from the builder settings when configured, else PATH)."""
+    return LoginBroker(secrets_dir_for(settings), claude_binary=settings.builder.claude_binary)
+
+
 def get_verify_limiter(request: Request) -> VerifyRateLimiter:
     """One limiter per app, created lazily on ``app.state`` (the app factory is not ours)."""
     limiter = getattr(request.app.state, "verify_limiter", None)
@@ -254,6 +264,7 @@ def get_verify_limiter(request: Request) -> VerifyRateLimiter:
 
 SecretsDep = Annotated[SecretsFile, Depends(get_secrets_file)]
 VerifyLimiterDep = Annotated[VerifyRateLimiter, Depends(get_verify_limiter)]
+LoginBrokerDep = Annotated[LoginBroker, Depends(get_login_broker)]
 
 __all__ = [
     "CLAUDE_CODE_TOKEN_MAX_LEN",

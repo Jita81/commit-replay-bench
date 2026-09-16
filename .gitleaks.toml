@@ -5,6 +5,8 @@
 # is a finding, not a false positive, until proven otherwise in review.
 
 title = "crb gitleaks config"
+# The top-level [[allowlists]] form needs gitleaks >= 8.25; CI pins 8.30.1 (GITLEAKS_VERSION).
+minVersion = "8.25.0"
 
 [extend]
 useDefault = true

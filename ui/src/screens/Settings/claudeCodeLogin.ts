@@ -113,3 +113,63 @@ export function useVerifyClaudeCodeToken(): UseMutationResult<LoginCheck, ApiErr
     mutationFn: () => api<LoginCheck>(`${CLAUDE_CODE_TOKEN_PATH}/verify`, { method: 'POST', timeoutMs: VERIFY_TIMEOUT_MS }),
   })
 }
+
+// ---------------------------------------------------------------------------
+// Sign in with a Claude account from the browser (docs/API.md "Admin" — login sessions)
+// ---------------------------------------------------------------------------
+
+export const CLAUDE_CODE_LOGIN_PATH = `${CLAUDE_CODE_TOKEN_PATH}/login`
+
+export type LoginSessionState = 'pending_url' | 'awaiting_code' | 'exchanging' | 'done' | 'failed' | 'expired' | 'cancelled'
+
+/** `LoginSessionOut` — a sign-in session's state; never a code, never the token. */
+export interface LoginSession {
+  id: string
+  state: LoginSessionState
+  /** The Anthropic sign-in URL to open in a new tab while `awaiting_code`; `''` otherwise. */
+  url: string
+  detail: string
+  started_at: string
+  expires_at: string
+  /** The stored token's last four characters once `done`. */
+  fingerprint: string
+}
+
+export const LOGIN_TERMINAL: ReadonlySet<LoginSessionState> = new Set(['done', 'failed', 'expired', 'cancelled'])
+
+/** `POST …/login` — runs `claude setup-token` on the API host; the response carries the URL to open (up to ~30 s). */
+export function useStartClaudeLogin(): UseMutationResult<LoginSession, ApiError, void> {
+  return useMutation({
+    mutationFn: () => api<LoginSession>(CLAUDE_CODE_LOGIN_PATH, { method: 'POST', timeoutMs: 45_000 }),
+  })
+}
+
+/** `POST …/login/{id}/code` with the code Anthropic's page showed; the token never comes back. */
+export function useSubmitClaudeLoginCode(): UseMutationResult<LoginSession, ApiError, { id: string; code: string }> {
+  return useMutation({
+    mutationFn: ({ id, code }) => api<LoginSession>(`${CLAUDE_CODE_LOGIN_PATH}/${encodeURIComponent(id)}/code`, { method: 'POST', body: { code } }),
+  })
+}
+
+/** `DELETE …/login/{id}` — stops the helper; nothing is stored. */
+export function useCancelClaudeLogin(): UseMutationResult<LoginSession, ApiError, string> {
+  return useMutation({
+    mutationFn: (id) => api<LoginSession>(`${CLAUDE_CODE_LOGIN_PATH}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  })
+}
+
+/** `GET …/login/{id}` polled every second while the session is not terminal; invalidates the secrets list on `done`. */
+export function useClaudeLoginSession(id: string | null): UseQueryResult<LoginSession, ApiError> {
+  const qc = useQueryClient()
+  return useQuery({
+    queryKey: ['settings', 'claude-login', id] as const,
+    queryFn: async () => {
+      const s = await api<LoginSession>(`${CLAUDE_CODE_LOGIN_PATH}/${encodeURIComponent(id!)}`)
+      if (s.state === 'done') void qc.invalidateQueries({ queryKey: secretsKey })
+      return s
+    },
+    enabled: id !== null,
+    retry: false,
+    refetchInterval: (q) => (q.state.data && LOGIN_TERMINAL.has(q.state.data.state) ? false : 1000),
+  })
+}

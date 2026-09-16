@@ -174,8 +174,9 @@ test.describe(`05 replay (${BUILDER})`, () => {
     const cell = page.locator(`[data-testid="cell-measured"][aria-label^="${cellClass} ${cellSize}:"]`)
     await expect(cell, `a measured cell for ${cellClass} × ${cellSize}`).toBeVisible()
     const label = (await cell.getAttribute('aria-label')) ?? ''
-    // "<class> <size>: <route>, n <n>, point <pct>, false-Q1 <n>"
-    const m = /^([a-z.]+) (XS|S|M|L|XL): (\w+), n (\d+), point ([\d.]+%), false-Q1 (\d+)$/.exec(label)
+    // "<class> <size>: <route>, n <n>, point <pct>, 95% CI <lo> to <hi>, false-Q1 <n>, apparatus <v> · belts <set>"
+    // — the whole claim travels in the accessible label (interval + provenance, batch 4)
+    const m = /^([a-z.]+) (XS|S|M|L|XL): (\w+), n (\d+), point ([\d.]+%), 95% CI [\d.]+% to [\d.]+%, false-Q1 (\d+), apparatus \S+ · belts \S+$/.exec(label)
     expect(m, `cell aria-label ${label}`).toBeTruthy()
     const n = Number(m![4])
     expect(n).toBeGreaterThanOrEqual(1)
