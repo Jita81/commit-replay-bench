@@ -195,12 +195,15 @@ def test_wrong_state_bad_code_shape_missing_cli_and_unknown_session(
 
 
 def test_expired_session_is_reported_and_swept(fake_claude: Path, secrets_dir: Path) -> None:
-    broker = cl.LoginBroker(secrets_dir, claude_binary=str(fake_claude), ttl_s=3)
+    # the TTL must outlast the helper's start-up on a loaded CI runner (3 s was not enough
+    # on py3.13's runner: the session expired before the URL was read) — 10 s is ample,
+    # and the wait below spans it
+    broker = cl.LoginBroker(secrets_dir, claude_binary=str(fake_claude), ttl_s=10)
     st = broker.start(started_by="ada")
     assert st.state == cl.STATE_AWAITING_CODE
     # nobody pastes a code: the helper gives up at the TTL and the API reads `expired`
     expired = _wait(
-        broker, st.id, {cl.STATE_EXPIRED, cl.STATE_FAILED, cl.STATE_CANCELLED}, timeout=15
+        broker, st.id, {cl.STATE_EXPIRED, cl.STATE_FAILED, cl.STATE_CANCELLED}, timeout=30
     )
     assert expired.state == cl.STATE_EXPIRED
     assert broker.active() is None
