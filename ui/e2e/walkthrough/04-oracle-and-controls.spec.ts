@@ -75,10 +75,12 @@ test.describe('04 oracle + controls', () => {
     // The gate's state is the API's routing verdict (the reduction the capability map and
     // the routes gate on), rendered — never derived in the UI from the counts: OPEN only
     // when the verdict is `passed`. On the one-task fixture the verdict is `thin` (fewer
-    // than half the controls constructible) or `escaped` (a measurement control graded
-    // clean — a finding, not a violation): both keep the gate CLOSED, exactly as routing
-    // withholds deliver under them. Before batch 4 the banner derived OPEN from "no
-    // violations" alone and hid that.
+    // than half the controls constructible) or `escaped` — the fixture's `hardcode_cheat`
+    // grades clean by construction (one assertion cannot tell a hard-coded return from an
+    // implementation; tests/test_oracle_controls.py pins it as the measured escape): a
+    // finding, not a violation. Both keep the gate CLOSED, exactly as routing withholds
+    // deliver under them. Before batch 4 the banner derived OPEN from "no violations"
+    // alone and hid that.
     const res = await page.request.get(`${env.baseUrl}/api/v1/oracle/${encodeURIComponent(t.name)}/controls`)
     expect(res.ok(), `GET /oracle/{repo}/controls → ${res.status()}`).toBeTruthy()
     const verdict = ((await res.json()) as { verdict: { state: string; violations?: number } }).verdict
