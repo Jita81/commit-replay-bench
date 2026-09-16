@@ -95,8 +95,10 @@ def upgrade() -> None:
         more = f" (+{len(dupes) - 10} more)" if len(dupes) > 10 else ""
         raise RuntimeError(
             f"refusing to upgrade 0004: events holds {len(dupes)} duplicated (trace_id, seq) "
-            f"pair(s) — {shown}{more}. Rows are append-only and cannot be renumbered; export "
-            "the ledger and resolve the traces before retrying"
+            f"pair(s) — {shown}{more}. Rows are append-only, so this upgrade will not renumber "
+            "them for you: back the database up, move the LATER row of each pair to the "
+            "trace's max(seq)+1 as docs/DEPLOYMENT.md 'If revision 0004 refuses' shows, "
+            "record the ids you moved, then re-run"
         )
     names = _index_names()
     if OLD_INDEX in names or context.is_offline_mode():
