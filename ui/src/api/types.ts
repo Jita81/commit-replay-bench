@@ -811,6 +811,8 @@ export interface RouteDecision {
   false_q1: number
   oracle_strength: number | null
   policy_version: string
+  /** The bar as numbers beside its name (ADR-0003 amendment 2026-09-16). */
+  policy_thresholds?: Record<string, unknown>
   verification_tier: string
   apparatus_versions: string[]
   /** The belt sets behind `n` (`v4`, `v5`…) — provenance every rendered rate keeps. */

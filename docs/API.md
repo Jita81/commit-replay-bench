@@ -4,6 +4,10 @@ Base path `/api/v1`. JSON everywhere. This document is the contract the server
 (`crb.server`) implements and the UI (`ui/`) consumes; both are built against it
 in parallel, so changes here are changes to both.
 
+> **Driving the API from an assistant:** every route below that a model should reach is also a
+> Model Context Protocol tool — see [MCP](MCP.md) (`crb mcp`); the tools relay these responses
+> unchanged.
+
 ## Conventions
 
 - **Auth**: cookie session (`crb_session`, HttpOnly, SameSite=Lax, Secure in prod).

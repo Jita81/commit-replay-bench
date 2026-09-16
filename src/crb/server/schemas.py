@@ -933,6 +933,9 @@ class RouteDecisionOut(BaseModel):
     false_q1: int
     oracle_strength: float | None
     policy_version: str
+    #: The bar as numbers beside its name (ADR-0003 amendment 2026-09-16) — a client never
+    #: has to look a version up, and a tightened deployment policy is visible per decision.
+    policy_thresholds: dict[str, Any] = {}
     verification_tier: str
     apparatus_versions: list[str]
     #: The belt sets behind ``n`` (``v4`` / ``v5``…), the provenance every rendered rate keeps.

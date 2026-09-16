@@ -8,6 +8,35 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+Nothing yet — `main` is 2.0.0a1 below.
+
+## [2.0.0a1] — 2026-09-16 — first releasable v2, tagged on `main`
+
+Tagged `v2.0.0a1` on `main` on 2026-09-16 (DL-039) after the day's work below: the merge
+from the `reboot/v2` integration branch (PR #2), the third-party review batches, the
+repository going public with CI green and branch protection requiring it, the browser
+sign-in, the dogfood measurement, the external assessment's two code fixes, and the MCP
+server. The release workflow builds the wheel and the container image, smokes both, writes
+an SPDX SBOM and signs the image keyless (Sigstore); `docs/DEPLOYMENT.md` §2.2 says how to
+verify. Everything before this tag is 2.0.0a1 — nothing was tagged earlier because the
+tag's purpose is the signed image and CI was unavailable until the afternoon (DL-035).
+
+### 2026-09-16 (night) — the MCP server: drive a deployment from Claude Code
+
+- **`crb mcp`** — the API as Model Context Protocol tools on stdio (`claude mcp add crb --
+  crb mcp`; [MCP](docs/MCP.md)). Thirty-eight tools, each a one-line pass-through to
+  `/api/v1` that returns the API's JSON unchanged: repositories, tasks, runs, ledger rows
+  and evidence packs, the capability map and routes (with `policy_thresholds`), the oracle
+  and controls, the learning-loop plans, ledger verify, sign-offs and reviews (read), the
+  factory. The tools act as a local service account under the deployment's RBAC; a
+  refusal comes back as `{"error": true, status, code, message, detail}`. Creating a
+  sign-off or a review is deliberately **not** a tool (a human attestation; EVIDENCE §2).
+  The server's instructions carry the claims policy. New layer `crb.mcp` (a client of the
+  server over HTTP, never an importer of it — import-linter enforces the direction); extra
+  `[mcp]`; `docs/MCP.md`; ADR-0008 layer table.
+- `GET /routes` decisions now serve `policy_thresholds` (the field was added to
+  `RouteDecision` in #28 and dropped by the response schema — found by the MCP tests).
+
 ### 2026-09-16 (evening) — the external assessment: the map gates the factory; a policy names its bar
 
 An external reviewer's forty-point assessment of the explainer was checked point by point
@@ -68,16 +97,6 @@ repository already answered; two gaps were real and are closed here:
   merged green.
 - **Branch protection on `main`**: the eleven CI jobs are required and the branch must be
   up to date; no force-push, no deletion (DL-037).
-
-## [2.0.0a1] — 2026-09-16 — first releasable v2, on `main`
-
-Merged from the `reboot/v2` integration branch into `main` on 2026-09-16 (PR #2) after the
-third-party review batches below, with the gates run locally: GitHub Actions on the
-repository refused every job from 2026-09-15 ("recent account payments have failed or your
-spending limit needs to be increased"), so the operator chose to proceed on the locally-run
-gates (DL-035). The `v2.0.0a1` tag and the signed GHCR image follow when CI minutes are
-restored — the release workflow is what builds, smokes and signs the image, and a tag
-without it would publish nothing.
 
 ### 2026-09-16 — the release-to-main documentation pass
 

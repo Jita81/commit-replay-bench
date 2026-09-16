@@ -53,6 +53,13 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     serve.add_argument("--database-url", default=None, help="overrides CRB_DATABASE_URL")
     serve.set_defaults(func=cmd_serve)
 
+    mcp = sub.add_parser(
+        "mcp",
+        help="run the MCP server on stdio (Claude Code: `claude mcp add crb -- crb mcp`)",
+    )
+    mcp.add_argument("--list", action="store_true", help="print the tool names and exit")
+    mcp.set_defaults(func=cmd_mcp)
+
     worker = sub.add_parser("worker", help="run the job worker (mine / replay / oracle / probe)")
     worker.add_argument("--database-url", default=None)
     worker.add_argument("--home", default=None, help="evidence + events dir (CRB_HOME)")
@@ -90,6 +97,20 @@ def cmd_serve(args: argparse.Namespace) -> int:
         raise CliError(f"{_SERVER_HINT} ({e})") from e
     serve(host=args.host, port=args.port)
     return EXIT_OK
+
+
+def cmd_mcp(args: argparse.Namespace) -> int:
+    """The MCP server over the API named by ``CRB_API_URL`` (docs/MCP.md); ``--list``
+    prints the tool names without connecting."""
+    try:
+        from crb.mcp.server import describe
+        from crb.mcp.server import main as mcp_main
+    except ImportError as e:
+        raise CliError(f"the MCP server needs `pip install commit-replay-bench[mcp]` ({e})") from e
+    if args.list:
+        print(describe())
+        return EXIT_OK
+    return mcp_main()
 
 
 def cmd_worker(args: argparse.Namespace) -> int:

@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-346 files with a header · 1 exempt (listed at the end).
+350 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -120,6 +120,14 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/factory/review.py`](../src/crb/factory/review.py) | Independent review — mechanical probes first, then a different identity's opinion that can only tighten the verdict; recorded BEFORE any edit. | [`tests/test_factory_review.py`](../tests/test_factory_review.py), [`tests/test_factory_loop.py`](../tests/test_factory_loop.py) | never for a new repository; adding a probe means a ``Probe`` class, a place in ``default_probes`` and a decision whether it is ``required`` (a required probe that cannot run FAILS); a new reviewer must carry a rung label distinct from every builder and test author. |
 | [`src/crb/factory/testfirst.py`](../src/crb/factory/testfirst.py) | The RED proof and the test-first authoring seam — the oracle is manufactured and proven to fail on the base before anything is built. | [`tests/test_factory_testfirst.py`](../tests/test_factory_testfirst.py), [`tests/test_factory_loop.py`](../tests/test_factory_loop.py) | never for a new repository (the runner and its scope come from the repo config); when a new test-author rung is added (it must carry a label distinct from every builder rung); when the proof's recorded fields change (bump ``RED_PROOF_SCHEMA``). |
 
+## `src/crb/mcp` (3 files)
+
+| File | What it is | Tested by | Touch when |
+|---|---|---|---|
+| [`src/crb/mcp/__init__.py`](../src/crb/mcp/__init__.py) | The MCP surface: ``build_server`` (the tools over ``/api/v1``), ``CrbApi`` (the authenticated HTTP client), ``main`` (``crb mcp`` on stdio). | [`tests/test_mcp_server.py`](../tests/test_mcp_server.py) | a route is added that an assistant should reach (see server.py). |
+| [`src/crb/mcp/client.py`](../src/crb/mcp/client.py) | ``CrbApi`` — a small, synchronous client over ``/api/v1`` that the MCP tools call. It logs in with a LOCAL account, carries the session cookie and the CSRF double-submit header, retries once on a 401 (session expiry), and turns the API's error envelope into ``CrbApiError``. | [`tests/test_mcp_server.py`](../tests/test_mcp_server.py) (over the real app via ``TestClient``) | the API grows an auth scheme (a bearer token for service accounts — the seam is ``login``/``_headers``); never for a new repository. |
+| [`src/crb/mcp/server.py`](../src/crb/mcp/server.py) | ``build_server(api)`` returns an ``MCPServer`` whose tools are one-line pass-throughs to ``/api/v1``: repositories, tasks, runs, evidence, the capability map and routes, the oracle and controls, the ledger, sign-offs (read), the factory. ``main()`` runs it on stdio so Claude Code (or any MCP client) can drive a crb deployment: ``claude mcp add crb -- crb mcp``. | [`tests/test_mcp_server.py`](../tests/test_mcp_server.py) — every tool called through ``MCPServer.call_tool`` against the seeded app: RBAC refusals surface as errors, the sign-off tools do not exist, the instructions carry the claims policy | a route is added that an assistant should reach (one function, one line); never for a new repository. |
+
 ## `src/crb/observability` (5 files)
 
 | File | What it is | Tested by | Touch when |
@@ -186,7 +194,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/migrations/versions/v0004_events_trace_seq_unique.py`](../src/crb/store/migrations/versions/v0004_events_trace_seq_unique.py) | Revision ``0004`` — the unique ``(trace_id, seq)`` index on ``events``. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_events.py`](../tests/test_store_events.py) | never — a released revision is immutable. |
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 
-## `tests` (116 files)
+## `tests` (117 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -250,6 +258,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_ledger.py`](../tests/test_ledger.py) | The ledger's test suite — ``GradeRow`` invariants, the hash chain and cell statistics. | [`tests/test_ledger.py`](../tests/test_ledger.py) | a field is added to ``GradeRow`` (it is hashed: pin the old rows still verify and the new ones commit to it); a belt set or apparatus version is introduced (extend ``expected_belt_sets`` and its table here); a failure kind is added. |
 | [`tests/test_legacy.py`](../tests/test_legacy.py) | The importers' test suite — the census and the benchmark ledger. | [`tests/test_legacy.py`](../tests/test_legacy.py) | the census format gains a field (a synthetic row per shape here — the real data must not change); never to make an import more lenient. |
 | [`tests/test_lint.py`](../tests/test_lint.py) | Belt 5's test suite — the lint rule, its wiring into the grader and the miner, and the real toolchains. | [`tests/test_lint.py`](../tests/test_lint.py) | onboarding a repository whose linter the detection misses (add a detection case on its shape, or declare ``lint`` in the repo config — [`docs/OPERATOR.md`](../docs/OPERATOR.md)); a linter's output format changes (the attribution regex); a new language runner adds ``detect_lint``. |
+| [`tests/test_mcp_server.py`](../tests/test_mcp_server.py) | The MCP server's test suite — every tool called through ``MCPServer.call_tool`` against the seeded app (FastAPI's ``TestClient`` is an ``httpx.Client``, so the server's HTTP client runs unchanged over the real routes). | [`tests/test_mcp_server.py`](../tests/test_mcp_server.py) | a tool is added (add it to ``EXPECTED_TOOLS`` and one call); the seed's cells change (the map assertions name the seeded cobra-like cell). |
 | [`tests/test_mine.py`](../tests/test_mine.py) | The miner's test suite — candidate discovery, the RED check, the baseline and the gold check on the fixture repository. | [`tests/test_mine.py`](../tests/test_mine.py) | the candidate rule changes (what counts as coupled source + test, the pools); the gold check gains a belt; a new repository layout needs a support-file rule. |
 | [`tests/test_node_eras.py`](../tests/test_node_eras.py) | The JavaScript dependency-era suite (``_NodeBase.ensure_era``). | [`tests/test_node_eras.py`](../tests/test_node_eras.py) | another package manager's lockfile is supported (a ``lock_key`` case); the eviction or free-space policy changes. |
 | [`tests/test_oracle_adequacy.py`](../tests/test_oracle_adequacy.py) | The oracle-adequacy gate's test suite (``crb.core.oracle.adequacy``). | [`tests/test_oracle_adequacy.py`](../tests/test_oracle_adequacy.py) | the routing policy's oracle floor moves (an ADR; the derivation case here fails first); a band is added. |
