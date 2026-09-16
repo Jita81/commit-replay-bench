@@ -42,7 +42,7 @@ import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { StatTile } from '../../components/StatTile'
 import { useAuth } from '../../lib/auth'
-import { fmtDate, fmtInt, fmtPct, shortId } from '../../lib/format'
+import { fmtDate, fmtInt, fmtPct, shortId, wilson } from '../../lib/format'
 import { probeDisplay } from '../../lib/verdict'
 import { RunNewDialog } from '../Runs/RunNewDialog'
 import { RepoConfigTab } from './RepoConfigTab'
@@ -64,7 +64,9 @@ function ProfileTable({ cells, classes, sizes, total }: { cells: ProfileCell[]; 
   return (
     <div className="overflow-auto rounded-[var(--radius-control)] border border-border">
       <table className="num w-full border-collapse text-[13px]">
-        <caption className="sr-only">Change profile: commits per capability class and size tier</caption>
+        <caption className="sr-only">
+          Change profile: commits per capability class and size tier over {fmtInt(total)} classified commits. This is a census of the examined history, not a sample: a cell with no commits reads 0 (measured), and shares are exact fractions of the census, so they carry no confidence interval.
+        </caption>
         <thead className="bg-surface-high">
           <tr>
             <th scope="col" className="label border-b border-border px-3 py-2 text-left">
@@ -93,11 +95,15 @@ function ProfileTable({ cells, classes, sizes, total }: { cells: ProfileCell[]; 
                 </th>
                 {sizeList.map((s) => {
                   const c = idx.get(`${cls}|${s}`)
+                  // The API lists only cells with commits; the profile walked EVERY commit
+                  // in the window, so an absent cell is a measured zero of the census, not
+                  // an unmeasured cell (unlike the capability map, where absence is
+                  // NOT_YET_MEASURED). Rendered as an explicit 0 with that reading.
                   const n = c?.count ?? 0
                   const alpha = n === 0 ? 0 : 0.15 + 0.6 * (n / max)
                   return (
-                    <td key={s} className="px-3 py-1.5 text-right" style={n ? { background: `color-mix(in srgb, var(--trust) ${Math.round(alpha * 100)}%, transparent)` } : undefined}>
-                      {n === 0 ? <span className="text-on-surface-muted">·</span> : fmtInt(n)}
+                    <td key={s} className="px-3 py-1.5 text-right" style={n ? { background: `color-mix(in srgb, var(--trust) ${Math.round(alpha * 100)}%, transparent)` } : undefined} title={n === 0 ? `0 of ${fmtInt(total)} classified commits — none in this cell (measured, not missing)` : `${fmtInt(n)} of ${fmtInt(total)} classified commits`}>
+                      {n === 0 ? <span className="text-on-surface-muted" aria-label="0 commits">0</span> : fmtInt(n)}
                     </td>
                   )
                 })}
@@ -135,7 +141,7 @@ function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => v
     <div className="space-y-6">
       <div className="flex flex-wrap gap-3">
         <StatTile label="Replayable tasks" value={fmtInt(tc.total)} n={tc.total} apparatus="mined at the commit's parent, RED-checked" />
-        <StatTile label="Gold-clean" value={tc.total ? fmtPct(tc.gold_clean / tc.total, 0) : '—'} n={tc.total} apparatus={`${fmtInt(tc.gold_clean)} clean · ${fmtInt(tc.gold_failed)} failed · ${fmtInt(tc.unchecked)} unchecked`} />
+        <StatTile label="Gold-clean" value={tc.total ? fmtPct(tc.gold_clean / tc.total, 0) : '—'} n={tc.total} ci={tc.total ? wilson(tc.gold_clean, tc.total) : null} apparatus={`${fmtInt(tc.gold_clean)} clean · ${fmtInt(tc.gold_failed)} failed · ${fmtInt(tc.unchecked)} unchecked · Wilson 95% over the mined tasks`} />
         <StatTile label="Hard pool" value={fmtInt(tc.hard)} n={tc.total} apparatus={`${fmtInt(tc.standard)} standard · ${fmtInt(tc.hard)} hard`} />
       </div>
       <Card

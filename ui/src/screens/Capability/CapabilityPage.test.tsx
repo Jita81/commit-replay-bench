@@ -198,12 +198,14 @@ describe('CapabilityPage — controls verdict + failure split (A2)', () => {
 
     // the cell: all-rows point, clean n/N, then the model rate and the split — never instead of
     const measured = screen.getByTestId('cell-measured')
-    expect(measured.getAttribute('aria-label')).toBe('bug.fix S: human, n 13, point 61.5%, false-Q1 0')
+    // the accessible label carries the whole claim: n, point, the Wilson interval and the
+    // apparatus + belt-set provenance (CodeRabbit on PR #6)
+    expect(measured.getAttribute('aria-label')).toBe('bug.fix S: human, n 13, point 61.5%, 95% CI 35.5% to 82.3%, false-Q1 0, apparatus 2.0 · belts v4')
     expect(measured.textContent).toContain('61.5%')
     expect(measured.textContent).toContain('clean 8/13')
     const model = measured.querySelector('[data-testid="model-point"]')!
     expect(model.textContent).toContain('model 89%')
-    expect(model.textContent).toContain('(8/9)')
+    expect(model.textContent).toContain('(8/9 [56%–98%])') // n and the served Wilson interval travel with the model rate
     const split = measured.querySelector('[data-testid="failure-split"]')!
     expect(split.getAttribute('aria-label')).toBe('red 1, lint 0, budget 1, protocol 1, harness 2, outage 0, DQ 1')
     expect(split.querySelector('[data-testid="kind-harness"]')!.textContent).toBe('harness2')

@@ -760,6 +760,8 @@ export interface CapabilityCell {
   verification_tier: VerificationTier
   apparatus_versions: string[]
   belt_set?: string
+  /** Every belt set behind `n` (`v4`, `v5`…) — with `apparatus_versions`, the provenance a rate keeps. */
+  belt_sets?: string[]
 }
 
 /** Headline numbers of one map; `false_q1_total` must read 0. */
@@ -804,9 +806,15 @@ export interface RouteDecision {
   n: number
   point: number
   ci_low: number
+  /** The upper Wilson bound — served so the UI never mirrors an asymmetric interval. */
+  ci_high: number
   false_q1: number
   oracle_strength: number | null
   policy_version: string
+  verification_tier: string
+  apparatus_versions: string[]
+  /** The belt sets behind `n` (`v4`, `v5`…) — provenance every rendered rate keeps. */
+  belt_sets: string[]
 }
 
 /** `GET /routes?repo=` — one decision per cell. */
@@ -970,29 +978,68 @@ export interface ControlsReport {
   passed: boolean
   escape_rows: ControlRow[]
   rows: ControlRow[]
+  /** When the report came from a run (the server sets both); absent on a bare `to_dict`. */
+  run_id?: string
+  reported_at?: string
+  /**
+   * The routing-reduced verdict of THIS report — the same reduction `/capability-map` and
+   * `/routes` gate on (`state`: passed | failed | thin | escaped | unmeasured). The gate
+   * renders this, never a verdict it derives from the counts (CodeRabbit on PR #6).
+   */
+  verdict?: {
+    measured: boolean
+    passed: boolean
+    complete: boolean
+    constructible: number
+    total: number
+    share: number
+    escapes: number
+    run_id: string
+    created: string
+    state: 'passed' | 'failed' | 'thin' | 'escaped' | 'unmeasured'
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Factory (phase P6) — shapes are provisional; the UI only renders lists.
+// Factory — `src/crb/server/routes/factory.py` (`FactoryBacklogOut`, `FactoryTaskOut`)
 // ---------------------------------------------------------------------------
 
-/** `GET /factory/{repo}/backlog` (P6 — 501 until it lands). */
+/** One frozen backlog item (`BacklogItemOut`). */
+export interface FactoryBacklogItem {
+  id: string
+  title: string
+  kind: string
+  capability_class: string
+  size: string
+  level: string
+  depends_on: string[]
+  structural_facts: string[]
+  has_authored_test: boolean
+}
+
+/** `GET /factory/{repo}/backlog` — the ACTIVE frozen backlog; 404 `not_found` when none is registered. */
 export interface FactoryBacklog {
   repo: string
   hash: string
   frozen_at: string | null
-  items: Array<{ id: string; title: string; capability_class: string; size: string }>
+  items: FactoryBacklogItem[]
 }
 
-/** `GET /factory/{repo}/tasks` item (P6). */
+/** `GET /factory/{repo}/tasks` — a bare list (not a `Page`): the latest state of every active item, folded from the evidence chain. */
 export interface FactoryTask {
   id: string
   title: string
+  capability_class: string
+  size: string
+  kind: string
+  status: string
   dor_gaps: string[]
+  route_hint: string
   red_proof: boolean | null
   build_status: string
   pr_url: string | null
   review_verdict: string | null
+  last_event: string
 }
 
 // ---------------------------------------------------------------------------

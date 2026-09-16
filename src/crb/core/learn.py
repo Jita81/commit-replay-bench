@@ -363,11 +363,25 @@ class RefusalReport:
     minutes: float
     unparsed: int
     apparatus_versions: tuple[str, ...]
+    #: ``(apparatus_version, rows_total, rows_protocol)`` per apparatus — the share is
+    #: never blended across versions in what is served (CodeRabbit on PR #6, 2026-09-16).
+    by_apparatus: tuple[tuple[str, int, int], ...] = ()
 
     @property
     def instrument_share(self) -> float:
         """The share of ALL rows the guards refused (review §7.5's denominator)."""
         return self.rows_protocol / self.rows_total if self.rows_total else 0.0
+
+    def share_dict(self, protocol: int, total: int) -> dict[str, Any]:
+        """One rate with its n and Wilson 95% interval — the only form a rate is served in."""
+        ci = wilson_interval(protocol, total)
+        return {
+            "rows_total": total,
+            "rows_protocol": protocol,
+            "share": round(protocol / total, 4) if total else 0.0,
+            "ci_low": round(ci.low, 4) if total else 0.0,
+            "ci_high": round(ci.high, 4) if total else 1.0,
+        }
 
     def get(self, group_id: str) -> RefusalGroup | None:
         """The group a decision names, or ``None`` (an unknown id is refused)."""
@@ -382,6 +396,11 @@ class RefusalReport:
             "rows_total": self.rows_total,
             "rows_protocol": self.rows_protocol,
             "protocol_share": round(self.instrument_share, 4),
+            # the rate WITH its interval, and per apparatus version (never blended)
+            "share": self.share_dict(self.rows_protocol, self.rows_total),
+            "by_apparatus": [
+                {"apparatus_version": v, **self.share_dict(p, t)} for v, t, p in self.by_apparatus
+            ],
             "cost_usd": round(self.cost_usd, 6),
             "minutes": round(self.minutes, 2),
             "unparsed": self.unparsed,
@@ -465,6 +484,12 @@ def triage_refusals(rows: Iterable[GradeRow]) -> RefusalReport:
             )
         )
     groups.sort(key=lambda g: (-g.n, g.prefix, g.reason, g.shape))
+    totals: dict[str, int] = {}
+    protos: dict[str, int] = {}
+    for r in rs:
+        totals[r.apparatus_version] = totals.get(r.apparatus_version, 0) + 1
+    for r in protocol:
+        protos[r.apparatus_version] = protos.get(r.apparatus_version, 0) + 1
     return RefusalReport(
         groups=tuple(groups),
         rows_total=len(rs),
@@ -473,6 +498,7 @@ def triage_refusals(rows: Iterable[GradeRow]) -> RefusalReport:
         minutes=sum(r.latency_s for r in protocol) / 60.0,
         unparsed=unparsed,
         apparatus_versions=tuple(sorted({r.apparatus_version for r in protocol})),
+        by_apparatus=tuple((v, totals[v], protos.get(v, 0)) for v in sorted(totals)),
     )
 
 

@@ -139,7 +139,7 @@ image: { repository: <acr>.azurecr.io/crb, digest: "sha256:…" }
 config:
   CRB_OIDC__ISSUER: https://login.microsoftonline.com/<tenant-id>/v2.0
   CRB_OIDC__CLIENT_ID: <app (client) id>
-  CRB_OIDC__REDIRECT_URL: https://crb.example.internal/auth/callback
+  CRB_OIDC__REDIRECT_URL: https://crb.example.internal/api/v1/auth/oidc/callback
   CRB_TRUSTED_PROXIES: 10.240.0.0/16          # ingress controller pod CIDR
   CRB_AZURE_ENDPOINT: https://<aoai>.openai.azure.com
   CRB_AZURE_DEPLOYMENT: gpt-4o
@@ -206,7 +206,7 @@ and `DockerSettings` refuses to mount the socket, `/` or `$HOME` into a sandbox.
 ### 4.1 Entra ID → `CRB_OIDC__*`
 
 Create an **app registration** (single tenant), a **web** redirect URI
-`https://<host>/auth/callback`, and a client secret (or a federated credential). Then:
+`https://<host>/api/v1/auth/oidc/callback` (the route `GET /auth/oidc/callback` under the API prefix — `docs/API.md`), and a client secret (or a federated credential). Then:
 
 | Entra ID | crb setting |
 |---|---|

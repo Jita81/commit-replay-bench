@@ -8,7 +8,10 @@
 
 Upstream, importing the benchmark ledger module instantiated an ORM engine through a
 package `__init__` chain; the grader was coupled to a web application; three copies of the
-grading logic drifted. An instrument that an NHS organisation must be able to audit — and
+grading logic drifted `[observed by inspection of AthenaClaude `origin/main` on 2026-09-13
+(the three: `commit_replay.grade`, `scripts/factorial/grade.py`,
+`~/.expansion-bench/bench.py:grade`) — an inventory, not a measurement, and pre-`crb`
+apparatus]`. An instrument that an NHS organisation must be able to audit — and
 that a second team must be able to re-run to check our numbers — has to be small, have no
 hidden side effects on import, and depend on nothing whose behaviour changes under it.
 Python 3.12 ships `subprocess`, `hashlib`, `json`, `dataclasses`, `pathlib`, `re` and

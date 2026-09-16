@@ -243,8 +243,8 @@ def cell_out(c: CapabilityCell) -> CapabilityCellSplitOut:
         n_lint_evaluated=s.n_lint_evaluated,
         model_n=s.model_n,
         model_point=None if c.model_point is None else round(c.model_point, 4),
-        model_ci_low=round(s.model_ci.low, 4),
-        model_ci_high=round(s.model_ci.high, 4),
+        model_ci_low=None if c.model_point is None else round(s.model_ci.low, 4),
+        model_ci_high=None if c.model_point is None else round(s.model_ci.high, 4),
         failure_split=split_out(c),
     )
 
@@ -359,8 +359,12 @@ def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
                 label=c.label,
                 verification_tier=c.verification_tier or "automated-pass",
                 apparatus_versions=list(c.stats.apparatus_versions),
+                ci_high=round(c.stats.ci.high, 4),
+                belt_sets=list(c.belt_sets),
                 model_n=c.model_n,
                 model_point=None if c.model_point is None else round(c.model_point, 4),
+                model_ci_low=None if c.model_point is None else round(c.stats.model_ci.low, 4),
+                model_ci_high=None if c.model_point is None else round(c.stats.model_ci.high, 4),
                 failure_split=split_out(c),
             )
         )

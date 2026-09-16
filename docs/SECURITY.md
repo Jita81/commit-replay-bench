@@ -1,9 +1,14 @@
 # Security and threat model
 
 _Audience: the security reviewer of an organisation self-hosting Commit Replay Bench (crb).
-Every control below names the code that implements it. Statements about behaviour are
-**[measured]** where a test in this repository proves them, **[design]** where they are
-architectural commitments not yet covered by an end-to-end test._
+Every control below names the code that implements it. Statements about behaviour carry
+the repository's claim tags (docs/EVIDENCE-AND-CLAIMS.md §1): **[measured]** where a test
+in this repository proves them — for a security control the "n, method, apparatus" of a
+measured claim is the named test, what it exercises, and the release it runs in;
+**[hypothesis]** where the control is implemented but not yet covered by an end-to-end
+test; **[aspiration]** where it is designed for and not yet built. (Earlier editions wrote
+**[design]** for the second and third of these; read it as **[hypothesis]** where the code
+exists and **[aspiration]** where it does not.)_
 
 ## 1. What the system does, in security terms
 
@@ -40,8 +45,18 @@ credentials and the host, and **prove** that stored evidence has not been altere
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Nothing crosses the tenant boundary except calls to the model endpoint the operator
-configures. There is no telemetry, no update check, no licence phone-home. With the
+**What crosses the tenant boundary — the complete list.** Nothing leaves the deployment
+except these three flows, each to an endpoint the operator configures, and each carrying
+only what is named here:
+
+| Flow | Endpoint | What is sent | What is never sent |
+|---|---|---|---|
+| Builder / labeller / reviewer calls | the model endpoint (`CRB_OPENAI_BASE_URL` / Azure / Anthropic) | the task brief, the source files the builder reads in its worktree, tool results, the diff it writes | the held-out tests, the ledger, credentials, other repositories |
+| Repository clone and fetch | the repository's git remote (`repos.url`) | the git protocol; the push token only on an `https://` / `ssh` remote and only for factory delivery (§3.4 / `crb.factory.delivery`) | anything not in the git protocol |
+| Sign-in | the OIDC issuer (`CRB_OIDC__ISSUER`, https-only) | the authorisation code flow (PKCE), the ID-token validation against the issuer's JWKS | the session cookie, any repository content |
+
+There is no telemetry, no update check, no licence phone-home, and the opt-in federated
+export (ADR-0007) is a file the operator produces, never a call the product makes. With the
 builder in its container (ADR-0012) the model endpoint is reachable from exactly one
 process — the egress sidecar — and only for the hosts on the allowlist.
 

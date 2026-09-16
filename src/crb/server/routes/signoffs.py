@@ -1000,6 +1000,12 @@ def preview_signoff(
             belt_sets=list(cell.belt_sets),
             model_n=cell.model_n,
             model_point=None if cell.model_point is None else round(cell.model_point, 4),
+            model_ci_low=None
+            if cell.model_point is None or s is None
+            else round(s.model_ci.low, 4),
+            model_ci_high=None
+            if cell.model_point is None or s is None
+            else round(s.model_ci.high, 4),
             failure_split=FailureSplitOut(
                 builder_red=cell.n_builder_red,
                 budget=cell.n_budget,

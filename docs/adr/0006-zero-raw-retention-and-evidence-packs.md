@@ -76,9 +76,12 @@ not stored; transcripts were sometimes retained inline.
 The 2026-09-13 critical-friend review (§5 plays 05 and 07, action #3) found two gaps in
 what this ADR stores: a human cannot re-examine the diff the instrument accepted (the pack
 holds `diff_sha256` + counts), and a human's post-hoc finding on an accepted change has
-nowhere to live. The NHS public-repos measurement (2026-09-14, §4) confirmed the need:
-three of three clean patches were mechanically clean and plausibly not the PR a maintainer
-would merge as-is. The retention switch (`retain: {worktrees, transcripts}` on `POST /runs`,
+nowhere to live. The NHS public-repos measurement confirmed the need `[measured
+2026-09-14; n = 3 clean sighted patches (cobra), apparatus 2.2 / belt set v5; method: a
+human reading of the retained diffs against the repository's contribution standard —
+docs/reviews/2026-09-14-nhs-public-repos.md §4]`: three of three were mechanically clean
+and plausibly not the PR a maintainer would merge as-is (gofmt failures, two behavioural
+gaps, an API divergence). The retention switch (`retain: {worktrees, transcripts}` on `POST /runs`,
 655e732) left the artefacts behind; this amendment makes them reachable and gives the
 verdict a home. Three rules:
 

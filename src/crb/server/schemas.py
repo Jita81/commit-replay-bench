@@ -917,11 +917,16 @@ class RouteDecisionOut(BaseModel):
     n: int
     point: float
     ci_low: float
+    #: The upper Wilson bound — not an input to the rule (``ci_low`` routes) but served so a
+    #: client never mirrors an asymmetric interval from its lower bound (CodeRabbit on PR #6).
+    ci_high: float = 1.0
     false_q1: int
     oracle_strength: float | None
     policy_version: str
     verification_tier: str
     apparatus_versions: list[str]
+    #: The belt sets behind ``n`` (``v4`` / ``v5``…), the provenance every rendered rate keeps.
+    belt_sets: list[str] = []
 
 
 class RoutesResponse(BaseModel):

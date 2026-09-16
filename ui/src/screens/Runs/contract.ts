@@ -30,7 +30,7 @@
  *               (`derive_verdict`, `SEVERITY` — mirrored here),
  *               ui/src/screens/Runs/EvidenceDrawer.tsx
  *               (the Patch and Transcript tabs), ui/src/screens/Runs/ReviewPanel.tsx (the
- *               review form), ui/src/api/client.ts (`ApiError`, `API_BASE`)
+ *               review form), ui/src/api/client.ts (`ApiError`, `fetchBounded`, `errorFromResponse`)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx (SHA-256 test vectors, the diff
  *               parser's counting rule, `deriveVerdict`, the anchor flow),
  *               ui/e2e/walkthrough/09-review.spec.ts (a real retained worktree end to end)
@@ -43,7 +43,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
-import { API_BASE, ApiError, api, qs } from '../../api/client'
+import { type ApiError, api, errorFromResponse, fetchBounded, qs } from '../../api/client'
 import type { Page } from '../../api/types'
 
 // ---------------------------------------------------------------------------
@@ -282,23 +282,11 @@ export interface RetainedPatch {
 /** `GET /grades/{row_hash}/patch` as bytes (not through `api<T>`, which parses JSON): hash the bytes here, read the `X-CRB-*` headers, and map a non-2xx to `ApiError` like the client does. */
 export async function fetchRetainedPatch(rowHash: string, signal?: AbortSignal): Promise<RetainedPatch> {
   const path = `/grades/${encodeURIComponent(rowHash)}/patch`
-  let res: Response
-  try {
-    res = await fetch(`${API_BASE}${path}`, { credentials: 'include', headers: { Accept: 'text/x-diff' }, signal })
-  } catch (err) {
-    throw new ApiError(0, 'network', 'Could not reach the server.', { path, cause: err instanceof Error ? err.message : String(err) })
-  }
-  if (!res.ok) {
-    type Envelope = { error?: { code?: string; message?: string; detail?: Record<string, unknown> } }
-    let parsed: Envelope | null = null
-    try {
-      parsed = (await res.json()) as Envelope
-    } catch {
-      parsed = null
-    }
-    const e = parsed?.error
-    throw new ApiError(res.status, e?.code ?? 'invalid_response', e?.message ?? res.statusText, e?.detail ?? { path })
-  }
+  // The shared client's two guarantees, kept here too: a stall is bounded (`timeout`,
+  // never an infinite spinner) and a half-shaped error body is `invalid_response`, not a
+  // fabricated code (CodeRabbit on PR #6).
+  const res = await fetchBounded(path, { headers: { Accept: 'text/x-diff' } }, { signal })
+  if (!res.ok) throw await errorFromResponse(res, path)
   const bytes = new Uint8Array(await res.arrayBuffer())
   const sha256 = sha256Hex(bytes)
   const diffSha256 = res.headers.get(PATCH_HEADERS.diffSha) ?? ''

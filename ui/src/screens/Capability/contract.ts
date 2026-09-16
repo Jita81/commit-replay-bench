@@ -119,8 +119,9 @@ export interface CapabilityCellSplit extends CapabilityCell {
   model_n: number
   /** clean / (clean + builder_red); `null` when no fair, finished attempt exists. */
   model_point: number | null
-  model_ci_low: number
-  model_ci_high: number
+  /** `null` with `model_point` when `model_n == 0` — an unmeasured rate has no interval. */
+  model_ci_low: number | null
+  model_ci_high: number | null
   failure_split: FailureSplit
 }
 
@@ -138,6 +139,9 @@ export interface RouteDecisionWithControls extends RouteDecision {
   controls: ControlsVerdict | null
   model_n: number
   model_point: number | null
+  /** `null` with `model_point` when `model_n == 0`. */
+  model_ci_low: number | null
+  model_ci_high: number | null
   failure_split: FailureSplit
 }
 
@@ -158,9 +162,10 @@ export interface FailureSplitReport extends FailureSplit {
   ci_low: number
   ci_high: number
   model_n: number
-  model_point: number
-  model_ci_low: number
-  model_ci_high: number
+  /** `null` (with both bounds) when `model_n == 0` — unmeasured, never a zero row. */
+  model_point: number | null
+  model_ci_low: number | null
+  model_ci_high: number | null
   cost_known: number
   cost_unknown: number
   kinds: FailureKind[]
@@ -221,7 +226,12 @@ export interface ControlsDisplay {
 }
 
 /** The controls pill: passed / FAILED / thin k of N / escaped / unmeasured. */
-export function controlsDisplay(v: ControlsVerdict | null | undefined): ControlsDisplay {
+/**
+ * `minShare` is the policy's `min_controls_share` (the bar the server applied) — passed in
+ * by every caller that has the policy so the explanation never restates a UI constant
+ * (CodeRabbit on PR #6); the default is only for a caller with no policy in hand.
+ */
+export function controlsDisplay(v: ControlsVerdict | null | undefined, minShare = 0.5): ControlsDisplay {
   if (!v || !v.measured) {
     return { label: 'controls: unmeasured', tone: 'muted', glyph: '·', describe: 'Negative controls: never run for this repo — deliver is withheld until a controls run passes.' }
   }
@@ -234,7 +244,7 @@ export function controlsDisplay(v: ControlsVerdict | null | undefined): Controls
     case 'escaped':
       return { label: `controls: ${v.escapes} escape${v.escapes === 1 ? '' : 's'}`, tone: 'amber', glyph: '⚠', describe: `Negative controls: passed, but ${v.escapes} measurement control(s) graded clean — the oracle cannot tell an implementation from a cheat; deliver withheld until re-measured${run}${partial}.` }
     case 'thin':
-      return { label: `controls: thin ${kn}`, tone: 'amber', glyph: '◐', describe: `Negative controls: passed, but only ${kn} control rows were constructible (${Math.round(v.share * 100)}% < 50%) — the load-bearing ones never ran; deliver withheld${run}${partial}.` }
+      return { label: `controls: thin ${kn}`, tone: 'amber', glyph: '◐', describe: `Negative controls: passed, but only ${kn} control rows were constructible (${Math.round(v.share * 100)}% < ${Math.round(minShare * 100)}%) — the load-bearing ones never ran; deliver withheld${run}${partial}.` }
     default:
       return { label: `controls: passed ${kn}`, tone: 'green', glyph: '✓', describe: `Negative controls: passed, ${kn} constructible, ${v.escapes} escape(s)${run}${partial}.` }
   }

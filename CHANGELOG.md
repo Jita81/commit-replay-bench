@@ -8,6 +8,67 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-16 — CodeRabbit batch 4 (the front end and the documents; PR #6's findings)
+
+The `ui/**` instruction is "every number rendered carries its n, its interval and its
+apparatus; a route or verdict is read from the API, never decided in the UI; unmeasured is
+never a fabricated zero". The `docs/**` instruction is the claim schema. What changed:
+
+- **The API serves what a rendered rate needs.** `/routes` decisions carry `ci_high`,
+  `belt_sets`, `model_ci_low` / `model_ci_high`; `/failure-split`, the capability cells and
+  the sign-off evidence serve `model_point` and both bounds as **`null`** when `model_n ==
+  0` (never `0.0` / `[0, 1]`); `/learn/refusals` serves `share {rows_total, rows_protocol,
+  share, ci_low, ci_high}` and `by_apparatus[]` beside `protocol_share`.
+- **Routing page**: the interval bar draws the server's asymmetric Wilson interval (the
+  upper bound used to be mirrored from the lower one); every bar's accessible label carries
+  apparatus + belt set.
+- **Capability page**: the selected cell is a key resolved against the current response
+  (a repo / projection / filter change no longer keeps a stale detail with the new repo's
+  ledger link); a projected dimension with no filter renders every cell behind a class×size
+  slot, stacked and labelled (a `Map` used to keep an arbitrary one); the cell label and the
+  bar carry `95% CI … apparatus 2.2 · belts v5`; the model rate shows its interval; the
+  coverage tile says why it has no interval (a coverage of the change profile, not a sampled
+  rate); the controls pill and tile take the policy's `min_controls_share` instead of a
+  literal `50%`.
+- **Sign-off page**: the deliver bars come from the capability map's policy (`min_point`,
+  `min_ci_low`), never `0.9` / `0.8` in the UI; the controls explanation takes the sign-off
+  policy's share.
+- **Oracle page**: the gate renders the API's `verdict` (the reduction `/capability-map` and
+  `/routes` gate on) as its first criterion; the counts are supporting detail. Task strength
+  shows its Wilson interval from the served kill / mutant counts.
+- **Learn page**: the instrument-caused share is shown per apparatus version with its
+  interval; a blended number is never the headline.
+- **Repo detail**: the profile histogram states it is a census (an absent cell is a measured
+  0 of N examined commits, with that reading in the cell's title — not `NOT_YET_MEASURED`,
+  which is the capability map's word for a cell nobody has measured); gold-clean carries
+  a Wilson interval. The config form's change baseline is the STORED config, so a repo
+  registered without a runner can be saved over (the normalised baseline hid the
+  substitution and Save stayed disabled).
+- **Task detail**: a review opens the pack the review recorded, not the grade row's.
+- **Runs**: `fetchRetainedPatch` goes through the shared `fetchBounded` + `errorFromResponse`
+  (timeout → `ApiError('timeout')`, a half-shaped body → `invalid_response`).
+- **Repo picker** walks every `/repos` page (`useAllRepos`); the first page no longer
+  hides a repository.
+- **Factory page** matches the shipped contract: `/tasks` is a bare list, a 404 is "no
+  backlog registered — POST /factory/{repo}/backlog", the types mirror `FactoryTaskOut`,
+  and the screen has a test (`FactoryPage.test.tsx`); the "phase P6 not enabled" state is
+  gone.
+- **Documents**: `POST /runs` and the `runs.kind` column list `label` and `factory`; the
+  OIDC callback example is the real `/api/v1/auth/oidc/callback`; SECURITY lists every
+  flow that crosses the tenant boundary (model endpoint, git remote, OIDC issuer — what is
+  sent, what never is) and adopts the repository's three claim tags; ADR-0002 no longer
+  claims a filtered export verifies standalone (it says what does); the census document
+  splits the two `deliver` cells by mode × belt set (sighted v4 ≈ 89 %, blind ≈ 85 %, legacy
+  sighted ≈ 97 % — the blended 94.4 % is not a rate to quote) and its claim example follows;
+  ADR-0011's 4-of-10 `tsc` reading is split sighted 3/9, blind 1/1 with n, method and
+  apparatus; the measured claims in ADR-0001/0003/0004/0006/0009/0010 carry n, method and
+  apparatus, and ADR-0002/0005/0008's inspections are tagged as inspections.
+
+Declined from this slice: intervals on counts, costs and durations (the Runs page's
+progress, cost, event and duration figures are exact counts and sums, not sampled rates —
+a Wilson interval on them would be fabricated context); the `pyproject` matrix / entry-point
+/ coverage findings (review artefacts of a slice without `src/`).
+
 ### 2026-09-16 — CodeRabbit batch 3 (the test suite; PR #5's findings)
 
 The tests are the evidence that the instrument is honest, so a test that cannot fail is a

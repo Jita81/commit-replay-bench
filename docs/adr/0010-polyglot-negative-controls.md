@@ -14,7 +14,10 @@ Three of them (`gold`, `noop`, `test_tamper`) are language-agnostic. The other f
 Python-AST transforms, so on every non-Python repository they read `not_constructible`. The
 2026-09-13 critical-friend review (§4.2 reading 6, action #6) measured the consequence on the
 live stack: spf13/cobra and koajs/koa each wrote 56 control rows with **32 `not_constructible`**
-[measured], and the gate said "passed" with exactly the load-bearing controls untested:
+`[measured 2026-09-13; apparatus 2.0, controls policy `controls-gate.v1`; method: a `crb`
+`controls` run — the seven controls over 8 tasks per repo, verdict per row from
+`crb.core.oracle.controls`; n = 56 rows per repo]`, and the gate said "passed" with exactly
+the load-bearing controls untested:
 
 - `regression` is the control that proves belt 3 (no new failures) is load-bearing rather than
   ornamental;
