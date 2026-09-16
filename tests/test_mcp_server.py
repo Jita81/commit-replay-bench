@@ -33,10 +33,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.fixtures.server_seed import ALPHA, ROOT_PW, USER_PW, USERS, make_env
 
 from crb.mcp import INSTRUCTIONS, CrbApi, CrbApiError, build_server, tool_names
 from crb.server.app import API_PREFIX
+from fixtures.server_seed import ALPHA, ROOT_PW, USER_PW, USERS, make_env
 
 pytestmark = pytest.mark.timeout(120)
 
