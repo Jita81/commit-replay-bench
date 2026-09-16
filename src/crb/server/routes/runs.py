@@ -68,7 +68,7 @@ from crb.builders.claude_code import default_model as claude_code_default_model
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
 from crb.observability.events import StepEvent, StepStatus
-from crb.server.auth import OperatorDep, ViewerDep
+from crb.server.auth import OperatorDep, ViewerDep, require_role_now
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.schemas import (
@@ -548,18 +548,35 @@ def create_run(
 ) -> RunOut:
     if db.get(Repo, body.repo) is None:
         raise ApiError(404, "not_found", f"no repo {body.repo!r}")
-    if body.backlog_hash is not None and body.kind != KIND_FACTORY:
-        raise ApiError(422, "validation_error", "backlog_hash applies to factory runs only")
+    factory_only = {
+        "backlog_hash": body.backlog_hash,
+        "deliver": body.deliver,
+        "deliver_override": body.deliver_override,
+        "max_rework": body.max_rework,
+    }
+    if body.kind != KIND_FACTORY and any(v is not None for v in factory_only.values()):
+        named = sorted(k for k, v in factory_only.items() if v is not None)
+        raise ApiError(422, "validation_error", f"{named} apply to factory runs only")
     api = require_jobs()
     run = new_run(body, actor=operator.id)
     if body.kind == KIND_FACTORY:
         # Pin the backlog the run will work at ENQUEUE time; the worker re-verifies the
         # stamp on claim. Closes the window between the register route's
         # "no active run" check and this enqueue (CodeRabbit on PR #4, 2026-09-15).
-        run.params_json = {
+        params = {
             **dict(run.params_json or {}),
             "backlog_hash": active_backlog_hash(settings, body.repo, body.backlog_hash),
         }
+        if body.deliver is not None:
+            params["deliver"] = bool(body.deliver)
+        if body.max_rework is not None:
+            params["max_rework"] = int(body.max_rework)
+        if body.deliver_override:
+            # the route gate's override is an APPROVER's act, stamped with their identity
+            # (external review 2026-09-16 point 36 → DL-038)
+            require_role_now(operator, "approver")
+            params["deliver_override_by"] = operator.id
+        run.params_json = params
     run = api.enqueue(factory, run)
     stored = db.get(Run, run.id)
     return run_out(db, stored if stored is not None else run)

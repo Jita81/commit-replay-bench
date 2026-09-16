@@ -61,6 +61,13 @@ default**.
 - **Not a proof of semantic correctness.** A green suite proves the change satisfies the
   suite. `clean` is a mechanical result. See [EVIDENCE-AND-CLAIMS](docs/EVIDENCE-AND-CLAIMS.md)
   for what may and may not be said on that basis.
+- **Not a licence to deploy.** `deliver` is a route for a *class* of change in one
+  repository: its measured cell clears the published bar (n ≥ 10, point ≥ 0.90, Wilson-low
+  ≥ 0.80, false-Q1 = 0, oracle ≥ 0.80, controls passed), so the factory may open a branch
+  and a pull request for such changes under human review — and only for such changes: the
+  map gates the factory ([ADR-0003](docs/adr/0003-one-routing-rule.md), amendment
+  2026-09-16). It never means a change is safe to merge or deploy unattended; a human
+  merges, and the measurement says nothing about security, operations or business fit.
 
 ---
 
@@ -236,9 +243,12 @@ per-repository or per-model capability claim.
   repair — flipped 3 of 4 formatter misses); the remaining misses are the model's, not the
   budget's (§9).
 - **Blind is a different measurement, and the honest one for "could it have done the
-  PR":** the same 14 NHS tasks read 12/14 sighted and **2/14 blind** at rung 0 — from the
-  commit message alone the builder cannot reconstruct what the maintainers' tests will check
-  (§10). The blind rows are stamped as their own mode and never pooled with sighted ones.
+  PR":** the same 14 NHS tasks read 12/14 sighted and **2/14 blind** at rung 0 (25 turns /
+  25 tool calls / 15 min / $1, the pre-flight arm, one attempt per task, Sonnet 5, apparatus
+  2.2) — from the commit message alone the builder cannot reconstruct what the maintainers'
+  tests will check (§10). The blind rows are stamped as their own mode and never pooled with
+  sighted ones; the number is that repository's under that budget, not a property of the
+  model.
 
 ## Status by phase
 

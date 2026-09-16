@@ -125,6 +125,7 @@ from crb.builders.adapter import (
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.budget import budget_for_rung
 from crb.builders.labeller import make_labeller
+from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
 from crb.core.execution import DockerSettings, Executor, SandboxUnavailable, make_executor
 from crb.core.git import (
@@ -167,6 +168,8 @@ from crb.factory.testfirst import AuthoredTest
 from crb.observability import metrics
 from crb.observability.events import Emitter, JsonlSink, MultiSink, StepStatus
 from crb.server.factory_state import FactoryHome
+from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
+from crb.server.routes.oracle import latest_controls_verdict
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
@@ -1250,6 +1253,34 @@ class Worker:
         self._progress(ctx, len(scores), total)
         return (STATUS_CANCELLED if cancelled else STATUS_SUCCEEDED), counts, ""
 
+    def _route_lookup(self, repo: str) -> Callable[[BacklogItem], dict[str, Any] | None]:
+        """The capability map's decision for an item's (class × size) cell — computed once,
+        lazily, from the same signed map ``GET /capability-map`` serves (sighted rows,
+        current apparatus, the repo's latest controls verdict, sign-offs overlaid). ``None``
+        for a cell nobody has measured: the loop withholds delivery on it (DL-038)."""
+        cache: dict[str, dict[str, Any] | None] = {}
+        computed: dict[str, bool] = {}
+
+        def compute() -> None:
+            rows = rows_for_apparatus(
+                rows_for_mode(self.ledger.rows(repo=repo), "sighted"), "current"
+            )
+            with self.factory() as s:
+                cmap, _ = signed_map(
+                    rows, PROJECTION_CLASS_SIZE, s, repo, controls=latest_controls_verdict(s, repo)
+                )
+            for c in cmap.cells:
+                if c.decision is not None:
+                    cache[f"{c.key.capability_class}|{c.key.size}"] = c.decision.to_dict()
+            computed["done"] = True
+
+        def lookup(item: BacklogItem) -> dict[str, Any] | None:
+            if not computed:
+                compute()
+            return cache.get(f"{item.capability_class}|{item.size_estimate}")
+
+        return lookup
+
     def _run_factory(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
         """Forward mode (P6): run the repo's FROZEN backlog through the governed loop
         (:class:`crb.factory.loop.FactoryLoop`) — readiness gate, RED proof, build ladder
@@ -1323,6 +1354,10 @@ class Worker:
             budget=budget,
             gap_ledger=home.gap_ledger(),
             deliver=bool(p.get("deliver", False)),
+            # the route gate: the same signed (class × size) map the API serves, under the
+            # repo's latest controls verdict, sighted rows of the current apparatus
+            route_decision_for=self._route_lookup(run.repo),
+            deliver_override_by=str(p.get("deliver_override_by", "") or ""),
             run_id=run.id,
             actor=run.actor,
             timeout=ctx.timeout,

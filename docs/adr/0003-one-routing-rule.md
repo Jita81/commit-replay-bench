@@ -141,6 +141,44 @@ latest measurement and is reported as such — it is never silently upgraded to 
 one. Every decision records `controls.run_id` and `controls.created` so an auditor can
 re-read the report the route was taken under.
 
+## Amendment (2026-09-16) — the rule gates the factory, and a policy names its bar
+
+**Context.** The external review of 2026-09-16 (docs/reviews/2026-09-16-external-assessment.md,
+points 9 and 36) found two gaps between what this ADR says and what the code did. (1) The
+forward-mode factory delivered any clean build when `deliver` was on: the route decision was
+rendered in the pull-request body but never consulted — the capability map described the
+factory's boundary without enforcing it. (2) A `RoutingPolicy` could be built with looser
+thresholds under the unchanged published version string, so a decision could read
+`routing.v1` while clearing a lower bar, and a decision carried only the version name, not the
+numbers.
+
+**Decision.**
+
+1. **The route gates delivery.** `FactoryLoop._deliver` asks the capability map for the
+   item's (class × size) cell — the same signed map `GET /capability-map` serves, sighted rows
+   of the current apparatus under the repository's latest controls verdict — and opens a
+   branch and pull request only when it reads `deliver`. Any other route, or a cell nobody has
+   measured, withholds delivery: the build is still graded and reviewed, the withholding is a
+   `delivery.refused` event carrying the measured route, its reason code and the policy
+   version, and no branch is pushed. An **approver** may override the gate for one run
+   (`POST /runs {kind: factory, deliver: true, deliver_override: true}` — 403 for any lower
+   role); the override is itself a `route.decided` event naming who overrode and the route
+   they overrode, so the chain shows the human act, never a silent bypass.
+2. **A policy names its bar.** `RoutingPolicy` refuses to be constructed looser than the
+   published defaults on any clause under `POLICY_VERSION`; loosening needs its own version
+   string (`crb route --policy-json '{"min_n": 3}'` is refused until it carries `"version"`).
+   Tightening keeps the name — the rule holds and more. Every `RouteDecision` now carries
+   `policy_thresholds` (the numbers) beside `policy_version` (the name), the symmetry
+   `SignoffPolicy` already had.
+
+**Consequences.** `deliver` on the map is now what it says: the boundary the factory
+operates inside. A deployment that wants to ship under a relaxed bar can, and every decision
+it produces says so by name and by number. The override path exists because an organisation
+may have grounds the instrument cannot see; it is an accountable act, not a switch. Tests:
+`tests/test_factory_loop.py` (withheld on `human`, withheld on no measurement, override on the
+record), `tests/test_worker.py` (the worker feeds the signed map), `tests/test_routing.py`
+(naming rule, thresholds stamped), `tests/test_server_routes_factory.py` (approver-only).
+
 ## Alternatives considered
 
 - **Keep both rules and report both.** Rejected: two bars invite choosing the one that

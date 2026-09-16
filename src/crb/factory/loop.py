@@ -60,6 +60,7 @@ from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.ledger import JsonlLedger
 from crb.core.redact import redact_and_cap
+from crb.core.routing import ROUTE_DELIVER as ROUTE_DELIVER_WORD
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig
 from crb.factory.backlog import KIND_OPERATOR, Backlog, BacklogError, BacklogItem
@@ -163,7 +164,14 @@ class FactorySpec:
     timeout: int = 0
     max_rework: int = 1
     rework_test: ReworkTestFn | None = None
+    #: The capability map's decision for the item's (class × size) cell — the ROUTE GATE on
+    #: delivery: a pull request is opened only when it reads ``deliver``. ``None`` (no map
+    #: available) withholds delivery like any other non-deliver route.
     route_decision_for: Callable[[BacklogItem], Mapping[str, Any] | None] | None = None
+    #: An approver's identity that overrides the route gate for THIS run; recorded on the
+    #: evidence chain as a ``route.decided`` event naming the measured route it overrode.
+    #: Empty = no override (the default).
+    deliver_override_by: str = ""
     keep_workspaces: bool = False
 
     def __post_init__(self) -> None:
@@ -404,6 +412,51 @@ class FactoryLoop:
             self._emit("delivery.skipped", item.id, status=StepStatus.SKIPPED, reason="opt-in off")
             return None, ""
         route = s.route_decision_for(item) if s.route_decision_for is not None else None
+        # THE ROUTE GATE (external review 2026-09-16, point 36 → DL-038): the capability
+        # map decides what the factory may deliver. A clean build in a cell that does not
+        # route `deliver` — or in a cell nobody has measured — is built, graded and
+        # reviewed, but no pull request is opened; the withholding and the measured route
+        # are on the evidence chain. An approver may override for one run, and that
+        # override is itself an event naming the route it overrode.
+        measured = str(route.get("route", "")) if route else ""
+        if measured != ROUTE_DELIVER_WORD:
+            why = (
+                "no capability-map route for the item's cell — nothing measured licenses delivery"
+                if route is None
+                else f"the cell routes {measured} ({route.get('reason_code') or route.get('reason', '')})"
+            )
+            if not s.deliver_override_by:
+                s.evidence.record_delivery_refused(
+                    item.id,
+                    f"route gate: {why}",
+                    pack_hash=final.pack_hash,
+                    measured_route=measured,
+                    reason_code=str((route or {}).get("reason_code", "")),
+                    policy_version=str((route or {}).get("policy_version", "")),
+                )
+                self._emit(
+                    "delivery.withheld",
+                    item.id,
+                    status=StepStatus.SKIPPED,
+                    reason=why,
+                    measured_route=measured,
+                )
+                return None, ""
+            s.evidence.record_route(
+                item.id,
+                ROUTE_DELIVER_WORD,
+                f"route gate overridden by {s.deliver_override_by}: {why}",
+                override_by=s.deliver_override_by,
+                measured_route=measured,
+                reason_code=str((route or {}).get("reason_code", "")),
+                policy_version=str((route or {}).get("policy_version", "")),
+            )
+            self._emit(
+                "delivery.override",
+                item.id,
+                override_by=s.deliver_override_by,
+                measured_route=measured,
+            )
         try:
             d = deliver(
                 self.repo,

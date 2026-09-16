@@ -17,8 +17,9 @@ Contents: [1 Context & scope](#1-context--scope) · [2 Constraints](#2-constrain
 `crb` answers one question for one organisation's repositories: **for which classes of
 change, at which sizes, can a given AI builder be trusted to deliver — and what is the
 evidence?** It does so by replaying a repository's real commits and grading the builder's
-attempt against the repository's own held-out tests under four mechanical belts
-([ADR-0001](adr/0001-four-belts-and-false-q1-at-write.md)).
+attempt against the repository's own held-out tests under four core mechanical belts plus
+the repository's own lint gate where it configures one
+([ADR-0001](adr/0001-four-belts-and-false-q1-at-write.md), [ADR-0011](adr/0011-repo-lint-belt.md)).
 
 **In scope (this product):** mining replayable commits; sandboxed test execution; the
 four-belt grader; evidence packs; the append-only hash-chained ledger; cell statistics; the
@@ -393,7 +394,7 @@ DB triggers forbidding `UPDATE` and `DELETE`, and rows carry `prev_hash` / `row_
 | `runs` | `id`, `repo`, `kind ∈ setup\|probe\|mine\|replay\|blind\|oracle\|controls\|label\|factory`, `status`, `builder`, `model`, `provider`, `budget`, `apparatus` (stamp JSON), `counts` | Orphaned `running` runs are resumed by the worker, never at API boot. |
 | `tasks` | `task_id` (sha), `repo`, `subject`, `authored`, `pool`, `size`, `capability_class` (resolved), `language`, `test_files`, `src_files`, `target_tests`, `belt_scope`, `baseline_failing`, `red_checked`, `gold_clean`, `gold_note`; in `spec_json` also `path_class`, `intent` (label or null), `class_source` | `TaskSpec.to_dict()` shape (§7.5). A `label` run rewrites `spec_json` + the `capability_class` column via the same upsert as `mine`. |
 | `attempts` | `id`, `run_id`, `task_id`, `builder`, `mode`, `turns`, `tokens_in/out`, `cost_usd`, `latency_s`, `transcript_ref` (opt-in) | `BuilderRef` shape. |
-| `grades` **(append-only)** | `row_id`, `repo`, `task_id`, `clean`, four belts, `disqualified`, `dq_reason`, `error`, `evidence_pack_hash`, `apparatus_version`, `belt_set ∈ v4\|v3-legacy`, `provenance`, cell fields, cost/latency, `actor`, `created`, `prev_hash`, `row_hash` | `GradeRow` — same invariants as the JSONL ledger, checked by a DB constraint **and** in Python before write. |
+| `grades` **(append-only)** | `row_id`, `repo`, `task_id`, `clean`, four belts, `disqualified`, `dq_reason`, `error`, `evidence_pack_hash`, `apparatus_version`, `belt_set ∈ v5\|v4\|v3-legacy`, `provenance`, cell fields, cost/latency, `actor`, `created`, `prev_hash`, `row_hash` | `GradeRow` — same invariants as the JSONL ledger, checked by a DB constraint **and** in Python before write. |
 | `events` **(append-only)** | `StepEvent` envelope columns | SSE reads from here. |
 | `oracle_scores` | `task_id`, `mutants`, `killed`, `invalid`, `equivalent`, `strength`, `budget`, `apparatus_version` | Hygiene-adjusted mutation strength (P2). |
 | `signoffs` **(append-only)** | `cell`, `route`, `actor`, `reason`, `revoked_by` | 409 on any false-Q1 in the cell; revocation is a new row. |
@@ -402,8 +403,7 @@ DB triggers forbidding `UPDATE` and `DELETE`, and rows carry `prev_hash` / `row_
 
 ### 7.4 Versioning
 
-`crb.core.version.__version__` is the package version; `APPARATUS_VERSION` (currently
-`2.0`) is the version of the **measuring instrument** — belt semantics, size table, class
+`crb.core.version.__version__` is the package version; `APPARATUS_VERSION` (currently `2.2`) is the version of the **measuring instrument** — belt semantics, size table, class
 taxonomy, routing rule. Changing any of those bumps `APPARATUS_VERSION` and needs an ADR.
 Rows and packs from different apparatus versions are never blended in a claim
 ([EVIDENCE-AND-CLAIMS §4](EVIDENCE-AND-CLAIMS.md)).

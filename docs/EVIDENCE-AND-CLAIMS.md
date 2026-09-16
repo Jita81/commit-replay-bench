@@ -70,6 +70,7 @@ The product shows, for every cell and every aggregate:
 | `n` | `CellStats.n` — eligible trials (not disqualified; `gold_clean` is not `False`). | The denominator is the claim. Disqualified and gold-failed tasks are shown beside `n`, not hidden in it. |
 | `clean`, `point` | `clean / n`. | The numerator and the proportion. |
 | `ci_low`, `ci_high` | Wilson score interval, z = 1.96 (`crb.core.stats.wilson_interval`). | Small `n` shows as a wide interval; `n ≤ 0` shows `[0, 1]`. |
+| the conditioning list | **Axes** a cell may be projected on: `process_step`, `capability_class`, `size`, `language`, `builder`, `model`, `provider` (`crb.core.ledger.CellKey`). **Filters**: repository, mode (sighted/blind), apparatus version. **Stamps** on every row: belt set, runner + services, executor posture, corpus provenance, routing policy version **and thresholds**, oracle strength. **Absent**: a context condition (the brief is fixed per mode); process is a builder suffix (`+preflight`), not an axis. | A number is conditional on all of these; what is absent cannot be claimed to have been controlled. |
 | `false_q1` | Read-time re-derivation. | Must display 0; anything else is a stop condition. |
 | `disqualified`, `errors` | Counts. | A harness bug shows here, never as a higher pass rate. |
 | `cost_usd_mean`, `latency_s_mean` | Means over trials that recorded them. | Economics travel with quality. |
@@ -205,7 +206,54 @@ and may only be quoted as "signed before `signoff-policy.v1`"; a record signed u
 `require_oracle_measured`) and may only be quoted as "signed under `signoff-policy.v1`
 — oracle not required to be measured".
 
+### 6b. Domain of validity — what the corpus can and cannot say
+
+The corpus is, by construction, commits that couple a source change to a test change within
+the pool caps (`crb.core.mine.pool_caps`: standard 1–3 source files and ≤ 6 files in all;
+hard 4–8 and ≤ 14) whose target tests are RED at the parent and GREEN with the commit's own
+sources, on repositories whose suite runs in the sandbox. Every rate from it is a rate over
+**that** population. It says nothing about:
+
+- changes that were never encoded as a test (on our own repository 46 of 242 non-merge
+  commits are source-only — docs/reviews/2026-09-16-dogfood.md §3);
+- architecture, requirements ambiguity, migrations, operational and security design, UX and
+  product judgement — work whose result is not a source+test commit;
+- the original engineering reasoning: a builder sees the commit's subject and description
+  (blind) or its tests (sighted), never the ticket, the conversation or the maintainer's
+  tacit knowledge, so a rate measures reproduction of the observable result from the
+  available information, not the reasoning that produced it (the upstream spec-lever finding:
+  blind-authored facts 68.8 % ≈ bare 72.9 %; docs/reviews/2026-09-13-critical-friend.md);
+- sizes beyond the caps, and commits the miner skipped (merges, gold-dirty).
+
+A claim that steps outside this population (a throughput headline, "AI can do our
+engineering", a rate on XL work) is not licensed by anything in the ledger.
+
+### 6c. The evidence ladder — the chain proves integrity, not truth
+
+The hash chain proves that what was recorded was not altered afterwards; it does not prove
+that what was recorded is true. Evidence ranks, weakest first:
+
+1. a builder's self-report — never consulted by anything;
+2. a structured event (the StepEvent stream) — what a stage said happened;
+3. captured, redacted output in the evidence pack — what the runner printed;
+4. an independent reproduction — the factory reviewer's belt re-run in a fresh tree, a
+   human review anchored to the diff bytes (`ReviewRecord.patch_sha256_reviewed`);
+5. the hash chain over all of it — that none of the above changed since.
+
+"Hash-chained" therefore means "unaltered", never "verified"; a verdict is verified by rung
+4, and the product's own claim of a clean row rests on rungs 3–5 together.
+
 ## 7. What must never be said
+
+- **Any throughput headline** (changes or stories per hour) derived from this benchmark.
+  The only rate-of-work numbers it licenses are verified changes per unit time and human
+  hours per verified change, each with `n`, mode, builder and apparatus — and the ledger
+  records neither human hours nor merge outcomes yet (DL-038, backlog B-9).
+- That mutation strength measures specification completeness or production safety. It
+  measures whether the **target tests** notice crude faults on the changed lines: a suite can
+  be strong on what it asserts and silent on what it never mentions (cobra #1559,
+  docs/reviews/2026-09-13-critical-friend.md §3.2), and nothing in the instrument observes
+  the running system.
 
 - **"Delivers unseen software correctly 97.5% of the time."** — or any rate from a sighted,
   retrospective corpus presented as blind or prospective capability. The permitted form is

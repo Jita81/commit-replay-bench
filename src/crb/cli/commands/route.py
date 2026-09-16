@@ -76,7 +76,12 @@ def load_policy(spec: str) -> RoutingPolicy:
         raise CliError(f"--policy-json unknown field(s) {unknown}; known: {sorted(known)}")
     if "granularize_sizes" in d:
         d["granularize_sizes"] = tuple(str(s) for s in d["granularize_sizes"])
-    return RoutingPolicy(**d)
+    try:
+        return RoutingPolicy(**d)
+    except ValueError as e:
+        # a policy looser than the published rule must carry its own "version" — every
+        # decision names the bar it cleared (external review 2026-09-16, point 9)
+        raise CliError(f"--policy-json: {e}") from e
 
 
 def cmd_route(args: argparse.Namespace) -> int:

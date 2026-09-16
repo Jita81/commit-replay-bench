@@ -233,9 +233,29 @@ def _rig(pyrepo: pr.PyRepo, tmp_path: Path, **overrides: Any) -> Rig:
         "open_pr_fn": open_pr,
         "run_id": "run-1",
         "actor": "tester",
+        # the route gate: delivery tests that want a PR must say the cell routes `deliver`
+        # (the map's word), the way the worker feeds the map's decision to the loop
+        "route_decision_for": lambda item: DELIVER_ROUTE,
     }
     kw.update(overrides)
     return Rig(pyrepo, fl.FactorySpec(**kw), sink, evidence, ledger, builder, author, pushes, prs)
+
+
+#: A capability-map decision as the worker hands it to the loop (``RouteDecision.to_dict``).
+DELIVER_ROUTE: dict[str, Any] = {
+    "route": "deliver",
+    "reason": "n=12 point=1.000 ci_low=0.76 false_q1=0",
+    "reason_code": "deliver",
+    "policy_version": "routing.v1",
+    "n": 12,
+}
+HUMAN_ROUTE: dict[str, Any] = {
+    "route": "human",
+    "reason": "oracle strength 0.58 < 0.80 — green cannot license auto-delivery",
+    "reason_code": "oracle_weak",
+    "policy_version": "routing.v1",
+    "n": 12,
+}
 
 
 # --- spec guards ------------------------------------------------------------------
@@ -399,6 +419,74 @@ def test_delivery_on_opens_branch_and_pr_then_reviews(pyrepo: pr.PyRepo, tmp_pat
     assert pyrepo.repo.rev_parse("main") == pyrepo.docs_sha  # never main
     kinds = rig.kinds("I-1")
     assert fe.EV_DELIVERY in kinds and kinds.index(fe.EV_DELIVERY) < kinds.index(fe.EV_VERDICT)
+
+
+# --- the route gate (DL-038) --------------------------------------------------------
+
+
+def _creds() -> StaticProvider:
+    return StaticProvider(
+        GitCredentials(remote="https://github.com/acme/calc.git", token="ghp_" + "b" * 36)
+    )
+
+
+def test_route_gate_withholds_delivery_when_the_cell_does_not_route_deliver(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The capability map decides what the factory may deliver: a clean build in a cell
+    that routes `human` is built, graded and reviewed, but no branch is pushed and no PR
+    opened; the withholding names the measured route on the evidence chain."""
+    rig = _rig(
+        pyrepo, tmp_path, deliver=True, creds=_creds(), route_decision_for=lambda item: HUMAN_ROUTE
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is None  # reviewed, not delivered
+    assert not rig.pushes and not rig.prs
+    refused = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    assert len(refused) == 1
+    ev = refused[0].payload
+    assert ev["reason"].startswith("route gate: the cell routes human (oracle_weak)")
+    assert ev["measured_route"] == "human" and ev["reason_code"] == "oracle_weak"
+    assert ev["policy_version"] == "routing.v1"
+    assert fe.EV_DELIVERY not in rig.kinds("I-1")
+    assert pyrepo.repo.rev_parse("main") == pyrepo.docs_sha
+
+
+def test_route_gate_withholds_delivery_when_nothing_is_measured(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds(), route_decision_for=None)
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is None
+    assert not rig.pushes and not rig.prs
+    ev = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)[0].payload
+    assert "no capability-map route" in ev["reason"] and ev["measured_route"] == ""
+
+
+def test_route_gate_override_by_an_approver_is_itself_on_the_record(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        route_decision_for=lambda item: HUMAN_ROUTE,
+        deliver_override_by="approver:ada",
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
+    assert len(rig.pushes) == 1 and len(rig.prs) == 1
+    routes = [e.payload for e in rig.evidence.events_for("I-1", fe.EV_ROUTE)]
+    override = [r for r in routes if r.get("override_by")]
+    assert len(override) == 1
+    assert override[0]["route"] == "deliver" and override[0]["measured_route"] == "human"
+    assert (
+        override[0]["override_by"] == "approver:ada" and override[0]["reason_code"] == "oracle_weak"
+    )
+    assert "route gate overridden by approver:ada" in override[0]["reason"]
+    kinds = rig.kinds("I-1")
+    assert kinds.index(fe.EV_ROUTE) < kinds.index(fe.EV_DELIVERY)
 
 
 # --- rework -------------------------------------------------------------------------

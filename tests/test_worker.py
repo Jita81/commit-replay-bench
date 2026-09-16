@@ -1128,6 +1128,40 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     # the run's StepEvents carry stage=factory and the item id
     actions = [e.action for e in h.events(run.id) if e.stage == "factory"]
     assert "item.start" in actions and "review.verdict" in actions and "item.done" in actions
+    # THE ROUTE GATE (DL-038): with delivery opted in, the worker hands the loop the
+    # capability map's decision for the item's cell — the SAME signed map the API serves.
+    # The first factory run above wrote one sighted process_step=factory row into the
+    # fixture's bug.fix XS cell, so the map now says `calibrate (n_below_min)` for it →
+    # delivery WITHHELD (recorded with the measured route, no PR attempted), and the item
+    # is still built, reviewed and accepted
+    h.enqueue("factory", ladder_json=["fake:m0"], params_json={"deliver": True})
+    gated = h.run_one()
+    assert gated.status == STATUS_SUCCEEDED, gated.error
+    assert gated.counts_json["by_status"] == {"accepted": 1}
+    refused = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED]
+    assert refused and refused[-1].payload["reason"].startswith(
+        "route gate: the cell routes calibrate"
+    )
+    assert refused[-1].payload["measured_route"] == "calibrate"
+    assert refused[-1].payload["reason_code"] == "n_below_min"
+    assert refused[-1].payload["policy_version"] == "routing.v1"
+    withheld = [e.action for e in h.events(gated.id) if e.stage == "factory"]
+    assert "delivery.withheld" in withheld and "delivery.opened" not in withheld
+    # an approver's override reaches delivery — which then fails closed on the missing
+    # credentials, the next gate in line — and the override is on the evidence chain
+    h.enqueue(
+        "factory",
+        ladder_json=["fake:m0"],
+        params_json={"deliver": True, "deliver_override_by": "approver:ada"},
+    )
+    overridden = h.run_one()
+    assert overridden.status == STATUS_SUCCEEDED
+    assert overridden.counts_json["by_status"] == {"delivery_failed": 1}
+    routes = [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
+    assert routes and routes[-1].payload["override_by"] == "approver:ada"
+    assert "delivery.override" in [
+        e.action for e in h.events(overridden.id) if e.stage == "factory"
+    ]
     # a run queued against a backlog that was re-registered before the worker claimed it
     # fails closed on the pinned hash (the API stamps params.backlog_hash at enqueue)
     h.enqueue("factory", ladder_json=["fake:m0"], params_json={"backlog_hash": "f" * 64})

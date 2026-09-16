@@ -562,6 +562,16 @@ class RunCreateRequest(BaseModel):
     #: ``params.backlog_hash`` at enqueue and re-verified by the worker on claim, so a
     #: backlog re-registered between the two fails the run instead of being worked.
     backlog_hash: str | None = Field(default=None, min_length=8, max_length=64)
+    #: ``factory`` runs only. ``deliver``: open a branch + pull request for a clean build
+    #: (OFF by default; needs a credentials provider on the worker). Delivery is ROUTE-GATED:
+    #: it happens only when the item's (class × size) cell routes ``deliver`` on the
+    #: capability map; otherwise it is withheld and recorded (DL-038). ``deliver_override``:
+    #: an APPROVER's one-run override of that gate — the caller's identity is stamped into
+    #: ``params.deliver_override_by`` and onto the evidence chain. ``max_rework``: how many
+    #: review-driven rework cycles an item may take (default 1).
+    deliver: bool | None = None
+    deliver_override: bool | None = None
+    max_rework: int | None = Field(default=None, ge=0, le=5)
 
     @field_validator("kind")
     @classmethod

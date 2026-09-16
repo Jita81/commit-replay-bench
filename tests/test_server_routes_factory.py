@@ -208,3 +208,38 @@ def test_factory_run_pins_the_active_backlog_hash_at_enqueue(env: Env) -> None:
     # the pin is a factory-only field
     r = env.post("/runs", json={"repo": ALPHA, "kind": "mine", "backlog_hash": active})
     assert r.status_code == 422 and "factory runs only" in envelope(r)["message"]
+
+
+def test_factory_delivery_fields_and_the_approver_only_override(env: Env) -> None:
+    """`deliver` / `max_rework` are stored on the run; `deliver_override` needs an approver
+    and stamps the caller's identity into `params.deliver_override_by` (the route gate's
+    override is an approver's act, on the evidence chain — DL-038); none of them apply to
+    a non-factory run."""
+    login(env.client, "operator")
+    assert _register(env, [ITEM]).status_code == 201
+    body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "m"}
+    r = env.post("/runs", json={**body, "deliver": True, "max_rework": 2})
+    assert r.status_code == 201, r.text
+    with env.factory() as s:
+        run = s.get(Run, r.json()["id"])
+        assert run is not None
+        assert run.params_json["deliver"] is True and run.params_json["max_rework"] == 2
+        assert "deliver_override_by" not in run.params_json
+    # an operator may not override the route gate
+    r = env.post("/runs", json={**body, "deliver": True, "deliver_override": True})
+    assert r.status_code == 403 and envelope(r)["code"] == "forbidden"
+    # an approver may — and is named for it
+    login(env.client, "approver")
+    r = env.post("/runs", json={**body, "deliver": True, "deliver_override": True})
+    assert r.status_code == 201, r.text
+    with env.factory() as s:
+        run = s.get(Run, r.json()["id"])
+        assert run is not None and run.params_json["deliver_override_by"]
+        assert run.params_json["deliver_override_by"] == run.actor
+    # factory-only fields on another kind are refused, naming them
+    login(env.client, "operator")
+    r = env.post("/runs", json={"repo": ALPHA, "kind": "mine", "deliver": True, "max_rework": 1})
+    assert (
+        r.status_code == 422
+        and "['deliver', 'max_rework'] apply to factory runs only" in envelope(r)["message"]
+    )
