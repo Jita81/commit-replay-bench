@@ -167,6 +167,28 @@ def test_sealed_tree_equals_parent_and_tests_are_overlaid(
     )
 
 
+def test_sealed_checkout_carries_a_prior_attempts_edits_for_a_repair(
+    pyrepo: pr.PyRepo, trial: Workspace, tmp_path: Path
+) -> None:
+    """The pre-flight's repair call re-seals: without carrying the first attempt's source
+    edits the repair started from the bare parent and silently discarded them (CodeRabbit on
+    PR #3, 2026-09-15). Carried files are the sealed BASE, so the repair's diff is only the
+    repair's."""
+    (trial.root / pr.SRC).write_text(pr.SRC_FEAT + "UGLY = 1\n", encoding="utf-8")  # attempt 1
+    s = SealedCheckout.create(
+        trial, tmp_path / "sealed2", test_files=[pr.TEST_SUBTRACT], carry_files=[pr.SRC]
+    )
+    try:
+        assert (s.root / pr.SRC).read_text() == pr.SRC_FEAT + "UGLY = 1\n"
+        assert s.workspace().touched_files() == [pr.TEST_SUBTRACT]  # the edits are the base
+        (s.root / pr.SRC).write_text(pr.SRC_FEAT, encoding="utf-8")  # the repair
+        assert [c.path for c in s.diff_against_parent()] == [pr.SRC, pr.TEST_SUBTRACT]
+        back = s.copy_back(trial)
+        assert pr.SRC in back.copied and (trial.root / pr.SRC).read_text() == pr.SRC_FEAT
+    finally:
+        s.remove()
+
+
 def test_sealed_checkout_blind_mode_has_no_tests(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     ws = pyrepo.trial(tmp_path / "blind", overlay_tests=False)
     try:
@@ -451,18 +473,21 @@ def test_stream_stats_translates_container_paths(trial: Workspace) -> None:
         keep=False,
     )
     assert any("immutable" in r for r in stats.refused)
+    # the attempted test-file edit is itself a violation (the deny rule stopping it does
+    # not make the attempt honest); an in-worktree `git diff` is not
+    assert [v for v in stats.violations if v.startswith("tamper:")] and len(stats.violations) == 1
     stats.feed(
         '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",'
         '"input":{"command":"git diff /work/src/calc/__init__.py"}}]}}',
         keep=False,
     )
-    assert stats.violations == []
+    assert len(stats.violations) == 1
     stats.feed(
         '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",'
         '"input":{"command":"git log --oneline"}}]}}',
         keep=False,
     )
-    assert len(stats.violations) == 1 and "archaeology" in stats.violations[0]
+    assert len(stats.violations) == 2 and "archaeology" in stats.violations[1]
     # the transcript keeps what the agent actually ran
     assert stats.bash_commands[0] == "git diff /work/src/calc/__init__.py"
 

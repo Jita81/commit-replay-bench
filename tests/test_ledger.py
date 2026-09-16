@@ -1063,3 +1063,14 @@ def test_outage_rows_are_not_observations() -> None:
     assert outage.failure_kind == lg.FAILURE_OUTAGE and outage.eligible is False
     split = lg.failure_split([outage, row()])
     assert split.n == 1 and split.outage == 1 and split.rows == 2
+
+
+def test_jsonl_append_survives_a_last_row_longer_than_the_tail_window(tmp_path: Path) -> None:
+    """_last_hash read only the final 64 KiB; a last row longer than that (labels are
+    unbounded) was parsed from its middle and every later append failed (CodeRabbit on
+    PR #3, 2026-09-15). The window now grows to a line boundary."""
+    ledger = lg.JsonlLedger(tmp_path / "ledger.jsonl")
+    big = ledger.append(row(task_id="a" * 40, labels={"note": "x" * 70_000}))
+    small = ledger.append(row(task_id="b" * 40))
+    assert small.prev_hash == big.row_hash
+    assert ledger.verify() == 2

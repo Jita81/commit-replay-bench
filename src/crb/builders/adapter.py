@@ -490,7 +490,13 @@ def build_fn_for(
         return attempt
 
     def sealed_build(
-        ws: Workspace, task: TaskSpec, rung: Rung, brief: BuildBrief, rung_budget: Budget
+        ws: Workspace,
+        task: TaskSpec,
+        rung: Rung,
+        brief: BuildBrief,
+        rung_budget: Budget,
+        *,
+        carry_files: Sequence[str] = (),
     ) -> BuildOutcome:
         """One attempt against a sealed checkout inside a container session. The
         builder is instantiated per attempt (its spawn/executor belong to the
@@ -500,7 +506,7 @@ def build_fn_for(
         assert container is not None
         dest = ws.root.parent / f"{ws.root.name}-sealed"
         tests = task.test_files if brief.sighted else ()
-        with SealedCheckout.create(ws, dest, test_files=tests) as sealed:
+        with SealedCheckout.create(ws, dest, test_files=tests, carry_files=carry_files) as sealed:
             emit(
                 on_event,
                 BUILDER_EVENT_PREFIX + "sealed",
@@ -669,7 +675,10 @@ def build_fn_for(
                     wall_clock_s=min(rung_budget.wall_clock_s, pf.repair_wall_clock_s),
                 )
                 if sealed:
-                    second = sealed_build(ws, task, rung, repair_brief, repair_budget)
+                    # the repair starts from the first attempt's edits, not the bare parent
+                    second = sealed_build(
+                        ws, task, rung, repair_brief, repair_budget, carry_files=files
+                    )
                 else:
                     second = builder.build(
                         ws, repair_brief, repair_budget, on_event=builder_on_event

@@ -48,7 +48,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
@@ -271,6 +271,9 @@ class Emitter:
         self.repo = repo
         self._seq = 0
         self._lock = threading.Lock()
+        # serialises seq allocation + sink delivery (RLock: a sink may emit through the
+        # same emitter from within the same call)
+        self._emit_lock = threading.RLock()
 
     def _next_seq(self) -> int:
         """The next sequence number — the only per-trace ordering a reader may rely on
@@ -315,9 +318,15 @@ class Emitter:
             duration_ms=duration_ms,
             cost_usd=cost_usd,
             payload=payload,
-            seq=self._next_seq(),
+            seq=0,
         )
-        self.sink.emit(ev)
+        # allocate the sequence number AND deliver under one lock: with the lock released
+        # between the two, thread A could take seq 1, thread B take and deliver seq 2, then
+        # A deliver seq 1 — a JSONL sink or an SSE stream would see them out of order and a
+        # resume-by-seq reader would skip one (CodeRabbit on PR #3, 2026-09-15)
+        with self._emit_lock:
+            ev = replace(ev, seq=self._next_seq())
+            self.sink.emit(ev)
         return ev
 
     def error(self, stage: str, action: str, exc: BaseException, **payload: Any) -> StepEvent:

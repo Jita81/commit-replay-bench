@@ -115,6 +115,12 @@ class _Handler(socketserver.StreamRequestHandler):
     """One client connection: exactly one ``CONNECT`` decision, then a tunnel or a refusal."""
 
     server: EgressProxy  # narrowed for mypy; assigned by socketserver
+    #: UNBUFFERED reads: a buffered ``rfile`` may read past the blank header line into the
+    #: first TLS bytes the client sends after ``CONNECT`` (an eager client), and ``_pump``
+    #: reads the raw socket, so those bytes would be lost and the handshake would hang
+    #: (CodeRabbit on PR #3, 2026-09-15). Header reads are a few hundred bytes; byte-wise
+    #: is fine.
+    rbufsize = 0
 
     def handle(self) -> None:
         """Read the request line, drain the headers unread, decide, tunnel."""

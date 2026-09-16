@@ -50,8 +50,15 @@ class RedactingFilter(logging.Filter):
             record.msg = redact(str(record.getMessage()))
             record.args = ()
         for k, v in list(record.__dict__.items()):
-            if k not in _STD_ATTRS and isinstance(v, str):
+            if k in _STD_ATTRS:
+                continue
+            if isinstance(v, str):
                 record.__dict__[k] = redact(v)
+            elif not isinstance(v, int | float | bool | type(None)):
+                # a mapping / list / object extra reaches the formatter as str(v): redact
+                # the rendering here, so no non-string extra can carry a secret through
+                # (CodeRabbit on PR #3, CWE-532, 2026-09-15)
+                record.__dict__[k] = redact(str(v))
         return True
 
 

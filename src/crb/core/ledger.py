@@ -845,8 +845,17 @@ class JsonlLedger:
             size = f.tell()
             step = min(size, 65536)
             f.seek(size - step)
-            chunk = f.read().decode("utf-8", errors="replace")
-        for line in reversed(chunk.splitlines()):
+            chunk = f.read()
+            # a row is normally far smaller than 64 KiB, but labels are unbounded: widen the
+            # window until it contains a line boundary before the last line (or the whole
+            # file), so a long last row is never parsed from its middle (CodeRabbit on
+            # PR #3, 2026-09-15)
+            while step < size and b"\n" not in chunk.rstrip(b"\n"):
+                step = min(size, step * 2)
+                f.seek(size - step)
+                chunk = f.read()
+        text = chunk.decode("utf-8", errors="replace")
+        for line in reversed(text.splitlines()):
             if line.strip():
                 last = line
                 break

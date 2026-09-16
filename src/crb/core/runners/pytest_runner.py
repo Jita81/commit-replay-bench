@@ -57,7 +57,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from crb.core.execution import Command, ExecResult, Executor
@@ -358,10 +358,17 @@ class PytestRunner(BaseRunner):
         #    dist-info with METADATA only (no RECORD of files, so nothing is shadowed).
         #    NHSDigital/mesh-client `test_get_version`, 2026-09-14.
         for stub in self.opts.get("dist_info_stubs") or []:
+            # a malformed entry is a configuration error the setup RECORDS, never a
+            # KeyError that loses the setup result (CodeRabbit on PR #3, 2026-09-15)
+            name = str((stub.get("name") if isinstance(stub, Mapping) else "") or "").strip()
+            if not name:
+                return session.result(
+                    False, f"runner_opts.dist_info_stubs: every entry needs a name (got {stub!r})"
+                )
             version = str(stub.get("version") or "0.0.0+crb")
-            written = write_dist_info_stub(python, str(stub["name"]), version)
+            written = write_dist_info_stub(python, name, version)
             session.record(
-                Command(("crb", "dist-info-stub", str(stub["name"]), version), root),
+                Command(("crb", "dist-info-stub", name, version), root),
                 ExecResult(0, f"wrote {written} (METADATA only; no files shadowed)", ""),
             )
         return self.finish_setup(session, root, env_dir)

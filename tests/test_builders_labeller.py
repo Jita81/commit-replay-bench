@@ -322,7 +322,7 @@ def test_claude_labeller_argv_and_env_api_key_mode(api_key: None) -> None:
     assert "UNRELATED_SECRET" not in env and env["CI"] == "1" and env["NO_COLOR"] == "1"
     assert env == cc.ClaudeCodeBuilder.env("api_key")
     assert timeout == lb.DEFAULT_TIMEOUT_S
-    assert lab.usage.to_dict()["tokens_in"] == 1200 and lab.usage.to_dict()["cost_usd"] == 0.004
+    assert lab.usage.to_dict()["tokens_in"] == 1300 and lab.usage.to_dict()["cost_usd"] == 0.004
 
 
 def test_claude_labeller_cli_mode_mirrors_claude_code(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -349,7 +349,8 @@ def test_claude_labeller_cli_mode_mirrors_claude_code(monkeypatch: pytest.Monkey
     assert env == cc.ClaudeCodeBuilder.env("cli")
     # no total_cost_usd reported → priced from the tokens (sonnet-5 has a pricing row)
     usage = lab.usage.to_dict()
-    assert usage["cost_known"] is True and usage["cost_usd"] > 0 and usage["tokens_in"] == 1200
+    # tokens_in is the TOTAL prompt: 1200 uncached + 100 cache reads (the meter prices them apart)
+    assert usage["cost_known"] is True and usage["cost_usd"] > 0 and usage["tokens_in"] == 1300
     with pytest.raises(ValueError, match="cannot combine"):
         lb.ClaudeCodeLabeller(auth="cli", bare=True, spawn=spawn)
     with pytest.raises(ValueError, match="auth must be one of"):
