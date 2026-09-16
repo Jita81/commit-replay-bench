@@ -522,7 +522,11 @@ def test_regression_control_on_target_only_belt_names_the_config_weakness() -> N
     """With belt_scope=TARGET_ONLY belt 3 re-runs only the target tests, so the regression
     control's poisoned neighbour is invisible: that is a VIOLATION (the gate fails, the
     cells cannot be trusted) whose note tells the operator to widen the belt — measured on
-    pallets/click during the walkthrough."""
+    pallets/click during the walkthrough. The executable form of that claim (the narrower
+    belt, the verdict and the note) is ``tests/test_oracle_controls_js.py``
+    ``test_regression_not_constructible_under_target_only_names_the_scope`` together with
+    ``test_regression_poison_target_selection_is_deterministic`` here; this case pins only
+    the VOCABULARY the verdict is built from."""
     from crb.core.oracle import controls as c
 
     assert c.REGRESSION in c.EXPECTED and c.OBS_REGRESSED in c.EXPECTED[c.REGRESSION]

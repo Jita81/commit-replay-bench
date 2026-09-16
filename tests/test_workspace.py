@@ -162,7 +162,6 @@ def test_diff_stats_includes_untracked_new_files(pyrepo: pr.PyRepo, tmp_path: Pa
         stats = ws.diff_stats()
         assert stats.files == ("src/calc/extra.py",)
         assert stats.additions == 2 and stats.deletions == 0
-        assert stats.diff_sha256 != ws.diff_stats(exclude=["src/calc/extra.py"]).files  # smoke
         empty = Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws2")
         try:
             assert empty.diff_stats().diff_sha256 != stats.diff_sha256

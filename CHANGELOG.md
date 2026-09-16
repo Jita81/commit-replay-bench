@@ -8,6 +8,50 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-16 — CodeRabbit batch 3 (the test suite; PR #5's findings)
+
+The tests are the evidence that the instrument is honest, so a test that cannot fail is a
+finding. Every assertion below was loosened by an `or`, a membership set, a guard or a
+sample, and now pins the exact contract:
+
+- `grade.error` events carry the REDACTED error (the raw `on_event` seam no longer sees a
+  token); the test pins the redacted form instead of `token in … or "RuntimeError" in …`.
+- Exact pins: the quoted-git-verb refusal label; the factory's RED baseline; the clean
+  scratch directory (present AND empty); the `weak` band below the adequacy floor; the
+  controls-file usage error (`2`, never the verdict's `1`); the label run's `succeeded` +
+  `intent`; the capability map's blind separation (a blind row is seeded and `n_all ==
+  n_default + 1`); every clean row's evidence pack (not a sample of five); the events
+  read clamp (5,004 rows, the cap wins); the secrets file checked before the admin writes
+  it; the username as well as the token absent from a clone error; JS runner-hook poison
+  pinned as belt-1b `disqualified` (a `clean` row is now a failure, not an alternative).
+- Docstrings say what the body proves: the cargo / maven suites pin FIXED defects (the
+  "strict xfail" sentences and dead `_DEFECT` constants are gone); three `env` fixtures
+  name the role they log in as; the builders fixture's baseline is the RED target, not
+  empty; the belt-5 regression case names the executable cases it defers to.
+- Precondition instead of guard: the CLI chain-break check asserts `> 1` rows and always
+  runs; the server drift guard imports `fastapi` hard (the test jobs install the server
+  extra); the migration files test pins the head to an existing revision file.
+- **Warm-ups fail in CI.** `CRB_TEST_STRICT_WARMUP=1` (set on the `test` job) turns a
+  failed npm install, Maven resolution or docker build into a test FAILURE — a broken pin,
+  fixture or Dockerfile is a repository defect; offline they stay skips with the reason
+  (a missing tool or daemon is always a skip).
+- The release tag rule is one script, `scripts/check_release_tag.py`, run by `release.yml`
+  and pinned by the tests (accept `v<version>` only; refuse a suffix, a missing or
+  upper-case `v`, a branch is a no-op); the workflow's `on.push.tags` is asserted `["v*"]`.
+- `tests/fixtures/remote.py` runs git through the hermetic helper (fixed identity, no
+  user config, 120 s timeout); the openai-agent tool-call ids are a stable digest, not
+  `hash()`; the real-LLM labeller test carries `@pytest.mark.live`.
+- The census case in `tests/test_capability.py` goes through the shipped
+  `crb.core.legacy.import_census` over the vendored `data/census-2026-07-08` (it used a
+  private re-implementation over `~/.expansion-bench` and skipped everywhere but one
+  machine).
+- New `tests/test_core_is_stdlib_only.py`: the POSITIVE form of ADR-0008 — every import
+  under `src/crb/core` must be in `sys.stdlib_module_names` or `crb.core`; import-linter's
+  `forbidden` contract only rejects what it lists.
+
+Declined from this slice (review artefacts of a slice without `src/`): the `conftest`
+importability, `.coderabbit.yaml` paths, the console entry point and the CI matrix.
+
 ### 2026-09-16 — CodeRabbit batch 2 (server / store / factory / deploy; PR #4's findings)
 
 Third-party review of the server, store, factory and deployment slices (ADR-0013: advisory,

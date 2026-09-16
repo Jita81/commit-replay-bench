@@ -8,7 +8,8 @@ test modules import this explicitly. It owns three things:
   ``tests/.cache/node_modules_<tool>``, the Maven local-repository warm-up, and
   the sandbox image build. Each is memoised in-process and, where it makes
   sense, on disk, and each turns "cannot warm up" into a *pytest skip with the
-  reason* rather than a failure: a missing network is not a defect;
+  reason* by default (a missing network is not a defect) — and into a FAILURE
+  under ``CRB_TEST_STRICT_WARMUP=1`` (CI), where a broken pin or fixture is one;
 * **the shared instrument steps** the per-language modules repeat — find the
   feat candidate, open a fresh trial worktree at the parent with the commit's
   tests overlaid.
@@ -23,7 +24,8 @@ What it does: Answers "is go/node/mvn/cargo/docker available", warms the npm dev
               caches, the Maven local repository and the sandbox image once per session, and
               performs the two instrument steps every language module repeats — mine the feat
               candidate, open a trial worktree at the parent with the tests overlaid. A warm-up
-              that cannot complete becomes a pytest skip with the reason, never a failure.
+              that cannot complete is a skip with the reason offline and a failure in CI
+              (``CRB_TEST_STRICT_WARMUP``); a missing tool or daemon is always a skip.
 How:          Memoised probes → on-disk caches under ``tests/.cache`` → ``iter_candidates`` +
               ``Workspace.create`` + ``overlay_tests`` through the real runner and executor.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -42,6 +44,7 @@ Touch when:   adding a runner for a new language (add its availability probe and
 from __future__ import annotations
 
 import importlib
+import os
 import shutil
 import subprocess
 import sys
@@ -140,6 +143,21 @@ def _cache_dir() -> Path:
     return CACHE_DIR
 
 
+#: ``CRB_TEST_STRICT_WARMUP=1`` (set in CI, where the network is available) turns a failed
+#: warm-up — an npm install, the Maven resolution, a docker build — into a test FAILURE
+#: instead of a skip: a broken package pin, fixture or Dockerfile is a repository defect,
+#: not unavailable infrastructure (CodeRabbit on PR #5, 2026-09-16). Locally, offline,
+#: the skip stays so the hermetic suite still runs.
+STRICT_WARMUP = os.environ.get("CRB_TEST_STRICT_WARMUP", "") not in ("", "0", "false")
+
+
+def warmup_unavailable(reason: str) -> None:
+    """Skip (default) or fail (strict) the calling test with the warm-up's own reason."""
+    if STRICT_WARMUP:
+        pytest.fail(f"[strict warm-up] {reason}", pytrace=False)
+    pytest.skip(reason + " — set CRB_TEST_STRICT_WARMUP=1 to fail instead of skipping")
+
+
 _NPM: dict[str, Path | str] = {}
 
 
@@ -153,7 +171,7 @@ def npm_cache(tool: str) -> Path:
         raise ValueError(f"no npm package pinned for {tool!r}")
     hit = _NPM.get(tool)
     if isinstance(hit, str):
-        pytest.skip(hit)
+        warmup_unavailable(hit)
     if isinstance(hit, Path):
         return hit
     prefix = _cache_dir() / f"node_modules_{tool}"
@@ -188,7 +206,7 @@ def npm_cache(tool: str) -> Path:
             _NPM[tool] = reason = (
                 f"npm install {NPM_PACKAGES[tool]} failed (no network?): {err or 'binary missing'}"
             )
-            pytest.skip(reason)
+            warmup_unavailable(reason)
     _NPM[tool] = nm
     return nm
 
@@ -205,7 +223,7 @@ def maven_warmup(scratch: Path) -> None:
     """
     if "reason" in _MAVEN:
         if _MAVEN["reason"]:
-            pytest.skip(_MAVEN["reason"])
+            warmup_unavailable(_MAVEN["reason"])
         return
     jvmrepo = fixture_module("jvmrepo")
     root, _ = jvmrepo.build(Path(scratch) / "mvn-warmup")
@@ -217,7 +235,7 @@ def maven_warmup(scratch: Path) -> None:
     _MAVEN["reason"] = reason = "maven warm-up failed (offline / cold ~/.m2?): " + (
         "timed out" if run.timed_out else run.tail[-400:]
     )
-    pytest.skip(reason)
+    warmup_unavailable(reason)
 
 
 _IMAGES: dict[str, str] = {}
@@ -227,10 +245,10 @@ def ensure_docker_image(tag: str, dockerfile: str) -> None:
     """Build ``tag`` from an inline Dockerfile once per session (reused if present)."""
     if tag in _IMAGES:
         if _IMAGES[tag]:
-            pytest.skip(_IMAGES[tag])
+            warmup_unavailable(_IMAGES[tag])
         return
     reason = docker_unavailable_reason()
-    if reason:
+    if reason:  # no daemon is environmental — a plain skip, never a failure
         _IMAGES[tag] = reason
         pytest.skip(reason)
     docker = shutil.which("docker") or "docker"
@@ -252,7 +270,7 @@ def ensure_docker_image(tag: str, dockerfile: str) -> None:
             err = f"timed out after {DOCKER_BUILD_TIMEOUT_S}s"
         if err:
             _IMAGES[tag] = reason = f"docker build {tag} failed (no network?): {err}"
-            pytest.skip(reason)
+            warmup_unavailable(reason)
     _IMAGES[tag] = ""
 
 

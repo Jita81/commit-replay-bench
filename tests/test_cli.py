@@ -622,11 +622,13 @@ def test_ledger_verify_detects_tampering(run: Run, tmp_path: Path, workdir: Path
     assert "row_hash mismatch" in str(d["error"])
     code, out, _ = run(["ledger", "verify", "--path", str(copy)])
     assert code == 1 and "BROKEN" in out
-    # removing a row breaks the chain too (prev_hash of the next row no longer matches)
-    if len(lines) > 1:
-        copy.write_text("\n".join(lines[1:]) + "\n")
-        code, d = run_json(run, ["ledger", "verify", "--path", str(copy)])
-        assert code == 1 and "prev_hash mismatch" in str(d["error"])
+    # removing a row breaks the chain too (prev_hash of the next row no longer matches);
+    # the precondition is asserted so the check runs even under ``-k`` (it used to be
+    # guarded by ``if len(lines) > 1`` and could pass without checking anything)
+    assert len(lines) > 1, "the ledger under test must hold more than one row"
+    copy.write_text("\n".join(lines[1:]) + "\n")
+    code, d = run_json(run, ["ledger", "verify", "--path", str(copy)])
+    assert code == 1 and "prev_hash mismatch" in str(d["error"])
 
 
 def test_ledger_empty_paths(run: Run, tmp_path: Path) -> None:

@@ -52,7 +52,7 @@ from crb.store.events import last_seq
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
 from fixtures import pyrepo as pr
-from fixtures.server_seed import ALPHA, BETA, RUN_IDS, Env, envelope, login, make_env
+from fixtures.server_seed import ALPHA, BETA, RUN_IDS, Env, envelope, login, make_env, task_id
 from fixtures.signoff_seed import attested_body, clear_policy, score_oracle
 
 CELL_KEYS = {
@@ -662,12 +662,38 @@ class TestModeFilter:
     live stack, 2026-09-15."""
 
     def test_default_is_sighted_and_blind_is_separate(self, env: Env) -> None:
+        # the seed is all sighted; one BLIND row makes the separation observable — an
+        # endpoint that ignored ``mode`` would make ``n_all == n_default`` (CodeRabbit, PR #5)
+        DbLedger(env.factory).append(
+            GradeRow(
+                repo=ALPHA,
+                task_id=task_id(1),
+                mode="blind",
+                clean=True,
+                tests_unmodified=True,
+                target_green=True,
+                no_new_failures=True,
+                source_changed=True,
+                capability_class="bug.fix",
+                size="S",
+                language="python",
+                builder="editblock",
+                model="m",
+                provider="p",
+                run_id="c" * 32,
+                trial="r1",
+                evidence_pack_hash="e" * 64,
+                gold_clean=True,
+            )
+        )
         d = env.get(f"/capability-map?repo={ALPHA}&by=class,size").json()
         a = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=all").json()
         s = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=sighted").json()
+        b = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=blind").json()
         assert d["cells"] == s["cells"]
         n_default = sum(c["n"] for c in d["cells"])
         n_all = sum(c["n"] for c in a["cells"])
-        assert n_all >= n_default
+        n_blind = sum(c["n"] for c in b["cells"])
+        assert n_blind == 1 and n_all == n_default + 1
         r = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=other")
         assert r.status_code == 422

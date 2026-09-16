@@ -88,7 +88,7 @@ def test_the_five_weak_but_passed_confirmatory_tasks_route_to_human():
     }
     for task, strength in weak_passed.items():
         assert routing_decision(True, strength) == DECISION_HUMAN_REVIEW, task
-        assert adequacy_verdict(True, strength).band in {"weak", "adequate"}, task
+        assert adequacy_verdict(True, strength).band == "weak", task  # every strength < 0.5
 
 
 # --- the policy is one frozen object, consistent with routing ---------------------------

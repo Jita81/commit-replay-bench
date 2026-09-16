@@ -24,28 +24,26 @@ Touch when:   the clone policy gains a case a bare ``file://`` remote cannot sta
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
-
-def _git(*args: str) -> str:
-    p = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
-    if p.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)} failed rc={p.returncode}: {p.stderr}")
-    return p.stdout.strip()
+from fixtures.langs import git
 
 
 def bare_remote(src: Path, dest: Path, *, tag: str = "") -> str:
     """``git init --bare dest`` + push every branch of ``src`` (and ``tag`` when given).
 
-    Returns the ``file://`` URL of the bare repository.
+    Every command runs through the hermetic ``fixtures.langs.git`` helper (fixed identity,
+    no user/system config, 120 s timeout) so developer git configuration cannot change the
+    repository's shape or push behaviour, and a stalled push cannot block the session
+    (CodeRabbit on PR #5, 2026-09-16). Returns the ``file://`` URL of the bare repository.
     """
-    _git("init", "--bare", "--quiet", "--initial-branch=main", str(dest))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    git(dest.parent, "init", "--bare", "--quiet", "--initial-branch=main", str(dest))
     if tag:
-        _git("-C", str(src), "tag", tag)
-    _git("-C", str(src), "push", "--quiet", "--all", str(dest))
+        git(src, "tag", tag)
+    git(src, "push", "--quiet", "--all", str(dest))
     if tag:
-        _git("-C", str(src), "push", "--quiet", str(dest), f"refs/tags/{tag}")
+        git(src, "push", "--quiet", str(dest), f"refs/tags/{tag}")
     return dest.resolve().as_uri()
 
 

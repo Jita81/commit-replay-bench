@@ -128,7 +128,8 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
-    """The seeded environment, logged in as admin, torn down after the test."""
+    """The seeded environment, logged in as APPROVER (the role that signs), torn down after
+    the test."""
     with make_env(tmp_path, role="approver") as e:
         yield e
 

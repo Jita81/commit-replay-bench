@@ -60,15 +60,8 @@ jobs:
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
-      - name: Check the tag matches pyproject version
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME#v}"
-          PYV="$(uv run --no-project --python 3.12 python -c 'import tomllib,sys; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
-          echo "tag=$TAG pyproject=$PYV"
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "$TAG" != "$PYV" ]; then
-            echo "::error::tag v$TAG does not match pyproject version $PYV"; exit 1
-          fi
+      - name: Check the tag matches pyproject version (scripts/check_release_tag.py — the rule the tests pin)
+        run: uv run --no-project --python 3.12 python scripts/check_release_tag.py
       - name: uv build
         run: uv build --sdist --wheel --out-dir dist
       - name: Smoke-install the wheel and import the core

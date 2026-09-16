@@ -194,6 +194,6 @@ class TestEvidence:
     def test_every_clean_row_has_a_resolvable_pack(self, env: Env) -> None:
         with env.factory() as s:
             hashes = {g.evidence_pack_hash for g in s.query(Grade).filter(Grade.clean.is_(True))}
-        assert "" not in hashes
-        for h in sorted(hashes)[:5]:
-            assert env.get(f"/evidence/{h}").json()["verified"] is True
+        assert "" not in hashes and len(hashes) > 5
+        for h in sorted(hashes):  # EVERY clean row, as the name says — not a sample of five
+            assert env.get(f"/evidence/{h}").json()["verified"] is True, h

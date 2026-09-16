@@ -29,6 +29,7 @@ Touch when:   a tool is added to the loop (a schema case, a guard case if it can
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -57,9 +58,12 @@ from builders_repo import make_fixture  # noqa: E402
 
 
 def call(name: str, **args: Any) -> oc.ToolCall:
-    """A ``ToolCall`` with a deterministic id derived from its name and arguments."""
+    """A ``ToolCall`` with a deterministic id derived from its name and arguments — a
+    stable digest, not ``hash()`` (which varies with ``PYTHONHASHSEED``), and wide enough
+    that five calls in one turn cannot collide."""
+    digest = hashlib.sha256(f"{name}:{json.dumps(args, sort_keys=True)}".encode()).hexdigest()
     return oc.ToolCall(
-        id=f"c{abs(hash((name, json.dumps(args, sort_keys=True)))) % 10_000}",
+        id=f"c{digest[:12]}",
         name=name,
         arguments=args,
     )

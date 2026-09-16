@@ -130,6 +130,10 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
+    env:
+      # A toolchain warm-up (npm install, Maven resolution, docker build) that fails here
+      # is a repository defect, not missing infrastructure: fail, never skip.
+      CRB_TEST_STRICT_WARMUP: "1"
     steps:
       - uses: actions/checkout@v4
         with:

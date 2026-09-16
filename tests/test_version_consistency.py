@@ -27,7 +27,9 @@ Touch when:   releasing (bump all three and the CHANGELOG together — this suit
 
 from __future__ import annotations
 
+import importlib.util
 import re
+import sys
 import tomllib
 from pathlib import Path
 
@@ -37,6 +39,15 @@ ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"
 CHART = ROOT / "deploy" / "helm" / "crb" / "Chart.yaml"
 CHANGELOG = ROOT / "CHANGELOG.md"
+RELEASE = ROOT / ".github" / "workflows" / "release.yml"
+
+_SPEC = importlib.util.spec_from_file_location(
+    "check_release_tag", ROOT / "scripts" / "check_release_tag.py"
+)
+assert _SPEC and _SPEC.loader
+crt = importlib.util.module_from_spec(_SPEC)
+sys.modules["check_release_tag"] = crt
+_SPEC.loader.exec_module(crt)
 
 #: PEP 440 for the shapes this project releases (``2.0.0a1``, ``2.1.0``, ``2.1.0rc1``).
 _PEP440 = re.compile(r"^\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?$")
@@ -59,11 +70,20 @@ def test_package_version_is_one_number_in_three_places() -> None:
     assert _chart_app_version() == __version__
 
 
-def test_release_tag_check_would_accept_the_version_tag() -> None:
-    """The exact rule ``release.yml`` applies: ``v<pyproject version>`` is the only tag
-    the build job accepts."""
-    tag = f"v{__version__}"
-    assert tag[1:] == _pyproject_version()
+def test_release_tag_rule_accepts_only_the_version_tag() -> None:
+    """The rule ``release.yml`` runs (``scripts/check_release_tag.py``): on a tag push only
+    ``v<pyproject version>`` passes; a wrong version, a missing or upper-case ``v``, a suffix
+    are refused; a branch push is a no-op. The workflow must call that script."""
+    v = _pyproject_version()
+    assert crt.check("tag", f"v{v}", v) is None
+    for bad in (f"v{v}-rc1", f"V{v}", v, "v9.9.9", "vlatest"):
+        assert crt.check("tag", bad, v), bad
+    assert crt.check("branch", "main", v) is None
+    assert crt.pyproject_version() == __version__
+    # the CLI form the workflow runs
+    assert crt.main(["--ref-type", "tag", "--ref-name", f"v{v}"]) == 0
+    assert crt.main(["--ref-type", "tag", "--ref-name", "v0.0.0"]) == 1
+    assert "python scripts/check_release_tag.py" in RELEASE.read_text(encoding="utf-8")
 
 
 def test_apparatus_version_is_independent_of_the_package_version() -> None:
