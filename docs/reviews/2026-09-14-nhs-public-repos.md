@@ -145,3 +145,81 @@ Readings:
   (frontend 4/6, react-components 7/8, mesh-client 4/4); the three misses are two
   `builder_red` (both L `frontend.component.add` on nhsuk-frontend) and one `protocol`.
   Cells are still ≤ 8 tasks; nothing here reaches the sign-off bar.
+
+## 10. Stage C (2026-09-15 night) — blind rung 0 with the pre-flight on: $8.42
+
+The decider's plan after Stage B (DL-031): the 14 non-mesh NHS tasks blind — the builder
+sees the commit message and the code, never the tests — at rung 0 (25 turns / 25 tool calls
+/ 15 min / $1) with the belt-5 pre-flight on, ≤ $8. Two runs: the first stopped after three
+consecutive provider refusals (the usage limit — the circuit breaker, DL-020's `outage_stop`,
+worked as designed: 1 fair row, 3 `outage` rows outside `n`, $0.75); the remainder ran once
+the limit reset.
+
+| Repo | Fair rows | Clean | Misses | $ |
+|---|---|---|---|---|
+| nhsuk-frontend | 6 | **0** | 6 `builder_red` (tests red, lint clean) | 3.70 |
+| nhsuk-react-components | 8 | **2** (`6d09861db2` XS, `16d417f596` XS — both `frontend.component.add`) | 6 `builder_red` | 4.72 |
+| total | **14** | **2 (14 %)** | 12 `builder_red`, 0 protocol, 0 budget, 0 harness; +3 outage | **8.42** |
+
+Readings:
+- **Blind is a different measurement, and the honest one for "could it have done the PR".**
+  Sighted, the same 14 tasks read 12 of 14 clean on 2.2 (§9); blind, 2 of 14. The builder
+  that can make a visible failing test pass cannot, from the commit message alone,
+  reconstruct what the maintainer's tests will check — on these repositories the message is
+  not a specification (ADR-0004; the upstream finding that the "specification lever" was
+  leakage, `project_spec_lever_leakage`).
+- Every miss is the model's (`builder_red`): the pre-flight kept lint out of the picture,
+  no attempt hit its budget, no guard refused. Nothing here is an instrument defect.
+- The two blind cleans are the two smallest component additions (XS) — the shape the map
+  would route first if the cells were not ≤ 8 tasks.
+- Spend of the approved $45 after Stage C: $3.68 (B) + $8.42 (C) + the three label runs
+  (koa 32 / cobra 36 / click 36 tasks labelled by intent; ≈ $1) ≈ **$13**. The top-up (§11)
+  follows; Stage D stays cancelled (§9).
+
+## 11. The koa / cobra / click top-up (2026-09-16 night) — one attempt per NEW task: $7.48
+
+DL-027's rule: no repetition of tasks that already carry 2.2 rows; mine wider, then one
+sighted attempt (plain `claude_code`, no pre-flight, so the rows pool with the existing
+cells) per NEW gold-clean `bug.fix` XS/S task, ≤ $10. The intent labels landed first
+(koa 28 of 32, cobra 32 of 36, click 30 of 36 tasks labelled by intent — the rest keep the
+path-derived class). 35 new tasks, a `$0.28` per-attempt cap.
+
+| Repo | New tasks | Clean | Misses | $ / attempt | $ |
+|---|---|---|---|---|---|
+| cobra | 14 (6 XS, 8 S) | **13** | 1 `builder_red` (S) | 0.21 | 3.00 |
+| click | 17 (7 XS, 10 S) | **14** | 2 `builder_red` (S), 1 `lint` (XS — the maintainers' formatter) | 0.21 | 3.53 |
+| koa | 4 (2 XS, 2 S) | **2** | 1 **regression** (XS — belt 3: a neighbouring test went red), 1 `builder_red` (S) | 0.23 | 0.94 |
+| total | **35** | **29 (83 %)** | 6 | | **7.48** |
+
+The cells afterwards (sighted, apparatus 2.2, the live map — `crb.core.routing` v1 under
+each repo's controls verdict):
+
+| Cell | n (rows) | distinct tasks | clean | rate [Wilson 95 %] | oracle | route |
+|---|---|---|---|---|---|---|
+| cobra `bug.fix` XS | 22 | 9 | 22 | 100 % [0.85, 1.00] | 1.00 | **deliver** |
+| cobra `bug.fix` S | 24 | 11 | 23 | 95.8 % [0.80, 0.99] | 0.94 | calibrate — `ci_low` 0.798 < 0.80 |
+| click `bug.fix` XS | 19 | 10 | 17 | 89.5 % [0.69, 0.97] | 0.76 | human — controls FAILED |
+| click `bug.fix` S | 13 | 13 | 11 | 84.6 % [0.58, 0.96] | 0.86 | human — controls FAILED |
+| koa `bug.fix` S | 18 | 6 | 16 | 88.9 % [0.67, 0.97] | 0.82 | calibrate — point < 0.90 |
+| koa `bug.fix` XS | 11 | 6 | 9 | 81.8 % [0.52, 0.95] | 1.00 | calibrate — point < 0.90 |
+
+Readings:
+- **cobra `bug.fix` XS keeps its `deliver` route on nine distinct tasks instead of three**
+  (DL-029's concern): 22 of 22, every new task clean. cobra `bug.fix` S lost the route by
+  one miss — Wilson-low 0.798 against the 0.80 bar — which is the rule doing exactly what it
+  is for: a 95.8 % point on 24 rows is not yet 80 % with 95 % confidence.
+- **click's cells are held at `human` by the instrument, not the model**: the live stack
+  still runs the code from before PR #7, whose controls run picked a regression-poison
+  target the belt never re-ran (§5-class defect, fixed and CodeRabbit-approved, not yet
+  deployed). 17 of 19 XS and 11 of 13 S are clean; the route waits for the controls re-run
+  on the merged code.
+- **koa produced the campaign's first belt-3 catch on a new task**: `ff25eb4a7f` made the
+  target green and a neighbouring test red — `no_new_failures = False`, recorded as a
+  regression, never as clean. That is the belt working, and the row the map shows a human.
+- The per-attempt price of a small `bug.fix` on these repositories is **$0.21–0.23** at
+  20–350 s (one click attempt hit the 900 s wall clock and still passed).
+- Spend of the approved $45 after the top-up: **≈ $20.6** ($3.68 B + $8.42 C + ≈ $1 labels
+  + $7.48 top-up). Remaining ≈ $24. Next paid step, when the merged code is deployed:
+  re-run click's controls + oracle ($0, local), then the NHS blind cells are still ≤ 8 tasks
+  and the sign-off bar (n ≥ 10 per cell, the task minimum the operator has yet to set —
+  DL-029) is the decision in front of the operator, not another measurement.
