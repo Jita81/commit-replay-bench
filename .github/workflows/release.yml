@@ -73,7 +73,7 @@ jobs:
         run: |
           cd dist && sha256sum -- * | tee SHA256SUMS
       - name: Upload distributions
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: crb-dist-${{ env.ARTIFACT_SUFFIX }}
           path: |
@@ -160,7 +160,7 @@ jobs:
           python3 -c "import json; d=json.load(open('sbom.spdx.json')); print(d['spdxVersion'], len(d.get('packages', [])), 'packages')"
 
       - name: Upload the SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: crb-image-sbom-${{ env.ARTIFACT_SUFFIX }}
           path: sbom.spdx.json

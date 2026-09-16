@@ -162,7 +162,7 @@ jobs:
           --cov-fail-under=70
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: coverage-py${{ matrix.python }}
@@ -221,7 +221,7 @@ jobs:
           --progress-spinner off
       - name: Upload resolved requirements
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: resolved-requirements
@@ -254,7 +254,7 @@ jobs:
           --output-file sbom.cdx.json
           .venv/bin/python
       - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: sbom-cyclonedx
@@ -305,7 +305,7 @@ jobs:
           fi
       - name: Upload junit
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: store-postgres-junit
@@ -412,7 +412,7 @@ jobs:
         run: scripts/walkthrough.sh
       - name: Upload the Playwright report + traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: walkthrough-playwright-report
