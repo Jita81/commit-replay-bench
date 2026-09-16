@@ -698,7 +698,9 @@ def authored_of(root: Path) -> str | None:
         return None
     if p.returncode != 0:
         return None
-    return p.stdout.strip() or None
+    # Same spelling as ``Repo.author_date``: git >= 2.5x renders UTC as ``Z`` (CI, 2026-09-15).
+    raw = p.stdout.strip()
+    return (raw[:-1] + "+00:00" if raw.endswith("Z") else raw) or None
 
 
 def read_fixture(clone: Path, fx: Fixture) -> bytes:

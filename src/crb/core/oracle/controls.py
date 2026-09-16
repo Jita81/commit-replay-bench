@@ -388,9 +388,15 @@ def pick_regression_poison_target(ws: Workspace, task: TaskSpec, config: RepoCon
     src_texts = [ws.read(p) for p in task.src_files if ws.exists(p)] + [
         ws.repo.show_file(ws.sha, p) or "" for p in task.src_files
     ]
-    suite_texts = [
-        ws.read(p) for p in files if config.is_test(p) and p not in task.test_files and ws.exists(p)
-    ]
+    # only the tests belt 3 will actually RE-RUN can catch the poison: under AFFECTED_DIRS
+    # that is the target tests' directories, not the whole suite. Choosing a module that
+    # only a test outside the belt imports made the control read `clean` and the gate
+    # FAIL with a blank note (click, 8 tasks, 2026-09-15) — an instrument defect, not
+    # an oracle escape. `()` (BARE) = every test file.
+    belt_tests = controls_js.belt_test_files(
+        files, belt_scope=task.belt_scope, is_test=config.is_test, target_tests=task.test_files
+    )
+    suite_texts = [ws.read(p) for p in belt_tests if ws.exists(p)]
     return select_poison_target(
         candidates, target_texts=target_texts, src_texts=src_texts, suite_texts=suite_texts
     )
@@ -1361,17 +1367,23 @@ def controls_for_task(
             if verdict == VERDICT_VIOLATION:
                 detail = result.error or result.dq_reason or result.note
                 note = f"{note + '; ' if note else ''}observed={observed} {detail}".strip()
-                if (
-                    name == REGRESSION
-                    and observed == OBS_CLEAN
-                    and config.belt_scope == BELT_TARGET_ONLY
-                ):
-                    note = (
-                        "belt_scope=TARGET_ONLY: belt 3 re-runs only the target tests, so a "
-                        "regression outside them is invisible — widen belt_scope "
-                        "(AFFECTED_DIRS or explicit scopes) before trusting this repo's cells; "
-                        + note
-                    )
+                if name == REGRESSION and observed == OBS_CLEAN:
+                    # the scope belt 3 actually RAN is the task's (mined under the config of
+                    # its day), not the repo config's now (CodeRabbit on PR #7)
+                    scope: Any = task.belt_scope or "BARE"
+                    if task.belt_scope == tuple(task.target_tests):
+                        note = (
+                            "belt_scope=TARGET_ONLY: belt 3 re-runs only the target tests, so a "
+                            "regression outside them is invisible — widen belt_scope "
+                            "(AFFECTED_DIRS or explicit scopes) before trusting this repo's "
+                            "cells; " + note
+                        )
+                    else:
+                        note = (
+                            f"belt_scope={scope}: the poisoned module was not caught by the tests "
+                            "belt 3 re-ran — no test inside the belt scope failed on it; widen "
+                            "belt_scope (BARE) or report the selector that chose it; " + note
+                        )
         if apply_note:
             note = f"{note}; {apply_note}" if note else apply_note
         rows.append(row(name, observed, verdict, note, grade_result=result, started=started))
