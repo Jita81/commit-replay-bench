@@ -148,6 +148,19 @@ token (`claude setup-token`) that a `claude_code` build in `auth: cli` mode forw
 the CLI as `CLAUDE_CODE_OAUTH_TOKEN`. It exists so the token never has to transit a chat,
 a ticket or a shell history again (review 2026-09-13, action #9).
 
+- **Minted on the API host, from the browser.** *Settings → Sign in with your Claude
+  account* starts a login session: a detached helper (`crb.server.claude_login_driver`)
+  runs `claude setup-token` in a pseudo-terminal on the API host, the browser opens
+  Anthropic's sign-in URL in a new tab, the person approves and pastes the code
+  Anthropic shows, the helper types it into the CLI and stores the minted token through
+  the same owner-only store as the manual path. The browser sees the URL, the session
+  state and, at the end, four characters; the pasted code is written once (mode 0600)
+  and deleted the moment the helper has typed it; the token is never in a response, an
+  event, a log line or the session directory (the helper scrubs token shapes from
+  everything it reports). One session per deployment at a time; ten-minute expiry;
+  admin only. [measured] `tests/test_server_claude_login.py` (a fake CLI replays the real
+  transcript, including a refused code and a token-shaped run in an error line).
+
 - **Where.** One file per secret under `CRB_SECRETS_DIR` → `$CRB_HOME/secrets` →
   `./.crb/secrets`: `claude_code_oauth_token` (the raw value) and
   `claude_code_oauth_token.meta.json` (`set_at`, `set_by` — never the value). Directory

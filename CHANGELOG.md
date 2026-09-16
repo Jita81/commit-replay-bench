@@ -8,7 +8,30 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
-Nothing yet — `main` is 2.0.0a1 below.
+### 2026-09-16 — sign in with a Claude account from the browser; the repository is public; CI runs again
+
+- **Settings → Sign in with your Claude account.** An admin no longer needs a terminal
+  to register the Claude Code login: the API host runs `claude setup-token` in a
+  pseudo-terminal behind a **login session** (`POST /settings/secrets/claude-code-token/login`
+  → the Anthropic sign-in URL, opened in a new tab; `POST …/login/{id}/code` with the code
+  Anthropic shows; `GET …/login/{id}` polled to `done`). The minted token goes straight into
+  the owner-only secrets store on the API host — never through the browser, never in a
+  response, event, log or the session directory. A detached helper
+  (`crb.server.claude_login_driver`) owns the PTY, so several API workers and an API
+  restart see one session; one session per deployment; ten-minute expiry; admin only.
+  `CRB_BUILDER__CLAUDE_BINARY` names the CLI on the API host when it is not on PATH (the
+  verify probe honours it too). Tested against a fake CLI that replays the real
+  transcript (observed on Claude Code 2.1.132).
+- **Public repository.** Made public on 2026-09-16 (Apache-2.0 already; the full history
+  scanned — only test fixtures match credential shapes). GitHub Actions runs again on the
+  free tier: the first run on `main` was 10 of 12 jobs green; the two red ones were the
+  gate's own configuration, fixed here — the gitleaks scanner pinned to `8.30.1` (the
+  action's default `8.24.3` predates the top-level `[[allowlists]]` form and reported the
+  test tree's deliberately fake credentials), and two walkthrough expectations moved by
+  batch 4 (the cell's accessible label now carries its interval and provenance; the
+  controls gate renders the API's verdict — `thin` keeps it closed, as routing withholds
+  deliver).
+- Dependabot's GitHub Actions bumps arrive as one grouped PR.
 
 ## [2.0.0a1] — 2026-09-16 — first releasable v2, on `main`
 

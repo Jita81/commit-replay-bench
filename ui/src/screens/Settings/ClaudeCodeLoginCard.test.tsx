@@ -30,7 +30,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Principal } from '../../api/types'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { ClaudeCodeLoginCard } from './ClaudeCodeLoginCard'
-import type { LoginCheck, SecretStatus, SecretsStatusList } from './claudeCodeLogin'
+import type { LoginCheck, LoginSession, SecretStatus, SecretsStatusList } from './claudeCodeLogin'
 
 const ADMIN: Principal = { ...PRINCIPAL, role: 'admin' }
 const VIEWER: Principal = { ...PRINCIPAL, role: 'viewer' }
@@ -62,7 +62,7 @@ describe('ClaudeCodeLoginCard', () => {
     expect(status).toHaveAttribute('data-present', 'false')
     expect(status).toHaveTextContent('no token stored')
     const text = screen.getByTestId('claude-login-instructions').textContent ?? ''
-    expect(text).toContain('Run claude setup-token on any machine, paste the token here; it is stored owner-only on the API host under CRB_HOME/secrets and forwarded to builders only in auth: cli mode.')
+    expect(text).toContain('Sign in with your Claude account below (the API host runs claude setup-token for you), or run it on any machine and paste the token; either way it is stored owner-only on the API host under CRB_HOME/secrets and forwarded to builders only in auth: cli mode.')
     expect(text).toContain('/srv/crb/secrets')
     // nothing to verify or remove yet
     expect(screen.getByTestId('claude-login-verify')).toBeDisabled()
@@ -172,5 +172,87 @@ describe('ClaudeCodeLoginCard', () => {
     await user.click(remove)
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === PATH)).toBe(true))
     await waitFor(() => expect(screen.getByTestId('claude-login-status')).toHaveAttribute('data-present', 'false'))
+  })
+
+  it('signs in from the browser: opens the tab on the click, takes the code, polls to done — the token never appears', async () => {
+    const URL = 'https://claude.com/cai/oauth/authorize?code=true&client_id=abc&state=S1'
+    const base: LoginSession = { id: 'a'.repeat(32), state: 'awaiting_code', url: URL, detail: 'sign in on Anthropic\'s page, then paste the code it shows', started_at: '2026-09-16T10:00:00+00:00', expires_at: '2026-09-16T10:10:00+00:00', fingerprint: '' }
+    let posted = false
+    let polls = 0
+    const tab = { closed: false, location: { href: '' }, close: vi.fn() }
+    const open = vi.fn(() => tab as unknown as Window)
+    vi.stubGlobal('open', open)
+    const api = setup(ADMIN, {
+      'GET /settings/secrets': () => json(list(polls >= 2 ? { ...PRESENT, set_by: 'login:Ada' } : ABSENT)),
+      [`POST ${PATH}/login`]: () => json(base, 201),
+      [`POST ${PATH}/login/${base.id}/code`]: () => {
+        posted = true
+        return json({ ...base, state: 'exchanging', url: '' })
+      },
+      [`GET ${PATH}/login/${base.id}`]: () => {
+        if (!posted) return json(base)
+        polls += 1
+        return json(polls >= 2 ? { ...base, state: 'done', url: '', detail: 'token stored', fingerprint: 'GOOD' } : { ...base, state: 'exchanging', url: '' })
+      },
+    })
+    const user = userEvent.setup()
+    await screen.findByTestId('claude-login-status')
+    await user.click(screen.getByTestId('claude-signin-start'))
+    // the tab was opened synchronously on the click and then pointed at Anthropic's URL
+    expect(open).toHaveBeenCalledWith('', '_blank', 'noopener')
+    await waitFor(() => expect(tab.location.href).toBe(URL))
+    expect(screen.getByTestId('claude-signin')).toHaveAttribute('data-state', 'awaiting_code')
+    expect(screen.getByTestId('claude-signin-url')).toHaveAttribute('href', URL)
+    // the code goes to the session; the field is a password input and is cleared after
+    const field = screen.getByTestId('claude-signin-code')
+    expect(field).toHaveAttribute('type', 'password')
+    await user.type(field, 'the-code-from-anthropic#S1')
+    await user.click(screen.getByTestId('claude-signin-submit'))
+    const sent = api.calls.find((c) => c.path === `${PATH}/login/${base.id}/code` && c.method === 'POST')
+    expect(sent && JSON.parse(String(sent.init?.body))).toEqual({ code: 'the-code-from-anthropic#S1' })
+    await waitFor(() => expect(field).toHaveValue(''))
+    // polled to done: the result names only the fingerprint and the list now shows the login's token
+    await waitFor(() => expect(screen.getByTestId('claude-signin-result')).toHaveAttribute('data-state', 'done'), { timeout: 5000 })
+    expect(screen.getByTestId('claude-signin-result')).toHaveTextContent('token stored …GOOD')
+    await waitFor(() => expect(screen.getByTestId('claude-login-status')).toHaveAttribute('data-present', 'true'))
+    expect(screen.getByTestId('claude-login-provenance')).toHaveTextContent('login:Ada')
+    expect(document.body.textContent).not.toContain(TOKEN)
+  })
+
+  it('a refused code is shown as failed with the server detail; a missing CLI is the envelope', async () => {
+    const base: LoginSession = { id: 'b'.repeat(32), state: 'awaiting_code', url: 'https://claude.com/x', detail: '', started_at: '', expires_at: '', fingerprint: '' }
+    let posted = false
+    vi.stubGlobal('open', vi.fn(() => ({ closed: true, location: { href: '' }, close: vi.fn() })))
+    setup(ADMIN, {
+      'GET /settings/secrets': list(ABSENT),
+      [`POST ${PATH}/login`]: () => json(base, 201),
+      [`POST ${PATH}/login/${base.id}/code`]: () => {
+        posted = true
+        return json({ ...base, state: 'exchanging', url: '' })
+      },
+      [`GET ${PATH}/login/${base.id}`]: () => json(posted ? { ...base, state: 'failed', url: '', detail: 'the claude CLI refused the code: Invalid authorization code.' } : base),
+    })
+    const user = userEvent.setup()
+    await screen.findByTestId('claude-login-status')
+    await user.click(screen.getByTestId('claude-signin-start'))
+    await screen.findByTestId('claude-signin-code')
+    await user.type(screen.getByTestId('claude-signin-code'), 'wrong-code-1234')
+    await user.click(screen.getByTestId('claude-signin-submit'))
+    await waitFor(() => expect(screen.getByTestId('claude-signin-result')).toHaveAttribute('data-state', 'failed'), { timeout: 5000 })
+    expect(screen.getByTestId('claude-signin-result')).toHaveTextContent('Invalid authorization code')
+    // and the button is free again for another attempt
+    expect(screen.getByTestId('claude-signin-start')).toBeEnabled()
+  })
+
+  it('the start button reports a missing CLI through the error envelope', async () => {
+    vi.stubGlobal('open', vi.fn(() => ({ closed: false, location: { href: '' }, close: vi.fn() })))
+    setup(ADMIN, {
+      'GET /settings/secrets': list(ABSENT),
+      [`POST ${PATH}/login`]: () => envelope(503, 'cli_missing', "the claude CLI is not on the API host's PATH"),
+    })
+    const user = userEvent.setup()
+    await screen.findByTestId('claude-login-status')
+    await user.click(screen.getByTestId('claude-signin-start'))
+    await waitFor(() => expect(screen.getByTestId('claude-signin')).toHaveTextContent("the claude CLI is not on the API host's PATH"))
   })
 })

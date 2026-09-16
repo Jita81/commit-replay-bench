@@ -342,9 +342,10 @@ class TestSecretsFile:
             return LoginCheck("ok", "pong", "explicit", "WXYZ")
 
         monkeypatch.setattr(srv, "verify_login", fake_verify)
-        check = f.verify(NAME, timeout_s=7)
+        check = f.verify(NAME, timeout_s=7, binary="/opt/claude")
         assert check is not None and check.status == "ok"
-        assert seen == {"token": TOKEN, "timeout_s": 7}
+        # the configured CLI binary (CRB_BUILDER__CLAUDE_BINARY) reaches the probe
+        assert seen == {"token": TOKEN, "timeout_s": 7, "binary": "/opt/claude"}
 
 
 class TestVerifyRateLimiter:

@@ -153,6 +153,10 @@ class BuilderSettings(BaseModel):
     tmp_size: str = "1g"
     #: ``uid:gid`` for the builder container; empty ⇒ the worker's own uid:gid. Root is refused by the worker.
     user: str = ""
+    #: The Claude Code CLI the API host runs for the login flow and the verify probe
+    #: (``CRB_BUILDER__CLAUDE_BINARY``); empty ⇒ ``claude`` on PATH. The worker resolves its
+    #: own binary through the builder config; this is the API's.
+    claude_binary: str = ""
 
     @field_validator("allow_hosts", mode="before")
     @classmethod
@@ -176,6 +180,7 @@ class BuilderSettings(BaseModel):
         return {
             "executor": self.executor,
             "image": self.image,
+            "claude_binary": self.claude_binary or "claude (PATH)",
             "proxy_image": self.proxy_image or self.image,
             "allow_hosts": list(self.allow_hosts),
             "egress_network": self.egress_network if self.allow_hosts else "none",

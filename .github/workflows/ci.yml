@@ -187,7 +187,12 @@ jobs:
           fetch-depth: 0 # gitleaks scans the full history
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
+        # The action's default scanner (8.24.3) predates the top-level ``[[allowlists]]``
+        # form the config uses, so the test tree's deliberately fake credentials were 18
+        # "findings" (first CI run after the repository went public, 2026-09-16). Pin the
+        # scanner the gate runs — the version that read the config correctly locally.
         env:
+          GITLEAKS_VERSION: "8.30.1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Required only for organisation-owned repositories; harmless when unset.
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}

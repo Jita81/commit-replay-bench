@@ -84,7 +84,7 @@ test.describe('07 settings + accessibility', () => {
     await page.goto('/settings')
     await expect(page.getByRole('heading', { name: 'Claude Code login' })).toBeVisible()
     await expect(page.getByTestId('claude-login-instructions')).toContainText(
-      'Run claude setup-token on any machine, paste the token here; it is stored owner-only on the API host under CRB_HOME/secrets and forwarded to builders only in auth: cli mode.',
+      'Sign in with your Claude account below (the API host runs claude setup-token for you), or run it on any machine and paste the token; either way it is stored owner-only on the API host under CRB_HOME/secrets and forwarded to builders only in auth: cli mode.',
     )
     const status = page.getByTestId('claude-login-status')
     await expect(status).toHaveAttribute('data-present', 'false')

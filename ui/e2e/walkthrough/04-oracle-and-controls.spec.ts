@@ -26,7 +26,7 @@
  * Touch when:   a control is added to the matrix (`CONTROLS` here must match
  *               src/crb/core/oracle/controls.py) or the Oracle page's columns change.
  */
-import { expect, expectLogAction, primary, startRun, test, waitForRun } from './support'
+import { env, expect, expectLogAction, primary, startRun, test, waitForRun } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -71,8 +71,23 @@ test.describe('04 oracle + controls', () => {
     const banner = page.getByTestId('gate-banner')
     await expect(banner).toBeVisible()
     await expect(banner).toContainText('Negative controls')
-    await expect(banner).toHaveAttribute('data-state', 'OPEN')
     await expect(banner).toContainText('0 violation(s)')
+    // The gate's state is the API's routing verdict (the reduction the capability map and
+    // the routes gate on), rendered — never derived in the UI from the counts: OPEN only
+    // when the verdict is `passed`. On the one-task fixture the verdict is `thin` (fewer
+    // than half the controls constructible) or `escaped` — the fixture's `hardcode_cheat`
+    // grades clean by construction (one assertion cannot tell a hard-coded return from an
+    // implementation; tests/test_oracle_controls.py pins it as the measured escape): a
+    // finding, not a violation. Both keep the gate CLOSED, exactly as routing withholds
+    // deliver under them. Before batch 4 the banner derived OPEN from "no violations"
+    // alone and hid that.
+    const res = await page.request.get(`${env.baseUrl}/api/v1/oracle/${encodeURIComponent(t.name)}/controls`)
+    expect(res.ok(), `GET /oracle/{repo}/controls → ${res.status()}`).toBeTruthy()
+    const verdict = ((await res.json()) as { verdict: { state: string; violations?: number } }).verdict
+    expect(verdict.state, 'the fixture has no violations; the verdict is passed, thin or escaped').toMatch(/^(passed|thin|escaped)$/)
+    await expect(banner).toHaveAttribute('data-state', verdict.state === 'passed' ? 'OPEN' : 'CLOSED')
+    await expect(banner).toContainText(`Routing verdict (from the API)`)
+    await expect(banner).toContainText(verdict.state)
 
     const table = page.getByRole('table', { name: 'Negative-control rows' })
     const rows = table.locator('tbody tr')
