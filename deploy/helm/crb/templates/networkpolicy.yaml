@@ -1,0 +1,187 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $embedded := eq .Values.postgresql.mode "embedded" }}
+# 1. Default deny — every crb pod (api, worker, migrate, embedded postgres): no ingress, no
+#    egress unless a rule below allows it. Requires a NetworkPolicy-enforcing CNI.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "crb.fullname" . }}-default-deny
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "crb.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+---
+# 2. DNS for every crb pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "crb.fullname" . }}-dns
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "crb.selectorLabels" . | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            {{- toYaml $np.dns.namespaceSelector | nindent 12 }}
+          {{- with $np.dns.podSelector }}
+          podSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      ports:
+        - protocol: UDP
+          port: {{ $np.dns.port }}
+        - protocol: TCP
+          port: {{ $np.dns.port }}
+---
+# 3. API ingress: only the ingress controller (and optionally a metrics scraper).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "crb.fullname" . }}-api-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "crb.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    {{- $peers := concat $np.apiIngress $np.metricsIngress }}
+    {{- if $peers }}
+    - from:
+        {{- toYaml $peers | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: 8000
+    {{- end }}
+---
+# 4. Database egress for api, worker and migrate.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "crb.fullname" . }}-db-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "crb.selectorLabels" . | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    {{- if $embedded }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "crb.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    {{- else if $np.postgres.cidrs }}
+    - to:
+        {{- range $np.postgres.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $np.postgres.port }}
+    {{- else }}
+    {{- fail "networkPolicy.postgres.cidrs is empty with postgresql.mode=external: every pod would be denied its database (default deny). Set the CIDR(s) of the database endpoint, or disable networkPolicy." }}
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- /* every crb pod: api, worker, migrate job, embedded postgres */ -}}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- if $embedded }}
+---
+# 4b. Embedded postgres accepts connections only from crb pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "crb.fullname" . }}-db-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "crb.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "crb.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 5432
+{{- end }}
+---
+# 5. Worker egress: the model endpoint ONLY (extraEgress is granted to every pod in §4).
+#    Sandbox containers themselves run with --network=none.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "crb.fullname" . }}-worker-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "crb.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  policyTypes: [Egress]
+  egress:
+    {{- if $np.modelEndpoint.cidrs }}
+    - to:
+        {{- range $np.modelEndpoint.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $np.modelEndpoint.port }}
+    {{- end }}
+---
+# 6. API egress: the OIDC issuer ONLY (extraEgress is granted to every pod in §4).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "crb.fullname" . }}-api-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "crb.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  policyTypes: [Egress]
+  egress:
+    {{- if $np.oidc.cidrs }}
+    - to:
+        {{- range $np.oidc.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $np.oidc.port }}
+    {{- end }}
+{{- end }}

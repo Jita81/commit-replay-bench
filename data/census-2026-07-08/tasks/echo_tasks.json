@@ -1,0 +1,2516 @@
+{
+ "cc07fa957464a7c288859083b3008ca970c68a6e": {
+  "task": "cc07fa957464a7c288859083b3008ca970c68a6e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go",
+   "json_test.go",
+   "perf_bench_test.go"
+  ],
+  "src_files": [
+   "json.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-22T09:44:54-07:00",
+  "subject": "perf(json): pooled-buffer JSON deserialize (#3023)",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5::TestDefaultBinder_BindBody",
+   "github.com/labstack/echo/v5::TestDefaultBinder_BindBody/nok,_JSON_POST_body_bind_failure",
+   "github.com/labstack/echo/v5::TestDefaultBinder_BindToStructFromMixedSources",
+   "github.com/labstack/echo/v5::TestDefaultBinder_BindToStructFromMixedSources/nok,_POST_body_bind_failure",
+   "github.com/labstack/echo/v5::TestDefaultJSONCodec_Decode_RejectsTrailingData"
+  ],
+  "gold_clean": true
+ },
+ "c9477eb5b5126ae933f2729af852d1be3f5845ae": {
+  "task": "c9477eb5b5126ae933f2729af852d1be3f5845ae",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/rate_limiter_context_test.go"
+  ],
+  "src_files": [
+   "middleware/rate_limiter.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-14T06:08:22-07:00",
+  "subject": "feat(middleware): optional RateLimiterStoreContext for response headers (#2961) (#3007)",
+  "src_churn": 62,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a9ede66a5a7196411131beb1ee801e75bbaf7ac6": {
+  "task": "a9ede66a5a7196411131beb1ee801e75bbaf7ac6",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/static_percent_test.go"
+  ],
+  "src_files": [
+   "middleware/static.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-13T13:22:39-07:00",
+  "subject": "fix(middleware/static): don't double-unescape request path (#2599) (#3006)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5/middleware::TestStatic_servesFileWithPercentInName"
+  ],
+  "gold_clean": true
+ },
+ "ec9515a829f6e7ae76c5187e7cc249ddf21181d9": {
+  "task": "ec9515a829f6e7ae76c5187e7cc249ddf21181d9",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_field_error_test.go",
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-13T13:22:36-07:00",
+  "subject": "fix(binder): include field name in form/struct bind conversion errors (#2629) (#3005)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5::TestBindInt8",
+   "github.com/labstack/echo/v5::TestBindInt8/nok,_binding_fails",
+   "github.com/labstack/echo/v5::TestBindUnmarshalParamExtras",
+   "github.com/labstack/echo/v5::TestBindUnmarshalParamExtras/nok,_unmarshalling_fails",
+   "github.com/labstack/echo/v5::TestBindUnmarshalParams",
+   "github.com/labstack/echo/v5::TestBindUnmarshalParams/nok,_unmarshalling_fails",
+   "github.com/labstack/echo/v5::TestBind_formConversionErrorIncludesFieldName",
+   "github.com/labstack/echo/v5::TestDefaultBinder_BindToStructFromMixedSources",
+   "github.com/labstack/echo/v5::TestDefaultBinder_BindToStructFromMixedSources/nok,_GET_with_body_bind_failure_when_types_are_not_convertible"
+  ],
+  "gold_clean": true
+ },
+ "dba8ff62ea1903956ba4c77ddc37c578c3ae2e48": {
+  "task": "dba8ff62ea1903956ba4c77ddc37c578c3ae2e48",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "binder_error_response_test.go"
+  ],
+  "src_files": [
+   "binder.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-13T13:22:11-07:00",
+  "subject": "fix(binder): serialize BindingError to structured JSON (#2771) (#3004)",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9c748c9b114372d9a9326405a0b063b84a31147d": {
+  "task": "9c748c9b114372d9a9326405a0b063b84a31147d",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/body_limit_test.go",
+   "middleware/decompress_test.go"
+  ],
+  "src_files": [
+   "middleware/decompress.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-11T03:17:46+09:00",
+  "subject": "fix(middleware): reset ContentLength after gzip decompression",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5/middleware::TestBodyLimitAfterDecompressUsesDecodedSize"
+  ],
+  "gold_clean": true
+ },
+ "6a390cb5a791c12993140e00e66090e67511b9a0": {
+  "task": "6a390cb5a791c12993140e00e66090e67511b9a0",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/proxy_test.go"
+  ],
+  "src_files": [
+   "middleware/proxy.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-09T05:31:17+09:00",
+  "subject": "fix(middleware/proxy): append RealIP to X-Forwarded-For for WebSocket requests (#2994)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5/middleware::TestProxyWebSocketXForwardedFor",
+   "github.com/labstack/echo/v5/middleware::TestProxyWebSocketXForwardedFor/multi-line_XFF_(multiple_header_occurrences)_is_joined_with_proxy_RealIP_appended",
+   "github.com/labstack/echo/v5/middleware::TestProxyWebSocketXForwardedFor/single-line_comma-separated_XFF_is_preserved_with_proxy_RealIP_appended",
+   "github.com/labstack/echo/v5/middleware::TestProxyWebSocketXForwardedFor/single-line_single-entry_XFF_is_preserved_with_proxy_RealIP_appended"
+  ],
+  "gold_clean": true
+ },
+ "98d99d5c8c1376e82247775b14da21d618fbb7dc": {
+  "task": "98d99d5c8c1376e82247775b14da21d618fbb7dc",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/proxy_test.go"
+  ],
+  "src_files": [
+   "middleware/proxy.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-21T14:23:05+09:00",
+  "subject": "fix proxy panic when balancer has no target",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5/middleware::TestProxyWithNoTargetDoesNotRetry",
+   "github.com/labstack/echo/v5/middleware::TestProxyWithNoTargetReturnsBadGateway",
+   "github.com/labstack/echo/v5/middleware::TestProxyWithNoTargetReturnsBadGateway/custom_balancer_with_nil_target",
+   "github.com/labstack/echo/v5/middleware::TestProxyWithNoTargetReturnsBadGateway/custom_balancer_with_nil_target_URL",
+   "github.com/labstack/echo/v5/middleware::TestProxyWithNoTargetReturnsBadGateway/random_balancer_with_nil_targets",
+   "github.com/labstack/echo/v5/middleware::TestProxyWithNoTargetReturnsBadGateway/round-robin_balancer_after_removing_last_target",
+   "github.com/labstack/echo/v5/middleware::TestProxyWithNoTargetReturnsBadGateway/round-robin_balancer_with_nil_targets"
+  ],
+  "gold_clean": true
+ },
+ "d1d8ad3f99dd9b80542cd0c357d56a8916c515df": {
+  "task": "d1d8ad3f99dd9b80542cd0c357d56a8916c515df",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-25T15:12:36+03:00",
+  "subject": "Context.Scheme should validate values taken from header (#2953)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5::TestContext_Scheme",
+   "github.com/labstack/echo/v5::TestContext_Scheme/ignores_invalid_X-Forwarded-Proto_and_uses_X-Forwarded-Protocol",
+   "github.com/labstack/echo/v5::TestContext_Scheme/ignores_invalid_forwarded_headers_and_falls_back_to_http"
+  ],
+  "gold_clean": true
+ },
+ "22e4b71109ef072ef011a489066ec662ca9565b2": {
+  "task": "22e4b71109ef072ef011a489066ec662ca9565b2",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "context_test.go",
+   "ip_test.go",
+   "middleware/request_logger_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "ip.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-31T23:26:41+03:00",
+  "subject": "Remove legacy IP extraction logic from context.RealIP method and move it to LegacyIPExtractor IP extraction function.",
+  "src_churn": 87,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a7005b2f5fa623237d388b71e35311afebd2a5d7": {
+  "task": "a7005b2f5fa623237d388b71e35311afebd2a5d7",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "echo_test.go"
+  ],
+  "src_files": [
+   "echo.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-31T14:27:50+03:00",
+  "subject": "Add NewDefaultFS function to help create filesystem that allows absolute paths (#2931)",
+  "src_churn": 33,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9183f1e80901fe3e55a61fce607e2c925e1e987b": {
+  "task": "9183f1e80901fe3e55a61fce607e2c925e1e987b",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/csrf_test.go"
+  ],
+  "src_files": [
+   "middleware/csrf.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-10T10:23:11+02:00",
+  "subject": "CSRF: support older token-based CSRF protection handler that want to render token into template",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5/middleware::TestCSRFWithConfig",
+   "github.com/labstack/echo/v5/middleware::TestCSRFWithConfig/ok,_safe_method_+_SecFetchSite=same-origin_passes",
+   "github.com/labstack/echo/v5/middleware::TestCSRFWithConfig/ok,_unsafe_method_+_SecFetchSite=same-origin_passes"
+  ],
+  "gold_clean": true
+ },
+ "717034fc7ac29db24cb0aeec51cad2ebb1ae192e": {
+  "task": "717034fc7ac29db24cb0aeec51cad2ebb1ae192e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "httperror_test.go",
+   "router_test.go"
+  ],
+  "src_files": [
+   "httperror.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-12T18:14:20+02:00",
+  "subject": "Add ResolveResponseStatus function to help middleware/handlers determine HTTP status code and echo.Response",
+  "src_churn": 75,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "4dd9f4641305ef32492e8fbdaacd000bf8c9453e": {
+  "task": "4dd9f4641305ef32492e8fbdaacd000bf8c9453e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "httperror_test.go"
+  ],
+  "src_files": [
+   "httperror.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-13T00:18:50+09:00",
+  "subject": "rename and moved to HttpStatusCoder below",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9e37c93010459ff3604e4abee70e7249b60231ef": {
+  "task": "9e37c93010459ff3604e4abee70e7249b60231ef",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "httperror_test.go"
+  ],
+  "src_files": [
+   "httperror.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-12T22:29:13+09:00",
+  "subject": "removed Is method and improved StatusCode method",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a16859ca8f49f9da2431e6a94b1d91942b49388e": {
+  "task": "a16859ca8f49f9da2431e6a94b1d91942b49388e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "httperror_test.go"
+  ],
+  "src_files": [
+   "httperror.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-09T19:46:10+09:00",
+  "subject": "add/Is_method",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5::TestHTTPError_Is",
+   "github.com/labstack/echo/v5::TestHTTPError_Is/ok,_different_instance,_same_code",
+   "github.com/labstack/echo/v5::TestHTTPError_Is/ok,_same_instance",
+   "github.com/labstack/echo/v5::TestHTTPError_Is/ok,_target_is_sentinel_error"
+  ],
+  "gold_clean": true
+ },
+ "6c162596b43157c8a4d6c7d88a7db9f45be95ef2": {
+  "task": "6c162596b43157c8a4d6c7d88a7db9f45be95ef2",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/static_test.go"
+  ],
+  "src_files": [
+   "middleware/static.go",
+   "middleware/static_other.go",
+   "middleware/static_windows.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-06T15:03:55+02:00",
+  "subject": "Fix directory traversal vulnerability under Windows in Static middleware when default Echo filesytem is used (effectively `middleware.StaticConfig{Filesystem: n",
+  "src_churn": 102,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5/middleware::TestStatic_DirectoryBrowsing",
+   "github.com/labstack/echo/v5/middleware::TestStatic_DirectoryBrowsing/ok,_should_return_only_subfolder_folder_listing_from_Root=public/assets"
+  ],
+  "gold_clean": true
+ },
+ "88d975a83de6a8cdf233512cfcf7c9295c91c778": {
+  "task": "88d975a83de6a8cdf233512cfcf7c9295c91c778",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "group_test.go",
+   "middleware/static_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "echo.go",
+   "version.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-06T12:27:18+02:00",
+  "subject": "Fix directory traversal vulnerability under Windows in Static middleware when default Echo filesytem is used (effectively `middleware.StaticConfig{Filesystem: n",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5/middleware::TestStatic",
+   "github.com/labstack/echo/v5/middleware::TestStatic/ok,_serve_directory_index_with_IgnoreBase_and_browse",
+   "github.com/labstack/echo/v5/middleware::TestStatic/ok,_serve_file_from_subdirectory",
+   "github.com/labstack/echo/v5/middleware::TestStatic/ok,_serve_file_with_IgnoreBase",
+   "github.com/labstack/echo/v5/middleware::TestStatic/ok,_serve_from_http.FileSystem",
+   "github.com/labstack/echo/v5/middleware::TestStatic/ok,_serve_index_as_directory_index_listing_files_directory",
+   "github.com/labstack/echo/v5/middleware::TestStatic/ok,_serve_index_with_Echo_message",
+   "github.com/labstack/echo/v5/middleware::TestStatic/ok,_when_html5_mode_serve_index_for_any_static_file_that_does_not_exist",
+   "github.com/labstack/echo/v5/middleware::TestStatic_useCaseForApiAndSPAs"
+  ],
+  "gold_clean": false
+ },
+ "09ccfbaace93a36bef8f494348d13d86dc327ea4": {
+  "task": "09ccfbaace93a36bef8f494348d13d86dc327ea4",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "router_test.go"
+  ],
+  "src_files": [
+   "router.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-02T08:51:19+02:00",
+  "subject": "Fill c.Request().Pattern field with route path to help standard library based middlewares.",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5::TestRouterFillsRequestPatternField"
+  ],
+  "gold_clean": true
+ },
+ "26ec148ea731c2ddf55c03b1f9b776da23e27217": {
+  "task": "26ec148ea731c2ddf55c03b1f9b776da23e27217",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/static_test.go"
+  ],
+  "src_files": [
+   "middleware/static.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-02T18:26:49+02:00",
+  "subject": "security (static middleware): fix bowser=true listing all file names from given filesystem root",
+  "src_churn": 50,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5/middleware::TestStatic_DirectoryBrowsing",
+   "github.com/labstack/echo/v5/middleware::TestStatic_DirectoryBrowsing/ok,_should_return_index.html_contents_from_Root=public_folder",
+   "github.com/labstack/echo/v5/middleware::TestStatic_DirectoryBrowsing/ok,_should_return_only_subfolder_folder_listing_from_Root=public/assets"
+  ],
+  "gold_clean": false
+ },
+ "1f3ef29366166d60b02b13ad9e9c56fbcb6635ab": {
+  "task": "1f3ef29366166d60b02b13ad9e9c56fbcb6635ab",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "response_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "response.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-28T11:41:43+02:00",
+  "subject": "Context: json should not send status code before serialization is complete (#2877)",
+  "src_churn": 68,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v5::TestContextJSONWithNotEchoResponse",
+   "github.com/labstack/echo/v5::TestResponse_UnwrapResponse_error"
+  ],
+  "gold_clean": true
+ },
+ "096ce41d2a24f5ec652b21adbcf25c484bef49ea": {
+  "task": "096ce41d2a24f5ec652b21adbcf25c484bef49ea",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/recover_test.go"
+  ],
+  "src_files": [
+   "middleware/recover.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-20T12:41:59+02:00",
+  "subject": "Panic MW: will now return a custom PanicStackError with stack trace when config.DisablePrintStack is set to false.",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "85e01ed1f82d4c6affcf1c34f28e4928c0ad1cc2": {
+  "task": "85e01ed1f82d4c6affcf1c34f28e4928c0ad1cc2",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "response_test.go"
+  ],
+  "src_files": [
+   "response.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-06T11:12:52+02:00",
+  "subject": "Response should implement http.Flusher and http.Hijacker to work with older libraries that do not use `http.NewResponseController()`",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d0f9d1e73503f38a82719562a7ff28ae06730d9e": {
+  "task": "d0f9d1e73503f38a82719562a7ff28ae06730d9e",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/csrf_test.go"
+  ],
+  "src_files": [
+   "middleware/csrf.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-29T23:14:29+02:00",
+  "subject": "CRSF with Sec-Fetch-Site=same-site falls back to legacy token",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestCSRFConfig_checkSecFetchSiteRequest",
+   "github.com/labstack/echo/v4/middleware::TestCSRFConfig_checkSecFetchSiteRequest/nok,_unsafe_DELETE_+_same-site_is_blocked",
+   "github.com/labstack/echo/v4/middleware::TestCSRFConfig_checkSecFetchSiteRequest/nok,_unsafe_POST_+_same-site_is_blocked",
+   "github.com/labstack/echo/v4/middleware::TestCSRFConfig_checkSecFetchSiteRequest/nok,_unsafe_PUT_+_same-site_is_blocked"
+  ],
+  "gold_clean": true
+ },
+ "cbc0ac1dbc7b1a03feb45b21f52783e5a1d24df0": {
+  "task": "cbc0ac1dbc7b1a03feb45b21f52783e5a1d24df0",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "binder_generic_test.go"
+  ],
+  "src_files": [
+   "binder_generic.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-25T15:29:37+02:00",
+  "subject": "Add PathParam(Or)/QueryParam(Or)/FormParam(Or) generic functions",
+  "src_churn": 573,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6b14f4ef3f37387827fa1cd514ea32a63425ee0c": {
+  "task": "6b14f4ef3f37387827fa1cd514ea32a63425ee0c",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_generic_test.go"
+  ],
+  "src_files": [
+   "context_generic.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-25T15:28:38+02:00",
+  "subject": "Add Context.Get generic functions",
+  "src_churn": 40,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9fe43f78b8195896a27a8c8a5219ca7eb08fae26": {
+  "task": "9fe43f78b8195896a27a8c8a5219ca7eb08fae26",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/rate_limiter_test.go"
+  ],
+  "src_files": [
+   "middleware/rate_limiter.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-12T11:23:24+02:00",
+  "subject": "fix Rate limiter disallows fractional rates",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestRateLimiterMemoryStore_FractionalRateDefaultBurst"
+  ],
+  "gold_clean": true
+ },
+ "b70ec6a08493fc51ac2922000451f3d48a77f895": {
+  "task": "b70ec6a08493fc51ac2922000451f3d48a77f895",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/compress_test.go"
+  ],
+  "src_files": [
+   "middleware/body_limit.go",
+   "middleware/compress.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-12T10:05:31+02:00",
+  "subject": "add checks for invalid casts",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestGzipErrorReturnedInvalidConfig"
+  ],
+  "gold_clean": true
+ },
+ "c9b8b36c9a9186421b3f239ced9b8b239047d525": {
+  "task": "c9b8b36c9a9186421b3f239ced9b8b239047d525",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/rate_limiter_test.go"
+  ],
+  "src_files": [
+   "middleware/rate_limiter.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-12T09:47:15+02:00",
+  "subject": "fix Time-of-Check-Time-of-Use bug in rate limiter",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestRateLimiterMemoryStore_TOCTOUFix"
+  ],
+  "gold_clean": true
+ },
+ "f7dc94df14493734791f16b514a25e20f4a96eaa": {
+  "task": "f7dc94df14493734791f16b514a25e20f4a96eaa",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/body_dump_test.go"
+  ],
+  "src_files": [
+   "middleware/body_dump.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-11T23:47:24+02:00",
+  "subject": "handle errors in body dump middleware",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestBodyDump_ReadError"
+  ],
+  "gold_clean": true
+ },
+ "c12cb08a8679d45dbefe31ab604e60c9ebb64c3c": {
+  "task": "c12cb08a8679d45dbefe31ab604e60c9ebb64c3c",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/logger_strings_test.go",
+   "middleware/logger_test.go",
+   "middleware/request_logger_test.go"
+  ],
+  "src_files": [
+   "middleware/logger.go",
+   "middleware/logger_strings.go",
+   "middleware/request_logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-11T14:39:59+02:00",
+  "subject": "Logger middleware json string escaping and deprecation (#2849)",
+  "src_churn": 369,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d0137c3e80871259ab976c268eac98886c07fea5": {
+  "task": "d0137c3e80871259ab976c268eac98886c07fea5",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-15T19:08:27-07:00",
+  "subject": "Revert Issue #2813 fix based on maintainer feedback",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestTimeFormatBinding",
+   "github.com/labstack/echo/v4::TestTimeFormatBinding/ok,_custom_format_via_form_data",
+   "github.com/labstack/echo/v4::TestTimeFormatBinding/ok,_date_format_binding_via_query_params",
+   "github.com/labstack/echo/v4::TestTimeFormatBinding/ok,_datetime-local_format_binding"
+  ],
+  "gold_clean": true
+ },
+ "2fb84197e9f0b51ba7d2831f00328878f4f5f22d": {
+  "task": "2fb84197e9f0b51ba7d2831f00328878f4f5f22d",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-15T18:47:57-07:00",
+  "subject": "Fix DefaultBinder empty body handling for unknown ContentLength",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody",
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody/ok,_POST_with_empty_body_and_ContentLength_-1_(Issue_#2813)"
+  ],
+  "gold_clean": true
+ },
+ "f24aaff49bc5ba613222176237927a0409c4cdbb": {
+  "task": "f24aaff49bc5ba613222176237927a0409c4cdbb",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/cors_test.go"
+  ],
+  "src_files": [
+   "middleware/cors.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-05-22T14:11:54+03:00",
+  "subject": "Revert \"CORS: reject requests with 401 for non-preflight request with not mat\u2026\" (#2782)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestCorsHeaders",
+   "github.com/labstack/echo/v4/middleware::TestCorsHeaders/non-preflight_request,_allow_specific_origin,_different_origin_header_=_CORS_logic_failure",
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody",
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody/nok,_JSON_POST_with_http.NoBody"
+  ],
+  "gold_clean": true
+ },
+ "de44c53a5b16f7dca451f337f7221a1448c92007": {
+  "task": "de44c53a5b16f7dca451f337f7221a1448c92007",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/proxy_test.go"
+  ],
+  "src_files": [
+   "middleware/proxy.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-04-04T17:01:42+09:00",
+  "subject": "Add support for TLS WebSocket proxy (#2762)",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestProxyWithConfigWebSocketTLS2TLS",
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody",
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody/nok,_JSON_POST_with_http.NoBody"
+  ],
+  "gold_clean": true
+ },
+ "ce0b12ae531b8c6523797af2425c9c0b6d772c4e": {
+  "task": "ce0b12ae531b8c6523797af2425c9c0b6d772c4e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "router_test.go"
+  ],
+  "src_files": [
+   "bind.go",
+   "ip.go",
+   "middleware/rate_limiter.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-01-12T15:28:38+08:00",
+  "subject": "chore: fix some typos in comment (#2735)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody",
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody/nok,_JSON_POST_with_http.NoBody"
+  ],
+  "gold_clean": false
+ },
+ "ee3e1297788e8fc3543489ebc0d4e940be7c6532": {
+  "task": "ee3e1297788e8fc3543489ebc0d4e940be7c6532",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/cors_test.go"
+  ],
+  "src_files": [
+   "middleware/cors.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-01-07T22:06:28+02:00",
+  "subject": "CORS: reject requests with 401 for non-preflight request with not matching origin header (#2732)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestCorsHeaders",
+   "github.com/labstack/echo/v4/middleware::TestCorsHeaders/non-preflight_request,_allow_specific_origin,_different_origin_header_=_CORS_logic_failure",
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody",
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody/nok,_JSON_POST_with_http.NoBody"
+  ],
+  "gold_clean": true
+ },
+ "0368ed87f28eb07e7c5cca2dbff5585a019b4fa1": {
+  "task": "0368ed87f28eb07e7c5cca2dbff5585a019b4fa1",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-11T19:04:21+09:00",
+  "subject": "Add Conditions to Ensure Bind Succeeds with `Transfer-Encoding: chunked` (#2717)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody",
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody/nok,_JSON_POST_with_http.NoBody",
+   "github.com/labstack/echo/v4::TestDefaultBinder_BindBody/ok,_JSON_POST_bind_to_struct_with:_path_+_query_+_chunked_body"
+  ],
+  "gold_clean": false
+ },
+ "822d11a465aa640634789dd39babb14220f887eb": {
+  "task": "822d11a465aa640634789dd39babb14220f887eb",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "renderer_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "renderer.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-20T20:59:39+03:00",
+  "subject": "Add TemplateRenderer struct to ease creating renderers for `html/template` and `text/template` packages.",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d5b32c6e47569961c9b03fe96ca36be7c9d0a02b": {
+  "task": "d5b32c6e47569961c9b03fe96ca36be7c9d0a02b",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-20T20:14:34+03:00",
+  "subject": "Refactor work done by martinpasaribu <martin.yonathan305@gmail.com> (binding multipart files by using struct tags)",
+  "src_churn": 117,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestBindMultipartFormFiles",
+   "github.com/labstack/echo/v4::TestBindMultipartFormFiles/nok,_can_not_bind_to_multipart_file_struct"
+  ],
+  "gold_clean": true
+ },
+ "d1ab8e8544c30bda058a98878c8bd36d5aba7636": {
+  "task": "d1ab8e8544c30bda058a98878c8bd36d5aba7636",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-06T21:42:24+07:00",
+  "subject": "bind: add support of multipart multi files",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestFormMultipartBindTwoFiles"
+  ],
+  "gold_clean": true
+ },
+ "f13e2640f0eacdbe1bffc076c25126368d6445d2": {
+  "task": "f13e2640f0eacdbe1bffc076c25126368d6445d2",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-07-22T13:33:01+09:00",
+  "subject": "bind: Maintain backwards compatibility for map[string]interface{} binding (#2656)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestDefaultBinder_bindDataToMap",
+   "github.com/labstack/echo/v4::TestDefaultBinder_bindDataToMap/ok,_bind_to_map[string]interface",
+   "github.com/labstack/echo/v4::TestDefaultBinder_bindDataToMap/ok,_bind_to_map[string]interface_with_nil_map",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "447c92d842e2f91c07eb032f619bea212beeee60": {
+  "task": "447c92d842e2f91c07eb032f619bea212beeee60",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "echo_test.go",
+   "router_test.go"
+  ],
+  "src_files": [
+   "router.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-27T12:28:46+02:00",
+  "subject": "When route is registered with empty path it is normalized to `/`. Make sure that returned echo.Route structs reflect that behavior. (#2616)",
+  "src_churn": 38,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestRouter_addEmptyPathToSlashReverse"
+  ],
+  "gold_clean": false
+ },
+ "d549290448fc65ae075f0b960b25489f6a38cb78": {
+  "task": "d549290448fc65ae075f0b960b25489f6a38cb78",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-21T23:42:16+02:00",
+  "subject": "Remove maxparam dependence from Context (#2611)",
+  "src_churn": 40,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestContextSetParamNamesEchoMaxParam",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "011acb4732fe4bdca1cb6d8ea9c29735e0b941f7": {
+  "task": "011acb4732fe4bdca1cb6d8ea9c29735e0b941f7",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-13T22:07:08+02:00",
+  "subject": "default binder can bind pointer to slice as struct field. For example `*[]string` (#2608)",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestBindInt8",
+   "github.com/labstack/echo/v4::TestBindInt8/ok,_bind_pointer_to_slice_of_int8_as_struct_field,_value_is_set",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "c57fcb3746c4bfdab1b65363aa9e9edc7b6cab28": {
+  "task": "c57fcb3746c4bfdab1b65363aa9e9edc7b6cab28",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-11T22:49:58+02:00",
+  "subject": "Default binder can use `UnmarshalParams(params []string) error` interface to bind multiple input values at one go. (#2607)",
+  "src_churn": 64,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestBindUnmarshalParams",
+   "github.com/labstack/echo/v4::TestBindUnmarshalParams/nok,_unmarshalling_fails",
+   "github.com/labstack/echo/v4::TestBindUnmarshalParams/ok,_target_is_an_alias_to_slice_and_is_nil,_append_multiple_inputs",
+   "github.com/labstack/echo/v4::TestBindUnmarshalParams/ok,_target_is_an_alias_to_slice_and_is_nil,_single_input",
+   "github.com/labstack/echo/v4::TestBindUnmarshalParams/ok,_target_is_pointer_an_alias_to_slice_and_is_NOT_nil",
+   "github.com/labstack/echo/v4::TestBindUnmarshalParams/ok,_target_is_pointer_an_alias_to_slice_and_is_nil",
+   "github.com/labstack/echo/v4::TestBindUnmarshalParams/ok,_target_is_struct",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "a3b0ba24d3596de3bc2dde618125ac3acb1c774c": {
+  "task": "a3b0ba24d3596de3bc2dde618125ac3acb1c774c",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "ip_test.go"
+  ],
+  "src_files": [
+   "ip.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-10T19:04:54+02:00",
+  "subject": "Fix Real IP logic (#2550)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestExtractIPFromRealIPHeader",
+   "github.com/labstack/echo/v4::TestExtractIPFromRealIPHeader/request_is_from_external_IP_has_XFF_and_valid_+_TRUSTED_X-Real-Ip_header,_extract_IP_from_X-Real-Ip_header",
+   "github.com/labstack/echo/v4::TestExtractIPFromRealIPHeader/request_is_from_external_IP_has_XFF_and_valid_+_TRUSTED_X-Real-Ip_header,_extract_IP_from_X-Real-Ip_header#01",
+   "github.com/labstack/echo/v4::TestExtractIPFromRealIPHeader/request_is_from_external_IP_has_valid_+_TRUSTED_X-Real-Ip_header,_extract_IP_from_X-Real-Ip_header",
+   "github.com/labstack/echo/v4::TestExtractIPFromRealIPHeader/request_is_from_external_IP_has_valid_+_TRUSTED_X-Real-Ip_header,_extract_IP_from_X-Real-Ip_header#01",
+   "github.com/labstack/echo/v4::TestExtractIPFromRealIPHeader/request_is_from_external_IP_has_valid_+_UNTRUSTED_external_X-Real-Ip_header,_extract_IP_from_remote_addr",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "ea529bbab6602db8bd9fc0746405a3687ffbd885": {
+  "task": "ea529bbab6602db8bd9fc0746405a3687ffbd885",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-06T16:18:12+01:00",
+  "subject": "binder: allow binding to a nil map",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestDefaultBinder_bindDataToMap",
+   "github.com/labstack/echo/v4::TestDefaultBinder_bindDataToMap/ok,_bind_to_map[string]string_with_nil_map"
+  ],
+  "gold_clean": false
+ },
+ "76994d17d59d25c53c4e333d2a2048410e0748e1": {
+  "task": "76994d17d59d25c53c4e333d2a2048410e0748e1",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "context_test.go",
+   "middleware/decompress_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "echo.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-06T14:41:33+09:00",
+  "subject": "Remove default charset from 'application/json' Content-Type header (#2568)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestDecompressSkipper",
+   "github.com/labstack/echo/v4::TestContextJSON",
+   "github.com/labstack/echo/v4::TestContextJSONBlob",
+   "github.com/labstack/echo/v4::TestContextJSONPretty",
+   "github.com/labstack/echo/v4::TestContextJSONPrettyURL",
+   "github.com/labstack/echo/v4::TestContextJSONWithEmptyIntent",
+   "github.com/labstack/echo/v4::TestContext_JSON_CommitsCustomResponseCode",
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "60fc2fb1b76f5613fc41aa9315cad6e8c96c6859": {
+  "task": "60fc2fb1b76f5613fc41aa9315cad6e8c96c6859",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "bind.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-12-20T15:32:51+02:00",
+  "subject": "binder: make binding to Map work better with string destinations (#2554)",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestDefaultBinder_bindDataToMap",
+   "github.com/labstack/echo/v4::TestDefaultBinder_bindDataToMap/ok,_bind_to_map[string][]string"
+  ],
+  "gold_clean": false
+ },
+ "14daeb968049b71296a80b91abd3883afd02b4d1": {
+  "task": "14daeb968049b71296a80b91abd3883afd02b4d1",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-07T14:10:06+02:00",
+  "subject": "Security: c.Attachment and c.Inline should escape name in `Content-Disposition` header to avoid 'Reflect File Download' vulnerability. (#2541)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "50ebcd8d7c17457489df7bcbbcaa3745c687fd32": {
+  "task": "50ebcd8d7c17457489df7bcbbcaa3745c687fd32",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "json_test.go"
+  ],
+  "src_files": [
+   "binder.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-07T13:40:22+02:00",
+  "subject": "refactor context tests to be separate functions (#2540)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "c7d6d4373fdfbef5d6f44df0a8ef410c198420ee": {
+  "task": "c7d6d4373fdfbef5d6f44df0a8ef410c198420ee",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/proxy_test.go"
+  ],
+  "src_files": [
+   "middleware/proxy.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-05T17:01:01+01:00",
+  "subject": "proxy middleware: reuse echo request context (#2537)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestModifyResponseUseContext",
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "4bc3e475e3137b6402933eec5e6fde641e0d2320": {
+  "task": "4bc3e475e3137b6402933eec5e6fde641e0d2320",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/cors_test.go"
+  ],
+  "src_files": [
+   "middleware/cors.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-19T08:24:47+03:00",
+  "subject": "cors middleware: allow sending `Access-Control-Max-Age: 0` value with config.MaxAge being negative number. (#2518)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestCORS",
+   "github.com/labstack/echo/v4/middleware::TestCORS/ok,_preflight_request_when_`Access-Control-Max-Age`_is_set_to_0_-_not_to_cache_response",
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "b3ec8e0fdd9d904aa5b1b95479da20c4961a59eb": {
+  "task": "b3ec8e0fdd9d904aa5b1b95479da20c4961a59eb",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/util_test.go"
+  ],
+  "src_files": [
+   "middleware/util.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-22T12:08:34+08:00",
+  "subject": "fix(sec): `randomString` bias (#2492)",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "626f13e33830665e08d9d40e333dd13d9de8e672": {
+  "task": "626f13e33830665e08d9d40e333dd13d9de8e672",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/csrf_test.go",
+   "middleware/rate_limiter_test.go",
+   "middleware/util_test.go"
+  ],
+  "src_files": [
+   "middleware/csrf.go",
+   "middleware/request_id.go",
+   "middleware/util.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-21T09:49:27+03:00",
+  "subject": "CSRF/RequestID mw: switch math/random usage to crypto/random",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "3f8ae15b57624dcd04bac482e454c9b665476d9f": {
+  "task": "3f8ae15b57624dcd04bac482e454c9b665476d9f",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/body_limit_test.go"
+  ],
+  "src_files": [
+   "middleware/body_limit.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-21T11:37:25+03:30",
+  "subject": "delete unused context in body_limit.go (#2483)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "130be0742560d4e7502537077a2667b4fe5adce8": {
+  "task": "130be0742560d4e7502537077a2667b4fe5adce8",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/compress_test.go"
+  ],
+  "src_files": [
+   "middleware/compress.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-16T20:15:24+03:00",
+  "subject": "fix gzip not sending response code for no content responses (404, 301/302 redirects etc)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestGzipWithResponseWithoutBody",
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "1ee8e22faa4ee7ada2dd6927665113ac8a35e62f": {
+  "task": "1ee8e22faa4ee7ada2dd6927665113ac8a35e62f",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/rate_limiter_test.go"
+  ],
+  "src_files": [
+   "middleware/rate_limiter.go",
+   "middleware/request_logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-11T23:36:05+03:00",
+  "subject": "do not use global timeNow variables (#2477)",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "42f07ed880400b8bb80906dfec8138c572748ae8": {
+  "task": "42f07ed880400b8bb80906dfec8138c572748ae8",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/compress_test.go"
+  ],
+  "src_files": [
+   "middleware/compress.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-31T07:53:33+02:00",
+  "subject": "gzip response only if it exceeds a minimal length (#2267)",
+  "src_churn": 91,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "fbfe2167f1d20a2febe59770ca0500652df6c27e": {
+  "task": "fbfe2167f1d20a2febe59770ca0500652df6c27e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "echo_test.go"
+  ],
+  "src_files": [
+   "echo.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-29T22:26:53+02:00",
+  "subject": "fix(DefaultHTTPErrorHandler): return error message when message is an error (#2456)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestDefaultHTTPErrorHandler",
+   "github.com/labstack/echo/v4::TestDefaultHTTPErrorHandler/with_Debug=false_when_httpError_contains_an_error",
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "0ae74648b9045eac5b5978061044c314a6fcd63a": {
+  "task": "0ae74648b9045eac5b5978061044c314a6fcd63a",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/proxy_test.go"
+  ],
+  "src_files": [
+   "middleware/proxy.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-12T18:36:24+01:00",
+  "subject": "Support retries of failed proxy requests (#2414)",
+  "src_churn": 162,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "7d54690cdc4be1effb746ee60d950f937aa9e897": {
+  "task": "7d54690cdc4be1effb746ee60d950f937aa9e897",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "echo_test.go"
+  ],
+  "src_files": [
+   "router.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-16T20:13:47+02:00",
+  "subject": "Proper colon support in reverse (#2416)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEchoReverse",
+   "github.com/labstack/echo/v4::TestEchoReverse/ok,_escaped_colon_verbs",
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "a7802ea523e56c79a1b9e9620c48d68bcff5212e": {
+  "task": "a7802ea523e56c79a1b9e9620c48d68bcff5212e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "response_test.go"
+  ],
+  "src_files": [
+   "response.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-03-28T17:25:11+08:00",
+  "subject": "add supprt for go1.20 http.rwUnwrapper",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ec642f7df11b7e0d5231af0b35d12438bf48498e": {
+  "task": "ec642f7df11b7e0d5231af0b35d12438bf48498e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "group_test.go"
+  ],
+  "src_files": [
+   "group.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-23T21:02:12+02:00",
+  "subject": "Fix group.RouteNotFound not working when group has attached middlewares",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_RouteNotFoundWithMiddleware",
+   "github.com/labstack/echo/v4::TestGroup_RouteNotFoundWithMiddleware/ok,_custom_404_handler_is_called_with_middleware",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "5b36ce36127b2c011e6f0b905958d2544eef8820": {
+  "task": "5b36ce36127b2c011e6f0b905958d2544eef8820",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/proxy_test.go"
+  ],
+  "src_files": [
+   "middleware/proxy.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-24T19:32:41+01:00",
+  "subject": "Fixes the concurrency issue of calling the `Next()` proxy target on RRB (#2409)",
+  "src_churn": 59,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestProxyBalancerWithNoTargets",
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "1e575b7b56d7f1478d889bbd7464f124efe9bc1e": {
+  "task": "1e575b7b56d7f1478d889bbd7464f124efe9bc1e",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/recover_test.go"
+  ],
+  "src_files": [
+   "middleware/recover.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-24T16:39:40+05:30",
+  "subject": "Added a optional config variable to disable centralized error handler in recovery middleware (#2410)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "f909660bb9fa0fed50a897a5169422e3bd92106b": {
+  "task": "f909660bb9fa0fed50a897a5169422e3bd92106b",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/cors_test.go"
+  ],
+  "src_files": [
+   "middleware/cors.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-21T12:21:49+02:00",
+  "subject": "Add middleware.CORSConfig.UnsafeWildcardOriginWithAllowCredentials to make UNSAFE usages of wildcard origin + allow cretentials less likely.",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "82a964c657e26b68998393d3e7291f1a474447f8": {
+  "task": "82a964c657e26b68998393d3e7291f1a474447f8",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/context_timeout_test.go"
+  ],
+  "src_files": [
+   "middleware/context_timeout.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-01T23:38:20+03:00",
+  "subject": "Add context timeout middleware (#2380)",
+  "src_churn": 72,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "08093a4a1dbdcc90c2f6659ef02300d6eccef7f1": {
+  "task": "08093a4a1dbdcc90c2f6659ef02300d6eccef7f1",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "router_test.go"
+  ],
+  "src_files": [
+   "router.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-27T12:58:54-08:00",
+  "subject": "Return an empty string for ctx.path if there is no registered path",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_OnAddRouteHandler",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestRouterNoRoutablePath"
+  ],
+  "gold_clean": false
+ },
+ "45402bb393fa37386fcc5f9127eaff9dc18f67c6": {
+  "task": "45402bb393fa37386fcc5f9127eaff9dc18f67c6",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "echo_test.go"
+  ],
+  "src_files": [
+   "echo.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-12T19:38:02+02:00",
+  "subject": "Add echo.OnAddRouteHandler field. As name says - this handler is called when new route is registered.",
+  "src_churn": 39,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f1cf1ec930e388333798c133629afa18dad00241": {
+  "task": "f1cf1ec930e388333798c133629afa18dad00241",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "echo_test.go",
+   "router_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "router.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-12T18:35:19+02:00",
+  "subject": "Fix adding route with host overwrites default host route with same method+path in list of routes.",
+  "src_churn": 90,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "135c511f5dd1b6cecbbc632d01f2640075e2c4d4": {
+  "task": "135c511f5dd1b6cecbbc632d01f2640075e2c4d4",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/logger_test.go"
+  ],
+  "src_files": [
+   "middleware/logger.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-05T03:38:45+09:00",
+  "subject": "Add request route with \"route\" tag to logger middleware (#2162)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestLoggerTemplate",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "754479694694f6d0bd280d453c10d63348e4e3b7": {
+  "task": "754479694694f6d0bd280d453c10d63348e4e3b7",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "ip_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "ip.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-24T21:17:31+01:00",
+  "subject": "Remove square brackets from ipv6 addresses in XFF (#2182)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestContext_RealIP",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestExtractIPFromRealIPHeader",
+   "github.com/labstack/echo/v4::TestExtractIPFromRealIPHeader/request_is_from_external_IP_has_XFF_and_valid_+_TRUSTED_X-Real-Ip_header,_extract_IP_from_X-Real-Ip_header#01",
+   "github.com/labstack/echo/v4::TestExtractIPFromRealIPHeader/request_is_from_external_IP_has_valid_+_TRUSTED_X-Real-Ip_header,_extract_IP_from_X-Real-Ip_header#01",
+   "github.com/labstack/echo/v4::TestExtractIPFromXFFHeader",
+   "github.com/labstack/echo/v4::TestExtractIPFromXFFHeader/request_is_from_external_IP_is_valid_and_has_some_IPs_TRUSTED_XFF_header,_extract_IP_from_XFF_header#01",
+   "github.com/labstack/echo/v4::TestExtractIPFromXFFHeader/request_trusts_all_IPs_in_XFF_header,_extract_IP_from_furthest_in_XFF_chain#01",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "be23ab67ccdcb94ff99f49638b252be03ae274a6": {
+  "task": "be23ab67ccdcb94ff99f49638b252be03ae274a6",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "echo_test.go"
+  ],
+  "src_files": [
+   "echo.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-19T22:05:53+02:00",
+  "subject": "Add new method HTTPError.WithInternal",
+  "src_churn": 55,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "35184a893b98d2e2451d061c210a61e2d50030a0": {
+  "task": "35184a893b98d2e2451d061c210a61e2d50030a0",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/extractor_test.go"
+  ],
+  "src_files": [
+   "middleware/csrf.go",
+   "middleware/extractor.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-12T23:14:59+02:00",
+  "subject": "Expose middleware.CreateExtractors function so we can use it from echo-contrib repository",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "0ce73028d0815e0ecec80964cc2da42d98fafa33": {
+  "task": "0ce73028d0815e0ecec80964cc2da42d98fafa33",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/proxy_test.go"
+  ],
+  "src_files": [
+   "middleware/proxy.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-29T21:54:23+03:00",
+  "subject": "[suggestion] Add helper interface for ProxyBalancer interface (#2316)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestTargetProvider",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "4c44305b23757c65b46cb08894ae536d8bfed5df": {
+  "task": "4c44305b23757c65b46cb08894ae536d8bfed5df",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bind_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-06T12:04:00+03:30",
+  "subject": "update tests (#2275)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": false
+ },
+ "d77e8c09b21bb23fa8d2dc0250c998d0da0815fa": {
+  "task": "d77e8c09b21bb23fa8d2dc0250c998d0da0815fa",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/csrf_test.go"
+  ],
+  "src_files": [
+   "middleware/csrf.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-01T12:21:55+04:30",
+  "subject": "Added ErrorHandler and ErrorHandlerWithContext in CSRF middleware (#2257)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "cba12a570e8caa1fafabc2d41afc97bd7a83d758": {
+  "task": "cba12a570e8caa1fafabc2d41afc97bd7a83d758",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "router_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "router.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-06T23:25:43+03:00",
+  "subject": "Allow arbitrary HTTP method types to be added as routes",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestRouterAllowHeaderForAnyOtherMethodType",
+   "github.com/labstack/echo/v4::TestRouter_addAndMatchAllSupportedMethods",
+   "github.com/labstack/echo/v4::TestRouter_addAndMatchAllSupportedMethods/ok,_NON_TRADITIONAL_METHOD"
+  ],
+  "gold_clean": false
+ },
+ "78c3d9543be665b4bb9ed5ece3ac829108e3efa5": {
+  "task": "78c3d9543be665b4bb9ed5ece3ac829108e3efa5",
+  "target_tests": [
+   "./",
+   "./internal/pathutil",
+   "./middleware"
+  ],
+  "test_files": [
+   "echo_test.go",
+   "internal/pathutil/pathutil_test.go",
+   "middleware/static_test.go",
+   "static_encoded_separator_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "group.go",
+   "internal/pathutil/pathutil.go",
+   "middleware/static.go"
+  ],
+  "pool": "hard",
+  "authored": "2026-06-15T20:06:11+03:00",
+  "subject": "revert PR #3009 changes to just disabling path escaping by default in static methods/middleware (#3016)",
+  "src_churn": 135,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b1d65e40fef366f2e1a70ca7c172f5057df7024b": {
+  "task": "b1d65e40fef366f2e1a70ca7c172f5057df7024b",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "bind_cache_test.go",
+   "dispatch_pool_test.go",
+   "middleware/randomstring_bench_test.go",
+   "middleware/randomstring_concurrent_test.go",
+   "perf_bench_test.go",
+   "query_fastpath_test.go",
+   "server_test.go"
+  ],
+  "src_files": [
+   "bind.go",
+   "context.go",
+   "echo.go",
+   "middleware/secure.go",
+   "middleware/util.go"
+  ],
+  "pool": "hard",
+  "authored": "2026-06-14T06:08:07-07:00",
+  "subject": "perf: optimize core hot paths (chain, context, binding, responses) (#3008)",
+  "src_churn": 299,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f3fc61848f0d61ded6df3f5cd73ebdecfd1ffb8d": {
+  "task": "f3fc61848f0d61ded6df3f5cd73ebdecfd1ffb8d",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/csrf_test.go",
+   "middleware/util_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "middleware/csrf.go",
+   "middleware/middleware.go",
+   "middleware/util.go"
+  ],
+  "pool": "hard",
+  "authored": "2025-12-29T22:47:42+02:00",
+  "subject": "CRSF with Sec-Fetch-Site checks",
+  "src_churn": 140,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bc1e1904f1f7b641b3c5eca11be634735a3688f9": {
+  "task": "bc1e1904f1f7b641b3c5eca11be634735a3688f9",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/body_dump_test.go",
+   "middleware/compress_test.go",
+   "middleware/middleware_test.go",
+   "response_test.go"
+  ],
+  "src_files": [
+   "middleware/body_dump.go",
+   "middleware/compress.go",
+   "middleware/responsecontroller_1.19.go",
+   "middleware/responsecontroller_1.20.go",
+   "response.go",
+   "responsecontroller_1.19.go",
+   "responsecontroller_1.20.go"
+  ],
+  "pool": "hard",
+  "authored": "2024-03-09T10:50:47+02:00",
+  "subject": "Allow ResponseWriters to unwrap writers when flushing/hijacking (#2595)",
+  "src_churn": 146,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestResponse_FlushPanics"
+  ],
+  "gold_clean": false
+ },
+ "8d4ac4c907696c1aecb237d088f9b648c00f274b": {
+  "task": "8d4ac4c907696c1aecb237d088f9b648c00f274b",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/logger_test.go",
+   "middleware/request_logger_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "echo.go",
+   "middleware/logger.go",
+   "middleware/request_logger.go"
+  ],
+  "pool": "hard",
+  "authored": "2022-11-30T15:47:23+02:00",
+  "subject": "Additional configuration options for RequestLogger and Logger middleware (#2341)",
+  "src_churn": 121,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "0ac4d74402391912ff6da733bb09fd4c3980b4e1": {
+  "task": "0ac4d74402391912ff6da733bb09fd4c3980b4e1",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "binder_go1.15_test.go",
+   "binder_test.go",
+   "context_fs_test.go",
+   "echo_fs_test.go",
+   "group_fs_test.go",
+   "middleware/static_1_16_test.go",
+   "middleware/static_test.go"
+  ],
+  "src_files": [
+   "context_fs.go",
+   "context_fs_go1.16.go",
+   "echo_fs.go",
+   "echo_fs_go1.16.go",
+   "group_fs.go",
+   "group_fs_go1.16.go"
+  ],
+  "pool": "hard",
+  "authored": "2022-09-04T22:44:32+03:00",
+  "subject": "Fix #2259 open redirect vulnerability in echo.StaticDirectoryHandler (used by e.Static, e.StaticFs etc)",
+  "src_churn": 506,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4a1ccdfdc520eb90573a97a7d04fd9fc300c1629": {
+  "task": "4a1ccdfdc520eb90573a97a7d04fd9fc300c1629",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/csrf_test.go",
+   "middleware/extractor_test.go",
+   "middleware/jwt_test.go",
+   "middleware/key_auth_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "middleware/csrf.go",
+   "middleware/extractor.go",
+   "middleware/jwt.go",
+   "middleware/key_auth.go",
+   "middleware/middleware.go"
+  ],
+  "pool": "hard",
+  "authored": "2022-01-24T22:03:45+02:00",
+  "subject": "JWT, KeyAuth, CSRF multivalue extractors (#2060)",
+  "src_churn": 663,
+  "size": "XL",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestEcho_StaticPanic/panics_for_/",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_../",
+   "github.com/labstack/echo/v4::TestGroup_StaticPanic/panics_for_/"
+  ],
+  "gold_clean": true
+ },
+ "5b26a5257b066ec32acbe918641b76ff05b4a87c": {
+  "task": "5b26a5257b066ec32acbe918641b76ff05b4a87c",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "echo_test.go",
+   "middleware/cors_test.go",
+   "router_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "echo.go",
+   "middleware/cors.go",
+   "router.go"
+  ],
+  "pool": "hard",
+  "authored": "2021-12-04T20:02:11+02:00",
+  "subject": "`Allow` header support in Router, MethodNotFoundHandler (405) and CORS middleware",
+  "src_churn": 183,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5e791b07870ea1317a320987e9a4bf4c3c1013e7": {
+  "task": "5e791b07870ea1317a320987e9a4bf4c3c1013e7",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "json_test.go"
+  ],
+  "src_files": [
+   "bind.go",
+   "context.go",
+   "echo.go",
+   "json.go"
+  ],
+  "pool": "hard",
+  "authored": "2021-07-05T20:33:19+01:00",
+  "subject": "Allow for custom JSON encoding implementations (#1880)",
+  "src_churn": 68,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a4ab482b605fb260385212b9bcbcfcdef00a0c27": {
+  "task": "a4ab482b605fb260385212b9bcbcfcdef00a0c27",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "echo_go1.13_test.go",
+   "echo_test.go",
+   "middleware/csrf_samesite_test.go",
+   "middleware/csrf_test.go",
+   "middleware/proxy_1_11_test.go",
+   "middleware/proxy_test.go",
+   "middleware/timeout_test.go"
+  ],
+  "src_files": [
+   "middleware/csrf.go",
+   "middleware/csrf_samesite.go",
+   "middleware/csrf_samesite_1.12.go",
+   "middleware/proxy.go",
+   "middleware/proxy_1_11.go",
+   "middleware/proxy_1_11_n.go",
+   "middleware/timeout.go"
+  ],
+  "pool": "hard",
+  "authored": "2021-04-16T12:38:12+03:00",
+  "subject": "Add Go 1.16 to CI and drop 1.12 specific code (#1850)",
+  "src_churn": 126,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1a6ec73e57633b3b64755c07b13080d3507f9cf5": {
+  "task": "1a6ec73e57633b3b64755c07b13080d3507f9cf5",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/proxy_test.go",
+   "middleware/rewrite_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "middleware/middleware.go",
+   "middleware/proxy.go",
+   "middleware/rewrite.go"
+  ],
+  "pool": "hard",
+  "authored": "2020-08-28T12:47:02-07:00",
+  "subject": "using url.EscapedPath instead of custom GetPath, rewritePath func added to middleware - used by proxy and rewrite",
+  "src_churn": 41,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/v4/middleware::TestProxy",
+   "github.com/labstack/echo/v4/middleware::TestRewrite"
+  ],
+  "gold_clean": true
+ },
+ "7c5af01350b73a75fb7c129f2dacdeea7d6189ba": {
+  "task": "7c5af01350b73a75fb7c129f2dacdeea7d6189ba",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "ip_test.go",
+   "middleware/proxy_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "echo.go",
+   "ip.go",
+   "middleware/proxy.go"
+  ],
+  "pool": "hard",
+  "authored": "2020-02-25T01:29:34+09:00",
+  "subject": "Safer/trustable extraction of real ip from request (#1478)",
+  "src_churn": 147,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bc37a3a79264209e4e6f1ca9d4f7ec16c8dba429": {
+  "task": "bc37a3a79264209e4e6f1ca9d4f7ec16c8dba429",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/proxy_1_11_test.go",
+   "middleware/proxy_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "middleware/proxy.go",
+   "middleware/proxy_1_11.go",
+   "middleware/proxy_1_11_n.go"
+  ],
+  "pool": "hard",
+  "authored": "2018-10-13T08:10:19+02:00",
+  "subject": "Proxy: Better errors + remote custom TLS (#1197)",
+  "src_churn": 51,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/labstack/echo/middleware::TestProxy_1_11"
+  ],
+  "gold_clean": true
+ },
+ "af1bfd5397ec0eac5e4ce07393cdb89a3f087ab2": {
+  "task": "af1bfd5397ec0eac5e4ce07393cdb89a3f087ab2",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "echo_go1.8_test.go",
+   "echo_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "echo_go1.8.go",
+   "util_go17.go",
+   "util_go18.go"
+  ],
+  "pool": "hard",
+  "authored": "2018-04-03T13:09:21+02:00",
+  "subject": "Clean old Go versions",
+  "src_churn": 72,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4f3080c197fb03bd488e822b71bd0e0792a19a72": {
+  "task": "4f3080c197fb03bd488e822b71bd0e0792a19a72",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/compress_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "middleware/csrf.go",
+   "middleware/jwt.go",
+   "router.go"
+  ],
+  "pool": "hard",
+  "authored": "2018-02-21T11:38:22-08:00",
+  "subject": "Bit of more cleanup",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9797cf4b9c9759cc26860310817a15663f3083bd": {
+  "task": "9797cf4b9c9759cc26860310817a15663f3083bd",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "echo_test.go"
+  ],
+  "src_files": [
+   "echo.go",
+   "examples/graceful-shutdown/grace/server.go",
+   "examples/graceful-shutdown/graceful/server.go",
+   "examples/graceful-shutdown/server.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-01-13T18:40:27-08:00",
+  "subject": "gc",
+  "src_churn": 181,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "412823eabb0f1e4c0b93fcf7a26232099469938d": {
+  "task": "412823eabb0f1e4c0b93fcf7a26232099469938d",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/basic_auth_test.go",
+   "middleware/key_auth_test.go"
+  ],
+  "src_files": [
+   "bind.go",
+   "echo.go",
+   "middleware/basic_auth.go",
+   "middleware/csrf.go",
+   "middleware/jwt.go",
+   "middleware/key_auth.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-01-02T20:12:06-08:00",
+  "subject": "Added key auth middleware",
+  "src_churn": 209,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8623669cbc9309b3e6aa1534c357e726a6300744": {
+  "task": "8623669cbc9309b3e6aa1534c357e726a6300744",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "router_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "echo.go",
+   "group.go",
+   "middleware/static.go"
+  ],
+  "pool": "hard",
+  "authored": "2016-10-10T18:18:09-07:00",
+  "subject": "removed `Context#P()`",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "15eb5b0aad47d50d9a9ca7b0a39b3b019ce1ff27": {
+  "task": "15eb5b0aad47d50d9a9ca7b0a39b3b019ce1ff27",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go",
+   "echo_test.go",
+   "router_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "context/context.go",
+   "context/context_1.7.go",
+   "context/context_pre1.7.go",
+   "echo.go"
+  ],
+  "pool": "hard",
+  "authored": "2016-10-10T17:31:26-07:00",
+  "subject": "removed embedded context and exposed `SetRequest` in context",
+  "src_churn": 287,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "702e6d0967e7dfa04388bb5effa38302d9ff22ad": {
+  "task": "702e6d0967e7dfa04388bb5effa38302d9ff22ad",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/cors_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "engine/engine.go",
+   "engine/fasthttp/header.go",
+   "engine/standard/header.go",
+   "middleware/cors.go",
+   "test/header.go"
+  ],
+  "pool": "hard",
+  "authored": "2016-05-22T07:58:21-07:00",
+  "subject": "Closes #517, closes #518",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}

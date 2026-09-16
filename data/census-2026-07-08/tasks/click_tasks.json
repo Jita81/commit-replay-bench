@@ -1,0 +1,947 @@
+{
+ "9f9b149ea30287b4977b800a024ee68144b8c869": {
+  "task": "9f9b149ea30287b4977b800a024ee68144b8c869",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/click/__init__.py",
+   "src/click/decorators.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-29T11:26:36+02:00",
+  "subject": "Add `@custom_version_option`, freeze `@version_option`",
+  "src_churn": 53,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_basic.py::test_custom_version_option[args0]",
+   "tests/test_basic.py::test_custom_version_option[args1]",
+   "tests/test_basic.py::test_custom_version_option_receives_context"
+  ],
+  "gold_clean": true
+ },
+ "93ba0075f4881b858b61f89a753c7c10e330027e": {
+  "task": "93ba0075f4881b858b61f89a753c7c10e330027e",
+  "target_tests": [
+   "tests/test_termui.py"
+  ],
+  "test_files": [
+   "tests/test_termui.py"
+  ],
+  "src_files": [
+   "src/click/termui.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-30T20:26:47+04:00",
+  "subject": "Strip ANSI from `confirm()` and `prompt()` when the stream don't support them",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6f85d26dcd50c1745e81040ed4f2b61f8bf293cf": {
+  "task": "6f85d26dcd50c1745e81040ed4f2b61f8bf293cf",
+  "target_tests": [
+   "tests/test_types.py"
+  ],
+  "test_files": [
+   "tests/test_types.py"
+  ],
+  "src_files": [
+   "src/click/types.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-27T12:47:47+04:00",
+  "subject": "Do not trigger a `BytesWarning` under `python -bb`",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bec59289d8cf9b9b4010642b2fee483e5f8eeefc": {
+  "task": "bec59289d8cf9b9b4010642b2fee483e5f8eeefc",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/click/decorators.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-11T09:59:39+04:00",
+  "subject": "Fix `package_name` resolution when top-level module differs from distribution name",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "762c97eef7c1b3779678992f26a553a2a8c80793": {
+  "task": "762c97eef7c1b3779678992f26a553a2a8c80793",
+  "target_tests": [
+   "tests/test_basic.py"
+  ],
+  "test_files": [
+   "tests/test_basic.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-10T17:26:48+04:00",
+  "subject": "Fix double-bracketing of choices in synopsis",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "051bb0f30b545cf7426deef819811815297c2798": {
+  "task": "051bb0f30b545cf7426deef819811815297c2798",
+  "target_tests": [
+   "tests/test_termui.py"
+  ],
+  "test_files": [
+   "tests/test_termui.py"
+  ],
+  "src_files": [
+   "src/click/_termui_impl.py",
+   "src/click/utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-29T15:30:33+02:00",
+  "subject": "Do not let the GC close a borrowed `stdout`",
+  "src_churn": 79,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "399919f740bfd26cb30d544877fafd03cfcd9091": {
+  "task": "399919f740bfd26cb30d544877fafd03cfcd9091",
+  "target_tests": [
+   "tests/test_termui.py"
+  ],
+  "test_files": [
+   "tests/test_termui.py"
+  ],
+  "src_files": [
+   "src/click/termui.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-29T16:48:26+02:00",
+  "subject": "Support incremental output in the pager",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "684b3f5b5150761ec1c930bef300eb6169f483d8": {
+  "task": "684b3f5b5150761ec1c930bef300eb6169f483d8",
+  "target_tests": [
+   "tests/test_arguments.py",
+   "tests/test_info_dict.py"
+  ],
+  "test_files": [
+   "tests/test_arguments.py",
+   "tests/test_info_dict.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-19T01:48:00Z",
+  "subject": "Add help parameter to arguments",
+  "src_churn": 44,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "665736bc85a19a7a2357c071394b4a545617faa3": {
+  "task": "665736bc85a19a7a2357c071394b4a545617faa3",
+  "target_tests": [
+   "tests/test_arguments.py",
+   "tests/test_commands.py"
+  ],
+  "test_files": [
+   "tests/test_arguments.py",
+   "tests/test_commands.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T07:30:13+02:00",
+  "subject": "Mark commands as optional in the synopsis",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "82f377c547e1867d073f02bb8f476214d07e245b": {
+  "task": "82f377c547e1867d073f02bb8f476214d07e245b",
+  "target_tests": [
+   "tests/test_commands.py",
+   "tests/test_options.py"
+  ],
+  "test_files": [
+   "tests/test_commands.py",
+   "tests/test_options.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T15:52:07+02:00",
+  "subject": "Fix deprecated label formatting",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b7e5fd4cc7de70280eccd39f2bb956df617e5519": {
+  "task": "b7e5fd4cc7de70280eccd39f2bb956df617e5519",
+  "target_tests": [
+   "tests/test_shell_completion.py"
+  ],
+  "test_files": [
+   "tests/test_shell_completion.py"
+  ],
+  "src_files": [
+   "src/click/shell_completion.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T15:05:16+08:00",
+  "subject": "Fix broken fish completion and multiline help string",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c3535905c77a29afc84861b29d3ad366ce5451bd": {
+  "task": "c3535905c77a29afc84861b29d3ad366ce5451bd",
+  "target_tests": [
+   "tests/test_shell_completion.py"
+  ],
+  "test_files": [
+   "tests/test_shell_completion.py"
+  ],
+  "src_files": [
+   "src/click/shell_completion.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T15:05:16+08:00",
+  "subject": "Fix broken fish completion and multiline help string",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "becbde5cf416441627f779e8dd34e57738ee1c1f": {
+  "task": "becbde5cf416441627f779e8dd34e57738ee1c1f",
+  "target_tests": [
+   "tests/test_termui.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_termui.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/click/_termui_impl.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-19T12:37:31-07:00",
+  "subject": "pager doesn't close std streams",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "4d3db84b251518e97299a38a5ca4bab3d01873a2": {
+  "task": "4d3db84b251518e97299a38a5ca4bab3d01873a2",
+  "target_tests": [
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/click/utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-21T10:26:28+01:00",
+  "subject": "handle empty bytes in echo",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7d05a59b9d46a415d85937630d1d812cf477f60a": {
+  "task": "7d05a59b9d46a415d85937630d1d812cf477f60a",
+  "target_tests": [
+   "tests/test_defaults.py",
+   "tests/test_options.py"
+  ],
+  "test_files": [
+   "tests/test_defaults.py",
+   "tests/test_options.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-19T19:43:26-04:00",
+  "subject": "Fix get_parameter_source() during type conversion and eager callbacks",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "32ae2acd3474a57d2450ea849545b2e1258bf76a": {
+  "task": "32ae2acd3474a57d2450ea849545b2e1258bf76a",
+  "target_tests": [
+   "tests/test_shell_completion.py"
+  ],
+  "test_files": [
+   "tests/test_shell_completion.py"
+  ],
+  "src_files": [
+   "src/click/types.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-18T13:59:38-07:00",
+  "subject": "choice shell autocompletion to use normalize_choice()",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d15f3c23a177e80c324e1ee9681c9449c31ac965": {
+  "task": "d15f3c23a177e80c324e1ee9681c9449c31ac965",
+  "target_tests": [
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/click/_compat.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-18T12:46:02-07:00",
+  "subject": "fix: Skip flaky pager test on macOS with free-threaded Python 3.14t",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a3321c9ca14ddb951f04ac981f275b0de2f46208": {
+  "task": "a3321c9ca14ddb951f04ac981f275b0de2f46208",
+  "target_tests": [
+   "tests/test_shell_completion.py"
+  ],
+  "test_files": [
+   "tests/test_shell_completion.py"
+  ],
+  "src_files": [
+   "src/click/shell_completion.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-18T10:14:33-07:00",
+  "subject": "Implement Unix line endings for shell completion output to ensure compatibility with Windows (#3277)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "0551bf53588ae87f462d336f24f853a156fefe3a": {
+  "task": "0551bf53588ae87f462d336f24f853a156fefe3a",
+  "target_tests": [
+   "tests/test_formatting.py"
+  ],
+  "test_files": [
+   "tests/test_formatting.py"
+  ],
+  "src_files": [
+   "src/click/formatting.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-16T08:19:58+02:00",
+  "subject": "Fix `HelpFormatter.write_usage` producing spurious characters",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "1aa2d53d63ff68bf14b35931177aac9270e39713": {
+  "task": "1aa2d53d63ff68bf14b35931177aac9270e39713",
+  "target_tests": [
+   "tests/test_termui.py"
+  ],
+  "test_files": [
+   "tests/test_termui.py"
+  ],
+  "src_files": [
+   "src/click/_termui_impl.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-05T19:18:44+01:00",
+  "subject": "Redesigned tests and get_pager_file branching to be more clear and not set color unknowingly.",
+  "src_churn": 34,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ad39d749be85af02bf191636062eef51323ad5ab": {
+  "task": "ad39d749be85af02bf191636062eef51323ad5ab",
+  "target_tests": [
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/click/testing.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-05T10:07:38+04:00",
+  "subject": "Add `capture` parameter to `CliRunner` and revert default-mode `fileno` exposure",
+  "src_churn": 139,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "0f71fe771ceefd5715b3b375c9b2e3a701c0648e": {
+  "task": "0f71fe771ceefd5715b3b375c9b2e3a701c0648e",
+  "target_tests": [
+   "tests/test_options.py"
+  ],
+  "test_files": [
+   "tests/test_options.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-15T11:55:32+02:00",
+  "subject": "Fix dual-option arbitration to respect explicit defaults",
+  "src_churn": 57,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d946074a8fd4bd743dcde12e08e1561f062a2a68": {
+  "task": "d946074a8fd4bd743dcde12e08e1561f062a2a68",
+  "target_tests": [
+   "tests/test_formatting.py"
+  ],
+  "test_files": [
+   "tests/test_formatting.py"
+  ],
+  "src_files": [
+   "src/click/_textwrap.py",
+   "src/click/formatting.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-12T17:00:35+02:00",
+  "subject": "Rewrite `_wrap_chunks` in `TextWrapper` to be ANSI-aware",
+  "src_churn": 147,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "61bdc2ae81f6d0dc19bd247504544659245df056": {
+  "task": "61bdc2ae81f6d0dc19bd247504544659245df056",
+  "target_tests": [
+   "tests/test_termui.py"
+  ],
+  "test_files": [
+   "tests/test_termui.py"
+  ],
+  "src_files": [
+   "src/click/termui.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-08T16:39:06+02:00",
+  "subject": "Implement a regex-based solution to hide hidden input",
+  "src_churn": 41,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a09c1c655eef3d43181eb46036b66cf058d72df4": {
+  "task": "a09c1c655eef3d43181eb46036b66cf058d72df4",
+  "target_tests": [
+   "tests/test_termui.py"
+  ],
+  "test_files": [
+   "tests/test_termui.py"
+  ],
+  "src_files": [
+   "src/click/termui.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-11T01:28:21+09:00",
+  "subject": "fix: show custom error message in prompt with hide_input=True",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fc6c7c47edd6110b6bd5a1a5297b2035214b0cd1": {
+  "task": "fc6c7c47edd6110b6bd5a1a5297b2035214b0cd1",
+  "target_tests": [
+   "tests/test_types.py"
+  ],
+  "test_files": [
+   "tests/test_types.py"
+  ],
+  "src_files": [
+   "src/click/types.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-08T16:47:47+03:00",
+  "subject": "`FuncParamType` should use `ValueError` message in `self.fail()` (#3211)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "19fd4d6e18bc9fce451f92f422696b11169faa57": {
+  "task": "19fd4d6e18bc9fce451f92f422696b11169faa57",
+  "target_tests": [
+   "tests/test_shell_completion.py"
+  ],
+  "test_files": [
+   "tests/test_shell_completion.py"
+  ],
+  "src_files": [
+   "src/click/shell_completion.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-30T01:37:31+02:00",
+  "subject": "Fix: Ensure fish completion handles multiline help strings correctly (#3126)",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "2468b70997a6ec27ced4b4867954c90da3f92075": {
+  "task": "2468b70997a6ec27ced4b4867954c90da3f92075",
+  "target_tests": [
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/click/termui.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-29T16:20:22-07:00",
+  "subject": "Fix readline backspace/line-wrapping on linux (#2969)",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "3a3e0350b6a2ea3e799440d48e779acabcf44de9": {
+  "task": "3a3e0350b6a2ea3e799440d48e779acabcf44de9",
+  "target_tests": [
+   "tests/test_defaults.py"
+  ],
+  "test_files": [
+   "tests/test_defaults.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-21T16:58:25+02:00",
+  "subject": "Split string values from `default_map` for multi-value parameters",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "1241abaed4e441582a21f4bf90c8482de02b92df": {
+  "task": "1241abaed4e441582a21f4bf90c8482de02b92df",
+  "target_tests": [
+   "tests/test_formatting.py"
+  ],
+  "test_files": [
+   "tests/test_formatting.py"
+  ],
+  "src_files": [
+   "src/click/exceptions.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-21T17:56:16+02:00",
+  "subject": "Use non-shadowed help option name in error hint",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "4e4c7a69b7953ccb8c14e92368ca65d9525f1d2b": {
+  "task": "4e4c7a69b7953ccb8c14e92368ca65d9525f1d2b",
+  "target_tests": [
+   "tests/test_options.py"
+  ],
+  "test_files": [
+   "tests/test_options.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-21T12:55:57+02:00",
+  "subject": "Auto-detect `type=UNPROCESSED` when `flag_value` has non-basic types",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8762c7752cf1632d082c76922b15fef06ac3a2f1": {
+  "task": "8762c7752cf1632d082c76922b15fef06ac3a2f1",
+  "target_tests": [
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/click/testing.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-04T14:41:40+04:00",
+  "subject": "Expose original file descriptor in `CliRunner`",
+  "src_churn": 65,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "607316f9dea85ee81f8a215f5d5ae20f7f4fff71": {
+  "task": "607316f9dea85ee81f8a215f5d5ae20f7f4fff71",
+  "target_tests": [
+   "tests/test_options.py",
+   "tests/test_termui.py"
+  ],
+  "test_files": [
+   "tests/test_options.py",
+   "tests/test_termui.py"
+  ],
+  "src_files": [
+   "src/click/core.py",
+   "src/click/termui.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-09T11:29:08+02:00",
+  "subject": "Support show_default string in prompts",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c653ec820093ed1dda41aae8d35bff7834b0344a": {
+  "task": "c653ec820093ed1dda41aae8d35bff7834b0344a",
+  "target_tests": [
+   "tests/test_options.py",
+   "tests/test_termui.py"
+  ],
+  "test_files": [
+   "tests/test_options.py",
+   "tests/test_termui.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-09T15:04:42+02:00",
+  "subject": "Reconcile default value passing and default activation",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "4f9086bf8fd98aca1d804bf742f4f1ceb6c12295": {
+  "task": "4f9086bf8fd98aca1d804bf742f4f1ceb6c12295",
+  "target_tests": [
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/click/testing.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-28T16:37:55+04:00",
+  "subject": "Patch `pdb` in `CliRunner` to allow debugger interactions in tests",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6de212151893e4072ca21779b7b6f4cb82452f51": {
+  "task": "6de212151893e4072ca21779b7b6f4cb82452f51",
+  "target_tests": [
+   "tests/test_defaults.py"
+  ],
+  "test_files": [
+   "tests/test_defaults.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-02T16:26:39+04:00",
+  "subject": "Treat `UNSET` in a `default_map` as absent",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b96c2601af4e01341b4d2c0db494ebee4aef8f42": {
+  "task": "b96c2601af4e01341b4d2c0db494ebee4aef8f42",
+  "target_tests": [
+   "tests/test_termui.py"
+  ],
+  "test_files": [
+   "tests/test_termui.py"
+  ],
+  "src_files": [
+   "src/click/_termui_impl.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-04T14:51:58+04:00",
+  "subject": "Document and fix command string sanitizing with `shlex.split`",
+  "src_churn": 65,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d340b0c1202284a1b9d0ca892549208527d586ce": {
+  "task": "d340b0c1202284a1b9d0ca892549208527d586ce",
+  "target_tests": [
+   "tests/test_options.py"
+  ],
+  "test_files": [
+   "tests/test_options.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-01T18:42:50+02:00",
+  "subject": "Fix speculative speculative empty string check",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "546f2851f414b07413777ebcae89b2c21a685252": {
+  "task": "546f2851f414b07413777ebcae89b2c21a685252",
+  "target_tests": [
+   "tests/test_defaults.py",
+   "tests/test_options.py"
+  ],
+  "test_files": [
+   "tests/test_defaults.py",
+   "tests/test_options.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-21T18:01:42+04:00",
+  "subject": "Fix callable ``flag_value`` being instantiated when used as a default",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "aaf99a3ee6935f321f755bc7c5717a91d321cd39": {
+  "task": "aaf99a3ee6935f321f755bc7c5717a91d321cd39",
+  "target_tests": [
+   "tests/test_defaults.py"
+  ],
+  "test_files": [
+   "tests/test_defaults.py"
+  ],
+  "src_files": [
+   "src/click/core.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-20T12:10:39+04:00",
+  "subject": "Hide `Sentinel.UNSET` values as `None` in `lookup_default()`",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "831c8f0948af519e45b90801d7430ff25451f972": {
+  "task": "831c8f0948af519e45b90801d7430ff25451f972",
+  "target_tests": [
+   "tests/test_commands.py",
+   "tests/test_options.py"
+  ],
+  "test_files": [
+   "tests/test_commands.py",
+   "tests/test_options.py"
+  ],
+  "src_files": [
+   "src/click/__init__.py",
+   "src/click/core.py",
+   "src/click/exceptions.py",
+   "src/click/parser.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-04-30T02:53:14+03:00",
+  "subject": "Add NoSuchCommand exception with suggestions for misspelled commands (#3228)",
+  "src_churn": 66,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b64ea07128a6368b5f6f93035c75d5693c7ba572": {
+  "task": "b64ea07128a6368b5f6f93035c75d5693c7ba572",
+  "target_tests": [
+   "tests/test_arguments.py",
+   "tests/test_basic.py",
+   "tests/test_options.py",
+   "tests/test_termui.py",
+   "tests/test_utils.py"
+  ],
+  "test_files": [
+   "tests/test_arguments.py",
+   "tests/test_basic.py",
+   "tests/test_options.py",
+   "tests/test_termui.py",
+   "tests/test_utils.py"
+  ],
+  "src_files": [
+   "src/click/_utils.py",
+   "src/click/core.py",
+   "src/click/parser.py",
+   "src/click/termui.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-08-06T12:26:04+04:00",
+  "subject": "Differentiate absence of value and value of absence for `default` and `flag_value`",
+  "src_churn": 587,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e252437313eb364212fdb2d200902e2e8d28f3f9": {
+  "task": "e252437313eb364212fdb2d200902e2e8d28f3f9",
+  "target_tests": [
+   "tests/test_options.py",
+   "tests/test_shell_completion.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_options.py",
+   "tests/test_shell_completion.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/click/core.py",
+   "src/click/exceptions.py",
+   "src/click/shell_completion.py",
+   "src/click/testing.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-07-22T03:20:02-07:00",
+  "subject": "Revert \"Revert \"Merge Stable into master\"\"",
+  "src_churn": 42,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8bc912710774c7b4c84f5d4effd0c764f3e2bbb9": {
+  "task": "8bc912710774c7b4c84f5d4effd0c764f3e2bbb9",
+  "target_tests": [
+   "tests/test_options.py",
+   "tests/test_shell_completion.py",
+   "tests/test_testing.py"
+  ],
+  "test_files": [
+   "tests/test_options.py",
+   "tests/test_shell_completion.py",
+   "tests/test_testing.py"
+  ],
+  "src_files": [
+   "src/click/core.py",
+   "src/click/exceptions.py",
+   "src/click/shell_completion.py",
+   "src/click/testing.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-07-22T03:04:08-07:00",
+  "subject": "Revert \"Merge Stable into master\"",
+  "src_churn": 42,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "15959d92fd88d929e2eaecf25dffd1d35fbcd7fb": {
+  "task": "15959d92fd88d929e2eaecf25dffd1d35fbcd7fb",
+  "target_tests": [
+   "tests/typing/typing_aliased_group.py",
+   "tests/typing/typing_confirmation_option.py",
+   "tests/typing/typing_options.py",
+   "tests/typing/typing_simple_example.py",
+   "tests/typing/typing_version_option.py"
+  ],
+  "test_files": [
+   "tests/typing/typing_aliased_group.py",
+   "tests/typing/typing_confirmation_option.py",
+   "tests/typing/typing_options.py",
+   "tests/typing/typing_simple_example.py",
+   "tests/typing/typing_version_option.py"
+  ],
+  "src_files": [
+   "src/click/__init__.py",
+   "src/click/_termui_impl.py",
+   "src/click/core.py",
+   "src/click/decorators.py",
+   "src/click/globals.py",
+   "src/click/parser.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-03-23T10:31:34+01:00",
+  "subject": "update dev dependencies",
+  "src_churn": 81,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3630addf538ff4d1d5bc75438c8d84378105d03d": {
+  "task": "3630addf538ff4d1d5bc75438c8d84378105d03d",
+  "target_tests": [
+   "tests/test_parser.py"
+  ],
+  "test_files": [
+   "tests/test_parser.py"
+  ],
+  "src_files": [
+   "src/click/__init__.py",
+   "src/click/core.py",
+   "src/click/formatting.py",
+   "src/click/parser.py",
+   "src/click/shell_completion.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-08-20T09:13:25-07:00",
+  "subject": "deprecate OptionParser",
+  "src_churn": 230,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ }
+}

@@ -1,0 +1,1839 @@
+{
+ "25b8e179d8d7ed86769c02f648772dd5fb43dc3c": {
+  "task": "25b8e179d8d7ed86769c02f648772dd5fb43dc3c",
+  "target_tests": [
+   "tests/test_formparsers.py"
+  ],
+  "test_files": [
+   "tests/test_formparsers.py"
+  ],
+  "src_files": [
+   "starlette/formparsers.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-12T11:16:29+02:00",
+  "subject": "Enforce `FormParser` limits in parser callbacks (#3331)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_formparsers.py::test_urlencoded_limits_stop_parsing_within_a_single_chunk[asyncio]",
+   "tests/test_formparsers.py::test_urlencoded_limits_stop_parsing_within_a_single_chunk[trio]",
+   "tests/test_requests.py::test_request_headers[asyncio]",
+   "tests/test_requests.py::test_request_headers[trio]",
+   "tests/test_websockets.py::test_websocket_headers[asyncio]",
+   "tests/test_websockets.py::test_websocket_headers[trio]"
+  ],
+  "gold_clean": true
+ },
+ "dba1c4babc4f99ad2622bb913d87045775dda735": {
+  "task": "dba1c4babc4f99ad2622bb913d87045775dda735",
+  "target_tests": [
+   "tests/test_formparsers.py"
+  ],
+  "test_files": [
+   "tests/test_formparsers.py"
+  ],
+  "src_files": [
+   "starlette/formparsers.py",
+   "starlette/requests.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-12T11:03:48+02:00",
+  "subject": "Enforce `max_fields` and `max_part_size` in `FormParser` (#3329)",
+  "src_churn": 33,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_formparsers.py::test_urlencoded_field_exceeds_max_part_size_raise[asyncio-app-expectation0]",
+   "tests/test_formparsers.py::test_urlencoded_field_exceeds_max_part_size_raise[asyncio-app1-expectation1]",
+   "tests/test_formparsers.py::test_urlencoded_field_exceeds_max_part_size_raise[trio-app-expectation0]",
+   "tests/test_formparsers.py::test_urlencoded_field_exceeds_max_part_size_raise[trio-app1-expectation1]",
+   "tests/test_formparsers.py::test_urlencoded_field_name_exceeds_max_part_size_raise[asyncio-app-expectation0]",
+   "tests/test_formparsers.py::test_urlencoded_field_name_exceeds_max_part_size_raise[asyncio-app1-expectation1]",
+   "tests/test_formparsers.py::test_urlencoded_field_name_exceeds_max_part_size_raise[trio-app-expectation0]",
+   "tests/test_formparsers.py::test_urlencoded_field_name_exceeds_max_part_size_raise[trio-app1-expectation1]",
+   "tests/test_formparsers.py::test_urlencoded_max_fields_is_customizable[asyncio-app-expectation0]",
+   "tests/test_formparsers.py::test_urlencoded_max_fields_is_customizable[asyncio-app1-expectation1]",
+   "tests/test_formparsers.py::test_urlencoded_max_fields_is_customizable[trio-app-expectation0]",
+   "tests/test_formparsers.py::test_urlencoded_max_fields_is_customizable[trio-app1-expectation1]",
+   "tests/test_formparsers.py::test_urlencoded_max_part_size_is_customizable[asyncio-app-expectation0]",
+   "tests/test_formparsers.py::test_urlencoded_max_part_size_is_customizable[asyncio-app1-expectation1]",
+   "tests/test_formparsers.py::test_urlencoded_max_part_size_is_customizable[trio-app-expectation0]",
+   "tests/test_formparsers.py::test_urlencoded_max_part_size_is_customizable[trio-app1-expectation1]",
+   "tests/test_formparsers.py::test_urlencoded_too_many_fields_raise[asyncio-app-expectation0]",
+   "tests/test_formparsers.py::test_urlencoded_too_many_fields_raise[asyncio-app1-expectation1]",
+   "tests/test_formparsers.py::test_urlencoded_too_many_fields_raise[trio-app-expectation0]",
+   "tests/test_formparsers.py::test_urlencoded_too_many_fields_raise[trio-app1-expectation1]",
+   "tests/test_requests.py::test_request_headers[asyncio]",
+   "tests/test_requests.py::test_request_headers[trio]",
+   "tests/test_websockets.py::test_websocket_headers[asyncio]",
+   "tests/test_websockets.py::test_websocket_headers[trio]"
+  ],
+  "gold_clean": true
+ },
+ "167b5850e809f38b27fbfed62d58bf6442855975": {
+  "task": "167b5850e809f38b27fbfed62d58bf6442855975",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "starlette/datastructures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-11T07:52:42+02:00",
+  "subject": "Build `request.url` from structured components (#3326)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_datastructures.py::test_url_from_scope_with_authority_in_path[host-header-absolute]",
+   "tests/test_datastructures.py::test_url_from_scope_with_authority_in_path[host-header-at-sign]",
+   "tests/test_datastructures.py::test_url_from_scope_with_authority_in_path[host-header-userinfo]",
+   "tests/test_datastructures.py::test_url_from_scope_with_authority_in_path[server-fallback-absolute]",
+   "tests/test_datastructures.py::test_url_from_scope_with_authority_in_path[server-fallback-at-sign]",
+   "tests/test_datastructures.py::test_url_from_scope_with_authority_in_path[server-fallback-userinfo]",
+   "tests/test_requests.py::test_request_headers[asyncio]",
+   "tests/test_requests.py::test_request_headers[trio]",
+   "tests/test_websockets.py::test_websocket_headers[asyncio]",
+   "tests/test_websockets.py::test_websocket_headers[trio]"
+  ],
+  "gold_clean": true
+ },
+ "37309255b4c1b9c381a2d24a1eaf83100984a16a": {
+  "task": "37309255b4c1b9c381a2d24a1eaf83100984a16a",
+  "target_tests": [
+   "tests/test_staticfiles.py"
+  ],
+  "test_files": [
+   "tests/test_staticfiles.py"
+  ],
+  "src_files": [
+   "starlette/staticfiles.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-10T20:27:39+09:00",
+  "subject": "Use `removeprefix` to strip weak ETag indicator in `is_not_modified` (#3193)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_requests.py::test_request_headers[asyncio]",
+   "tests/test_requests.py::test_request_headers[trio]",
+   "tests/test_staticfiles.py::test_staticfiles_304_with_etag_match[asyncio]",
+   "tests/test_staticfiles.py::test_staticfiles_304_with_etag_match[trio]",
+   "tests/test_websockets.py::test_websocket_headers[asyncio]",
+   "tests/test_websockets.py::test_websocket_headers[trio]"
+  ],
+  "gold_clean": true
+ },
+ "1a2f97293966f3e6549e4da3d00d526915b03b3b": {
+  "task": "1a2f97293966f3e6549e4da3d00d526915b03b3b",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "starlette/datastructures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-09T23:46:44-07:00",
+  "subject": "Fix IndexError in URL.replace() on a URL with no authority (#3317)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_datastructures.py::test_url",
+   "tests/test_requests.py::test_request_headers[asyncio]",
+   "tests/test_requests.py::test_request_headers[trio]",
+   "tests/test_websockets.py::test_websocket_headers[asyncio]",
+   "tests/test_websockets.py::test_websocket_headers[trio]"
+  ],
+  "gold_clean": true
+ },
+ "aba13f31b34083dfc0f12f265e7c53b2924a823d": {
+  "task": "aba13f31b34083dfc0f12f265e7c53b2924a823d",
+  "target_tests": [
+   "tests/test_formparsers.py"
+  ],
+  "test_files": [
+   "tests/test_formparsers.py"
+  ],
+  "src_files": [
+   "starlette/formparsers.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-31T11:55:23+03:00",
+  "subject": "Catch `OSError` alongside `MultiPartException` when closing temp files (#3191)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_formparsers.py::test_multipart_closes_tempfile_on_oserror[asyncio]",
+   "tests/test_formparsers.py::test_multipart_closes_tempfile_on_oserror[trio]",
+   "tests/test_requests.py::test_request_headers[asyncio]",
+   "tests/test_requests.py::test_request_headers[trio]",
+   "tests/test_websockets.py::test_websocket_headers[asyncio]",
+   "tests/test_websockets.py::test_websocket_headers[trio]"
+  ],
+  "gold_clean": true
+ },
+ "014f0e2efaca4e34a0f4b4b1a28a70296035e09d": {
+  "task": "014f0e2efaca4e34a0f4b4b1a28a70296035e09d",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-31T16:24:52+08:00",
+  "subject": "Clamp oversized suffix ranges in `FileResponse` (#3307)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_requests.py::test_request_headers[asyncio]",
+   "tests/test_requests.py::test_request_headers[trio]",
+   "tests/test_responses.py::test_file_response_suffix_range_larger_than_file[asyncio]",
+   "tests/test_responses.py::test_file_response_suffix_range_larger_than_file[trio]",
+   "tests/test_websockets.py::test_websocket_headers[asyncio]",
+   "tests/test_websockets.py::test_websocket_headers[trio]"
+  ],
+  "gold_clean": true
+ },
+ "100f05a66bf3ff5643540164ae95fc3ad9ed3443": {
+  "task": "100f05a66bf3ff5643540164ae95fc3ad9ed3443",
+  "target_tests": [
+   "tests/test_requests.py",
+   "tests/test_websockets.py"
+  ],
+  "test_files": [
+   "tests/test_requests.py",
+   "tests/test_websockets.py"
+  ],
+  "src_files": [
+   "starlette/testclient.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-26T17:16:03+02:00",
+  "subject": "Add `httpx2` as a dev dependency (#3295)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_requests.py::test_request_headers[asyncio]",
+   "tests/test_requests.py::test_request_headers[trio]",
+   "tests/test_websockets.py::test_websocket_headers[asyncio]",
+   "tests/test_websockets.py::test_websocket_headers[trio]"
+  ],
+  "gold_clean": false
+ },
+ "e3f972225adb1d84b80dba132f520cc24cb84229": {
+  "task": "e3f972225adb1d84b80dba132f520cc24cb84229",
+  "target_tests": [
+   "tests/test_endpoints.py"
+  ],
+  "test_files": [
+   "tests/test_endpoints.py"
+  ],
+  "src_files": [
+   "starlette/endpoints.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T17:43:29+02:00",
+  "subject": "Only dispatch standard HTTP verbs in `HTTPEndpoint` (#3286)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_endpoints.py::test_http_endpoint_does_not_dispatch_non_verb_method[asyncio]",
+   "tests/test_endpoints.py::test_http_endpoint_does_not_dispatch_non_verb_method[trio]"
+  ],
+  "gold_clean": true
+ },
+ "348f86dc92fed6e3c0314154e38deec90a6bcabd": {
+  "task": "348f86dc92fed6e3c0314154e38deec90a6bcabd",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T18:36:50+05:30",
+  "subject": "Use `\"application/octet-stream\"` as the `FileResponse` media type fallback (#3283)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_responses.py::test_file_response_default_media_type[asyncio]",
+   "tests/test_responses.py::test_file_response_default_media_type[trio]"
+  ],
+  "gold_clean": true
+ },
+ "764dab0dcfb9033d75442d7a359645c9f94648c6": {
+  "task": "764dab0dcfb9033d75442d7a359645c9f94648c6",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "starlette/datastructures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-21T18:49:37+02:00",
+  "subject": "Ignore malformed `Host` header when constructing `request.url` (#3279)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_datastructures.py::test_url_from_scope_with_invalid_host[at-sign]",
+   "tests/test_datastructures.py::test_url_from_scope_with_invalid_host[backslash]",
+   "tests/test_datastructures.py::test_url_from_scope_with_invalid_host[hash]",
+   "tests/test_datastructures.py::test_url_from_scope_with_invalid_host[question-mark]",
+   "tests/test_datastructures.py::test_url_from_scope_with_invalid_host[slash]",
+   "tests/test_datastructures.py::test_url_from_scope_with_invalid_host[space]"
+  ],
+  "gold_clean": true
+ },
+ "9ee951980bae776103715b66305f807d9e8245da": {
+  "task": "9ee951980bae776103715b66305f807d9e8245da",
+  "target_tests": [
+   "tests/test_responses.py",
+   "tests/test_websockets.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py",
+   "tests/test_websockets.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-15T12:59:15+01:00",
+  "subject": "Handle websocket denial responses in streaming and file responses (#3189)",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [
+   "tests/test_responses.py::test_streaming_response_runs_background_on_websocket_scope[asyncio]",
+   "tests/test_responses.py::test_streaming_response_runs_background_on_websocket_scope[trio]",
+   "tests/test_websockets.py::test_send_denial_response_with_file_response[asyncio]",
+   "tests/test_websockets.py::test_send_denial_response_with_file_response[trio]",
+   "tests/test_websockets.py::test_send_denial_response_with_streaming_response[asyncio]",
+   "tests/test_websockets.py::test_send_denial_response_with_streaming_response[trio]"
+  ],
+  "gold_clean": true
+ },
+ "4647e532bbed7a5f60c9972ddba3f5fb4a79e1f9": {
+  "task": "4647e532bbed7a5f60c9972ddba3f5fb4a79e1f9",
+  "target_tests": [
+   "tests/middleware/test_session.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_session.py"
+  ],
+  "src_files": [
+   "starlette/middleware/sessions.py",
+   "starlette/requests.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-01T19:21:54+01:00",
+  "subject": "Track session access and modification in `SessionMiddleware` (#3166)",
+  "src_churn": 63,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "496b7106a6223b1bb95785790766ec5e9b9f1c9d": {
+  "task": "496b7106a6223b1bb95785790766ec5e9b9f1c9d",
+  "target_tests": [
+   "tests/test_templates.py"
+  ],
+  "test_files": [
+   "tests/test_templates.py"
+  ],
+  "src_files": [
+   "starlette/templating.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-22T14:27:33+01:00",
+  "subject": "Enable `autoescape` by default in `Jinja2Templates` (#3148)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_templates.py::test_templates_autoescape"
+  ],
+  "gold_clean": true
+ },
+ "3bddf51c71e0940d1e9bfbae9d952df8389cb80b": {
+  "task": "3bddf51c71e0940d1e9bfbae9d952df8389cb80b",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-14T14:19:32+01:00",
+  "subject": "Avoid mutating `FileResponse` headers on range requests (#3144)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_responses.py::test_file_response_multiple_calls[asyncio]",
+   "tests/test_responses.py::test_file_response_multiple_calls[trio]"
+  ],
+  "gold_clean": true
+ },
+ "9c74ef4c7cb1b79909aebf38be0e155064c27601": {
+  "task": "9c74ef4c7cb1b79909aebf38be0e155064c27601",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-14T14:12:10+01:00",
+  "subject": "Use CRLF line endings in multipart byterange boundaries (#3143)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_responses.py::test_file_response_insert_ranges[asyncio]",
+   "tests/test_responses.py::test_file_response_insert_ranges[trio]",
+   "tests/test_responses.py::test_file_response_multi_small_chunk_size[asyncio]",
+   "tests/test_responses.py::test_file_response_multi_small_chunk_size[trio]",
+   "tests/test_responses.py::test_file_response_range_multi[asyncio]",
+   "tests/test_responses.py::test_file_response_range_multi[trio]",
+   "tests/test_responses.py::test_file_response_range_multi_head[asyncio]",
+   "tests/test_responses.py::test_file_response_range_multi_head[trio]"
+  ],
+  "gold_clean": true
+ },
+ "90b805fda70db2316d79aa577f4c3eb670f9a8a1": {
+  "task": "90b805fda70db2316d79aa577f4c3eb670f9a8a1",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-14T14:00:30+01:00",
+  "subject": "Set `Content-Type` instead of `Content-Range` on multi-range responses (#3142)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_responses.py::test_file_response_insert_ranges[asyncio]",
+   "tests/test_responses.py::test_file_response_insert_ranges[trio]",
+   "tests/test_responses.py::test_file_response_multi_small_chunk_size[asyncio]",
+   "tests/test_responses.py::test_file_response_multi_small_chunk_size[trio]",
+   "tests/test_responses.py::test_file_response_range_multi[asyncio]",
+   "tests/test_responses.py::test_file_response_range_multi[trio]",
+   "tests/test_responses.py::test_file_response_range_multi_head[asyncio]",
+   "tests/test_responses.py::test_file_response_range_multi_head[trio]"
+  ],
+  "gold_clean": true
+ },
+ "c011d1fcb27ab8b4759288479208315695ef3ca3": {
+  "task": "c011d1fcb27ab8b4759288479208315695ef3ca3",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-14T13:52:04+01:00",
+  "subject": "Include `bytes` unit in Content-Range header on 416 responses",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_responses.py::test_file_response_range_416[asyncio]",
+   "tests/test_responses.py::test_file_response_range_416[trio]"
+  ],
+  "gold_clean": true
+ },
+ "51057d57449c35a9fa2814266cda60dc51bf3435": {
+  "task": "51057d57449c35a9fa2814266cda60dc51bf3435",
+  "target_tests": [
+   "tests/test_staticfiles.py"
+  ],
+  "test_files": [
+   "tests/test_staticfiles.py"
+  ],
+  "src_files": [
+   "starlette/staticfiles.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-14T12:05:17+01:00",
+  "subject": "Handle null bytes in `StaticFiles` path (#3139)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_staticfiles.py::test_staticfiles_null_byte_in_path[asyncio]",
+   "tests/test_staticfiles.py::test_staticfiles_null_byte_in_path[trio]"
+  ],
+  "gold_clean": true
+ },
+ "02b6ed7b18c741c00795010e9d716b58006af2c3": {
+  "task": "02b6ed7b18c741c00795010e9d716b58006af2c3",
+  "target_tests": [
+   "tests/middleware/test_cors.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_cors.py"
+  ],
+  "src_files": [
+   "starlette/middleware/cors.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-14T11:33:37+01:00",
+  "subject": "Return explicit origin in CORS response when credentials are allowed (#3137)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "tests/middleware/test_cors.py::test_cors_allow_all[asyncio]",
+   "tests/middleware/test_cors.py::test_cors_allow_all[trio]",
+   "tests/middleware/test_cors.py::test_cors_vary_header_is_properly_set_for_credentialed_request[asyncio]",
+   "tests/middleware/test_cors.py::test_cors_vary_header_is_properly_set_for_credentialed_request[trio]"
+  ],
+  "gold_clean": true
+ },
+ "d8c7cf9aca95b31c7a70473d03c26bc8ce33cd74": {
+  "task": "d8c7cf9aca95b31c7a70473d03c26bc8ce33cd74",
+  "target_tests": [
+   "tests/test_applications.py",
+   "tests/test_requests.py"
+  ],
+  "test_files": [
+   "tests/test_applications.py",
+   "tests/test_requests.py"
+  ],
+  "src_files": [
+   "starlette/datastructures.py",
+   "starlette/requests.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-18T10:49:54+01:00",
+  "subject": "Turn `State` into a `Mapping` (#3036)",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_applications.py::test_request_state[asyncio]",
+   "tests/test_applications.py::test_request_state[trio]",
+   "tests/test_requests.py::test_request_state_object"
+  ],
+  "gold_clean": true
+ },
+ "49d4de92867cb38a781069701ad57cecab4a1a36": {
+  "task": "49d4de92867cb38a781069701ad57cecab4a1a36",
+  "target_tests": [
+   "tests/middleware/test_cors.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_cors.py"
+  ],
+  "src_files": [
+   "starlette/middleware/cors.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-04T08:29:23+01:00",
+  "subject": "Add `allow_private_network` in `CORSMiddleware` (#3065)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [
+   "tests/middleware/test_cors.py::test_cors_private_network_access_allowed[asyncio]",
+   "tests/middleware/test_cors.py::test_cors_private_network_access_allowed[trio]",
+   "tests/middleware/test_cors.py::test_cors_private_network_access_disallowed[asyncio]",
+   "tests/middleware/test_cors.py::test_cors_private_network_access_disallowed[trio]"
+  ],
+  "gold_clean": true
+ },
+ "3d480dd7d5adf474d0736c67a2a3064e88226837": {
+  "task": "3d480dd7d5adf474d0736c67a2a3064e88226837",
+  "target_tests": [
+   "tests/test_staticfiles.py"
+  ],
+  "test_files": [
+   "tests/test_staticfiles.py"
+  ],
+  "src_files": [
+   "starlette/staticfiles.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-01T12:17:34+01:00",
+  "subject": "Ignore `if-modified-since` if `if-none-match` is present (#3057)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_staticfiles.py::test_staticfiles_200_with_etag_mismatch_and_timestamp_match[asyncio]",
+   "tests/test_staticfiles.py::test_staticfiles_200_with_etag_mismatch_and_timestamp_match[trio]"
+  ],
+  "gold_clean": true
+ },
+ "26d66bbfb05c7bbecbbb57106c65f33682f8174e": {
+  "task": "26d66bbfb05c7bbecbbb57106c65f33682f8174e",
+  "target_tests": [
+   "tests/middleware/test_base.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py"
+  ],
+  "src_files": [
+   "starlette/middleware/base.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-28T09:03:33+01:00",
+  "subject": "Do not pollute exception context in Middleware (#2976)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "tests/middleware/test_base.py::test_error_context_propagation[asyncio]",
+   "tests/middleware/test_base.py::test_error_context_propagation[trio]"
+  ],
+  "gold_clean": true
+ },
+ "a59397db889e3a96c4f34b1406957a3b92e1e8b5": {
+  "task": "a59397db889e3a96c4f34b1406957a3b92e1e8b5",
+  "target_tests": [
+   "tests/test_config.py"
+  ],
+  "test_files": [
+   "tests/test_config.py"
+  ],
+  "src_files": [
+   "starlette/config.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-27T01:30:15+09:00",
+  "subject": "Set encodings when reading config files (#2996)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_config.py::test_config_with_encoding"
+  ],
+  "gold_clean": true
+ },
+ "7f78881448d06ac2b296fc3533abbb0148fb9402": {
+  "task": "7f78881448d06ac2b296fc3533abbb0148fb9402",
+  "target_tests": [
+   "tests/test_requests.py"
+  ],
+  "test_files": [
+   "tests/test_requests.py"
+  ],
+  "src_files": [
+   "starlette/requests.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-20T23:43:26+02:00",
+  "subject": "Support multiple cookie headers in `Request.cookies` (#3029)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_requests.py::test_multiple_cookie_headers[asyncio]",
+   "tests/test_requests.py::test_multiple_cookie_headers[trio]"
+  ],
+  "gold_clean": true
+ },
+ "40a81479c7146bab21cc58ccb92b017cf177a077": {
+  "task": "40a81479c7146bab21cc58ccb92b017cf177a077",
+  "target_tests": [
+   "tests/test_status.py"
+  ],
+  "test_files": [
+   "tests/test_status.py"
+  ],
+  "src_files": [
+   "starlette/status.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-09-13T10:30:18+02:00",
+  "subject": "feat: implement rfc9110 http status names (#2939)",
+  "src_churn": 124,
+  "size": "L",
+  "baseline_failing": [
+   "tests/test_status.py::test_deprecated_types[HTTP_413_REQUEST_ENTITY_TOO_LARGE-'HTTP_413_REQUEST_ENTITY_TOO_LARGE'",
+   "tests/test_status.py::test_deprecated_types[HTTP_414_REQUEST_URI_TOO_LONG-'HTTP_414_REQUEST_URI_TOO_LONG'"
+  ],
+  "gold_clean": true
+ },
+ "3d7430a0aa7fb45d8e6a6ef19c9ffa675f669335": {
+  "task": "3d7430a0aa7fb45d8e6a6ef19c9ffa675f669335",
+  "target_tests": [
+   "tests/test__utils.py"
+  ],
+  "test_files": [
+   "tests/test__utils.py"
+  ],
+  "src_files": [
+   "starlette/_utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-24T08:01:30+01:00",
+  "subject": "Use `asyncio.iscoroutinefunction` for Python 3.12 and older (#2984)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test__utils.py::test_async_mocked_async_function"
+  ],
+  "gold_clean": true
+ },
+ "9f7ec2eb512fcc3fe90b43cb9dd9e1d08696bec1": {
+  "task": "9f7ec2eb512fcc3fe90b43cb9dd9e1d08696bec1",
+  "target_tests": [
+   "tests/test_formparsers.py"
+  ],
+  "test_files": [
+   "tests/test_formparsers.py"
+  ],
+  "src_files": [
+   "starlette/datastructures.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-07-21T02:24:02+09:00",
+  "subject": "Make UploadFile check for future rollover (#2962)",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_formparsers.py::test_multipart_request_large_file_rollover_in_background_thread[asyncio]",
+   "tests/test_formparsers.py::test_multipart_request_large_file_rollover_in_background_thread[trio]"
+  ],
+  "gold_clean": true
+ },
+ "af1c709a7d1b92dee2921cceef7ef8d1df65ad25": {
+  "task": "af1c709a7d1b92dee2921cceef7ef8d1df65ad25",
+  "target_tests": [
+   "tests/middleware/test_base.py",
+   "tests/middleware/test_gzip.py",
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py",
+   "tests/middleware/test_gzip.py",
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/middleware/base.py",
+   "starlette/middleware/gzip.py",
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-05-29T15:17:44+02:00",
+  "subject": "Add support for ASGI `pathsend` extension (#2671)",
+  "src_churn": 38,
+  "size": "S",
+  "baseline_failing": [
+   "tests/middleware/test_base.py::test_asgi_pathsend_events[asyncio]",
+   "tests/middleware/test_base.py::test_asgi_pathsend_events[trio]",
+   "tests/middleware/test_gzip.py::test_gzip_ignored_for_pathsend_responses[asyncio]",
+   "tests/middleware/test_gzip.py::test_gzip_ignored_for_pathsend_responses[trio]"
+  ],
+  "gold_clean": true
+ },
+ "4acf1d1ca3e8aa767567cb4e6e12f093f066553b": {
+  "task": "4acf1d1ca3e8aa767567cb4e6e12f093f066553b",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-05-04T11:54:01+02:00",
+  "subject": "feat: add partitioned attribute to cookie (#2501)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_responses.py::test_set_cookie[asyncio]",
+   "tests/test_responses.py::test_set_cookie[trio]",
+   "tests/test_responses.py::test_set_cookie_raises_for_invalid_python_version[asyncio]",
+   "tests/test_responses.py::test_set_cookie_raises_for_invalid_python_version[trio]"
+  ],
+  "gold_clean": true
+ },
+ "a766a58d14007f07c0b5782fa78cdc370b892796": {
+  "task": "a766a58d14007f07c0b5782fa78cdc370b892796",
+  "target_tests": [
+   "tests/test_exceptions.py"
+  ],
+  "test_files": [
+   "tests/test_exceptions.py"
+  ],
+  "src_files": [
+   "starlette/middleware/exceptions.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-04-16T13:57:27+01:00",
+  "subject": "Mark ExceptionMiddleware.http_exception as async to prevent thread creation. (#2922)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_exceptions.py::test_http_exception_does_not_use_threadpool[asyncio]",
+   "tests/test_exceptions.py::test_http_exception_does_not_use_threadpool[trio]"
+  ],
+  "gold_clean": true
+ },
+ "48f7cd7f28b9e4b9a5a6b19159139205907aec41": {
+  "task": "48f7cd7f28b9e4b9a5a6b19159139205907aec41",
+  "target_tests": [
+   "tests/middleware/test_base.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py"
+  ],
+  "src_files": [
+   "starlette/middleware/base.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-04-13T06:38:18-07:00",
+  "subject": "Prevents reraising of exception from BaseHttpMiddleware (#2911)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/middleware/test_base.py::test_exception_can_be_caught[asyncio]",
+   "tests/middleware/test_base.py::test_exception_can_be_caught[trio]"
+  ],
+  "gold_clean": true
+ },
+ "bcdf0ad017168408060b6faab156636ced4c94f7": {
+  "task": "bcdf0ad017168408060b6faab156636ced4c94f7",
+  "target_tests": [
+   "tests/test_templates.py"
+  ],
+  "test_files": [
+   "tests/test_templates.py"
+  ],
+  "src_files": [
+   "starlette/templating.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-03-16T13:18:00+01:00",
+  "subject": "fix IndexError in TemplateResponse (#2909)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_templates.py::TestTemplatesArgsOnly::test_all_args[asyncio]",
+   "tests/test_templates.py::TestTemplatesArgsOnly::test_all_args[trio]",
+   "tests/test_templates.py::TestTemplatesArgsOnly::test_headers[asyncio]",
+   "tests/test_templates.py::TestTemplatesArgsOnly::test_headers[trio]",
+   "tests/test_templates.py::TestTemplatesArgsOnly::test_media_type[asyncio]",
+   "tests/test_templates.py::TestTemplatesArgsOnly::test_media_type[trio]",
+   "tests/test_templates.py::TestTemplatesArgsOnly::test_status_code[asyncio]",
+   "tests/test_templates.py::TestTemplatesArgsOnly::test_status_code[trio]"
+  ],
+  "gold_clean": true
+ },
+ "bc3b4002e241353d96e1ad18d8c6b5fc4f8463df": {
+  "task": "bc3b4002e241353d96e1ad18d8c6b5fc4f8463df",
+  "target_tests": [
+   "tests/test_staticfiles.py"
+  ],
+  "test_files": [
+   "tests/test_staticfiles.py"
+  ],
+  "src_files": [
+   "starlette/staticfiles.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-03-08T07:59:24Z",
+  "subject": "Allow relative directory path when `follow_symlinks=True` (#2896)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_staticfiles.py::test_staticfiles_relative_directory_symlinks[asyncio]",
+   "tests/test_staticfiles.py::test_staticfiles_relative_directory_symlinks[trio]"
+  ],
+  "gold_clean": true
+ },
+ "5cc4ddf1a5d07388015458e7c6b2ae5df617c372": {
+  "task": "5cc4ddf1a5d07388015458e7c6b2ae5df617c372",
+  "target_tests": [
+   "tests/middleware/test_base.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py"
+  ],
+  "src_files": [
+   "starlette/middleware/base.py",
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-22T10:41:46-03:00",
+  "subject": "Raise exception from background task on BaseHTTPMiddleware (#2812)",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [
+   "tests/middleware/test_base.py::test_run_background_tasks_raise_exceptions[asyncio]",
+   "tests/middleware/test_base.py::test_run_background_tasks_raise_exceptions[trio]"
+  ],
+  "gold_clean": true
+ },
+ "f13d354e18141cea9041ffad603d98197d880a73": {
+  "task": "f13d354e18141cea9041ffad603d98197d880a73",
+  "target_tests": [
+   "tests/middleware/test_gzip.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_gzip.py"
+  ],
+  "src_files": [
+   "starlette/middleware/gzip.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-22T08:16:21-05:00",
+  "subject": "fix(gzip): Make sure Vary header is always added if a response can be compressed (#2865)",
+  "src_churn": 107,
+  "size": "M",
+  "baseline_failing": [
+   "tests/middleware/test_gzip.py::test_gzip_not_in_accept_encoding[asyncio]",
+   "tests/middleware/test_gzip.py::test_gzip_not_in_accept_encoding[trio]",
+   "tests/middleware/test_gzip.py::test_gzip_streaming_response_identity[asyncio]",
+   "tests/middleware/test_gzip.py::test_gzip_streaming_response_identity[trio]"
+  ],
+  "gold_clean": true
+ },
+ "a9a8dab0cc3cbd05dca37650fc392717b9fe5bbf": {
+  "task": "a9a8dab0cc3cbd05dca37650fc392717b9fe5bbf",
+  "target_tests": [
+   "tests/middleware/test_gzip.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_gzip.py"
+  ],
+  "src_files": [
+   "starlette/middleware/gzip.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-22T09:54:55-03:00",
+  "subject": "Don't compress on server sent events (#2871)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/middleware/test_gzip.py::test_gzip_ignored_on_server_sent_events[asyncio]",
+   "tests/middleware/test_gzip.py::test_gzip_ignored_on_server_sent_events[trio]"
+  ],
+  "gold_clean": true
+ },
+ "135e3af00a507714a4e391ab8d11b835399aa1a4": {
+  "task": "135e3af00a507714a4e391ab8d11b835399aa1a4",
+  "target_tests": [
+   "tests/test_testclient.py"
+  ],
+  "test_files": [
+   "tests/test_testclient.py"
+  ],
+  "src_files": [
+   "starlette/testclient.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-22T15:45:06+04:00",
+  "subject": "Add deprecated warnings to `TestClient` on use of `timeout` argument (#2840)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_testclient.py::test_timeout_deprecation"
+  ],
+  "gold_clean": true
+ },
+ "f137494160fad01f75ae54b8867ecc8f762bc118": {
+  "task": "f137494160fad01f75ae54b8867ecc8f762bc118",
+  "target_tests": [
+   "tests/test_staticfiles.py"
+  ],
+  "test_files": [
+   "tests/test_staticfiles.py"
+  ],
+  "src_files": [
+   "starlette/staticfiles.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-01-24T12:13:42+01:00",
+  "subject": "Turn directory into string on `lookup_path` on commonpath comparison (#2851)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_staticfiles.py::test_staticfiles_self_symlinks[asyncio]",
+   "tests/test_staticfiles.py::test_staticfiles_self_symlinks[trio]"
+  ],
+  "gold_clean": true
+ },
+ "20066626dbf785789c37b216e34b076284373038": {
+  "task": "20066626dbf785789c37b216e34b076284373038",
+  "target_tests": [
+   "tests/test_testclient.py",
+   "tests/types.py"
+  ],
+  "test_files": [
+   "tests/test_testclient.py",
+   "tests/types.py"
+  ],
+  "src_files": [
+   "starlette/testclient.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-28T10:05:09+04:00",
+  "subject": "Add `client` parameter to `TestClient` (#2810)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_testclient.py::test_client_custom_client[asyncio]",
+   "tests/test_testclient.py::test_client_custom_client[trio]"
+  ],
+  "gold_clean": true
+ },
+ "cef7834e2b9eec9ec7bd1e00f9dacf7c3048c65e": {
+  "task": "cef7834e2b9eec9ec7bd1e00f9dacf7c3048c65e",
+  "target_tests": [
+   "tests/test_formparsers.py"
+  ],
+  "test_files": [
+   "tests/test_formparsers.py"
+  ],
+  "src_files": [
+   "starlette/formparsers.py",
+   "starlette/requests.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-28T08:57:20+04:00",
+  "subject": "Add `max_part_size` parameter to `MultiPartParser` (#2815)",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_formparsers.py::test_max_fields_is_customizable_high[asyncio]",
+   "tests/test_formparsers.py::test_max_fields_is_customizable_high[trio]",
+   "tests/test_formparsers.py::test_max_fields_is_customizable_low_raises[asyncio-app-expectation0]",
+   "tests/test_formparsers.py::test_max_fields_is_customizable_low_raises[asyncio-app1-expectation1]",
+   "tests/test_formparsers.py::test_max_fields_is_customizable_low_raises[trio-app-expectation0]",
+   "tests/test_formparsers.py::test_max_fields_is_customizable_low_raises[trio-app1-expectation1]",
+   "tests/test_formparsers.py::test_max_files_is_customizable_low_raises[asyncio-app-expectation0]",
+   "tests/test_formparsers.py::test_max_files_is_customizable_low_raises[asyncio-app1-expectation1]",
+   "tests/test_formparsers.py::test_max_files_is_customizable_low_raises[trio-app-expectation0]",
+   "tests/test_formparsers.py::test_max_files_is_customizable_low_raises[trio-app1-expectation1]",
+   "tests/test_formparsers.py::test_max_part_size_exceeds_custom_limit[asyncio-app-expectation0]",
+   "tests/test_formparsers.py::test_max_part_size_exceeds_custom_limit[asyncio-app1-expectation1]",
+   "tests/test_formparsers.py::test_max_part_size_exceeds_custom_limit[trio-app-expectation0]",
+   "tests/test_formparsers.py::test_max_part_size_exceeds_custom_limit[trio-app1-expectation1]"
+  ],
+  "gold_clean": true
+ },
+ "cba90a77fe1b5929ae99616af597665120704b7e": {
+  "task": "cba90a77fe1b5929ae99616af597665120704b7e",
+  "target_tests": [
+   "tests/test_convertors.py"
+  ],
+  "test_files": [
+   "tests/test_convertors.py"
+  ],
+  "src_files": [
+   "starlette/convertors.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-25T09:48:06+01:00",
+  "subject": "Make UUID path parameter conversion more flexible (#2806)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_convertors.py::test_default_uuid_convertor[asyncio-00000000-AAAA-FFFF-9999-000000000000-200]",
+   "tests/test_convertors.py::test_default_uuid_convertor[asyncio-00000000AAAAFFFF9999000000000000-200]",
+   "tests/test_convertors.py::test_default_uuid_convertor[asyncio-00000000aaaaffff9999000000000000-200]",
+   "tests/test_convertors.py::test_default_uuid_convertor[trio-00000000-AAAA-FFFF-9999-000000000000-200]",
+   "tests/test_convertors.py::test_default_uuid_convertor[trio-00000000AAAAFFFF9999000000000000-200]",
+   "tests/test_convertors.py::test_default_uuid_convertor[trio-00000000aaaaffff9999000000000000-200]"
+  ],
+  "gold_clean": true
+ },
+ "ca1f45dc126f7b907a15df4dcbccf897da349d40": {
+  "task": "ca1f45dc126f7b907a15df4dcbccf897da349d40",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-03T08:07:22+01:00",
+  "subject": "Use ETag from headers when parsing If-Range in FileResponse (#2761)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_responses.py::test_file_response_with_range_header[asyncio]",
+   "tests/test_responses.py::test_file_response_with_range_header[trio]"
+  ],
+  "gold_clean": true
+ },
+ "eee4cdcb9a4e787d53df88ccbee2861a0bb9b0a8": {
+  "task": "eee4cdcb9a4e787d53df88ccbee2861a0bb9b0a8",
+  "target_tests": [
+   "tests/test_staticfiles.py"
+  ],
+  "test_files": [
+   "tests/test_staticfiles.py"
+  ],
+  "src_files": [
+   "starlette/staticfiles.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-02T00:46:16+08:00",
+  "subject": "Fix: Resolve the issue where the directory itself being a symlink does not work. (#2711)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/test_staticfiles.py::test_staticfiles_self_symlinks[asyncio]",
+   "tests/test_staticfiles.py::test_staticfiles_self_symlinks[trio]"
+  ],
+  "gold_clean": true
+ },
+ "7d586f7e39f3e83e8b86636cd41d75e9a879a791": {
+  "task": "7d586f7e39f3e83e8b86636cd41d75e9a879a791",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-18T21:56:13+01:00",
+  "subject": "Support for `send` client disconnect to HTTP (#2732)",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [
+   "tests/middleware/test_wsgi.py::test_wsgi_post[asyncio]",
+   "tests/middleware/test_wsgi.py::test_wsgi_post[trio]",
+   "tests/test_requests.py::test_request_body[asyncio]",
+   "tests/test_requests.py::test_request_body[trio]",
+   "tests/test_requests.py::test_request_stream[asyncio]",
+   "tests/test_requests.py::test_request_stream[trio]",
+   "tests/test_responses.py::test_streaming_response_on_client_disconnects[asyncio]",
+   "tests/test_responses.py::test_streaming_response_on_client_disconnects[trio]"
+  ],
+  "gold_clean": true
+ },
+ "9dc9d2e92919306fae683746e38530ff55ed3092": {
+  "task": "9dc9d2e92919306fae683746e38530ff55ed3092",
+  "target_tests": [
+   "tests/test_testclient.py"
+  ],
+  "test_files": [
+   "tests/test_testclient.py"
+  ],
+  "src_files": [
+   "starlette/testclient.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-19T03:28:43+08:00",
+  "subject": "fix(testclient): exclude query sting from `raw_path` (#2716)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "tests/middleware/test_wsgi.py::test_wsgi_post[asyncio]",
+   "tests/middleware/test_wsgi.py::test_wsgi_post[trio]",
+   "tests/test_requests.py::test_request_body[asyncio]",
+   "tests/test_requests.py::test_request_body[trio]",
+   "tests/test_requests.py::test_request_stream[asyncio]",
+   "tests/test_requests.py::test_request_stream[trio]",
+   "tests/test_testclient.py::test_raw_path_with_querystring[asyncio]",
+   "tests/test_testclient.py::test_raw_path_with_querystring[trio]",
+   "tests/test_testclient.py::test_websocket_raw_path_without_params[asyncio]",
+   "tests/test_testclient.py::test_websocket_raw_path_without_params[trio]"
+  ],
+  "gold_clean": true
+ },
+ "427a8dcf357597df27b2509b1ac436caf7708300": {
+  "task": "427a8dcf357597df27b2509b1ac436caf7708300",
+  "target_tests": [
+   "tests/middleware/test_base.py",
+   "tests/test_applications.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py",
+   "tests/test_applications.py"
+  ],
+  "src_files": [
+   "starlette/applications.py",
+   "starlette/middleware/__init__.py",
+   "starlette/routing.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-11-15T00:34:22+01:00",
+  "subject": "Fix issue with middleware args passing (#2752)",
+  "src_churn": 25,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "99b6938363c2e5b05a53ef5558c511fed61fbfb4": {
+  "task": "99b6938363c2e5b05a53ef5558c511fed61fbfb4",
+  "target_tests": [
+   "tests/test_applications.py",
+   "tests/test_exceptions.py"
+  ],
+  "test_files": [
+   "tests/test_applications.py",
+   "tests/test_exceptions.py"
+  ],
+  "src_files": [
+   "starlette/_exception_handler.py",
+   "starlette/testclient.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-15T09:50:49+02:00",
+  "subject": "Allow to raise `HTTPException` before `websocket.accept()` (#2725)",
+  "src_churn": 42,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "fd038f3070c302bff17ef7d173dbb0b007617733": {
+  "task": "fd038f3070c302bff17ef7d173dbb0b007617733",
+  "target_tests": [
+   "tests/test_formparsers.py"
+  ],
+  "test_files": [
+   "tests/test_formparsers.py"
+  ],
+  "src_files": [
+   "starlette/formparsers.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-15T08:40:51+02:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "fe46d99d92da17efe1827f96ad29d748aac870d2": {
+  "task": "fe46d99d92da17efe1827f96ad29d748aac870d2",
+  "target_tests": [
+   "tests/middleware/test_base.py",
+   "tests/test_requests.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py",
+   "tests/test_requests.py"
+  ],
+  "src_files": [
+   "starlette/requests.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-29T05:40:23-04:00",
+  "subject": "Support `request.url_for` when only \"app\" scope is avaialable (#2672)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "075efd0c5c9f5e49a4416f3b4a24e24efab135f8": {
+  "task": "075efd0c5c9f5e49a4416f3b4a24e24efab135f8",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-25T19:27:55+08:00",
+  "subject": "generate boundary with token_hex (#2702)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b8139f9fe3b1acb34ddbe38dc6472a60b621540e": {
+  "task": "b8139f9fe3b1acb34ddbe38dc6472a60b621540e",
+  "target_tests": [
+   "tests/middleware/test_base.py",
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py",
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-25T09:16:08+02:00",
+  "subject": "Consider `FileResponse.chunk_size` when handling multiple ranges (#2703)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4fbf766b3eac4146b86175682cec88d266fd8470": {
+  "task": "4fbf766b3eac4146b86175682cec88d266fd8470",
+  "target_tests": [
+   "tests/test_requests.py"
+  ],
+  "test_files": [
+   "tests/test_requests.py"
+  ],
+  "src_files": [
+   "starlette/requests.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-24T02:38:19+08:00",
+  "subject": "test: add tests in `test_requests` (#2677)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d289ac7e8de469d0f26c0a210d82e1b315ad8304": {
+  "task": "d289ac7e8de469d0f26c0a210d82e1b315ad8304",
+  "target_tests": [
+   "tests/test__utils.py"
+  ],
+  "test_files": [
+   "tests/test__utils.py"
+  ],
+  "src_files": [
+   "starlette/_utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-24T02:23:34+08:00",
+  "subject": "perf: stop use `re` on `get_route_path` (#2701)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "69ed26a85956ef4bd0161807eb27abf49be7cd3c": {
+  "task": "69ed26a85956ef4bd0161807eb27abf49be7cd3c",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-23T03:20:21+02:00",
+  "subject": "Add support for HTTP Range to `FileResponse` (#2697)",
+  "src_churn": 210,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "53f9dc02be5b41f31ba096c8a5d65a6e6ca94fe0": {
+  "task": "53f9dc02be5b41f31ba096c8a5d65a6e6ca94fe0",
+  "target_tests": [
+   "tests/middleware/test_base.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py"
+  ],
+  "src_files": [
+   "starlette/middleware/base.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-07T13:42:54+01:00",
+  "subject": "Fix `BackgroundTasks` with `BaseHTTPMiddleware` (#2688)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1131b3cbcd6f9e2aa3500fd4d7bf3cd200fa2532": {
+  "task": "1131b3cbcd6f9e2aa3500fd4d7bf3cd200fa2532",
+  "target_tests": [
+   "tests/test__utils.py",
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test__utils.py",
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "starlette/_utils.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-01T12:12:43-03:00",
+  "subject": "Ensure accurate `root_path` removal in `get_route_path` function (#2600)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d771bb7a5ecfcd658735cf07ba6f1dd4ac057ccd": {
+  "task": "d771bb7a5ecfcd658735cf07ba6f1dd4ac057ccd",
+  "target_tests": [
+   "tests/middleware/test_base.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py"
+  ],
+  "src_files": [
+   "starlette/middleware/base.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-01T02:04:50-05:00",
+  "subject": "Don't poll for disconnects in BaseHTTPMiddleware via StreamingResponse (#2620)",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "67f473d4a3a25e821ab2f30da88b54854ae41e86": {
+  "task": "67f473d4a3a25e821ab2f30da88b54854ae41e86",
+  "target_tests": [
+   "tests/test_responses.py"
+  ],
+  "test_files": [
+   "tests/test_responses.py"
+  ],
+  "src_files": [
+   "starlette/responses.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-07-23T12:10:14+02:00",
+  "subject": "Revert \"Add support for ASGI `pathsend` extension\" (#2649)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "45e51dcf99f3a270b0bcec1aec5410b4345863a9": {
+  "task": "45e51dcf99f3a270b0bcec1aec5410b4345863a9",
+  "target_tests": [
+   "tests/test_applications.py",
+   "tests/test_status.py",
+   "tests/test_testclient.py"
+  ],
+  "test_files": [
+   "tests/test_applications.py",
+   "tests/test_status.py",
+   "tests/test_testclient.py"
+  ],
+  "src_files": [
+   "starlette/concurrency.py",
+   "starlette/middleware/wsgi.py",
+   "starlette/routing.py",
+   "starlette/status.py",
+   "starlette/testclient.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-06-11T08:29:31+02:00",
+  "subject": "Use `StarletteDeprecationWarning` instead of `DeprecationWarning` (#3119)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [
+   "tests/test_applications.py::test_app_async_gen_lifespan[asyncio]",
+   "tests/test_applications.py::test_app_async_gen_lifespan[trio]",
+   "tests/test_applications.py::test_app_sync_gen_lifespan[asyncio]",
+   "tests/test_applications.py::test_app_sync_gen_lifespan[trio]",
+   "tests/test_requests.py::test_request_headers[asyncio]",
+   "tests/test_requests.py::test_request_headers[trio]",
+   "tests/test_status.py::test_deprecated_types[HTTP_413_REQUEST_ENTITY_TOO_LARGE-'HTTP_413_REQUEST_ENTITY_TOO_LARGE'",
+   "tests/test_status.py::test_deprecated_types[HTTP_414_REQUEST_URI_TOO_LONG-'HTTP_414_REQUEST_URI_TOO_LONG'",
+   "tests/test_testclient.py::test_timeout_deprecation",
+   "tests/test_websockets.py::test_websocket_headers[asyncio]",
+   "tests/test_websockets.py::test_websocket_headers[trio]"
+  ],
+  "gold_clean": true
+ },
+ "e6f7ad1ab85efb27ab7910d8007b3f4531f7b083": {
+  "task": "e6f7ad1ab85efb27ab7910d8007b3f4531f7b083",
+  "target_tests": [
+   "tests/middleware/test_base.py",
+   "tests/middleware/test_wsgi.py",
+   "tests/test__utils.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py",
+   "tests/middleware/test_wsgi.py",
+   "tests/test__utils.py"
+  ],
+  "src_files": [
+   "starlette/_utils.py",
+   "starlette/middleware/base.py",
+   "starlette/middleware/wsgi.py",
+   "starlette/responses.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-06-10T11:33:02+01:00",
+  "subject": "avoid collapsing exception groups from user code (#2830)",
+  "src_churn": 58,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1a6018e08a994c78f5c169b8535408259af0f249": {
+  "task": "1a6018e08a994c78f5c169b8535408259af0f249",
+  "target_tests": [
+   "tests/middleware/test_errors.py",
+   "tests/test_authentication.py",
+   "tests/test_concurrency.py",
+   "tests/test_exceptions.py",
+   "tests/test_responses.py",
+   "tests/test_routing.py",
+   "tests/test_websockets.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_errors.py",
+   "tests/test_authentication.py",
+   "tests/test_concurrency.py",
+   "tests/test_exceptions.py",
+   "tests/test_responses.py",
+   "tests/test_routing.py",
+   "tests/test_websockets.py"
+  ],
+  "src_files": [
+   "starlette/applications.py",
+   "starlette/formparsers.py",
+   "starlette/requests.py",
+   "starlette/routing.py",
+   "starlette/schemas.py",
+   "starlette/templating.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-09-29T10:28:34+02:00",
+  "subject": "Support python-multipart 0.0.12 (#2708)",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "296cab922aa72d9f281d339b01d6eb6e6652d986": {
+  "task": "296cab922aa72d9f281d339b01d6eb6e6652d986",
+  "target_tests": [
+   "tests/test__utils.py",
+   "tests/test_applications.py",
+   "tests/test_responses.py",
+   "tests/test_routing.py",
+   "tests/test_websockets.py"
+  ],
+  "test_files": [
+   "tests/test__utils.py",
+   "tests/test_applications.py",
+   "tests/test_responses.py",
+   "tests/test_routing.py",
+   "tests/test_websockets.py"
+  ],
+  "src_files": [
+   "starlette/_utils.py",
+   "starlette/config.py",
+   "starlette/middleware/__init__.py",
+   "starlette/responses.py",
+   "starlette/status.py",
+   "starlette/templating.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-07-27T03:03:46-06:00",
+  "subject": "Bump the python-packages group with 13 updates (#2632)",
+  "src_churn": 57,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c3c6314759b8356df185857c6001de6c8575708d": {
+  "task": "c3c6314759b8356df185857c6001de6c8575708d",
+  "target_tests": [
+   "tests/middleware/test_wsgi.py",
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_wsgi.py",
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "starlette/_utils.py",
+   "starlette/datastructures.py",
+   "starlette/middleware/wsgi.py",
+   "starlette/requests.py",
+   "starlette/routing.py",
+   "starlette/staticfiles.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-01-09T08:45:30+04:00",
+  "subject": "\u267b\ufe0f Refactor logic to handle `root_path` to keep compatibility with ASGI and compatibility with other non-Starlette-specific libraries like a2wsgi (#2400)",
+  "src_churn": 82,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5d12b8698283f76e718e014aca3b8d50162bad8a": {
+  "task": "5d12b8698283f76e718e014aca3b8d50162bad8a",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "starlette/_utils.py",
+   "starlette/applications.py",
+   "starlette/middleware/sessions.py",
+   "starlette/requests.py",
+   "starlette/responses.py",
+   "starlette/routing.py",
+   "starlette/templating.py",
+   "starlette/testclient.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-07-13T10:19:12+02:00",
+  "subject": "Drop support for Python 3.7 (#2178)",
+  "src_churn": 135,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "da6461b239cde16ee9709b7d266c2529c26239d7": {
+  "task": "da6461b239cde16ee9709b7d266c2529c26239d7",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "starlette/applications.py",
+   "starlette/routing.py",
+   "starlette/testclient.py",
+   "starlette/types.py"
+  ],
+  "pool": "hard",
+  "authored": "2023-03-05T15:49:07+01:00",
+  "subject": "Support lifespan state (#2060)",
+  "src_churn": 78,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "58b82b07b913645fa968a4e23a0707226f56fe97": {
+  "task": "58b82b07b913645fa968a4e23a0707226f56fe97",
+  "target_tests": [
+   "tests/test_datastructures.py"
+  ],
+  "test_files": [
+   "tests/test_datastructures.py"
+  ],
+  "src_files": [
+   "starlette/datastructures.py",
+   "starlette/middleware/errors.py",
+   "starlette/responses.py",
+   "starlette/schemas.py",
+   "starlette/templating.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-10-05T20:40:04+02:00",
+  "subject": "Ignore `type: ignore` without code error (#1893)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5b058faa108ebe0e7d8810e84bf88cb37744faf8": {
+  "task": "5b058faa108ebe0e7d8810e84bf88cb37744faf8",
+  "target_tests": [
+   "tests/test__utils.py"
+  ],
+  "test_files": [
+   "tests/test__utils.py"
+  ],
+  "src_files": [
+   "starlette/_utils.py",
+   "starlette/authentication.py",
+   "starlette/background.py",
+   "starlette/endpoints.py",
+   "starlette/middleware/errors.py",
+   "starlette/middleware/exceptions.py",
+   "starlette/routing.py",
+   "starlette/testclient.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-05-28T09:28:58+02:00",
+  "subject": "Improve detection of async callables (#1444)",
+  "src_churn": 54,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3453fd6b6259393f3744815b49af297c934f32d0": {
+  "task": "3453fd6b6259393f3744815b49af297c934f32d0",
+  "target_tests": [
+   "tests/test_exceptions.py",
+   "tests/test_formparsers.py"
+  ],
+  "test_files": [
+   "tests/test_exceptions.py",
+   "tests/test_formparsers.py"
+  ],
+  "src_files": [
+   "starlette/applications.py",
+   "starlette/exceptions.py",
+   "starlette/formparsers.py",
+   "starlette/middleware/exceptions.py",
+   "starlette/requests.py"
+  ],
+  "pool": "hard",
+  "authored": "2022-05-19T20:33:03+02:00",
+  "subject": "Add 400 response when `boundary` is missing  (#1617)",
+  "src_churn": 216,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7f8cd041734be3b290cdb178e99c37e1d5a19b41": {
+  "task": "7f8cd041734be3b290cdb178e99c37e1d5a19b41",
+  "target_tests": [
+   "tests/middleware/test_base.py",
+   "tests/middleware/test_lifespan.py",
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py",
+   "tests/middleware/test_lifespan.py",
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "starlette/applications.py",
+   "starlette/middleware/__init__.py",
+   "starlette/routing.py",
+   "starlette/websockets.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-11-13T12:25:18Z",
+  "subject": "Version 0.13 (#704)",
+  "src_churn": 340,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "91eefb2af3940364b051138bed47319e189d31be": {
+  "task": "91eefb2af3940364b051138bed47319e189d31be",
+  "target_tests": [
+   "tests/middleware/test_base.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_base.py"
+  ],
+  "src_files": [
+   "starlette/applications.py",
+   "starlette/exceptions.py",
+   "starlette/middleware/__init__.py",
+   "starlette/routing.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-11-04T15:08:24Z",
+  "subject": "Support app configuration on initialization. (#702)",
+  "src_churn": 111,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2a8c045822238764ef5b2dd70d8148b201e5e4d2": {
+  "task": "2a8c045822238764ef5b2dd70d8148b201e5e4d2",
+  "target_tests": [
+   "tests/test_routing.py"
+  ],
+  "test_files": [
+   "tests/test_routing.py"
+  ],
+  "src_files": [
+   "starlette/datastructures.py",
+   "starlette/requests.py",
+   "starlette/routing.py",
+   "starlette/testclient.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-11-01T14:11:00Z",
+  "subject": "Include 'root_path' when returning URLs from request.url_for (#699)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e0e2621add2ef2aff24b4cb706932a61467b2658": {
+  "task": "e0e2621add2ef2aff24b4cb706932a61467b2658",
+  "target_tests": [
+   "tests/middleware/test_wsgi.py",
+   "tests/test_applications.py",
+   "tests/test_authentication.py",
+   "tests/test_database.py",
+   "tests/test_formparsers.py",
+   "tests/test_schemas.py",
+   "tests/test_staticfiles.py",
+   "tests/test_templates.py"
+  ],
+  "test_files": [
+   "tests/middleware/test_wsgi.py",
+   "tests/test_applications.py",
+   "tests/test_authentication.py",
+   "tests/test_database.py",
+   "tests/test_formparsers.py",
+   "tests/test_schemas.py",
+   "tests/test_staticfiles.py",
+   "tests/test_templates.py"
+  ],
+  "src_files": [
+   "starlette/applications.py",
+   "starlette/config.py",
+   "starlette/requests.py",
+   "starlette/routing.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-05-13T16:22:59+02:00",
+  "subject": "flake8 fixes (#512)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b3ad311bbcb750f8136d68cec4770d56e88831f0": {
+  "task": "b3ad311bbcb750f8136d68cec4770d56e88831f0",
+  "target_tests": [
+   "tests/test_database.py",
+   "tests/test_responses.py",
+   "tests/test_templates.py"
+  ],
+  "test_files": [
+   "tests/test_database.py",
+   "tests/test_responses.py",
+   "tests/test_templates.py"
+  ],
+  "src_files": [
+   "starlette/applications.py",
+   "starlette/database/mysql.py",
+   "starlette/responses.py",
+   "starlette/templating.py"
+  ],
+  "pool": "hard",
+  "authored": "2019-02-18T13:28:18Z",
+  "subject": "Template component (#398)",
+  "src_churn": 152,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}

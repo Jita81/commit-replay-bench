@@ -1,0 +1,1475 @@
+{
+ "tasks": {
+  "drf:fbb02d9be78b1e232784dbb813c3fa118c1ba076": {
+   "repo": "drf",
+   "task": "fbb02d9be78b1e232784dbb813c3fa118c1ba076",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Replace `cc_delim_re usage` with `split_header_value` for Django 6.1+ compatibility (#9978)",
+   "change_class": "bug.fix"
+  },
+  "drf:cf582fb58e9e5ffcc8ed78a2cb9aaa8f4865666a": {
+   "repo": "drf",
+   "task": "cf582fb58e9e5ffcc8ed78a2cb9aaa8f4865666a",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Fix OpenAPI zero numeric bounds for list children (#9977)",
+   "change_class": "unclassified"
+  },
+  "drf:3e40eb4ec395c5925ee1100d44acc22cb2af2dc7": {
+   "repo": "drf",
+   "task": "3e40eb4ec395c5925ee1100d44acc22cb2af2dc7",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Fix#6855 browsable api extra action (#9934)",
+   "change_class": "bug.fix"
+  },
+  "drf:65aa4b8608e3fd5f32d1d077504e8671991ebe28": {
+   "repo": "drf",
+   "task": "65aa4b8608e3fd5f32d1d077504e8671991ebe28",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Fix partial form data updates involving `ListField` (#9902)",
+   "change_class": "unclassified"
+  },
+  "drf:84ae65b59d3223d8508ecbd08c58945b6bf9cb97": {
+   "repo": "drf",
+   "task": "84ae65b59d3223d8508ecbd08c58945b6bf9cb97",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Include `choices` param for non-editable fields (#9929)",
+   "change_class": "feature.add"
+  },
+  "drf:c0407dee6ef8a5603c2d5d34373d724be7b98188": {
+   "repo": "drf",
+   "task": "c0407dee6ef8a5603c2d5d34373d724be7b98188",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Fix `HTMLFormRenderer` with empty `datetime` values (#9928)",
+   "change_class": "bug.fix"
+  },
+  "drf:a4504226fc46d30d7cf079c9507c7bc435669116": {
+   "repo": "drf",
+   "task": "a4504226fc46d30d7cf079c9507c7bc435669116",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Preserve ordering in `MultipleChoiceField` (#9735)",
+   "change_class": "unclassified"
+  },
+  "drf:d6ffc95532f66f16df1230b5e95533c835520c66": {
+   "repo": "drf",
+   "task": "d6ffc95532f66f16df1230b5e95533c835520c66",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Updates for TokenAdmin. (#9836)",
+   "change_class": "bug.fix"
+  },
+  "drf:d692b87a2be24315717944736b306753ada9cfe7": {
+   "repo": "drf",
+   "task": "d692b87a2be24315717944736b306753ada9cfe7",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Add validation for decorator order with @api_view (#9821)",
+   "change_class": "feature.add"
+  },
+  "drf:ad0fea04de0b51657adc1cbc677034f562727684": {
+   "repo": "drf",
+   "task": "ad0fea04de0b51657adc1cbc677034f562727684",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Add support for ipaddress objects in JSONEncoder (#9087)",
+   "change_class": "feature.add"
+  },
+  "drf:01659c075a9dedb6cb6d29ba23012d447aff0c8b": {
+   "repo": "drf",
+   "task": "01659c075a9dedb6cb6d29ba23012d447aff0c8b",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Fixed #5363 -- HTML5 datetime-local valid format HTMLFormRenderer (#9365)",
+   "change_class": "bug.fix"
+  },
+  "drf:577bb3c81973eaa543e3eb47ae3bdd4c4968cc01": {
+   "repo": "drf",
+   "task": "577bb3c81973eaa543e3eb47ae3bdd4c4968cc01",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Validation on ManyToManyField when default=None (#9790)",
+   "change_class": "bug.fix"
+  },
+  "drf:9cf6efb4a8de4e99ee77217f088879889b4b3e85": {
+   "repo": "drf",
+   "task": "9cf6efb4a8de4e99ee77217f088879889b4b3e85",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Support `violation_error_code` and `violation_error_message` from `UniqueConstraint` in `UniqueTogetherValidator` (#9766)",
+   "change_class": "feature.add"
+  },
+  "drf:cf923511e7bbd1d05b6919af9af4e5edd81f5b71": {
+   "repo": "drf",
+   "task": "cf923511e7bbd1d05b6919af9af4e5edd81f5b71",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Add missing decorators: `@versioning_class()`, `@content_negotiation_class()`, `@metadata_class()` for function based views (#9719)",
+   "change_class": "feature.add"
+  },
+  "drf:513ddb4ffbfaef9d0117b281121ffc7319106f2f": {
+   "repo": "drf",
+   "task": "513ddb4ffbfaef9d0117b281121ffc7319106f2f",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Condition of UniqueTogetherValidator can be read-only (#9764)",
+   "change_class": "feature.add"
+  },
+  "celery:379a629dc2580380c15b6d1bd44a28db50e45288": {
+   "repo": "celery",
+   "task": "379a629dc2580380c15b6d1bd44a28db50e45288",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Preserve group errback mutability (#10385)",
+   "change_class": "bug.fix"
+  },
+  "celery:730ab395c9b9654fcf248d400b551f1f693b35e1": {
+   "repo": "celery",
+   "task": "730ab395c9b9654fcf248d400b551f1f693b35e1",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Update reserved requests to use new event dispatcher on reconnect (#10383)",
+   "change_class": "bug.fix"
+  },
+  "celery:3f2cf57d395a105dda9179b203040a1471d40a78": {
+   "repo": "celery",
+   "task": "3f2cf57d395a105dda9179b203040a1471d40a78",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Raise a clear error instead of a bare ValueError when fast_trace_task's worker registry is empty (#10397)",
+   "change_class": "bug.fix"
+  },
+  "celery:2e150f8330df059858ff5d481390a29b73c59600": {
+   "repo": "celery",
+   "task": "2e150f8330df059858ff5d481390a29b73c59600",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Fix queue selection by alias to store the real queue name (#10358)",
+   "change_class": "bug.fix"
+  },
+  "celery:d6131816f172750f7ba6204f903cd2fc243853ad": {
+   "repo": "celery",
+   "task": "d6131816f172750f7ba6204f903cd2fc243853ad",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Tolerate task cancellation errors after connection loss (#10382)",
+   "change_class": "bug.fix"
+  },
+  "celery:e2b276e603b3974392d0363a76b00cb2263880a0": {
+   "repo": "celery",
+   "task": "e2b276e603b3974392d0363a76b00cb2263880a0",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Mark rejected tasks as failed when not requeued (#10369)",
+   "change_class": "bug.fix"
+  },
+  "celery:7f9a6e5d02f3501dd1137e7024148330c6dce804": {
+   "repo": "celery",
+   "task": "7f9a6e5d02f3501dd1137e7024148330c6dce804",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Fix add_consumer not restoring consume_from for known queues (#10352)",
+   "change_class": "bug.fix"
+  },
+  "celery:d4eb32a781713ac3b6da3c61e49b21bfe936eda7": {
+   "repo": "celery",
+   "task": "d4eb32a781713ac3b6da3c61e49b21bfe936eda7",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Fix free worker stalling after broker reconnect (AsynPool.flush clearing _busy_workers) (#10346)",
+   "change_class": "bug.fix"
+  },
+  "celery:ece6862996dd03181e0f5c996ab0def973f27fe8": {
+   "repo": "celery",
+   "task": "ece6862996dd03181e0f5c996ab0def973f27fe8",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Fix Queues.deselect leaking routing-only queues into consumers (#10348)",
+   "change_class": "bug.fix"
+  },
+  "celery:1cc9ecf430717b371892573ecad252929213e75e": {
+   "repo": "celery",
+   "task": "1cc9ecf430717b371892573ecad252929213e75e",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Fix Consumer.on_close() wiping in-flight reservations and breaking worker_disable_prefetch (#10345)",
+   "change_class": "bug.fix"
+  },
+  "celery:c30f42ad2f7acb429d0ebfa5fe46d3056f8c5c0c": {
+   "repo": "celery",
+   "task": "c30f42ad2f7acb429d0ebfa5fe46d3056f8c5c0c",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Handle DST gaps in make_aware (#10324)",
+   "change_class": "bug.fix"
+  },
+  "celery:066e96e01c3eab72c1c4bf601d11c80b5ba876ef": {
+   "repo": "celery",
+   "task": "066e96e01c3eab72c1c4bf601d11c80b5ba876ef",
+   "clean": true,
+   "trials": 1,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Fix worker consuming unexpected queues after connection loss (#10335)",
+   "change_class": "bug.fix"
+  },
+  "gin:d9307dbcbbe796a64d9e0ef23452da888dd7f904": {
+   "repo": "gin",
+   "task": "d9307dbcbbe796a64d9e0ef23452da888dd7f904",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "fix(context): skip chmod on pre-existing dirs in SaveUploadedFile (#4702)",
+   "change_class": "bug.fix"
+  },
+  "gin:4a3eb31fb15b2a2d78b4bdbe0c31a2c564b1977a": {
+   "repo": "gin",
+   "task": "4a3eb31fb15b2a2d78b4bdbe0c31a2c564b1977a",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "fix(recovery): record recovered panics in c.Errors (#4698)",
+   "change_class": "bug.fix"
+  },
+  "gin:293ad7edebb3ae30369288bd6416ca0d78474727": {
+   "repo": "gin",
+   "task": "293ad7edebb3ae30369288bd6416ca0d78474727",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "fix(context): Copy() copies Errors and Accepted fields (#4695)",
+   "change_class": "bug.fix"
+  },
+  "gin:d75fcd4c9ab260e5225de590f1f0f8c0e0e12d11": {
+   "repo": "gin",
+   "task": "d75fcd4c9ab260e5225de590f1f0f8c0e0e12d11",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "fix(response): panic on Hijack/CloseNotify when wrapper unsupported (#4645)",
+   "change_class": "bug.fix"
+  },
+  "gin:96ece6a14123923d00081320486042f568adef32": {
+   "repo": "gin",
+   "task": "96ece6a14123923d00081320486042f568adef32",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "feat(context): add Scheme() with proper reverse proxy support (#4655)",
+   "change_class": "feature.add"
+  },
+  "gin:052d1a79aafe3f04078a2716f8e77d4340308383": {
+   "repo": "gin",
+   "task": "052d1a79aafe3f04078a2716f8e77d4340308383",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "feat(render): add PDF renderer and tests (#4491)",
+   "change_class": "feature.add"
+  },
+  "gin:ae3f524974fc4f55d18c9e7fae4614503c015226": {
+   "repo": "gin",
+   "task": "ae3f524974fc4f55d18c9e7fae4614503c015226",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "ci: update Go version support to 1.25+ across CI and docs (#4550)",
+   "change_class": "other"
+  },
+  "gin:472d086af2acd924cb4b9d7be0525f7d790f69bc": {
+   "repo": "gin",
+   "task": "472d086af2acd924cb4b9d7be0525f7d790f69bc",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "M",
+   "subject": "fix(tree): panic in findCaseInsensitivePathRec with RedirectFixedPath (#4535)",
+   "change_class": "bug.fix"
+  },
+  "gin:5c00df8afadd06cc5be530dde00fe6d9fa4a2e4a": {
+   "repo": "gin",
+   "task": "5c00df8afadd06cc5be530dde00fe6d9fa4a2e4a",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "fix(render): write content length in Data.Render (#4206)",
+   "change_class": "bug.fix"
+  },
+  "gin:db309081bc5c137b2aa15701ef53f7f19788da25": {
+   "repo": "gin",
+   "task": "db309081bc5c137b2aa15701ef53f7f19788da25",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "chore(logger): allow skipping query string output (#4547)",
+   "change_class": "feature.add"
+  },
+  "gin:53410d2e07054369e0960fbe2eed97e1b9966f12": {
+   "repo": "gin",
+   "task": "53410d2e07054369e0960fbe2eed97e1b9966f12",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "feat(context): add GetError and GetErrorSlice methods for error retrieval (#4502)",
+   "change_class": "feature.add"
+  },
+  "gin:192ac89eefc1c30f7c97ae48a9ffb1c6f1c8c8bc": {
+   "repo": "gin",
+   "task": "192ac89eefc1c30f7c97ae48a9ffb1c6f1c8c8bc",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "M",
+   "subject": "feat(binding): add support for encoding.UnmarshalText in uri/query binding (#4203)",
+   "change_class": "feature.add"
+  },
+  "gin:b2b489dbf4826c2c630717a77fd5e42774625410": {
+   "repo": "gin",
+   "task": "b2b489dbf4826c2c630717a77fd5e42774625410",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "chore(context): always trust xff headers from unix socket (#3359)",
+   "change_class": "behavior.change"
+  },
+  "gin:9914178584e42458ff7d23891463a880f58c9d86": {
+   "repo": "gin",
+   "task": "9914178584e42458ff7d23891463a880f58c9d86",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "fix(context): ClientIP handling for multiple X-Forwarded-For header values (#4472)",
+   "change_class": "bug.fix"
+  },
+  "gin:915e4c90d28ec4cffc6eb146e208ab5a65eac772": {
+   "repo": "gin",
+   "task": "915e4c90d28ec4cffc6eb146e208ab5a65eac772",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "refactor(context): replace hardcoded localhost IPs with constants (#4481)",
+   "change_class": "refactor"
+  },
+  "gin:64a6ed9a41ab72076506bd590dc4b916ca4b66a5": {
+   "repo": "gin",
+   "task": "64a6ed9a41ab72076506bd590dc4b916ca4b66a5",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "M",
+   "subject": "perf(recovery): optimize line reading in stack function (#4466)",
+   "change_class": "perf"
+  },
+  "gin:19b877fa50cbbb9282763099fb177a1e5cc5c850": {
+   "repo": "gin",
+   "task": "19b877fa50cbbb9282763099fb177a1e5cc5c850",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "test(debug): improve the test coverage of debug.go to 100% (#4404)",
+   "change_class": "other"
+  },
+  "express:18e5985b8a9d5e8423db0a9121f22bdaecd5b120": {
+   "repo": "express",
+   "task": "18e5985b8a9d5e8423db0a9121f22bdaecd5b120",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "fix(res.send): add Content-Length header only if Transfer-Encoding is not present (#4893)",
+   "change_class": "bug.fix"
+  },
+  "express:59e205a57a04fced6bb7b8ec0b5dec29461a9996": {
+   "repo": "express",
+   "task": "59e205a57a04fced6bb7b8ec0b5dec29461a9996",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Upgrade `content-disposition` (#7233)",
+   "change_class": "unclassified"
+  },
+  "express:c9ecf7b658388ccaa2b8470aabad92aabde458a2": {
+   "repo": "express",
+   "task": "c9ecf7b658388ccaa2b8470aabad92aabde458a2",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "feat: Allow passing null or undefined as the value for options in app.render (#6903)",
+   "change_class": "feature.add"
+  },
+  "express:9a3f7ff4120d7920a2d13809ff5ae78648c8a3d6": {
+   "repo": "express",
+   "task": "9a3f7ff4120d7920a2d13809ff5ae78648c8a3d6",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Polish HTML structure of the response in the res.redirect() function (#5167)",
+   "change_class": "behavior.change"
+  },
+  "express:caa4f68ee8d32474676fa29cc2086dcc1d62208b": {
+   "repo": "express",
+   "task": "caa4f68ee8d32474676fa29cc2086dcc1d62208b",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "feat: Extend res.links() to allow adding multiple links with the same rel (closes #2729) (#4885)",
+   "change_class": "feature.add"
+  },
+  "express:55869f49a65f1e279d92488fa6319c9fd4d8eac2": {
+   "repo": "express",
+   "task": "55869f49a65f1e279d92488fa6319c9fd4d8eac2",
+   "clean": true,
+   "trials": 1,
+   "source": "banked",
+   "size": "XS",
+   "subject": "feat: Added check to support Uint8Array in response sending (#6285)",
+   "change_class": "feature.add"
+  },
+  "express:246f6f5aeebad1b9d6a0ea08cd96d3fe19f8f23c": {
+   "repo": "express",
+   "task": "246f6f5aeebad1b9d6a0ea08cd96d3fe19f8f23c",
+   "clean": false,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "fix: Remove `utils-merge` dependency - use spread syntax instead (#6091)",
+   "change_class": "refactor"
+  },
+  "petclinic:1cad4124b7685d3e66ac376f44874a3d5319cb06": {
+   "repo": "petclinic",
+   "task": "1cad4124b7685d3e66ac376f44874a3d5319cb06",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Refactor code logic <refactor>: remove useless logic cod. <refactor>: detele useless annotation which is provided by Jpa. <refactor>: refactor implement of `fin",
+   "change_class": "refactor"
+  },
+  "petclinic:14af47d4e5b4e12e0ca28e5c2c8437528546c25d": {
+   "repo": "petclinic",
+   "task": "14af47d4e5b4e12e0ca28e5c2c8437528546c25d",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Refactor: - <optimize>: delete logic `add owner to model` because of the comment `@ModelAttribute(\"owner\")`. - <fix>: add logical judgment in ordet to avoid `ow",
+   "change_class": "refactor"
+  },
+  "petclinic:d381fb658cb435a04e2271ca85bd3e8627a5e7e4": {
+   "repo": "petclinic",
+   "task": "d381fb658cb435a04e2271ca85bd3e8627a5e7e4",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Use open session in view and populate model attrs",
+   "change_class": "bug.fix"
+  },
+  "petclinic:e765e3ffe16002beb30c6a5c6f06409816259bf4": {
+   "repo": "petclinic",
+   "task": "e765e3ffe16002beb30c6a5c6f06409816259bf4",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Fix lazy loading issue in owner details",
+   "change_class": "bug.fix"
+  },
+  "petclinic:472575378c7b377862cc01b713cab38eaa8f9c64": {
+   "repo": "petclinic",
+   "task": "472575378c7b377862cc01b713cab38eaa8f9c64",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "S",
+   "subject": "Additional tweaks in aggregate model.",
+   "change_class": "refactor"
+  },
+  "petclinic:423a3375434eb90d1631a47849fd5e56700585f7": {
+   "repo": "petclinic",
+   "task": "423a3375434eb90d1631a47849fd5e56700585f7",
+   "clean": true,
+   "trials": 2,
+   "source": "banked",
+   "size": "XS",
+   "subject": "Move Visit to owner package (it's aggregate root)",
+   "change_class": "refactor"
+  },
+  "drf:e454758fb6edf1dcf5aa5417a388b940c871469c": {
+   "repo": "drf",
+   "task": "e454758fb6edf1dcf5aa5417a388b940c871469c",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix regression in unique_together validation with SerializerMethodField (#9712)",
+   "change_class": "bug.fix"
+  },
+  "gin:b917b14ff9d189f16a7492be79d123a47806ee19": {
+   "repo": "gin",
+   "task": "b917b14ff9d189f16a7492be79d123a47806ee19",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "fix(binding): empty value error (#2169)",
+   "change_class": "bug.fix"
+  },
+  "gin:f416d1e594a027063e73f66ac873a82113036fd8": {
+   "repo": "gin",
+   "task": "f416d1e594a027063e73f66ac873a82113036fd8",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "test(gin): resolve race conditions in integration tests (#4453)",
+   "change_class": "other"
+  },
+  "gin:63dd3e60cab89c27fb66bce1423bd268d52abad1": {
+   "repo": "gin",
+   "task": "63dd3e60cab89c27fb66bce1423bd268d52abad1",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix(recover): suppress http.ErrAbortHandler in recover (#4336)",
+   "change_class": "bug.fix"
+  },
+  "gin:771dcc6476d7bc6abb9ec0235ecefa4d38fe6fb0": {
+   "repo": "gin",
+   "task": "771dcc6476d7bc6abb9ec0235ecefa4d38fe6fb0",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "feat(gin): add option to use escaped path (#4420)",
+   "change_class": "feature.add"
+  },
+  "gin:440eb14ab8ed503d4a31dfecc9946a90cd73b955": {
+   "repo": "gin",
+   "task": "440eb14ab8ed503d4a31dfecc9946a90cd73b955",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "M",
+   "subject": "perf(path): replace regex with custom functions in redirectTrailingSlash (#4414)",
+   "change_class": "perf"
+  },
+  "gin:5fad976b372e381312f8de69f0969f1284d229d3": {
+   "repo": "gin",
+   "task": "5fad976b372e381312f8de69f0969f1284d229d3",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix(gin): literal colon routes not working with engine.Handler() (#4415)",
+   "change_class": "bug.fix"
+  },
+  "gin:acc55e049e33b401e810dbd8c0d6dcb6b3ba2b05": {
+   "repo": "gin",
+   "task": "acc55e049e33b401e810dbd8c0d6dcb6b3ba2b05",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "feat(context): add Protocol Buffers support to content negotiation (#4423)",
+   "change_class": "feature.add"
+  },
+  "gin:38e765119241d990705169bedb5002a29ae0cbd1": {
+   "repo": "gin",
+   "task": "38e765119241d990705169bedb5002a29ae0cbd1",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "feat(context): implemented Delete method",
+   "change_class": "feature.add"
+  },
+  "gin:c3d1092b3b48addf6f9cd00fe274ec3bd14650eb": {
+   "repo": "gin",
+   "task": "c3d1092b3b48addf6f9cd00fe274ec3bd14650eb",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "fix(binding): improve empty slice/array handling in form binding (#4380)",
+   "change_class": "bug.fix"
+  },
+  "gin:4dec17afdff48e8018c83618fbbe69fceeb2b41d": {
+   "repo": "gin",
+   "task": "4dec17afdff48e8018c83618fbbe69fceeb2b41d",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "feat(logger): color latency (#4146)",
+   "change_class": "feature.add"
+  },
+  "gin:234a6d4c00cb77af9852aca0b8289745d5529b4b": {
+   "repo": "gin",
+   "task": "234a6d4c00cb77af9852aca0b8289745d5529b4b",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix(response): refine hijack behavior for response lifecycle (#4373)",
+   "change_class": "bug.fix"
+  },
+  "gin:f9bd00a6b7939b941fde3fdd239367f4a7d6b137": {
+   "repo": "gin",
+   "task": "f9bd00a6b7939b941fde3fdd239367f4a7d6b137",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "perf(context): optimize getMapFromFormData performance (#4339)",
+   "change_class": "perf"
+  },
+  "gin:45b805f6d59ba0b4f315adffe81ed4a82a51a591": {
+   "repo": "gin",
+   "task": "45b805f6d59ba0b4f315adffe81ed4a82a51a591",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "perf(recovery): optimize the log output of CustomRecoveryWithWriter (#4258)",
+   "change_class": "perf"
+  },
+  "gin:32065bbd4298d566d060d234e452bbf44e92161d": {
+   "repo": "gin",
+   "task": "32065bbd4298d566d060d234e452bbf44e92161d",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "chore(response): prevention of Hijack() runtime panics (#4295)",
+   "change_class": "bug.fix"
+  },
+  "gin:e4c2a2762448fbd094463a2022e97bc5be98ec63": {
+   "repo": "gin",
+   "task": "e4c2a2762448fbd094463a2022e97bc5be98ec63",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "refactor(context): remove unused Context dependency in get method (#4304)",
+   "change_class": "refactor"
+  },
+  "gin:dbd8a2515093ad47cadc5c1fface89861a0b765c": {
+   "repo": "gin",
+   "task": "dbd8a2515093ad47cadc5c1fface89861a0b765c",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "feat: added `AbortWithStatusPureJSON()` in `Context` (#4290)",
+   "change_class": "feature.add"
+  },
+  "gin:e30123ad7314411664a693f23ed0ade498ccdaf0": {
+   "repo": "gin",
+   "task": "e30123ad7314411664a693f23ed0ade498ccdaf0",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "refactor(recovery): extract Authorization header masking into maskAuthorization func (#4143)",
+   "change_class": "refactor"
+  },
+  "gin:3c12d2a80e40930632fc4a4a4e1a45140f33fb12": {
+   "repo": "gin",
+   "task": "3c12d2a80e40930632fc4a4a4e1a45140f33fb12",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "perf(recover): replace bytes with strings in function for better performance (#4252)",
+   "change_class": "perf"
+  },
+  "gin:41d8591eb16bf23732de9ae2b699d6cae54c2ae8": {
+   "repo": "gin",
+   "task": "41d8591eb16bf23732de9ae2b699d6cae54c2ae8",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "M",
+   "subject": "refactor(context): refactor `Keys` type to `map[any]any` (#3963)",
+   "change_class": "refactor"
+  },
+  "gin:fb09c825e8e13134daaa90debfda198520e1b347": {
+   "repo": "gin",
+   "task": "fb09c825e8e13134daaa90debfda198520e1b347",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "feat(context): add SetCookieData (#4240)",
+   "change_class": "feature.add"
+  },
+  "drf:543996711d323722a1017e376619ae462a726ada": {
+   "repo": "drf",
+   "task": "543996711d323722a1017e376619ae462a726ada",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix `UniqueTogetherValidator` to handle fields w/ `source` attr (#9688)",
+   "change_class": "bug.fix"
+  },
+  "drf:17e95604f5056c4f5ceb40ca30cd349acd74c101": {
+   "repo": "drf",
+   "task": "17e95604f5056c4f5ceb40ca30cd349acd74c101",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "M",
+   "subject": "Fix unique together validator doesn't respect condition's fields (#9360)",
+   "change_class": "bug.fix"
+  },
+  "drf:4a1d773b8f7d86e08e3fd7c6809fd1092eb69d6e": {
+   "repo": "drf",
+   "task": "4a1d773b8f7d86e08e3fd7c6809fd1092eb69d6e",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Fixed regression that tests using format still work (#9615)",
+   "change_class": "bug.fix"
+  },
+  "drf:089f6a697445af20f52832db99f2ab94baea4ece": {
+   "repo": "drf",
+   "task": "089f6a697445af20f52832db99f2ab94baea4ece",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "support django 2.1 test client json data automatically serialized (#6511)",
+   "change_class": "feature.add"
+  },
+  "drf:a8595a8eae2649b763f4882da643c1dc9183d6f1": {
+   "repo": "drf",
+   "task": "a8595a8eae2649b763f4882da643c1dc9183d6f1",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix raising on nullable fields part of `UniqueConstraint` (#9531)",
+   "change_class": "bug.fix"
+  },
+  "drf:2ede857de0bbcc8863fadd6acdb1f8d5570d87dc": {
+   "repo": "drf",
+   "task": "2ede857de0bbcc8863fadd6acdb1f8d5570d87dc",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Add official support for Django 5.1 (#9514)",
+   "change_class": "feature.add"
+  },
+  "drf:125ad42eb3922cd5ce1f4b332c91baf6d6162fb3": {
+   "repo": "drf",
+   "task": "125ad42eb3922cd5ce1f4b332c91baf6d6162fb3",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Accept integers as min/max values of DecimalField (#9515)",
+   "change_class": "feature.add"
+  },
+  "drf:518eb22e67b443521f4a7e2be41cce603e59480b": {
+   "repo": "drf",
+   "task": "518eb22e67b443521f4a7e2be41cce603e59480b",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Fix unique_together validation with source (#9482)",
+   "change_class": "bug.fix"
+  },
+  "drf:8e304e1adbb0f99f91a15ed3abd379104bba3b89": {
+   "repo": "drf",
+   "task": "8e304e1adbb0f99f91a15ed3abd379104bba3b89",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Fixed AttributeError raised by data property being silently ignored (#9455)",
+   "change_class": "bug.fix"
+  },
+  "drf:f74185b6ddd51758f5c54a4ac10e354de0c98f1e": {
+   "repo": "drf",
+   "task": "f74185b6ddd51758f5c54a4ac10e354de0c98f1e",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix get_template_context to handle also lists (#9467)",
+   "change_class": "bug.fix"
+  },
+  "drf:e596f43c4e8183e4639996f95477b71eba3c8d80": {
+   "repo": "drf",
+   "task": "e596f43c4e8183e4639996f95477b71eba3c8d80",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "use warnings rather than logging a warning for DecimalField warnings (#9367)",
+   "change_class": "behavior.change"
+  },
+  "drf:7f18ec1b536a90b1fc194ef6140a6dcd8b605051": {
+   "repo": "drf",
+   "task": "7f18ec1b536a90b1fc194ef6140a6dcd8b605051",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Revert \"Ensure CursorPagination respects nulls in the ordering field (#8912)\" (#9381)",
+   "change_class": "bug.fix"
+  },
+  "drf:4ef3aaf0ad0e31efe13d3c503a7099915a7c8875": {
+   "repo": "drf",
+   "task": "4ef3aaf0ad0e31efe13d3c503a7099915a7c8875",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Revert #9030 (#9333)",
+   "change_class": "bug.fix"
+  },
+  "drf:d32346bae55f3e4718a185fb60e9f7a28e389c85": {
+   "repo": "drf",
+   "task": "d32346bae55f3e4718a185fb60e9f7a28e389c85",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix type name of `FieldInfo` namedtuple (#9124)",
+   "change_class": "bug.fix"
+  },
+  "petclinic:142321aa3ed056eeda0662c1987b76db25b3d736": {
+   "repo": "petclinic",
+   "task": "142321aa3ed056eeda0662c1987b76db25b3d736",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "M",
+   "subject": "Extracted findPetTypes",
+   "change_class": "refactor"
+  },
+  "petclinic:4926e292700f79260a58d6faf55b232ce075b70e": {
+   "repo": "petclinic",
+   "task": "4926e292700f79260a58d6faf55b232ce075b70e",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Change validation annotations and whitespace handling",
+   "change_class": "behavior.change"
+  },
+  "sqlalchemy:b7c6251293a287542ac8568cad7505b710fa3532": {
+   "repo": "sqlalchemy",
+   "task": "b7c6251293a287542ac8568cad7505b710fa3532",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "SQL codestyle: trim spacing around 'INHERITS' table list",
+   "change_class": "other"
+  },
+  "sqlalchemy:295013ba17895cb925bef042b9ad70c80f1d19b0": {
+   "repo": "sqlalchemy",
+   "task": "295013ba17895cb925bef042b9ad70c80f1d19b0",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "L",
+   "subject": "wrap before/after_cursor_execute event hooks in error handling",
+   "change_class": "bug.fix"
+  },
+  "sqlalchemy:101fd7f9b31db22f6ca2efdd3384a1e2751890bd": {
+   "repo": "sqlalchemy",
+   "task": "101fd7f9b31db22f6ca2efdd3384a1e2751890bd",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "override get_select_precolumns() in StrSQLCompiler",
+   "change_class": "refactor"
+  },
+  "sqlalchemy:74ef020b969a9ae0e124762d4531c85b1834f60e": {
+   "repo": "sqlalchemy",
+   "task": "74ef020b969a9ae0e124762d4531c85b1834f60e",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "M",
+   "subject": "Add explicit USING support to DELETE",
+   "change_class": "feature.add"
+  },
+  "sqlalchemy:8604972666978ca981623c7f415e405bc074663a": {
+   "repo": "sqlalchemy",
+   "task": "8604972666978ca981623c7f415e405bc074663a",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "quote driver name and pass-through keys in pyodbc connect string",
+   "change_class": "bug.fix"
+  },
+  "sqlalchemy:7a823b5f81c05407513efb84d13b67731635154d": {
+   "repo": "sqlalchemy",
+   "task": "7a823b5f81c05407513efb84d13b67731635154d",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix is_pep695 misidentifying Annotated[TypeAliasType] as PEP 695",
+   "change_class": "bug.fix"
+  },
+  "sqlalchemy:01194229387ab3d5e43d8395ce368b858dcd2b69": {
+   "repo": "sqlalchemy",
+   "task": "01194229387ab3d5e43d8395ce368b858dcd2b69",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "send execution options to connection also",
+   "change_class": "feature.add"
+  },
+  "sqlalchemy:b14415fa43dd676dd215fec0c18e756db43a70ff": {
+   "repo": "sqlalchemy",
+   "task": "b14415fa43dd676dd215fec0c18e756db43a70ff",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "M",
+   "subject": "Register func.any(), func.all(), func.some() as collection aggregates",
+   "change_class": "feature.add"
+  },
+  "sqlalchemy:4fb459aaf05dd9c31ce3ece57c1bbf81ca9855de": {
+   "repo": "sqlalchemy",
+   "task": "4fb459aaf05dd9c31ce3ece57c1bbf81ca9855de",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Add ambiguous column support to SimpleResultMetaData",
+   "change_class": "feature.add"
+  },
+  "sqlalchemy:96f98a9119d79b4f6e6026249a4afcf3b4b98c8e": {
+   "repo": "sqlalchemy",
+   "task": "96f98a9119d79b4f6e6026249a4afcf3b4b98c8e",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "allow backref named 'metadata' to not break _metadata_for_cls",
+   "change_class": "bug.fix"
+  },
+  "sqlalchemy:c41f25b17031d8e9ca3d7e613c0d4dcd78b693fe": {
+   "repo": "sqlalchemy",
+   "task": "c41f25b17031d8e9ca3d7e613c0d4dcd78b693fe",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix lambda statements with non-lambda criteria",
+   "change_class": "bug.fix"
+  },
+  "sqlalchemy:cf3cfa307f5b8cdfbd47b104db38c193503de1c8": {
+   "repo": "sqlalchemy",
+   "task": "cf3cfa307f5b8cdfbd47b104db38c193503de1c8",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix subqueryload losing .and_() criteria when combined with of_type()",
+   "change_class": "bug.fix"
+  },
+  "sqlalchemy:808fd28297f36bf932443bae77ca5bb16bcbd4dd": {
+   "repo": "sqlalchemy",
+   "task": "808fd28297f36bf932443bae77ca5bb16bcbd4dd",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "M",
+   "subject": "omit_join optimization for selectinload on many-to-many relationships",
+   "change_class": "perf"
+  },
+  "sqlalchemy:9030af40baffdd68e214434ef9a89bf4b117f99b": {
+   "repo": "sqlalchemy",
+   "task": "9030af40baffdd68e214434ef9a89bf4b117f99b",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "dont produce side effects for do_orm_execute",
+   "change_class": "bug.fix"
+  },
+  "sqlalchemy:68e982ad9de3c2300ea1927c099e3489b5baa6bc": {
+   "repo": "sqlalchemy",
+   "task": "68e982ad9de3c2300ea1927c099e3489b5baa6bc",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "user_defined_options returns memoized options",
+   "change_class": "perf"
+  },
+  "sqlalchemy:afa94c32a91711b81e4e663cc328837354491315": {
+   "repo": "sqlalchemy",
+   "task": "afa94c32a91711b81e4e663cc328837354491315",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "implement _post_inspect for AliasedInsp",
+   "change_class": "feature.add"
+  },
+  "sqlalchemy:cf2984c31d1f3edcfd26801a8ac560d95b52892e": {
+   "repo": "sqlalchemy",
+   "task": "cf2984c31d1f3edcfd26801a8ac560d95b52892e",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix ExcludeConstraint not forwarding info to parent constructor",
+   "change_class": "bug.fix"
+  },
+  "sqlalchemy:4ce719fbb3889765b43d7005954b4a8ae7de8c93": {
+   "repo": "sqlalchemy",
+   "task": "4ce719fbb3889765b43d7005954b4a8ae7de8c93",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix joinedload + of_type() + and_() invalid SQL for subclass columns",
+   "change_class": "bug.fix"
+  },
+  "sqlalchemy:f862a4534affcac0522832583e89c209ac58290f": {
+   "repo": "sqlalchemy",
+   "task": "f862a4534affcac0522832583e89c209ac58290f",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix floordiv (//) for float/numeric by int with div_is_floordiv dialects",
+   "change_class": "bug.fix"
+  },
+  "koa:480a4f064a4e8edb9e09be39355b3228ae4f4f9e": {
+   "repo": "koa",
+   "task": "480a4f064a4e8edb9e09be39355b3228ae4f4f9e",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix: response content-type value amount as one with testcase (#1899)",
+   "change_class": "bug.fix"
+  },
+  "koa:3f3ac48904229f807939d13ab49fdf8262a7aa08": {
+   "repo": "koa",
+   "task": "3f3ac48904229f807939d13ab49fdf8262a7aa08",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix: request.length overflows on Content-Length > 2GB (#1961)",
+   "change_class": "bug.fix"
+  },
+  "koa:2503a1fb14ff3dbed9b55ea1cd6419be739ff150": {
+   "repo": "koa",
+   "task": "2503a1fb14ff3dbed9b55ea1cd6419be739ff150",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "feat: defer AsyncLocalStorage creation for v8 startup snapshots (#1946)",
+   "change_class": "feature.add"
+  },
+  "koa:55ab9bab044ead4e82c70a30a4f9dc0fc9c1b6df": {
+   "repo": "koa",
+   "task": "55ab9bab044ead4e82c70a30a4f9dc0fc9c1b6df",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Merge commit from fork",
+   "change_class": "other"
+  },
+  "koa:863c2118f0fcc802678bb12b9dd1ec80a9be4001": {
+   "repo": "koa",
+   "task": "863c2118f0fcc802678bb12b9dd1ec80a9be4001",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix: only original value destroy if the new value is not a stream (#1914)",
+   "change_class": "bug.fix"
+  },
+  "koa:27df3b6e0055c5d9ca9b40cad084f2a7f6e54d9c": {
+   "repo": "koa",
+   "task": "27df3b6e0055c5d9ca9b40cad084f2a7f6e54d9c",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "fix: adds steam clean up (#1910)",
+   "change_class": "bug.fix"
+  },
+  "koa:769fd75cc6b30d72493b370b5a3ae2332ca03c5b": {
+   "repo": "koa",
+   "task": "769fd75cc6b30d72493b370b5a3ae2332ca03c5b",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix: normalize referer before redirect (#1908)",
+   "change_class": "bug.fix"
+  },
+  "koa:83128eb6cc210fa6f5519f93afb5606ffc3ffa5e": {
+   "repo": "koa",
+   "task": "83128eb6cc210fa6f5519f93afb5606ffc3ffa5e",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix: fixes response.attachment behavior leads to Content-Type Sniffing (#1904)",
+   "change_class": "bug.fix"
+  },
+  "koa:422c551c63d00f24e2bbbdf492f262a5935bb1f0": {
+   "repo": "koa",
+   "task": "422c551c63d00f24e2bbbdf492f262a5935bb1f0",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Merge commit from fork",
+   "change_class": "other"
+  },
+  "celery:1a4768959ef1b41f2c3e2b447233e90455697239": {
+   "repo": "celery",
+   "task": "1a4768959ef1b41f2c3e2b447233e90455697239",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Defer default queue lookup for explicitly routed tasks (#10357)",
+   "change_class": "bug.fix"
+  },
+  "celery:201573a11fb8c6cf8f712deea3b23142146b2cbb": {
+   "repo": "celery",
+   "task": "201573a11fb8c6cf8f712deea3b23142146b2cbb",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix pidbox consumer cleanup during reset cycles (#10363)",
+   "change_class": "bug.fix"
+  },
+  "celery:4a11650b11504c78f8351be836890c04c6e7a413": {
+   "repo": "celery",
+   "task": "4a11650b11504c78f8351be836890c04c6e7a413",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Redis ResultConsumer: clean up leaked _pending_messages after on_wait_for_pending (#10366)",
+   "change_class": "bug.fix"
+  },
+  "celery:74a7a63bb4844f4f8e426fa1f6b6a073a89ef01d": {
+   "repo": "celery",
+   "task": "74a7a63bb4844f4f8e426fa1f6b6a073a89ef01d",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "fix(redis): prevent _pending_messages memory leak in ResultConsumer (#10342)",
+   "change_class": "bug.fix"
+  },
+  "celery:477c816f9c6a4aa601825fa36d4f203dba375c48": {
+   "repo": "celery",
+   "task": "477c816f9c6a4aa601825fa36d4f203dba375c48",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Fix: wrap new-style errback calls in try/except to prevent silent chain halt (#10214)",
+   "change_class": "bug.fix"
+  },
+  "celery:bf1cf69e24e3ede7d7053c17d47e381be959880e": {
+   "repo": "celery",
+   "task": "bf1cf69e24e3ede7d7053c17d47e381be959880e",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Skip empty groups in chains (#10321)",
+   "change_class": "bug.fix"
+  },
+  "celery:be0e2de234324a06c61b5561fdd0ff18fabcea38": {
+   "repo": "celery",
+   "task": "be0e2de234324a06c61b5561fdd0ff18fabcea38",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Allow Redis backend SSL config with redis URLs (#10313)",
+   "change_class": "feature.add"
+  },
+  "celery:8f0842b336bb95b38e436ca0739e9646ac016ae4": {
+   "repo": "celery",
+   "task": "8f0842b336bb95b38e436ca0739e9646ac016ae4",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "fix(redis): keep _reconnect_pubsub compatible with redis-py < 5.3.0 (#10298)",
+   "change_class": "bug.fix"
+  },
+  "celery:03c79ac140b2098520011a94d2e9a52f83571260": {
+   "repo": "celery",
+   "task": "03c79ac140b2098520011a94d2e9a52f83571260",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix(worker): guard heartbeat control command against None event_dispatcher (#10295)",
+   "change_class": "bug.fix"
+  },
+  "celery:5013b4a999c202f53594addb2d609498eee330de": {
+   "repo": "celery",
+   "task": "5013b4a999c202f53594addb2d609498eee330de",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix(worker): skip Broadcast queues in native delayed delivery binding (#10293)",
+   "change_class": "bug.fix"
+  },
+  "celery:f8668fcf5a9d8170485b2bc682558e55c914b127": {
+   "repo": "celery",
+   "task": "f8668fcf5a9d8170485b2bc682558e55c914b127",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Removed socket.timeout from reconnection conditions (#10285)",
+   "change_class": "behavior.change"
+  },
+  "celery:323f21d3f4b28d57d0e8a14aed9dfd8f901d3933": {
+   "repo": "celery",
+   "task": "323f21d3f4b28d57d0e8a14aed9dfd8f901d3933",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix(defaults,rpc): RabbitMQ 4.3.0 compatibility for transient queues (#10290)",
+   "change_class": "bug.fix"
+  },
+  "celery:7bfa8d0c32e0af83b955a5f170c2051c3f1ec788": {
+   "repo": "celery",
+   "task": "7bfa8d0c32e0af83b955a5f170c2051c3f1ec788",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "Revert \"fix(defaults): default to exclusive queues for RabbitMQ 4.3.0 compati\u2026\" (#10289)",
+   "change_class": "behavior.change"
+  },
+  "celery:d9b39790d526085b83770ee4de15fb0da14ee2e6": {
+   "repo": "celery",
+   "task": "d9b39790d526085b83770ee4de15fb0da14ee2e6",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix(defaults): default to exclusive queues for RabbitMQ 4.3.0 compatibility (#10287)",
+   "change_class": "bug.fix"
+  },
+  "celery:9c8145fc0d97b7304786c77cf16852abc8876d30": {
+   "repo": "celery",
+   "task": "9c8145fc0d97b7304786c77cf16852abc8876d30",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "S",
+   "subject": "Deferred ack synloop bug (#10263)",
+   "change_class": "bug.fix"
+  },
+  "celery:8b4b29c935db900b294122c7a751e93fb3f9d178": {
+   "repo": "celery",
+   "task": "8b4b29c935db900b294122c7a751e93fb3f9d178",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "XS",
+   "subject": "fix(events): stop leaking exceptions and cancel stale Heart timers (#10280)",
+   "change_class": "bug.fix"
+  },
+  "celery:fbd01579c47acc8f1967ed8d5281bf41565dca8d": {
+   "repo": "celery",
+   "task": "fbd01579c47acc8f1967ed8d5281bf41565dca8d",
+   "clean": true,
+   "trials": 1,
+   "source": "expansion",
+   "size": "M",
+   "subject": "fix(send_task): honour per-task serializer and execution options (#10217)",
+   "change_class": "bug.fix"
+  }
+ },
+ "by_repo": {
+  "drf": {
+   "n": 30,
+   "clean": 30
+  },
+  "celery": {
+   "n": 29,
+   "clean": 29
+  },
+  "gin": {
+   "n": 37,
+   "clean": 37
+  },
+  "express": {
+   "n": 7,
+   "clean": 6
+  },
+  "petclinic": {
+   "n": 8,
+   "clean": 8
+  },
+  "sqlalchemy": {
+   "n": 19,
+   "clean": 19
+  },
+  "koa": {
+   "n": 9,
+   "clean": 9
+  }
+ },
+ "by_size": {
+  "S": {
+   "n": 63,
+   "clean": 62
+  },
+  "XS": {
+   "n": 64,
+   "clean": 64
+  },
+  "M": {
+   "n": 11,
+   "clean": 11
+  },
+  "L": {
+   "n": 1,
+   "clean": 1
+  }
+ },
+ "by_class": {
+  "bug.fix": {
+   "n": 75,
+   "clean": 75
+  },
+  "unclassified": {
+   "n": 4,
+   "clean": 4
+  },
+  "feature.add": {
+   "n": 30,
+   "clean": 30
+  },
+  "other": {
+   "n": 6,
+   "clean": 6
+  },
+  "behavior.change": {
+   "n": 6,
+   "clean": 6
+  },
+  "refactor": {
+   "n": 11,
+   "clean": 10
+  },
+  "perf": {
+   "n": 7,
+   "clean": 7
+  }
+ },
+ "total": 139,
+ "total_clean": 138,
+ "total_trials": 194
+}

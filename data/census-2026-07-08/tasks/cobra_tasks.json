@@ -1,0 +1,2051 @@
+{
+ "ad460ea8f249db69c943a365fb84f3a59042d54e": {
+  "task": "ad460ea8f249db69c943a365fb84f3a59042d54e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "args_test.go"
+  ],
+  "src_files": [
+   "args.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-25T19:07:41-04:00",
+  "subject": "Add cobra unique args validator (#2397)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "746ef07158728502482cea9f880a6f4b21ef29a9": {
+  "task": "746ef07158728502482cea9f880a6f4b21ef29a9",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-24T13:41:57-07:00",
+  "subject": "fix: prevent completions from mutating os.Args via append side effect (#2356)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestCompletionDoesNotMutateOsArgs"
+  ],
+  "gold_clean": true
+ },
+ "6dec1ae26659a130bdb4c985768d1853b0e1bc06": {
+  "task": "6dec1ae26659a130bdb4c985768d1853b0e1bc06",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-05-31T12:36:04Z",
+  "subject": "The default ShellCompDirective can be customized for a command and its subcommands (#2238)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "1995054b003053cc1e404bccfbf6d168e8731509": {
+  "task": "1995054b003053cc1e404bccfbf6d168e8731509",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-21T12:46:14Z",
+  "subject": "Flow context to command in SetHelpFunc (#2241)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestHelpFuncExecuted"
+  ],
+  "gold_clean": true
+ },
+ "40b5bc1437a564fc795d388b23835e84f54cd1d1": {
+  "task": "40b5bc1437a564fc795d388b23835e84f54cd1d1",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go",
+   "command_go120.go",
+   "command_go121.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-16T18:42:04-05:00",
+  "subject": "Revert \"Make detection for test-binary more universal (#2173)\" (#2235)",
+  "src_churn": 66,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a97f9fd47b290016526c8af2dac0531fea5cd773": {
+  "task": "a97f9fd47b290016526c8af2dac0531fea5cd773",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-16T19:08:14+01:00",
+  "subject": "fix CompletionFunc implementation (#2234)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "24ada7fe71e3a3a8741dd52e0a7fc3b97450535a": {
+  "task": "24ada7fe71e3a3a8741dd52e0a7fc3b97450535a",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "command.go",
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-15T13:07:02-05:00",
+  "subject": "Remove the default \"completion\" cmd if it is alone (#1559)",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8cb30f9ca53a004a6fe88c5cfcc79ac7b24fc638": {
+  "task": "8cb30f9ca53a004a6fe88c5cfcc79ac7b24fc638",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "active_help.go",
+   "command.go",
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-09T17:06:07+01:00",
+  "subject": "feat: add CompletionWithDesc helper (#2231)",
+  "src_churn": 68,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ab5cadcc1bbe224b329726fc5f8b99d6f93e9805": {
+  "task": "ab5cadcc1bbe224b329726fc5f8b99d6f93e9805",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-02-06T10:25:44-05:00",
+  "subject": "Allow to reset the templates to the default (#2229)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestSetHelpTemplate",
+   "github.com/spf13/cobra::TestSetUsageTemplate"
+  ],
+  "gold_clean": true
+ },
+ "611e16c322e3b0413a9ba4e489fcd98ef904e406": {
+  "task": "611e16c322e3b0413a9ba4e489fcd98ef904e406",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "cobra_test.go",
+   "command_test.go"
+  ],
+  "src_files": [
+   "cobra.go",
+   "command.go",
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-01-27T15:43:43+01:00",
+  "subject": "Allow linker to perform deadcode elimination for program using Cobra (#1956)",
+  "src_churn": 281,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestDeadcodeElimination"
+  ],
+  "gold_clean": true
+ },
+ "0745e5576205cd05fada5bb2e01500d97e1a04be": {
+  "task": "0745e5576205cd05fada5bb2e01500d97e1a04be",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-28T23:41:43+01:00",
+  "subject": "completion: improve detection for flags that accept multiple values (#2210)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d1e9d85fcf592461f3bc2f4b6d5e140c4c0aabf8": {
+  "task": "d1e9d85fcf592461f3bc2f4b6d5e140c4c0aabf8",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go",
+   "command_go120.go",
+   "command_go121.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-12-28T23:07:03+01:00",
+  "subject": "Make detection for test-binary more universal (#2173)",
+  "src_churn": 66,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5bef9d8d87ad1a1c73e74361bad9e38b3469a58e": {
+  "task": "5bef9d8d87ad1a1c73e74361bad9e38b3469a58e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-12T19:08:27+03:00",
+  "subject": "Fix --version help and output for plugins (#2180)",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestPlugin",
+   "github.com/spf13/cobra::TestPluginWithSubCommands",
+   "github.com/spf13/cobra::TestVersionFlagExecutedDiplayName"
+  ],
+  "gold_clean": true
+ },
+ "a73b9c391a9489d20f5ee1480e75d3b99fc8c7e2": {
+  "task": "a73b9c391a9489d20f5ee1480e75d3b99fc8c7e2",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-12T20:07:59+02:00",
+  "subject": "Fix help text for runnable plugin command",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestPlugin"
+  ],
+  "gold_clean": true
+ },
+ "df547f5fc6ee86071f73c36c16afd885bb4e3f28": {
+  "task": "df547f5fc6ee86071f73c36c16afd885bb4e3f28",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-12T17:20:47+02:00",
+  "subject": "Fix help text for plugins",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestPlugin"
+  ],
+  "gold_clean": true
+ },
+ "e63925d3216142ba2c8d7641d729c6c15f4433e7": {
+  "task": "e63925d3216142ba2c8d7641d729c6c15f4433e7",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "active_help.go",
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-12-17T20:50:59+02:00",
+  "subject": "Add env variable to suppress completion descriptions on create (#1938)",
+  "src_churn": 53,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a0a6ae020bb3899ff0276067863e50523f897370": {
+  "task": "a0a6ae020bb3899ff0276067863e50523f897370",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-02T11:23:08-04:00",
+  "subject": "Improve API to get flag completion function (#2063)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "890302a35f578311404a462b3cdd404f34db3720": {
+  "task": "890302a35f578311404a462b3cdd404f34db3720",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-02T14:15:26+02:00",
+  "subject": "Support usage as plugin for tools like kubectl (#2018)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b711e8760b73c6aa1b4aa1bef3a26da5926f175d": {
+  "task": "b711e8760b73c6aa1b4aa1bef3a26da5926f175d",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-10-28T16:10:06-04:00",
+  "subject": "Don't complete --help flag when flag parsing disabled (#2061)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestCompleteWithDisableFlagParsing",
+   "github.com/spf13/cobra::TestCompletionCobraFlags",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/no_completion_for_--help/-h_and_--version/-v_flags_when_DisableFlagParsing=true"
+  ],
+  "gold_clean": true
+ },
+ "4cafa37bc4bb85633b4245aa118280fe5a9edcd5": {
+  "task": "4cafa37bc4bb85633b4245aa118280fe5a9edcd5",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "cobra.go",
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-10-22T03:36:12+03:00",
+  "subject": "Allow running persistent run hooks of all parents (#2044)",
+  "src_churn": 39,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "0c72800b8dba637092b57a955ecee75949e79a73": {
+  "task": "0c72800b8dba637092b57a955ecee75949e79a73",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-09T02:29:06+09:00",
+  "subject": "Customizable error message prefix (#2023)",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c81c46a015b48d9f79c73cc6f528f90eaabb0c7e": {
+  "task": "c81c46a015b48d9f79c73cc6f528f90eaabb0c7e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go",
+   "flag_groups_test.go"
+  ],
+  "src_files": [
+   "flag_groups.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-16T18:38:22+02:00",
+  "subject": "Add 'one required flag' group (#1952)",
+  "src_churn": 68,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fdee73b4a0d0be3e233b968ab038866b7cd99772": {
+  "task": "fdee73b4a0d0be3e233b968ab038866b7cd99772",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "powershell_completions_test.go"
+  ],
+  "src_files": [
+   "powershell_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-19T18:16:18+02:00",
+  "subject": "powershell: escape variable with curly brackets (#1960)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestPwshCompletionNoActiveHelp"
+  ],
+  "gold_clean": true
+ },
+ "b4f979ae352828a0153281b590771ce9588d67f8": {
+  "task": "b4f979ae352828a0153281b590771ce9588d67f8",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-03T01:58:36+01:00",
+  "subject": "completions: do not detect arguments with dash as 2nd char as flag (#1817)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestArgsNotDetectedAsFlagsCompletionInGo",
+   "github.com/spf13/cobra::TestArgsNotDetectedAsFlagsCompletionInGo/one_digit_prefixed_dash_last"
+  ],
+  "gold_clean": true
+ },
+ "6b0bd3076cfafd1c108264ed1e4aa0c0fe3f8537": {
+  "task": "6b0bd3076cfafd1c108264ed1e4aa0c0fe3f8537",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-07T23:12:02-05:00",
+  "subject": "fix: don't remove flag value that matches subcommand name (#1781)",
+  "src_churn": 40,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestFind",
+   "github.com/spf13/cobra::TestFind/[--foo_child_--bar_something_child]",
+   "github.com/spf13/cobra::TestFind/[-f_child_-b_something_child]"
+  ],
+  "gold_clean": true
+ },
+ "10cf7be9972ee5b5994cf760ecba642309ac8685": {
+  "task": "10cf7be9972ee5b5994cf760ecba642309ac8685",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-24T11:11:57-04:00",
+  "subject": "Check for group presence after full initialization (#1839)",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestWrongGroupFirstLevel"
+  ],
+  "gold_clean": true
+ },
+ "2169adb5749372c64cdd303864ae8a444da6350f": {
+  "task": "2169adb5749372c64cdd303864ae8a444da6350f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go",
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-10T22:59:11+02:00",
+  "subject": "Add groups for commands in help (#1003)",
+  "src_churn": 81,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "212ea4078323771dc49b6f25a41d84efbaac3a4c": {
+  "task": "212ea4078323771dc49b6f25a41d84efbaac3a4c",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "command.go",
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-04T18:41:30-04:00",
+  "subject": "Include --help and --version flag in completion (#1813)",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestCompleteWithDisableFlagParsing",
+   "github.com/spf13/cobra::TestCompletionCobraFlags",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/completion_after_--version_when_only_-v_flag_was_created_by_program",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/completion_of_help_and_version_flags",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/no_completion_after_--help_flag",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/no_completion_after_--help_flag_even_with_other_completions",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/no_completion_after_--version_flag",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/no_completion_after_--version_flag_even_with_other_completions",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/no_completion_after_-h_flag",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/no_completion_after_-h_flag_even_with_other_completions",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/no_completion_after_-v_flag",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/no_completion_after_-v_flag_even_with_other_completions",
+   "github.com/spf13/cobra::TestCompletionCobraFlags/no_completion_after_-v_flag_even_with_other_flag_completions",
+   "github.com/spf13/cobra::TestCompletionForGroupedFlags",
+   "github.com/spf13/cobra::TestCompletionForGroupedFlags/flags_in_group_suggested_with_-_prefix",
+   "github.com/spf13/cobra::TestCompletionForMutuallyExclusiveFlags",
+   "github.com/spf13/cobra::TestCompletionForMutuallyExclusiveFlags/flags_in_mutually_exclusive_group_suggested_with_the_-_prefix",
+   "github.com/spf13/cobra::TestCompletionForMutuallyExclusiveFlags/group_ignored_if_some_flags_not_applicable",
+   "github.com/spf13/cobra::TestCompletionForMutuallyExclusiveFlags/when_flag_in_mutually_exclusive_group_present,_other_flags_in_group_not_suggested_even_with_the_-_prefix",
+   "github.com/spf13/cobra::TestFlagCompletionWithNotInterspersedArgs",
+   "github.com/spf13/cobra::TestFlagNameCompletionInGo",
+   "github.com/spf13/cobra::TestFlagNameCompletionInGoWithDesc",
+   "github.com/spf13/cobra::TestFlagNameCompletionRepeat"
+  ],
+  "gold_clean": true
+ },
+ "7039e1fa214cfc1de404ed6540158c8fda64a758": {
+  "task": "7039e1fa214cfc1de404ed6540158c8fda64a758",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-30T11:26:05-07:00",
+  "subject": "Add '--version' flag to Help output (#1707)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestHelpCommandExecutedWithVersionSet"
+  ],
+  "gold_clean": true
+ },
+ "d689184a421607457a18131e0a2b602fec22e3b4": {
+  "task": "d689184a421607457a18131e0a2b602fec22e3b4",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "cobra.go",
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-11T15:25:22+03:00",
+  "subject": "Support for case-insensitive command names (#1802)",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "22b617914c8890ba20db7ceafcdc2ef4ca4817d3": {
+  "task": "22b617914c8890ba20db7ceafcdc2ef4ca4817d3",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-28T12:46:39-04:00",
+  "subject": "fix: show flags that shadow parent persistent flag in child help (#1776)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestChildFlagShadowsParentPersistentFlag",
+   "github.com/spf13/cobra::TestHelpCommandExecutedOnChildWithFlagThatShadowsParentFlag"
+  ],
+  "gold_clean": true
+ },
+ "7790bf97fd40e285913066cf65387ad281cd6c2e": {
+  "task": "7790bf97fd40e285913066cf65387ad281cd6c2e",
+  "target_tests": [
+   "./doc"
+  ],
+  "test_files": [
+   "doc/yaml_docs_test.go"
+  ],
+  "src_files": [
+   "doc/yaml_docs.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-13T23:31:45+02:00",
+  "subject": "fix: correct command path in see_also for YAML doc (#1771)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/doc::TestGenYamlDoc"
+  ],
+  "gold_clean": true
+ },
+ "5f2ec3c897155c3346e77430932e3966e5cfa648": {
+  "task": "5f2ec3c897155c3346e77430932e3966e5cfa648",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go",
+   "flag_groups.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-20T22:04:28-04:00",
+  "subject": "Update shell completion to respect flag groups (#1659)",
+  "src_churn": 52,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestCompletionForGroupedFlags",
+   "github.com/spf13/cobra::TestCompletionForGroupedFlags/when_flag_in_group_present,_other_flags_in_group_suggested_even_without_-_prefix",
+   "github.com/spf13/cobra::TestCompletionForMutuallyExclusiveFlags",
+   "github.com/spf13/cobra::TestCompletionForMutuallyExclusiveFlags/when_flag_in_mutually_exclusive_group_present,_other_flags_in_group_not_suggested_even_with_the_-_prefix"
+  ],
+  "gold_clean": true
+ },
+ "b9ca5949e2f58373e8e4c3823c213401f7d9d0e3": {
+  "task": "b9ca5949e2f58373e8e4c3823c213401f7d9d0e3",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-06-21T04:02:33+02:00",
+  "subject": "use errors.Is() to check for errors (#1730)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestFlagErrorFuncHelp"
+  ],
+  "gold_clean": true
+ },
+ "68b6b24f0c9926a779f7113d1040396a30fdedaf": {
+  "task": "68b6b24f0c9926a779f7113d1040396a30fdedaf",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "flag_groups_test.go"
+  ],
+  "src_files": [
+   "command.go",
+   "flag_groups.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-04-17T16:04:57-05:00",
+  "subject": "Add ability to mark flags as required or exclusive as a group (#1654)",
+  "src_churn": 178,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f848943afd7212766aadc19256cf9e7384980281": {
+  "task": "f848943afd7212766aadc19256cf9e7384980281",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-18T21:01:58+11:00",
+  "subject": "Add Command.SetContext (#1551)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5d066b77b522ad02084723a79b618243cd6f47e3": {
+  "task": "5d066b77b522ad02084723a79b618243cd6f47e3",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-03-18T02:37:54+01:00",
+  "subject": "Introduce FixedCompletions (#1574)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9054739e08187aab9294b7a773d54c92fabc23d3": {
+  "task": "9054739e08187aab9294b7a773d54c92fabc23d3",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-12-14T13:22:22-05:00",
+  "subject": "Remove __complete cmd for program without subcmds (#1563)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_based_on_module",
+   "github.com/spf13/cobra::TestCompleteWithRootAndLegacyArgs"
+  ],
+  "gold_clean": true
+ },
+ "6f84ef48750fe6355a267117837ba6ee3da254e7": {
+  "task": "6f84ef48750fe6355a267117837ba6ee3da254e7",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-12-07T18:02:02-05:00",
+  "subject": "Provide option to hide default 'completion' cmd (#1541)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_based_on_module"
+  ],
+  "gold_clean": true
+ },
+ "c3573e220c93941b06812483ee96ceaf5fa5e5cc": {
+  "task": "c3573e220c93941b06812483ee96ceaf5fa5e5cc",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-12-07T17:52:50-05:00",
+  "subject": "Completion: Capitalize short desc, and remove extra space from long (#1455)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_based_on_module",
+   "github.com/spf13/cobra::TestCmdNameCompletionInGo",
+   "github.com/spf13/cobra::TestFlagNameCompletionInGoWithDesc"
+  ],
+  "gold_clean": true
+ },
+ "45e521ea93e2270ef7333487f0a87e3887de2da9": {
+  "task": "45e521ea93e2270ef7333487f0a87e3887de2da9",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "args_test.go"
+  ],
+  "src_files": [
+   "args.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-12-07T14:38:00-08:00",
+  "subject": "enable composing PositionalArgs (#896)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_based_on_module"
+  ],
+  "gold_clean": true
+ },
+ "9388e79fb48d6af993c8d4fb90a7de9c7533725b": {
+  "task": "9388e79fb48d6af993c8d4fb90a7de9c7533725b",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/init_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/init.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-07-01T17:47:45-04:00",
+  "subject": "Cobra generator now works within Go modules",
+  "src_churn": 78,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_based_on_module"
+  ],
+  "gold_clean": false
+ },
+ "c9edb78accc109d0fa42d449417815fc83db979d": {
+  "task": "c9edb78accc109d0fa42d449417815fc83db979d",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/add_test.go",
+   "cobra/cmd/init_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/licenses.go",
+   "cobra/cmd/root.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-07-01T17:45:46-04:00",
+  "subject": "Change generator default license to none",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name"
+  ],
+  "gold_clean": false
+ },
+ "dcf42b25f7f1980135e744f099ecbbc6ec85eadc": {
+  "task": "dcf42b25f7f1980135e744f099ecbbc6ec85eadc",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/add_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/root.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-07-01T17:40:39-04:00",
+  "subject": "Change generator to require opting in to viper.",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name"
+  ],
+  "gold_clean": false
+ },
+ "d2c0cb310d527ce26e8a173aa0fbc901e5ce8780": {
+  "task": "d2c0cb310d527ce26e8a173aa0fbc901e5ce8780",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "bash_completions.go",
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-11-01T15:01:33-04:00",
+  "subject": "DisableFlagParsing must disable flag completion (#1161)",
+  "src_churn": 150,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra::TestCompleteWithDisableFlagParsing"
+  ],
+  "gold_clean": true
+ },
+ "5d46ac904df31583e1c824a3f5d7198cfa1911c0": {
+  "task": "5d46ac904df31583e1c824a3f5d7198cfa1911c0",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-07-01T17:47:10+02:00",
+  "subject": "custom comp: do not complete flags after args when interspersed is false (#1308)",
+  "src_churn": 48,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra::TestFlagCompletionWithNotInterspersedArgs"
+  ],
+  "gold_clean": true
+ },
+ "b36196066e3b97b3cc87a352c81279af77028cc8": {
+  "task": "b36196066e3b97b3cc87a352c81279af77028cc8",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "bash_completionsV2.go",
+   "command.go",
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-30T17:24:58-04:00",
+  "subject": "Bash completion V2 with completion descriptions (#1146)",
+  "src_churn": 319,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra::TestDefaultCompletionCmd"
+  ],
+  "gold_clean": true
+ },
+ "4590150168e93f4b017c6e33469e26590ba839df": {
+  "task": "4590150168e93f4b017c6e33469e26590ba839df",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/init_test.go"
+  ],
+  "src_files": [
+   "completions.go",
+   "powershell_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-11T08:19:33+09:00",
+  "subject": "Correcting misspelled words (#1349)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name"
+  ],
+  "gold_clean": false
+ },
+ "2d94892a8bec681d65a129e0a94b2e0d87e52cb9": {
+  "task": "2d94892a8bec681d65a129e0a94b2e0d87e52cb9",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-03T18:42:00+02:00",
+  "subject": "Custom completion handle multiple shorhand flags together (#1258)",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra::TestMultipleShorthandFlagCompletion"
+  ],
+  "gold_clean": true
+ },
+ "6d00909120c77b54b0c9974a4e20ffc540901b98": {
+  "task": "6d00909120c77b54b0c9974a4e20ffc540901b98",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go",
+   "completions_test.go"
+  ],
+  "src_files": [
+   "command.go",
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-05-03T18:33:57+02:00",
+  "subject": "Pass context to completion (#1265)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name"
+  ],
+  "gold_clean": true
+ },
+ "b312f0a8ef6f7ceb211af700083046da437db67c": {
+  "task": "b312f0a8ef6f7ceb211af700083046da437db67c",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "command.go",
+   "completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-02-15T12:47:01-05:00",
+  "subject": "Create 'completion' command automatically (#1192)",
+  "src_churn": 735,
+  "size": "XL",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name"
+  ],
+  "gold_clean": false
+ },
+ "23a6174c7f9d0c64a48e634054bdf6886fb7fbba": {
+  "task": "23a6174c7f9d0c64a48e634054bdf6886fb7fbba",
+  "target_tests": [
+   "./doc"
+  ],
+  "test_files": [
+   "doc/md_docs_test.go"
+  ],
+  "src_files": [
+   "doc/md_docs.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-01-21T03:33:16Z",
+  "subject": "Add the ability to specify a filePostpender in GenMarkdownTreeCustom (#1270)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name"
+  ],
+  "gold_clean": true
+ },
+ "40d34bca1bffe2f5e84b18d7fd94d5b3c02275a6": {
+  "task": "40d34bca1bffe2f5e84b18d7fd94d5b3c02275a6",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-10-01T17:28:00+02:00",
+  "subject": "Fix stderr printing functions (#894)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra::TestCommandPrintRedirection"
+  ],
+  "gold_clean": true
+ },
+ "8a63648dd905e5c96bee06e6851a894fc75aa058": {
+  "task": "8a63648dd905e5c96bee06e6851a894fc75aa058",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "custom_completions_test.go"
+  ],
+  "src_files": [
+   "custom_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-09-09T19:27:42+02:00",
+  "subject": "Handle linebreaks in custom completions. (#1162)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestFlagNameCompletionInGoWithDesc"
+  ],
+  "gold_clean": true
+ },
+ "50258f15eb8a64e95e5d9ec571f17e550e37fa69": {
+  "task": "50258f15eb8a64e95e5d9ec571f17e550e37fa69",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "bash_completions_test.go",
+   "custom_completions_test.go"
+  ],
+  "src_files": [
+   "bash_completions.go",
+   "custom_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-09-09T17:34:51+02:00",
+  "subject": "Complete subcommands when TraverseChildren is set (#1171)",
+  "src_churn": 42,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/spf13/cobra::TestBashCompletionTraverseChildren",
+   "github.com/spf13/cobra::TestBashCompletions",
+   "github.com/spf13/cobra::TestNoCmdNameCompletionInGo"
+  ],
+  "gold_clean": true
+ },
+ "02a0d2fbc9e61d26f8e5979749f6030964a55a3e": {
+  "task": "02a0d2fbc9e61d26f8e5979749f6030964a55a3e",
+  "target_tests": [
+   "./doc"
+  ],
+  "test_files": [
+   "doc/cmd_test.go",
+   "doc/md_docs_test.go"
+  ],
+  "src_files": [
+   "doc/md_docs.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-08-26T18:18:51+03:00",
+  "subject": "doc: GenMarkdown skip Synopsis on empty long cmd (#1207)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/doc::TestGenMdDocWithNoLongOrSynopsis"
+  ],
+  "gold_clean": true
+ },
+ "675ae5f5a98cc705a6d54f4c487ab81230604137": {
+  "task": "675ae5f5a98cc705a6d54f4c487ab81230604137",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "custom_completions_test.go",
+   "fish_completions_test.go"
+  ],
+  "src_files": [
+   "fish_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-07-10T16:12:46-04:00",
+  "subject": "Fish does not accept - or : in vars (#1122)",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra::TestProgWithColon",
+   "github.com/spf13/cobra::TestProgWithDash"
+  ],
+  "gold_clean": true
+ },
+ "04318720db1743b8488c86b2f7dca6d9663cb2f2": {
+  "task": "04318720db1743b8488c86b2f7dca6d9663cb2f2",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "custom_completions_test.go"
+  ],
+  "src_files": [
+   "bash_completions.go",
+   "command.go",
+   "custom_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-06-16T16:49:26-04:00",
+  "subject": "Add completion for help command (#1136)",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra::TestCompleteHelp"
+  ],
+  "gold_clean": true
+ },
+ "ed7b60e2987d2cd54d6a391379e33effdacdadf9": {
+  "task": "ed7b60e2987d2cd54d6a391379e33effdacdadf9",
+  "target_tests": [
+   "./doc"
+  ],
+  "test_files": [
+   "doc/yaml_docs_test.go"
+  ],
+  "src_files": [
+   "doc/yaml_docs.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-06-15T15:51:03-07:00",
+  "subject": "YAML documentation contains \"Usage\" (#1037)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra/doc::TestGenYamlDocRunnable"
+  ],
+  "gold_clean": true
+ },
+ "5155946348eed0f79a76f7743407c0c933e3b5f0": {
+  "task": "5155946348eed0f79a76f7743407c0c933e3b5f0",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-05-07T21:18:16-04:00",
+  "subject": "Ignore required flags when DisableFlagParsing (#1095)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra::TestPersistentRequiredFlagsWithDisableFlagParsing"
+  ],
+  "gold_clean": true
+ },
+ "e392f3204db0445f1f4ad47448b04d8c8ad04c2a": {
+  "task": "e392f3204db0445f1f4ad47448b04d8c8ad04c2a",
+  "target_tests": [
+   "./doc"
+  ],
+  "test_files": [
+   "doc/man_docs_test.go"
+  ],
+  "src_files": [
+   "doc/man_docs.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-04-29T11:15:55-06:00",
+  "subject": "Man pages won't have auto gen tag when option is disabled (#1104)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra/doc::TestGenManNoGenTag"
+  ],
+  "gold_clean": true
+ },
+ "41fd44e1df83ad6acd8e14b304d5f2a2ae1d62f5": {
+  "task": "41fd44e1df83ad6acd8e14b304d5f2a2ae1d62f5",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/init_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/init.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-04-28T16:59:18-06:00",
+  "subject": "Fix cobra init cmd help documentation (#1108)",
+  "src_churn": 63,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b84ef40338051c81c2916fe90c7e73e6e5583182": {
+  "task": "b84ef40338051c81c2916fe90c7e73e6e5583182",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "custom_completions_test.go"
+  ],
+  "src_files": [
+   "bash_completions.go",
+   "command.go",
+   "custom_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-04-06T13:28:44-04:00",
+  "subject": "Rename BashCompDirectives to ShellCompDirectives (#1082)",
+  "src_churn": 74,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd"
+  ],
+  "gold_clean": true
+ },
+ "b80aeb17fc46362ff9cea51437a719322f8965ac": {
+  "task": "b80aeb17fc46362ff9cea51437a719322f8965ac",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "custom_completions_test.go"
+  ],
+  "src_files": [
+   "bash_completions.go",
+   "command.go",
+   "custom_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-04-03T15:43:43-04:00",
+  "subject": "Add support for custom completions in Go (#1035)",
+  "src_churn": 392,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd"
+  ],
+  "gold_clean": true
+ },
+ "6607e6b8603f56adb027298ee6695e06ffb3a819": {
+  "task": "6607e6b8603f56adb027298ee6695e06ffb3a819",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-03-27T14:38:32-06:00",
+  "subject": "Partial Revert of #922 (#1068)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra::TestHelpExecutedOnNonRunnableChild"
+  ],
+  "gold_clean": true
+ },
+ "95f2f73ed97e57387762620175ccdc277a8597a0": {
+  "task": "95f2f73ed97e57387762620175ccdc277a8597a0",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-02-28T13:13:40-05:00",
+  "subject": "Add short version flag -v when not otherwise set (#996)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra::TestShortAndLongVersionFlagInHelp",
+   "github.com/spf13/cobra::TestShorthandVersionFlagExecuted",
+   "github.com/spf13/cobra::TestShorthandVersionFlagExecutedOnSubcommand",
+   "github.com/spf13/cobra::TestShorthandVersionTemplate"
+  ],
+  "gold_clean": true
+ },
+ "0da06874266c88228b8f14615396a1f6bfc90ed7": {
+  "task": "0da06874266c88228b8f14615396a1f6bfc90ed7",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-02-20T07:29:50+01:00",
+  "subject": "Add support for context.Context",
+  "src_churn": 30,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd"
+  ],
+  "gold_clean": true
+ },
+ "19cf35ea77e5981f8e8b90a897af621f2be864f6": {
+  "task": "19cf35ea77e5981f8e8b90a897af621f2be864f6",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/add_test.go",
+   "cobra/cmd/init_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/project.go"
+  ],
+  "pool": "standard",
+  "authored": "2019-09-17T17:02:42+02:00",
+  "subject": "fix: ensure that testproject is removed even after a failure (#948)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd"
+  ],
+  "gold_clean": false
+ },
+ "9334a46bd6b3887f3561d705440038ec93b7f62e": {
+  "task": "9334a46bd6b3887f3561d705440038ec93b7f62e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2019-07-29T23:36:50-07:00",
+  "subject": "Return an error in the case of unrunnable subcommand",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd"
+  ],
+  "gold_clean": true
+ },
+ "b6357260812dd09c49dc7d55042f0c795b419f6b": {
+  "task": "b6357260812dd09c49dc7d55042f0c795b419f6b",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "command.go"
+  ],
+  "pool": "standard",
+  "authored": "2019-05-15T18:49:16+02:00",
+  "subject": "considering stderr in UsageString",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra::TestUsageStringRedirected"
+  ],
+  "gold_clean": true
+ },
+ "11aa612384e0e18662f319528bde7b68ffca43ee": {
+  "task": "11aa612384e0e18662f319528bde7b68ffca43ee",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/add_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/add.go",
+   "cobra/cmd/project.go",
+   "cobra/tpl/main.go"
+  ],
+  "pool": "standard",
+  "authored": "2019-01-30T19:47:38-08:00",
+  "subject": "test add",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd"
+  ],
+  "gold_clean": false
+ },
+ "303a3e5160b0d2d72ca96ed9eff9e016fe54b2f9": {
+  "task": "303a3e5160b0d2d72ca96ed9eff9e016fe54b2f9",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/project_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/project.go"
+  ],
+  "pool": "standard",
+  "authored": "2019-01-30T01:49:57-08:00",
+  "subject": "vgo - strip out unused methods",
+  "src_churn": 197,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd"
+  ],
+  "gold_clean": false
+ },
+ "50665e99933b63952bde8df17bfe2113ab6dbe44": {
+  "task": "50665e99933b63952bde8df17bfe2113ab6dbe44",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/init_test.go"
+  ],
+  "src_files": [
+   "cobra/tpl/main.go"
+  ],
+  "pool": "standard",
+  "authored": "2019-01-30T00:46:53-08:00",
+  "subject": "vgo - update golden templates",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestFindExistingPackage",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd"
+  ],
+  "gold_clean": false
+ },
+ "c3b51f3a2e0ea821c0cb8ed8e5850e98394641c5": {
+  "task": "c3b51f3a2e0ea821c0cb8ed8e5850e98394641c5",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/add_test.go",
+   "cobra/cmd/init_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/init.go"
+  ],
+  "pool": "standard",
+  "authored": "2019-01-29T23:41:41-08:00",
+  "subject": "simplify test",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestFindExistingPackage"
+  ],
+  "gold_clean": false
+ },
+ "21ccc7b307f4a6453e393a0ce1fe40eedbeffa2d": {
+  "task": "21ccc7b307f4a6453e393a0ce1fe40eedbeffa2d",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "powershell_completions_test.go"
+  ],
+  "src_files": [
+   "powershell_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2018-12-17T23:01:34Z",
+  "subject": "Add basic PowerShell completions",
+  "src_churn": 100,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestFindExistingPackage"
+  ],
+  "gold_clean": true
+ },
+ "e2c45ac9eb0cdb823b89c1e868d698dc74822797": {
+  "task": "e2c45ac9eb0cdb823b89c1e868d698dc74822797",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "zsh_completions_test.go"
+  ],
+  "src_files": [
+   "bash_completions.go",
+   "shell_completions.go",
+   "zsh_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2018-06-03T22:08:30+03:00",
+  "subject": "Started working on Unified API for the various shell completions:",
+  "src_churn": 155,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestFindExistingPackage"
+  ],
+  "gold_clean": true
+ },
+ "edbb6712e2cba085bb278feeb1b88ae88079ecdf": {
+  "task": "edbb6712e2cba085bb278feeb1b88ae88079ecdf",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "zsh_completions_test.go"
+  ],
+  "src_files": [
+   "zsh_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2018-03-23T13:09:56+03:00",
+  "subject": "zsh-completions: implemented argument completion.",
+  "src_churn": 149,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestFindExistingPackage"
+  ],
+  "gold_clean": true
+ },
+ "d262154093af3bc0c8d63a8dbadaa13e7807360a": {
+  "task": "d262154093af3bc0c8d63a8dbadaa13e7807360a",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "zsh_completions_test.go"
+  ],
+  "src_files": [
+   "zsh_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2018-03-22T19:58:25+02:00",
+  "subject": "zsh-completion: tidy up function and variable names",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestFindExistingPackage"
+  ],
+  "gold_clean": true
+ },
+ "8822449c0fb9575f1d2453e80cd3e55ab8fc2844": {
+  "task": "8822449c0fb9575f1d2453e80cd3e55ab8fc2844",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "zsh_completions_test.go"
+  ],
+  "src_files": [
+   "zsh_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2018-03-17T20:55:27+02:00",
+  "subject": "zsh-completion: added escapinng of single quotes in flag description.",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestFindExistingPackage",
+   "github.com/spf13/cobra::TestGenZshCompletion",
+   "github.com/spf13/cobra::TestGenZshCompletion/flag_description_with_single_quote_(')_shouldn't_break_quotes_in_completion_file"
+  ],
+  "gold_clean": true
+ },
+ "7ce08e227e8c9db9b243dfef1e792af31d19cdd0": {
+  "task": "7ce08e227e8c9db9b243dfef1e792af31d19cdd0",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "zsh_completions_test.go"
+  ],
+  "src_files": [
+   "zsh_completions.go"
+  ],
+  "pool": "standard",
+  "authored": "2018-03-04T23:56:31+02:00",
+  "subject": "zsh-completion: completion should always parse the root command!",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestFindExistingPackage",
+   "github.com/spf13/cobra::TestGenZshCompletion",
+   "github.com/spf13/cobra::TestGenZshCompletion/command_should_run_on_the_root_command_so_--version_and_--help_will_be_generated"
+  ],
+  "gold_clean": true
+ },
+ "f464d6c82e9af74b7a46301a775163984af32cd1": {
+  "task": "f464d6c82e9af74b7a46301a775163984af32cd1",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "active_help_test.go",
+   "bash_completionsV2_test.go",
+   "bash_completions_test.go",
+   "fish_completions_test.go",
+   "power_completions_test.go",
+   "zsh_completions_test.go"
+  ],
+  "src_files": [
+   "active_help.go",
+   "bash_completions.go",
+   "bash_completionsV2.go",
+   "completions.go",
+   "fish_completions.go",
+   "powershell_completions.go",
+   "zsh_completions.go"
+  ],
+  "pool": "hard",
+  "authored": "2022-06-15T20:08:16-04:00",
+  "subject": "Add Active Help support (#1482)",
+  "src_churn": 162,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "de187e874d1ca382320088f8f6d76333408e5c2e": {
+  "task": "de187e874d1ca382320088f8f6d76333408e5c2e",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "completions_test.go"
+  ],
+  "src_files": [
+   "bash_completions.go",
+   "command.go",
+   "completions.go",
+   "fish_completions.go"
+  ],
+  "pool": "hard",
+  "authored": "2021-07-02T17:25:47+02:00",
+  "subject": "Fix flag completion (#1438)",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name",
+   "github.com/spf13/cobra::TestFlagCompletionWorksRootCommandAddedAfterFlags"
+  ],
+  "gold_clean": true
+ },
+ "2c5a0d300f8ba1cd142776508519aba999b5e77f": {
+  "task": "2c5a0d300f8ba1cd142776508519aba999b5e77f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "custom_completions_test.go",
+   "zsh_completions_test.go"
+  ],
+  "src_files": [
+   "bash_completions.go",
+   "custom_completions.go",
+   "fish_completions.go",
+   "shell_completions.go",
+   "zsh_completions.go"
+  ],
+  "pool": "hard",
+  "authored": "2020-06-29T15:52:14-04:00",
+  "subject": "Extend Go completions and revamp zsh comp (#1070) (#1070)",
+  "src_churn": 941,
+  "size": "XL",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd/successfully_creates_a_project_with_name"
+  ],
+  "gold_clean": false
+ },
+ "a684a6d7f5e37385d954dd3b5a14fc6912c6ab9d": {
+  "task": "a684a6d7f5e37385d954dd3b5a14fc6912c6ab9d",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "custom_completions_test.go"
+  ],
+  "src_files": [
+   "args.go",
+   "bash_completions.go",
+   "custom_completions.go",
+   "fish_completions.go"
+  ],
+  "pool": "hard",
+  "authored": "2020-04-10T15:56:28-04:00",
+  "subject": "Fish completion using Go completion (#1048)",
+  "src_churn": 278,
+  "size": "L",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd"
+  ],
+  "gold_clean": true
+ },
+ "51f06c7dd1e73470976107fc6931b21143b83676": {
+  "task": "51f06c7dd1e73470976107fc6931b21143b83676",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "args.go",
+   "cobra.go",
+   "cobra/cmd/project.go",
+   "cobra/tpl/main.go",
+   "command.go"
+  ],
+  "pool": "hard",
+  "authored": "2019-07-30T15:26:11-07:00",
+  "subject": "Correct all complaints from golint",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenAddCmd",
+   "github.com/spf13/cobra/cobra/cmd::TestGoldenInitCmd"
+  ],
+  "gold_clean": true
+ },
+ "d20925b9326e2e50610b0a21ba0c009f99482a70": {
+  "task": "d20925b9326e2e50610b0a21ba0c009f99482a70",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "command_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/add.go",
+   "cobra/cmd/helpers.go",
+   "cobra/cmd/init.go",
+   "cobra/cmd/project.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-05-05T10:06:10+02:00",
+  "subject": "cmd: Small correctives",
+  "src_churn": 76,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "32756eb4408d255f59cde274fdd954f12a8e1df1": {
+  "task": "32756eb4408d255f59cde274fdd954f12a8e1df1",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/helpers_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/add.go",
+   "cobra/cmd/helpers.go",
+   "cobra/cmd/init.go",
+   "cobra/cmd/license_apache_2.go",
+   "cobra/cmd/licenses.go",
+   "cobra/cmd/project.go",
+   "cobra/cmd/root.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-04-29T12:02:02+02:00",
+  "subject": "cmd: Rewrite",
+  "src_churn": 805,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a0bd6c17b3d370421866b51e650bf2801e6bd1f4": {
+  "task": "a0bd6c17b3d370421866b51e650bf2801e6bd1f4",
+  "target_tests": [
+   "./",
+   "./doc"
+  ],
+  "test_files": [
+   "bash_completions_test.go",
+   "cobra_test.go",
+   "doc/man_docs_test.go"
+  ],
+  "src_files": [
+   "cobra.go",
+   "cobra/cmd/helpers.go",
+   "cobra/cmd/root.go",
+   "command.go",
+   "command_notwin.go"
+  ],
+  "pool": "hard",
+  "authored": "2016-03-31T09:53:34-04:00",
+  "subject": "Fixing golint warnings",
+  "src_churn": 71,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ea5bc31ac4d24aa8b4048ccf6248b4e05a64f6e9": {
+  "task": "ea5bc31ac4d24aa8b4048ccf6248b4e05a64f6e9",
+  "target_tests": [
+   "./cobra/cmd"
+  ],
+  "test_files": [
+   "cobra/cmd/helpers_test.go"
+  ],
+  "src_files": [
+   "cobra/cmd/helpers.go",
+   "cobra/cmd/init.go",
+   "cobra/cmd/licenses.go",
+   "cobra/cmd/root.go",
+   "cobra/main.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-10-28T12:51:48-04:00",
+  "subject": "Add cobra generator application",
+  "src_churn": 1099,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9e7788657f7d4cdc20007a16ba586b4ba0c3aab1": {
+  "task": "9e7788657f7d4cdc20007a16ba586b4ba0c3aab1",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "man_docs_test.go"
+  ],
+  "src_files": [
+   "bash_completions.go",
+   "doc_util.go",
+   "man_docs.go",
+   "md_docs.go"
+  ],
+  "pool": "hard",
+  "authored": "2015-08-18T15:33:41-07:00",
+  "subject": "Auto generation of a man page",
+  "src_churn": 237,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}

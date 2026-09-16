@@ -1,0 +1,21 @@
+# Non-secret configuration for api, worker and migrate. Secret values live ONLY in
+# .Values.existingSecret; a key that looks secret is refused here at render time.
+{{- range $k, $v := .Values.config }}
+{{- if or (hasSuffix "_KEY" $k) (hasSuffix "_SECRET" $k) (hasSuffix "PASSWORD" $k) (eq $k "CRB_DATABASE_URL") }}
+{{- if and $v (not (or (eq $k "CRB_OPENAI_KEY_ENV") (eq $k "CRB_AZURE_KEY_ENV") (eq $k "CRB_SECRET_KEY_FILE"))) }}
+{{- fail (printf "config.%s looks like a secret; put it in the existing Secret (%s) instead" $k $.Values.existingSecret) }}
+{{- end }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "crb.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+data:
+  {{- range $k, $v := .Values.config }}
+  {{ $k }}: {{ $v | toString | quote }}
+  {{- end }}
+  CRB_WEB_CONCURRENCY: {{ .Values.api.webConcurrency | toString | quote }}

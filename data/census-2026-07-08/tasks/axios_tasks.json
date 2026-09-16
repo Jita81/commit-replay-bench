@@ -1,0 +1,1515 @@
+{
+ "e435384f36bdd310ae784d652e97a0383d1c52a7": {
+  "task": "e435384f36bdd310ae784d652e97a0383d1c52a7",
+  "target_tests": [
+   "tests/unit/core/AxiosError.test.js",
+   "tests/unit/utils.test.js"
+  ],
+  "test_files": [
+   "tests/unit/core/AxiosError.test.js",
+   "tests/unit/utils.test.js"
+  ],
+  "src_files": [
+   "lib/utils.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-02T03:47:21+09:00",
+  "subject": "fix(utils): serialize Set values in toJSONObject (#11044)",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [
+   "core::AxiosError serializes Set values in config snapshots",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming",
+   "utils toJSON Set handling should convert a Set nested inside a plain object",
+   "utils toJSON Set handling should convert a cross-realm Set to an array",
+   "utils toJSON Set handling should convert a flat Set to an array",
+   "utils toJSON Set handling should convert nested Sets recursively",
+   "utils toJSON Set handling should handle a Set that appears in multiple places (DAG, not cycle)",
+   "utils toJSON Set handling should not follow a Set that directly contains itself (self-cycle)",
+   "utils toJSON Set handling should reproduce the original issue #5910 test case",
+   "utils toJSON Set handling should skip undefined values inside a Set (mirrors object/array behaviour)"
+  ],
+  "gold_clean": false
+ },
+ "a85da2918eb540928b54bb3d57692efc8f2f83f1": {
+  "task": "a85da2918eb540928b54bb3d57692efc8f2f83f1",
+  "target_tests": [
+   "tests/unit/core/mergeConfig.test.js"
+  ],
+  "test_files": [
+   "tests/unit/core/mergeConfig.test.js"
+  ],
+  "src_files": [
+   "lib/core/mergeConfig.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-02T02:27:32+08:00",
+  "subject": "feat(core): support symbol keys in mergeConfig (#11043)",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [
+   "core::mergeConfig directMergeKeys preserves request-only symbol keys",
+   "core::mergeConfig directMergeKeys supports symbol keys",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming"
+  ],
+  "gold_clean": false
+ },
+ "97131238cab2e56f58f26b5bfd95e40bb5b9df14": {
+  "task": "97131238cab2e56f58f26b5bfd95e40bb5b9df14",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js",
+   "lib/helpers/progressEventReducer.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-01T21:04:49+03:00",
+  "subject": "fix(http): flush download progress before stream close (#11040)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming",
+   "supports http with nodejs progress download should flush final download progress before a streamed response closes"
+  ],
+  "gold_clean": false
+ },
+ "3d253b4f17a5107e6f274ee5b2e96e03508dceb2": {
+  "task": "3d253b4f17a5107e6f274ee5b2e96e03508dceb2",
+  "target_tests": [
+   "tests/unit/helpers/progressEventReducer.test.js"
+  ],
+  "test_files": [
+   "tests/unit/helpers/progressEventReducer.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/progressEventReducer.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-02T01:49:56+08:00",
+  "subject": "fix: clamp negative progress values (#11039)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "helpers::progressEventReducer should clamp negative loaded values to zero",
+   "helpers::progressEventReducer should clamp negative loaded values to zero when length is not computable"
+  ],
+  "gold_clean": false
+ },
+ "02c2c4f891d76b15712a9edd149a2d9f7978774f": {
+  "task": "02c2c4f891d76b15712a9edd149a2d9f7978774f",
+  "target_tests": [
+   "tests/unit/core/buildFullPath.test.js",
+   "tests/unit/helpers/combineURLs.test.js"
+  ],
+  "test_files": [
+   "tests/unit/core/buildFullPath.test.js",
+   "tests/unit/helpers/combineURLs.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/combineURLs.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-02T01:38:47+08:00",
+  "subject": "fix: normalize repeated base URL slashes (#11038)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "core::buildFullPath removes repeated trailing slashes from baseURL when combining URLs",
+   "helpers::combineURLs should remove multiple trailing slashes from the base URL",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a response whose Content-Length exceeds maxContentLength with ERR_BAD_RESPONSE"
+  ],
+  "gold_clean": false
+ },
+ "e566ea39a22e55a05073b035c51852b4863de012": {
+  "task": "e566ea39a22e55a05073b035c51852b4863de012",
+  "target_tests": [
+   "tests/unit/axiosHeaders.test.js"
+  ],
+  "test_files": [
+   "tests/unit/axiosHeaders.test.js"
+  ],
+  "src_files": [
+   "lib/core/AxiosHeaders.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-30T02:27:18+08:00",
+  "subject": "fix: return set-cookie values consistently (#11037)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "AxiosHeaders getSetCookie should return programmatic empty set-cookie as an array",
+   "AxiosHeaders getSetCookie should return programmatic set-cookie as an array",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should allow a response at or below maxContentLength",
+   "supports fetch with nodejs size limits should reject a response whose Content-Length exceeds maxContentLength with ERR_BAD_RESPONSE",
+   "supports http with nodejs HTTP2 should support http2 transport",
+   "supports http with nodejs JSON should support reviver on JSON.parse",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should support function as paramsSerializer value"
+  ],
+  "gold_clean": true
+ },
+ "78b5187ee7b6b97e416caf4e116fe7c8d3c2c2ca": {
+  "task": "78b5187ee7b6b97e416caf4e116fe7c8d3c2c2ca",
+  "target_tests": [
+   "tests/unit/helpers/parseHeaders.test.js"
+  ],
+  "test_files": [
+   "tests/unit/helpers/parseHeaders.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/parseHeaders.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-30T01:59:26+08:00",
+  "subject": "fix: preserve empty duplicate header values (#11036)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "helpers::parseHeaders should ignore duplicate node-style headers after an empty first value",
+   "helpers::parseHeaders should ignore inherited parsed header values",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming"
+  ],
+  "gold_clean": true
+ },
+ "4106dda9abe43bd3a1471b24dd5d0627470570fc": {
+  "task": "4106dda9abe43bd3a1471b24dd5d0627470570fc",
+  "target_tests": [
+   "tests/unit/composeSignals.test.js"
+  ],
+  "test_files": [
+   "tests/unit/composeSignals.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/composeSignals.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-30T01:36:20+08:00",
+  "subject": "fix: abort composed signals immediately (#11035)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [
+   "helpers::composeSignals should abort immediately when a signal is already aborted",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming"
+  ],
+  "gold_clean": true
+ },
+ "9e5c894ef7a07666b38973cd3031bc51e9924c6a": {
+  "task": "9e5c894ef7a07666b38973cd3031bc51e9924c6a",
+  "target_tests": [
+   "tests/unit/helpers/shouldBypassProxy.test.js"
+  ],
+  "test_files": [
+   "tests/unit/helpers/shouldBypassProxy.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/shouldBypassProxy.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-29T10:39:17-06:00",
+  "subject": "fix(no_proxy): canonicalise IPv4 shorthand/octal/hex in shouldBypassProxy (#11029)",
+  "src_churn": 117,
+  "size": "M",
+  "baseline_failing": [
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should expand a hex tail in a 3-part entry",
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should expand a hex tail low-byte-right (entry-side normalisation)",
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should expand a multi-byte decimal tail in a 3-part entry",
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should expand a multi-byte decimal tail low-byte-right (entry-side normalisation)",
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should expand an octal tail low-byte-right (entry-side normalisation)",
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should match a hex entry against a canonical request",
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should match a shorthand entry against a canonical request",
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should match an octal entry against a canonical request",
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should normalise octal on non-loopback addresses symmetrically",
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should preserve explicit ports across octal normalisation",
+   "helpers::shouldBypassProxy IPv4 shorthand / octal / hex normalization should treat octal `00` as equivalent to decimal `0`",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming",
+   "supports http with nodejs request aborting should be able to abort the response stream"
+  ],
+  "gold_clean": true
+ },
+ "d45e737718876f3c7a1ad9384693622eb68a739a": {
+  "task": "d45e737718876f3c7a1ad9384693622eb68a739a",
+  "target_tests": [
+   "tests/unit/adapters/fetch.test.js",
+   "tests/unit/adapters/http.test.js",
+   "tests/unit/core/buildFullPath.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/fetch.test.js",
+   "tests/unit/adapters/http.test.js",
+   "tests/unit/core/buildFullPath.test.js"
+  ],
+  "src_files": [
+   "lib/core/AxiosError.js",
+   "lib/core/buildFullPath.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-28T22:48:08+03:00",
+  "subject": "fix(core): include offending URL in malformed protocol error (#11024)",
+  "src_churn": 54,
+  "size": "M",
+  "baseline_failing": [
+   "core::buildFullPath includes the offending URL in the error message",
+   "core::buildFullPath redacts credentials and query/fragment values while keeping the URL identifiable",
+   "core::buildFullPath rejects HTTP URLs missing slashes after the protocol",
+   "core::buildFullPath rejects a malformed baseURL when absolute requests are forced through baseURL",
+   "core::buildFullPath reports the control-character-normalized URL for a leading control character",
+   "core::buildFullPath reports the control-character-normalized URL for an interior control character",
+   "supports fetch with nodejs rejects malformed HTTP URLs before fetch normalization and preserves config",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming",
+   "supports http with nodejs rejects malformed HTTP URLs before Node URL normalization and preserves config"
+  ],
+  "gold_clean": false
+ },
+ "44de1e484dcd65809d13c54d3220fe3de9113d4f": {
+  "task": "44de1e484dcd65809d13c54d3220fe3de9113d4f",
+  "target_tests": [
+   "tests/unit/helpers/formDataToJSON.test.js"
+  ],
+  "test_files": [
+   "tests/unit/helpers/formDataToJSON.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/formDataToJSON.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-26T00:37:07+06:00",
+  "subject": "fix(formDataToJSON): only split keys on bracket and dot notation (#11006)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [
+   "formDataToJSON should not split keys on characters other than brackets and dots",
+   "formDataToJSON should still split bracket and dot notation",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming"
+  ],
+  "gold_clean": true
+ },
+ "a446b39b19c8b570214a4158520c5ddd5b020366": {
+  "task": "a446b39b19c8b570214a4158520c5ddd5b020366",
+  "target_tests": [
+   "tests/unit/helpers/AxiosURLSearchParams.test.js",
+   "tests/unit/helpers/buildURL.test.js"
+  ],
+  "test_files": [
+   "tests/unit/helpers/AxiosURLSearchParams.test.js",
+   "tests/unit/helpers/buildURL.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/AxiosURLSearchParams.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-19T04:20:06+09:00",
+  "subject": "fix(AxiosURLSearchParams): use arrow function so encoder.call(this) receives the instance (#11019)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "AxiosURLSearchParams::toString should pass the AxiosURLSearchParams instance as `this` to a custom encoder",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should allow a response at or below maxContentLength",
+   "supports fetch with nodejs size limits should reject a response whose Content-Length exceeds maxContentLength with ERR_BAD_RESPONSE"
+  ],
+  "gold_clean": false
+ },
+ "b32880af48017457a1203ab2e63720902d3b71b3": {
+  "task": "b32880af48017457a1203ab2e63720902d3b71b3",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-17T21:24:25+02:00",
+  "subject": "fix: incorrect use of error (#11021)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a response whose Content-Length exceeds maxContentLength with ERR_BAD_RESPONSE",
+   "supports http with nodejs should display error while parsing params"
+  ],
+  "gold_clean": false
+ },
+ "20ce9c412ebd88823d1a4a47000cb133a8f79440": {
+  "task": "20ce9c412ebd88823d1a4a47000cb133a8f79440",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-18T00:56:56+08:00",
+  "subject": "fix(http): defer env proxy handling to Node (#10942)",
+  "src_churn": 72,
+  "size": "M",
+  "baseline_failing": [
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming",
+   "supports http with nodejs should detect Node native env proxy support from the selected agent",
+   "supports http with nodejs should leave env proxy handling to supported Node versions when the selected agent uses proxyEnv"
+  ],
+  "gold_clean": true
+ },
+ "01e869dd28cefc52b144c8234e40cf3d56fcb182": {
+  "task": "01e869dd28cefc52b144c8234e40cf3d56fcb182",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-16T23:53:12+05:30",
+  "subject": "fix(http): accept path-only url when socketPath is set (#6611) (#10930)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming",
+   "supports http with nodejs socketPath security accepts a path-only url when socketPath is set (regression #6611)",
+   "supports http with nodejs socketPath security accepts a path-only url when socketPath matches allowedSocketPaths"
+  ],
+  "gold_clean": false
+ },
+ "227c788eb702ee88791451eb53e76ef3dca67f8a": {
+  "task": "227c788eb702ee88791451eb53e76ef3dca67f8a",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-15T15:20:25+03:00",
+  "subject": "fix(http): guard socket.setKeepAlive for proxy agent streams (#10917)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "regression issues 4999 should not fail with query parsing",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should allow a response at or below maxContentLength",
+   "supports fetch with nodejs size limits should reject a response whose Content-Length exceeds maxContentLength with ERR_BAD_RESPONSE",
+   "supports http with nodejs keep-alive should not throw TypeError when a proxy agent stream does not define setKeepAlive (regression #10908)"
+  ],
+  "gold_clean": false
+ },
+ "4918457aad892a32b2b0cd585c40d22870d48c4a": {
+  "task": "4918457aad892a32b2b0cd585c40d22870d48c4a",
+  "target_tests": [
+   "tests/unit/adapters/fetch.test.js",
+   "tests/unit/core/AxiosError.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/fetch.test.js",
+   "tests/unit/core/AxiosError.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/fetch.js",
+   "lib/core/AxiosError.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-15T00:04:35+05:30",
+  "subject": "fix(core): make AxiosError cause non-enumerable to prevent circular JSON errors (#10913)",
+  "src_churn": 53,
+  "size": "M",
+  "baseline_failing": [
+   "core::AxiosError cause serialization (regression #7205) does not break structured loggers / own-property serialization",
+   "core::AxiosError cause serialization (regression #7205) sets `cause` as a non-enumerable own property (native Error parity)",
+   "supports fetch with nodejs fetch adapter - timeout normalization sets a non-enumerable cause on canceled fetch errors so loggers do not throw (#7205)",
+   "supports fetch with nodejs sets a non-enumerable cause on network errors so loggers do not throw (#7205)",
+   "supports fetch with nodejs should handle fetch failed error as an AxiosError with ERR_NETWORK code",
+   "supports fetch with nodejs should not use inherited Symbol.iterator for request headers",
+   "supports fetch with nodejs size limits should reject a chunked response that exceeds maxContentLength during streaming"
+  ],
+  "gold_clean": false
+ },
+ "a8e4f13aeecc45a3b8fab3ecfd9ddb5d70fb772b": {
+  "task": "a8e4f13aeecc45a3b8fab3ecfd9ddb5d70fb772b",
+  "target_tests": [
+   "tests/unit/core/mergeConfig.test.js"
+  ],
+  "test_files": [
+   "tests/unit/core/mergeConfig.test.js"
+  ],
+  "src_files": [
+   "lib/core/Axios.js",
+   "lib/core/mergeConfig.js",
+   "lib/defaults/transitional.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-03T21:09:05+03:00",
+  "subject": "fix(core): keep default validateStatus when request passes undefined (#10899)",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [
+   "core::mergeConfig directMergeKeys keeps config1 value when the transitional option is disabled (issue #6688)"
+  ],
+  "gold_clean": true
+ },
+ "6bb12c191f5380fad321322fb90216ae0dc36985": {
+  "task": "6bb12c191f5380fad321322fb90216ae0dc36985",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js",
+   "tests/unit/prototypePollution.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js",
+   "tests/unit/prototypePollution.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-03T11:05:51+03:00",
+  "subject": "fix: custom auth headers not stripped on cross-origin redirects (#10892)",
+  "src_churn": 73,
+  "size": "M",
+  "baseline_failing": [
+   "Prototype Pollution Protection http adapter gadgets should not pick up Object.prototype.sensitiveHeaders during redirects",
+   "supports http with nodejs should fail closed when sensitiveHeaders redirect origin cannot be parsed",
+   "supports http with nodejs should reject invalid sensitiveHeaders config",
+   "supports http with nodejs should strip sensitiveHeaders case-insensitively on cross-origin redirect",
+   "supports http with nodejs should strip sensitiveHeaders configured on an instance",
+   "supports http with nodejs should strip sensitiveHeaders on cross-origin redirect"
+  ],
+  "gold_clean": true
+ },
+ "38ba1b3d2b0aa5ada0463a37a548feb83a84dfa1": {
+  "task": "38ba1b3d2b0aa5ada0463a37a548feb83a84dfa1",
+  "target_tests": [
+   "tests/unit/adapters/fetch.test.js",
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/fetch.test.js",
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/fetch.js",
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-01T18:12:55+02:00",
+  "subject": "fix(fetch): support basic auth from URL (#10896)",
+  "src_churn": 81,
+  "size": "M",
+  "baseline_failing": [
+   "supports fetch with nodejs keeps malformed URL credentials percent-encoding and does not throw",
+   "supports fetch with nodejs should UTF-8 encode basic auth credentials from the request URL",
+   "supports fetch with nodejs should decode basic auth credentials from the request URL",
+   "supports fetch with nodejs should prefer config auth over basic auth credentials from the request URL",
+   "supports fetch with nodejs should support basic auth",
+   "supports fetch with nodejs should support password-only basic auth credentials from the request URL",
+   "supports http with nodejs should support password-only basic auth credentials from the request URL"
+  ],
+  "gold_clean": true
+ },
+ "3dec28f94ce29d396d5f2d9718805b47428dc7ab": {
+  "task": "3dec28f94ce29d396d5f2d9718805b47428dc7ab",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-28T20:46:22+02:00",
+  "subject": "fix(http): preserve TLS options for proxy tunnels (#10957)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "supports http with nodejs should apply httpsAgent TLS options to CONNECT-tunneled origins (issue #10953)"
+  ],
+  "gold_clean": true
+ },
+ "58d8a125bf8339b9079caf9359c82ac136da95b0": {
+  "task": "58d8a125bf8339b9079caf9359c82ac136da95b0",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-27T00:19:23+05:30",
+  "subject": "fix(http): preserve basic auth on same-origin redirects (#6929) (#10929)",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [
+   "supports http with nodejs should preserve basic auth across multi-hop same-origin redirects",
+   "supports http with nodejs should preserve basic auth across same-origin 303 POST -> GET redirect"
+  ],
+  "gold_clean": true
+ },
+ "7b3369a9c4b8666a9bb4e34c9c49712ce542ce01": {
+  "task": "7b3369a9c4b8666a9bb4e34c9c49712ce542ce01",
+  "target_tests": [
+   "tests/unit/core/dispatchRequest.test.js",
+   "tests/unit/helpers/resolveConfig.test.js"
+  ],
+  "test_files": [
+   "tests/unit/core/dispatchRequest.test.js",
+   "tests/unit/helpers/resolveConfig.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/resolveConfig.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T16:39:00+03:00",
+  "subject": "fix: clear RN FormData content type (#10898)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "core::dispatchRequest happy path clears default Content-Type for React Native FormData before adapter headers are sent",
+   "helpers::resolveConfig clears Content-Type for React Native FormData"
+  ],
+  "gold_clean": true
+ },
+ "278041d8cce5d96911bb1333f77dca3567fc90e2": {
+  "task": "278041d8cce5d96911bb1333f77dca3567fc90e2",
+  "target_tests": [
+   "tests/unit/axiosHeaders.test.js"
+  ],
+  "test_files": [
+   "tests/unit/axiosHeaders.test.js"
+  ],
+  "src_files": [
+   "lib/core/AxiosHeaders.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T00:03:18+05:30",
+  "subject": "fix(headers): silently skip empty header names instead of throwing (#10875)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "AxiosHeaders set should silently skip empty header names"
+  ],
+  "gold_clean": true
+ },
+ "f70731bbdcc08672f4cd3f085198a930f4722c88": {
+  "task": "f70731bbdcc08672f4cd3f085198a930f4722c88",
+  "target_tests": [
+   "tests/unit/api.test.js",
+   "tests/unit/utils/merge.test.js"
+  ],
+  "test_files": [
+   "tests/unit/api.test.js",
+   "tests/unit/utils/merge.test.js"
+  ],
+  "src_files": [
+   "lib/utils.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T02:15:18+08:00",
+  "subject": "fix: preserve symbol keys in merged request data (#10812)",
+  "src_churn": 25,
+  "size": "S",
+  "baseline_failing": [
+   "instance api should pass symbol keys to transformRequest through axios.create",
+   "static api should pass symbol keys to transformRequest",
+   "utils::merge should honor skipUndefined for symbol keys",
+   "utils::merge should merge enumerable symbol keys",
+   "utils::merge should support caseless string keys with symbol keys"
+  ],
+  "gold_clean": true
+ },
+ "315ec44489cafeec509409fb6b0c0a6a88d56dc8": {
+  "task": "315ec44489cafeec509409fb6b0c0a6a88d56dc8",
+  "target_tests": [
+   "tests/unit/helpers/Http2Sessions.test.js"
+  ],
+  "test_files": [
+   "tests/unit/helpers/Http2Sessions.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js",
+   "lib/helpers/Http2Sessions.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-22T13:59:46-04:00",
+  "subject": "refactor(http): extract Http2Sessions into its own module (#10861)",
+  "src_churn": 223,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2af5c5fbcac022ea76f60d6c92a9b6ef04ef1949": {
+  "task": "2af5c5fbcac022ea76f60d6c92a9b6ef04ef1949",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js",
+   "lib/core/mergeConfig.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-20T02:52:07+09:00",
+  "subject": "feat(http): implement zstd decompression for http adapter (#6792)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [
+   "supports fetch with nodejs should allow request interceptors to encode Unicode header values before fetch sends them",
+   "supports fetch with nodejs should sanitize request headers containing CRLF characters",
+   "supports http with nodejs HTTP2 response types should support arraybuffer response type",
+   "supports http with nodejs HTTP2 response types should support stream response type",
+   "supports http with nodejs JSON should support reviver on JSON.parse",
+   "supports http with nodejs compression algorithms zstd decompression should not fail if response content-length header is missing (zstd)",
+   "supports http with nodejs compression algorithms zstd decompression should not fail with chunked responses (without Content-Length header)",
+   "supports http with nodejs compression algorithms zstd decompression should reject when the server aborts mid-stream and maxRedirects is 0",
+   "supports http with nodejs compression algorithms zstd decompression should support decompression",
+   "supports http with nodejs compression should advertise zstd when enabled and supported",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should support IPv4 literal strings",
+   "supports http with nodejs should support IPv6 literal strings",
+   "supports http with nodejs should support function as paramsSerializer value"
+  ],
+  "gold_clean": false
+ },
+ "847d89b43654405d9a231e0b669832c2092b621f": {
+  "task": "847d89b43654405d9a231e0b669832c2092b621f",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js",
+   "tests/unit/api.test.js",
+   "tests/unit/helpers/buildURL.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js",
+   "tests/unit/api.test.js",
+   "tests/unit/helpers/buildURL.test.js"
+  ],
+  "src_files": [
+   "lib/core/Axios.js",
+   "lib/core/dispatchRequest.js",
+   "lib/helpers/buildURL.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-10T01:09:13+08:00",
+  "subject": "fix: support URL object as config.url input (#10866)",
+  "src_churn": 57,
+  "size": "M",
+  "baseline_failing": [
+   "helpers::buildURL should not require global URL to be a constructor",
+   "helpers::buildURL should support URL object with params",
+   "helpers::buildURL should support URL object without params",
+   "helpers::buildURL should support URL-like object with params",
+   "static api should normalize URL object set by a request interceptor before dispatch",
+   "static api should support URL object config in getUri",
+   "static api should support URL object shorthand with config",
+   "supports http with nodejs JSON should support reviver on JSON.parse",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should support function as paramsSerializer value"
+  ],
+  "gold_clean": false
+ },
+ "40948863677bb793bfff0293cce7e7b4f8a1b212": {
+  "task": "40948863677bb793bfff0293cce7e7b4f8a1b212",
+  "target_tests": [
+   "tests/unit/helpers/progressEventReducer.test.js"
+  ],
+  "test_files": [
+   "tests/unit/helpers/progressEventReducer.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/progressEventReducer.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-09T22:34:43+05:30",
+  "subject": "fix(progress): guard malformed XHR upload events (#10868)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [
+   "helpers::progressEventReducer should ignore malformed events that lack a numeric loaded value",
+   "supports http with nodejs HTTP2 response types should support arraybuffer response type",
+   "supports http with nodejs HTTP2 response types should support stream response type",
+   "supports http with nodejs HTTP2 response types should support text response type",
+   "supports http with nodejs HTTP2 should support FormData as a payload",
+   "supports http with nodejs HTTP2 should support request cancellation",
+   "supports http with nodejs HTTP2 should support request payload",
+   "supports http with nodejs HTTP2 should support stream response cancellation",
+   "supports http with nodejs keep-alive should not emit MaxListenersExceededWarning under concurrent requests through a pooled keep-alive agent (regression #10780)",
+   "supports http with nodejs keep-alive should not fail with \"socket hang up\" when using timeouts",
+   "supports http with nodejs redirect listener accumulation should not emit MaxListenersExceededWarning when a single request follows >= 11 redirects",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should not abort stream on settle rejection",
+   "supports http with nodejs should support function as paramsSerializer value"
+  ],
+  "gold_clean": false
+ },
+ "3e6b4e1f311b43aa1dc77d78150a601d9fe4b280": {
+  "task": "3e6b4e1f311b43aa1dc77d78150a601d9fe4b280",
+  "target_tests": [
+   "tests/unit/syntaxCompat.test.js"
+  ],
+  "test_files": [
+   "tests/unit/syntaxCompat.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/fetch.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-07T19:36:11+02:00",
+  "subject": "fix: error unexpected token in fetch JS compatibility issue with Webpack 4 (#10864)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "lib/ source files parse as ES2018 adapters/fetch.js",
+   "supports fetch with nodejs fetch adapter - Content-Type handling should remove manually set Content-Type without boundary for FormData",
+   "supports fetch with nodejs fetch adapter - Content-Type handling should set correct Content-Type for FormData automatically",
+   "supports fetch with nodejs should combine baseURL and url",
+   "supports fetch with nodejs should get response headers",
+   "supports fetch with nodejs should support params",
+   "supports http with nodejs HTTP2 response types should support stream response type",
+   "supports http with nodejs HTTP2 should support http2 transport",
+   "supports http with nodejs JSON should support reviver on JSON.parse",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should support function as paramsSerializer value"
+  ],
+  "gold_clean": false
+ },
+ "caa00a90b524bb67ed033474abcf4d8645ced793": {
+  "task": "caa00a90b524bb67ed033474abcf4d8645ced793",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-06T19:53:37+02:00",
+  "subject": "fix: https data in cleartext to proxy (#10858)",
+  "src_churn": 165,
+  "size": "L",
+  "baseline_failing": [
+   "supports http with nodejs Blob should support Blob",
+   "supports http with nodejs DNS should handle errors",
+   "supports http with nodejs FormData form-data instance (https://www.npmjs.com/package/form-data) should allow passing FormData",
+   "supports http with nodejs HTTP2 response types should support arraybuffer response type",
+   "supports http with nodejs HTTP2 response types should support json response type",
+   "supports http with nodejs HTTP2 response types should support stream response type",
+   "supports http with nodejs HTTP2 response types should support text response type",
+   "supports http with nodejs HTTP2 session should reuse session for the target authority",
+   "supports http with nodejs HTTP2 session should use different sessions after previous session timeout",
+   "supports http with nodejs HTTP2 session should use different sessions for different authorities",
+   "supports http with nodejs HTTP2 session should use different sessions for requests with different http2Options set",
+   "supports http with nodejs HTTP2 session should use the same session for request with the same resolved http2Options set",
+   "supports http with nodejs HTTP2 should support FormData as a payload",
+   "supports http with nodejs HTTP2 should support http2 transport",
+   "supports http with nodejs HTTP2 should support request cancellation",
+   "supports http with nodejs HTTP2 should support request payload",
+   "supports http with nodejs HTTP2 should support request timeout",
+   "supports http with nodejs HTTP2 should support stream response cancellation",
+   "supports http with nodejs HTTPS CONNECT tunneling agent management forwards user httpsAgent options to the tunneling agent so origin TLS uses them",
+   "supports http with nodejs HTTPS CONNECT tunneling agent management handles IPv6 literal proxy hosts",
+   "supports http with nodejs HTTPS CONNECT tunneling agent management reuses the same tunneling agent for repeated requests through the same proxy",
+   "supports http with nodejs HTTPS CONNECT tunneling agent management still tunnels through the proxy when a non-proxy httpsAgent is supplied",
+   "supports http with nodejs HTTPS CONNECT tunneling agent management strips its own tunneling agent on redirect when the redirect target has no proxy",
+   "supports http with nodejs JSON should support reviver on JSON.parse",
+   "supports http with nodejs URLEncoded Form should respect formSerializer config",
+   "supports http with nodejs keep-alive should not emit MaxListenersExceededWarning under concurrent requests through a pooled keep-alive agent (regression #10780)",
+   "supports http with nodejs keep-alive should not fail with \"socket hang up\" when using timeouts",
+   "supports http with nodejs progress download should support download progress capturing",
+   "supports http with nodejs progress upload should support upload progress capturing",
+   "supports http with nodejs redirect listener accumulation should attach at most one close listener to the outer request across a long redirect chain",
+   "supports http with nodejs redirect listener accumulation should not emit MaxListenersExceededWarning when a single request follows >= 11 redirects",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should CONNECT-tunnel HTTPS targets through an HTTP proxy by default (issue #6320)",
+   "supports http with nodejs should able to cancel multiple requests with CancelToken",
+   "supports http with nodejs should not abort stream on settle rejection",
+   "supports http with nodejs should omit a user-agent if one is explicitly disclaimed",
+   "supports http with nodejs should supply a user-agent if one is not specified",
+   "supports http with nodejs should support HTTPS protocol",
+   "supports http with nodejs should support HTTPS proxy set via env var",
+   "supports http with nodejs should support function as paramsSerializer value",
+   "supports http with nodejs should throw an error if http server that aborts a chunked request"
+  ],
+  "gold_clean": false
+ },
+ "5061879649bb59df593423b1bc782dff734fd13d": {
+  "task": "5061879649bb59df593423b1bc782dff734fd13d",
+  "target_tests": [
+   "tests/unit/fromDataURI.test.js"
+  ],
+  "test_files": [
+   "tests/unit/fromDataURI.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/fromDataURI.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-05T22:53:16+05:30",
+  "subject": "fix: update fromDataURI regex to match RFC 2397 (#10829)",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [
+   "helpers::fromDataURI should decode URL-encoded body",
+   "helpers::fromDataURI should normalize omitted mediatype to text/plain per RFC 2397",
+   "helpers::fromDataURI should parse canonical RFC example with charset parameter",
+   "helpers::fromDataURI should parse data URI with mediatype and no base64",
+   "helpers::fromDataURI should parse data URI with no mediatype and base64",
+   "helpers::fromDataURI should parse data URI with spaces in data",
+   "helpers::fromDataURI should preserve full content type with parameters in Blob",
+   "supports http with nodejs HTTP2 response types should support arraybuffer response type",
+   "supports http with nodejs HTTP2 response types should support json response type",
+   "supports http with nodejs HTTP2 response types should support stream response type",
+   "supports http with nodejs HTTP2 response types should support text response type",
+   "supports http with nodejs HTTP2 should support FormData as a payload",
+   "supports http with nodejs HTTP2 should support http2 transport",
+   "supports http with nodejs HTTP2 should support request cancellation",
+   "supports http with nodejs HTTP2 should support request payload",
+   "supports http with nodejs HTTP2 should support request timeout",
+   "supports http with nodejs HTTP2 should support stream response cancellation",
+   "supports http with nodejs JSON should support reviver on JSON.parse",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should support function as paramsSerializer value"
+  ],
+  "gold_clean": false
+ },
+ "78e8dcf8754ed9d1219628540d69d09bdba5a9be": {
+  "task": "78e8dcf8754ed9d1219628540d69d09bdba5a9be",
+  "target_tests": [
+   "tests/unit/helpers/formDataToJSON.test.js"
+  ],
+  "test_files": [
+   "tests/unit/helpers/formDataToJSON.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/formDataToJSON.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-04T20:31:02+01:00",
+  "subject": "fix(security): defense-in-depth against already-polluted Object.prototype in formDataToJSON (#7413)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "formDataToJSON should not write through to inherited objects on Object.prototype",
+   "supports http with nodejs HTTP2 should support http2 transport",
+   "supports http with nodejs JSON should support reviver on JSON.parse",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should support function as paramsSerializer value"
+  ],
+  "gold_clean": false
+ },
+ "5107ee69aee527b19eabaf80000ca65752135435": {
+  "task": "5107ee69aee527b19eabaf80000ca65752135435",
+  "target_tests": [
+   "tests/unit/core/settle.test.js"
+  ],
+  "test_files": [
+   "tests/unit/core/settle.test.js"
+  ],
+  "src_files": [
+   "lib/core/settle.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-01T22:54:28+05:30",
+  "subject": "fix: prevent undefined error codes in settle (#7276)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [
+   "core::settle error code assignment assigns ERR_BAD_RESPONSE for a 2xx status rejected via custom validateStatus",
+   "core::settle error code assignment assigns ERR_BAD_RESPONSE for a 3xx status rejected via custom validateStatus",
+   "core::settle error code assignment assigns ERR_BAD_RESPONSE for a 6xx status rejected via custom validateStatus",
+   "supports http with nodejs HTTP2 response types should support arraybuffer response type",
+   "supports http with nodejs HTTP2 response types should support stream response type",
+   "supports http with nodejs keep-alive should not emit MaxListenersExceededWarning under concurrent requests through a pooled keep-alive agent (regression #10780)",
+   "supports http with nodejs keep-alive should not fail with \"socket hang up\" when using timeouts",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should not abort stream on settle rejection"
+  ],
+  "gold_clean": false
+ },
+ "ad68e1a484b50086af427f767bbd7d6e3aab7ac3": {
+  "task": "ad68e1a484b50086af427f767bbd7d6e3aab7ac3",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-30T19:59:04+03:00",
+  "subject": "fix(http): honor timeout during connect without redirects (#10819)",
+  "src_churn": 64,
+  "size": "M",
+  "baseline_failing": [
+   "supports http with nodejs HTTP2 response types should support arraybuffer response type",
+   "supports http with nodejs HTTP2 response types should support json response type",
+   "supports http with nodejs HTTP2 response types should support stream response type",
+   "supports http with nodejs HTTP2 response types should support text response type",
+   "supports http with nodejs HTTP2 should support FormData as a payload",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should respect the timeout property during TCP connect with maxRedirects set to 0",
+   "supports http with nodejs should support IPv4 literal strings",
+   "supports http with nodejs should support IPv6 literal strings",
+   "supports http with nodejs should support function as paramsSerializer value"
+  ],
+  "gold_clean": false
+ },
+ "2a51828213128691d2e37502b5eb2cf4965a737d": {
+  "task": "2a51828213128691d2e37502b5eb2cf4965a737d",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-30T19:49:56+03:00",
+  "subject": "fix(http): decode URL basic auth credentials (#10825)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [
+   "supports http with nodejs HTTP2 response types should support text response type",
+   "supports http with nodejs HTTP2 should support FormData as a payload",
+   "supports http with nodejs HTTP2 should support http2 transport",
+   "supports http with nodejs HTTP2 should support request payload",
+   "supports http with nodejs JSON should support reviver on JSON.parse",
+   "supports http with nodejs keep-alive should not emit MaxListenersExceededWarning under concurrent requests through a pooled keep-alive agent (regression #10780)",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should decode basic auth credentials from the request URL",
+   "supports http with nodejs should not abort stream on settle rejection",
+   "supports http with nodejs should support function as paramsSerializer value"
+  ],
+  "gold_clean": false
+ },
+ "0e8b6bbb542131bae9940618d84d5286255d4db1": {
+  "task": "0e8b6bbb542131bae9940618d84d5286255d4db1",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-30T22:03:33+05:30",
+  "subject": "fix(http): preserve user-supplied Host header when forwarding through a proxy (#10805) (#10822)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [
+   "supports http with nodejs HTTP2 response types should support json response type",
+   "supports http with nodejs HTTP2 response types should support stream response type",
+   "supports http with nodejs Host header preservation when forwarding through a proxy (#10805) preserves a user-supplied Host header across a redirect re-invocation",
+   "supports http with nodejs Host header preservation when forwarding through a proxy (#10805) preserves a user-supplied Host header regardless of casing",
+   "supports http with nodejs Host header preservation when forwarding through a proxy (#10805) preserves a user-supplied lowercase host header",
+   "supports http with nodejs keep-alive should not emit MaxListenersExceededWarning under concurrent requests through a pooled keep-alive agent (regression #10780)",
+   "supports http with nodejs should not abort stream on settle rejection"
+  ],
+  "gold_clean": false
+ },
+ "cd0d44825fe1db7ab597bb139206d780ae94a8ce": {
+  "task": "cd0d44825fe1db7ab597bb139206d780ae94a8ce",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-28T16:31:36+03:00",
+  "subject": "fix(http): preserve response in error when stream is aborted after headers (#10708)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "supports http with nodejs compression should support gunzip error handling",
+   "supports http with nodejs should support IPv4 literal strings",
+   "supports http with nodejs should throw an error if http server that aborts a chunked request"
+  ],
+  "gold_clean": false
+ },
+ "f39203dcbee0632eff0c77cdfe350b08a241f838": {
+  "task": "f39203dcbee0632eff0c77cdfe350b08a241f838",
+  "target_tests": [
+   "tests/unit/adapters/fetch.test.js",
+   "tests/unit/api.test.js",
+   "tests/unit/query.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/fetch.test.js",
+   "tests/unit/api.test.js",
+   "tests/unit/query.test.js"
+  ],
+  "src_files": [
+   "lib/core/Axios.js",
+   "lib/defaults/index.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-28T14:28:30+02:00",
+  "subject": "feat: add QUERY HTTP method support (#10802)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [
+   "QUERY method instance.query() should make a request with the QUERY HTTP method on an instance",
+   "QUERY method instance.query() should merge instance defaults with request config",
+   "QUERY method static axios.query() should make a request with the QUERY HTTP method",
+   "QUERY method static axios.query() should set Content-Type to application/json for object bodies",
+   "QUERY method static axios.query() should support a request body",
+   "QUERY method static axios.query() should support custom headers",
+   "QUERY method static axios.query() should work with baseURL configuration",
+   "QUERY method with HTTP server should send QUERY requests with a body to a real server",
+   "QUERY method with HTTP server should send QUERY requests with baseURL to a real server",
+   "QUERY method with HTTP server should send QUERY requests with custom headers to a real server",
+   "instance api should have request methods",
+   "static api should have request method helpers",
+   "supports fetch with nodejs should send QUERY requests with a body through the fetch adapter"
+  ],
+  "gold_clean": false
+ },
+ "2344aab6090c17c7d9ff8719c435a15abf2be2bb": {
+  "task": "2344aab6090c17c7d9ff8719c435a15abf2be2bb",
+  "target_tests": [
+   "tests/unit/adapters/fetch.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/fetch.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/fetch.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-27T18:42:33+03:00",
+  "subject": "fix(fetch): preserve abort reasons in fetch adapter (#10806)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "supports fetch with nodejs fetch adapter - timeout normalization should surface ETIMEDOUT when fetch rejects with a broken DOMException on abort (Safari)",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should support IPv4 literal strings"
+  ],
+  "gold_clean": false
+ },
+ "caa3497913b731fbae957e6e88edd82da7930111": {
+  "task": "caa3497913b731fbae957e6e88edd82da7930111",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-26T12:14:23-04:00",
+  "subject": "fix: missing beforeRedirect requestDetails argument (#6241)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "supports fetch with nodejs should support a timeout",
+   "supports fetch with nodejs should support params",
+   "supports http with nodejs should pass requestDetails to beforeRedirect with the original URL"
+  ],
+  "gold_clean": false
+ },
+ "a88f748cc957eeb45a982236190d89cf07a8a230": {
+  "task": "a88f748cc957eeb45a982236190d89cf07a8a230",
+  "target_tests": [
+   "tests/unit/helpers/buildURL.test.js"
+  ],
+  "test_files": [
+   "tests/unit/helpers/buildURL.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/buildURL.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-27T01:16:18+10:00",
+  "subject": "feat: export encode function from buildURL helper (#6897)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "helpers::encode should apply all substitutions together",
+   "helpers::encode should be exported as a named export",
+   "helpers::encode should encode space as `+` (form-style) rather than `%20`",
+   "helpers::encode should leave plain ASCII unchanged",
+   "helpers::encode should preserve `$` rather than percent-encoding it",
+   "helpers::encode should preserve `,` rather than percent-encoding it",
+   "helpers::encode should preserve `:` rather than percent-encoding it",
+   "helpers::encode should still percent-encode characters outside the preserved set",
+   "supports fetch with nodejs should support a timeout",
+   "supports fetch with nodejs should support params",
+   "supports http with nodejs request aborting should be able to abort the response stream",
+   "supports http with nodejs should support IPv4 literal strings"
+  ],
+  "gold_clean": true
+ },
+ "c918e85e91528da910836f0fa5c74ca3714daff1": {
+  "task": "c918e85e91528da910836f0fa5c74ca3714daff1",
+  "target_tests": [
+   "tests/unit/adapters/fetch.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/fetch.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/fetch.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-26T13:37:24+03:00",
+  "subject": "fix(fetch-adapter): set User-Agent header to match http adapter (#10772)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "supports fetch with nodejs fetch adapter - User-Agent header should set User-Agent header to axios/<version> by default",
+   "supports fetch with nodejs should support a timeout",
+   "supports fetch with nodejs should support params"
+  ],
+  "gold_clean": false
+ },
+ "bd3816bf9eaff677c3e278df9b03bcd302e9177b": {
+  "task": "bd3816bf9eaff677c3e278df9b03bcd302e9177b",
+  "target_tests": [
+   "tests/unit/core/dispatchRequest.test.js",
+   "tests/unit/transformResponse.test.js"
+  ],
+  "test_files": [
+   "tests/unit/core/dispatchRequest.test.js",
+   "tests/unit/transformResponse.test.js"
+  ],
+  "src_files": [
+   "lib/core/dispatchRequest.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-25T22:53:24+06:00",
+  "subject": "fix(dispatchRequest): attach response to AxiosError on JSON parse failure (#10724)",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [
+   "core::dispatchRequest JSON parse failure on adapter rejection rejects with AxiosError carrying response and status (rejection path)",
+   "core::dispatchRequest JSON parse failure on adapter resolution rejects with AxiosError carrying response and status",
+   "supports fetch with nodejs should support a timeout",
+   "supports fetch with nodejs should support params"
+  ],
+  "gold_clean": true
+ },
+ "f2dc4495472071d3ed9a5637f35660226c8e44c6": {
+  "task": "f2dc4495472071d3ed9a5637f35660226c8e44c6",
+  "target_tests": [
+   "tests/unit/parseProtocol.test.js"
+  ],
+  "test_files": [
+   "tests/unit/parseProtocol.test.js"
+  ],
+  "src_files": [
+   "lib/helpers/parseProtocol.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-25T19:27:58+03:00",
+  "subject": "fix(parseProtocol): fix regex to require colon in protocol separator (#10729)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "helpers::parseProtocol should not match URLs without a colon separator",
+   "supports fetch with nodejs should support a timeout",
+   "supports fetch with nodejs should support params"
+  ],
+  "gold_clean": true
+ },
+ "e6a62415821802fc078e2b031f63306e44b11d9c": {
+  "task": "e6a62415821802fc078e2b031f63306e44b11d9c",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-24T19:12:52+02:00",
+  "subject": "fix: close redirect listiner chanin correctly to no longer stack (#10800)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [
+   "supports fetch with nodejs should support a timeout",
+   "supports fetch with nodejs should support params",
+   "supports http with nodejs redirect listener accumulation should attach at most one close listener to the outer request across a long redirect chain",
+   "supports http with nodejs redirect listener accumulation should not emit MaxListenersExceededWarning when a single request follows >= 11 redirects"
+  ],
+  "gold_clean": false
+ },
+ "afca61a070728e717203c2bc21e7b589b59b858b": {
+  "task": "afca61a070728e717203c2bc21e7b589b59b858b",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-22T20:53:40+02:00",
+  "subject": "fix: clear stale header on redirect when target is no-proxy (#10794)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [
+   "supports fetch with nodejs should support a timeout",
+   "supports fetch with nodejs should support params",
+   "supports http with nodejs Proxy-Authorization header leak on redirect (GHSA-j5f8-grm9-p9fc) clears a stale Proxy-Authorization header when environment-derived proxy is bypassed on redirect (NO_PROXY)",
+   "supports http with nodejs Proxy-Authorization header leak on redirect (GHSA-j5f8-grm9-p9fc) clears a stale Proxy-Authorization header when redirected request resolves to no proxy (configProxy=false)",
+   "supports http with nodejs Proxy-Authorization header leak on redirect (GHSA-j5f8-grm9-p9fc) replaces Proxy-Authorization when redirect target resolves to a different proxy without credentials",
+   "supports http with nodejs Proxy-Authorization header leak on redirect (GHSA-j5f8-grm9-p9fc) strips stale Proxy-Authorization regardless of header key casing",
+   "supports http with nodejs Proxy-Authorization header leak on redirect (GHSA-j5f8-grm9-p9fc) strips stale Proxy-Authorization when the beforeRedirects.proxy hook is invoked with configProxy=false"
+  ],
+  "gold_clean": true
+ },
+ "e5540dcafe423909527c0af097fb6ae7f68c08f3": {
+  "task": "e5540dcafe423909527c0af097fb6ae7f68c08f3",
+  "target_tests": [
+   "tests/unit/adapters/fetch.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/fetch.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/fetch.js",
+   "lib/helpers/estimateDataURLDecodedBytes.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-22T18:54:12+02:00",
+  "subject": "fix: fetch adaptor is not enforcing max body or content length (#10795)",
+  "src_churn": 118,
+  "size": "M",
+  "baseline_failing": [
+   "supports fetch with nodejs should support a timeout",
+   "supports fetch with nodejs should support params",
+   "supports fetch with nodejs size limits (GHSA-777c-7fjr-54vf) should reject a chunked response that exceeds maxContentLength during streaming",
+   "supports fetch with nodejs size limits (GHSA-777c-7fjr-54vf) should reject a data: URL whose body size exceeds maxContentLength (non-base64)",
+   "supports fetch with nodejs size limits (GHSA-777c-7fjr-54vf) should reject a data: URL whose decoded size exceeds maxContentLength (base64)",
+   "supports fetch with nodejs size limits (GHSA-777c-7fjr-54vf) should reject a response whose Content-Length exceeds maxContentLength with ERR_BAD_RESPONSE",
+   "supports fetch with nodejs size limits (GHSA-777c-7fjr-54vf) should reject an outbound body that exceeds maxBodyLength with ERR_BAD_REQUEST"
+  ],
+  "gold_clean": false
+ },
+ "4709a48fa2717ba97f43f5432d48ca4e26c2d326": {
+  "task": "4709a48fa2717ba97f43f5432d48ca4e26c2d326",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-21T19:25:49+02:00",
+  "subject": "fix: added fix for memory leak in sockets (#10788)",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [
+   "supports fetch with nodejs should support a timeout",
+   "supports fetch with nodejs should support params",
+   "supports http with nodejs keep-alive should install at most one socket error listener across reused keep-alive sockets",
+   "supports http with nodejs keep-alive should not accumulate socket error listeners when a pooled socket is reassigned before the previous request closes (regression #10780)",
+   "supports http with nodejs keep-alive should not emit MaxListenersExceededWarning under concurrent requests through a pooled keep-alive agent (regression #10780)"
+  ],
+  "gold_clean": false
+ },
+ "6feafcff6c2dbafe206161c5d09e38e1d36af66f": {
+  "task": "6feafcff6c2dbafe206161c5d09e38e1d36af66f",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js",
+   "lib/core/mergeConfig.js"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-20T20:27:08+02:00",
+  "subject": "fix: socket issue (#10777)",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [
+   "supports fetch with nodejs should support a timeout",
+   "supports http with nodejs socketPath security (GHSA-j96w-fp6f-pq6v) empty allowedSocketPaths array blocks all socketPath values",
+   "supports http with nodejs socketPath security (GHSA-j96w-fp6f-pq6v) rejects non-string socketPath",
+   "supports http with nodejs socketPath security (GHSA-j96w-fp6f-pq6v) rejects socketPath attempting path traversal that escapes allowlist",
+   "supports http with nodejs socketPath security (GHSA-j96w-fp6f-pq6v) rejects socketPath not in allowedSocketPaths"
+  ],
+  "gold_clean": false
+ },
+ "73a7c552820291ee491e4dd8fa901cef113ec800": {
+  "task": "73a7c552820291ee491e4dd8fa901cef113ec800",
+  "target_tests": [
+   "tests/unit/prototypePollution.test.js"
+  ],
+  "test_files": [
+   "tests/unit/prototypePollution.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js",
+   "lib/core/AxiosHeaders.js",
+   "lib/helpers/buildURL.js",
+   "lib/helpers/formDataToStream.js",
+   "lib/helpers/resolveConfig.js",
+   "lib/helpers/toFormData.js"
+  ],
+  "pool": "hard",
+  "authored": "2026-05-27T00:39:03+05:30",
+  "subject": "fix: clean up error handling, fix a proto-pollution gap, and seal a few loose ends (#10922)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [
+   "Prototype Pollution Protection resolveConfig params and paramsSerializer gadget should not inherit polluted params via resolveConfig",
+   "Prototype Pollution Protection resolveConfig params and paramsSerializer gadget should not invoke polluted paramsSerializer via resolveConfig",
+   "regression issues 4999 should not fail with query parsing"
+  ],
+  "gold_clean": true
+ },
+ "1337845ea3395045ef2a88da05dd4cd34d9247eb": {
+  "task": "1337845ea3395045ef2a88da05dd4cd34d9247eb",
+  "target_tests": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/http.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js",
+   "lib/core/Axios.js",
+   "lib/core/mergeConfig.js",
+   "lib/defaults/transitional.js"
+  ],
+  "pool": "hard",
+  "authored": "2026-05-20T18:30:26+02:00",
+  "subject": "feat(http): add zstd decompression support (#10920)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [
+   "supports http with nodejs compression should advertise zstd when enabled through transitional config and supported"
+  ],
+  "gold_clean": false
+ },
+ "cabead530614ec86761d92d81af2783aafeb9d01": {
+  "task": "cabead530614ec86761d92d81af2783aafeb9d01",
+  "target_tests": [
+   "tests/unit/adapters/fetch.test.js",
+   "tests/unit/adapters/http.test.js",
+   "tests/unit/axiosHeaders.test.js"
+  ],
+  "test_files": [
+   "tests/unit/adapters/fetch.test.js",
+   "tests/unit/adapters/http.test.js",
+   "tests/unit/axiosHeaders.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/fetch.js",
+   "lib/adapters/http.js",
+   "lib/adapters/xhr.js",
+   "lib/core/AxiosHeaders.js",
+   "lib/helpers/sanitizeHeaderValue.js"
+  ],
+  "pool": "hard",
+  "authored": "2026-05-06T20:15:24+03:00",
+  "subject": "fix: preserve Unicode headers for request interceptors (#10850)",
+  "src_churn": 103,
+  "size": "M",
+  "baseline_failing": [
+   "AxiosHeaders set should preserve non-control Unicode characters in array header values",
+   "AxiosHeaders set should preserve non-control Unicode characters in header values",
+   "AxiosHeaders set should still strip CR/LF from Unicode header values to prevent header injection",
+   "supports fetch with nodejs should allow request interceptors to encode Unicode header values before fetch sends them",
+   "supports http with nodejs should allow request interceptors to encode Unicode header values before Node sends them"
+  ],
+  "gold_clean": true
+ },
+ "47915144662f2733e6c051bdcb895a8c8f0586aa": {
+  "task": "47915144662f2733e6c051bdcb895a8c8f0586aa",
+  "target_tests": [
+   "tests/unit/prototypePollution.test.js"
+  ],
+  "test_files": [
+   "tests/unit/prototypePollution.test.js"
+  ],
+  "src_files": [
+   "lib/adapters/http.js",
+   "lib/core/mergeConfig.js",
+   "lib/helpers/resolveConfig.js",
+   "lib/helpers/validator.js"
+  ],
+  "pool": "hard",
+  "authored": "2026-04-20T21:33:19+02:00",
+  "subject": "fix: more header pollutions (#10779)",
+  "src_churn": 61,
+  "size": "M",
+  "baseline_failing": [
+   "Prototype Pollution Protection Full gadget coverage via null-prototype config should ignore polluted adapter",
+   "Prototype Pollution Protection Full gadget coverage via null-prototype config should ignore polluted httpAgent",
+   "Prototype Pollution Protection Full gadget coverage via null-prototype config should ignore polluted maxContentLength",
+   "Prototype Pollution Protection Full gadget coverage via null-prototype config should ignore polluted method",
+   "Prototype Pollution Protection Full gadget coverage via null-prototype config should ignore polluted params and paramsSerializer",
+   "Prototype Pollution Protection Full gadget coverage via null-prototype config should ignore polluted proxy",
+   "Prototype Pollution Protection Full gadget coverage via null-prototype config should ignore polluted timeout at the merged config level",
+   "Prototype Pollution Protection Full gadget coverage via null-prototype config should ignore polluted transformRequest",
+   "Prototype Pollution Protection Full gadget coverage via null-prototype config should ignore polluted transformResponse",
+   "Prototype Pollution Protection Full gadget coverage via null-prototype config should ignore polluted transitional",
+   "Prototype Pollution Protection GHSA-q8qp-cvcw-x6jj http adapter gadgets should not enable insecureHTTPParser via Object.prototype",
+   "Prototype Pollution Protection GHSA-q8qp-cvcw-x6jj http adapter gadgets should not invoke Object.prototype.beforeRedirect during redirects",
+   "Prototype Pollution Protection GHSA-q8qp-cvcw-x6jj http adapter gadgets should not pick up Object.prototype.auth as an Authorization header",
+   "Prototype Pollution Protection GHSA-q8qp-cvcw-x6jj http adapter gadgets should not pick up Object.prototype.socketPath and redirect the request",
+   "Prototype Pollution Protection GHSA-q8qp-cvcw-x6jj resolveConfig baseURL gadget should not hijack relative-URL requests via Object.prototype.baseURL",
+   "Prototype Pollution Protection GHSA-q8qp-cvcw-x6jj resolveConfig baseURL gadget should not hijack requests via Object.prototype.baseURL with allowAbsoluteUrls:false",
+   "Prototype Pollution Protection mergeConfig null-prototype structural defense should not expose arbitrary polluted keys as inherited properties",
+   "Prototype Pollution Protection mergeConfig null-prototype structural defense should return an object whose prototype is null",
+   "supports fetch with nodejs should support a timeout",
+   "supports fetch with nodejs should support params"
+  ],
+  "gold_clean": true
+ }
+}

@@ -1,0 +1,49 @@
+diff --git a/packages/nhsuk-frontend/src/nhsuk/configurable-component.jsdom.test.mjs b/packages/nhsuk-frontend/src/nhsuk/configurable-component.jsdom.test.mjs
+index cb6a1f8bf..18f33d841 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/configurable-component.jsdom.test.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/configurable-component.jsdom.test.mjs
+@@ -134,6 +134,30 @@ describe('ConfigurableComponent', () => {
+           'Error thrown from $root support check'
+         )
+       })
++
++      it('Allows child classes to define conditional config support checks', () => {
++        class ServiceComponent extends MockConfigurableComponent {
++          /**
++           * @param {HTMLElement} [$root]
++           * @param {Partial<MockConfig>} [config]
++           */
++          static checkSupport($root, config) {
++            if (config?.aBoolean) {
++              throw new Error('Error thrown from config support check')
++            }
++          }
++        }
++
++        expect(() => new ServiceComponent($root1)).not.toThrow()
++
++        expect(() => new ServiceComponent($root2, { aBoolean: true })).toThrow(
++          'Error thrown from config support check'
++        )
++      })
+     })
+   })
+ })
++
++/**
++ * @import { MockConfig } from '#lib/fixtures/configuration/mock-component.mjs'
++ */
+diff --git a/packages/nhsuk-frontend/src/nhsuk/configurable-component.mjs b/packages/nhsuk-frontend/src/nhsuk/configurable-component.mjs
+index 42f066fc2..8ac1216c4 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/configurable-component.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/configurable-component.mjs
+@@ -75,6 +75,9 @@ export class ConfigurableComponent extends Component {
+       )
+     )
+ 
++    // Re-run support checks now config is available
++    childConstructor.checkSupport(this.$root, this.config)
++
+     // Check for valid config
+     const errors = validateConfig(schema, this.config)
+     if (errors[0]) {

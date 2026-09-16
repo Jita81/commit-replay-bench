@@ -1,0 +1,57 @@
+{{- if .Values.migrate.enabled }}
+# Runs `python -m crb.store.migrate upgrade` (alembic upgrade head + append-only triggers,
+# one transaction) BEFORE the api/worker pods of a release are created or rolled. A failed
+# migration fails the release; nothing else changes.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "crb.fullname" . }}-migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.migrate.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "crb.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "crb.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "crb.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["migrate", "upgrade", "-v"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          envFrom:
+            {{- include "crb.envFrom" . | nindent 12 }}
+          env:
+            {{- include "crb.commonEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "crb.scratchMounts" . | nindent 12 }}
+            - name: data
+              mountPath: /srv/crb
+      volumes:
+        {{- include "crb.scratchVolumes" . | nindent 8 }}
+        - name: data
+          emptyDir:
+            sizeLimit: 64Mi
+{{- end }}

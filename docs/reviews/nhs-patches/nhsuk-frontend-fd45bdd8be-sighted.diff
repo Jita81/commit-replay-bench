@@ -1,0 +1,29 @@
+diff --git a/packages/nhsuk-frontend/src/nhsuk/lib/nunjucks/globals/get-component-macro.unit.test.mjs b/packages/nhsuk-frontend/src/nhsuk/lib/nunjucks/globals/get-component-macro.unit.test.mjs
+index 2e276e9df..83f254420 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/lib/nunjucks/globals/get-component-macro.unit.test.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/lib/nunjucks/globals/get-component-macro.unit.test.mjs
+@@ -35,10 +35,8 @@ describe('Nunjucks global: getComponentMacro', () => {
+ 
+       {% call label({
+         size: "l"
+-      }) -%}
+-
++      }) %}
+       What is your full name?
+-
+       {%- endcall %}
+     `)
+   })
+diff --git a/packages/nhsuk-frontend/src/nhsuk/lib/nunjucks/index.mjs b/packages/nhsuk-frontend/src/nhsuk/lib/nunjucks/index.mjs
+index ec1eb4c44..723c6b681 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/lib/nunjucks/index.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/lib/nunjucks/index.mjs
+@@ -62,7 +62,7 @@ export function macro(macroName, macroPath, options) {
+   // If we're nesting child components or text, pass the children to the macro
+   // using the 'caller' Nunjucks feature
+   macroString += options?.callBlock
+-    ? `{% call ${macroCall} -%}\n\n${options.callBlock.trim()}\n\n{%- endcall %}`
++    ? `{% call ${macroCall} %}\n${options.callBlock.trim()}\n{%- endcall %}`
+     : `{{ ${macroCall} }}`
+ 
+   return macroString

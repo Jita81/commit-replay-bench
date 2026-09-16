@@ -1,0 +1,294 @@
+# Release: on a `v*` tag —
+#
+#   build   sdist + wheel with `uv build`, tag == pyproject version, smoke-import, SHA256SUMS
+#   image   build deploy/Dockerfile (UI + wheel, linux/amd64), smoke it, generate an SPDX
+#           SBOM (syft), then push to GHCR — ONLY on a tag of the canonical repository:
+#             ghcr.io/jita81/commit-replay-bench:<version>      (tag v2.0.0a1 → 2.0.0a1)
+#             ghcr.io/jita81/commit-replay-bench:sha-<short>    (7-char commit sha)
+#           BuildKit provenance (SLSA, mode=max) and an SBOM attestation ride with the image.
+#   sign    cosign KEYLESS (GitHub OIDC → Sigstore/Fulcio, recorded in Rekor): signs the
+#           image digest and attaches the syft SBOM as an in-toto attestation. A separate
+#           job so a fork, or an org that forbids id-token, still gets the image; it is
+#           skipped there rather than failing the release.
+#
+# This is a private product: there is NO PyPI publish step. `workflow_dispatch` runs the
+# whole pipeline WITHOUT pushing or signing (a dry run of the release path on any branch).
+#
+# What needs org-level permission: `packages: write` for the push (GITHUB_TOKEN is enough
+# once the GHCR package is linked to this repository), and `id-token: write` for keyless
+# signing (the repository/organisation setting "Allow GitHub Actions to create and approve
+# pull requests" is NOT involved; only "Workflow permissions" must permit the id-token
+# scope). No long-lived secret is used anywhere in this workflow.
+#
+# Verification (docs/DEPLOYMENT.md §2.2 / deploy/README.md §1.1):
+#   cosign verify ghcr.io/jita81/commit-replay-bench:<version> \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github.com/Jita81/commit-replay-bench/\.github/workflows/release\.yml@refs/tags/v'
+#   cosign verify-attestation --type spdxjson … (same flags) | jq -r .payload | base64 -d
+#
+# Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/jita81/commit-replay-bench
+  CANONICAL_REPO: Jita81/commit-replay-bench
+  # Artifact names may not contain `/`; a dispatch from a `feat/…` branch would. Tag name on a
+  # tag, commit sha otherwise.
+  ARTIFACT_SUFFIX: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+
+jobs:
+  build:
+    name: build (sdist + wheel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Check the tag matches pyproject version (scripts/check_release_tag.py — the rule the tests pin)
+        run: uv run --no-project --python 3.12 python scripts/check_release_tag.py
+      - name: uv build
+        run: uv build --sdist --wheel --out-dir dist
+      - name: Smoke-install the wheel and import the core
+        run: |
+          uv venv -q .smoke --python 3.12
+          uv pip install -q dist/*.whl --python .smoke/bin/python
+          .smoke/bin/python -c "import crb.core, crb.core.version as v; print('crb', v.__version__, 'apparatus', v.APPARATUS_VERSION)"
+      - name: Record checksums
+        run: |
+          cd dist && sha256sum -- * | tee SHA256SUMS
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: crb-dist-${{ env.ARTIFACT_SUFFIX }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 365
+
+  image:
+    name: image (build + smoke + SBOM; push to GHCR on tag)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # Push only for a real tag of the canonical repository. A fork's tag, or a manual
+      # dispatch, builds and smokes the identical image but never publishes it.
+      PUSH: ${{ github.ref_type == 'tag' && github.repository == 'Jita81/commit-replay-bench' }}
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      version: ${{ steps.meta.outputs.version }}
+      pushed: ${{ env.PUSH }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Image tags and OCI labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # `type=semver` is deliberately NOT used: PEP 440 pre-releases (2.0.0a1) are not
+          # valid semver and would be silently dropped. The version tag is the git tag
+          # minus its leading `v`; `sha-<short>` is always added.
+          tags: |
+            type=match,pattern=v(.*),group=1,enable=${{ github.ref_type == 'tag' }}
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.title=Commit Replay Bench
+            org.opencontainers.image.vendor=Automated Agile
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.documentation=https://github.com/Jita81/commit-replay-bench/blob/main/docs/DEPLOYMENT.md
+
+      - name: Build deploy/Dockerfile (load locally; nothing is pushed yet)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: crb:release-candidate
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke the candidate — non-root, read-only root, migrate on SQLite, UI + tools present
+        # Same checks as ci.yml `container`, run on the exact image that will be pushed.
+        # tmpfs ownership is explicit: newer daemons make --tmpfs inherit the image
+        # directory's root:0750, which uid 10001 cannot write.
+        run: |
+          set -euo pipefail
+          docker run --rm crb:release-candidate python -c "import os; assert os.getuid() == 10001, os.getuid(); print('uid ok')"
+          docker run --rm --read-only --tmpfs /tmp --tmpfs /srv/crb:rw,uid=10001,gid=10001,mode=0750 crb:release-candidate migrate upgrade -v
+          docker run --rm crb:release-candidate python -c "import os; assert os.path.isfile('/app/ui/dist/index.html'), 'UI missing from image'; print('ui ok')"
+          docker run --rm crb:release-candidate python -c "import shutil; assert shutil.which('docker') and shutil.which('git'); print('tools ok')"
+          docker run --rm crb:release-candidate python -c "import crb.store.migrate, crb.core, crb.builders, crb.core.version as v; print('imports ok', v.__version__, 'apparatus', v.APPARATUS_VERSION)"
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+        id: syft
+
+      - name: SBOM of the candidate image (syft → SPDX JSON)
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          set -euo pipefail
+          "$SYFT" scan docker:crb:release-candidate -o spdx-json=sbom.spdx.json
+          python3 -c "import json; d=json.load(open('sbom.spdx.json')); print(d['spdxVersion'], len(d.get('packages', [])), 'packages')"
+
+      - name: Upload the SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: crb-image-sbom-${{ env.ARTIFACT_SUFFIX }}
+          path: sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 365
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push to GHCR (a cache hit — the bytes are the smoked candidate)
+        if: env.PUSH == 'true'
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # SLSA provenance + BuildKit's own SBOM attestation, attached to the image index.
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+
+      - name: Smoke the PUSHED digest — what a user pulls is what was tested
+        # The push re-runs the build from cache and attaches provenance + SBOM; the bytes
+        # users pull are addressed by THIS digest, so the same checks run on it, not on the
+        # local candidate (CodeRabbit on PR #4, 2026-09-15).
+        if: env.PUSH == 'true'
+        env:
+          REF: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test -n "${{ steps.push.outputs.digest }}"
+          docker pull "$REF"
+          docker run --rm "$REF" python -c "import os; assert os.getuid() == 10001, os.getuid(); print('uid ok')"
+          docker run --rm --read-only --tmpfs /tmp --tmpfs /srv/crb:rw,uid=10001,gid=10001,mode=0750 "$REF" migrate upgrade -v
+          docker run --rm "$REF" python -c "import crb.store.migrate, crb.core, crb.builders, crb.core.version as v; print('pushed image ok', v.__version__, 'apparatus', v.APPARATUS_VERSION)"
+
+      - name: Summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo "## Container image"
+            echo
+            if [ "$PUSH" = "true" ]; then
+              echo "Pushed (linux/amd64):"
+              echo
+              echo '```'
+              echo "$TAGS"
+              echo "${IMAGE}@${DIGEST}"
+              echo '```'
+            else
+              echo "Built and smoked, **not pushed** (not a tag of ${CANONICAL_REPO}). Tags it would carry:"
+              echo
+              echo '```'
+              echo "$TAGS"
+              echo '```'
+            fi
+            echo
+            echo "SBOM: artifact \`crb-image-sbom-${ARTIFACT_SUFFIX}\` (SPDX JSON, syft)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  sign:
+    name: sign (cosign keyless) + attest SBOM
+    needs: image
+    # Separate job, skipped on forks / dry runs / when the push did not happen, so an
+    # organisation that does not grant `id-token: write` still gets an (unsigned) image
+    # and a red job here rather than a missing release.
+    if: needs.image.outputs.pushed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      DIGEST: ${{ needs.image.outputs.digest }}
+    steps:
+      - uses: sigstore/cosign-installer@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download the SBOM produced from the pushed candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: crb-image-sbom-${{ env.ARTIFACT_SUFFIX }}
+      - name: cosign sign (keyless, by digest)
+        run: |
+          set -euo pipefail
+          test -n "$DIGEST"
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+      - name: cosign attest the SBOM (in-toto, predicate type spdxjson)
+        run: |
+          set -euo pipefail
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "${IMAGE}@${DIGEST}"
+      - name: Verify what we just published (the same command an operator runs)
+        run: |
+          set -euo pipefail
+          ISSUER=https://token.actions.githubusercontent.com
+          IDENTITY_RE="^https://github.com/${CANONICAL_REPO}/\.github/workflows/release\.yml@refs/tags/v"
+          cosign verify "${IMAGE}@${DIGEST}" \
+            --certificate-oidc-issuer "$ISSUER" \
+            --certificate-identity-regexp "$IDENTITY_RE" > /dev/null
+          cosign verify-attestation --type spdxjson "${IMAGE}@${DIGEST}" \
+            --certificate-oidc-issuer "$ISSUER" \
+            --certificate-identity-regexp "$IDENTITY_RE" > /dev/null
+          {
+            echo "## Signature"
+            echo
+            echo "Signed keyless (Sigstore, GitHub OIDC) and SBOM attested. Verify with:"
+            echo
+            echo '```bash'
+            echo "cosign verify ${IMAGE}@${DIGEST} \\"
+            echo "  --certificate-oidc-issuer ${ISSUER} \\"
+            echo "  --certificate-identity-regexp '${IDENTITY_RE}'"
+            echo "cosign verify-attestation --type spdxjson ${IMAGE}@${DIGEST} \\"
+            echo "  --certificate-oidc-issuer ${ISSUER} \\"
+            echo "  --certificate-identity-regexp '${IDENTITY_RE}' | jq -r .payload | base64 -d | jq .predicate"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

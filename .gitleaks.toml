@@ -1,0 +1,25 @@
+# gitleaks configuration for crb.
+# Extends the default ruleset; allowlists ONLY the test tree, where redaction tests
+# deliberately contain fake tokens (crb.core.redact must recognise the shapes).
+# Nothing under src/, docs/ or deploy/ is allowlisted. Anything else that trips a rule
+# is a finding, not a false positive, until proven otherwise in review.
+
+title = "crb gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures and redaction tests contain deliberately fake credentials"
+paths = [
+  '''^tests/''',
+]
+
+[[allowlists]]
+description = "Documentation placeholders that are obviously not credentials"
+regexTarget = "match"
+regexes = [
+  '''(?i)\[REDACTED[A-Z-]*\]''',
+  '''(?i)sk-(?:live|test|proj|ant)?-?x{8,}''',
+  '''(?i)(?:secret|token|password|api[_-]?key)\s*[=:]\s*<[^>]+>''',
+]

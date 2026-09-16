@@ -1,0 +1,35 @@
+diff --git a/packages/nhsuk-frontend/src/nhsuk/components/tables/table.jsdom.test.mjs b/packages/nhsuk-frontend/src/nhsuk/components/tables/table.jsdom.test.mjs
+index 4575aa0a1..0fecb1227 100644
+--- a/packages/nhsuk-frontend/src/nhsuk/components/tables/table.jsdom.test.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/components/tables/table.jsdom.test.mjs
+@@ -147,7 +147,7 @@ describe('Table', () => {
+     it('should create status message', () => {
+       const $screenReaderStatusMessage = document.querySelector('[role=status]')
+ 
+-      expect($screenReaderStatusMessage).toBe($root?.nextElementSibling)
++      expect($screenReaderStatusMessage).toBe($root?.previousElementSibling)
+       expect($screenReaderStatusMessage).toHaveAttribute('role', 'status')
+       expect($screenReaderStatusMessage).toHaveAttribute('aria-live', 'polite')
+       expect($screenReaderStatusMessage).toHaveAttribute('aria-atomic', 'true')
+@@ -372,7 +372,7 @@ describe('Table', () => {
+     it('should update status message when sorting', () => {
+       const $screenReaderStatusMessage = document.querySelector('[role=status]')
+ 
+-      expect($screenReaderStatusMessage).toBe($root?.nextElementSibling)
++      expect($screenReaderStatusMessage).toBe($root?.previousElementSibling)
+       expect($screenReaderStatusMessage).toBeEmptyDOMElement()
+ 
+       $button1.click()
+diff --git a/packages/nhsuk-frontend/src/nhsuk/components/tables/table.mjs b/packages/nhsuk-frontend/src/nhsuk/components/tables/table.mjs
+index 4c33ff131..66bf2ce1c 100755
+--- a/packages/nhsuk-frontend/src/nhsuk/components/tables/table.mjs
++++ b/packages/nhsuk-frontend/src/nhsuk/components/tables/table.mjs
+@@ -94,7 +94,7 @@ export class Table extends ConfigurableComponent {
+     this.$screenReaderStatusMessage.classList.add('nhsuk-u-visually-hidden')
+ 
+     this.$root.insertAdjacentElement(
+-      'afterend',
++      'beforebegin',
+       this.$screenReaderStatusMessage
+     )
+ 

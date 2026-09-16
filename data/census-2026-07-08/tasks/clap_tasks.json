@@ -1,0 +1,999 @@
+{
+ "4b45d361b1b96eb1f37b7d1db2684203ca828a94": {
+  "task": "4b45d361b1b96eb1f37b7d1db2684203ca828a94",
+  "target_tests": [
+   "derive_ui"
+  ],
+  "test_files": [
+   "tests/derive_ui.rs"
+  ],
+  "src_files": [
+   "src/lib.rs"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-08T09:45:17-06:00",
+  "subject": "chore: Update MSRV to 1.74",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d30d94f51c3e10fed96d0a555a0f0c5a2b3a5824": {
+  "task": "d30d94f51c3e10fed96d0a555a0f0c5a2b3a5824",
+  "target_tests": [
+   "derive_ui"
+  ],
+  "test_files": [
+   "tests/derive_ui.rs"
+  ],
+  "src_files": [
+   "src/lib.rs"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-24T10:14:23-05:00",
+  "subject": "chore: Update MSRV to 1.70",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "56fe5e0ec0f97a82651775252b4699e8442e81b1": {
+  "task": "56fe5e0ec0f97a82651775252b4699e8442e81b1",
+  "target_tests": [
+   "builder",
+   "ui"
+  ],
+  "test_files": [
+   "tests/builder/subcommands.rs",
+   "tests/ui.rs"
+  ],
+  "src_files": [
+   "src/_features.rs"
+  ],
+  "pool": "standard",
+  "authored": "2023-03-28T00:26:18-05:00",
+  "subject": "fix!: Remove `unstable-replace` feature flag",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false,
+  "oracle_invalid": "not red on parent in isolated build (DL-011 class)"
+ },
+ "8c92ef6c76686a642e748919f33587561c2a0280": {
+  "task": "8c92ef6c76686a642e748919f33587561c2a0280",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/help.rs"
+  ],
+  "src_files": [
+   "src/builder/command.rs"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-15T18:33:35+01:00",
+  "subject": "fix(help): Fix yet another --help long help edge case (#4712)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "473cf175a2fa973b62c79dabf00892d6feff453a": {
+  "task": "473cf175a2fa973b62c79dabf00892d6feff453a",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/hidden_args.rs"
+  ],
+  "src_files": [
+   "src/builder/command.rs"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-15T17:25:19+01:00",
+  "subject": "fix(help): Fix --help help text in edge case (#4710)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f25fe5b3e014fcfa58b965ccfb5b607a33c3402b": {
+  "task": "f25fe5b3e014fcfa58b965ccfb5b607a33c3402b",
+  "target_tests": [
+   "derive_ui"
+  ],
+  "test_files": [
+   "tests/derive_ui.rs"
+  ],
+  "src_files": [
+   "src/lib.rs"
+  ],
+  "pool": "standard",
+  "authored": "2023-01-09T12:29:41-06:00",
+  "subject": "chore: Bump MSRV to 1.64.0",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "85ecb3e895d17ff391be6dc43a8e9944cb318cef": {
+  "task": "85ecb3e895d17ff391be6dc43a8e9944cb318cef",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/conflicts.rs"
+  ],
+  "src_files": [
+   "src/parser/validator.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-22T13:09:04-06:00",
+  "subject": "fix(parser): Override required when parent group has conflict",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c6058dee6ed463e4f8de2c5c76c63eb576ca8cbe": {
+  "task": "c6058dee6ed463e4f8de2c5c76c63eb576ca8cbe",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/help.rs",
+   "tests/builder/template_help.rs"
+  ],
+  "src_files": [
+   "src/output/help_template.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-22T00:47:53+09:00",
+  "subject": "fix(help_template): Added cfg",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false,
+  "oracle_invalid": "not red on parent in isolated build (DL-011 class)"
+ },
+ "a42204243a3b25f2f2f17b98666e3bf20a3bfa51": {
+  "task": "a42204243a3b25f2f2f17b98666e3bf20a3bfa51",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/help.rs",
+   "tests/builder/template_help.rs"
+  ],
+  "src_files": [
+   "src/builder/command.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-21T09:58:03+09:00",
+  "subject": "fix(help_template): Remove {bin} variable",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6abc2cfc3be18a854bbf482c7a67c3675b76269e": {
+  "task": "6abc2cfc3be18a854bbf482c7a67c3675b76269e",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/main.rs",
+   "tests/builder/occurrences.rs"
+  ],
+  "src_files": [
+   "src/parser/matches/arg_matches.rs",
+   "src/parser/matches/matched_arg.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-06T02:14:33-07:00",
+  "subject": "feat: Add get/remove API for getting grouped values",
+  "src_churn": 426,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e9cbed34cd12728b79dcdfc745ba7777e5d13029": {
+  "task": "e9cbed34cd12728b79dcdfc745ba7777e5d13029",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/utf8.rs"
+  ],
+  "src_files": [
+   "src/lib.rs",
+   "src/parser/features/suggestions.rs",
+   "src/parser/parser.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-11T12:25:56-06:00",
+  "subject": "fix(parser): Don't panic on invalid UTF-8 values",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "547bd288bf0aa1261687834e4a44cc14af8ba6a7": {
+  "task": "547bd288bf0aa1261687834e4a44cc14af8ba6a7",
+  "target_tests": [
+   "common",
+   "nushell"
+  ],
+  "test_files": [
+   "tests/common.rs",
+   "tests/nushell.rs"
+  ],
+  "src_files": [
+   "src/lib.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-31T20:11:01+08:00",
+  "subject": "feat: add value completion",
+  "src_churn": 99,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3d9b50513bc35d6e2254e2868008e1d3355f74a2": {
+  "task": "3d9b50513bc35d6e2254e2868008e1d3355f74a2",
+  "target_tests": [
+   "common",
+   "nushell"
+  ],
+  "test_files": [
+   "tests/common.rs",
+   "tests/nushell.rs"
+  ],
+  "src_files": [
+   "src/lib.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-31T18:32:40+08:00",
+  "subject": "feat: add alias completion",
+  "src_churn": 91,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "dfe9e73880b15f16c722e5681e4015265c42b678": {
+  "task": "dfe9e73880b15f16c722e5681e4015265c42b678",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/help.rs"
+  ],
+  "src_files": [
+   "src/output/help_template.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-07T10:35:29-06:00",
+  "subject": "fix(help): Update auto-next-line to use new padding",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c37ab6c205b4723584c8a6569b82b45105c99f0b": {
+  "task": "c37ab6c205b4723584c8a6569b82b45105c99f0b",
+  "target_tests": [
+   "derive"
+  ],
+  "test_files": [
+   "tests/derive/doc_comments_help.rs"
+  ],
+  "src_files": [
+   "src/_derive/mod.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-07T09:41:43-06:00",
+  "subject": "fix(derive): Allow 'long_help' to force populating from doc comment",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "45dcf0ed222e5fdb023f45b50366cf0e3817c907": {
+  "task": "45dcf0ed222e5fdb023f45b50366cf0e3817c907",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/conflicts.rs"
+  ],
+  "src_files": [
+   "src/parser/validator.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-17T19:02:39-05:00",
+  "subject": "fix(parser): Don't make Args `exclusive` with their ArgGroup",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d0dcaac2aba81852b2e3f03ad3390799a9ceac90": {
+  "task": "d0dcaac2aba81852b2e3f03ad3390799a9ceac90",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/groups.rs"
+  ],
+  "src_files": [
+   "src/parser/parser.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-12T07:39:55-05:00",
+  "subject": "fix(parser): Only add ArgGroup to ArgMatches for command-line",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b26c01aa0eea71450577956501f4b467fa0e646b": {
+  "task": "b26c01aa0eea71450577956501f4b467fa0e646b",
+  "target_tests": [
+   "derive"
+  ],
+  "test_files": [
+   "tests/derive/help.rs"
+  ],
+  "src_files": [
+   "src/_derive/mod.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-11T10:29:19-05:00",
+  "subject": "feat(derive): Allow type-less fields",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5017f0d720bcc2d27b8bc91f189e0ec6af9e2ff1": {
+  "task": "5017f0d720bcc2d27b8bc91f189e0ec6af9e2ff1",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/groups.rs"
+  ],
+  "src_files": [
+   "src/parser/validator.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-30T11:18:47-05:00",
+  "subject": "fxi(error): Don't report unrelated groups in requries errors",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "cb04c711055b247e9e3cf1dd0cc77d27806b1bee": {
+  "task": "cb04c711055b247e9e3cf1dd0cc77d27806b1bee",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/groups.rs"
+  ],
+  "src_files": [
+   "src/parser/validator.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-30T10:38:24-05:00",
+  "subject": "fix(error): Don't report unrelated groups in conflict errors",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "3683e2c791f8b8fcfd25a958f2fc5eebde4a52ed": {
+  "task": "3683e2c791f8b8fcfd25a958f2fc5eebde4a52ed",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/posix_compatible.rs"
+  ],
+  "src_files": [
+   "src/builder/debug_asserts.rs",
+   "src/parser/parser.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-28T16:10:02-05:00",
+  "subject": "fix(parser): Allow one-off self-overrides",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "cb1cd6700985add94cb9f6b6c88948007904aa74": {
+  "task": "cb1cd6700985add94cb9f6b6c88948007904aa74",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/flags.rs"
+  ],
+  "src_files": [
+   "src/parser/parser.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-27T09:25:24-05:00",
+  "subject": "fix(error): Include failed arg in usage in --flag=bad-value error",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "12d76d649ad3e66147bf3ef03029e1d1d20f13de": {
+  "task": "12d76d649ad3e66147bf3ef03029e1d1d20f13de",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/flags.rs"
+  ],
+  "src_files": [
+   "src/parser/parser.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-27T09:20:42-05:00",
+  "subject": "fix(error): Include 'Usage:' title in --flag=bad-value error",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "3c9bca5ead286fb250fad210aa024b4a285d6dd4": {
+  "task": "3c9bca5ead286fb250fad210aa024b4a285d6dd4",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/help.rs"
+  ],
+  "src_files": [
+   "src/builder/styled_str.rs",
+   "src/output/help_template.rs",
+   "src/output/textwrap/mod.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-26T11:35:18-05:00",
+  "subject": "fix(help)!: Wrapping is behind wrap_help",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false,
+  "oracle_invalid": "not red on parent in isolated build (DL-011 class)"
+ },
+ "652e71d6166d9beeb6dfd6f4f6c5d1e283d98651": {
+  "task": "652e71d6166d9beeb6dfd6f4f6c5d1e283d98651",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/positionals.rs",
+   "tests/builder/subcommands.rs"
+  ],
+  "src_files": [
+   "src/builder/command.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-22T09:17:56-05:00",
+  "subject": "fix(help)!: Provide styled usage to user",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false,
+  "oracle_invalid": "not red on parent in isolated build (DL-011 class)"
+ },
+ "4674e434935196241e1c3341d9a3e5ec59386de9": {
+  "task": "4674e434935196241e1c3341d9a3e5ec59386de9",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/error.rs"
+  ],
+  "src_files": [
+   "src/error/format.rs",
+   "src/error/mod.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-20T13:40:16-05:00",
+  "subject": "fix(error): Remove RawFormatter",
+  "src_churn": 39,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "90bcb7f75ea1bb52a7c5fab13e36fa365ef8fb6d": {
+  "task": "90bcb7f75ea1bb52a7c5fab13e36fa365ef8fb6d",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/error.rs"
+  ],
+  "src_files": [
+   "src/error/format.rs",
+   "src/lib.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-20T13:37:00-05:00",
+  "subject": "fix(error): Use a non-generic Error alias",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false,
+  "oracle_invalid": "not red on parent in isolated build (DL-011 class)"
+ },
+ "b4788d51f16d21abf17d6ba4de0628e553c21a21": {
+  "task": "b4788d51f16d21abf17d6ba4de0628e553c21a21",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/error.rs"
+  ],
+  "src_files": [
+   "src/error/format.rs",
+   "src/error/mod.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-19T09:43:49-05:00",
+  "subject": "fix(error): Provide a no-context alternative to RichFormatter",
+  "src_churn": 32,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bbbaca2ffebeb5b004a18f26500bfe6a08cb360e": {
+  "task": "bbbaca2ffebeb5b004a18f26500bfe6a08cb360e",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/cargo.rs"
+  ],
+  "src_files": [
+   "src/macros.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-16T15:40:21-05:00",
+  "subject": "perf: Hint to the compiler when once_cell isn't needed",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false,
+  "oracle_invalid": "not red on parent in isolated build (DL-011 class)"
+ },
+ "acb0fb780978d30b70e2d3a3921352e45677f98b": {
+  "task": "acb0fb780978d30b70e2d3a3921352e45677f98b",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/version.rs"
+  ],
+  "src_files": [
+   "src/builder/command.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-16T11:54:02-05:00",
+  "subject": "fix: Generalize `mut_arg`, like `mut_subcommand`",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b7d13dfb88d6517843ec71630e8c0ef44e20b8ad": {
+  "task": "b7d13dfb88d6517843ec71630e8c0ef44e20b8ad",
+  "target_tests": [
+   "builder",
+   "derive"
+  ],
+  "test_files": [
+   "tests/builder/app_settings.rs",
+   "tests/derive/subcommands.rs"
+  ],
+  "src_files": [
+   "src/builder/command.rs",
+   "src/mkeymap.rs",
+   "src/parser/parser.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-15T10:27:16-05:00",
+  "subject": "fix(parser): Prefer invalid subcommands over invalid args",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f68500d9fd13509fa1f5e93f5bc0c24aebd7c500": {
+  "task": "f68500d9fd13509fa1f5e93f5bc0c24aebd7c500",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/env.rs"
+  ],
+  "src_files": [
+   "src/builder/arg.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-13T14:55:12-05:00",
+  "subject": "fix: Replace Arg::env with Arg::env_os",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false,
+  "oracle_invalid": "not red on parent in isolated build (DL-011 class)"
+ },
+ "56fe50eab8a20d79af22db42a2f8a979d3df44cf": {
+  "task": "56fe50eab8a20d79af22db42a2f8a979d3df44cf",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/help.rs"
+  ],
+  "src_files": [
+   "src/output/help.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-07T16:37:27-05:00",
+  "subject": "fix(help): I think this fixes a bug?",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bbb6c38bad671d3818d37f17526b965d8358ceaa": {
+  "task": "bbb6c38bad671d3818d37f17526b965d8358ceaa",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/help.rs"
+  ],
+  "src_files": [
+   "src/output/help.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-07T13:30:06-05:00",
+  "subject": "fix(help):Be dense on short next line help",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "1258f3e5f6d65683947c0dbca5e6b50dd0e73982": {
+  "task": "1258f3e5f6d65683947c0dbca5e6b50dd0e73982",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/app_settings.rs"
+  ],
+  "src_files": [
+   "src/builder/command.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-07T07:24:42-05:00",
+  "subject": "fix: Deprecate `Command::allow_negative_numbers`",
+  "src_churn": 34,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d45e4be14bc77562deac740e7a287f26fd2204ac": {
+  "task": "d45e4be14bc77562deac740e7a287f26fd2204ac",
+  "target_tests": [
+   "builder",
+   "derive"
+  ],
+  "test_files": [
+   "tests/builder/app_settings.rs",
+   "tests/builder/positionals.rs",
+   "tests/derive/non_literal_attributes.rs"
+  ],
+  "src_files": [
+   "src/builder/command.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-06T17:12:17-05:00",
+  "subject": "fix(derive): Deprecate Command::allow_hyphen_values",
+  "src_churn": 40,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7a2bbca62bf245970866d3de76293de435dc8dbe": {
+  "task": "7a2bbca62bf245970866d3de76293de435dc8dbe",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/app_settings.rs"
+  ],
+  "src_files": [
+   "src/builder/command.rs",
+   "src/parser/parser.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-09-06T17:11:58-05:00",
+  "subject": "fix(derive): Make Command::allow_hyphen_values forward to Arg",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fd9a5a1d502523d0bb61b4f19e135e5403c057e0": {
+  "task": "fd9a5a1d502523d0bb61b4f19e135e5403c057e0",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/app_settings.rs"
+  ],
+  "src_files": [
+   "src/parser/parser.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-07T18:50:08-07:00",
+  "subject": "fix(parser): Arg::allow_hyphen_values correctly handles long args in first pos",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "671914b590910c771fbd0cb2acc8ab31c040f2b2": {
+  "task": "671914b590910c771fbd0cb2acc8ab31c040f2b2",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/flags.rs",
+   "tests/builder/opts.rs",
+   "tests/builder/possible_values.rs",
+   "tests/builder/subcommands.rs"
+  ],
+  "src_files": [
+   "src/error/format.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-31T16:02:14-05:00",
+  "subject": "fix(error): Make whitespace consistent with self/help",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "439c9e7a91158873342fb9dd38720ac6d6c15ab5": {
+  "task": "439c9e7a91158873342fb9dd38720ac6d6c15ab5",
+  "target_tests": [
+   "builder",
+   "derive"
+  ],
+  "test_files": [
+   "tests/builder/utils.rs",
+   "tests/derive/utils.rs"
+  ],
+  "src_files": [
+   "src/builder/command.rs",
+   "src/output/help.rs"
+  ],
+  "pool": "standard",
+  "authored": "2022-08-31T15:42:59-05:00",
+  "subject": "feat(help): Expose clap's indentation to help_template",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9d1de20787f9f8ced9a975dce7123d0edf74f407": {
+  "task": "9d1de20787f9f8ced9a975dce7123d0edf74f407",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/action.rs",
+   "tests/builder/multiple_values.rs"
+  ],
+  "src_files": [
+   "src/builder/action.rs",
+   "src/builder/arg.rs",
+   "src/builder/command.rs",
+   "src/derive.rs",
+   "src/parser/matches/arg_matches.rs"
+  ],
+  "pool": "hard",
+  "authored": "2023-01-23T09:23:38-06:00",
+  "subject": "docs: Prefer `get_flag` over `get_one::<bool>`",
+  "src_churn": 68,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6b62c82fe29ff9c7a8cd989a75ab4f7f2ad3144c": {
+  "task": "6b62c82fe29ff9c7a8cd989a75ab4f7f2ad3144c",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/app_settings.rs"
+  ],
+  "src_files": [
+   "src/error/context.rs",
+   "src/error/format.rs",
+   "src/error/mod.rs",
+   "src/parser/validator.rs"
+  ],
+  "pool": "hard",
+  "authored": "2022-11-15T10:17:16-06:00",
+  "subject": "feat(parser): Show available subcommands when one is missing",
+  "src_churn": 39,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f8053fcedbbf05afe1dad0086b5e6876120f9531": {
+  "task": "f8053fcedbbf05afe1dad0086b5e6876120f9531",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/error.rs",
+   "tests/builder/opts.rs",
+   "tests/builder/subcommands.rs"
+  ],
+  "src_files": [
+   "src/error/context.rs",
+   "src/error/format.rs",
+   "src/error/mod.rs",
+   "src/parser/parser.rs"
+  ],
+  "pool": "hard",
+  "authored": "2022-10-13T10:17:11-05:00",
+  "subject": "fix(error): Don't suggest '--' when it doesn't help",
+  "src_churn": 39,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c165b601acb4232b2748f8f455d3df4cf458f2c9": {
+  "task": "c165b601acb4232b2748f8f455d3df4cf458f2c9",
+  "target_tests": [
+   "examples",
+   "ui"
+  ],
+  "test_files": [
+   "tests/examples.rs",
+   "tests/ui.rs"
+  ],
+  "src_files": [
+   "src/_features.rs",
+   "src/builder/command.rs",
+   "src/builder/os_str.rs",
+   "src/builder/resettable.rs",
+   "src/builder/str.rs",
+   "src/util/id.rs"
+  ],
+  "pool": "hard",
+  "authored": "2022-09-16T11:52:55-05:00",
+  "subject": "perf: Switch to `&'static str` by default",
+  "src_churn": 86,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ef5f9f956ac1375532f28f679ce91c0560c2bbeb": {
+  "task": "ef5f9f956ac1375532f28f679ce91c0560c2bbeb",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/error.rs"
+  ],
+  "src_files": [
+   "src/builder/mod.rs",
+   "src/builder/styled_str.rs",
+   "src/error/context.rs",
+   "src/error/format.rs",
+   "src/error/mod.rs"
+  ],
+  "pool": "hard",
+  "authored": "2022-08-24T12:26:56-05:00",
+  "subject": "perf(error): Allow custmizing formatting",
+  "src_churn": 920,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "91e55c6b9c7f6d36c359e2f7460e5be83c370694": {
+  "task": "91e55c6b9c7f6d36c359e2f7460e5be83c370694",
+  "target_tests": [
+   "builder",
+   "derive"
+  ],
+  "test_files": [
+   "tests/builder/default_vals.rs",
+   "tests/derive/default_value.rs"
+  ],
+  "src_files": [
+   "src/builder/arg.rs",
+   "src/builder/debug_asserts.rs",
+   "src/builder/mod.rs",
+   "src/builder/resettable.rs",
+   "src/lib.rs",
+   "src/output/help.rs",
+   "src/parser/parser.rs",
+   "src/util/os_str.rs"
+  ],
+  "pool": "hard",
+  "authored": "2022-08-15T16:18:53-05:00",
+  "subject": "fix: Switch OsStr's in builder to owned/borrowed type",
+  "src_churn": 203,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "09288b4bb9010424d54c3de56934401453a98a71": {
+  "task": "09288b4bb9010424d54c3de56934401453a98a71",
+  "target_tests": [
+   "builder"
+  ],
+  "test_files": [
+   "tests/builder/action.rs",
+   "tests/builder/default_vals.rs",
+   "tests/builder/require.rs"
+  ],
+  "src_files": [
+   "src/builder/arg.rs",
+   "src/builder/arg_group.rs",
+   "src/builder/arg_predicate.rs",
+   "src/builder/mod.rs"
+  ],
+  "pool": "hard",
+  "authored": "2022-08-16T11:52:10-05:00",
+  "subject": "fix!: Require/default conditional APIs are more explicit",
+  "src_churn": 146,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "43e961d24f7c6d1162d207a33fd498c930b9f5eb": {
+  "task": "43e961d24f7c6d1162d207a33fd498c930b9f5eb",
+  "target_tests": [
+   "builder",
+   "derive"
+  ],
+  "test_files": [
+   "tests/builder/utf8.rs",
+   "tests/derive/flags.rs",
+   "tests/derive/skip.rs",
+   "tests/derive/subcommands.rs"
+  ],
+  "src_files": [
+   "src/builder/arg.rs",
+   "src/builder/debug_asserts.rs",
+   "src/error/kind.rs",
+   "src/output/usage.rs"
+  ],
+  "pool": "hard",
+  "authored": "2022-08-11T16:07:58-05:00",
+  "subject": "style: Address clippy",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ }
+}

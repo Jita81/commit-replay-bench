@@ -1,0 +1,2601 @@
+{
+ "ed7672b9312318b3b90ffb743e2b145185fc21e3": {
+  "task": "ed7672b9312318b3b90ffb743e2b145185fc21e3",
+  "target_tests": [
+   "testing/test_assertion.py"
+  ],
+  "test_files": [
+   "testing/test_assertion.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/_typing.py",
+   "src/_pytest/assertion/truncate.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-28T10:34:29+02:00",
+  "subject": "[refactor] Introduce a TruncationBudget for assertion truncation (#14652)",
+  "src_churn": 53,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3fa8d9b15b733aadb8a043cca3e98447804e1f28": {
+  "task": "3fa8d9b15b733aadb8a043cca3e98447804e1f28",
+  "target_tests": [
+   "testing/test_assertion.py"
+  ],
+  "test_files": [
+   "testing/test_assertion.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/compare_text.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-27T10:29:06-04:00",
+  "subject": "Fix off-by-one in trailing assertion diff skipping (#14637) (#14639)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7660d7d5ce47cc4fcf3f5672954484744c9b59c8": {
+  "task": "7660d7d5ce47cc4fcf3f5672954484744c9b59c8",
+  "target_tests": [
+   "testing/test_config.py"
+  ],
+  "test_files": [
+   "testing/test_config.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/findpaths.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-26T19:49:28+05:30",
+  "subject": "Error on top-level options in pytest.toml (#14646)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9db664649af9b24d496fb7ad482b66c0c341a28c": {
+  "task": "9db664649af9b24d496fb7ad482b66c0c341a28c",
+  "target_tests": [
+   "testing/test_assertion.py"
+  ],
+  "test_files": [
+   "testing/test_assertion.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/_guards.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-25T22:23:44+09:00",
+  "subject": "assertion: add support for `dict.keys()` and `dict.values()` types in assertion explanations (as sets)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c95e8a759fda80e97097d4776cfca2bfab9f9c77": {
+  "task": "c95e8a759fda80e97097d4776cfca2bfab9f9c77",
+  "target_tests": [
+   "testing/python/approx.py"
+  ],
+  "test_files": [
+   "testing/python/approx.py"
+  ],
+  "src_files": [
+   "src/_pytest/python_api.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-20T23:04:57+03:00",
+  "subject": "approx: improve typing",
+  "src_churn": 178,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d2466e3a9655f75d25719bcc4510cdbcb39cf10d": {
+  "task": "d2466e3a9655f75d25719bcc4510cdbcb39cf10d",
+  "target_tests": [
+   "testing/io/test_pprint.py"
+  ],
+  "test_files": [
+   "testing/io/test_pprint.py"
+  ],
+  "src_files": [
+   "src/_pytest/_io/pprint.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-21T06:49:47+02:00",
+  "subject": "[perf] Make ``PrettyPrinter`` format lazily so output can be budget-capped (#14588)",
+  "src_churn": 341,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f36b07a432100b55e4c0fd768b1d9339dd7c3415": {
+  "task": "f36b07a432100b55e4c0fd768b1d9339dd7c3415",
+  "target_tests": [
+   "testing/test_conftest.py"
+  ],
+  "test_files": [
+   "testing/test_conftest.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-18T13:46:28+02:00",
+  "subject": "config: fix regression causing <invocation_dir>/tests* conftests to not be initial",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c24de8840a0a3c1fd9ecbe334b05d0d496b25014": {
+  "task": "c24de8840a0a3c1fd9ecbe334b05d0d496b25014",
+  "target_tests": [
+   "testing/python/raises_group.py"
+  ],
+  "test_files": [
+   "testing/python/raises_group.py"
+  ],
+  "src_files": [
+   "src/_pytest/raises.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-20T05:26:13+03:00",
+  "subject": "raises: fix stale loop variable in RaisesGroup error reporting",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "cf76861fa56201a09578cb534c7df8eb619db0d2": {
+  "task": "cf76861fa56201a09578cb534c7df8eb619db0d2",
+  "target_tests": [
+   "testing/python/metafunc.py"
+  ],
+  "test_files": [
+   "testing/python/metafunc.py"
+  ],
+  "src_files": [
+   "src/_pytest/python.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-17T11:45:30+03:00",
+  "subject": "python: minor refactor of `_find_parametrized_scope`",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "03116d3bca115f02202b6837714d3cbab7273b11": {
+  "task": "03116d3bca115f02202b6837714d3cbab7273b11",
+  "target_tests": [
+   "testing/typing_checks.py"
+  ],
+  "test_files": [
+   "testing/typing_checks.py"
+  ],
+  "src_files": [
+   "src/_pytest/mark/structures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-16T14:36:26+03:00",
+  "subject": "mark/structures: undo non-collection-argvalues type-check time deprecation due to mypy bug",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3a85b5ead0753e50b7689c489235237acfa7b94e": {
+  "task": "3a85b5ead0753e50b7689c489235237acfa7b94e",
+  "target_tests": [
+   "testing/python/fixtures.py"
+  ],
+  "test_files": [
+   "testing/python/fixtures.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-14T11:27:41+03:00",
+  "subject": "Revert \"fixtures: remove no longer needed special case in `pytest_generate_tests`\"",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e7c732299e4326c1ca72d5a13a2a3d69aec35ea6": {
+  "task": "e7c732299e4326c1ca72d5a13a2a3d69aec35ea6",
+  "target_tests": [
+   "testing/test_doctest.py"
+  ],
+  "test_files": [
+   "testing/test_doctest.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-01T12:02:24+09:00",
+  "subject": "fixtures: remove holderobjseen check from parsefactories",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "547eb136142d4952515367625f6830eec5ec4c3c": {
+  "task": "547eb136142d4952515367625f6830eec5ec4c3c",
+  "target_tests": [
+   "testing/deprecated_test.py",
+   "testing/python/metafunc.py"
+  ],
+  "test_files": [
+   "testing/deprecated_test.py",
+   "testing/python/metafunc.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py",
+   "src/_pytest/python.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-06T11:15:49+03:00",
+  "subject": "fixtures: deprecate global None fixture visibility",
+  "src_churn": 88,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "197bc7148ac2fed5bad1ab78b0a288251f5a650d": {
+  "task": "197bc7148ac2fed5bad1ab78b0a288251f5a650d",
+  "target_tests": [
+   "testing/deprecated_test.py"
+  ],
+  "test_files": [
+   "testing/deprecated_test.py"
+  ],
+  "src_files": [
+   "src/_pytest/deprecated.py",
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-29T21:38:16+03:00",
+  "subject": "fixtures: deprecate FixtureDef.has_location",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7186cd46553a14bfc1ee0e6e77e5daa6c3882bd4": {
+  "task": "7186cd46553a14bfc1ee0e6e77e5daa6c3882bd4",
+  "target_tests": [
+   "testing/python/fixtures.py"
+  ],
+  "test_files": [
+   "testing/python/fixtures.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-29T21:32:19+03:00",
+  "subject": "fixtures: order fixture override chains by visibility",
+  "src_churn": 50,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "784cd9aebf8aa2daae417fba00490e4370170cdf": {
+  "task": "784cd9aebf8aa2daae417fba00490e4370170cdf",
+  "target_tests": [
+   "testing/code/test_excinfo.py"
+  ],
+  "test_files": [
+   "testing/code/test_excinfo.py"
+  ],
+  "src_files": [
+   "src/_pytest/_code/code.py",
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-04T19:14:02+03:00",
+  "subject": "code: rename `FormattedExcinfo` -> `ExceptionInfoFormatter`",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f976bb67b293cf358e2fbd0352638e2f5a9da8e0": {
+  "task": "f976bb67b293cf358e2fbd0352638e2f5a9da8e0",
+  "target_tests": [
+   "testing/code/test_code.py"
+  ],
+  "test_files": [
+   "testing/code/test_code.py"
+  ],
+  "src_files": [
+   "src/_pytest/_code/code.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-30T19:49:42+08:00",
+  "subject": "Fix Code.getargs() treating co_flags bitmask values as counts (#14493)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "4748bb15b9053a791c04783d4d84eba512c7cf79": {
+  "task": "4748bb15b9053a791c04783d4d84eba512c7cf79",
+  "target_tests": [
+   "testing/test_junitxml.py"
+  ],
+  "test_files": [
+   "testing/test_junitxml.py"
+  ],
+  "src_files": [
+   "src/_pytest/junitxml.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-28T22:00:24+08:00",
+  "subject": "junitxml: fix supplementary plane characters incorrectly escaped (#14484)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c9d940f12ed381320f7b21ca8f0987190cfff934": {
+  "task": "c9d940f12ed381320f7b21ca8f0987190cfff934",
+  "target_tests": [
+   "testing/test_unraisableexception.py"
+  ],
+  "test_files": [
+   "testing/test_unraisableexception.py"
+  ],
+  "src_files": [
+   "src/_pytest/unraisableexception.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-27T12:38:09-05:00",
+  "subject": "Surface filter-promoted unraisable warnings directly (#14263) (#14499)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e2dbcb27f9d44ec510dae964672499c93f78bbc1": {
+  "task": "e2dbcb27f9d44ec510dae964672499c93f78bbc1",
+  "target_tests": [
+   "testing/test_junitxml.py"
+  ],
+  "test_files": [
+   "testing/test_junitxml.py"
+  ],
+  "src_files": [
+   "src/_pytest/junitxml.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T19:27:34+05:30",
+  "subject": "Fix junitxml count for teardown errors (#14501)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "438c01d8b0d4d42742aa9bc9ee1fef372fe242e6": {
+  "task": "438c01d8b0d4d42742aa9bc9ee1fef372fe242e6",
+  "target_tests": [
+   "testing/test_config.py"
+  ],
+  "test_files": [
+   "testing/test_config.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/deprecated.py",
+   "src/pytest/__main__.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T10:14:57+02:00",
+  "subject": "deprecate: pytest.console_main() for removal in pytest 10",
+  "src_churn": 31,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f3051d2b763082b92253a8d84a8616d0223aec47": {
+  "task": "f3051d2b763082b92253a8d84a8616d0223aec47",
+  "target_tests": [
+   "testing/test_config.py"
+  ],
+  "test_files": [
+   "testing/test_config.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/config/argparsing.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-24T09:15:16+02:00",
+  "subject": "refactor: address review feedback on prog name implementation",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ce2bc5744dd712e3facc0a3fe51f51318e5b1842": {
+  "task": "ce2bc5744dd712e3facc0a3fe51f51318e5b1842",
+  "target_tests": [
+   "testing/test_config.py"
+  ],
+  "test_files": [
+   "testing/test_config.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-18T11:20:18+01:00",
+  "subject": "fix: show correct program name in argparse help/errors",
+  "src_churn": 41,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "1abe84a29554e72f57ac2160d8fbaaafade3bb8c": {
+  "task": "1abe84a29554e72f57ac2160d8fbaaafade3bb8c",
+  "target_tests": [
+   "testing/test_mark.py"
+  ],
+  "test_files": [
+   "testing/test_mark.py"
+  ],
+  "src_files": [
+   "src/_pytest/mark/structures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T06:59:34-07:00",
+  "subject": "Improve error message for module-level __getattr__ issues (#14170)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "47ed628df2b39ff114c069e70a5cc4ccbdc89b97": {
+  "task": "47ed628df2b39ff114c069e70a5cc4ccbdc89b97",
+  "target_tests": [
+   "testing/test_monkeypatch.py"
+  ],
+  "test_files": [
+   "testing/test_monkeypatch.py"
+  ],
+  "src_files": [
+   "src/_pytest/monkeypatch.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T09:52:56-04:00",
+  "subject": "Fix monkeypatch.setattr() teardown crash on failed setattr (#14161) (#14209)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "62ca642621c0888b044ac5f663c78e86de063887": {
+  "task": "62ca642621c0888b044ac5f663c78e86de063887",
+  "target_tests": [
+   "testing/test_unittest.py"
+  ],
+  "test_files": [
+   "testing/test_unittest.py"
+  ],
+  "src_files": [
+   "src/_pytest/unittest.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T09:24:47-04:00",
+  "subject": "Fix autouse fixtures running in @unittest.skip classes (#14210)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ec0f6d01aef6f324b33be1ba64105edccf537c4b": {
+  "task": "ec0f6d01aef6f324b33be1ba64105edccf537c4b",
+  "target_tests": [
+   "testing/test_assertion.py"
+  ],
+  "test_files": [
+   "testing/test_assertion.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/util.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-23T16:09:18+03:30",
+  "subject": "Improve assertion diffs for mappings (#14504)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "46478fad53774fad76d829f51679824d0131a0b3": {
+  "task": "46478fad53774fad76d829f51679824d0131a0b3",
+  "target_tests": [
+   "testing/test_conftest.py"
+  ],
+  "test_files": [
+   "testing/test_conftest.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-22T21:18:01+02:00",
+  "subject": "fix: assign conftest fixtures to Directory nodes during collection",
+  "src_churn": 198,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "543b11f2534bb0edc85b86767ed239da9c5bd140": {
+  "task": "543b11f2534bb0edc85b86767ed239da9c5bd140",
+  "target_tests": [
+   "testing/python/raises.py"
+  ],
+  "test_files": [
+   "testing/python/raises.py"
+  ],
+  "src_files": [
+   "src/_pytest/raises.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-19T15:45:10-04:00",
+  "subject": "Fix -v hint in raises match diff not working (#14226)",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d6dbe52bda18fe2cb63c3c9060d7ef8597465655": {
+  "task": "d6dbe52bda18fe2cb63c3c9060d7ef8597465655",
+  "target_tests": [
+   "testing/test_assertion.py"
+  ],
+  "test_files": [
+   "testing/test_assertion.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/__init__.py",
+   "src/_pytest/assertion/util.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-18T17:18:31+01:00",
+  "subject": "New assertion_text_diff_style option for text diff blocks (#14425)",
+  "src_churn": 116,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8571cf8d44a390c4c61f82c9b5a825ae393b1203": {
+  "task": "8571cf8d44a390c4c61f82c9b5a825ae393b1203",
+  "target_tests": [
+   "testing/deprecated_test.py"
+  ],
+  "test_files": [
+   "testing/deprecated_test.py"
+  ],
+  "src_files": [
+   "src/_pytest/deprecated.py",
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-14T16:47:53+03:00",
+  "subject": "Deprecate `self` in class-scoped fixtures on base classes (#14071)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "984cabfaccf8aa69fe49097ed3d07bd60d05f240": {
+  "task": "984cabfaccf8aa69fe49097ed3d07bd60d05f240",
+  "target_tests": [
+   "testing/test_mark_expression.py"
+  ],
+  "test_files": [
+   "testing/test_mark_expression.py"
+  ],
+  "src_files": [
+   "src/_pytest/mark/expression.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-13T23:42:37+08:00",
+  "subject": "mark/expression: fix scanner - search for backslash in string value, not entire input (#14475)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "2c555d62fa2c51ccb0c4c1cdd6243149ce4ffa97": {
+  "task": "2c555d62fa2c51ccb0c4c1cdd6243149ce4ffa97",
+  "target_tests": [
+   "testing/python/approx.py"
+  ],
+  "test_files": [
+   "testing/python/approx.py"
+  ],
+  "src_files": [
+   "src/_pytest/python_api.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-12T17:24:12+08:00",
+  "subject": "fix approx rel for timedelta: accept float, compute rel * expected (#14466)",
+  "src_churn": 43,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d81a115afc5f4e5f1df49f6a0ebb9a5ee58be70e": {
+  "task": "d81a115afc5f4e5f1df49f6a0ebb9a5ee58be70e",
+  "target_tests": [
+   "testing/test_pastebin.py"
+  ],
+  "test_files": [
+   "testing/test_pastebin.py"
+  ],
+  "src_files": [
+   "src/_pytest/deprecated.py",
+   "src/_pytest/pastebin.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-10T22:59:54+03:00",
+  "subject": "pastebin: deprecate `--pastebin`",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a481f264d70ac3d053d5f7408f4ac1ec439d0c2f": {
+  "task": "a481f264d70ac3d053d5f7408f4ac1ec439d0c2f",
+  "target_tests": [
+   "testing/test_config.py",
+   "testing/test_mark.py"
+  ],
+  "test_files": [
+   "testing/test_config.py",
+   "testing/test_mark.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-08T15:40:31-05:00",
+  "subject": "Fix strict options from addopts",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7e6161c68579eb58ecceaf8c6b6f6b1b2f46c28a": {
+  "task": "7e6161c68579eb58ecceaf8c6b6f6b1b2f46c28a",
+  "target_tests": [
+   "testing/logging/test_fixture.py",
+   "testing/logging/test_reporting.py"
+  ],
+  "test_files": [
+   "testing/logging/test_fixture.py",
+   "testing/logging/test_reporting.py"
+  ],
+  "src_files": [
+   "src/_pytest/logging.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-10T11:42:36+03:00",
+  "subject": "logging: also capture logs from non-propagating loggers",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "07dbfab72000c076352edc41d0cbec7a77c6e376": {
+  "task": "07dbfab72000c076352edc41d0cbec7a77c6e376",
+  "target_tests": [
+   "testing/python/approx.py"
+  ],
+  "test_files": [
+   "testing/python/approx.py"
+  ],
+  "src_files": [
+   "src/_pytest/python_api.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-08T08:57:43+01:00",
+  "subject": "Add datetime/timedelta support to pytest.approx (#8395) (#14414)",
+  "src_churn": 91,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "84ae27e4710af45cc307f8c0c25259e917090219": {
+  "task": "84ae27e4710af45cc307f8c0c25259e917090219",
+  "target_tests": [
+   "testing/test_parseopt.py"
+  ],
+  "test_files": [
+   "testing/test_parseopt.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/argparsing.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-08T01:50:25+08:00",
+  "subject": "Fix Argument.__repr__ crash when _action is not initialized (#14429)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "0263914bf9cec5677783cda7557717e4a9660452": {
+  "task": "0263914bf9cec5677783cda7557717e4a9660452",
+  "target_tests": [
+   "testing/test_tmpdir.py"
+  ],
+  "test_files": [
+   "testing/test_tmpdir.py"
+  ],
+  "src_files": [
+   "src/_pytest/pathlib.py",
+   "src/_pytest/tmpdir.py"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-27T01:39:21+09:00",
+  "subject": "tmpdir: stop relying on atexit and add integration tests for tmpdir fixture",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "deb9f5f79b0537a5e80cc26dd11bfb217e263a72": {
+  "task": "deb9f5f79b0537a5e80cc26dd11bfb217e263a72",
+  "target_tests": [
+   "testing/python/fixtures.py",
+   "testing/test_setuponly.py"
+  ],
+  "test_files": [
+   "testing/python/fixtures.py",
+   "testing/test_setuponly.py"
+  ],
+  "src_files": [
+   "src/_pytest/runner.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-01T14:09:06+02:00",
+  "subject": "Add a space after the test name with --setup-show (#14430)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "4ee157d2da975f4c59f24ab99b2f885c3ba96d16": {
+  "task": "4ee157d2da975f4c59f24ab99b2f885c3ba96d16",
+  "target_tests": [
+   "testing/test_assertion.py",
+   "testing/test_assertrewrite.py"
+  ],
+  "test_files": [
+   "testing/test_assertion.py",
+   "testing/test_assertrewrite.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-13T22:43:54+03:00",
+  "subject": "assertion/rewrite: fix test crash on assert failure with `terminalreporter` disabled",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e178744105e1493a54377f93172aa5933ac70d3f": {
+  "task": "e178744105e1493a54377f93172aa5933ac70d3f",
+  "target_tests": [
+   "testing/test_warnings.py"
+  ],
+  "test_files": [
+   "testing/test_warnings.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-26T17:00:16+08:00",
+  "subject": "config: fix duplicate values in Config.known_args_namespace for append actions",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "560b67893a11f37502024c6741614652ab27b2db": {
+  "task": "560b67893a11f37502024c6741614652ab27b2db",
+  "target_tests": [
+   "testing/typing_checks.py"
+  ],
+  "test_files": [
+   "testing/typing_checks.py"
+  ],
+  "src_files": [
+   "src/_pytest/mark/structures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-01T18:46:53Z",
+  "subject": "Allow pytest.HIDDEN_PARAM in ids argument of pytest.mark.parametrize typing",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cd7592c41c40ebc9663c2984447d72e95c731bda": {
+  "task": "cd7592c41c40ebc9663c2984447d72e95c731bda",
+  "target_tests": [
+   "testing/python/raises.py"
+  ],
+  "test_files": [
+   "testing/python/raises.py"
+  ],
+  "src_files": [
+   "src/_pytest/raises.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-26T00:21:16-07:00",
+  "subject": "raises: suppress exception cause in raises match failures (#14391)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "a38b20d79039d50c504320b5d4d790c61893a90e": {
+  "task": "a38b20d79039d50c504320b5d4d790c61893a90e",
+  "target_tests": [
+   "testing/python/raises.py"
+  ],
+  "test_files": [
+   "testing/python/raises.py"
+  ],
+  "src_files": [
+   "src/_pytest/raises.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-26T02:54:10+08:00",
+  "subject": "raises: is_fully_escaped does not handle consecutive backslashes correctly (#14393)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d72943a57266ef368fb3498a3fd136cbf1c7aee6": {
+  "task": "d72943a57266ef368fb3498a3fd136cbf1c7aee6",
+  "target_tests": [
+   "testing/test_helpconfig.py"
+  ],
+  "test_files": [
+   "testing/test_helpconfig.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-21T08:54:17-03:00",
+  "subject": "Fix `-V` to show version information (#14382)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "90465694d3501267decade1ac0be988999940957": {
+  "task": "90465694d3501267decade1ac0be988999940957",
+  "target_tests": [
+   "testing/test_warnings.py"
+  ],
+  "test_files": [
+   "testing/test_warnings.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/main.py",
+   "src/_pytest/terminal.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-16T07:59:31-04:00",
+  "subject": "Add `--max-warnings` option to fail test runs (#14372)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7bb1aa6df90bcb1bca9060e34ab984d4586edd8f": {
+  "task": "7bb1aa6df90bcb1bca9060e34ab984d4586edd8f",
+  "target_tests": [
+   "testing/python/raises.py",
+   "testing/python/raises_group.py"
+  ],
+  "test_files": [
+   "testing/python/raises.py",
+   "testing/python/raises_group.py"
+  ],
+  "src_files": [
+   "src/_pytest/raises.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-13T17:17:22+02:00",
+  "subject": "Style: Use type.__name__ in raises error messages for consistency (#13862)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "338851a980a1255d7ff3799e13fa35200f7392e0": {
+  "task": "338851a980a1255d7ff3799e13fa35200f7392e0",
+  "target_tests": [
+   "testing/test_runner.py"
+  ],
+  "test_files": [
+   "testing/test_runner.py"
+  ],
+  "src_files": [
+   "src/_pytest/runner.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-07-30T10:51:23+10:00",
+  "subject": "runner: correctly cleanup item _request/funcargs if an exception was reraised during call (e.g. KeyboardInterrupt)",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "166a857f3a6375e72b9f4c65daf4d66f2e7d4ec7": {
+  "task": "166a857f3a6375e72b9f4c65daf4d66f2e7d4ec7",
+  "target_tests": [
+   "testing/test_pathlib.py"
+  ],
+  "test_files": [
+   "testing/test_pathlib.py"
+  ],
+  "src_files": [
+   "src/_pytest/pathlib.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-11T00:22:18+03:00",
+  "subject": "pathlib: remove `module_location` parameter of `_import_module_using_spec`",
+  "src_churn": 23,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "eff72f75e6f5b2ed95ba5ff29400f0e237053dc1": {
+  "task": "eff72f75e6f5b2ed95ba5ff29400f0e237053dc1",
+  "target_tests": [
+   "testing/python/show_fixtures_per_test.py"
+  ],
+  "test_files": [
+   "testing/python/show_fixtures_per_test.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-17T16:24:20+11:00",
+  "subject": "fixtures: exclude direct-param fixtures from --fixtures-per-test output",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6d03e6f74c0ba1ea4d1b3d194d045b3939dd0c94": {
+  "task": "6d03e6f74c0ba1ea4d1b3d194d045b3939dd0c94",
+  "target_tests": [
+   "testing/python/metafunc.py"
+  ],
+  "test_files": [
+   "testing/python/metafunc.py"
+  ],
+  "src_files": [
+   "src/_pytest/python.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-09T14:26:01+03:00",
+  "subject": "python: add a DirectParamFixtureDef subclass to mark direct-parametrization helper fixtures",
+  "src_churn": 62,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4722f2472dfb2dad48420cc22e24cd06256ac7bc": {
+  "task": "4722f2472dfb2dad48420cc22e24cd06256ac7bc",
+  "target_tests": [
+   "testing/example_scripts/fixtures/test_getfixturevalue_dynamic.py",
+   "testing/python/fixtures.py"
+  ],
+  "test_files": [
+   "testing/example_scripts/fixtures/test_getfixturevalue_dynamic.py",
+   "testing/python/fixtures.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-08T14:55:18+03:00",
+  "subject": "fixtures: change static fixture closure order fully to DFS",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "920b9c44785662e1f073190c9848d910cd3cccf7": {
+  "task": "920b9c44785662e1f073190c9848d910cd3cccf7",
+  "target_tests": [
+   "testing/python/fixtures.py"
+  ],
+  "test_files": [
+   "testing/python/fixtures.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-08T13:18:48+03:00",
+  "subject": "fixtures: fix parametrization losing (static) transitive dependencies from overridden fixtures",
+  "src_churn": 92,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7161cfec0da7ecbbbf136f7176e90ec36288c935": {
+  "task": "7161cfec0da7ecbbbf136f7176e90ec36288c935",
+  "target_tests": [
+   "testing/test_tmpdir.py"
+  ],
+  "test_files": [
+   "testing/test_tmpdir.py"
+  ],
+  "src_files": [
+   "src/_pytest/tmpdir.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-31T16:58:20+03:00",
+  "subject": "tmpdir: fix insecure temporary directory vulnerability (CVE-2025-71176)",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "bc57e69aaa01ae0271463f3cd85e8388d16da55e": {
+  "task": "bc57e69aaa01ae0271463f3cd85e8388d16da55e",
+  "target_tests": [
+   "testing/test_recwarn.py"
+  ],
+  "test_files": [
+   "testing/test_recwarn.py"
+  ],
+  "src_files": [
+   "src/_pytest/recwarn.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-27T03:52:15+09:00",
+  "subject": "recwarn: improved `warns(match=...)` error message on regex mismatch (closes #11225) (#14310)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "1613a12c2948ec22e4703387e97ff4acf172e66c": {
+  "task": "1613a12c2948ec22e4703387e97ff4acf172e66c",
+  "target_tests": [
+   "testing/python/raises.py"
+  ],
+  "test_files": [
+   "testing/python/raises.py"
+  ],
+  "src_files": [
+   "src/_pytest/raises.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-20T05:27:57+03:00",
+  "subject": "raises: fix regex escaping warning not considering `|` as needs escaping",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "10929dcd8ac8484331be9f686a85ce02d09fefdf": {
+  "task": "10929dcd8ac8484331be9f686a85ce02d09fefdf",
+  "target_tests": [
+   "testing/test_runner.py"
+  ],
+  "test_files": [
+   "testing/test_runner.py"
+  ],
+  "src_files": [
+   "src/_pytest/outcomes.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-15T13:26:12+02:00",
+  "subject": "outcomes: remove deprecated `importorskip` `ImportError` behavior",
+  "src_churn": 43,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e96f81f4a651a89e02ae6475882c974bd212b05e": {
+  "task": "e96f81f4a651a89e02ae6475882c974bd212b05e",
+  "target_tests": [
+   "testing/python/fixtures.py"
+  ],
+  "test_files": [
+   "testing/python/fixtures.py"
+  ],
+  "src_files": [
+   "src/_pytest/deprecated.py",
+   "src/_pytest/fixtures.py",
+   "src/_pytest/runner.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-14T23:29:27+02:00",
+  "subject": "fixtures: deprecate calling `request.getfixturevalue()` during teardown",
+  "src_churn": 42,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "719f1ec97ef6a1a3c622e778aeab4c3f4c4514ac": {
+  "task": "719f1ec97ef6a1a3c622e778aeab4c3f4c4514ac",
+  "target_tests": [
+   "testing/python/fixtures.py"
+  ],
+  "test_files": [
+   "testing/python/fixtures.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-08T00:29:30+02:00",
+  "subject": "fixtures: improve handling of `pytest_fixture_post_finalizer` raising",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6b700f49fb59fc6cec43b9a550cf558954d83332": {
+  "task": "6b700f49fb59fc6cec43b9a550cf558954d83332",
+  "target_tests": [
+   "testing/test_subtests.py"
+  ],
+  "test_files": [
+   "testing/test_subtests.py"
+  ],
+  "src_files": [
+   "src/_pytest/subtests.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-18T19:17:31+01:00",
+  "subject": "subtests: avoid double `saferepr()` (#14213)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8950ca3bc0988647dfc35b02f854347a1435bd36": {
+  "task": "8950ca3bc0988647dfc35b02f854347a1435bd36",
+  "target_tests": [
+   "testing/test_subtests.py"
+  ],
+  "test_files": [
+   "testing/test_subtests.py"
+  ],
+  "src_files": [
+   "src/_pytest/unittest.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-16T15:52:46+01:00",
+  "subject": "subtests: fix inconcistent handling of non-string messages (#14196)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "966edc9d517cd092104028796b684fb1119a7c73": {
+  "task": "966edc9d517cd092104028796b684fb1119a7c73",
+  "target_tests": [
+   "testing/io/test_saferepr.py",
+   "testing/test_assertion.py"
+  ],
+  "test_files": [
+   "testing/io/test_saferepr.py",
+   "testing/test_assertion.py"
+  ],
+  "src_files": [
+   "src/_pytest/_io/pprint.py",
+   "src/_pytest/_io/saferepr.py",
+   "src/_pytest/pytester_assertions.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-14T17:33:30+01:00",
+  "subject": "Fix: assertrepr_compare respects dict insertion order (#14050)",
+  "src_churn": 33,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "3fc824a62cd5f724ff2ae9a3aff721cee7cb4cbf": {
+  "task": "3fc824a62cd5f724ff2ae9a3aff721cee7cb4cbf",
+  "target_tests": [
+   "testing/python/metafunc.py"
+  ],
+  "test_files": [
+   "testing/python/metafunc.py"
+  ],
+  "src_files": [
+   "src/_pytest/mark/structures.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-29T18:19:19+01:00",
+  "subject": "fix(parametrize): handle trailing comma in string argnames (#719)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e7ff0f6e7b6ba65bd3f9ac4d6119f14601cb3408": {
+  "task": "e7ff0f6e7b6ba65bd3f9ac4d6119f14601cb3408",
+  "target_tests": [
+   "testing/test_cacheprovider.py"
+  ],
+  "test_files": [
+   "testing/test_cacheprovider.py"
+  ],
+  "src_files": [
+   "src/_pytest/cacheprovider.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-17T17:08:05+01:00",
+  "subject": "cacheprovider: simplify cache directory creation",
+  "src_churn": 90,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e95a843a5dbf8af618d0714705bbf97dfdb04044": {
+  "task": "e95a843a5dbf8af618d0714705bbf97dfdb04044",
+  "target_tests": [
+   "testing/python/approx.py"
+  ],
+  "test_files": [
+   "testing/python/approx.py"
+  ],
+  "src_files": [
+   "src/_pytest/python_api.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-25T14:01:35+01:00",
+  "subject": "Fix pytest.approx to correctly take account Mapping keys order to compare them (#13815)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "3d27ab94849019eb8b3eaabac71c486f9edd4128": {
+  "task": "3d27ab94849019eb8b3eaabac71c486f9edd4128",
+  "target_tests": [
+   "testing/test_nodes.py"
+  ],
+  "test_files": [
+   "testing/test_nodes.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py",
+   "src/_pytest/nodes.py",
+   "src/_pytest/terminal.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-17T21:01:12+01:00",
+  "subject": "add: nodes.norm_sep helper for nodeid path separator normalization (#14120)",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6762f5a1cd813a4c0147bf93cd27418f6bfe2d3b": {
+  "task": "6762f5a1cd813a4c0147bf93cd27418f6bfe2d3b",
+  "target_tests": [
+   "testing/test_assertion.py"
+  ],
+  "test_files": [
+   "testing/test_assertion.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/truncate.py"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-11T23:41:52+01:00",
+  "subject": "[truncate explanation] Fix edge case when we truncate due to max_chars",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "004a96740fb990c7d6dc39bd305b08852635ec5d": {
+  "task": "004a96740fb990c7d6dc39bd305b08852635ec5d",
+  "target_tests": [
+   "testing/test_config.py"
+  ],
+  "test_files": [
+   "testing/test_config.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-29T14:16:10+03:00",
+  "subject": "Show better error when blocking conftest files via `-p` (#14018)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c287dd7147319bf76179633def108c4b5aa013e6": {
+  "task": "c287dd7147319bf76179633def108c4b5aa013e6",
+  "target_tests": [
+   "testing/test_subtests.py"
+  ],
+  "test_files": [
+   "testing/test_subtests.py"
+  ],
+  "src_files": [
+   "src/_pytest/subtests.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-20T07:37:02-03:00",
+  "subject": "Ensure subtest's context kwargs are JSON serializable (#13963)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "fa6a232d529b33f6388dc788d7613cf206c08130": {
+  "task": "fa6a232d529b33f6388dc788d7613cf206c08130",
+  "target_tests": [
+   "testing/code/test_excinfo.py"
+  ],
+  "test_files": [
+   "testing/code/test_excinfo.py"
+  ],
+  "src_files": [
+   "src/_pytest/_code/code.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-12T16:15:44+01:00",
+  "subject": "don't crash if exceptiongroup has only hidden tb frames (#14025)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "4488b9e4c8b06e15b9ac3d6860655abf4f028d1b": {
+  "task": "4488b9e4c8b06e15b9ac3d6860655abf4f028d1b",
+  "target_tests": [
+   "testing/test_config.py"
+  ],
+  "test_files": [
+   "testing/test_config.py"
+  ],
+  "src_files": [
+   "src/_pytest/terminal.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-02T01:58:20-05:00",
+  "subject": "feat: add `--report-chars` long option and its corresponding test",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "d871b508011011cd2c76a7aa354b569cef38b24b": {
+  "task": "d871b508011011cd2c76a7aa354b569cef38b24b",
+  "target_tests": [
+   "testing/acceptance_test.py"
+  ],
+  "test_files": [
+   "testing/acceptance_test.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-29T22:23:13+02:00",
+  "subject": "fixtures: turn requesting async fixture without a plugin into a hard error",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c4142aff4ba2ed34ab4ff86ffffb9f9e357fc524": {
+  "task": "c4142aff4ba2ed34ab4ff86ffffb9f9e357fc524",
+  "target_tests": [
+   "testing/code/test_source.py"
+  ],
+  "test_files": [
+   "testing/code/test_source.py"
+  ],
+  "src_files": [
+   "src/_pytest/_code/source.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-21T03:13:03+02:00",
+  "subject": "Fix internal error when source is modified (#13884)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "beedab9c364e46101d629e2655f00cdb280bdc70": {
+  "task": "beedab9c364e46101d629e2655f00cdb280bdc70",
+  "target_tests": [
+   "testing/test_terminal.py"
+  ],
+  "test_files": [
+   "testing/test_terminal.py"
+  ],
+  "src_files": [
+   "src/_pytest/terminalprogress.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-18T20:50:06+02:00",
+  "subject": "terminalprogress: disable when TERM=dumb",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "2ffef56153c0e25330110cc32d046df6d395ad74": {
+  "task": "2ffef56153c0e25330110cc32d046df6d395ad74",
+  "target_tests": [
+   "testing/test_terminal.py"
+  ],
+  "test_files": [
+   "testing/test_terminal.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/terminal.py",
+   "src/_pytest/terminalprogress.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-16T15:05:10+02:00",
+  "subject": "terminal: disable OSC 9;4; terminal progress by default, except on Windows",
+  "src_churn": 44,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "adcdeb9236d40a0b3a7f25e03ae94e683501cf56": {
+  "task": "adcdeb9236d40a0b3a7f25e03ae94e683501cf56",
+  "target_tests": [
+   "testing/python/collect.py"
+  ],
+  "test_files": [
+   "testing/python/collect.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-17T23:19:13+02:00",
+  "subject": "fixtures: fix incorrect \"duplicate parametrization\" when using `indirect=[...]`",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "3c2263613165828421aa482b9d7939bbe3cfa0b9": {
+  "task": "3c2263613165828421aa482b9d7939bbe3cfa0b9",
+  "target_tests": [
+   "testing/python/metafunc.py"
+  ],
+  "test_files": [
+   "testing/python/metafunc.py"
+  ],
+  "src_files": [
+   "src/_pytest/python.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-17T22:35:50+02:00",
+  "subject": "python: use nodeid in error messages instead of function name",
+  "src_churn": 31,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "78e1bd79ea6acffc390f6e898d6a8b7305aaefeb": {
+  "task": "78e1bd79ea6acffc390f6e898d6a8b7305aaefeb",
+  "target_tests": [
+   "testing/test_config.py"
+  ],
+  "test_files": [
+   "testing/test_config.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/deprecated.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-12T18:43:13+02:00",
+  "subject": "config: deprecate `config.inicfg`",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "173892066bbeddecb2c05ab89cccbdd5b1916a02": {
+  "task": "173892066bbeddecb2c05ab89cccbdd5b1916a02",
+  "target_tests": [
+   "testing/test_config.py"
+  ],
+  "test_files": [
+   "testing/test_config.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-13T18:00:45+02:00",
+  "subject": "config: restore `config.inicfg`",
+  "src_churn": 46,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "86608c3aaca8c6c9c009f463a01eec397f5f17ad": {
+  "task": "86608c3aaca8c6c9c009f463a01eec397f5f17ad",
+  "target_tests": [
+   "testing/deprecated_test.py",
+   "testing/test_mark.py"
+  ],
+  "test_files": [
+   "testing/deprecated_test.py",
+   "testing/test_mark.py"
+  ],
+  "src_files": [
+   "src/_pytest/deprecated.py",
+   "src/_pytest/fixtures.py",
+   "src/_pytest/mark/structures.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-09T22:12:53+02:00",
+  "subject": "Hard error when setting a mark on a fixture function",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c47d63e933f96adf53a225da5fe0a79a126b9bb8": {
+  "task": "c47d63e933f96adf53a225da5fe0a79a126b9bb8",
+  "target_tests": [
+   "testing/test_parseopt.py"
+  ],
+  "test_files": [
+   "testing/test_parseopt.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/config/argparsing.py",
+   "src/_pytest/helpconfig.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-01T22:42:10+02:00",
+  "subject": "config: make `Argument` a wrapper around `argparse.Action`",
+  "src_churn": 148,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6a47389c7813ec7ed395c0279c4b7685fde9f95a": {
+  "task": "6a47389c7813ec7ed395c0279c4b7685fde9f95a",
+  "target_tests": [
+   "testing/test_unittest.py"
+  ],
+  "test_files": [
+   "testing/test_unittest.py"
+  ],
+  "src_files": [
+   "src/_pytest/unittest.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-10T14:50:26-03:00",
+  "subject": "Restore skipping tests via `raise unittest.SkipTest` (#13912)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "c37e687774d050e96102f936dbc38a839b58c9f9": {
+  "task": "c37e687774d050e96102f936dbc38a839b58c9f9",
+  "target_tests": [
+   "testing/test_terminal.py"
+  ],
+  "test_files": [
+   "testing/test_terminal.py"
+  ],
+  "src_files": [
+   "src/_pytest/terminal.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-09T00:30:37+02:00",
+  "subject": "terminal: disable terminal progress plugin on iTerm2",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "dd47a89d6eb03e7d18e2fea4fd0a198b1ec5f4a5": {
+  "task": "dd47a89d6eb03e7d18e2fea4fd0a198b1ec5f4a5",
+  "target_tests": [
+   "testing/python/metafunc.py",
+   "testing/typing_checks.py"
+  ],
+  "test_files": [
+   "testing/python/metafunc.py",
+   "testing/typing_checks.py"
+  ],
+  "src_files": [
+   "src/_pytest/deprecated.py",
+   "src/_pytest/mark/structures.py",
+   "src/_pytest/python.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-04T21:21:30+02:00",
+  "subject": "Deprecate passing iterator argvalues to parametrize",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7d9375781c694577219bec435ad3c37c52e00d03": {
+  "task": "7d9375781c694577219bec435ad3c37c52e00d03",
+  "target_tests": [
+   "testing/test_compat.py"
+  ],
+  "test_files": [
+   "testing/test_compat.py"
+  ],
+  "src_files": [
+   "src/_pytest/compat.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-05T17:01:40+02:00",
+  "subject": "compat: add compat for `@warnings.deprecated`",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "76910ca669594849278a30bf6a943b4cd465fa05": {
+  "task": "76910ca669594849278a30bf6a943b4cd465fa05",
+  "target_tests": [
+   "testing/test_terminal.py"
+  ],
+  "test_files": [
+   "testing/test_terminal.py"
+  ],
+  "src_files": [
+   "src/_pytest/terminal.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-03T22:39:32Z",
+  "subject": "Fix `--show-capture` with  `--tb=line` (#13868)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5a85b90a442eb4fd77cf2a3309d3280e8793d1a9": {
+  "task": "5a85b90a442eb4fd77cf2a3309d3280e8793d1a9",
+  "target_tests": [
+   "testing/test_config.py",
+   "testing/test_warnings.py"
+  ],
+  "test_files": [
+   "testing/test_config.py",
+   "testing/test_warnings.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-31T11:40:46+02:00",
+  "subject": "config: inline `_preparse`",
+  "src_churn": 176,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5e3b7d5e1f0c9dc7f426dbecaef76efcea4a3770": {
+  "task": "5e3b7d5e1f0c9dc7f426dbecaef76efcea4a3770",
+  "target_tests": [
+   "testing/test_helpconfig.py"
+  ],
+  "test_files": [
+   "testing/test_helpconfig.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/config/argparsing.py",
+   "src/_pytest/helpconfig.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-31T10:14:27+02:00",
+  "subject": "config: remove `after_preparse`",
+  "src_churn": 31,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e94518ddef13db739e9ab2c35d11e4f8904f6d13": {
+  "task": "e94518ddef13db739e9ab2c35d11e4f8904f6d13",
+  "target_tests": [
+   "testing/test_config.py",
+   "testing/test_parseopt.py"
+  ],
+  "test_files": [
+   "testing/test_config.py",
+   "testing/test_parseopt.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/config/argparsing.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-30T21:44:07+02:00",
+  "subject": "config: use one `ArgumentParser` instead of creating new one for each parse",
+  "src_churn": 78,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7ff334e7880d8aa03de7428ba2941fc92d8f892e": {
+  "task": "7ff334e7880d8aa03de7428ba2941fc92d8f892e",
+  "target_tests": [
+   "testing/python/approx.py"
+  ],
+  "test_files": [
+   "testing/python/approx.py"
+  ],
+  "src_files": [
+   "src/_pytest/python_api.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-01T22:00:34+01:00",
+  "subject": "`pytest.approx` returns a clearer error mesage when comparing mappings with different keys (#13818)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e3facc0f8115a52606151c436ab3cb0816dbc0c3": {
+  "task": "e3facc0f8115a52606151c436ab3cb0816dbc0c3",
+  "target_tests": [
+   "testing/python/raises.py",
+   "testing/python/raises_group.py"
+  ],
+  "test_files": [
+   "testing/python/raises.py",
+   "testing/python/raises_group.py"
+  ],
+  "src_files": [
+   "src/_pytest/raises.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-01T16:35:10+01:00",
+  "subject": "Improve clarity of 'expected exception' error messages (#13861)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "115b8703b898e5782bb2512eb08390674745e8e2": {
+  "task": "115b8703b898e5782bb2512eb08390674745e8e2",
+  "target_tests": [
+   "testing/test_parseopt.py"
+  ],
+  "test_files": [
+   "testing/test_parseopt.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/argparsing.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-30T11:09:45+02:00",
+  "subject": "config: use intermixed arg parsing also in `parse_known_and_unknown_args`",
+  "src_churn": 13,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "b3f3263a83ad5cd53f9e080e4ef52b7f18b9d4f0": {
+  "task": "b3f3263a83ad5cd53f9e080e4ef52b7f18b9d4f0",
+  "target_tests": [
+   "testing/code/test_excinfo.py",
+   "testing/python/raises.py",
+   "testing/python/raises_group.py"
+  ],
+  "test_files": [
+   "testing/code/test_excinfo.py",
+   "testing/python/raises.py",
+   "testing/python/raises_group.py"
+  ],
+  "src_files": [
+   "src/_pytest/_code/code.py",
+   "src/_pytest/raises.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-29T17:08:11+01:00",
+  "subject": "Clarify regex match error in pytest.raises (#13859)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "8c6e01d6907465ca6c8101fe852f933b71bd0683": {
+  "task": "8c6e01d6907465ca6c8101fe852f933b71bd0683",
+  "target_tests": [
+   "testing/test_config.py"
+  ],
+  "test_files": [
+   "testing/test_config.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/config/argparsing.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-29T12:23:33+02:00",
+  "subject": "config: remove `_config_source_hint`, use `extra_info` instead",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "e26c0ae688a77132d13c523009ba07d17c7f2ca4": {
+  "task": "e26c0ae688a77132d13c523009ba07d17c7f2ca4",
+  "target_tests": [
+   "testing/test_reports.py"
+  ],
+  "test_files": [
+   "testing/test_reports.py"
+  ],
+  "src_files": [
+   "src/_pytest/reports.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-28T20:04:07+02:00",
+  "subject": "fix #13537: Add support for ExceptionGroup with only Skipped exceptions in teardown (#13741)",
+  "src_churn": 72,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "cc400d1fba5ca6ce0421880166d0a2948454f6ff": {
+  "task": "cc400d1fba5ca6ce0421880166d0a2948454f6ff",
+  "target_tests": [
+   "testing/test_config.py",
+   "testing/test_findpaths.py"
+  ],
+  "test_files": [
+   "testing/test_config.py",
+   "testing/test_findpaths.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/findpaths.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-26T18:11:26+02:00",
+  "subject": "config: consider empty .pytest.ini as config file",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "94534908a0f8295ea1299191c3a321bb9f92ebd4": {
+  "task": "94534908a0f8295ea1299191c3a321bb9f92ebd4",
+  "target_tests": [
+   "testing/test_skipping.py"
+  ],
+  "test_files": [
+   "testing/test_skipping.py"
+  ],
+  "src_files": [
+   "src/_pytest/helpconfig.py",
+   "src/_pytest/skipping.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-20T08:48:39+03:00",
+  "subject": "Rename `xfail_strict` to `strict_xfail`, make it an alias",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "543d9aac933cd122ef509e3056cfc3959e128b3f": {
+  "task": "543d9aac933cd122ef509e3056cfc3959e128b3f",
+  "target_tests": [
+   "testing/test_config.py",
+   "testing/test_findpaths.py"
+  ],
+  "test_files": [
+   "testing/test_config.py",
+   "testing/test_findpaths.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/config/findpaths.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-24T22:34:02+03:00",
+  "subject": "config: rename `IniValue` to `ConfigValue`",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "355ff095202921388061211d7a13332944191bad": {
+  "task": "355ff095202921388061211d7a13332944191bad",
+  "target_tests": [
+   "testing/test_config.py",
+   "testing/test_findpaths.py"
+  ],
+  "test_files": [
+   "testing/test_config.py",
+   "testing/test_findpaths.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/config/argparsing.py",
+   "src/_pytest/config/findpaths.py"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-19T22:25:17+03:00",
+  "subject": "config: add support for ini option aliases",
+  "src_churn": 89,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "03da9f0ccb88c27630146cfc296d51be4ad9d389": {
+  "task": "03da9f0ccb88c27630146cfc296d51be4ad9d389",
+  "target_tests": [
+   "testing/python/approx.py",
+   "testing/test_reports.py"
+  ],
+  "test_files": [
+   "testing/python/approx.py",
+   "testing/test_reports.py"
+  ],
+  "src_files": [
+   "src/_pytest/approx.py",
+   "src/_pytest/assertion/_compare_any.py",
+   "src/_pytest/doctest.py",
+   "src/pytest/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-06-23T19:36:55+03:00",
+  "subject": "Rename `python_api.py` to `approx.py`",
+  "src_churn": 1014,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ff77cd8b66b43a88c26ca54384bbcab72d079497": {
+  "task": "ff77cd8b66b43a88c26ca54384bbcab72d079497",
+  "target_tests": [
+   "testing/test_assertion.py"
+  ],
+  "test_files": [
+   "testing/test_assertion.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/__init__.py",
+   "src/_pytest/assertion/_compare_any.py",
+   "src/_pytest/assertion/_compare_set.py",
+   "src/_pytest/assertion/util.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-06-13T14:30:39+02:00",
+  "subject": "[refactor] Make base assertion comparisons return an iterator instead of a list of string (#14546)",
+  "src_churn": 190,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f52ff0c1778c15038cf2bbb00b7668dac674cc26": {
+  "task": "f52ff0c1778c15038cf2bbb00b7668dac674cc26",
+  "target_tests": [
+   "testing/python/fixtures.py"
+  ],
+  "test_files": [
+   "testing/python/fixtures.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py",
+   "src/_pytest/python.py",
+   "src/_pytest/unittest.py",
+   "src/pytest/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-06-06T21:55:09+03:00",
+  "subject": "Add `pytest.register_fixture`",
+  "src_churn": 76,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "9d3b7c18da6831469ac7b75859a7f126fa3110cc": {
+  "task": "9d3b7c18da6831469ac7b75859a7f126fa3110cc",
+  "target_tests": [
+   "testing/test_assertion.py"
+  ],
+  "test_files": [
+   "testing/test_assertion.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/_compare_any.py",
+   "src/_pytest/assertion/compare_text.py",
+   "src/_pytest/assertion/util.py",
+   "src/_pytest/raises.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-05-25T13:56:17+02:00",
+  "subject": "[refactor] Make text comparison helpers yield strings",
+  "src_churn": 91,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f93656d611f3c9cd22f346dfeda52cddb778c589": {
+  "task": "f93656d611f3c9cd22f346dfeda52cddb778c589",
+  "target_tests": [
+   "testing/typing_checks.py"
+  ],
+  "test_files": [
+   "testing/typing_checks.py"
+  ],
+  "src_files": [
+   "src/_pytest/fixtures.py",
+   "src/_pytest/mark/structures.py",
+   "src/_pytest/python.py",
+   "src/_pytest/scope.py",
+   "src/pytest/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-04-01T08:35:35-07:00",
+  "subject": "Make ScopeName public to enable downstream type checking  (#14325)",
+  "src_churn": 38,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d4907e8499fc4c36493b61437b56cf2eabfdcebf": {
+  "task": "d4907e8499fc4c36493b61437b56cf2eabfdcebf",
+  "target_tests": [
+   "testing/deprecated_test.py",
+   "testing/test_nodes.py"
+  ],
+  "test_files": [
+   "testing/deprecated_test.py",
+   "testing/test_nodes.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/compat.py",
+   "src/_pytest/deprecated.py",
+   "src/_pytest/nodes.py",
+   "src/_pytest/python.py"
+  ],
+  "pool": "hard",
+  "authored": "2026-03-15T12:35:30+02:00",
+  "subject": "nodes: remove deprecated `fspath` Node constructor parameter",
+  "src_churn": 67,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "91cfa28769be0093e2098398f2696032718aee8a": {
+  "task": "91cfa28769be0093e2098398f2696032718aee8a",
+  "target_tests": [
+   "testing/acceptance_test.py",
+   "testing/test_config.py",
+   "testing/test_pathlib.py"
+  ],
+  "test_files": [
+   "testing/acceptance_test.py",
+   "testing/test_config.py",
+   "testing/test_pathlib.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/debugging.py",
+   "src/_pytest/monkeypatch.py",
+   "src/_pytest/outcomes.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-11-02T09:30:09+02:00",
+  "subject": "Use `importlib.import_module` instead of `__import__`",
+  "src_churn": 24,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "79392133b63bc79efde860eb94901108b88cfcd6": {
+  "task": "79392133b63bc79efde860eb94901108b88cfcd6",
+  "target_tests": [
+   "testing/test_subtests.py"
+  ],
+  "test_files": [
+   "testing/test_subtests.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/deprecated.py",
+   "src/_pytest/reports.py",
+   "src/_pytest/runner.py",
+   "src/_pytest/subtests.py",
+   "src/_pytest/terminal.py",
+   "src/_pytest/unittest.py",
+   "src/pytest/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-11-01T11:43:53-03:00",
+  "subject": "Integrate pytest-subtests (#13738)",
+  "src_churn": 565,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "7672dafb2a4dc0d9d9d0ae07a05c0b74ce57bd96": {
+  "task": "7672dafb2a4dc0d9d9d0ae07a05c0b74ce57bd96",
+  "target_tests": [
+   "testing/test_config.py",
+   "testing/test_findpaths.py",
+   "testing/test_legacypath.py"
+  ],
+  "test_files": [
+   "testing/test_config.py",
+   "testing/test_findpaths.py",
+   "testing/test_legacypath.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/config/findpaths.py",
+   "src/_pytest/helpconfig.py",
+   "src/_pytest/hookspec.py",
+   "src/_pytest/pytester.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-10-24T22:48:47+03:00",
+  "subject": "config: add native TOML configuration",
+  "src_churn": 181,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d79af500bf13c3d50dd89793c69304cf448f3210": {
+  "task": "d79af500bf13c3d50dd89793c69304cf448f3210",
+  "target_tests": [
+   "testing/test_collection.py",
+   "testing/test_config.py",
+   "testing/test_mark.py",
+   "testing/test_skipping.py"
+  ],
+  "test_files": [
+   "testing/test_collection.py",
+   "testing/test_config.py",
+   "testing/test_mark.py",
+   "testing/test_skipping.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/main.py",
+   "src/_pytest/mark/structures.py",
+   "src/_pytest/python.py",
+   "src/_pytest/skipping.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-10-23T13:25:28+03:00",
+  "subject": "Add `strict` ini option to enable all other strictness options",
+  "src_churn": 47,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "efa9eff5831658f765d4d7590a91ac2f0ff12fa2": {
+  "task": "efa9eff5831658f765d4d7590a91ac2f0ff12fa2",
+  "target_tests": [
+   "testing/test_config.py",
+   "testing/test_mark.py"
+  ],
+  "test_files": [
+   "testing/test_config.py",
+   "testing/test_mark.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/config/argparsing.py",
+   "src/_pytest/main.py",
+   "src/_pytest/mark/structures.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-10-20T09:15:09+03:00",
+  "subject": "Add `strict_config`, `strict_markers` ini options, same as CLI flags",
+  "src_churn": 74,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "ebd0d3538e869e3ccf976ee32bd8a107311154ee": {
+  "task": "ebd0d3538e869e3ccf976ee32bd8a107311154ee",
+  "target_tests": [
+   "testing/acceptance_test.py",
+   "testing/test_warnings.py"
+  ],
+  "test_files": [
+   "testing/acceptance_test.py",
+   "testing/test_warnings.py"
+  ],
+  "src_files": [
+   "src/_pytest/deprecated.py",
+   "src/_pytest/warning_types.py",
+   "src/_pytest/warnings.py",
+   "src/pytest/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-10-02T11:02:37+03:00",
+  "subject": "Change PytestRemovedIn9Warning to error by default",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "082a27e30153a840c467f9ade194602e6882d157": {
+  "task": "082a27e30153a840c467f9ade194602e6882d157",
+  "target_tests": [
+   "testing/test_collection.py"
+  ],
+  "test_files": [
+   "testing/test_collection.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/truncate.py",
+   "src/_pytest/assertion/util.py",
+   "src/_pytest/compat.py",
+   "src/_pytest/terminal.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-09-30T10:12:06+03:00",
+  "subject": "compat: move `running_on_ci()` to compat",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "01de0c1e4c2b6bd89e6b7e437f9e553ca4f880d2": {
+  "task": "01de0c1e4c2b6bd89e6b7e437f9e553ca4f880d2",
+  "target_tests": [
+   "testing/test_collection.py",
+   "testing/test_junitxml.py"
+  ],
+  "test_files": [
+   "testing/test_collection.py",
+   "testing/test_junitxml.py"
+  ],
+  "src_files": [
+   "src/_pytest/assertion/rewrite.py",
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/fixtures.py",
+   "src/_pytest/python_api.py",
+   "src/_pytest/recwarn.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-06-03T21:59:34+03:00",
+  "subject": "[pre-commit.ci] pre-commit autoupdate (#13475)",
+  "src_churn": 31,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "20c51f70c99ecaa4745d622a69bbe93fbf59ad16": {
+  "task": "20c51f70c99ecaa4745d622a69bbe93fbf59ad16",
+  "target_tests": [
+   "testing/_py/test_local.py",
+   "testing/test_pytester.py"
+  ],
+  "test_files": [
+   "testing/_py/test_local.py",
+   "testing/test_pytester.py"
+  ],
+  "src_files": [
+   "src/_pytest/junitxml.py",
+   "src/_pytest/pytester.py",
+   "src/_pytest/runner.py",
+   "src/_pytest/terminal.py",
+   "src/_pytest/timing.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-04-29T08:00:08-03:00",
+  "subject": "Add `Instant` class to conveniently track elapsed and start/end times (#13397)",
+  "src_churn": 96,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "134b759e5def7fd2fd4c74bd2a4f00a4b56e5425": {
+  "task": "134b759e5def7fd2fd4c74bd2a4f00a4b56e5425",
+  "target_tests": [
+   "testing/code/test_excinfo.py",
+   "testing/python/raises.py",
+   "testing/python/raises_group.py",
+   "testing/test_warning_types.py",
+   "testing/typing_raises_group.py"
+  ],
+  "test_files": [
+   "testing/code/test_excinfo.py",
+   "testing/python/raises.py",
+   "testing/python/raises_group.py",
+   "testing/test_warning_types.py",
+   "testing/typing_raises_group.py"
+  ],
+  "src_files": [
+   "src/_pytest/mark/structures.py",
+   "src/_pytest/python_api.py",
+   "src/_pytest/raises.py",
+   "src/_pytest/skipping.py",
+   "src/pytest/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-03-29T14:08:12+01:00",
+  "subject": "raisesgroup followups (#13279)",
+  "src_churn": 1768,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "611bb13108c249d2789014a631242f765efe1644": {
+  "task": "611bb13108c249d2789014a631242f765efe1644",
+  "target_tests": [
+   "testing/python/metafunc.py",
+   "testing/test_mark.py"
+  ],
+  "test_files": [
+   "testing/python/metafunc.py",
+   "testing/test_mark.py"
+  ],
+  "src_files": [
+   "src/_pytest/mark/__init__.py",
+   "src/_pytest/mark/structures.py",
+   "src/_pytest/python.py",
+   "src/pytest/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-03-01T16:06:40+03:00",
+  "subject": "Allow hiding a parameter set from test name (#13229)",
+  "src_churn": 92,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "753df941da92bd02b9f4d453c14006e382c004e0": {
+  "task": "753df941da92bd02b9f4d453c14006e382c004e0",
+  "target_tests": [
+   "testing/python/raises.py",
+   "testing/typing_raises_group.py"
+  ],
+  "test_files": [
+   "testing/python/raises.py",
+   "testing/typing_raises_group.py"
+  ],
+  "src_files": [
+   "src/_pytest/_code/code.py",
+   "src/_pytest/outcomes.py",
+   "src/_pytest/python_api.py",
+   "src/_pytest/raises_group.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-02-21T13:01:57+01:00",
+  "subject": "harmonize stringify_exception, various comments",
+  "src_churn": 90,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e1e1874cda7b8ee51172092158ab774960fa8d6c": {
+  "task": "e1e1874cda7b8ee51172092158ab774960fa8d6c",
+  "target_tests": [
+   "testing/python/raises_group.py",
+   "testing/typing_raises_group.py"
+  ],
+  "test_files": [
+   "testing/python/raises_group.py",
+   "testing/typing_raises_group.py"
+  ],
+  "src_files": [
+   "src/_pytest/_code/code.py",
+   "src/_pytest/_raises_group.py",
+   "src/_pytest/mark/structures.py",
+   "src/_pytest/python_api.py",
+   "src/_pytest/skipping.py",
+   "src/pytest/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2025-02-06T15:39:25+01:00",
+  "subject": "rename AbstractMatcher -> AbstractRaises, Matcher->RaisesExc. Add docs on RaisesGroup&RaisesExc. Add warnings to group_contains. Remove group_contains example f",
+  "src_churn": 152,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "868e1d225e443984a6aa29cfde2d1231eb03ed41": {
+  "task": "868e1d225e443984a6aa29cfde2d1231eb03ed41",
+  "target_tests": [
+   "testing/test_unraisableexception.py"
+  ],
+  "test_files": [
+   "testing/test_unraisableexception.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/pytester.py",
+   "src/_pytest/warning_types.py",
+   "src/_pytest/warnings.py",
+   "src/pytest/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-12-18T11:09:33Z",
+  "subject": "apply warnings filter as soon as possible, and remove it as late as possible (#13057)",
+  "src_churn": 80,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "216ec3c0ba87b50af11a3fd6f633b69105a7708e": {
+  "task": "216ec3c0ba87b50af11a3fd6f633b69105a7708e",
+  "target_tests": [
+   "testing/acceptance_test.py",
+   "testing/test_unittest.py"
+  ],
+  "test_files": [
+   "testing/acceptance_test.py",
+   "testing/test_unittest.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/exceptions.py",
+   "src/_pytest/python.py",
+   "src/_pytest/warning_types.py",
+   "src/pytest/__init__.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-10-25T13:36:55+02:00",
+  "subject": "Remove PytestReturnNotNoneWarning and PytestUnhandledCoroutineWarning. Make tests fail instead of raising warning/exception. fix tests. add changelog.",
+  "src_churn": 73,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "72c682ff9773ad2690711105a100423ebf7c7c15": {
+  "task": "72c682ff9773ad2690711105a100423ebf7c7c15",
+  "target_tests": [
+   "testing/acceptance_test.py"
+  ],
+  "test_files": [
+   "testing/acceptance_test.py"
+  ],
+  "src_files": [
+   "src/_pytest/cacheprovider.py",
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/fixtures.py",
+   "src/_pytest/logging.py",
+   "src/_pytest/nodes.py",
+   "src/_pytest/python.py",
+   "src/_pytest/runner.py",
+   "src/_pytest/stepwise.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-09-05T04:04:12-07:00",
+  "subject": "Streamline checks for verbose option (#12706)",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "dacee1f11d7495347fa2cfabeb33e998c95c8c05": {
+  "task": "dacee1f11d7495347fa2cfabeb33e998c95c8c05",
+  "target_tests": [
+   "testing/deprecated_test.py"
+  ],
+  "test_files": [
+   "testing/deprecated_test.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/config/compat.py",
+   "src/_pytest/deprecated.py",
+   "src/_pytest/hookspec.py",
+   "src/_pytest/main.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-03-07T19:30:51-03:00",
+  "subject": "Revert \"Remove deprecated py.path hook arguments\"",
+  "src_churn": 129,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "303cd0d48a66bbeba7e2e3eaf4752c6ef4d38a2c": {
+  "task": "303cd0d48a66bbeba7e2e3eaf4752c6ef4d38a2c",
+  "target_tests": [
+   "testing/deprecated_test.py",
+   "testing/test_legacypath.py",
+   "testing/test_nodes.py"
+  ],
+  "test_files": [
+   "testing/deprecated_test.py",
+   "testing/test_legacypath.py",
+   "testing/test_nodes.py"
+  ],
+  "src_files": [
+   "src/_pytest/compat.py",
+   "src/_pytest/config/compat.py",
+   "src/_pytest/deprecated.py",
+   "src/_pytest/legacypath.py",
+   "src/_pytest/main.py",
+   "src/_pytest/nodes.py",
+   "src/_pytest/python.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-03-07T19:19:14-03:00",
+  "subject": "Revert \"Remove deprecated py.path (`fspath`) node constructor arguments\"",
+  "src_churn": 108,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "111c0d910e15afb9e1ed1f6862e1637594eaa076": {
+  "task": "111c0d910e15afb9e1ed1f6862e1637594eaa076",
+  "target_tests": [
+   "testing/code/test_excinfo.py",
+   "testing/code/test_source.py",
+   "testing/test_conftest.py",
+   "testing/test_pathlib.py",
+   "testing/test_pluginmanager.py"
+  ],
+  "test_files": [
+   "testing/code/test_excinfo.py",
+   "testing/code/test_source.py",
+   "testing/test_conftest.py",
+   "testing/test_pathlib.py",
+   "testing/test_pluginmanager.py"
+  ],
+  "src_files": [
+   "src/_pytest/config/__init__.py",
+   "src/_pytest/main.py",
+   "src/_pytest/pathlib.py",
+   "src/_pytest/python.py",
+   "src/_pytest/runner.py"
+  ],
+  "pool": "hard",
+  "authored": "2024-03-02T11:46:54-03:00",
+  "subject": "Add consider_namespace_packages ini option",
+  "src_churn": 100,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ }
+}

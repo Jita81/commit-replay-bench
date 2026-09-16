@@ -1,0 +1,1343 @@
+{
+ "e4f54f78c93dae0507fcac5be81253974bc9042d": {
+  "task": "e4f54f78c93dae0507fcac5be81253974bc9042d",
+  "target_tests": [
+   "JavaUtilConcurrentAtomicTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/JavaUtilConcurrentAtomicTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-22T18:27:24+04:00",
+  "subject": "Throw JsonSyntaxException instead of NPE for a null AtomicLongArray element (#3038)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "com.google.gson.functional.JavaUtilConcurrentAtomicTest::testAtomicLongArrayWithNullElement"
+  ],
+  "gold_clean": true
+ },
+ "004e7a4949e08b430e3c8996998ee5a17ff9423a": {
+  "task": "004e7a4949e08b430e3c8996998ee5a17ff9423a",
+  "target_tests": [
+   "JsonReaderTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/stream/JsonReaderTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-04T13:41:58-04:00",
+  "subject": "Fix: peekNumber rejects some numerals like 2^64 + \"0\" (#3034)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "com.google.gson.stream.JsonReaderTest::testNumberLongAccumulatorOverflowsToZero"
+  ],
+  "gold_clean": true
+ },
+ "6bf8bf6cbf4d4f5f72f69262be890a5a5e28259d": {
+  "task": "6bf8bf6cbf4d4f5f72f69262be890a5a5e28259d",
+  "target_tests": [
+   "JsonReaderTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/stream/JsonReaderTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-24T05:08:20+08:00",
+  "subject": "fix: Include location info in NumberFormatException from JsonReader (#3000)",
+  "src_churn": 30,
+  "size": "S",
+  "baseline_failing": [
+   "com.google.gson.stream.JsonReaderTest::testNextDoubleNumberFormatExceptionContainsLocation",
+   "com.google.gson.stream.JsonReaderTest::testNextIntNumberFormatExceptionContainsLocation",
+   "com.google.gson.stream.JsonReaderTest::testNextLongNumberFormatExceptionContainsLocation"
+  ],
+  "gold_clean": true
+ },
+ "f4d371d29c04066dbe7fdb31f642831f9c7f40cd": {
+  "task": "f4d371d29c04066dbe7fdb31f642831f9c7f40cd",
+  "target_tests": [
+   "MapAsArrayTypeAdapterTest",
+   "MapTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/MapAsArrayTypeAdapterTest.java",
+   "gson/src/test/java/com/google/gson/functional/MapTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/MapTypeAdapterFactory.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-04-05T13:27:39-04:00",
+  "subject": "Fix duplicate key detection when first value is null (#3006)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1fa9b7a0a994b006b3be00e2df9de778e71e6807": {
+  "task": "1fa9b7a0a994b006b3be00e2df9de778e71e6807",
+  "target_tests": [
+   "JsonReaderTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/stream/JsonReaderTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-03-19T12:36:10-07:00",
+  "subject": "Validate that strings being parsed as integers consist of ASCII characters (#2995)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8526dbd2f0a7e61d5fbcc5caa163f2352fb0ddc0": {
+  "task": "8526dbd2f0a7e61d5fbcc5caa163f2352fb0ddc0",
+  "target_tests": [
+   "GsonTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/GsonBuilder.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-29T00:46:34+08:00",
+  "subject": "Optimize `new Gson()` (#2864)",
+  "src_churn": 465,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "286843d4a90a4690e5e1f438c944569b3fbfb1d2": {
+  "task": "286843d4a90a4690e5e1f438c944569b3fbfb1d2",
+  "target_tests": [
+   "SqlTypesSupportTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/internal/sql/SqlTypesSupportTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/LongSerializationPolicy.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java",
+   "gson/src/main/java/com/google/gson/internal/sql/SqlTypesSupport.java"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-12T22:45:55+08:00",
+  "subject": "refactor: move derived adapters from Gson to TypeAdapters (#2951)",
+  "src_churn": 368,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c47db7bc13875db690bcfb76e02b1e1bbb3a3353": {
+  "task": "c47db7bc13875db690bcfb76e02b1e1bbb3a3353",
+  "target_tests": [
+   "DefaultTypeAdaptersTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/DefaultTypeAdaptersTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/internal/bind/IgnoreJRERequirement.java",
+   "gson/src/main/java/com/google/gson/internal/bind/JavaTimeTypeAdapters.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java"
+  ],
+  "pool": "standard",
+  "authored": "2025-12-23T14:38:19-08:00",
+  "subject": "Add type adapters for `java.time` classes (#2948)",
+  "src_churn": 621,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1471917391b2cebaab70bbe68cd1dd50eb3d0b5d": {
+  "task": "1471917391b2cebaab70bbe68cd1dd50eb3d0b5d",
+  "target_tests": [
+   "JsonObjectTest",
+   "JsonParserParameterizedTest",
+   "SubsetTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonObjectTest.java",
+   "gson/src/test/java/com/google/gson/JsonParserParameterizedTest.java",
+   "gson/src/test/java/com/google/gson/SubsetTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/Streams.java",
+   "gson/src/main/java/com/google/gson/internal/bind/JsonElementTypeAdapter.java",
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java",
+   "gson/src/main/java/com/google/gson/stream/JsonWriter.java"
+  ],
+  "pool": "standard",
+  "authored": "2025-11-20T12:16:31-08:00",
+  "subject": "Small modifications to make building a subset possible. (#2946)",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "72537db9a6095720aca3a67abe77ec5a16200081": {
+  "task": "72537db9a6095720aca3a67abe77ec5a16200081",
+  "target_tests": [
+   "StreamsTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/internal/StreamsTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/Streams.java"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-27T01:57:38+08:00",
+  "subject": "Make AppendableWriter do flush and close if delegation object supports (#2925)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "676b005ace2a44fbf821157b6211197ddbcb614c": {
+  "task": "676b005ace2a44fbf821157b6211197ddbcb614c",
+  "target_tests": [
+   "GsonBuilderTest",
+   "GsonTypesTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonBuilderTest.java",
+   "gson/src/test/java/com/google/gson/internal/GsonTypesTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/GsonBuilder.java",
+   "gson/src/main/java/com/google/gson/internal/GsonPreconditions.java",
+   "gson/src/main/java/com/google/gson/internal/GsonTypes.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TreeTypeAdapter.java"
+  ],
+  "pool": "standard",
+  "authored": "2025-07-16T23:54:22+02:00",
+  "subject": "Remove internal class `GsonPreconditions` and improve exception messages (#2879)",
+  "src_churn": 106,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "81d15f545d98e902ff1ebdb9c239f1719b3bc3aa": {
+  "task": "81d15f545d98e902ff1ebdb9c239f1719b3bc3aa",
+  "target_tests": [
+   "MapTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/MapTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/TreeTypeAdapter.java"
+  ],
+  "pool": "standard",
+  "authored": "2025-07-14T11:48:53-07:00",
+  "subject": "Address some minor Error Prone warnings. (#2842)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "4e65e6ab368d92638b4ca04521958dbf1d3753e7": {
+  "task": "4e65e6ab368d92638b4ca04521958dbf1d3753e7",
+  "target_tests": [
+   "NamingPolicyTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/NamingPolicyTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/FieldNamingStrategy.java",
+   "gson/src/main/java/com/google/gson/internal/bind/ReflectiveTypeAdapterFactory.java"
+  ],
+  "pool": "standard",
+  "authored": "2025-04-13T19:04:16-04:00",
+  "subject": "Give FieldNamingStrategy the ability to return multiple String names (#2776)",
+  "src_churn": 37,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ad5371eaa4af3555a6277c85a8ba27c09804b712": {
+  "task": "ad5371eaa4af3555a6277c85a8ba27c09804b712",
+  "target_tests": [
+   "Java17RecordTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/Java17RecordTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/LinkedTreeMap.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TreeTypeAdapter.java",
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+  ],
+  "pool": "standard",
+  "authored": "2025-04-03T11:06:48-07:00",
+  "subject": "Fix findings that are new with the latest Error Prone. (#2834)",
+  "src_churn": 71,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a2b1c3c88276697578a961de8286752e772c55db": {
+  "task": "a2b1c3c88276697578a961de8286752e772c55db",
+  "target_tests": [
+   "GsonBuilderTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonBuilderTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/GsonBuilder.java"
+  ],
+  "pool": "standard",
+  "authored": "2025-01-27T23:04:34+01:00",
+  "subject": "Allow registering adapters for `JsonElement` again (#2789)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7e98ebd3e53d7767e338b446dedc3996b2082257": {
+  "task": "7e98ebd3e53d7767e338b446dedc3996b2082257",
+  "target_tests": [
+   "GsonTypesTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/internal/GsonTypesTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/$Gson$Types.java"
+  ],
+  "pool": "standard",
+  "authored": "2024-10-12T17:18:44+03:00",
+  "subject": "Support Properties subclasses in GsonTypes.getMapKeyAndValueTypes (#2758)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7c55d8babe0ac9b21b3d3e9db655afa3f1b3bbf2": {
+  "task": "7c55d8babe0ac9b21b3d3e9db655afa3f1b3bbf2",
+  "target_tests": [
+   "TypeAdapterTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/TypeAdapterTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/TypeAdapter.java"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-03T22:03:21Z",
+  "subject": "Add NullSafeTypeAdapter to prevent TypeAdapter.nullSafe() (#2731)",
+  "src_churn": 42,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d1badbae65cccdc4e772bcf295c640af97b5674a": {
+  "task": "d1badbae65cccdc4e772bcf295c640af97b5674a",
+  "target_tests": [
+   "JsonReaderTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/stream/JsonReaderTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+  ],
+  "pool": "standard",
+  "authored": "2024-07-26T07:56:00-07:00",
+  "subject": "Reference the default nesting limit by name rather than as a constant. (#2719)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "1039427ff0100293dd3cf967a53a55282c0fef6b": {
+  "task": "1039427ff0100293dd3cf967a53a55282c0fef6b",
+  "target_tests": [
+   "JsonParserTest",
+   "JsonReaderTest",
+   "JsonTreeReaderTest",
+   "ObjectTest",
+   "ObjectTypeAdapterTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonParserTest.java",
+   "gson/src/test/java/com/google/gson/ObjectTypeAdapterTest.java",
+   "gson/src/test/java/com/google/gson/functional/ObjectTest.java",
+   "gson/src/test/java/com/google/gson/internal/bind/JsonTreeReaderTest.java",
+   "gson/src/test/java/com/google/gson/stream/JsonReaderTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/JsonTreeReader.java",
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+  ],
+  "pool": "standard",
+  "authored": "2024-07-19T19:47:18+02:00",
+  "subject": "Add nesting limit for `JsonReader` (#2588)",
+  "src_churn": 65,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "00028fb5a7f3fc9b72d77b2d028a58e3155dadec": {
+  "task": "00028fb5a7f3fc9b72d77b2d028a58e3155dadec",
+  "target_tests": [
+   "EnumTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/EnumTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-19T01:02:29+02:00",
+  "subject": "Remove `AccessController` usage for enum adapter (#2704)",
+  "src_churn": 34,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "342d60015ffb2738820d4e49423dbb884533bae8": {
+  "task": "342d60015ffb2738820d4e49423dbb884533bae8",
+  "target_tests": [
+   "JsonParserTest",
+   "JsonReaderTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonParserTest.java",
+   "gson/src/test/java/com/google/gson/stream/JsonReaderTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/JsonParser.java",
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java",
+   "gson/src/main/java/com/google/gson/stream/JsonWriter.java"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-19T14:44:35+01:00",
+  "subject": "Support strict mode for `JsonParser` (#2648)",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "13be1d104d5a5d39a93ff8202de4e75adbfc40f6": {
+  "task": "13be1d104d5a5d39a93ff8202de4e75adbfc40f6",
+  "target_tests": [
+   "DefaultDateTypeAdapterTest",
+   "DefaultTypeAdaptersTest",
+   "GsonBuilderTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonBuilderTest.java",
+   "gson/src/test/java/com/google/gson/functional/DefaultTypeAdaptersTest.java",
+   "gson/src/test/java/com/google/gson/internal/bind/DefaultDateTypeAdapterTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/GsonBuilder.java",
+   "gson/src/main/java/com/google/gson/internal/PreJava9DateFormatProvider.java",
+   "gson/src/main/java/com/google/gson/internal/bind/DefaultDateTypeAdapter.java"
+  ],
+  "pool": "standard",
+  "authored": "2024-03-01T21:17:12+01:00",
+  "subject": "Fix `GsonBuilder.setDateFormat` ignoring partial DEFAULT; deprecate `setDateFormat(int)` (#2556)",
+  "src_churn": 62,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "db61bb07f04512b6fc21a5ce4d2b7cd380a1e7fc": {
+  "task": "db61bb07f04512b6fc21a5ce4d2b7cd380a1e7fc",
+  "target_tests": [
+   "JsonPrimitiveTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonPrimitiveTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/JsonPrimitive.java"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-09T17:38:42+01:00",
+  "subject": "Adds support to `BigDecimal` in `JsonPrimitive#equals` (#2364)",
+  "src_churn": 15,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "11b273241250c3103a6ec52b45f792328f50479c": {
+  "task": "11b273241250c3103a6ec52b45f792328f50479c",
+  "target_tests": [
+   "GsonTypesTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/internal/GsonTypesTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/$Gson$Types.java"
+  ],
+  "pool": "standard",
+  "authored": "2024-01-30T23:29:07+01:00",
+  "subject": "Fix $Gson$Types equals method for TypeVariable when its generic declaration is not a Class (#2599)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "46ab704221608fb6318d110f1b0c2abca73a9ea2": {
+  "task": "46ab704221608fb6318d110f1b0c2abca73a9ea2",
+  "target_tests": [
+   "EnumTest",
+   "ExposeAnnotationExclusionStrategyTest",
+   "InnerClassExclusionStrategyTest",
+   "ObjectTest",
+   "VersionExclusionStrategyTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/ExposeAnnotationExclusionStrategyTest.java",
+   "gson/src/test/java/com/google/gson/InnerClassExclusionStrategyTest.java",
+   "gson/src/test/java/com/google/gson/VersionExclusionStrategyTest.java",
+   "gson/src/test/java/com/google/gson/functional/EnumTest.java",
+   "gson/src/test/java/com/google/gson/functional/ObjectTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/Excluder.java",
+   "gson/src/main/java/com/google/gson/internal/bind/ReflectiveTypeAdapterFactory.java",
+   "gson/src/main/java/com/google/gson/internal/reflect/ReflectionHelper.java"
+  ],
+  "pool": "standard",
+  "authored": "2024-01-29T17:21:04+01:00",
+  "subject": "Support serializing anonymous and local class with custom adapter (#2498)",
+  "src_churn": 97,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "58d1a9f0eb396ff64a622532e2ba5c5c726165e6": {
+  "task": "58d1a9f0eb396ff64a622532e2ba5c5c726165e6",
+  "target_tests": [
+   "DefaultDateTypeAdapterTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/internal/bind/DefaultDateTypeAdapterTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/DefaultDateTypeAdapter.java",
+   "gson/src/main/java/com/google/gson/internal/sql/SqlDateTypeAdapter.java",
+   "gson/src/main/java/com/google/gson/internal/sql/SqlTimeTypeAdapter.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-12-05T22:54:53+08:00",
+  "subject": "Fix DateFormat time zone is not restored and add Test. (#2549)",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "66847264765180c849f945ca13704aa0eae79c58": {
+  "task": "66847264765180c849f945ca13704aa0eae79c58",
+  "target_tests": [
+   "DefaultTypeAdaptersTest",
+   "GsonBuilderTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonBuilderTest.java",
+   "gson/src/test/java/com/google/gson/functional/DefaultTypeAdaptersTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/GsonBuilder.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-18T23:09:25+01:00",
+  "subject": "Validate `GsonBuilder.setDateFormat` style arguments & extend tests (#2545)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "335ff0f9ae2ed71714a937513d4e6aba1d4318a4": {
+  "task": "335ff0f9ae2ed71714a937513d4e6aba1d4318a4",
+  "target_tests": [
+   "DefaultTypeAdaptersTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/DefaultTypeAdaptersTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/GsonBuilder.java",
+   "gson/src/main/java/com/google/gson/internal/bind/util/ISO8601Utils.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-11-19T02:36:53+08:00",
+  "subject": "validating the date format, add test case, since NumberFormatExceptio\u2026 (#2538)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6a9d240f786bfe6602ae5dafd6da23b4fb3043fc": {
+  "task": "6a9d240f786bfe6602ae5dafd6da23b4fb3043fc",
+  "target_tests": [
+   "NumberLimitsTest",
+   "PrimitiveTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/NumberLimitsTest.java",
+   "gson/src/test/java/com/google/gson/functional/PrimitiveTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/JsonPrimitive.java",
+   "gson/src/main/java/com/google/gson/ToNumberPolicy.java",
+   "gson/src/main/java/com/google/gson/internal/LazilyParsedNumber.java",
+   "gson/src/main/java/com/google/gson/internal/NumberLimits.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-10-23T22:51:29+02:00",
+  "subject": "Add limits when deserializing `BigDecimal` and `BigInteger` (#2510)",
+  "src_churn": 60,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0109f451299e7780a334d1844548d3a3346a9b39": {
+  "task": "0109f451299e7780a334d1844548d3a3346a9b39",
+  "target_tests": [
+   "GsonBuilderTest",
+   "GsonTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonBuilderTest.java",
+   "gson/src/test/java/com/google/gson/GsonTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/GsonBuilder.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-10-03T09:29:54-05:00",
+  "subject": "issue#2436: Throw exception when registering adapter for Object or JsonElement (#2479)",
+  "src_churn": 19,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e7cf5c458374e5fc69dbdce6de5cb2c881521135": {
+  "task": "e7cf5c458374e5fc69dbdce6de5cb2c881521135",
+  "target_tests": [
+   "ObjectTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/ObjectTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/ReflectiveTypeAdapterFactory.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-09-30T22:23:31+02:00",
+  "subject": "Only create one `BoundField` instance per field in `ReflectiveTypeAdapterFactory` (#2440)",
+  "src_churn": 106,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "70bda4b9c9eb8d0b567f8715a67dbada00b02216": {
+  "task": "70bda4b9c9eb8d0b567f8715a67dbada00b02216",
+  "target_tests": [
+   "JsonTreeWriterTest",
+   "JsonWriterTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/internal/bind/JsonTreeWriterTest.java",
+   "gson/src/test/java/com/google/gson/stream/JsonWriterTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/JsonTreeWriter.java",
+   "gson/src/main/java/com/google/gson/stream/JsonWriter.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-29T17:41:06+02:00",
+  "subject": "Throw exception when calling `JsonWriter.name` outside JSON object (#2476)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "88fd6d13905b520531f79cd3caf9fff30f3617e9": {
+  "task": "88fd6d13905b520531f79cd3caf9fff30f3617e9",
+  "target_tests": [
+   "JsonAdapterAnnotationOnClassesTest",
+   "JsonAdapterNullSafeTest",
+   "JsonAdapterSerializerDeserializerTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/JsonAdapterAnnotationOnClassesTest.java",
+   "gson/src/test/java/com/google/gson/functional/JsonAdapterSerializerDeserializerTest.java",
+   "gson/src/test/java/com/google/gson/regression/JsonAdapterNullSafeTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/InstanceCreator.java",
+   "gson/src/main/java/com/google/gson/annotations/JsonAdapter.java",
+   "gson/src/main/java/com/google/gson/internal/bind/JsonAdapterAnnotationTypeAdapterFactory.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-23T16:09:32+02:00",
+  "subject": "Improve `JsonAdapter` documentation and tests (#2442)",
+  "src_churn": 47,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "392cc65ff3004689e03b219d9b00979072f9c9d0": {
+  "task": "392cc65ff3004689e03b219d9b00979072f9c9d0",
+  "target_tests": [
+   "JsonWriterTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/stream/JsonWriterTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/stream/JsonWriter.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-22T22:42:31+05:30",
+  "subject": "Changes to ensure if no object is opened user won't be able to write property name (#2475)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7b8ce2b9f7faaa22893bb77140563e3c41afb4ab": {
+  "task": "7b8ce2b9f7faaa22893bb77140563e3c41afb4ab",
+  "target_tests": [
+   "TypeTokenTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/reflect/TypeTokenTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/reflect/TypeToken.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-14T23:26:05+02:00",
+  "subject": "Prevent `TypeToken` from capturing type variables (#2376)",
+  "src_churn": 67,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "cdbbee4e723c39c1df302a805f3bde8d4fe12bd1": {
+  "task": "cdbbee4e723c39c1df302a805f3bde8d4fe12bd1",
+  "target_tests": [
+   "DefaultInetAddressTypeAdapterTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/DefaultInetAddressTypeAdapterTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-08-08T14:21:06-07:00",
+  "subject": "Bump com.google.errorprone:error_prone_core from 2.20.0 to 2.21.1 (#2463)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a38b757bc4fddfd57ab762fbf192dd2b3fc6be22": {
+  "task": "a38b757bc4fddfd57ab762fbf192dd2b3fc6be22",
+  "target_tests": [
+   "TypeTokenTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/reflect/TypeTokenTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/reflect/TypeToken.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-25T22:00:26+02:00",
+  "subject": "Support non-generic type for `TypeToken.getParameterized` for legacy reasons (#2447)",
+  "src_churn": 28,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a589ef20087b4b0f1ec3048d3ceaef1eedccd09d": {
+  "task": "a589ef20087b4b0f1ec3048d3ceaef1eedccd09d",
+  "target_tests": [
+   "GsonTypesTest",
+   "TypeTokenTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/internal/GsonTypesTest.java",
+   "gson/src/test/java/com/google/gson/reflect/TypeTokenTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/$Gson$Types.java",
+   "gson/src/main/java/com/google/gson/reflect/TypeToken.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-24T00:24:23+02:00",
+  "subject": "Improve creation of `ParameterizedType` (#2375)",
+  "src_churn": 55,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9cf0f8d3022fdfcd480dcd7648b2e5209e775b52": {
+  "task": "9cf0f8d3022fdfcd480dcd7648b2e5209e775b52",
+  "target_tests": [
+   "DefaultTypeAdaptersTest",
+   "ExposeFieldsTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/DefaultTypeAdaptersTest.java",
+   "gson/src/test/java/com/google/gson/functional/ExposeFieldsTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/NonNullElementWrapperList.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-06-19T14:22:28-07:00",
+  "subject": "Update to latest Error Prone and fix some newly-flagged problems. (#2426)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "481ac9b82cd5713f43018fafc16218d4045dc4c4": {
+  "task": "481ac9b82cd5713f43018fafc16218d4045dc4c4",
+  "target_tests": [
+   "FormattingStyleTest",
+   "GsonTest",
+   "JsonWriterTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonTest.java",
+   "gson/src/test/java/com/google/gson/functional/FormattingStyleTest.java",
+   "gson/src/test/java/com/google/gson/stream/JsonWriterTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/FormattingStyle.java",
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/GsonBuilder.java",
+   "gson/src/main/java/com/google/gson/stream/JsonWriter.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-05-31T01:32:22+02:00",
+  "subject": "Use non-`null` `FormattingStyle`; configure space after separator (#2345)",
+  "src_churn": 153,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "37ed0fcbd7930df0aad9f5068c608e4465413877": {
+  "task": "37ed0fcbd7930df0aad9f5068c608e4465413877",
+  "target_tests": [
+   "DefaultTypeAdaptersTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/DefaultTypeAdaptersTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/JsonElement.java",
+   "gson/src/main/java/com/google/gson/JsonStreamParser.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-04-10T13:33:47-07:00",
+  "subject": "Address review comments from @Marcono1234. (#2372)",
+  "src_churn": 3,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "26229d33d81f0d60f508411eb3c541f3e87322ac": {
+  "task": "26229d33d81f0d60f508411eb3c541f3e87322ac",
+  "target_tests": [
+   "FormattingStyleTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/FormattingStyleTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/FormattingStyle.java",
+   "gson/src/main/java/com/google/gson/GsonBuilder.java",
+   "gson/src/main/java/com/google/gson/stream/JsonWriter.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-03-19T17:15:35+01:00",
+  "subject": "FormattingStyle follow-up (#2327)",
+  "src_churn": 31,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "85ebaf7c3553a5d5c058fd6067824a7c5258d07f": {
+  "task": "85ebaf7c3553a5d5c058fd6067824a7c5258d07f",
+  "target_tests": [
+   "JsonReaderTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/stream/JsonReaderTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-03-06T17:24:09+01:00",
+  "subject": "Fix #2334 (#2337)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "af2179843601c73aa96062208d8f324a45243e47": {
+  "task": "af2179843601c73aa96062208d8f324a45243e47",
+  "target_tests": [
+   "JsonPrimitiveTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonPrimitiveTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/JsonPrimitive.java"
+  ],
+  "pool": "standard",
+  "authored": "2023-02-06T18:40:11+01:00",
+  "subject": "Fix the `equals` method of `JsonPrimitive` to work with `BigInteger` (#2311)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "f63a1b85aec695f4d464e07a5c13fc038d581527": {
+  "task": "f63a1b85aec695f4d464e07a5c13fc038d581527",
+  "target_tests": [
+   "JsonStreamParserTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonStreamParserTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/JsonStreamParser.java"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-14T17:33:33+01:00",
+  "subject": "Remove EOFException special casing of JsonStreamParser.next() (#2281)",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e4c3b653a6bdac992d64822796af95ff8e74a625": {
+  "task": "e4c3b653a6bdac992d64822796af95ff8e74a625",
+  "target_tests": [
+   "GsonTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/JsonDeserializer.java",
+   "gson/src/main/java/com/google/gson/JsonSerializer.java",
+   "gson/src/main/java/com/google/gson/TypeAdapter.java"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-05T18:10:36+01:00",
+  "subject": "Fix non-threadsafe creation of adapter for type with cyclic dependency (#1832)",
+  "src_churn": 115,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "6c27553c8375515e9522facf5ea82b8161d5ffb2": {
+  "task": "6c27553c8375515e9522facf5ea82b8161d5ffb2",
+  "target_tests": [
+   "NamingPolicyTest",
+   "ObjectTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/NamingPolicyTest.java",
+   "gson/src/test/java/com/google/gson/functional/ObjectTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/ReflectiveTypeAdapterFactory.java",
+   "gson/src/main/java/com/google/gson/internal/reflect/ReflectionHelper.java"
+  ],
+  "pool": "standard",
+  "authored": "2022-12-05T02:27:43+01:00",
+  "subject": "Improve exception message for duplicate field names (#2251)",
+  "src_churn": 27,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "ceb3b8747ece88cc9f8422420fefccb95b83860f": {
+  "task": "ceb3b8747ece88cc9f8422420fefccb95b83860f",
+  "target_tests": [
+   "JsonObjectTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonObjectTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/JsonObject.java"
+  ],
+  "pool": "standard",
+  "authored": "2022-11-13T15:58:30-05:00",
+  "subject": "Added JsonObject method isEmpty() (#2233)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9578583effe9c6acc1296e856eeb81bfd75581d0": {
+  "task": "9578583effe9c6acc1296e856eeb81bfd75581d0",
+  "target_tests": [
+   "JsonArrayAsListTest",
+   "JsonObjectAsMapTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonArrayAsListTest.java",
+   "gson/src/test/java/com/google/gson/JsonObjectAsMapTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/JsonTreeReader.java"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-24T10:28:25-07:00",
+  "subject": "Small tweaks to fix Error Prone warnings. (#2227)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "954d526af4ad9e58872e7a64f92e749421d1cdf5": {
+  "task": "954d526af4ad9e58872e7a64f92e749421d1cdf5",
+  "target_tests": [
+   "JsonArrayAsListTest",
+   "JsonArrayTest",
+   "JsonObjectAsMapTest",
+   "JsonObjectTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonArrayAsListTest.java",
+   "gson/src/test/java/com/google/gson/JsonArrayTest.java",
+   "gson/src/test/java/com/google/gson/JsonObjectAsMapTest.java",
+   "gson/src/test/java/com/google/gson/JsonObjectTest.java",
+   "gson/src/test/java/com/google/gson/functional/JsonArrayTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/JsonArray.java",
+   "gson/src/main/java/com/google/gson/JsonObject.java",
+   "gson/src/main/java/com/google/gson/internal/NonNullElementWrapperList.java"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-16T21:30:49+02:00",
+  "subject": "Add `JsonArray.asList` and `JsonObject.asMap` view methods (#2225)",
+  "src_churn": 136,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "2549ba93fc48f4c29f1a5c82553ce666712f183a": {
+  "task": "2549ba93fc48f4c29f1a5c82553ce666712f183a",
+  "target_tests": [
+   "CollectionTest",
+   "ConstructorConstructorTest",
+   "GsonTest",
+   "MapTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonTest.java",
+   "gson/src/test/java/com/google/gson/functional/CollectionTest.java",
+   "gson/src/test/java/com/google/gson/functional/MapTest.java",
+   "gson/src/test/java/com/google/gson/internal/ConstructorConstructorTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/internal/ConstructorConstructor.java",
+   "gson/src/main/java/com/google/gson/internal/bind/CollectionTypeAdapterFactory.java",
+   "gson/src/main/java/com/google/gson/internal/bind/JsonAdapterAnnotationTypeAdapterFactory.java",
+   "gson/src/main/java/com/google/gson/internal/bind/MapTypeAdapterFactory.java",
+   "gson/src/main/java/com/google/gson/internal/bind/ReflectiveTypeAdapterFactory.java"
+  ],
+  "pool": "hard",
+  "authored": "2025-03-19T15:37:41+01:00",
+  "subject": "Fix ConstructorConstructor creating mismatching Collection and Map instances (#2068)",
+  "src_churn": 172,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9471163df1f972975878784d9fd3c646c8d0b840": {
+  "task": "9471163df1f972975878784d9fd3c646c8d0b840",
+  "target_tests": [
+   "ISO8601UtilsTest",
+   "OSGiManifestIT",
+   "ReflectionAccessFilterTest",
+   "TypeHierarchyAdapterTest",
+   "VersioningTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/ReflectionAccessFilterTest.java",
+   "gson/src/test/java/com/google/gson/functional/TypeHierarchyAdapterTest.java",
+   "gson/src/test/java/com/google/gson/functional/VersioningTest.java",
+   "gson/src/test/java/com/google/gson/integration/OSGiManifestIT.java",
+   "gson/src/test/java/com/google/gson/internal/bind/util/ISO8601UtilsTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/JsonIOException.java",
+   "gson/src/main/java/com/google/gson/internal/$Gson$Preconditions.java",
+   "gson/src/main/java/com/google/gson/internal/$Gson$Types.java",
+   "gson/src/main/java/com/google/gson/internal/bind/util/ISO8601Utils.java"
+  ],
+  "pool": "hard",
+  "authored": "2024-10-08T17:48:29-07:00",
+  "subject": "Fix some new Error Prone warnings. (#2753)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8bfdbb4e14172b013c3d1f56c3a36812075e2886": {
+  "task": "8bfdbb4e14172b013c3d1f56c3a36812075e2886",
+  "target_tests": [
+   "JsonArrayTest",
+   "JsonNullTest",
+   "JsonObjectTest",
+   "JsonPrimitiveTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonArrayTest.java",
+   "gson/src/test/java/com/google/gson/JsonNullTest.java",
+   "gson/src/test/java/com/google/gson/JsonObjectTest.java",
+   "gson/src/test/java/com/google/gson/JsonPrimitiveTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/JsonArray.java",
+   "gson/src/main/java/com/google/gson/JsonElement.java",
+   "gson/src/main/java/com/google/gson/JsonObject.java",
+   "gson/src/main/java/com/google/gson/JsonParser.java",
+   "gson/src/main/java/com/google/gson/JsonPrimitive.java"
+  ],
+  "pool": "hard",
+  "authored": "2024-05-18T19:43:19+02:00",
+  "subject": "Guarantee that `JsonElement.toString()` produces JSON (#2659)",
+  "src_churn": 113,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c2a0e4634a2100494159add78db2ee06f5eb9be6": {
+  "task": "c2a0e4634a2100494159add78db2ee06f5eb9be6",
+  "target_tests": [
+   "ConcurrencyTest",
+   "GsonBuilderTest",
+   "InternationalizationTest",
+   "LazilyParsedNumberTest",
+   "NullObjectAndFieldTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonBuilderTest.java",
+   "gson/src/test/java/com/google/gson/functional/ConcurrencyTest.java",
+   "gson/src/test/java/com/google/gson/functional/InternationalizationTest.java",
+   "gson/src/test/java/com/google/gson/functional/NullObjectAndFieldTest.java",
+   "gson/src/test/java/com/google/gson/internal/LazilyParsedNumberTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/JsonNull.java",
+   "gson/src/main/java/com/google/gson/JsonParser.java",
+   "gson/src/main/java/com/google/gson/internal/$Gson$Preconditions.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TypeAdapterRuntimeTypeWrapper.java"
+  ],
+  "pool": "hard",
+  "authored": "2023-11-10T21:36:42+01:00",
+  "subject": "Updates the line separator from `CRLF` to `LF` (#2536)",
+  "src_churn": 728,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e93fda9f17852e8bf029ac052175b40f6555481f": {
+  "task": "e93fda9f17852e8bf029ac052175b40f6555481f",
+  "target_tests": [
+   "EnumTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/EnumTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/FieldAttributes.java",
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/JsonArray.java",
+   "gson/src/main/java/com/google/gson/annotations/Until.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TreeTypeAdapter.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TypeAdapterRuntimeTypeWrapper.java",
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+  ],
+  "pool": "hard",
+  "authored": "2023-09-21T00:44:15+02:00",
+  "subject": "Fix typos and improve Gson Design Document formatting (#2491)",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7ee5ad6cd1640d957f3a73d89a271ee2ef9c7956": {
+  "task": "7ee5ad6cd1640d957f3a73d89a271ee2ef9c7956",
+  "target_tests": [
+   "GsonTest",
+   "InstanceCreatorTest",
+   "JsonAdapterAnnotationOnClassesTest",
+   "JsonAdapterAnnotationOnFieldsTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonTest.java",
+   "gson/src/test/java/com/google/gson/functional/InstanceCreatorTest.java",
+   "gson/src/test/java/com/google/gson/functional/JsonAdapterAnnotationOnClassesTest.java",
+   "gson/src/test/java/com/google/gson/functional/JsonAdapterAnnotationOnFieldsTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/InstanceCreator.java",
+   "gson/src/main/java/com/google/gson/internal/bind/JsonAdapterAnnotationTypeAdapterFactory.java",
+   "gson/src/main/java/com/google/gson/internal/bind/ReflectiveTypeAdapterFactory.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TreeTypeAdapter.java"
+  ],
+  "pool": "hard",
+  "authored": "2023-08-23T02:15:18+02:00",
+  "subject": "Fix `Gson.getDelegateAdapter` not working properly for `JsonAdapter` (#2435)",
+  "src_churn": 233,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "19f54ee6ed33b7517c729c801bc57c8c0478be7d": {
+  "task": "19f54ee6ed33b7517c729c801bc57c8c0478be7d",
+  "target_tests": [
+   "FormattingStyleTest",
+   "GsonTest",
+   "JsonTreeWriterTest",
+   "JsonWriterTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonTest.java",
+   "gson/src/test/java/com/google/gson/functional/FormattingStyleTest.java",
+   "gson/src/test/java/com/google/gson/internal/bind/JsonTreeWriterTest.java",
+   "gson/src/test/java/com/google/gson/stream/JsonWriterTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/FormattingStyle.java",
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/GsonBuilder.java",
+   "gson/src/main/java/com/google/gson/JsonPrimitive.java",
+   "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+   "gson/src/main/java/module-info.java"
+  ],
+  "pool": "hard",
+  "authored": "2023-02-12T08:20:02-08:00",
+  "subject": "Fixes #776: Add settings for the kind of newline to use (#2231)",
+  "src_churn": 221,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8451c1fa63f5198daf38498869836e85c85bdd08": {
+  "task": "8451c1fa63f5198daf38498869836e85c85bdd08",
+  "target_tests": [
+   "TypeAdapterRuntimeTypeWrapperTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/TypeAdapterRuntimeTypeWrapperTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/Gson.java",
+   "gson/src/main/java/com/google/gson/internal/bind/SerializationDelegatingTypeAdapter.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TreeTypeAdapter.java",
+   "gson/src/main/java/com/google/gson/internal/bind/TypeAdapterRuntimeTypeWrapper.java"
+  ],
+  "pool": "hard",
+  "authored": "2022-10-11T01:10:48+02:00",
+  "subject": "Fix TypeAdapterRuntimeTypeWrapper not detecting reflective TreeTypeAdapter and FutureTypeAdapter (#1787)",
+  "src_churn": 77,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "796193d0326a2f44bc314bf24262732ea3e64014": {
+  "task": "796193d0326a2f44bc314bf24262732ea3e64014",
+  "target_tests": [
+   "GsonBuilderTest",
+   "VersionExclusionStrategyTest",
+   "VersioningTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/GsonBuilderTest.java",
+   "gson/src/test/java/com/google/gson/VersionExclusionStrategyTest.java",
+   "gson/src/test/java/com/google/gson/functional/VersioningTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/GsonBuilder.java",
+   "gson/src/main/java/com/google/gson/annotations/Since.java",
+   "gson/src/main/java/com/google/gson/annotations/Until.java",
+   "gson/src/main/java/com/google/gson/internal/Excluder.java"
+  ],
+  "pool": "hard",
+  "authored": "2022-10-03T01:38:43+02:00",
+  "subject": "Improve versioning support documentation and validate version (#2214)",
+  "src_churn": 61,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0864a02e867633cba2daa8ace94eb3a72cc880de": {
+  "task": "0864a02e867633cba2daa8ace94eb3a72cc880de",
+  "target_tests": [
+   "DefaultDateTypeAdapterTest"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/internal/bind/DefaultDateTypeAdapterTest.java"
+  ],
+  "src_files": [
+   "gson/src/main/java/com/google/gson/GsonBuilder.java",
+   "gson/src/main/java/com/google/gson/TypeAdapter.java",
+   "gson/src/main/java/com/google/gson/TypeAdapterFactory.java",
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java",
+   "gson/src/main/java/com/google/gson/stream/JsonWriter.java"
+  ],
+  "pool": "hard",
+  "authored": "2022-09-23T14:33:28-07:00",
+  "subject": "Build on JDK 17 as well as 11. (#2198)",
+  "src_churn": 18,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}

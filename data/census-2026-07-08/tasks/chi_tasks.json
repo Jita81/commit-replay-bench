@@ -1,0 +1,1293 @@
+{
+ "caf87e6e1bd9f29326f2ffdb93d8098139f08e4f": {
+  "task": "caf87e6e1bd9f29326f2ffdb93d8098139f08e4f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "chi.go",
+   "mux.go",
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-07-05T20:13:24+02:00",
+  "subject": "feat(mux): support http QUERY method ietf rfc10008 (#1132)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "2b9fca258f92830fc8232582e9e05a4d4a572a5d": {
+  "task": "2b9fca258f92830fc8232582e9e05a4d4a572a5d",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/wrap_writer_test.go"
+  ],
+  "src_files": [
+   "middleware/wrap_writer.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-06-14T17:07:26+07:00",
+  "subject": "Honor Discard() in httpFancyWriter.ReadFrom (#1110)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestHttpFancyWriterReadFromHonorsDiscard"
+  ],
+  "gold_clean": true
+ },
+ "3b171578ca44dfd75ca3c5cbddc7b44c600a7b49": {
+  "task": "3b171578ca44dfd75ca3c5cbddc7b44c600a7b49",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/client_ip_bench_test.go",
+   "middleware/client_ip_example_test.go",
+   "middleware/client_ip_test.go"
+  ],
+  "src_files": [
+   "middleware/client_ip.go",
+   "middleware/logger.go",
+   "middleware/realip.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-22T17:16:13+02:00",
+  "subject": "feat: middleware.ClientIP, a replacement for middleware.RealIP (#967)",
+  "src_churn": 290,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "818fdcfc4786168651768377ba647cf9dd5b3953": {
+  "task": "818fdcfc4786168651768377ba647cf9dd5b3953",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "pattern_test.go"
+  ],
+  "src_files": [
+   "mux.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-21T02:15:38+08:00",
+  "subject": "fix: set Request.Pattern from RoutePattern() (#1097)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestPattern",
+   "github.com/go-chi/chi/v5::TestPattern/Nested_sub-router"
+  ],
+  "gold_clean": true
+ },
+ "4ef87eaf2cfb27d3126d48194e1a84806acc1aed": {
+  "task": "4ef87eaf2cfb27d3126d48194e1a84806acc1aed",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/wrap_writer_test.go"
+  ],
+  "src_files": [
+   "middleware/wrap_writer.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-05-16T19:31:44+05:00",
+  "subject": "middleware: fix httpFancyWriter.ReadFrom double-counting bytes with Tee (#1085)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestHttpFancyWriterReadFromByteCountWithTee"
+  ],
+  "gold_clean": true
+ },
+ "903cff2596eac0f72538ac46d696058351f1c3fb": {
+  "task": "903cff2596eac0f72538ac46d696058351f1c3fb",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "tree_test.go"
+  ],
+  "src_files": [
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-12T12:31:51+01:00",
+  "subject": "Propagate inline middlewares across mounted subrouters (#1049)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestWalkInlineMiddlewaresAcrossSubrouter",
+   "github.com/go-chi/chi/v5::TestWalkInlineMiddlewaresAcrossSubrouter/Use_on_subrouter_combined_with_outer_With",
+   "github.com/go-chi/chi/v5::TestWalkInlineMiddlewaresAcrossSubrouter/With+Group_wrapping_Route+With"
+  ],
+  "gold_clean": true
+ },
+ "05f1ef7bb50b8a8cb33a9dd3ba1c5b94bff0f723": {
+  "task": "05f1ef7bb50b8a8cb33a9dd3ba1c5b94bff0f723",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/route_headers_test.go"
+  ],
+  "src_files": [
+   "middleware/route_headers.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-02-05T16:50:34+05:45",
+  "subject": "fix(middleware): add missing return in RouteHeaders empty check (#1045)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestRouteHeaders",
+   "github.com/go-chi/chi/v5/middleware::TestRouteHeaders/empty_router_should_call_next_handler_exactly_once"
+  ],
+  "gold_clean": true
+ },
+ "6eb35881c0e438ffb663ddbad3a61babaa5e5d8a": {
+  "task": "6eb35881c0e438ffb663ddbad3a61babaa5e5d8a",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/strip_test.go"
+  ],
+  "src_files": [
+   "middleware/strip.go"
+  ],
+  "pool": "standard",
+  "authored": "2026-01-14T11:02:00-05:00",
+  "subject": "middleware: harden RedirectSlashes handler (#1044)",
+  "src_churn": 11,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestRedirectSlashes_PreventBackslashRelativeOpenRedirect",
+   "github.com/go-chi/chi/v5/middleware::TestRedirectSlashes_PreventBackslashRelativeOpenRedirect/encoded_backslash:_/%5Cevil.com/",
+   "github.com/go-chi/chi/v5/middleware::TestRedirectSlashes_PreventBackslashRelativeOpenRedirect/raw_backslash:_/\\evil.com/"
+  ],
+  "gold_clean": true
+ },
+ "9fb4a15daa6d4ccd5e7286c1227d58872f89f4cb": {
+  "task": "9fb4a15daa6d4ccd5e7286c1227d58872f89f4cb",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-10-08T12:00:50-04:00",
+  "subject": "update reverseMethodMap in RegisterMethod (#1022)",
+  "src_churn": 1,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestCustomHTTPMethod"
+  ],
+  "gold_clean": true
+ },
+ "d12cc49622f31a01c6cceea7cdb62f647660102c": {
+  "task": "d12cc49622f31a01c6cceea7cdb62f647660102c",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "pattern_test.go"
+  ],
+  "src_files": [
+   "mux.go",
+   "pattern.go",
+   "pattern_fallback.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-26T13:16:42+02:00",
+  "subject": "feat(mux): support http.Request.Pattern in Go 1.23 (#986)",
+  "src_churn": 36,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestPattern",
+   "github.com/go-chi/chi/v5::TestPattern/Basic_path_value",
+   "github.com/go-chi/chi/v5::TestPattern/Two_path_values",
+   "github.com/go-chi/chi/v5::TestPattern/Wildcard_path"
+  ],
+  "gold_clean": true
+ },
+ "78591377377c708fc96f26e51320cf378930b9d2": {
+  "task": "78591377377c708fc96f26e51320cf378930b9d2",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "mux.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-08-15T16:26:17+01:00",
+  "subject": "Allow multiple whitespace between method & pattern (#1013)",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestMuxHandlePatternValidation",
+   "github.com/go-chi/chi/v5::TestMuxHandlePatternValidation/Valid_pattern_with_multiple_whitespace_after_method"
+  ],
+  "gold_clean": true
+ },
+ "1be7ad938cc9c5b39a9dea01a5c518848928ab65": {
+  "task": "1be7ad938cc9c5b39a9dea01a5c518848928ab65",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/strip_test.go"
+  ],
+  "src_files": [
+   "middleware/strip.go"
+  ],
+  "pool": "standard",
+  "authored": "2025-06-20T14:12:13+02:00",
+  "subject": "Merge commit from fork",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestRedirectSlashes"
+  ],
+  "gold_clean": true
+ },
+ "6ceb498b221efa11f559602beb2463b8b52c2161": {
+  "task": "6ceb498b221efa11f559602beb2463b8b52c2161",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "mux.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-26T10:44:06-07:00",
+  "subject": "Fix `Mux.Find` not correctly handling nested routes (#954)",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestMuxFind"
+  ],
+  "gold_clean": true
+ },
+ "1f927a8ec868a307ad892b454d2aacfab463d5d0": {
+  "task": "1f927a8ec868a307ad892b454d2aacfab463d5d0",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/throttle_test.go"
+  ],
+  "src_files": [
+   "middleware/throttle.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-18T18:55:41+03:00",
+  "subject": "Ability to specify response HTTP status code for Throttle middleware (#571)",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "5dd77169551921a41dd3cb54ad01c4d7facab7d0": {
+  "task": "5dd77169551921a41dd3cb54ad01c4d7facab7d0",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/strip_test.go"
+  ],
+  "src_files": [
+   "middleware/strip.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-18T17:08:04+02:00",
+  "subject": "add strip prefix. (#875)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "cbaac313e4f2c7140eba9863f2be951c7804139a": {
+  "task": "cbaac313e4f2c7140eba9863f2be951c7804139a",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/realip_test.go"
+  ],
+  "src_files": [
+   "middleware/realip.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-18T16:08:04+02:00",
+  "subject": "feat(): add CF-Connecting-IP (#908)",
+  "src_churn": 51,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "1089a7c69556f7dae6b0219dfea02662c92334a4": {
+  "task": "1089a7c69556f7dae6b0219dfea02662c92334a4",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "chi.go",
+   "mux.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-09-18T06:25:35-07:00",
+  "subject": "Add `Find` to `Routes` interface (#872)",
+  "src_churn": 26,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "6fedde2a70dc2adce0a3dc41b8aebc0b2bec8185": {
+  "task": "6fedde2a70dc2adce0a3dc41b8aebc0b2bec8185",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-08-23T18:23:19+04:00",
+  "subject": "Make Context.RoutePattern() nil-safe (#927)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestRoutePattern"
+  ],
+  "gold_clean": true
+ },
+ "67be7d9cafdaeb4e04e887ff78d09e030ee43b00": {
+  "task": "67be7d9cafdaeb4e04e887ff78d09e030ee43b00",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/wrap_writer_test.go"
+  ],
+  "src_files": [
+   "middleware/wrap_writer.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-28T16:29:27+02:00",
+  "subject": "middleware: add Discard method to WrapResponseWriter (#926)",
+  "src_churn": 35,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f10dc4a9cab53a47f600f518fcccaa044666e95f": {
+  "task": "f10dc4a9cab53a47f600f518fcccaa044666e95f",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/compress_test.go"
+  ],
+  "src_files": [
+   "middleware/compress.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-06-08T01:13:37+02:00",
+  "subject": "fix(middleware): Close created writer in the compressor middleware (#919)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestCompressor"
+  ],
+  "gold_clean": true
+ },
+ "fd0ff0e45e67f04e1e17884c0d2d0550884624ed": {
+  "task": "fd0ff0e45e67f04e1e17884c0d2d0550884624ed",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "path_value_test.go"
+  ],
+  "src_files": [
+   "mux.go",
+   "path_value.go",
+   "path_value_fallback.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-17T08:17:06+08:00",
+  "subject": "feat(mux): add 1.22-style path value support (#901)",
+  "src_churn": 43,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestPathValue",
+   "github.com/go-chi/chi/v5::TestPathValue/Basic_path_value",
+   "github.com/go-chi/chi/v5::TestPathValue/Two_path_values"
+  ],
+  "gold_clean": true
+ },
+ "60b4f5f52d70851dc4802f68ef96794302bdf854": {
+  "task": "60b4f5f52d70851dc4802f68ef96794302bdf854",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "mux.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-02-17T08:11:00+08:00",
+  "subject": "feat: update HTTP method parsing in patterns for `Handle` and `HandleFunc` (#900)",
+  "src_churn": 16,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestMuxHandlePatternValidation",
+   "github.com/go-chi/chi/v5::TestMuxHandlePatternValidation/Valid_pattern_with_HTTP_POST"
+  ],
+  "gold_clean": true
+ },
+ "7446950424da5c8a04d26f294da95f6c98a4174a": {
+  "task": "7446950424da5c8a04d26f294da95f6c98a4174a",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "mux.go"
+  ],
+  "pool": "standard",
+  "authored": "2024-01-19T04:32:13+05:30",
+  "subject": "Extend Handle method to parse HTTP method in pattern (#897)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestMuxHandlePatternValidation",
+   "github.com/go-chi/chi/v5::TestMuxHandlePatternValidation/Valid_pattern_with_HTTP_POST"
+  ],
+  "gold_clean": true
+ },
+ "3954a76a285fe435e965603e05b3e57d24442ff9": {
+  "task": "3954a76a285fe435e965603e05b3e57d24442ff9",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/sunset_test.go"
+  ],
+  "src_files": [
+   "middleware/sunset.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-10-19T06:03:46+06:00",
+  "subject": "feat(middleware): add sunset/deprecation header middleware (#844)",
+  "src_churn": 25,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "f4ab9b1f050bdcf14bd096399e8bd57363406514": {
+  "task": "f4ab9b1f050bdcf14bd096399e8bd57363406514",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-10-19T05:30:59+05:30",
+  "subject": "fix: #846 (#847)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestRoutePattern"
+  ],
+  "gold_clean": true
+ },
+ "4b14b832d53cef6c77fdcf852876a34f46bc84a2": {
+  "task": "4b14b832d53cef6c77fdcf852876a34f46bc84a2",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "context.go",
+   "mux.go",
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2023-07-13T17:36:22+02:00",
+  "subject": "Adds the Allow header on 405 response (#776)",
+  "src_churn": 47,
+  "size": "M",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5::TestMethodNotAllowed",
+   "github.com/go-chi/chi/v5::TestMethodNotAllowed/Unregistered_Method"
+  ],
+  "gold_clean": true
+ },
+ "0fe6bf1ba3ac601700b7993bc4c62f6c5f707932": {
+  "task": "0fe6bf1ba3ac601700b7993bc4c62f6c5f707932",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/url_format_test.go"
+  ],
+  "src_files": [
+   "middleware/url_format.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-10-28T01:03:39+13:00",
+  "subject": "Use RoutePath in URLFormat middleware (#718)",
+  "src_churn": 6,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestURLFormatInSubRouter"
+  ],
+  "gold_clean": true
+ },
+ "7dbe9a0bd10f03c7841d0374af79d7fa32769a9f": {
+  "task": "7dbe9a0bd10f03c7841d0374af79d7fa32769a9f",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/recoverer_test.go"
+  ],
+  "src_files": [
+   "middleware/recoverer.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-01-04T00:04:36+01:00",
+  "subject": "recoverer: don't recover http.ErrAbortHandler (#624)",
+  "src_churn": 7,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestRecovererAbortHandler"
+  ],
+  "gold_clean": true
+ },
+ "06573a69be04fe52f371b87e6d49f433e71ac2f4": {
+  "task": "06573a69be04fe52f371b87e6d49f433e71ac2f4",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/realip_test.go"
+  ],
+  "src_files": [
+   "middleware/realip.go"
+  ],
+  "pool": "standard",
+  "authored": "2022-01-03T18:35:15Z",
+  "subject": "add net.ParseIP() as validation to RealIP middleware (#665)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestIvalidIP"
+  ],
+  "gold_clean": true
+ },
+ "e4fe2589dd544072423133852cf5661ae44bb72f": {
+  "task": "e4fe2589dd544072423133852cf5661ae44bb72f",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/realip_test.go"
+  ],
+  "src_files": [
+   "middleware/realip.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-12-02T19:38:14+02:00",
+  "subject": "support ip chain without spaces in xForwarded header (#684)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestXForwardForIP"
+  ],
+  "gold_clean": true
+ },
+ "df44563f0692b1e677f18220b9be165e481cf51b": {
+  "task": "df44563f0692b1e677f18220b9be165e481cf51b",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/recoverer_test.go"
+  ],
+  "src_files": [
+   "middleware/recoverer.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-08-30T20:31:12+03:00",
+  "subject": "Fix middleware.Recoverer under Go 1.17+ (again) (#654)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": true
+ },
+ "188a1675b7071f85360770e66daab3a51a977eeb": {
+  "task": "188a1675b7071f85360770e66daab3a51a977eeb",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/recoverer_test.go"
+  ],
+  "src_files": [
+   "middleware/recoverer.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-06-29T16:51:52+01:00",
+  "subject": "Fix middleware.Recoverer under Go 1.17+ (#633)",
+  "src_churn": 17,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestRecoverer"
+  ],
+  "gold_clean": true
+ },
+ "248d06cc6a671e893af50c576200e8354eed08f2": {
+  "task": "248d06cc6a671e893af50c576200e8354eed08f2",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/logger_test.go",
+   "middleware/wrap_writer_test.go"
+  ],
+  "src_files": [
+   "middleware/wrap_writer.go"
+  ],
+  "pool": "standard",
+  "authored": "2021-04-25T13:30:31+02:00",
+  "subject": "Fix support for httptest.ResponseRecorder (#584)",
+  "src_churn": 22,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/v5/middleware::TestRequestLoggerReadFrom"
+  ],
+  "gold_clean": true
+ },
+ "32e49a13fe6ec25275edf723814166dc092fe69f": {
+  "task": "32e49a13fe6ec25275edf723814166dc092fe69f",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/logger_test.go",
+   "middleware/wrap_writer_test.go"
+  ],
+  "src_files": [
+   "middleware/wrap_writer.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-12-11T13:23:58+01:00",
+  "subject": "logger: support websocket upgrade (#562)",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [
+   "github.com/go-chi/chi/middleware::TestRequestLogger"
+  ],
+  "gold_clean": true
+ },
+ "bf722e8cfa5f563ab39b397c0623a24a2fc8b064": {
+  "task": "bf722e8cfa5f563ab39b397c0623a24a2fc8b064",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-12-05T14:57:51-05:00",
+  "subject": "Deprecate ServerBaseContext in favour of stdlib http.Server#BaseContext",
+  "src_churn": 21,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "9e829149a5835e6d8472c437cb8530c0fd9e3d06": {
+  "task": "9e829149a5835e6d8472c437cb8530c0fd9e3d06",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/strip_test.go"
+  ],
+  "src_files": [
+   "middleware/strip.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-12-05T14:09:26-05:00",
+  "subject": "middleware.RedirectSlashes: slight update from last PR",
+  "src_churn": 10,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "87e5387928b553b5de3a75d5105a34871bc9b8b3": {
+  "task": "87e5387928b553b5de3a75d5105a34871bc9b8b3",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/strip_test.go"
+  ],
+  "src_files": [
+   "middleware/strip.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-12-05T20:07:21+01:00",
+  "subject": "Fix RedirectSlashes, Closes #504 (#505)",
+  "src_churn": 5,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "38aa4a9079a17ad96ab0d2cc52fbd55ebbda71d1": {
+  "task": "38aa4a9079a17ad96ab0d2cc52fbd55ebbda71d1",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/strip_test.go"
+  ],
+  "src_files": [
+   "middleware/strip.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-12-05T19:05:38+01:00",
+  "subject": "Make stripslashes middleware work with other routers (#539)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8afb3c57ef77f5561c5eb4cb9123dbba12535fcc": {
+  "task": "8afb3c57ef77f5561c5eb4cb9123dbba12535fcc",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/content_type_test.go"
+  ],
+  "src_files": [
+   "middleware/content_type.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-12-05T18:25:23+01:00",
+  "subject": "AllowContentType middleware refactor and tests (#470)",
+  "src_churn": 14,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "73938b5d1ab159050b9822e620e5e64109d229cf": {
+  "task": "73938b5d1ab159050b9822e620e5e64109d229cf",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/url_format_test.go"
+  ],
+  "src_files": [
+   "middleware/url_format.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-12-05T08:36:39-07:00",
+  "subject": "Chops the Suffix rather than the Prefix (#531)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "eeee8a2d341047d83f0f283cae4fa25c7eccc5ee": {
+  "task": "eeee8a2d341047d83f0f283cae4fa25c7eccc5ee",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "mux.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-11-24T21:12:32-05:00",
+  "subject": "Cleanup wildcard URLParam which connects the subrouter (#553)",
+  "src_churn": 9,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d6855b8512b1d901dd41ae9cff96ece185cd7dcb": {
+  "task": "d6855b8512b1d901dd41ae9cff96ece185cd7dcb",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/throttle_test.go"
+  ],
+  "src_files": [
+   "middleware/throttle.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-07-08T05:16:06-07:00",
+  "subject": "Respond with 429 when throttled (#528)",
+  "src_churn": 8,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "39504566046f2c13f4d059bccfe0fe06ed67aab3": {
+  "task": "39504566046f2c13f4d059bccfe0fe06ed67aab3",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-06-26T22:06:54+08:00",
+  "subject": "remove unnecessary type conversions (#523)",
+  "src_churn": 2,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "e7728c6d4bc0581289698a8303260253093e520f": {
+  "task": "e7728c6d4bc0581289698a8303260253093e520f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "src_files": [
+   "context.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-05-30T18:05:35-05:00",
+  "subject": "Replace wildcards correctly in RoutePattern (#515)",
+  "src_churn": 12,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "5704d7ee98edd3fe55169b506531bdd061667c70": {
+  "task": "5704d7ee98edd3fe55169b506531bdd061667c70",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-05-22T09:51:03-04:00",
+  "subject": "fix: handle methodnotallowed with path variables (#512)",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "99ad97ff6f4861f89329a898edced62e2262f1ab": {
+  "task": "99ad97ff6f4861f89329a898edced62e2262f1ab",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-04-16T14:10:37+02:00",
+  "subject": "Route recursive-search regexp patterns (#506)",
+  "src_churn": 29,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "b612eb4a0679ba65000dd57947496db7ecadb35f": {
+  "task": "b612eb4a0679ba65000dd57947496db7ecadb35f",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "mux.go",
+   "tree.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-02-19T22:26:21-05:00",
+  "subject": "Comments",
+  "src_churn": 20,
+  "size": "S",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "baf4ef5b139e284b297573d89daf587457153aa3": {
+  "task": "baf4ef5b139e284b297573d89daf587457153aa3",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/compress_test.go"
+  ],
+  "src_files": [
+   "middleware/compress.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-01-22T11:32:13-05:00",
+  "subject": "middleware/compress: deprecate old methods, update convenience method Compress(level int, types ...string)",
+  "src_churn": 66,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "0b14e8384c6d0c96b934e9060ac23e1b9c494c1a": {
+  "task": "0b14e8384c6d0c96b934e9060ac23e1b9c494c1a",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/compress_test.go"
+  ],
+  "src_files": [
+   "middleware/compress.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-01-22T16:21:12+01:00",
+  "subject": "simplify compressor handler",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d80b8f3f3c7fdb449622bdee65d8fff5155acf30": {
+  "task": "d80b8f3f3c7fdb449622bdee65d8fff5155acf30",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/compress_test.go"
+  ],
+  "src_files": [
+   "middleware/compress.go"
+  ],
+  "pool": "standard",
+  "authored": "2020-01-11T20:40:23+01:00",
+  "subject": "Panic for invalid content-type wildcard",
+  "src_churn": 4,
+  "size": "XS",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a52c582b532cd261dbedc4c811d809d6e024c1ff": {
+  "task": "a52c582b532cd261dbedc4c811d809d6e024c1ff",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/compress_test.go",
+   "middleware/throttle_test.go",
+   "mux_test.go",
+   "path_value_test.go"
+  ],
+  "src_files": [
+   "middleware/content_charset.go",
+   "mux.go",
+   "path_value.go",
+   "path_value_fallback.go",
+   "tree.go"
+  ],
+  "pool": "hard",
+  "authored": "2025-09-17T09:51:46+01:00",
+  "subject": "Bump minimum Go and use new features (#1017)",
+  "src_churn": 75,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "c88f06fe6419037c86b3b26a4a67470621f458ad": {
+  "task": "c88f06fe6419037c86b3b26a4a67470621f458ad",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/middleware_test.go"
+  ],
+  "src_files": [
+   "_examples/limits/main.go",
+   "_examples/router-walk/main.go",
+   "middleware/compress.go",
+   "middleware/wrap_writer.go"
+  ],
+  "pool": "hard",
+  "authored": "2019-01-08T13:36:51-05:00",
+  "subject": "fixes #347 deprecate http.CloseNotifier",
+  "src_churn": 45,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "aa3b3b503794cbf75151a3272d39e531d7f26c6b": {
+  "task": "aa3b3b503794cbf75151a3272d39e531d7f26c6b",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/middleware18_test.go",
+   "middleware/middleware_test.go"
+  ],
+  "src_files": [
+   "middleware/closenotify17.go",
+   "middleware/closenotify18.go",
+   "middleware/compress.go",
+   "middleware/compress18.go",
+   "middleware/wrap_writer.go",
+   "middleware/wrap_writer17.go",
+   "middleware/wrap_writer18.go"
+  ],
+  "pool": "hard",
+  "authored": "2019-01-07T20:40:32-05:00",
+  "subject": "chi v4, start by cleaning out older Go version patch code",
+  "src_churn": 198,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "d132b31857e5922a2cc7963f4fcfd8f46b3f2e97": {
+  "task": "d132b31857e5922a2cc7963f4fcfd8f46b3f2e97",
+  "target_tests": [
+   "./",
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/get_head_test.go",
+   "middleware/middleware_test.go",
+   "middleware/strip_test.go",
+   "mux_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "chi.go",
+   "context.go",
+   "middleware/get_head.go",
+   "mux.go",
+   "tree.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-08-31T21:51:08-04:00",
+  "subject": "middleware.GetHead (#248)",
+  "src_churn": 134,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "25354a53cca531cb2efd3f1d3c565d90ff04d802": {
+  "task": "25354a53cca531cb2efd3f1d3c565d90ff04d802",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "_examples/graceful/main.go",
+   "chain.go",
+   "context.go",
+   "middleware/logger.go",
+   "middleware/url_format.go",
+   "mux.go",
+   "tree.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-08-02T17:27:05-04:00",
+  "subject": "go vet and golint the project, release 3.1.5",
+  "src_churn": 52,
+  "size": "M",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "8f717baab43c6b59a09e1b0fa9b69b93e72af096": {
+  "task": "8f717baab43c6b59a09e1b0fa9b69b93e72af096",
+  "target_tests": [
+   "./",
+   "./docgen",
+   "./middleware"
+  ],
+  "test_files": [
+   "docgen/docgen_test.go",
+   "middleware/strip_test.go",
+   "mux_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "_examples/rest/main.go",
+   "_examples/todos-resource/todos.go",
+   "_examples/todos-resource/users.go",
+   "_examples/versions/main.go",
+   "chi.go",
+   "context.go",
+   "mux.go",
+   "tree.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-06-15T16:29:52-04:00",
+  "subject": "v3 beta 1",
+  "src_churn": 775,
+  "size": "XL",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "7f80c6515cef7ebbfc897994012de5efbc6285b6": {
+  "task": "7f80c6515cef7ebbfc897994012de5efbc6285b6",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go"
+  ],
+  "src_files": [
+   "_examples/versions/main.go",
+   "_examples/versions/presenter/v1/article.go",
+   "_examples/versions/presenter/v2/article.go",
+   "_examples/versions/presenter/v3/article.go",
+   "render/responder.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-03-28T21:49:33-04:00",
+  "subject": "Update versions example to use latest render subpkg",
+  "src_churn": 198,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "55c93631d13500c6fa96f83323fea4bfe0fc805b": {
+  "task": "55c93631d13500c6fa96f83323fea4bfe0fc805b",
+  "target_tests": [
+   "./middleware"
+  ],
+  "test_files": [
+   "middleware/compress_18_test.go",
+   "middleware/compress_test.go",
+   "middleware/middleware_test.go"
+  ],
+  "src_files": [
+   "middleware/compress.go",
+   "middleware/compress_17.go",
+   "middleware/compress_18.go",
+   "middleware/logger.go",
+   "middleware/wrap_writer.go",
+   "middleware/wrap_writer_17.go",
+   "middleware/wrap_writer_18.go",
+   "middleware/wrap_writer_http2.go"
+  ],
+  "pool": "hard",
+  "authored": "2017-01-04T16:29:12-05:00",
+  "subject": "Simplify go17 and go18 differences to support http2 WrapWriter",
+  "src_churn": 328,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "a98068174b44efe709a86b69845edb2a89d2f185": {
+  "task": "a98068174b44efe709a86b69845edb2a89d2f185",
+  "target_tests": [
+   "./"
+  ],
+  "test_files": [
+   "mux_test.go",
+   "tree_test.go"
+  ],
+  "src_files": [
+   "chi.go",
+   "middleware/profiler.go",
+   "mux.go",
+   "tree.go"
+  ],
+  "pool": "hard",
+  "authored": "2016-08-19T15:33:27-04:00",
+  "subject": "Remove Any() method from Router",
+  "src_churn": 145,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ },
+ "500b815b028cd91d1aef4b405b050a32e9e7fcba": {
+  "task": "500b815b028cd91d1aef4b405b050a32e9e7fcba",
+  "target_tests": [
+   "./",
+   "./docgen"
+  ],
+  "test_files": [
+   "docgen/docgen_test.go",
+   "mux_test.go"
+  ],
+  "src_files": [
+   "chi.go",
+   "docgen/builder.go",
+   "docgen/docgen.go",
+   "mux.go",
+   "tree.go"
+  ],
+  "pool": "hard",
+  "authored": "2016-08-10T17:25:46-04:00",
+  "subject": "Automatic doc generation from Router",
+  "src_churn": 249,
+  "size": "L",
+  "baseline_failing": [],
+  "gold_clean": false
+ }
+}

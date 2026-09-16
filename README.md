@@ -1,97 +1,269 @@
-# commit-replay-bench
+# Commit Replay Bench (`crb`)
 
-**Grade an AI coding agent against a repo's _own_ tests — the honest, overfit-proof coding eval.**
+**Commit Replay Bench** grades an AI builder against a repository's **own held-out tests**.
+Its verdicts do not come from a model's opinion of a model's work: every verdict is the
+result of five **mechanical belts** run over the repository's real test suite and its own lint gate, and the
+product refuses — at the moment of writing — to record a pass that any belt contradicts
+(**false-Q1 = 0**, enforced in `GradeResult.__post_init__` and `GradeRow.assert_invariants`).
+Every verdict is written to an **append-only, hash-chained ledger** with a per-task
+**evidence pack**, and every number the product displays carries its sample size `n`, a
+Wilson 95% interval, and the version of the apparatus that produced it. On that evidence
+it **routes** each class of change to `deliver` / `calibrate` / `granularize` / `human`, and
+— in a later phase — manufactures new work under the same governance.
 
-Most coding evals are curated exercises (easy to overfit) or leaderboards (easy to game). `commit-replay-bench` does something harder to fake: it replays a repository's **real commits** and grades each AI-produced change against that repo's **own held-out test suite**.
+> Status: **2.0.0a1 on `main`** (apparatus **2.2**, belt set v5), merged from the
+> `reboot/v2` integration branch on 2026-09-16 with the gates run locally and every change
+> since 2026-09-15 reviewed by CodeRabbit (ADR-0013). Every phase of the product plan has
+> shipped (P0–P7: engine, oracle, builders, store, server, UI, factory, deployment). The
+> `v2.0.0a1` tag and the signed container image follow when the repository's CI minutes
+> are restored (the release workflow builds and signs the image; DL-035). See
+> [Status by phase](#status-by-phase) and the [Changelog](CHANGELOG.md). The June 2026 v1
+> contents are tagged `v1.0.0-legacy`.
 
-For each commit it:
+## Start here
 
-1. checks out the **parent** (the state before the fix),
-2. overlays the commit's **tests** — which now **fail** on the parent (a genuine RED oracle),
-3. asks your model to **regenerate the source change**,
-4. requires the tests to pass **GREEN** with **no regressions** in the rest of the suite.
-
-Then it grades into three honest buckets:
-
-| Verdict | Meaning |
+| You are… | Read, in this order |
 |---|---|
-| `ai_can` | Green on the first try, no regressions — the agent reproduces the change unaided. |
-| `needs_human` | Green only after a retry, **or** green but it broke other tests — a human must reconcile. |
-| `fails` | Never green. |
+| **Anyone** — what is this and what does it claim? | the one-page [**explainer for practitioners**](https://claude.ai/artifact/DUaMMWkMXGk25djQYLfZQk) (how it works, the mechanics an expert will ask about, what has been measured, what it refuses to claim) → this page → [Evidence & claims](docs/EVIDENCE-AND-CLAIMS.md) → the [NHS measurement](docs/reviews/2026-09-14-nhs-public-repos.md) |
+| **A developer** taking it to a client's repository | [Onboarding a repository](docs/ONBOARDING-A-REPO.md) → [Operator guide](docs/OPERATOR.md) → [API](docs/API.md) → [Code map](docs/CODE-MAP.md) |
+| **A developer** changing the product | [Architecture](docs/ARCHITECTURE.md) → [ADRs](docs/adr/README.md) → [Code map](docs/CODE-MAP.md) (every file's header says what it is, what proves it, when you touch it) → [Contributing](docs/CONTRIBUTING.md) |
+| **Governance / assurance** | [Evidence & claims](docs/EVIDENCE-AND-CLAIMS.md) → [Security](docs/SECURITY.md) → [Data retention](docs/DATA-RETENTION.md) → [Licensing](docs/LICENSING.md) → the [decision log](docs/DECISION-LOG.md) and the [reviews](docs/reviews/) (an independent critical-friend review and two independent decider passes are on record) |
+| **An operator** deploying it | [Deployment](docs/DEPLOYMENT.md) → [Operator guide](docs/OPERATOR.md) |
 
-Because the oracle is the repo's *real* tests and the ground truth is the *real* commit, you can't overfit it the way you can a fixed exercise set.
+Related documents: [Explainer for practitioners](https://claude.ai/artifact/DUaMMWkMXGk25djQYLfZQk) ·
+[Architecture](docs/ARCHITECTURE.md) ·
+[Evidence & claims policy](docs/EVIDENCE-AND-CLAIMS.md) · [ADRs](docs/adr/README.md) ·
+[Operator guide](docs/OPERATOR.md) · [Onboarding a repository](docs/ONBOARDING-A-REPO.md) ·
+[Code map](docs/CODE-MAP.md) · [Contributing](docs/CONTRIBUTING.md) ·
+[Decision log](docs/DECISION-LOG.md) · [Changelog](CHANGELOG.md)
 
-## Why this exists
+---
 
-The agentic-coding ecosystem ships a lot of context tricks — `CLAUDE.md`, repo rules, prompt scaffolds, "loop engineering" — and **almost nobody measures whether they actually help.** This is the eval that closes that loop: point it at a real repo and a real model and get an honest `ai_can` rate. A/B your context, your model, your harness — against ground truth.
+## Who it is for
 
-## Install
+A **regulated organisation that self-hosts it** — the design customer is an NHS
+organisation. `crb` is deployed inside the customer's own tenant, **BYOK** (bring your own
+model keys). Nothing leaves the tenant except the calls to the model endpoint the operator
+configures (for example Azure OpenAI in the same tenant, or a local model). Repository
+tests run in a **fail-closed** container sandbox with no network; test output is redacted
+and capped before it is stored; raw diffs and builder transcripts are **not retained by
+default**.
+
+## What it is not
+
+- **Not a leaderboard.** There is no public ranking and no shared score. Each deployment
+  measures its own repositories, and a measured cell says nothing about a cell that was not
+  measured.
+- **Not an AI opinion of AI work.** No model reviews, approves or scores a change. The only
+  judge is the repository's own test suite, run mechanically under the belts below. Where a
+  suite is too weak to judge (a weak oracle), the product says so and routes to a human
+  rather than pretending.
+- **Not a proof of semantic correctness.** A green suite proves the change satisfies the
+  suite. `clean` is a mechanical result. See [EVIDENCE-AND-CLAIMS](docs/EVIDENCE-AND-CLAIMS.md)
+  for what may and may not be said on that basis.
+
+---
+
+## The belts (four core, plus the repository's own gate)
+
+A trial (the commit's parent plus the builder's edits) is `clean` **only if every evaluated
+belt holds** (`crb.core.grade.BELT_NAMES`; apparatus 2.2 = belt set v5):
+
+| # | Belt | What it checks | How |
+|---|------|----------------|-----|
+| 1 | `tests_unmodified` | The builder did not move the goalposts. | Every target test file is **byte-identical** to the real commit's version (`git diff <sha>` + SHA-256 compare). A modified oracle **disqualifies** the trial. |
+| 2 | `target_green` | The previously-RED target tests now pass. | The runner executes the target scope; timeouts are failures. |
+| 3 | `no_new_failures` | Nothing else broke. | The regression belt scope is run and compared with the **baseline failing set** captured at the parent; unattributable output (compile error, crash) fails the belt. |
+| 4 | `source_changed` | The pass is real, not a build-cache ghost. | The diff against the parent touches at least one non-test file. |
+| 5 | `repo_lint_clean` | The repository's **own** formatter / linter / type checker accepts the changed files. | `prettier`, `eslint`, `tsc`, `ruff`, `gofmt`, `spotless`, `cargo fmt` … at the version the commit pins ([ADR-0011](docs/adr/0011-repo-lint-belt.md)); *not evaluated* when the repository configures none — never a silent pass. Belt 1 also covers test infrastructure (`conftest.py`, `jest.config.*`, lockfiles). |
+
+Everything else **fails closed**: a harness error, sandbox failure or timeout is recorded as
+a non-pass, never a silent pass; a malformed oracle (a "test" file with no tests) or a
+tampered test file is **disqualified** — excluded from the denominator, not counted either
+way. `GradeResult.__post_init__` raises `FalseQ1Violation` if any code path tries to construct
+`clean=True` with a belt that is not `True` — see [ADR-0001](docs/adr/0001-four-belts-and-false-q1-at-write.md).
+
+## Modes: sighted and blind
+
+| Mode | What the builder sees | Extra check |
+|------|-----------------------|-------------|
+| `sighted` | The parent checkout **with the target tests overlaid** (it knows what must pass). | Belt 1 proves it left them byte-identical. |
+| `blind` | The parent checkout and a description only; the held-out tests are overlaid **at grade time**. | Belt 0 (blind only): if the builder touched *any* test file before the overlay, the trial is disqualified — the overlay would otherwise silently erase that edit. |
+
+In **neither** mode does the builder see the regression belt or the grader. See
+[ADR-0004](docs/adr/0004-builder-registry-sighted-and-blind.md).
+
+## The instrument in six steps
+
+1. **Mine** — walk the repository's history for commits that couple a source change with a
+   test change within the pool's size caps (`standard` / `hard`).
+2. **Prep** — create a disposable git worktree at the commit's **parent**; overlay the
+   commit's test files.
+3. **RED / baseline / GOLD check** — the target tests must **fail** at the parent (and not
+   time out); the belt scope's pre-existing failures are recorded as the **baseline**; then
+   the commit's own sources are overlaid and must turn the target green with no new belt
+   failures (**gold**). A commit whose gold does not pass cannot judge a builder and is
+   excluded from statistics (`gold_clean=False`).
+4. **Build** — the configured builder edits a fresh worktree (sighted or blind) under a
+   turn/token/cost budget. It never receives the grader.
+5. **Grade** — the belts run inside the sandbox; the result is a `GradeResult` that
+   cannot be `clean` with a failed belt.
+6. **Ledger** — the evidence pack is hashed; a `GradeRow` carrying that hash is chained to
+   the previous row and appended (no pack ⇒ no Q1). Cell statistics and the routing rule
+   read from the ledger, never from a builder's self-report.
+
+---
+
+## Quickstart
+
+> The CLI surface below is the P1/P2 contract. Commands are listed in pipeline order; the
+> status table says which phase delivers each one.
 
 ```bash
-pip install commit-replay-bench[openai]
+# Python ≥ 3.12; git on PATH; docker for the sandboxed executor.
+pip install -e '.[dev]'            # or: uv venv .venv --python 3.12 && uv pip install -e '.[dev]'
+
+crb repo add   myrepo --path /srv/repos/myrepo --language python --runner pytest \
+               --sandbox-image ghcr.io/example/myrepo-toolchain:2026-09
+crb repo probe myrepo              # proves the toolchain: runs a known-green scope in the sandbox
+crb mine       myrepo --pool standard --target 25    # RED-check, baseline, gold-check → tasks
+crb grade      myrepo --builder editblock --mode sighted   # build + the belts → evidence packs + ledger rows
+crb ledger verify                  # walks the hash chain; exit 1 on any break
+crb ledger stats --repo myrepo     # per-cell n, clean, point, Wilson CI, false-Q1 (must be 0), cost, latency
+crb route      --repo myrepo       # the ONE routing rule applied to each measured cell, with its reason
 ```
 
-(The core engine is **standard-library only**; the `openai` extra is just for the bundled OpenAI-compatible model adapter.)
-
-## Use (CLI)
-
-v1 targets **Python repos with a `pytest` suite**. Clone the target repo, set up a venv that can run its tests, then:
-
-```bash
-# OpenAI
-commit-replay /path/to/repo --model gpt-4o-mini --commits 10 --python /path/to/repo/.venv/bin/python
-
-# any OpenAI-compatible endpoint (Cerebras, Together, local vLLM, Ollama, …)
-commit-replay /path/to/repo --model gpt-oss-120b \
-  --base-url https://api.cerebras.ai/v1 --api-key-env CEREBRAS_API_KEY
-commit-replay /path/to/repo --model llama3.1 --base-url http://localhost:11434/v1   # Ollama
-```
-
-Output:
-
-```
-mined 56 feasible commits; replaying 10 with gpt-4o-mini
-
-  a1b2c3d4  ai_can       fix: handle empty input to merge_intervals
-  e5f6a7b8  fails        Optimise the scheduler hot path
-  ...
-gpt-4o-mini: ai_can=4 needs_human=1 fails=5 (graded 10, skipped 0)  →  ai_can rate 40%
-```
-
-## Use (library)
+Library use (stdlib only — `crb.core` imports nothing outside the standard library):
 
 ```python
-from commit_replay_bench import mine_feasible_commits, LiveGitHarness, CommitSpec, replay_commit, aggregate
-from commit_replay_bench.generate import openai_generate
+from crb.core.spec import RepoConfig, Language
+from crb.core.git import GitRepo
+from crb.core.runners import get_runner
+from crb.core.execution import DockerExecutor, DockerSettings
+from crb.core.mine import mine
+from crb.core.grade import grade
+from crb.core.ledger import JsonlLedger, GradeRow, all_cell_stats
+from crb.core.routing import route
 
-gen = openai_generate(model="gpt-4o-mini")
-harness = LiveGitHarness("/path/to/repo", "/path/to/repo/.venv/bin/python", base_ref="main")
-
-results = []
-for c in mine_feasible_commits("/path/to/repo")[:10]:
-    results.append(replay_commit(harness, CommitSpec(c.commit, c.subject, c.src_path, c.test_paths), gen))
-
-print(aggregate(results)["counts"])
+config = RepoConfig(name="myrepo", language=Language.PYTHON, sandbox_image="myrepo-toolchain:2026-09")
+executor = DockerExecutor(DockerSettings(image=config.sandbox_image))   # raises SandboxUnavailable if it cannot isolate
+runner = get_runner(config)
 ```
 
-## Plug in your own model or stack
+## Architecture
 
-- **Any model:** write a `generate(*, subject, src_path, src, tests, prior_failure) -> list[tuple[str, str]]` callable (return parsed SEARCH/REPLACE blocks — see `parse_edit_blocks`). The bundled `openai_generate` is just one implementation.
-- **Non-Python / non-pytest repos:** implement the `RepoHarness` Protocol (git checkout + your test runner) and call `replay_commit` directly. `LiveGitHarness` is the reference Python/pytest implementation.
+Layers depend **downward only**; `crb.core` is standard-library only. Both rules are enforced
+by `import-linter` in CI ([ADR-0008](docs/adr/0008-stdlib-core-and-downward-layers.md)).
 
-## Design notes (hard-won)
+```mermaid
+flowchart TB
+    subgraph L5["cli · server  (crb.cli, crb.server)"]
+        CLI[crb CLI]:::l5
+        API[FastAPI + worker + SSE]:::l5
+    end
+    subgraph L4["factory  (crb.factory) — forward mode"]
+        FAC[backlog freeze · DoR gate · RED proof · build under belts · branch+PR delivery]:::l4
+    end
+    subgraph L3["store  (crb.store)"]
+        ST[SQLAlchemy models · Alembic · append-only triggers · hash chain · JSONL import/export]:::l3
+    end
+    subgraph L2["builders · observability  (crb.builders, crb.observability)"]
+        B[claude_code · openai_agent · editblock]:::l2
+        O[StepEvent · sinks · Prometheus · JSON logs + redaction]:::l2
+    end
+    subgraph L1["core  (crb.core) — STDLIB ONLY"]
+        C[spec · git · execution · runners · workspace · mine · grade · evidence · ledger · stats · routing · redact · run]:::l1
+    end
+    L5 --> L4 --> L3 --> L2 --> L1
+    classDef l1 fill:#e8f1fb,stroke:#3b6ea5,color:#0b2545
+    classDef l2 fill:#eef7ee,stroke:#3f7d4e,color:#0f2e17
+    classDef l3 fill:#fff7e6,stroke:#b07a1a,color:#3a2600
+    classDef l4 fill:#f6eefb,stroke:#7a4aa3,color:#2b1240
+    classDef l5 fill:#f2f2f2,stroke:#666,color:#111
+```
 
-- **SEARCH/REPLACE, not unified diffs** — models reliably mis-form unified diffs against large files; SEARCH/REPLACE with a tolerant parser + fuzzy (indentation-insensitive) apply lands far more edits.
-- **`py_compile` gate** — a mis-spliced edit that breaks syntax becomes a retryable attempt, never a whole-suite crash.
-- **Test timeout** — a generated edit that blocks on tty/stdin is a failed attempt, never an infinite wait.
-- **Honest `SKIP`** — if the commit's test already passes on the parent, it isn't a valid oracle and the commit is skipped (not counted).
+The run pipeline, with the module that owns each stage:
 
-## Limitations
+```mermaid
+flowchart LR
+    M["mine<br/>(core.mine)"] --> P["prep<br/>(core.workspace)"] --> R["RED check + baseline + gold<br/>(core.mine)"] --> B["build<br/>(builders.* via core.run BuildFn)"] --> G["grade — four belts<br/>(core.grade)"] --> L["ledger + evidence pack<br/>(core.evidence, core.ledger)"] --> RT["route<br/>(core.routing)"]
+```
 
-- Grades **behavioural correctness** (does it pass the real tests), not style/maintainability — though "passes the repo's own tests with no regressions" is a high bar.
-- v1 is Python/pytest (the harness Protocol generalises; runners for other stacks welcome).
-- A repo's difficulty bounds the absolute rate; the **relative** comparison (model A vs B, context on vs off) is the robust signal.
+`core.run` orchestrates prep → build → grade → evidence → ledger per task, one ledger row
+per attempt, with the builder injected as a callable.
 
-## License
+Full description, C4 diagrams, sequence diagrams and the data model:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-MIT.
+## Evidence & claims policy
+
+Every claim in this repository carries one of three tags:
+
+| Tag | Meaning |
+|-----|---------|
+| `[measured]` | Backed by ledger rows you can re-derive: `n`, method, Wilson interval, apparatus version. |
+| `[hypothesis]` | Directionally supported; not yet confirmed by a pre-registered or replicated measurement. |
+| `[aspiration]` | Designed for; not demonstrated. |
+
+**A number without its method is a slogan.** Every figure the product shows carries its
+`n`, its confidence interval and its apparatus version; numbers from different apparatus
+versions are reported separately and never blended. The full policy — the severity ladder
+for false-Q1, the apparatus stamp, the legacy-belt caveat on the census ledger, and the
+permitted claim shapes at each maturity — is in
+[docs/EVIDENCE-AND-CLAIMS.md](docs/EVIDENCE-AND-CLAIMS.md).
+
+## What has been measured (2026-09-15) — and what it licenses
+
+Everything below is `[measured]`, re-derivable from the ledger, on the **host executor
+posture** (see the evidence caveat in the [Changelog](CHANGELOG.md)); nothing here is a
+per-repository or per-model capability claim.
+
+- **The instrument holds on real code.** Four public libraries (cobra, click, koa,
+  SQLAlchemy census) and three NHS repositories (nhsuk-frontend, nhsuk-react-components,
+  mesh-client) mined, oracle-scored and negative-controlled; **false-Q1 = 0** across every
+  ledger row; controls **passed with 0 escapes** on every repository they were run on
+  ([NHS measurement](docs/reviews/2026-09-14-nhs-public-repos.md), [critical-friend review](docs/reviews/2026-09-13-critical-friend.md)).
+- **The first `deliver` route holds on new tasks** — cobra `bug.fix` XS: 22/22 clean on
+  **9 distinct tasks** (the map says `n_tasks` next to `n`) after one attempt on each of six
+  NEW gold-clean tasks; cobra `bug.fix` S is 23/24 on 11 tasks and routes `calibrate` by one
+  miss (Wilson-low 0.798 against the 0.80 bar — the rule doing its job). The top-up over
+  koa/cobra/click cost $0.21–0.23 per attempt, 29 of 35 clean
+  ([NHS report §11](docs/reviews/2026-09-14-nhs-public-repos.md)). No sign-off has been
+  made: the policy requires a human attestation and a task minimum the operator has not yet
+  set (DL-029).
+- **NHS, sighted, Sonnet 5, 18 gold-clean tasks:** 15 of 18 clean counting the belt-5
+  pre-flight arm (12 plain; the pre-flight — the repository's own fixers plus one bounded
+  repair — flipped 3 of 4 formatter misses); the remaining misses are the model's, not the
+  budget's (§9).
+- **Blind is a different measurement, and the honest one for "could it have done the
+  PR":** the same 14 NHS tasks read 12/14 sighted and **2/14 blind** at rung 0 — from the
+  commit message alone the builder cannot reconstruct what the maintainers' tests will check
+  (§10). The blind rows are stamped as their own mode and never pooled with sighted ones.
+
+## Status by phase
+
+Phases are those of the approved product plan ([plan](docs/DECISION-LOG.md) DL-001..004);
+each shipped as a set of PRs with the gates green.
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| P0 | Reboot: `crb` skeleton, gates, ADR-0001..0003, `v1.0.0-legacy` tag | Done |
+| P1 | Core engine (stdlib): spec / mine / workspace / runners / grade / ledger / stats; fixture repos per language; negative-controls gate; census re-derivation gate | Done |
+| P2 | Oracle (mutation strength, adequacy, controls), routing, forecast, federated export, evidence packs; `crb` CLI end to end | Done |
+| P3 | Builders: `claude_code`, `openai_agent`, `editblock`; budget ladders; sighted / blind; tamper and archaeology guards | Done |
+| P4 | Store (SQLAlchemy + Alembic, append-only triggers, hash chain, census import), FastAPI, OIDC + local admin, RBAC, SSE, `/metrics`, worker | Done |
+| P5 | Observability UI (14 routed screens — see `ui/src/App.tsx`), evidence drill-down, capability map, sign-off, reviews; sealed builder container (ADR-0012) | Done |
+| P6 | Forward-mode factory: frozen backlog, DoR gate, RED proof, build under belts, opt-in PR delivery, review-before-edit — as a run kind with its API | Done (no model-backed test author yet; delivery credentials operator-provisioned) |
+| P7 | Dockerfile, compose, Helm, SECURITY / DATA-RETENTION / OPERATOR / DEPLOYMENT / REPRODUCING-THE-CENSUS; `2.0.0a1` on `main` | Done; `v2.0.0a1` tag + signed image follow CI minutes (DL-035) |
+
+**Open, honestly:** every measurement to date is on the host executor posture; the sealed
+posture is built and tested but not yet measured on. A human has not yet signed a cell. The
+file-header programme ([FILE-HEADER-STANDARD](docs/FILE-HEADER-STANDARD.md)) is complete —
+every source file carries a Navigation block and the CI job `code-map` keeps it so.
+
+## Licence
+
+**Apache License 2.0** ([LICENSE](LICENSE), [NOTICE](NOTICE)) — open source, with a patent
+grant; chosen so that the instrument that graded a client's evidence can be read, re-run and
+improved by anyone, including the client ([DECISION-LOG](docs/DECISION-LOG.md) DL-028,
+[LICENSING](docs/LICENSING.md)). The v1 contents (tag `v1.0.0-legacy`) were MIT.

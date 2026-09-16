@@ -1,0 +1,2038 @@
+diff --git a/src/components/form-elements/checkboxes/__tests__/Checkboxes.test.tsx b/src/components/form-elements/checkboxes/__tests__/Checkboxes.test.tsx
+index 3306460..5af15bb 100644
+--- a/src/components/form-elements/checkboxes/__tests__/Checkboxes.test.tsx
++++ b/src/components/form-elements/checkboxes/__tests__/Checkboxes.test.tsx
+@@ -7,7 +7,13 @@ import { renderClient, renderServer } from '#util/components';
+ describe('Checkboxes', () => {
+   it('matches snapshot', async () => {
+     const { container } = await renderClient(
+-      <Checkboxes id="example" name="example">
++      <Checkboxes
++        legend="What types of waste do you transport regularly?"
++        legendProps={{ size: 'l' }}
++        hint="Select all that apply"
++        id="example"
++        name="example"
++      >
+         <Checkboxes.Item value="animal">Waste from animal carcasses</Checkboxes.Item>
+         <Checkboxes.Item value="mines">Waste from mines or quarries</Checkboxes.Item>
+         <Checkboxes.Item value="farm">Farm or agricultural waste</Checkboxes.Item>
+@@ -20,7 +26,59 @@ describe('Checkboxes', () => {
+ 
+   it('matches snapshot with error message', async () => {
+     const { container } = await renderClient(
+-      <Checkboxes id="example" name="example" error="Example error">
++      <Checkboxes
++        legend="What types of waste do you transport regularly?"
++        legendProps={{ size: 'l' }}
++        hint="Select all that apply"
++        error="Example error"
++        id="example"
++        name="example"
++      >
++        <Checkboxes.Item value="animal">Waste from animal carcasses</Checkboxes.Item>
++        <Checkboxes.Item value="mines">Waste from mines or quarries</Checkboxes.Item>
++        <Checkboxes.Item value="farm">Farm or agricultural waste</Checkboxes.Item>
++      </Checkboxes>,
++      { moduleName: 'nhsuk-checkboxes' },
++    );
++
++    expect(container).toMatchSnapshot();
++  });
++
++  it('matches snapshot with HTML in props', async () => {
++    const { container } = await renderClient(
++      <Checkboxes
++        legend={
++          <>
++            <span className="nhsuk-caption-l">Example</span> Legend text
++          </>
++        }
++        legendProps={{
++          isPageHeading: true,
++          size: 'l',
++        }}
++        hint={
++          <>
++            Hint text <em>with HTML</em>
++          </>
++        }
++        error={
++          <>
++            Error text <em>with HTML</em>
++          </>
++        }
++        id="example"
++        name="example"
++      >
++        <Checkboxes.Item
++          value="animal"
++          hint={
++            <>
++              Item hint text <em>with HTML</em>
++            </>
++          }
++        >
++          Waste from animal carcasses
++        </Checkboxes.Item>
+         <Checkboxes.Item value="animal">Waste from animal carcasses</Checkboxes.Item>
+         <Checkboxes.Item value="mines">Waste from mines or quarries</Checkboxes.Item>
+         <Checkboxes.Item value="farm">Farm or agricultural waste</Checkboxes.Item>
+@@ -33,7 +91,13 @@ describe('Checkboxes', () => {
+ 
+   it('matches snapshot with an exclusive checkbox', async () => {
+     const { container } = await renderClient(
+-      <Checkboxes id="example" name="example">
++      <Checkboxes
++        legend="What types of waste do you transport regularly?"
++        legendProps={{ size: 'l' }}
++        hint="Select all that apply"
++        id="example"
++        name="example"
++      >
+         <Checkboxes.Item value="animal">Waste from animal carcasses</Checkboxes.Item>
+         <Checkboxes.Item value="mines">Waste from mines or quarries</Checkboxes.Item>
+         <Checkboxes.Item value="farm">Farm or agricultural waste</Checkboxes.Item>
+@@ -50,7 +114,13 @@ describe('Checkboxes', () => {
+ 
+   it('matches snapshot (via server)', async () => {
+     const { container, element } = await renderServer(
+-      <Checkboxes id="example" name="example">
++      <Checkboxes
++        legend="What types of waste do you transport regularly?"
++        legendProps={{ size: 'l' }}
++        hint="Select all that apply"
++        id="example"
++        name="example"
++      >
+         <Checkboxes.Item value="animal">Waste from animal carcasses</Checkboxes.Item>
+         <Checkboxes.Item value="mines">Waste from mines or quarries</Checkboxes.Item>
+         <Checkboxes.Item value="farm">Farm or agricultural waste</Checkboxes.Item>
+diff --git a/src/components/form-elements/checkboxes/__tests__/__snapshots__/Checkboxes.test.tsx.snap b/src/components/form-elements/checkboxes/__tests__/__snapshots__/Checkboxes.test.tsx.snap
+index abc0c8d..e807fe8 100644
+--- a/src/components/form-elements/checkboxes/__tests__/__snapshots__/Checkboxes.test.tsx.snap
++++ b/src/components/form-elements/checkboxes/__tests__/__snapshots__/Checkboxes.test.tsx.snap
+@@ -5,70 +5,86 @@ exports[`Checkboxes matches snapshot (via server): client 1`] = `
+   <div
+     class="nhsuk-form-group"
+   >
+-    <div
+-      class="nhsuk-checkboxes"
+-      data-module="nhsuk-checkboxes"
+-      data-nhsuk-checkboxes-init=""
+-      id="example"
++    <fieldset
++      aria-describedby="example--hint"
++      class="nhsuk-fieldset"
+     >
+-      <div
+-        class="nhsuk-checkboxes__item"
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-1"
+-          name="example"
+-          type="checkbox"
+-          value="animal"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-1"
+-          id="example-1--label"
+-        >
+-          Waste from animal carcasses
+-        </label>
+-      </div>
++        What types of waste do you transport regularly?
++      </legend>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-hint"
++        id="example--hint"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-2"
+-          name="example"
+-          type="checkbox"
+-          value="mines"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-2"
+-          id="example-2--label"
+-        >
+-          Waste from mines or quarries
+-        </label>
++        Select all that apply
+       </div>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-checkboxes"
++        data-module="nhsuk-checkboxes"
++        data-nhsuk-checkboxes-init=""
++        id="example"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-3"
+-          name="example"
+-          type="checkbox"
+-          value="farm"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-3"
+-          id="example-3--label"
++        <div
++          class="nhsuk-checkboxes__item"
+         >
+-          Farm or agricultural waste
+-        </label>
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-1"
++            name="example"
++            type="checkbox"
++            value="animal"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-1"
++            id="example-1--label"
++          >
++            Waste from animal carcasses
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-2"
++            name="example"
++            type="checkbox"
++            value="mines"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-2"
++            id="example-2--label"
++          >
++            Waste from mines or quarries
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-3"
++            name="example"
++            type="checkbox"
++            value="farm"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-3"
++            id="example-3--label"
++          >
++            Farm or agricultural waste
++          </label>
++        </div>
+       </div>
+-    </div>
++    </fieldset>
+   </div>
+ </div>
+ `;
+@@ -78,69 +94,85 @@ exports[`Checkboxes matches snapshot (via server): server 1`] = `
+   <div
+     class="nhsuk-form-group"
+   >
+-    <div
+-      class="nhsuk-checkboxes"
+-      data-module="nhsuk-checkboxes"
+-      id="example"
++    <fieldset
++      aria-describedby="example--hint"
++      class="nhsuk-fieldset"
+     >
+-      <div
+-        class="nhsuk-checkboxes__item"
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-1"
+-          name="example"
+-          type="checkbox"
+-          value="animal"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-1"
+-          id="example-1--label"
+-        >
+-          Waste from animal carcasses
+-        </label>
+-      </div>
++        What types of waste do you transport regularly?
++      </legend>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-hint"
++        id="example--hint"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-2"
+-          name="example"
+-          type="checkbox"
+-          value="mines"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-2"
+-          id="example-2--label"
+-        >
+-          Waste from mines or quarries
+-        </label>
++        Select all that apply
+       </div>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-checkboxes"
++        data-module="nhsuk-checkboxes"
++        id="example"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-3"
+-          name="example"
+-          type="checkbox"
+-          value="farm"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-3"
+-          id="example-3--label"
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-1"
++            name="example"
++            type="checkbox"
++            value="animal"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-1"
++            id="example-1--label"
++          >
++            Waste from animal carcasses
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
+         >
+-          Farm or agricultural waste
+-        </label>
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-2"
++            name="example"
++            type="checkbox"
++            value="mines"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-2"
++            id="example-2--label"
++          >
++            Waste from mines or quarries
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-3"
++            name="example"
++            type="checkbox"
++            value="farm"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-3"
++            id="example-3--label"
++          >
++            Farm or agricultural waste
++          </label>
++        </div>
+       </div>
+-    </div>
++    </fieldset>
+   </div>
+ </div>
+ `;
+@@ -150,168 +182,345 @@ exports[`Checkboxes matches snapshot 1`] = `
+   <div
+     class="nhsuk-form-group"
+   >
+-    <div
+-      class="nhsuk-checkboxes"
+-      data-module="nhsuk-checkboxes"
+-      data-nhsuk-checkboxes-init=""
+-      id="example"
++    <fieldset
++      aria-describedby="example--hint"
++      class="nhsuk-fieldset"
+     >
+-      <div
+-        class="nhsuk-checkboxes__item"
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-1"
+-          name="example"
+-          type="checkbox"
+-          value="animal"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-1"
+-          id="example-1--label"
+-        >
+-          Waste from animal carcasses
+-        </label>
+-      </div>
++        What types of waste do you transport regularly?
++      </legend>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-hint"
++        id="example--hint"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-2"
+-          name="example"
+-          type="checkbox"
+-          value="mines"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-2"
+-          id="example-2--label"
+-        >
+-          Waste from mines or quarries
+-        </label>
++        Select all that apply
+       </div>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-checkboxes"
++        data-module="nhsuk-checkboxes"
++        data-nhsuk-checkboxes-init=""
++        id="example"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-3"
+-          name="example"
+-          type="checkbox"
+-          value="farm"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-3"
+-          id="example-3--label"
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-1"
++            name="example"
++            type="checkbox"
++            value="animal"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-1"
++            id="example-1--label"
++          >
++            Waste from animal carcasses
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-2"
++            name="example"
++            type="checkbox"
++            value="mines"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-2"
++            id="example-2--label"
++          >
++            Waste from mines or quarries
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
+         >
+-          Farm or agricultural waste
+-        </label>
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-3"
++            name="example"
++            type="checkbox"
++            value="farm"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-3"
++            id="example-3--label"
++          >
++            Farm or agricultural waste
++          </label>
++        </div>
+       </div>
+-    </div>
++    </fieldset>
+   </div>
+ </div>
+ `;
+ 
+-exports[`Checkboxes matches snapshot with an exclusive checkbox 1`] = `
++exports[`Checkboxes matches snapshot with HTML in props 1`] = `
+ <div>
+   <div
+-    class="nhsuk-form-group"
++    class="nhsuk-form-group nhsuk-form-group--error"
+   >
+-    <div
+-      class="nhsuk-checkboxes"
+-      data-module="nhsuk-checkboxes"
+-      data-nhsuk-checkboxes-init=""
+-      id="example"
++    <fieldset
++      aria-describedby="example--hint example--error-message"
++      class="nhsuk-fieldset"
+     >
+-      <div
+-        class="nhsuk-checkboxes__item"
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-1"
+-          name="example"
+-          type="checkbox"
+-          value="animal"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-1"
+-          id="example-1--label"
++        <h1
++          class="nhsuk-fieldset__heading"
+         >
+-          Waste from animal carcasses
+-        </label>
+-      </div>
++          <span
++            class="nhsuk-caption-l"
++          >
++            Example
++          </span>
++           Legend text
++        </h1>
++      </legend>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-hint"
++        id="example--hint"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-2"
+-          name="example"
+-          type="checkbox"
+-          value="mines"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-2"
+-          id="example-2--label"
+-        >
+-          Waste from mines or quarries
+-        </label>
++        Hint text 
++        <em>
++          with HTML
++        </em>
+       </div>
++      <span
++        class="nhsuk-error-message"
++        id="example--error-message"
++      >
++        <span
++          class="nhsuk-u-visually-hidden"
++        >
++          Error:
++        </span>
++         
++        Error text 
++        <em>
++          with HTML
++        </em>
++      </span>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-checkboxes"
++        data-module="nhsuk-checkboxes"
++        data-nhsuk-checkboxes-init=""
++        id="example"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-3"
+-          name="example"
+-          type="checkbox"
+-          value="farm"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-3"
+-          id="example-3--label"
++        <div
++          class="nhsuk-checkboxes__item"
+         >
+-          Farm or agricultural waste
+-        </label>
++          <input
++            aria-describedby="example-1--hint"
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-1"
++            name="example"
++            type="checkbox"
++            value="animal"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-1"
++            id="example-1--label"
++          >
++            Waste from animal carcasses
++          </label>
++          <div
++            class="nhsuk-hint nhsuk-checkboxes__hint"
++            id="example-1--hint"
++          >
++            Item hint text 
++            <em>
++              with HTML
++            </em>
++          </div>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-2"
++            name="example"
++            type="checkbox"
++            value="animal"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-2"
++            id="example-2--label"
++          >
++            Waste from animal carcasses
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-3"
++            name="example"
++            type="checkbox"
++            value="mines"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-3"
++            id="example-3--label"
++          >
++            Waste from mines or quarries
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-4"
++            name="example"
++            type="checkbox"
++            value="farm"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-4"
++            id="example-4--label"
++          >
++            Farm or agricultural waste
++          </label>
++        </div>
+       </div>
++    </fieldset>
++  </div>
++</div>
++`;
++
++exports[`Checkboxes matches snapshot with an exclusive checkbox 1`] = `
++<div>
++  <div
++    class="nhsuk-form-group"
++  >
++    <fieldset
++      aria-describedby="example--hint"
++      class="nhsuk-fieldset"
++    >
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
++      >
++        What types of waste do you transport regularly?
++      </legend>
+       <div
+-        class="nhsuk-checkboxes__divider"
++        class="nhsuk-hint"
++        id="example--hint"
+       >
+-        or
++        Select all that apply
+       </div>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-checkboxes"
++        data-module="nhsuk-checkboxes"
++        data-nhsuk-checkboxes-init=""
++        id="example"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive="true"
+-          data-checkbox-exclusive-group="example"
+-          id="none"
+-          name="example"
+-          type="checkbox"
+-          value="none"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="none"
+-          id="none--label"
++        <div
++          class="nhsuk-checkboxes__item"
+         >
+-          None
+-        </label>
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-1"
++            name="example"
++            type="checkbox"
++            value="animal"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-1"
++            id="example-1--label"
++          >
++            Waste from animal carcasses
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-2"
++            name="example"
++            type="checkbox"
++            value="mines"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-2"
++            id="example-2--label"
++          >
++            Waste from mines or quarries
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-3"
++            name="example"
++            type="checkbox"
++            value="farm"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-3"
++            id="example-3--label"
++          >
++            Farm or agricultural waste
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__divider"
++        >
++          or
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive="true"
++            data-checkbox-exclusive-group="example"
++            id="none"
++            name="example"
++            type="checkbox"
++            value="none"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="none"
++            id="none--label"
++          >
++            None
++          </label>
++        </div>
+       </div>
+-    </div>
++    </fieldset>
+   </div>
+ </div>
+ `;
+@@ -321,83 +530,98 @@ exports[`Checkboxes matches snapshot with error message 1`] = `
+   <div
+     class="nhsuk-form-group nhsuk-form-group--error"
+   >
+-    <span
+-      class="nhsuk-error-message"
+-      id="example--error-message"
++    <fieldset
++      aria-describedby="example--hint example--error-message"
++      class="nhsuk-fieldset"
+     >
+-      <span
+-        class="nhsuk-u-visually-hidden"
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
+       >
+-        Error:
+-      </span>
+-       
+-      Example error
+-    </span>
+-    <div
+-      aria-describedby="example--error-message"
+-      class="nhsuk-checkboxes"
+-      data-module="nhsuk-checkboxes"
+-      data-nhsuk-checkboxes-init=""
+-      id="example"
+-    >
++        What types of waste do you transport regularly?
++      </legend>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-hint"
++        id="example--hint"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-1"
+-          name="example"
+-          type="checkbox"
+-          value="animal"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-1"
+-          id="example-1--label"
+-        >
+-          Waste from animal carcasses
+-        </label>
++        Select all that apply
+       </div>
+-      <div
+-        class="nhsuk-checkboxes__item"
++      <span
++        class="nhsuk-error-message"
++        id="example--error-message"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-2"
+-          name="example"
+-          type="checkbox"
+-          value="mines"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-2"
+-          id="example-2--label"
++        <span
++          class="nhsuk-u-visually-hidden"
+         >
+-          Waste from mines or quarries
+-        </label>
+-      </div>
++          Error:
++        </span>
++         
++        Example error
++      </span>
+       <div
+-        class="nhsuk-checkboxes__item"
++        class="nhsuk-checkboxes"
++        data-module="nhsuk-checkboxes"
++        data-nhsuk-checkboxes-init=""
++        id="example"
+       >
+-        <input
+-          class="nhsuk-checkboxes__input"
+-          data-checkbox-exclusive-group="example"
+-          id="example-3"
+-          name="example"
+-          type="checkbox"
+-          value="farm"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-checkboxes__label"
+-          for="example-3"
+-          id="example-3--label"
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-1"
++            name="example"
++            type="checkbox"
++            value="animal"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-1"
++            id="example-1--label"
++          >
++            Waste from animal carcasses
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
++        >
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-2"
++            name="example"
++            type="checkbox"
++            value="mines"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-2"
++            id="example-2--label"
++          >
++            Waste from mines or quarries
++          </label>
++        </div>
++        <div
++          class="nhsuk-checkboxes__item"
+         >
+-          Farm or agricultural waste
+-        </label>
++          <input
++            class="nhsuk-checkboxes__input"
++            data-checkbox-exclusive-group="example"
++            id="example-3"
++            name="example"
++            type="checkbox"
++            value="farm"
++          />
++          <label
++            class="nhsuk-label nhsuk-checkboxes__label"
++            for="example-3"
++            id="example-3--label"
++          >
++            Farm or agricultural waste
++          </label>
++        </div>
+       </div>
+-    </div>
++    </fieldset>
+   </div>
+ </div>
+ `;
+diff --git a/src/components/form-elements/date-input/__tests__/DateInput.test.tsx b/src/components/form-elements/date-input/__tests__/DateInput.test.tsx
+index 60b3236..23b7699 100644
+--- a/src/components/form-elements/date-input/__tests__/DateInput.test.tsx
++++ b/src/components/form-elements/date-input/__tests__/DateInput.test.tsx
+@@ -9,9 +9,9 @@ describe('DateInput', () => {
+   it('matches snapshot', async () => {
+     const { container } = await renderClient(
+       <DateInput
+-        hint="For example, 15 3 1984"
+         legend="What is your date of birth?"
+         legendProps={{ size: 'l' }}
++        hint="For example, 15 3 1984"
+         id="date-input"
+       />,
+       { className: 'nhsuk-date-input' },
+@@ -23,11 +23,41 @@ describe('DateInput', () => {
+   it('matches snapshot with error message', async () => {
+     const { container } = await renderClient(
+       <DateInput
+-        hint="For example, 15 3 1984"
+         legend="What is your date of birth?"
+         legendProps={{ size: 'l' }}
+-        id="date-input"
++        hint="For example, 15 3 1984"
+         error="Date of birth must include a day"
++        id="date-input"
++      />,
++      { className: 'nhsuk-date-input' },
++    );
++
++    expect(container).toMatchSnapshot();
++  });
++
++  it('matches snapshot with HTML in props', async () => {
++    const { container } = await renderClient(
++      <DateInput
++        legend={
++          <>
++            <span className="nhsuk-caption-l">Example</span> Legend text
++          </>
++        }
++        legendProps={{
++          isPageHeading: true,
++          size: 'l',
++        }}
++        hint={
++          <>
++            Hint text <em>with HTML</em>
++          </>
++        }
++        error={
++          <>
++            Error text <em>with HTML</em>
++          </>
++        }
++        id="date-input"
+       />,
+       { className: 'nhsuk-date-input' },
+     );
+@@ -38,9 +68,9 @@ describe('DateInput', () => {
+   it('matches snapshot with custom date fields', async () => {
+     const { container } = await renderClient(
+       <DateInput
+-        hint="For example, 15 3 1984"
+         legend="What is your date of birth?"
+         legendProps={{ size: 'l' }}
++        hint="For example, 15 3 1984"
+         id="date-input"
+       >
+         <DateInput.Day defaultValue="31" />
+@@ -56,11 +86,11 @@ describe('DateInput', () => {
+   it('matches snapshot with custom date fields and error message', async () => {
+     const { container } = await renderClient(
+       <DateInput
+-        hint="For example, 15 3 1984"
+         legend="What is your date of birth?"
+         legendProps={{ size: 'l' }}
+-        id="date-input"
++        hint="For example, 15 3 1984"
+         error="Date of birth must include a day"
++        id="date-input"
+       >
+         <DateInput.Day />
+         <DateInput.Month defaultValue="3" error={false} />
+@@ -75,9 +105,9 @@ describe('DateInput', () => {
+   it('matches snapshot (via server)', async () => {
+     const { container, element } = await renderServer(
+       <DateInput
+-        hint="For example, 15 3 1984"
+         legend="What is your date of birth?"
+         legendProps={{ size: 'l' }}
++        hint="For example, 15 3 1984"
+         id="date-input"
+       />,
+       { className: 'nhsuk-date-input' },
+@@ -105,9 +135,9 @@ describe('DateInput', () => {
+ 
+     const { container, modules } = await renderClient(
+       <DateInput
+-        hint="For example, 15 3 1984"
+         legend="What is your date of birth?"
+         legendProps={{ size: 'l' }}
++        hint="For example, 15 3 1984"
+         formGroupProps={{ ref: groupRef }}
+         ref={moduleRef}
+       >
+diff --git a/src/components/form-elements/date-input/__tests__/__snapshots__/DateInput.test.tsx.snap b/src/components/form-elements/date-input/__tests__/__snapshots__/DateInput.test.tsx.snap
+index 6a871bd..8461721 100644
+--- a/src/components/form-elements/date-input/__tests__/__snapshots__/DateInput.test.tsx.snap
++++ b/src/components/form-elements/date-input/__tests__/__snapshots__/DateInput.test.tsx.snap
+@@ -291,6 +291,130 @@ exports[`DateInput matches snapshot 1`] = `
+ </div>
+ `;
+ 
++exports[`DateInput matches snapshot with HTML in props 1`] = `
++<div>
++  <div
++    class="nhsuk-form-group nhsuk-form-group--error"
++  >
++    <fieldset
++      aria-describedby="date-input--hint date-input--error-message"
++      class="nhsuk-fieldset"
++      role="group"
++    >
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
++      >
++        <h1
++          class="nhsuk-fieldset__heading"
++        >
++          <span
++            class="nhsuk-caption-l"
++          >
++            Example
++          </span>
++           Legend text
++        </h1>
++      </legend>
++      <div
++        class="nhsuk-hint"
++        id="date-input--hint"
++      >
++        Hint text 
++        <em>
++          with HTML
++        </em>
++      </div>
++      <span
++        class="nhsuk-error-message"
++        id="date-input--error-message"
++      >
++        <span
++          class="nhsuk-u-visually-hidden"
++        >
++          Error:
++        </span>
++         
++        Error text 
++        <em>
++          with HTML
++        </em>
++      </span>
++      <div
++        class="nhsuk-date-input"
++        id="date-input"
++      >
++        <div
++          class="nhsuk-date-input__item"
++        >
++          <div
++            class="nhsuk-form-group"
++          >
++            <label
++              class="nhsuk-label nhsuk-date-input__label"
++              for="date-input-day"
++              id="date-input-day--label"
++            >
++              Day
++            </label>
++            <input
++              class="nhsuk-input nhsuk-date-input__input nhsuk-input--width-2 nhsuk-input--error"
++              id="date-input-day"
++              inputmode="numeric"
++              name="date-input-day"
++              type="text"
++            />
++          </div>
++        </div>
++        <div
++          class="nhsuk-date-input__item"
++        >
++          <div
++            class="nhsuk-form-group"
++          >
++            <label
++              class="nhsuk-label nhsuk-date-input__label"
++              for="date-input-month"
++              id="date-input-month--label"
++            >
++              Month
++            </label>
++            <input
++              class="nhsuk-input nhsuk-date-input__input nhsuk-input--width-2 nhsuk-input--error"
++              id="date-input-month"
++              inputmode="numeric"
++              name="date-input-month"
++              type="text"
++            />
++          </div>
++        </div>
++        <div
++          class="nhsuk-date-input__item"
++        >
++          <div
++            class="nhsuk-form-group"
++          >
++            <label
++              class="nhsuk-label nhsuk-date-input__label"
++              for="date-input-year"
++              id="date-input-year--label"
++            >
++              Year
++            </label>
++            <input
++              class="nhsuk-input nhsuk-date-input__input nhsuk-input--width-4 nhsuk-input--error"
++              id="date-input-year"
++              inputmode="numeric"
++              name="date-input-year"
++              type="text"
++            />
++          </div>
++        </div>
++      </div>
++    </fieldset>
++  </div>
++</div>
++`;
++
+ exports[`DateInput matches snapshot with custom date fields 1`] = `
+ <div>
+   <div
+diff --git a/src/components/form-elements/error-message/ErrorMessage.tsx b/src/components/form-elements/error-message/ErrorMessage.tsx
+index 1ea1cb2..14f7674 100644
+--- a/src/components/form-elements/error-message/ErrorMessage.tsx
++++ b/src/components/form-elements/error-message/ErrorMessage.tsx
+@@ -11,7 +11,7 @@ export const ErrorMessage: FC<ErrorMessageProps> = ({
+   children,
+   ...rest
+ }) => {
+-  if (!children || typeof children !== 'string') {
++  if (!children) {
+     return null;
+   }
+ 
+diff --git a/src/components/form-elements/label/Label.tsx b/src/components/form-elements/label/Label.tsx
+index 12b6a23..76e7b71 100644
+--- a/src/components/form-elements/label/Label.tsx
++++ b/src/components/form-elements/label/Label.tsx
+@@ -1,14 +1,21 @@
+ import classNames from 'classnames';
+ import { type ComponentPropsWithoutRef, type FC } from 'react';
+ 
++import { HeadingLevel, type HeadingLevelProps } from '#components/utils/HeadingLevel.js';
+ import { type NHSUKSize } from '#util/types/NHSUKTypes.js';
+ 
+-export interface LabelProps extends ComponentPropsWithoutRef<'label'> {
++export interface LabelProps
++  extends ComponentPropsWithoutRef<'label'>,
++    Pick<HeadingLevelProps, 'headingLevel'> {
+   isPageHeading?: boolean;
+   size?: NHSUKSize;
+ }
+ 
+-const LabelComponent: FC<Omit<LabelProps, 'isPageHeading'>> = ({ className, size, ...rest }) => (
++const LabelComponent: FC<Omit<LabelProps, 'isPageHeading' | 'headingLevel'>> = ({
++  className,
++  size,
++  ...rest
++}) => (
+   // eslint-disable-next-line jsx-a11y/label-has-associated-control
+   <label
+     className={classNames('nhsuk-label', { [`nhsuk-label--${size}`]: size }, className)}
+@@ -16,16 +23,16 @@ const LabelComponent: FC<Omit<LabelProps, 'isPageHeading'>> = ({ className, size
+   />
+ );
+ 
+-export const Label: FC<LabelProps> = ({ isPageHeading, children, ...rest }) => {
++export const Label: FC<LabelProps> = ({ isPageHeading, headingLevel, children, ...rest }) => {
+   if (!children) {
+     return null;
+   }
+ 
+-  if (isPageHeading) {
++  if (isPageHeading || headingLevel) {
+     return (
+-      <h1 className="nhsuk-label-wrapper">
++      <HeadingLevel className="nhsuk-label-wrapper" headingLevel={headingLevel ?? 'h1'}>
+         <LabelComponent {...rest}>{children}</LabelComponent>
+-      </h1>
++      </HeadingLevel>
+     );
+   }
+ 
+diff --git a/src/components/form-elements/label/__tests__/Label.test.tsx b/src/components/form-elements/label/__tests__/Label.test.tsx
+index baee8c9..914dd0b 100644
+--- a/src/components/form-elements/label/__tests__/Label.test.tsx
++++ b/src/components/form-elements/label/__tests__/Label.test.tsx
+@@ -1,6 +1,6 @@
+ import { render } from '@testing-library/react';
+ 
+-import { Label } from '..';
++import { Label, type LabelProps } from '..';
+ 
+ import { type NHSUKSize } from '#util/types';
+ 
+@@ -50,6 +50,21 @@ describe('Label', () => {
+     },
+   );
+ 
++  it.each<LabelProps>([
++    { headingLevel: 'h1' },
++    { headingLevel: 'h2' },
++    { headingLevel: 'h3' },
++    { headingLevel: 'h4' },
++  ])('renders as page heading with custom heading level $headingLevel', (props) => {
++    const { container } = render(<Label {...props}>Text</Label>);
++
++    const headingEl = container.querySelector('.nhsuk-label-wrapper');
++    const labelEl = headingEl?.querySelector('.nhsuk-label');
++
++    expect(headingEl?.tagName).toBe(props?.headingLevel?.toUpperCase());
++    expect(labelEl).toHaveTextContent('Text');
++  });
++
+   it('renders null with no children', () => {
+     const { container } = render(<Label />);
+ 
+diff --git a/src/components/form-elements/legend/Legend.tsx b/src/components/form-elements/legend/Legend.tsx
+index 0d303b7..e5520d7 100644
+--- a/src/components/form-elements/legend/Legend.tsx
++++ b/src/components/form-elements/legend/Legend.tsx
+@@ -15,7 +15,7 @@ export const Legend: FC<LegendProps> = ({
+   className,
+   children,
+   isPageHeading,
+-  headingLevel = 'h1',
++  headingLevel,
+   size,
+   ...rest
+ }) => {
+@@ -32,8 +32,8 @@ export const Legend: FC<LegendProps> = ({
+       )}
+       {...rest}
+     >
+-      {isPageHeading ? (
+-        <HeadingLevel className="nhsuk-fieldset__heading" headingLevel={headingLevel}>
++      {isPageHeading || headingLevel ? (
++        <HeadingLevel className="nhsuk-fieldset__heading" headingLevel={headingLevel ?? 'h1'}>
+           {children}
+         </HeadingLevel>
+       ) : (
+diff --git a/src/components/form-elements/legend/__tests__/Legend.test.tsx b/src/components/form-elements/legend/__tests__/Legend.test.tsx
+index 2cc8b59..31e22b9 100644
+--- a/src/components/form-elements/legend/__tests__/Legend.test.tsx
++++ b/src/components/form-elements/legend/__tests__/Legend.test.tsx
+@@ -1,6 +1,6 @@
+ import { render } from '@testing-library/react';
+ 
+-import { Legend } from '..';
++import { Legend, type LegendProps } from '..';
+ 
+ import { type NHSUKSize } from '#util/types/NHSUKTypes';
+ 
+@@ -40,6 +40,21 @@ describe('Legend', () => {
+     },
+   );
+ 
++  it.each<LegendProps>([
++    { headingLevel: 'h1' },
++    { headingLevel: 'h2' },
++    { headingLevel: 'h3' },
++    { headingLevel: 'h4' },
++  ])('renders as page heading with with custom heading level $headingLevel', (props) => {
++    const { container } = render(<Legend {...props}>Text</Legend>);
++
++    const legendEl = container.querySelector('.nhsuk-fieldset__legend');
++    const headingEl = legendEl?.querySelector('.nhsuk-fieldset__heading');
++
++    expect(legendEl).toHaveTextContent('Text');
++    expect(headingEl?.tagName).toBe(props?.headingLevel?.toUpperCase());
++  });
++
+   it('renders null with no children', () => {
+     const { container } = render(<Legend />);
+ 
+diff --git a/src/components/form-elements/radios/__tests__/Radios.test.tsx b/src/components/form-elements/radios/__tests__/Radios.test.tsx
+index 85630bb..2525bee 100644
+--- a/src/components/form-elements/radios/__tests__/Radios.test.tsx
++++ b/src/components/form-elements/radios/__tests__/Radios.test.tsx
+@@ -7,7 +7,51 @@ import { renderClient, renderServer } from '#util/components';
+ describe('Radios', () => {
+   it('matches snapshot', async () => {
+     const { container } = await renderClient(
+-      <Radios id="example" name="example">
++      <Radios
++        legend="Have you changed your name?"
++        legendProps={{ size: 'l' }}
++        hint="This includes changing your last name or spelling your name differently"
++        id="example"
++        name="example"
++      >
++        <Radios.Item id="example-1" value="yes">
++          Yes
++        </Radios.Item>
++        <Radios.Item id="example-2" value="no">
++          No
++        </Radios.Item>
++      </Radios>,
++      { moduleName: 'nhsuk-radios' },
++    );
++
++    expect(container).toMatchSnapshot();
++  });
++
++  it('matches snapshot with HTML in props', async () => {
++    const { container } = await renderClient(
++      <Radios
++        legend={
++          <>
++            <span className="nhsuk-caption-l">Example</span> Legend text
++          </>
++        }
++        legendProps={{
++          isPageHeading: true,
++          size: 'l',
++        }}
++        hint={
++          <>
++            Hint text <em>with HTML</em>
++          </>
++        }
++        error={
++          <>
++            Error text <em>with HTML</em>
++          </>
++        }
++        id="example"
++        name="example"
++      >
+         <Radios.Item id="example-1" value="yes">
+           Yes
+         </Radios.Item>
+@@ -23,7 +67,13 @@ describe('Radios', () => {
+ 
+   it('matches snapshot (via server)', async () => {
+     const { container, element } = await renderServer(
+-      <Radios id="example" name="example">
++      <Radios
++        legend="Have you changed your name?"
++        legendProps={{ size: 'l' }}
++        hint="This includes changing your last name or spelling your name differently"
++        id="example"
++        name="example"
++      >
+         <Radios.Item id="example-1" value="yes">
+           Yes
+         </Radios.Item>
+diff --git a/src/components/form-elements/radios/__tests__/__snapshots__/Radios.test.tsx.snap b/src/components/form-elements/radios/__tests__/__snapshots__/Radios.test.tsx.snap
+index 6bdcef4..6dd8f5f 100644
+--- a/src/components/form-elements/radios/__tests__/__snapshots__/Radios.test.tsx.snap
++++ b/src/components/form-elements/radios/__tests__/__snapshots__/Radios.test.tsx.snap
+@@ -5,49 +5,65 @@ exports[`Radios matches snapshot (via server): client 1`] = `
+   <div
+     class="nhsuk-form-group"
+   >
+-    <div
+-      class="nhsuk-radios"
+-      data-module="nhsuk-radios"
+-      data-nhsuk-radios-init=""
+-      id="example"
++    <fieldset
++      aria-describedby="example--hint"
++      class="nhsuk-fieldset"
+     >
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
++      >
++        Have you changed your name?
++      </legend>
+       <div
+-        class="nhsuk-radios__item"
++        class="nhsuk-hint"
++        id="example--hint"
+       >
+-        <input
+-          class="nhsuk-radios__input"
+-          id="example-1"
+-          name="example"
+-          type="radio"
+-          value="yes"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-radios__label"
+-          for="example-1"
+-          id="example-1--label"
+-        >
+-          Yes
+-        </label>
++        This includes changing your last name or spelling your name differently
+       </div>
+       <div
+-        class="nhsuk-radios__item"
++        class="nhsuk-radios"
++        data-module="nhsuk-radios"
++        data-nhsuk-radios-init=""
++        id="example"
+       >
+-        <input
+-          class="nhsuk-radios__input"
+-          id="example-2"
+-          name="example"
+-          type="radio"
+-          value="no"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-radios__label"
+-          for="example-2"
+-          id="example-2--label"
++        <div
++          class="nhsuk-radios__item"
+         >
+-          No
+-        </label>
++          <input
++            class="nhsuk-radios__input"
++            id="example-1"
++            name="example"
++            type="radio"
++            value="yes"
++          />
++          <label
++            class="nhsuk-label nhsuk-radios__label"
++            for="example-1"
++            id="example-1--label"
++          >
++            Yes
++          </label>
++        </div>
++        <div
++          class="nhsuk-radios__item"
++        >
++          <input
++            class="nhsuk-radios__input"
++            id="example-2"
++            name="example"
++            type="radio"
++            value="no"
++          />
++          <label
++            class="nhsuk-label nhsuk-radios__label"
++            for="example-2"
++            id="example-2--label"
++          >
++            No
++          </label>
++        </div>
+       </div>
+-    </div>
++    </fieldset>
+   </div>
+ </div>
+ `;
+@@ -57,48 +73,64 @@ exports[`Radios matches snapshot (via server): server 1`] = `
+   <div
+     class="nhsuk-form-group"
+   >
+-    <div
+-      class="nhsuk-radios"
+-      data-module="nhsuk-radios"
+-      id="example"
++    <fieldset
++      aria-describedby="example--hint"
++      class="nhsuk-fieldset"
+     >
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
++      >
++        Have you changed your name?
++      </legend>
+       <div
+-        class="nhsuk-radios__item"
++        class="nhsuk-hint"
++        id="example--hint"
+       >
+-        <input
+-          class="nhsuk-radios__input"
+-          id="example-1"
+-          name="example"
+-          type="radio"
+-          value="yes"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-radios__label"
+-          for="example-1"
+-          id="example-1--label"
+-        >
+-          Yes
+-        </label>
++        This includes changing your last name or spelling your name differently
+       </div>
+       <div
+-        class="nhsuk-radios__item"
++        class="nhsuk-radios"
++        data-module="nhsuk-radios"
++        id="example"
+       >
+-        <input
+-          class="nhsuk-radios__input"
+-          id="example-2"
+-          name="example"
+-          type="radio"
+-          value="no"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-radios__label"
+-          for="example-2"
+-          id="example-2--label"
++        <div
++          class="nhsuk-radios__item"
++        >
++          <input
++            class="nhsuk-radios__input"
++            id="example-1"
++            name="example"
++            type="radio"
++            value="yes"
++          />
++          <label
++            class="nhsuk-label nhsuk-radios__label"
++            for="example-1"
++            id="example-1--label"
++          >
++            Yes
++          </label>
++        </div>
++        <div
++          class="nhsuk-radios__item"
+         >
+-          No
+-        </label>
++          <input
++            class="nhsuk-radios__input"
++            id="example-2"
++            name="example"
++            type="radio"
++            value="no"
++          />
++          <label
++            class="nhsuk-label nhsuk-radios__label"
++            for="example-2"
++            id="example-2--label"
++          >
++            No
++          </label>
++        </div>
+       </div>
+-    </div>
++    </fieldset>
+   </div>
+ </div>
+ `;
+@@ -108,49 +140,160 @@ exports[`Radios matches snapshot 1`] = `
+   <div
+     class="nhsuk-form-group"
+   >
+-    <div
+-      class="nhsuk-radios"
+-      data-module="nhsuk-radios"
+-      data-nhsuk-radios-init=""
+-      id="example"
++    <fieldset
++      aria-describedby="example--hint"
++      class="nhsuk-fieldset"
+     >
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
++      >
++        Have you changed your name?
++      </legend>
+       <div
+-        class="nhsuk-radios__item"
++        class="nhsuk-hint"
++        id="example--hint"
+       >
+-        <input
+-          class="nhsuk-radios__input"
+-          id="example-1"
+-          name="example"
+-          type="radio"
+-          value="yes"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-radios__label"
+-          for="example-1"
+-          id="example-1--label"
++        This includes changing your last name or spelling your name differently
++      </div>
++      <div
++        class="nhsuk-radios"
++        data-module="nhsuk-radios"
++        data-nhsuk-radios-init=""
++        id="example"
++      >
++        <div
++          class="nhsuk-radios__item"
++        >
++          <input
++            class="nhsuk-radios__input"
++            id="example-1"
++            name="example"
++            type="radio"
++            value="yes"
++          />
++          <label
++            class="nhsuk-label nhsuk-radios__label"
++            for="example-1"
++            id="example-1--label"
++          >
++            Yes
++          </label>
++        </div>
++        <div
++          class="nhsuk-radios__item"
+         >
+-          Yes
+-        </label>
++          <input
++            class="nhsuk-radios__input"
++            id="example-2"
++            name="example"
++            type="radio"
++            value="no"
++          />
++          <label
++            class="nhsuk-label nhsuk-radios__label"
++            for="example-2"
++            id="example-2--label"
++          >
++            No
++          </label>
++        </div>
+       </div>
++    </fieldset>
++  </div>
++</div>
++`;
++
++exports[`Radios matches snapshot with HTML in props 1`] = `
++<div>
++  <div
++    class="nhsuk-form-group nhsuk-form-group--error"
++  >
++    <fieldset
++      aria-describedby="example--hint example--error-message"
++      class="nhsuk-fieldset"
++    >
++      <legend
++        class="nhsuk-fieldset__legend nhsuk-fieldset__legend--l"
++      >
++        <h1
++          class="nhsuk-fieldset__heading"
++        >
++          <span
++            class="nhsuk-caption-l"
++          >
++            Example
++          </span>
++           Legend text
++        </h1>
++      </legend>
+       <div
+-        class="nhsuk-radios__item"
++        class="nhsuk-hint"
++        id="example--hint"
+       >
+-        <input
+-          class="nhsuk-radios__input"
+-          id="example-2"
+-          name="example"
+-          type="radio"
+-          value="no"
+-        />
+-        <label
+-          class="nhsuk-label nhsuk-radios__label"
+-          for="example-2"
+-          id="example-2--label"
++        Hint text 
++        <em>
++          with HTML
++        </em>
++      </div>
++      <span
++        class="nhsuk-error-message"
++        id="example--error-message"
++      >
++        <span
++          class="nhsuk-u-visually-hidden"
++        >
++          Error:
++        </span>
++         
++        Error text 
++        <em>
++          with HTML
++        </em>
++      </span>
++      <div
++        class="nhsuk-radios"
++        data-module="nhsuk-radios"
++        data-nhsuk-radios-init=""
++        id="example"
++      >
++        <div
++          class="nhsuk-radios__item"
++        >
++          <input
++            class="nhsuk-radios__input"
++            id="example-1"
++            name="example"
++            type="radio"
++            value="yes"
++          />
++          <label
++            class="nhsuk-label nhsuk-radios__label"
++            for="example-1"
++            id="example-1--label"
++          >
++            Yes
++          </label>
++        </div>
++        <div
++          class="nhsuk-radios__item"
+         >
+-          No
+-        </label>
++          <input
++            class="nhsuk-radios__input"
++            id="example-2"
++            name="example"
++            type="radio"
++            value="no"
++          />
++          <label
++            class="nhsuk-label nhsuk-radios__label"
++            for="example-2"
++            id="example-2--label"
++          >
++            No
++          </label>
++        </div>
+       </div>
+-    </div>
++    </fieldset>
+   </div>
+ </div>
+ `;
+diff --git a/src/components/form-elements/text-input/__tests__/TextInput.test.tsx b/src/components/form-elements/text-input/__tests__/TextInput.test.tsx
+index 373dff4..450573e 100644
+--- a/src/components/form-elements/text-input/__tests__/TextInput.test.tsx
++++ b/src/components/form-elements/text-input/__tests__/TextInput.test.tsx
+@@ -20,6 +20,36 @@ describe('TextInput', () => {
+     expect(container).toMatchSnapshot('TextInput');
+   });
+ 
++  it('matches snapshot with HTML in props', async () => {
++    const { container } = await renderClient(
++      <TextInput
++        label={
++          <>
++            <span className="nhsuk-caption-l">Example</span> Label text
++          </>
++        }
++        labelProps={{
++          isPageHeading: true,
++          size: 'l',
++        }}
++        hint={
++          <>
++            Hint text <em>with HTML</em>
++          </>
++        }
++        error={
++          <>
++            Error text <em>with HTML</em>
++          </>
++        }
++        id="nhs-number"
++      />,
++      { className: 'nhsuk-input' },
++    );
++
++    expect(container).toMatchSnapshot();
++  });
++
+   it('matches snapshot (via server)', async () => {
+     const { container, element } = await renderServer(
+       <TextInput label="What is your NHS number?" labelProps={{ size: 'l' }} id="nhs-number" />,
+diff --git a/src/components/form-elements/text-input/__tests__/__snapshots__/TextInput.test.tsx.snap b/src/components/form-elements/text-input/__tests__/__snapshots__/TextInput.test.tsx.snap
+index a7c6381..fe32e07 100644
+--- a/src/components/form-elements/text-input/__tests__/__snapshots__/TextInput.test.tsx.snap
++++ b/src/components/form-elements/text-input/__tests__/__snapshots__/TextInput.test.tsx.snap
+@@ -44,6 +44,62 @@ exports[`TextInput matches snapshot (via server): server 1`] = `
+ </div>
+ `;
+ 
++exports[`TextInput matches snapshot with HTML in props 1`] = `
++<div>
++  <div
++    class="nhsuk-form-group nhsuk-form-group--error"
++  >
++    <h1
++      class="nhsuk-label-wrapper"
++    >
++      <label
++        class="nhsuk-label nhsuk-label--l"
++        for="nhs-number"
++        id="nhs-number--label"
++      >
++        <span
++          class="nhsuk-caption-l"
++        >
++          Example
++        </span>
++         Label text
++      </label>
++    </h1>
++    <div
++      class="nhsuk-hint"
++      id="nhs-number--hint"
++    >
++      Hint text 
++      <em>
++        with HTML
++      </em>
++    </div>
++    <span
++      class="nhsuk-error-message"
++      id="nhs-number--error-message"
++    >
++      <span
++        class="nhsuk-u-visually-hidden"
++      >
++        Error:
++      </span>
++       
++      Error text 
++      <em>
++        with HTML
++      </em>
++    </span>
++    <input
++      aria-describedby="nhs-number--hint nhs-number--error-message"
++      class="nhsuk-input nhsuk-input--error"
++      id="nhs-number"
++      name="nhs-number"
++      type="text"
++    />
++  </div>
++</div>
++`;
++
+ exports[`TextInput matches snapshot: TextInput 1`] = `
+ <div>
+   <div
+diff --git a/src/util/types/FormTypes.ts b/src/util/types/FormTypes.ts
+index 9f6d314..4bd74b3 100644
+--- a/src/util/types/FormTypes.ts
++++ b/src/util/types/FormTypes.ts
+@@ -1,3 +1,5 @@
++import { type ReactElement } from 'react';
++
+ import { type ErrorMessageProps } from '#components/form-elements/error-message/index.js';
+ import { type FieldsetProps } from '#components/form-elements/fieldset/index.js';
+ import { type HintTextProps } from '#components/form-elements/hint-text/index.js';
+@@ -7,13 +9,13 @@ import { type ComponentPropsWithDataAttributes } from '#util/types/NHSUKTypes.js
+ 
+ export interface FormElementProps {
+   'fieldsetProps'?: FieldsetProps;
+-  'legend'?: string;
++  'legend'?: string | ReactElement;
+   'legendProps'?: LegendProps;
+-  'label'?: string;
++  'label'?: string | ReactElement;
+   'labelProps'?: LabelProps;
+-  'error'?: string;
++  'error'?: string | ReactElement;
+   'errorProps'?: ErrorMessageProps;
+-  'hint'?: string;
++  'hint'?: string | ReactElement;
+   'hintProps'?: HintTextProps;
+   'formGroupProps'?: ComponentPropsWithDataAttributes<'div'>;
+   'id'?: string;

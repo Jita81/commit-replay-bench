@@ -1,0 +1,241 @@
+# Default values for the crb chart. Every default is the SECURE choice; loosen deliberately.
+# See docs/DEPLOYMENT.md §3 (Kubernetes / Helm) and §4 (Azure) for a worked configuration.
+
+image:
+  repository: ghcr.io/jita81/commit-replay-bench
+  # Leave empty to use the chart's appVersion. Prefer `digest` in production.
+  tag: ""
+  # e.g. sha256:… — when set, the image is referenced by digest and `tag` is ignored.
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  # Azure Workload Identity: azure.workload.identity/client-id: <uami client id>
+  annotations: {}
+  automountServiceAccountToken: false
+
+# ---------------------------------------------------------------------------------------
+# Secrets — ALWAYS from an existing Secret you manage (sealed-secrets, External Secrets
+# Operator from Key Vault, Key Vault CSI driver…). The chart never renders secret values.
+# Required keys:  CRB_SECRET_KEY, CRB_DATABASE_URL
+# Optional keys:  CRB_OIDC__CLIENT_SECRET, CRB_BOOTSTRAP_ADMIN__PASSWORD, AZURE_OPENAI_API_KEY,
+#                 CEREBRAS_API_KEY, ANTHROPIC_API_KEY, POSTGRES_PASSWORD (embedded pg only)
+# ---------------------------------------------------------------------------------------
+existingSecret: "crb-secrets"
+
+# Plain (non-secret) environment for api, worker and migrate. Rendered into a ConfigMap.
+# Nested server settings use `__`: CRB_OIDC__ISSUER, CRB_SANDBOX__EXECUTOR, …
+config:
+  CRB_ENV: "prod"
+  CRB_LOG_FORMAT: "json"
+  CRB_LOG_LEVEL: "INFO"
+  CRB_LOCAL_AUTH_ENABLED: "true"
+  CRB_BOOTSTRAP_ADMIN__USERNAME: "admin"
+  CRB_OIDC__ISSUER: ""
+  CRB_OIDC__CLIENT_ID: ""
+  CRB_OIDC__REDIRECT_URL: ""
+  CRB_OIDC__SCOPES: "openid profile email"
+  CRB_OIDC__ROLE_CLAIM: "roles"
+  CRB_OIDC__ROLE_MAP: '{"crb.viewer": "viewer", "crb.operator": "operator", "crb.approver": "approver", "crb.admin": "admin"}'
+  CRB_CORS_ORIGINS: ""
+  # Ingress controller pod CIDR(s) whose X-Forwarded-* headers are trusted. Set BOTH to the
+  # same value: the app (CRB_TRUSTED_PROXIES) and uvicorn (CRB_FORWARDED_ALLOW_IPS) each
+  # decide whom to believe. Empty = believe nobody (the app sees plain HTTP behind TLS
+  # termination and refuses a Secure cookie — set them, never "*": a wildcard lets any
+  # client spoof its address and scheme; CodeRabbit on PR #4, 2026-09-15).
+  CRB_TRUSTED_PROXIES: ""
+  CRB_FORWARDED_ALLOW_IPS: ""
+  CRB_RETENTION__TRANSCRIPTS_DAYS: "0"
+  # Model endpoint (BYOK). OpenAI-compatible:
+  CRB_OPENAI_BASE_URL: ""
+  CRB_OPENAI_KEY_ENV: "CEREBRAS_API_KEY"
+  # …or Azure OpenAI in-tenant (setting the endpoint selects Azure):
+  CRB_AZURE_ENDPOINT: ""
+  CRB_AZURE_DEPLOYMENT: ""
+  CRB_AZURE_API_VERSION: "2024-10-21"
+  CRB_AZURE_KEY_ENV: "AZURE_OPENAI_API_KEY"
+  # Sandbox: docker (fail-closed unless worker.sandbox.mode provides a daemon) | local (dev)
+  CRB_SANDBOX__EXECUTOR: "docker"
+  CRB_SANDBOX__IMAGE: ""
+
+# Extra env entries (list of core/v1 EnvVar) appended to every crb container.
+extraEnv: []
+
+# ---------------------------------------------------------------------------------------
+postgresql:
+  # external: CRB_DATABASE_URL in the existing Secret points at a managed server
+  #           (Azure Database for PostgreSQL Flexible Server with a private endpoint, …).
+  # embedded: an evaluation-only single-replica StatefulSet in this namespace. NOT for
+  #           production: no HA, no PITR, no managed backups. Point CRB_DATABASE_URL at
+  #           postgresql+psycopg://crb:<POSTGRES_PASSWORD>@<release>-crb-postgres:5432/crb
+  mode: external
+  embedded:
+    image: postgres:16.10-alpine3.22
+    database: crb
+    username: crb
+    # key in existingSecret holding the password
+    passwordKey: POSTGRES_PASSWORD
+    storage:
+      size: 20Gi
+      storageClassName: ""
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "2", memory: 2Gi }
+
+# ---------------------------------------------------------------------------------------
+migrate:
+  enabled: true
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 900
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+api:
+  replicaCount: 1
+  webConcurrency: 2
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "2", memory: 1Gi }
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+
+worker:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: "4", memory: 4Gi }
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+  # Work directory ($CRB_HOME: clones, worktrees, exports).
+  workDir:
+    # pvc | emptyDir. A PVC survives restarts (resumable runs); emptyDir is wiped.
+    type: pvc
+    size: 20Gi
+    storageClassName: ""
+    # ReadWriteOnce binds the volume to one node: worker.replicaCount > 1 with a RWO PVC
+    # fails to render (the second pod would never schedule, or two workers would share
+    # one worktree directory). Use ReadWriteMany, or emptyDir, to scale out.
+    accessMode: ReadWriteOnce
+  sandbox:
+    # How the worker reaches a Docker daemon for sandbox containers. READ docs/DEPLOYMENT.md §3.4.
+    #   none        no daemon → executor fails CLOSED (runs `blocked`). Safe default.
+    #   dind        docker:dind sidecar in the pod (privileged container; the daemon and every
+    #               sandbox live inside the pod's cgroup; nothing touches the node's runtime).
+    #   hostSocket  hostPath mount of the node's docker.sock (root-equivalent on the node —
+    #               only on a dedicated, tainted node pool with a matching PodSecurity policy).
+    mode: none
+    hostSocket:
+      path: /var/run/docker.sock
+      # gid of docker.sock on the node; added as a supplemental group
+      gid: 999
+    dind:
+      image: docker:28.4.0-dind
+      resources:
+        requests: { cpu: 500m, memory: 1Gi }
+        limits: { cpu: "4", memory: 8Gi }
+      # Storage for images + sandbox layers inside the sidecar (emptyDir).
+      storageSizeLimit: 40Gi
+
+# ---------------------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: crb.example.internal
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: true
+    # existing TLS Secret (or let cert-manager create it via annotations)
+    secretName: crb-tls
+
+# ---------------------------------------------------------------------------------------
+# NetworkPolicy — default-deny ingress + egress for every crb pod, then allowlists.
+# Needs a CNI that enforces NetworkPolicy (Azure CNI + Calico/Cilium, or Azure NPM).
+# Hostnames cannot be allowlisted by NetworkPolicy; use the private endpoint IPs/CIDRs.
+networkPolicy:
+  enabled: true
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector: {}
+    port: 53
+  # Who may reach the API Service (ingress controller pods). Empty = nobody.
+  apiIngress:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+      podSelector: {}
+  # Prometheus scrape of /metrics (optional).
+  metricsIngress: []
+  postgres:
+    # CIDR(s) of the external server's private endpoint. Ignored for embedded mode.
+    cidrs: []
+    port: 5432
+  # The model endpoint (worker only). Azure OpenAI private endpoint NIC IP as /32.
+  modelEndpoint:
+    cidrs: []
+    port: 443
+  # The OIDC issuer (api only). login.microsoftonline.com resolves to Microsoft ranges —
+  # use the Azure service tag equivalent CIDRs, or an egress proxy CIDR.
+  oidc:
+    cidrs: []
+    port: 443
+  # Arbitrary extra egress rules (networking.k8s.io/v1 NetworkPolicyEgressRule) applied to
+  # EVERY crb pod (api, worker, migrate job, embedded postgres) — e.g. an internal registry
+  # for dind sandbox images, or a corporate proxy.
+  extraEgress: []
+
+# ---------------------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  privileged: false
+  capabilities:
+    drop: ["ALL"]
+
+# tmpfs sizes for the read-only root filesystem
+tmp:
+  sizeLimit: 256Mi
+home:
+  sizeLimit: 64Mi
+
+# Prometheus Operator ServiceMonitor for /metrics (requires the CRD).
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}

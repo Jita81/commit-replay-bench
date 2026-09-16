@@ -1,16 +1,423 @@
+# CI gates for crb. Every job is a gate; none may be weakened without an ADR
+# (see docs/CONTRIBUTING.md "never weaken a gate").
+#
+# Jobs:
+#   lint      ruff check + ruff format --check
+#   types     mypy --strict over src/crb
+#   code-map  every source file carries a valid Navigation header; docs/CODE-MAP.md current
+#   layers    import-linter: crb.core is stdlib-only; layers depend downward only
+#   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
+#   security  gitleaks (secrets in history) + pip-audit on the resolved environment
+#   sbom      CycloneDX SBOM of the resolved environment, uploaded as an artifact
+#   test-postgres  the store suite (tests/test_store_*.py) against a real PostgreSQL 16 service
+#   container      hadolint + docker buildx build of deploy/Dockerfile (no push), image smoke
+#                  (non-root, read-only root, migrate, UI present), helm lint, compose config —
+#                  always runs (~2–4 min) and is blocking; the same Dockerfile is what
+#                  release.yml pushes to GHCR on a tag
+#   walkthrough    the full-browser walkthrough (ui/e2e/walkthrough) against a LIVE stack that
+#                  scripts/walkthrough.sh boots in a temp dir — tier 1: hermetic, no network,
+#                  no model (fixture repo over file://, test-only fixture_gold builder); the
+#                  Playwright report + traces are uploaded on failure
+#
+# Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
+
 name: ci
-on: [push, pull_request]
+
+on:
+  push:
+    branches: [main, "reboot/**"]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  UV_SYSTEM_PYTHON: "0"
+
 jobs:
-  test:
+  lint:
+    name: lint (ruff)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install (dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[dev]' --python .venv/bin/python
+      - name: ruff check
+        run: .venv/bin/ruff check src tests
+      - name: ruff format --check
+        run: .venv/bin/ruff format --check src tests
+
+  types:
+    name: types (mypy --strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      # mypy checks src/crb (server + store included): without the server and postgres
+      # extras every fastapi / sqlalchemy / pydantic import is `import-not-found` (95 of
+      # them, 277 errors with the cascades — measured 2026-09-14) and the gate measures
+      # the environment, not the types.
+      - name: Install (server + postgres + dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[server,postgres,dev]' --python .venv/bin/python
+      - name: mypy
+        run: .venv/bin/mypy
+
+  code-map:
+    name: code-map (every file has a valid header; docs/CODE-MAP.md is current)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
-      - run: pytest -q
-      - run: pip install ruff && ruff check src
+          python-version: "3.12"
+      - name: Headers present, links resolve, map current
+        run: python scripts/code_map.py --check
+
+  layers:
+    name: layers (import-linter)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install (dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[dev]' --python .venv/bin/python
+      - name: lint-imports (crb.core stdlib-only; layers downward only)
+        run: .venv/bin/lint-imports
+
+  test:
+    name: test (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    env:
+      # A toolchain warm-up (npm install, Maven resolution, docker build) that fails here
+      # is a repository defect, not missing infrastructure: fail, never skip.
+      CRB_TEST_STRICT_WARMUP: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # fixture replays and mining tests walk git history
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      # The suite covers the server routes and the store (SQLite here; PostgreSQL in
+      # test-postgres): the server and postgres extras are part of what is under test.
+      - name: Install (server + postgres + dev extras)
+        run: |
+          uv venv -q .venv --python ${{ matrix.python }}
+          uv pip install -q -e '.[server,postgres,dev]' --python .venv/bin/python
+      - name: Configure git identity for fixture repositories
+        run: |
+          git config --global user.email "ci@crb.invalid"
+          git config --global user.name "crb ci"
+          git config --global init.defaultBranch main
+      - name: pytest (coverage >= 70)
+        run: >-
+          .venv/bin/pytest -q
+          --cov=crb --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml
+          --cov-fail-under=70
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
+        with:
+          name: coverage-py${{ matrix.python }}
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  security:
+    name: security (gitleaks + pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # gitleaks-action lists a pull request's commits through the API on PR events;
+      # without this it fails 403 "Resource not accessible by integration" (first seen on
+      # PR #7, 2026-09-15 — pushes to a branch never needed it)
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # gitleaks scans the full history
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Required only for organisation-owned repositories; harmless when unset.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          # the verdict is the step's exit code; the report upload is what fails when the
+          # account's artifact-storage quota is full (2026-09-15)
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install the resolved DEPENDENCY environment (every extra; not the project itself)
+        # The project is deliberately not installed: it is not on an index, and an
+        # un-auditable distribution would trip --strict. We audit what crb depends on.
+        run: |
+          uv venv -q .audit --python 3.12
+          uv pip install -q -r pyproject.toml \
+            --extra openai --extra claude --extra server --extra postgres --extra dev \
+            --python .audit/bin/python
+          uv pip install -q pip pip-audit --python .audit/bin/python
+      - name: Record the resolved environment
+        run: |
+          uv pip freeze --python .audit/bin/python > resolved-requirements.txt
+          wc -l resolved-requirements.txt
+      - name: pip-audit (resolved environment, strict)
+        run: >-
+          .audit/bin/pip-audit
+          --strict
+          --desc on
+          --progress-spinner off
+      - name: Upload resolved requirements
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
+        with:
+          name: resolved-requirements
+          path: resolved-requirements.txt
+          retention-days: 7
+
+  sbom:
+    name: sbom (CycloneDX)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install the resolved environment (every extra) + cyclonedx-bom
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[openai,claude,server,postgres,dev]' --python .venv/bin/python
+          uv pip install -q cyclonedx-bom --python .venv/bin/python
+      - name: Generate SBOM (CycloneDX JSON of the environment; root component from pyproject)
+        run: >-
+          .venv/bin/cyclonedx-py environment
+          --pyproject pyproject.toml
+          --output-format JSON
+          --output-file sbom.cdx.json
+          .venv/bin/python
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 7
+
+  test-postgres:
+    name: test-postgres (store suite on PostgreSQL 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crb
+          POSTGRES_PASSWORD: crb
+          POSTGRES_DB: crb_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crb -d crb_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CRB_TEST_POSTGRES_URL: postgresql+psycopg://crb:crb@127.0.0.1:5432/crb_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install (server + postgres + dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[server,postgres,dev]' --python .venv/bin/python
+      - name: pytest — store suite, SQLite AND PostgreSQL parametrisations
+        # The same assertions run on both dialects. A skip here would hide a divergence, so
+        # the step fails if the postgres parametrisation was skipped for any reason.
+        run: |
+          .venv/bin/pytest -q tests/test_store_db.py tests/test_store_ledger.py tests/test_store_migrate.py \
+            -rs --junitxml=store-postgres.xml
+          if grep -q 'CRB_TEST_POSTGRES_URL not set' store-postgres.xml; then
+            echo '::error::postgres parametrisation was skipped'; exit 1
+          fi
+      - name: Upload junit
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
+        with:
+          name: store-postgres-junit
+          path: store-postgres.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  container:
+    name: container (docker build + smoke + helm lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: hadolint deploy/Dockerfile
+        uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: deploy/Dockerfile
+      - uses: docker/setup-buildx-action@v3
+      - name: Build deploy/Dockerfile (no push; GHA layer cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          load: true
+          tags: crb:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke the image — non-root, read-only root, migrate on SQLite, UI + tools present
+        # tmpfs ownership is explicit: newer daemons make --tmpfs inherit the image
+        # directory's root:0750, which uid 10001 cannot write ("unable to open database
+        # file" — the ubuntu-latest runner in CI run 34780605823 and Docker 29 / colima alike).
+        run: |
+          set -euo pipefail
+          docker run --rm crb:ci python -c "import os; assert os.getuid() == 10001, os.getuid(); print('uid ok')"
+          docker run --rm --read-only --tmpfs /tmp --tmpfs /srv/crb:rw,uid=10001,gid=10001,mode=0750 crb:ci migrate upgrade -v
+          docker run --rm --read-only --tmpfs /tmp --tmpfs /srv/crb:rw,uid=10001,gid=10001,mode=0750 crb:ci migrate current
+          docker run --rm crb:ci python -c "import os; assert os.path.isfile('/app/ui/dist/index.html'), 'UI missing from image'; print('ui ok')"
+          docker run --rm crb:ci sh -c 'command -v docker && command -v git && test -x /usr/local/bin/crb-entrypoint'
+          docker run --rm crb:ci python -c "import crb.store.migrate, crb.core, crb.builders; print('imports ok')"
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - name: helm lint (strict) + template every sandbox / postgres mode
+        run: |
+          helm lint deploy/helm/crb --strict
+          # external postgres (the default) must name its CIDR under the default-deny policy
+          helm template crb deploy/helm/crb --set 'networkPolicy.postgres.cidrs={10.0.0.0/8}' > /dev/null
+          helm template crb deploy/helm/crb --set worker.sandbox.mode=dind --set postgresql.mode=embedded --set ingress.enabled=true > /dev/null
+          helm template crb deploy/helm/crb --set worker.sandbox.mode=hostSocket --set worker.workDir.type=emptyDir --set 'networkPolicy.postgres.cidrs={10.0.0.0/8}' > /dev/null
+          # the chart refuses the two silent misconfigurations (an unreachable database, two workers on one RWO volume)
+          if helm template crb deploy/helm/crb > /dev/null 2>&1; then echo "expected render failure: external postgres without cidrs"; exit 1; fi
+          if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set worker.replicaCount=2 > /dev/null 2>&1; then echo "expected render failure: replicaCount=2 on RWO"; exit 1; fi
+      - name: docker compose config
+        run: |
+          printf 'POSTGRES_PASSWORD=ci\nCRB_SECRET_KEY=ci\n' > deploy/.env
+          docker compose -f deploy/docker-compose.yml config --quiet
+          rm -f deploy/.env
+
+  walkthrough:
+    name: walkthrough (browser, live stack, tier 1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install crb (server + dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[server,dev]' --python .venv/bin/python
+      - name: Install the UI + Playwright Chromium (with system deps)
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund --legacy-peer-deps
+          npx playwright install --with-deps chromium
+      - name: Build the UI bundle the API serves
+        working-directory: ui
+        run: npm run build
+      - name: Configure git identity for the fixture repository
+        run: |
+          git config --global user.email "ci@crb.invalid"
+          git config --global user.name "crb ci"
+          git config --global init.defaultBranch main
+      - name: Walkthrough — boot a fresh stack, drive it through the browser, tear it down
+        # Hermetic: no network (file:// fixture, pinned interpreter), no model (fixture_gold),
+        # a temp CRB_HOME + SQLite on a free port. The report is pointed into ui/ for upload.
+        env:
+          CI: "1"
+          CRB_E2E_REPORT_DIR: ${{ github.workspace }}/ui/playwright-report-walkthrough
+          CRB_E2E_OUTPUT_DIR: ${{ github.workspace }}/ui/test-results-walkthrough
+        run: scripts/walkthrough.sh
+      - name: Upload the Playwright report + traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
+        with:
+          name: walkthrough-playwright-report
+          path: |
+            ui/playwright-report-walkthrough
+            ui/test-results-walkthrough
+          if-no-files-found: ignore
+          retention-days: 7
