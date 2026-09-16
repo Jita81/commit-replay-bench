@@ -125,7 +125,9 @@ End commit messages with the attribution line required by the session/tooling th
 authored them, when one is in force.
 
 Branches: **`main` is the trunk** (from 2026-09-16; `reboot/v2` was the reboot's
-integration branch until then and is kept as history). Feature branches
+integration branch until then — merged with a merge commit, so its history is on `main`,
+and the branch is deleted). A branch exists only while its PR is open: merged and closed
+PRs delete theirs. Feature branches
 `feat/<area>-<topic>` / `fix/<area>-<topic>` / `docs/<topic>`; one PR per file-disjoint
 workstream where possible. The gates green before merge — in CI when the repository has
 minutes, otherwise run locally and stated in the PR (`pytest tests`, `ruff check`, `ruff

@@ -29,3 +29,8 @@ updates:
     labels: ["dependencies", "ci"]
     commit-message:
       prefix: "ci(deps)"
+    # One PR per week for every action bump — a major action version cannot be exercised
+    # without CI minutes, so they are reviewed and merged together, not as six branches.
+    groups:
+      github-actions:
+        patterns: ["*"]
