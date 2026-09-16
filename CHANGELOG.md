@@ -8,6 +8,28 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+Nothing yet — `main` is 2.0.0a1 below.
+
+## [2.0.0a1] — 2026-09-16 — first releasable v2, on `main`
+
+Merged from the `reboot/v2` integration branch into `main` on 2026-09-16 (PR #2) after the
+third-party review batches below, with the gates run locally: GitHub Actions on the
+repository refused every job from 2026-09-15 ("recent account payments have failed or your
+spending limit needs to be increased"), so the operator chose to proceed on the locally-run
+gates (DL-035). The `v2.0.0a1` tag and the signed GHCR image follow when CI minutes are
+restored — the release workflow is what builds, smokes and signs the image, and a tag
+without it would publish nothing.
+
+### 2026-09-16 — the release-to-main documentation pass
+
+- `main` is the trunk: README status, CONTRIBUTING (branch model, the local gate list when
+  CI has no minutes), ADR-0013, REPRODUCING-THE-CENSUS, `.coderabbit.yaml` base branches.
+- The live measurement state after the staged spend is in the README's *measured state*
+  and the NHS report §9–§11 (Stage B $3.68, Stage C $8.42, the koa/cobra/click top-up
+  $7.48, click's controls re-run on the merged instrument); DL-034.
+- `docs/DEPLOYMENT.md` gained *If revision 0004 refuses* — the recorded remedy for a
+  database that already holds a duplicated `(trace_id, seq)` pair (the dev stack needed it).
+
 ### 2026-09-16 — CodeRabbit batch 4 (the front end and the documents; PR #6's findings)
 
 The `ui/**` instruction is "every number rendered carries its n, its interval and its
@@ -174,7 +196,7 @@ slice and that was confirmed against the code; each fix carries its test.
 - `crb.core.services.authored_of` normalises git ≥ 2.5x's `Z` suffix like
   `Repo.author_date` (the one CI failure on PR #7).
 
-## [2.0.0a1] — 2026-09-15 — first releasable v2 (pinned as `2.0.0a1-rc1`; the `v` tag follows the licence text)
+### 2026-09-15 — the rc pin and what it carried
 
 ### 2026-09-15 — the NHS measurement's instrument findings (DL-020..025)
 - **CI green.** Red on every push since 2026-09-13: labeller tests needed a real `claude` on

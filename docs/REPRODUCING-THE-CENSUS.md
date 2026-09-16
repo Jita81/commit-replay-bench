@@ -29,7 +29,7 @@ Contents: [0 Prerequisites](#0-prerequisites) · [1 Manifest](#1-verify-the-mani
 
 ## 0. Prerequisites
 
-* A fresh clone of `Jita81/commit-replay-bench` at `reboot/v2` (or the tag you are reviewing).
+* A fresh clone of `Jita81/commit-replay-bench` at `main` (or the tag you are reviewing).
 * Python ≥ 3.12 and [`uv`](https://docs.astral.sh/uv/). No Docker, no model, no network after
   the install.
 * `CRB_HOME` and `CRB_DATABASE_URL` **unset** in your shell. Everything below writes into a
