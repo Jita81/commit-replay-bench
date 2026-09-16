@@ -222,9 +222,12 @@ class LoginBroker:
             if st.state == STATE_AWAITING_CODE:
                 return st
             if st.state in TERMINAL_STATES:
-                raise LoginError(
-                    "cli_failed", st.detail or "the claude CLI exited before printing a sign-in URL"
+                detail = (
+                    "the session expired before the claude CLI printed its sign-in URL"
+                    if st.state == STATE_EXPIRED
+                    else st.detail or "the claude CLI exited before printing a sign-in URL"
                 )
+                raise LoginError("cli_failed", detail)
             time.sleep(0.2)
         self.cancel(session_id, reason="the claude CLI did not print a sign-in URL in time")
         raise LoginError("cli_timeout", "the claude CLI did not print a sign-in URL in time")
