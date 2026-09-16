@@ -47,10 +47,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -69,10 +69,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -93,10 +93,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Headers present, links resolve, map current
@@ -107,10 +107,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -135,11 +135,11 @@ jobs:
       # is a repository defect, not missing infrastructure: fail, never skip.
       CRB_TEST_STRICT_WARMUP: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0 # fixture replays and mining tests walk git history
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
@@ -162,7 +162,7 @@ jobs:
           --cov-fail-under=70
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: coverage-py${{ matrix.python }}
@@ -181,12 +181,12 @@ jobs:
       # PR #7, 2026-09-15 — pushes to a branch never needed it)
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0 # gitleaks scans the full history
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         # The action's default scanner (8.24.3) predates the top-level ``[[allowlists]]``
         # form the config uses, so the test tree's deliberately fake credentials were 18
         # "findings" (first CI run after the repository went public, 2026-09-16). Pin the
@@ -200,7 +200,7 @@ jobs:
           # the verdict is the step's exit code; the report upload is what fails when the
           # account's artifact-storage quota is full (2026-09-15)
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -226,7 +226,7 @@ jobs:
           --progress-spinner off
       - name: Upload resolved requirements
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: resolved-requirements
@@ -238,10 +238,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -259,7 +259,7 @@ jobs:
           --output-file sbom.cdx.json
           .venv/bin/python
       - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: sbom-cyclonedx
@@ -287,10 +287,10 @@ jobs:
     env:
       CRB_TEST_POSTGRES_URL: postgresql+psycopg://crb:crb@127.0.0.1:5432/crb_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -310,7 +310,7 @@ jobs:
           fi
       - name: Upload junit
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: store-postgres-junit
@@ -323,7 +323,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: hadolint deploy/Dockerfile
@@ -353,7 +353,7 @@ jobs:
           docker run --rm crb:ci python -c "import os; assert os.path.isfile('/app/ui/dist/index.html'), 'UI missing from image'; print('ui ok')"
           docker run --rm crb:ci sh -c 'command -v docker && command -v git && test -x /usr/local/bin/crb-entrypoint'
           docker run --rm crb:ci python -c "import crb.store.migrate, crb.core, crb.builders; print('imports ok')"
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         with:
           version: v3.16.4
       - name: helm lint (strict) + template every sandbox / postgres mode
@@ -377,15 +377,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -417,7 +417,7 @@ jobs:
         run: scripts/walkthrough.sh
       - name: Upload the Playwright report + traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true  # a full artifact-storage quota is not a build failure
         with:
           name: walkthrough-playwright-report
