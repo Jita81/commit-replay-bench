@@ -1062,6 +1062,12 @@ class SignoffOut(BaseModel):
     revoked_at: str | None
     active: bool
     current_false_q1: int
+    #: The attestation was made on an earlier apparatus than the one this deployment reads
+    #: at now: it stays on the record but lifts nothing (evidence expires when the
+    #: apparatus changes — EVIDENCE-AND-CLAIMS §4); the Decisions inbox offers re-sign or
+    #: revoke. ``apparatus_current`` is the deployment's apparatus for comparison.
+    stale: bool = False
+    apparatus_current: str = ""
     evidence: SignoffEvidence
     prev_hash: str
     row_hash: str

@@ -333,12 +333,15 @@ Sizes: S ≤ 2 days, M ≤ 2 weeks, L > 2 weeks (one engineer). Order is by valu
 | # | Item | Size | Persona | Pattern / source | Notes |
 |---|---|---|---|---|---|
 | F1 | **GitHub App connection**: self-registered app (private key in Key Vault), installation callback, installation record, repository list, installation-token minting in the worker feeding the existing `GitCredentials` seam; `Metadata: read`, `Contents: read` only | L | P2, P3, P5 | GitHub Apps; SonarQube/Cortex/LinearB | Backend + UI. Keep the URL/deploy-key path as "manual" fallback. |
-| F2 | **Get-started task list** (Home empty state) with statuses, health banner, "invite an approver" task | S | P3 | GOV.UK task list; Userpilot checklist research | Reads existing `/health`, repos, signoffs. |
+| F2 | **Get-started task list** (Home empty state) with statuses, health banner, "invite an approver" task — **landed in PR #32** (`/home`) | S | P3 | GOV.UK task list; Userpilot checklist research | Reads existing `/health`, repos, signoffs. |
 | F3 | **Repository picker + shape detection + Check your answers + probe** | M | P3 | SonarQube import; GOV.UK check answers | Detection heuristics for language/runner/prefixes/lint from the tree; presets already exist. |
+| F3b | **Shape review with risk copy** — a summary list per config key with what going wrong costs ("wrong prefix: the belts cannot tell a fix from a test edit"), before the probe (from the Claude Design prototype, docs/reviews/2026-09-17-claude-design-prototype.md) | S | P3 | GOV.UK check answers | After F3. |
 | F4 | **Prove-the-instrument step** as a three-step sequence with the evidence strip (controls / oracle / gold-clean) | M | P3, P4 | ONBOARDING step 3; Swarmia "value immediately" | Reuses Oracle screen data. |
 | F5 | **Measure step**: cost estimate before start, confirm-an-action, retention consequences | S | P3, P5 | MoJ confirm an action | Reuses run form. |
+| F5b | **Per-run spend cap** — a run stops itself at a stated amount; the Measure page names it (prototype A6) | M | P3, P5 | MoJ confirm an action | API: `RunCreateRequest.max_cost_usd` summed over attempts. |
 | F6 | **Decision inbox** (approver home): ready sign-offs, readiness gaps, override requests, stale signed cells; nav badge | M | P4 | Approval-queue guidance; MoJ notification badge | Server-side: an endpoint listing cells whose preview passes all clauses but attestation. |
 | F7 | **Sign-off as check-your-answers → confirm → confirmation page** with hash reference; inline diff with the human-review guide | M | P4, P9 | GOV.UK check answers + confirmation; MoJ confirm | Refactor of `SignoffPage.tsx`; the criteria list already exists. |
+| F7b | **Separation of duties at write** — refuse a sign-off whose approver is the actor of every accepted row it names or of the run that produced them; the home page says "why two people" (prototype A1 claims this is enforced; it is not) | M | P4, P5 | NHS/GOV.UK two-person rule | Core `SignoffPolicy` clause + API; keep `relaxed` from lifting it. |
 | F8 | **Results-page ordering**: evidence strip first, decisions banner, map, economics; role-aware Home | M | P1, P3, P4 | Progressive disclosure | Replace `/repos` landing once a repo is signed. |
 | F9 | **Connection review page** (permissions and why, egress flows, executor posture, retention, Key Vault refs, installer, date) | S | P5, P6 | Cortex's permission list; SECURITY.md §2 | Mostly static + settings. |
 | F10 | **Factory enablement per repo** as an approver-gated permission escalation (`Contents: write`, `Pull requests: write`), ruleset recommendation, PR-body standard | M | P4, P5, P7 | GitHub coding agent safeguards; Renovate onboarding PR | Backend: per-repo delivery flag + token scope. |
@@ -350,7 +353,7 @@ Sizes: S ≤ 2 days, M ≤ 2 weeks, L > 2 weeks (one engineer). Order is by valu
 | F16 | **Design-system migration** to nhsuk-frontend v10 tokens + thin React wrappers; neutral theme; accessibility audit to WCAG 2.2 AA | L (incremental) | all | NHS/GOV.UK/MoJ | Start with F2/F7 screens; migrate the rest as touched. |
 | F17 | **Health-IT flag per repository** → CSO group routing on decisions and PR body | S | P4 | DCB0160 (inference) | Config + copy. |
 | F18 | **Audit export to SIEM** (ledger JSONL + auth/sign-off events; Splunk/Event Hubs/Datadog) | M | P5, P9 | GitHub audit streaming | Backend mostly. |
-| F19 | **Deployment posture page** (printable) | S | P6 | Service-standard mapping | Static + `/version`, `/health`. |
+| F19 | **Deployment posture page** (printable) — **landed in PR #32** (`/posture`) | S | P6 | Service-standard mapping | Static + `/version`, `/health`. |
 | F20 | **Flow view** (backlog → merge; cost per human-verified change) | M | P8, P1 | DORA 2025; LinearB cost per effective PR | **Blocked on B-9** (merge outcome via PR webhook; human minutes via review-time capture). Until then show the refusal text. |
 | F21 | GitLab / Azure DevOps connectors; GHES/ghe.com base URLs; enterprise-level install | L | P2 | GitLab scopes; ADO WIF; GitHub enterprise install | Later. |
 

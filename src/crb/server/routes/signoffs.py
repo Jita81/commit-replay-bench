@@ -659,8 +659,14 @@ def signoff_out(
     current_fq1, _ = (
         cell_false_q1(session, row.repo, scope_of(row)) if row.repo != WILDCARD else (0, [])
     )
-    active = revocation is None and not _superseded(row, all_rows) and current_fq1 == 0
     cj = dict(row.cell_json or {})
+    # stale = stamped on an apparatus that no longer matches the instrument reading now;
+    # a v1 record (no stamp) is not judged here
+    stamped = {v.strip() for v in str(cj.get(_EV_APPARATUS, "") or "").split(",") if v.strip()}
+    stale = bool(stamped) and APPARATUS_VERSION not in stamped
+    active = (
+        revocation is None and not _superseded(row, all_rows) and current_fq1 == 0 and not stale
+    )
     return SignoffWithPolicyOut(
         id=row.signoff_id,
         repo=row.repo,
@@ -674,6 +680,8 @@ def signoff_out(
         revoked_at=revocation.created if revocation is not None else None,
         active=active,
         current_false_q1=current_fq1,
+        stale=stale,
+        apparatus_current=APPARATUS_VERSION,
         evidence=_evidence(row),
         prev_hash=row.prev_hash,
         row_hash=row.row_hash,

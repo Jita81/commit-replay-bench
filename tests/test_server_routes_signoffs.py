@@ -89,6 +89,8 @@ OUT_KEYS = {
     "tier",
     "note",
     "approver",
+    "stale",
+    "apparatus_current",
     "created",
     "revoked",
     "revoked_by",
@@ -885,7 +887,9 @@ class TestListAndRevoke:
         assert item["route"] == {"route": "", "reason": "", "reason_code": ""}
         assert item["controls"]["verdict"] == "" and item["controls"]["k"] == 0
         assert item["evidence"]["n"] == 40 and item["evidence"]["oracle_strength"] is None
-        assert item["active"] is True  # trust once given stands until revoked / false-Q1
+        # trust once given stands until revoked / false-Q1 — or until the apparatus moves:
+        # this legacy row was stamped at 2.0 and the instrument now reads at a later one
+        assert item["stale"] is True and item["active"] is False
         assert verify_signoff_rows(_signoffs(env)) == 1
         # a new attestation chains after it
         clear_policy(env)
@@ -952,7 +956,11 @@ class TestListAndRevoke:
         assert item["policy_thresholds"] == v1_thresholds
         assert "require_oracle_measured" not in item["policy_thresholds"]
         assert item["evidence"]["oracle_strength"] is None  # what it saw, not today's measurement
-        assert item["attestation"]["reviewed_row_hash"] == row_hash and item["active"] is True
+        assert item["attestation"]["reviewed_row_hash"] == row_hash
+        # stamped at apparatus 2.1 and read at the current one: STALE — served, verifying,
+        # but lifting nothing until re-signed (evidence expires when the apparatus changes)
+        assert item["stale"] is True and item["active"] is False
+        assert item["apparatus_current"] == APPARATUS_VERSION
         assert verify_signoff_rows(_signoffs(env)) == 1
         clear_policy(env)
         r = env.post("/signoffs", json=attested_body(env, DELIVER))

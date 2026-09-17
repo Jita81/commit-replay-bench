@@ -402,6 +402,8 @@ export interface RunCreateRequest {
    */
   builder_config?: Record<string, unknown>
   /** factory runs only — delivery is route-gated (ADR-0003 amendment 2026-09-16); `deliver_override` needs approver. */
+  /** Per-run raw-retention switches (both default off — ADR-0006). */
+  retain?: { worktrees?: boolean; transcripts?: boolean }
   deliver?: boolean
   deliver_override?: boolean
   max_rework?: number
@@ -870,6 +872,11 @@ export interface Signoff {
   approver: string
   created: string
   revoked: boolean
+  /** Made on an earlier apparatus than the one the deployment reads at now: kept, verifying, lifting nothing until re-signed or revoked. */
+  /** Live: not revoked, not superseded, the cell still false-Q1-free and the apparatus unchanged. */
+  active?: boolean
+  stale?: boolean
+  apparatus_current?: string
   revoked_by: string | null
   revoked_at: string | null
   evidence: {

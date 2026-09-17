@@ -32,6 +32,7 @@ import { useTheme } from '../lib/theme'
 import { Button } from './Button'
 import { Pill } from './Pill'
 import { probeDisplay } from '../lib/verdict'
+import { useDecisionCount } from '../screens/Decisions/useDecisionCount'
 
 /** The one brand string in chrome (design law 9): header, footer and the login page use it. */
 export const BRAND = 'Commit Replay Bench'
@@ -43,15 +44,18 @@ export const BRAND = 'Commit Replay Bench'
  * into. The journey order is the order an enterprise reader needs; the explore screens are
  * the evidence behind it (every one still reachable, none demoted from the URL space).
  */
-const JOURNEY: Array<{ to: string; label: string }> = [
-  { to: '/connect', label: 'Connect' },
-  { to: '/results', label: 'Results' },
-  { to: '/decisions', label: 'Decisions' },
+const JOURNEY: Array<{ to: string; label: string; badge?: boolean }> = [
+  { to: '/home', label: 'Home' },
+  { to: '/connect', label: 'Connection' },
+  { to: '/repos', label: 'Repositories' },
+  { to: '/results', label: 'Capability map' },
+  { to: '/decisions', label: 'Decisions', badge: true },
   { to: '/factory', label: 'Factory' },
+  { to: '/posture', label: 'Deployment' },
 ]
 const EXPLORE: Array<{ to: string; label: string }> = [
   { to: '/runs', label: 'Runs' },
-  { to: '/capability', label: 'Map' },
+  { to: '/capability', label: 'Map grid' },
   { to: '/routing', label: 'Routes' },
   { to: '/oracle', label: 'Oracle' },
   { to: '/learn', label: 'Learn' },
@@ -83,76 +87,85 @@ export function Layout() {
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-surface-container focus:px-3 focus:py-2">
         Skip to content
       </a>
-      <header className="border-b border-border bg-surface-container">
-        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-6 gap-y-2 px-5 py-2.5">
-          <NavLink to="/" className="font-serif text-[17px] font-semibold text-on-surface no-underline">
-            {BRAND}
-          </NavLink>
-          <nav aria-label="Primary" className="order-last w-full md:order-none md:w-auto md:flex-1">
-            <ul className="m-0 flex list-none flex-wrap items-center gap-1 p-0">
-              {JOURNEY.map((n, i) => (
-                <li key={n.to}>
-                  <NavLink
-                    to={n.to}
-                    className={({ isActive }) =>
-                      `inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-control)] px-3 text-sm no-underline ${
-                        isActive ? 'bg-primary-container font-semibold text-primary' : 'text-on-surface-body hover:bg-surface-high'
-                      }`
-                    }
-                  >
-                    <span className="num font-mono text-[11px] text-on-surface-muted" aria-hidden>
-                      {i + 1}
-                    </span>
-                    {n.label}
-                  </NavLink>
-                </li>
-              ))}
-              <li aria-hidden className="mx-1 h-5 w-px bg-border" />
-              {EXPLORE.map((n) => (
-                <li key={n.to}>
-                  <NavLink
-                    to={n.to}
-                    className={({ isActive }) =>
-                      `inline-flex h-9 items-center rounded-[var(--radius-control)] px-2.5 text-xs no-underline ${
-                        isActive ? 'bg-primary-container font-semibold text-primary' : 'text-on-surface-muted hover:bg-surface-high hover:text-on-surface-body'
-                      }`
-                    }
-                  >
-                    {n.label}
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
-          </nav>
-          <div className="ml-auto flex items-center gap-2">
-            {h && (
-              <Pill tone={h.tone} glyph={h.glyph} size="xs" label={`Instrument health: ${h.label}`}>
-                {h.label}
-              </Pill>
-            )}
-            {me && (
-              <span className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-pill)] border border-border px-3 text-xs" data-testid="user-chip">
-                <span className="font-semibold text-on-surface">{me.display_name || me.email}</span>
-                <span className="label rounded-[var(--radius-pill)] bg-primary-container px-1.5 py-0.5 text-primary">{me.role}</span>
-              </span>
-            )}
-            <Button size="sm" variant="ghost" onClick={cycle} aria-label={`Theme: ${theme}. Switch theme`} title={`Theme: ${theme}`}>
-              <span aria-hidden>{THEME_GLYPH[theme]}</span>
-            </Button>
-            {me && (
-              <Button
-                size="sm"
-                onClick={() =>
-                  logout.mutate(undefined, {
-                    onSettled: () => navigate('/login'),
-                  })
-                }
-              >
-                Sign out
+      <header>
+        <div className="bg-primary text-on-primary">
+          <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-6 px-5 py-4">
+            <NavLink to="/home" className="flex items-center gap-3 text-on-primary no-underline">
+              <span className="block rounded-[2px] bg-on-primary px-2.5 pb-[7px] pt-[9px] text-[22px] font-bold leading-none tracking-[-.02em] text-primary">crb</span>
+              <span className="text-[22px] font-bold leading-none">{BRAND}</span>
+            </NavLink>
+            <div className="ml-auto flex items-center gap-4 text-[16px]">
+              {h && (
+                <Pill tone={h.tone} glyph={h.glyph} size="xs" label={`Instrument health: ${h.label}`}>
+                  {h.label}
+                </Pill>
+              )}
+              {me && (
+                <span className="inline-flex items-center gap-3" data-testid="user-chip">
+                  <span>{me.display_name || me.email}</span>
+                  <span className="label rounded-[4px] bg-on-primary px-2 py-1 text-[13px] font-bold uppercase tracking-[.05em] text-primary">{me.role}</span>
+                </span>
+              )}
+              <Button size="sm" variant="ghost" className="text-on-primary" onClick={cycle} aria-label={`Theme: ${theme}. Switch theme`} title={`Theme: ${theme}`}>
+                <span aria-hidden>{THEME_GLYPH[theme]}</span>
               </Button>
-            )}
+              {me && (
+                <button
+                  type="button"
+                  className="bg-transparent p-0 text-[16px] text-on-primary underline"
+                  onClick={() =>
+                    logout.mutate(undefined, {
+                      onSettled: () => navigate('/login'),
+                    })
+                  }
+                >
+                  Log out
+                </button>
+              )}
+            </div>
           </div>
         </div>
+        <nav aria-label="Primary" className="bg-primary-deep">
+          <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap px-5 p-0">
+            {JOURNEY.map((n) => (
+              <li key={n.to}>
+                <NavLink
+                  to={n.to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 border-b-4 px-4 py-3.5 text-[16px] leading-tight text-on-primary no-underline hover:bg-[#002265] ${
+                      isActive ? 'border-on-primary font-bold' : 'border-transparent'
+                    }`
+                  }
+                >
+                  {n.label}
+                  {n.badge && <DecisionsBadge />}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <nav aria-label="Explore" className="border-b border-border bg-surface-high">
+          <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap items-center gap-1 px-5 py-1 p-0">
+            <li className="pr-2 text-[11px] font-bold uppercase tracking-[.08em] text-on-surface-muted" aria-hidden>
+              Explore
+            </li>
+            {EXPLORE.map((n) => (
+              <li key={n.to}>
+                <NavLink
+                  to={n.to}
+                  className={({ isActive }) =>
+                    `inline-flex h-8 items-center rounded-[4px] px-2.5 text-xs no-underline ${
+                      isActive ? 'bg-primary-container font-bold text-primary' : 'text-on-surface-muted hover:bg-surface-highest hover:text-on-surface'
+                    }`
+                  }
+                >
+                  {n.label}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <StopConditionBanner />
       </header>
       <main id="main" className="mx-auto w-full max-w-[1400px] flex-1 space-y-7 px-5 py-7">
         <Outlet />
@@ -169,3 +182,37 @@ export function Layout() {
     </div>
   )
 }
+
+/** The count of decisions waiting on a person, on the nav — the design's badge. */
+function DecisionsBadge() {
+  const n = useDecisionCount()
+  if (n === null) return null
+  return (
+    <span className="inline-block rounded-[10px] bg-on-primary px-[7px] py-[5px] text-[14px] font-bold leading-none text-primary-deep" aria-label={`${n} decisions waiting`}>
+      {n}
+    </span>
+  )
+}
+
+/**
+ * The stop condition: a false-Q1 row anywhere on the ledger halts delivery and nothing
+ * measured is evidence until it is investigated. Rendered full-width and red, above every
+ * screen, from the ledger health probe — no policy setting can hide it.
+ */
+function StopConditionBanner() {
+  const health = useHealth()
+  const ledger = health.data?.probes.find((p) => p.name === 'ledger')
+  const falseQ1 = Number(ledger?.data.false_q1 ?? 0)
+  if (!ledger || falseQ1 === 0) return null
+  return (
+    <div className="bg-status-red text-on-primary" role="alert">
+      <div className="mx-auto max-w-[1400px] px-5 py-4 text-[19px] leading-[1.47]">
+        <strong>Delivery halted — {falseQ1} false-Q1 row{falseQ1 === 1 ? '' : 's'} on the ledger.</strong> Nothing measured is evidence until it is investigated. No policy setting can override this.{' '}
+        <NavLink to="/ledger" className="font-bold text-on-primary">
+          Investigate in the ledger
+        </NavLink>
+      </div>
+    </div>
+  )
+}
+

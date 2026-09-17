@@ -52,7 +52,7 @@ describe('DecisionsPage', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  it('a viewer sees the same rows with View and the role that acts', async () => {
+  it('a viewer sees the same rows with Read and the role that acts', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
@@ -61,8 +61,8 @@ describe('DecisionsPage', () => {
       'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
     })
     renderApp(<DecisionsPage />, { route: '/decisions' })
-    await waitFor(() => expect(screen.getByText('1 waiting')).toBeInTheDocument())
-    expect(screen.getByRole('link', { name: 'View' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByText('1 waiting').length).toBeGreaterThan(0)) // the pill and the card eyebrow
+    expect(screen.getByRole('link', { name: 'Read' })).toBeInTheDocument()
     expect(screen.getByText('approver acts')).toBeInTheDocument()
   })
 

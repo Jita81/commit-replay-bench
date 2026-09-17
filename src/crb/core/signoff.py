@@ -536,6 +536,27 @@ class SignoffRecord:
         """True when the record's repo covers ``repo`` and its scope covers the cell."""
         return self.repo in (WILDCARD, repo) and key_matches(self.scope(), cell.key)
 
+    def covers_apparatus(self, cell: CapabilityCell) -> bool:
+        """True when the attestation was made on the apparatus the cell is read at.
+
+        Evidence expires when the apparatus changes (EVIDENCE-AND-CLAIMS §4): a sign-off
+        stamped at 2.1 does not license a cell that is now read at 2.2, so the overlay
+        treats it as *stale* — kept on the record, shown in the Decisions inbox to be
+        re-signed or revoked, but lifting nothing. A record with no stamp (``crb.signoff.v1``)
+        or a cell with no rows is not judged stale here (the thin-cell rule covers the
+        latter); a cell read across several apparatus versions is covered when the
+        record's versions include every one of them.
+        """
+        stamped = {v.strip() for v in self.apparatus_version.split(",") if v.strip()}
+        current = set(cell.stats.apparatus_versions) if cell.stats is not None else set()
+        if not stamped or not current:
+            return True
+        return current <= stamped
+
+    def is_stale(self, cell: CapabilityCell) -> bool:
+        """The inbox's word for :meth:`covers_apparatus` being false."""
+        return not self.covers_apparatus(cell)
+
     # --- hashing ------------------------------------------------------------------
     def body(self) -> dict[str, Any]:
         """Everything hashed: the v1 fields for a ``crb.signoff.v1`` record (so an old
@@ -996,8 +1017,10 @@ def apply_signoffs(
     A cell is lifted only when it is measured, its CURRENT ``false_q1`` is 0 and
     an active attestation covers it for ``repo`` (``"*"`` applies only records
     that are themselves repo-agnostic — an unscoped read never borrows another
-    repo's attestation). The highest matching earned tier wins. Everything else
-    passes through unchanged.
+    repo's attestation) **on the apparatus the cell is read at** — a sign-off made
+    under an earlier apparatus is stale and lifts nothing (2026-09-17; evidence
+    expires when the apparatus changes). The highest matching earned tier wins.
+    Everything else passes through unchanged.
     """
     active = list(active_signoffs(signoffs).values())
     out: list[CapabilityCell] = []
@@ -1007,7 +1030,7 @@ def apply_signoffs(
         if cell.stats is None or cell.stats.false_q1 > 0:
             out.append(cell)
             continue
-        tiers = [r.tier for r in active if r.matches(cell, repo=repo)]
+        tiers = [r.tier for r in active if r.matches(cell, repo=repo) and r.covers_apparatus(cell)]
         if not tiers:
             out.append(cell)
             continue

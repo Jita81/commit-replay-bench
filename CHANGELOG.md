@@ -8,6 +8,46 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-17 — the NHS design system and the prototype's screens, on real data (DL-042)
+
+The operator's Claude Design prototype ("crb Front End", twelve NHS/GOV.UK-patterned
+screens) was read against the front end; the verdict and the screen-by-screen comparison
+are in docs/reviews/2026-09-17-claude-design-prototype.md. Its grammar is adopted; its
+numbers were never trusted.
+
+- **Design system**: the light theme is the NHS palette (NHS blue accent on white, the
+  design system's green / warm yellow / red for status, Arial); the header is the NHS blue
+  bar with the `crb` mark over a dark-blue nav row that carries a **Decisions badge**, with
+  the explore screens on a grey row beneath; a full-width red **stop-condition banner**
+  appears on every screen while the ledger holds a false-Q1 row. New GOV.UK/NHS pattern
+  components: `Tag`, `TaskList`, `SummaryList`, `NotificationBanner`, `WarningCallout`,
+  `InsetText`, `BackLink`, `ConfirmationPanel`, the green / red / grey buttons.
+- **Home** (`/home`) — "Get started": the seven tasks (connect GitHub, choose a repository,
+  confirm its shape, prove the instrument £0, measure — spends money, read the map, invite
+  an approver) with statuses derived from the API, "completed n of 7", the degraded sandbox
+  as an *Important* banner, the cost sentence, "Why two people".
+- **Measure** (`/connect/:name/measure`) — attempts (10/30/60 with what each buys),
+  retention with the policy statement, "Before you start" (the estimate from the
+  repository's own measured cost per attempt, the cap, retention, posture) and one red
+  button that names the spend.
+- **Capability map** on Results — the class × size **table** with the route as a solid
+  tag, `n on tasks`, point and interval, and the sign-off state on the cell (*signed
+  <date>* / *sign-off due* / *sign-off stale*); "What this licenses you to say" for the
+  signed cell with every qualifier the claims policy demands; economics tiles; the "no
+  throughput headline" callout.
+- **Decisions** — the NHS grammar, and a **"Signed cells now stale"** section.
+- **Sign-off** — "What your signature does not mean" before the affirmation; a
+  **confirmation panel** with a reference and "what happens next" after a recorded sign-off.
+- **Deployment posture** (`/posture`) — "About this deployment" for an architecture review
+  board, printable, from `/version`, `/health`, `/settings` and `/ledger/verify`.
+- **Core / API**: a sign-off made on an earlier apparatus is **stale** — it lifts nothing at
+  read (`SignoffRecord.covers_apparatus`, ADR-0002/EVIDENCE §4) and is served with
+  `stale: true`, `apparatus_current` and `active: false`. The prototype drew this as if it
+  existed; it did not.
+- Backlog: F3b (shape review with risk copy), F5b (per-run spend cap), F7b (separation of
+  duties at write — the prototype claims it; the product does not enforce it) added to
+  docs/reviews/2026-09-17-enterprise-front-end.md §9; F2 and F19 marked landed.
+
 ### 2026-09-17 — the GitHub App is the connection (ADR-0014, DL-041)
 
 The first item of the enterprise front-end backlog (F1): an organisation installs the

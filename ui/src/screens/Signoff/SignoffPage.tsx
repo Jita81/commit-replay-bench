@@ -53,6 +53,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextArea } from '../../components/Field'
 import { GateBanner, type GateCriterion } from '../../components/GateBanner'
+import { ConfirmationPanel, SummaryList, WarningCallout } from '../../components/govuk'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
@@ -389,6 +390,13 @@ export function SignoffPage() {
           {previewData && <EvidencePanel preview={previewData} bars={map.data?.policy ? { min_point: map.data.policy.min_point, min_ci_low: map.data.policy.min_ci_low } : undefined} />}
 
           <Card title="Approver form">
+            <WarningCallout title="What your signature does not mean">
+              <ul className="m-0 pl-6">
+                <li className="mb-2">It does not change the cell's route, its point estimate or its interval.</li>
+                <li className="mb-2">It does not vouch for any other class, size or repository.</li>
+                <li>It is invalidated at read if a false-Q1 row later appears in this cell, or when the apparatus changes.</li>
+              </ul>
+            </WarningCallout>
             <form id="signoff-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
               <SelectField label="Cell" required value={cellKey} onChange={(e) => setCellKey(e.target.value)} hint={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
                 <option value="">Choose a measured cell…</option>
@@ -455,9 +463,24 @@ export function SignoffPage() {
                 </div>
               )}
               {create.isSuccess && (
-                <p className="text-sm text-status-green sm:col-span-2" role="status" data-testid="signoff-recorded">
-                  ✓ Attestation recorded under <span className="font-mono">{create.data.policy_version}</span> — row <span className="font-mono">{shortId(create.data.row_hash)}</span>.
-                </p>
+                <div className="sm:col-span-2" role="status" data-testid="signoff-recorded">
+                  <ConfirmationPanel title="Sign-off recorded" reference={`sgn_${shortId(create.data.row_hash)}`} />
+                  <SummaryList
+                    label="What was recorded"
+                    rows={[
+                      { key: 'Cell', value: <><code>{cellLabel(create.data.cell)}</code> on {create.data.repo}, route {create.data.route.route || '—'}</> },
+                      { key: 'Row hash', value: <code>{create.data.row_hash}</code> },
+                      { key: 'Attested by', value: `${create.data.approver} at ${create.data.created}` },
+                      { key: 'Policy', value: <><code>{create.data.policy_version}</code> · apparatus {create.data.evidence.apparatus_versions.join(', ') || '—'}</> },
+                    ]}
+                  />
+                  <h3 className="mb-3 mt-6 text-[24px] font-bold leading-[1.3]">What happens next</h3>
+                  <ul className="m-0 max-w-[44em] pl-6 text-[19px] leading-[1.47]">
+                    <li className="mb-2">The factory may now open pull requests for items in this cell, on branches prefixed <code>crb/</code>, for review under the repository's own rules.</li>
+                    <li className="mb-2">The cell's verification tier is lifted on the map. Its route, point and interval are unchanged.</li>
+                    <li>If a false-Q1 row appears in this cell, or the apparatus changes, this sign-off stops counting at read and the cell returns to your decisions.</li>
+                  </ul>
+                </div>
               )}
             </form>
           </Card>

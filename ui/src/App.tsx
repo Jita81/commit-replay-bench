@@ -27,6 +27,9 @@ import { Layout } from './components/Layout'
 import { AuthProvider, RequireAuth } from './lib/auth'
 import { CapabilityPage } from './screens/Capability/CapabilityPage'
 import { ConnectPage, ConnectRepoPage } from './screens/Connect/ConnectPage'
+import { MeasurePage } from './screens/Connect/MeasurePage'
+import { HomePage } from './screens/Home/HomePage'
+import { PosturePage } from './screens/Posture/PosturePage'
 import { DecisionsPage } from './screens/Decisions/DecisionsPage'
 import { FactoryPage } from './screens/Factory/FactoryPage'
 import { LedgerPage } from './screens/Ledger/LedgerPage'
@@ -60,9 +63,12 @@ export function App() {
             </RequireAuth>
           }
         >
-          <Route index element={<Navigate to="/connect" replace />} />
+          <Route index element={<Navigate to="/home" replace />} />
+          <Route path="/home" element={<HomePage />} />
           <Route path="/connect" element={<ConnectPage />} />
           <Route path="/connect/:name" element={<ConnectRepoPage />} />
+          <Route path="/connect/:name/measure" element={<MeasurePage />} />
+          <Route path="/posture" element={<PosturePage />} />
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/decisions" element={<DecisionsPage />} />
           <Route path="/repos" element={<ReposPage />} />

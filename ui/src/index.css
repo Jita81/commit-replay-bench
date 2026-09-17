@@ -18,29 +18,37 @@
 /* ------------------------------------------------------------------ */
 
 :root {
+  /* The NHS design system palette (DL-042, from the Claude Design prototype of 2026-09-17):
+     NHS blue is THE accent, white ground, pale grey surfaces, the design system's green /
+     warm yellow / red for status, Arial throughout. Every screen reads these tokens; the
+     journey screens add the GOV.UK / NHS patterns (task list, summary list, notification
+     banner, warning callout, inset text, tags, buttons with the 4px shadow). */
   color-scheme: light;
-  --paper: #FBFAF6;            /* app background */
+  --paper: #FFFFFF;            /* app background — NHS white */
   --card: #FFFFFF;             /* surfaces */
-  --surface-high: #F3F1EA;
-  --surface-highest: #ECE9E0;
-  --ink: #1A1C1E;              /* primary text, >=12.6:1 on paper */
-  --body: #3A3D42;             /* secondary text, >=9:1 */
-  --muted: #5F646C;            /* tertiary/labels — AA floor 4.6:1 */
-  --line: #E7E2D6;             /* hairlines, table rules */
-  --trust: #0E5C5B;            /* THE accent: primary actions, active nav, links (7.4:1) */
-  --trust-soft: #E6F0EF;       /* active-nav fill, provenance chips */
+  --surface-high: #F0F4F5;     /* NHS pale grey */
+  --surface-highest: #D8DDE0;  /* NHS grey 4 */
+  --ink: #212B32;              /* NHS text */
+  --body: #212B32;
+  --muted: #4C6272;            /* NHS secondary text (7:1 on white) */
+  --line: #D8DDE0;             /* NHS grey 4 — hairlines, table rules */
+  --trust: #005EB8;            /* NHS blue — THE accent: actions, active nav, links */
+  --trust-soft: #E8EDEE;       /* NHS grey 5 — active-nav fill, chips */
   --on-trust: #FFFFFF;
-  --ok: #1F7A43;
+  --trust-deep: #003087;       /* NHS dark blue — the nav row */
+  --ok: #007F3B;               /* NHS green */
   --ok-soft: #E8F3EC;
-  --warn: #9A5B0B;
-  --warn-soft: #FAF1E3;
-  --fail: #A33A2E;
+  --warn: #7A5100;             /* warm amber as TEXT (AA on white); the tag fill is --warn-fill */
+  --warn-fill: #FFB81C;        /* NHS warm yellow — tag fill with dark text */
+  --warn-soft: #FFF9C4;        /* the warning callout ground */
+  --focus: #FFEB3B;            /* NHS focus yellow */
+  --fail: #D5281B;             /* NHS emergency red */
   --fail-soft: #F9ECEA;
-  --cat-blue: #1F5C8A;         /* categorical (~6.0:1 on paper) — NOT a second brand colour */
+  --cat-blue: #005EB8;
   --cat-blue-soft: #E7EFF6;
-  --cat-violet: #5A3A8A;       /* categorical (~7.2:1 on paper) */
+  --cat-violet: #330072;       /* NHS purple (visited links) — categorical only */
   --cat-violet-soft: #EEE9F5;
-  --shadow-card: 0 1px 3px rgba(16, 23, 41, 0.05);
+  --shadow-card: 0 4px 0 #D8DDE0;
 }
 
 /* Dark palette — the "Mission" register. Same token names; muted stays
@@ -58,6 +66,12 @@
     --line: #2C3135;
     --trust: #7FC4C1;
     --trust-soft: #143433;
+  --trust-deep: #0B2A3A;
+  --warn-fill: #E2B26A;
+  --focus: #FFEB3B;
+    --trust-deep: #0B2A3A;
+    --warn-fill: #E2B26A;
+    --focus: #FFEB3B;
     --on-trust: #0F1112;
     --ok: #8CCBA0;
     --ok-soft: #14301F;
@@ -135,14 +149,19 @@
 
   /* Type: serif headings are the trust signature; system sans for UI;
      mono for SHAs, ids, refs and counts-in-tables. No web fonts (air-gap). */
-  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* NHS design system type: Arial (Frutiger is licensed; Arial is the system's fallback and
+     what the prototype uses). Headings are bold sans, not serif. */
+  --font-serif: Arial, Helvetica, sans-serif;
+  --font-sans: Arial, Helvetica, sans-serif;
+  --color-primary-deep: var(--trust-deep);
+  --color-status-amber-fill: var(--warn-fill);
+  --color-focus: var(--focus);
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   --shadow-card: var(--shadow-card);
-  --radius-control: 8px;
-  --radius-card: 12px;
-  --radius-pill: 20px;
+  --radius-control: 4px;
+  --radius-card: 0px;
+  --radius-pill: 4px;
 }
 
 html, body, #root { min-height: 100%; }
@@ -156,8 +175,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-h1, h2, h3 { font-family: var(--font-serif); font-weight: 600; color: var(--ink); margin: 0; }
-h1 { font-size: 30px; line-height: 36px; }
+h1, h2, h3 { font-family: var(--font-serif); font-weight: 700; color: var(--ink); margin: 0; }
+h1 { font-size: 36px; line-height: 40px; }
 h2 { font-size: 20px; line-height: 28px; }
 h3 { font-size: 16px; line-height: 24px; }
 
