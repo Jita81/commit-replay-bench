@@ -62,6 +62,7 @@ describe('DecisionsPage', () => {
     })
     renderApp(<DecisionsPage />, { route: '/decisions' })
     await waitFor(() => expect(screen.getAllByText('1 waiting')).toHaveLength(2)) // the pill AND the card eyebrow
+    expect(screen.getByTestId('decisions-count')).toHaveAttribute('data-ready', 'true') // the e2e sweep's readiness anchor
     expect(screen.getByRole('link', { name: 'Read' })).toBeInTheDocument()
     expect(screen.getByText('approver acts')).toBeInTheDocument()
   })

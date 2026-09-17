@@ -66,8 +66,9 @@ export function DecisionsPage() {
       <Lede>
         Only decisions that are ready appear here. A cell the policy would refuse anyway is never sent to you — it stays on the map with its reason code. The instrument measured; a person decides.
       </Lede>
-      <div className="mb-6">
-        <Pill tone={total > 0 ? 'primary' : 'green'} size="sm" label={`${total} decisions waiting`} data-testid="decisions-count" data-ready={d.ready ? 'true' : 'false'}>
+      {/* the page-level readiness marker the walkthrough's axe sweep waits on: true only when every repository's queries settled */}
+      <div className="mb-6" data-testid="decisions-count" data-ready={d.ready ? 'true' : 'false'}>
+        <Pill tone={total > 0 ? 'primary' : 'green'} size="sm" label={`${total} decisions waiting`}>
           {d.ready ? `${total} waiting` : 'counting…'}
         </Pill>
       </div>
