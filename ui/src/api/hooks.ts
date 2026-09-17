@@ -620,6 +620,31 @@ export function useFactoryTasks(repo: string): UseQueryResult<FactoryTask[], Api
 }
 
 /** `GET /factory/{repo}/evidence` (P6). */
+/** `POST /factory/{repo}/tasks/{id}/signoff-gap` (approver) — a structural gap signed with an answer; invalidates the tasks. */
+export function useSignGap(): UseMutationResult<unknown, ApiError, { repo: string; itemId: string; slot: string; answer: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, itemId, slot, answer }) =>
+      api<unknown>(`/factory/${encodeURIComponent(repo)}/tasks/${encodeURIComponent(itemId)}/signoff-gap`, { method: 'POST', body: { slot, answer } }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(v.repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryEvidence(v.repo) })
+    },
+  })
+}
+
+/** `POST /factory/{repo}/backlog` (operator) — freeze a backlog; 409 while a factory run is active. */
+export function useRegisterBacklog(): UseMutationResult<FactoryBacklog, ApiError, { repo: string; body: unknown }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, body }) => api<FactoryBacklog>(`/factory/${encodeURIComponent(repo)}/backlog`, { method: 'POST', body }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: keys.factoryBacklog(v.repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(v.repo) })
+    },
+  })
+}
+
 export function useFactoryEvidence(repo: string): UseQueryResult<Page<EvidencePack>, ApiError> {
   return useQuery({
     queryKey: keys.factoryEvidence(repo),

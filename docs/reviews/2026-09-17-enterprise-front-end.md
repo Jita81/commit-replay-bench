@@ -1,0 +1,367 @@
+# What an enterprise front end must do — research brief (2026-09-17)
+
+<!--
+Navigation
+----------
+What it is:   A research brief, written by an independent agent on the operator's instruction,
+              on what the front end must do for an enterprise with thousands of developers in
+              many teams: who touches it, what "connecting a repository" means federated, the
+              guided first-run journey, where sign-off is surfaced, which design system, and
+              how governance leads will frame AI-produced change in value-stream terms.
+What it does: Grounds the front end's purpose (DL-040) in comparable products (GitHub Copilot
+              / code security enablement, SonarQube, Snyk, Cortex, Compass, LinearB, Swarmia,
+              DX, Renovate, Backstage), UK service-standard patterns (GOV.UK / NHS / MoJ task
+              list, step-by-step, check-your-answers, notification banner, tag, timeline) and
+              DORA 2025 / cost-per-effective-PR framing; ends in a 21-item ordered backlog
+              (F1–F21) with sizes and personas.
+How:          Web research with cited sources (§10 separates verified from inferred), read
+              against the repository's code and documents. Nothing in it is a measurement.
+Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none yet — F1 (GitHub App connection) and F16 (design-system migration) each
+              warrant one when taken
+Works with:   docs/DECISION-LOG.md (DL-040), ui/src/screens/Connect/ConnectPage.tsx,
+              ui/src/screens/Decisions/DecisionsPage.tsx, ui/src/screens/Results/ResultsPage.tsx,
+              ui/src/screens/Factory/FactoryPage.tsx (the first increment: F2, F6, F8, F15 in
+              their simplest form), docs/reviews/2026-09-16-external-assessment.md (B-9, which
+              F20 is blocked on)
+Tested by:    not applicable — a review record
+Touch when:   an F-item lands (mark it with the PR); a claim in §10 is verified or refuted.
+-->
+
+> **Status of this document.** Written 2026-09-17 by a research agent from public sources and
+> this repository; the operator has not yet chosen among its recommendations except where
+> DL-040 says so. The first UI increment (PR #30) built the journey shell — Connect (F2 in its
+> simplest form, over a URL rather than a GitHub App), Results ordering (F8), the Decisions
+> inbox (F6, client-derived), the Factory as a process (F15) — so the backlog below starts at
+> F1 (the GitHub App connection), which replaces the Connect screen's URL field.
+
+
+*Prepared 2026-09-17 against `crb` 2.0.0a1 (apparatus 2.2) as checked out at `/Users/paulglover/commit-replay-bench` (read-only), and against the external sources cited inline. Every external statement carries a URL. Statements about the product cite the file that proves them. Where I infer rather than verify, the sentence says so.*
+
+**What I could not verify.** The practitioner explainer linked from the README (`https://claude.ai/artifact/DUaMMWkMXGk25djYYLfZQk`) returns "artifact not found — it may have been deleted, or it has not been shared with you"; the README's "Start here" table and `docs/reviews/2026-09-16-external-assessment.md` (which was written against that explainer) stand in for it. Several vendor doc pages (Snyk's and SonarQube's GitHub-integration pages) had moved; I cite the page that resolved and say what it did and did not confirm.
+
+---
+
+## 1. Executive summary — what the front end is for
+
+The operator's question is what the front end must *do* if it is kept. The answer, from the product's own documents and from how every comparable enterprise product onboards, is that it has exactly three jobs, in this order, and everything else is drill-down:
+
+**1. Connect — a guided, federated onboarding.** Today a repository is registered by typing a clone path and a git URL into a dialog (`ui/src/screens/Repos/RepoConfigForm.tsx`: "Clone path", "Git URL") and factory delivery reads a long-lived token from `CRB_GIT_TOKEN` (`src/crb/factory/delivery.py`). That is a laptop workflow, not an enterprise one. Every comparable product — SonarQube, Snyk, Cortex, Compass, LinearB, Swarmia, Renovate, GitHub's own code security and Copilot — connects through an **app installed at organisation level with repository selection**, minting one-hour installation tokens, and never through a personal access token ([GitHub: choosing permissions](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app); [installation tokens expire after 1 hour](https://docs.github.com/en/enterprise-cloud@latest/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app); [GitHub: PATs are for yourself, use an App for an organisation](https://docs.github.com/en/enterprise-cloud@latest/rest/orgs/personal-access-tokens)). The recurring federation shape is **org-level install → team-level enablement → repo-level opt-in**, with ownership taken from the catalog the enterprise already has (CODEOWNERS, GitHub teams, Backstage `spec.owner`, repository custom properties) and results rolled up by team. crb's product already fits this: it clones read-only, never writes the default branch, and opens PRs only in factory mode with a token whose username is `x-access-token` (`delivery.py:117`) — the exact convention of a GitHub App installation token. The front end's first job is to make that connection a **task list** a tech lead completes in an afternoon and a platform team completes for 200 repositories under policy.
+
+**2. Show what matters when it matters — a role-aware results page.** The product's own claims policy says every number carries `n`, its Wilson interval, its mode and its apparatus (`docs/EVIDENCE-AND-CLAIMS.md` §3). The UI already renders that (`ui/src/screens/Signoff/SignoffPage.tsx` `StatTile` with `n`, `ci`, `apparatus`). What is missing is *ordering*: the results page must lead with (i) whether the instrument is trustworthy on this repository (controls passed / 0 escapes, oracle measured, false-Q1 = 0, chain verified), (ii) the decisions pending for *this viewer's* role and team, then (iii) the capability map with its routes, then cost, and only then runs and rows. Different personas see different first screens (sponsor: portfolio of signed cells by team; tech lead: this repo's map and failure split; approver: the decision inbox; AppSec: the connection's permissions, egress and retention). "What matters when it matters" is a role × moment matrix (section 2), not a single dashboard.
+
+**3. Surface human sign-off — an inbox of decisions plus a "check your answers" page per decision.** The governance act in this product is a human attestation, refused at write unless every clause of `signoff-policy.v2` holds (`docs/EVIDENCE-AND-CLAIMS.md` §6a; `docs/MCP.md` §2 deliberately withholds sign-off from the MCP tools). The UI is the *only* place that act can be made, so the UI's purpose is to make it legible: an approver-facing queue of things that are *ready to be decided* (cells the rule says `deliver`; factory readiness structural gaps; `deliver_override` requests) and *things that stop the line* (a false-Q1 row, a chain break, a controls escape), each opening into a GOV.UK-style "check your answers" summary of every policy clause with its status tag, the attestation, a confirm step, and a confirmation page whose reference is the sign-off's hash. Per-PR review stays in GitHub where the enterprise already governs it (CODEOWNERS, required reviews, rulesets); crb records the review row and links both ways.
+
+**Audience.** First buyer is an NHS organisation or a consultancy (Kainos) putting it in front of NHS-grade clients. Kainos delivers inside blended NHS England product teams on public frameworks ([Kainos/NHS England](https://www.kainos.com/insights/news/kainos-extends-partnership-with-nhs-englands-digital-prevention-service-portfolio-to-advance-personalised-preventative-healthcare-across-england)); their reviewers will expect the GOV.UK/NHS service standard and design language. The UK accessibility regulations cover public-sector intranets and extranets published after 23 September 2019 at WCAG 2.2 AA ([GOV.UK guidance](https://www.gov.uk/guidance/accessibility-requirements-for-public-sector-websites-and-apps); [Jisc summary](https://www.jisc.ac.uk/guides/accessibility-regulations-what-you-need-to-know)), so an internal governance tool in an NHS trust is in scope.
+
+**Design system.** Adopt the **NHS design system** (`nhsuk-frontend` v10, now realigned with GOV.UK Frontend — [NHS England blog](https://digital.nhs.uk/blog/design-matters/2025/making-the-nhs-design-system-fit-for-the-future)) as the base, extended with the **MoJ design system's** staff-facing components (filter, sortable table, timeline, badge, "confirm an action") — the precedent every UK department follows for casework tools: "start with the GOV.UK Design System, extend, don't replace" ([MoJ](https://mojdigital.blog.gov.uk/2019/08/16/introducing-the-moj-design-system/); [Home Office](https://design.homeoffice.gov.uk/design-system/get-started)). Its patterns map one-to-one onto our screens: **task list** = onboarding; **step-by-step navigation** = the factory process; **summary list + check your answers** = sign-off; **notification banner** = decisions needed; **tag** = route/status; **table** = the map. A neutral system (Carbon, Fluent, Atlassian) buys nothing with this buyer and loses that transactional pattern library. `nhsuk-react-components` exists (npm 6.0.1, MIT) and is one of the three NHS repositories the product has already measured (`docs/reviews/2026-09-14-nhs-public-repos.md`) — a useful dogfood story. Keep a neutral token theme for non-NHS clients.
+
+**Value stream.** Governance leads will frame AI-produced change in DORA/Flow terms: DORA 2025 added **rework rate** as a fifth metric and found AI "positively correlated with throughput, yet still negatively correlated with delivery stability" ([Faros summary of DORA 2025](https://www.faros.ai/blog/key-takeaways-from-the-dora-report-2025); [RedMonk](https://redmonk.com/rstephens/2025/12/18/dora2025/)); LinearB's 2026 benchmarks report AI-assisted PRs merging at 32.7 % vs 84.5 % for human PRs and sell "cost per effective PR" ([LinearB](https://linearb.io/blog/software-factory-2026-ai-benchmarks-code-review-roi); [LinearB AI metrics](https://linearb.helpdocs.io/article/t7tcdvx6iu-ai-metrics-explained)). The ledger already records attempts, cost, latency, first-pass vs eventual clean and review verdicts; it does **not** record merge outcome, human minutes or cost per accepted change (`docs/EVIDENCE-AND-CLAIMS.md` §7; DL-038 backlog B-9). The front end cannot show a flow view honestly until B-9 lands; until then it shows *measured* cost per clean attempt and *refuses* the throughput headline, which is itself a differentiator.
+
+**Ordered front-end backlog (section 9):** GitHub App connection + repository picker (L) → onboarding task list with detect/check-your-answers/probe (M) → decision inbox + sign-off as check-your-answers + confirmation (M) → role-aware home and results ordering (M) → team enablement and rollups from catalog ownership (L) → security/connection review page (S) → factory step-by-step and PR-body standard (M) → design-system migration (L, can be incremental) → flow view after B-9 (M).
+
+---
+
+## 2. Personas — who touches it, what they ask, when
+
+The product already names four RBAC roles — viewer / operator / approver / admin (`docs/ARCHITECTURE.md` §1, "External actors") — and the onboarding doc names three human roles: operator, approver ("must not be the operator who queued the runs"), reader/governance (`docs/ONBOARDING-A-REPO.md`, "Roles you need"). In an enterprise of thousands of developers those four roles are worn by at least nine distinct people. Enterprise onboarding research is explicit that "a single onboarding flow for all roles often creates confusion and delays first value" ([Userpilot](https://userpilot.medium.com/onboarding-ux-patterns-and-best-practices-in-saas-c46bcc7d562f)).
+
+| # | Persona | RBAC role | The question they ask | Artefact that answers it | How often | "What matters when it matters" for them |
+|---|---|---|---|---|---|---|
+| P1 | **CTO / Head of Engineering (sponsor)** | viewer (portfolio) | "Where can we trust AI to deliver, on what evidence, and what does it cost?" | Portfolio view: signed cells by team/repo, false-Q1 = 0 status, controls status, spend; `[measured]` tags | Monthly; at board/assurance reviews | One page: how many cells are signed, by whom, under which policy; nothing without `n` and an interval. Never a throughput headline (§7 forbids it). |
+| P2 | **Platform / DevEx team (installers)** | admin + operator | "How do we roll this to 200 repositories safely, and how do we know it's healthy?" | Org-level GitHub App install; team enablement table; per-repo probe status; `/health`; egress allowlist; retention settings | Weekly during rollout; on every permission change | Which repos are not yet probed / gold-clean; which teams have no approver; which runs are stuck; token/credential state (never values). |
+| P3 | **Engineering manager / tech lead (trialist)** | operator | "Can it do *our* bug fixes, on *our* repo, and what would 30 attempts cost?" | Task-list onboarding; the repo's map with routes and failure split; cost per attempt | Daily during a trial; then per quarter | A map that says `calibrate (n=4 < 10)` rather than a rate; the failure split naming `builder_red` vs `lint` vs `budget` (ONBOARDING step 4). |
+| P4 | **Approver / governance / assurance** (in NHS: clinical safety, information governance; a Clinical Safety Officer only if the *subject repositories* are Health IT under DCB0129/0160 — see §4) | approver | "What exactly am I attesting to, and can I see the evidence?" | Decision inbox; per-decision check-your-answers with every `signoff-policy.v2` clause; the accepted row's diff; confirmation with the sign-off hash | When a decision is pending (event-driven); quarterly re-attestation when evidence goes stale (§4 of EVIDENCE-AND-CLAIMS) | Only the decisions that are *ready* (rule says deliver, oracle measured, controls passed) and the *stop conditions* (false-Q1 > 0, chain break). Never a "please review" for a cell the policy would refuse anyway. |
+| P5 | **AppSec / security architect** | viewer (+ the GitHub org owner who installs the app) | "What can it reach, what leaves the tenant, who holds which token, and can I revoke it?" | Connection review page: requested permissions and why, repository selection, egress endpoints, executor posture, retention, secret storage; audit export | At install; at each permission escalation (factory delivery); annually | The permission diff when factory delivery is switched on for a repo (`Contents: read` → `write`, `Pull requests: write`); the three flows that cross the boundary (`docs/SECURITY.md` §2). |
+| P6 | **Procurement / architecture review board** | none (reads documents) | "Is it supportable, open, standards-compliant, licensed?" | Deployment posture page: version, apparatus, OIDC, Helm/Compose, SBOM, licence (Apache-2.0), service-standard mapping | Once, then per major version | A single "about this deployment" page that is printable. |
+| P7 | **Developer whose PR the factory opened** | none in crb (they live in GitHub) | "Why did this PR appear, what was proven about it, and what am I expected to do?" | The PR body (branch `crb/<item>-<slug>`, `delivery.py:30`) linking to the evidence pack, the RED proof, the belts, the route, the approver who signed the cell; CODEOWNERS review request | Per PR | The PR must be self-explaining in GitHub; crb's UI is one click away, not required. GitHub's own coding agent sets the bar: draft PR, human approval before workflows run, requester cannot approve, pushes only to its own branches ([GitHub blog](https://github.blog/news-insights/product-news/github-copilot-meet-the-new-coding-agent/)). |
+| P8 | **Programme / value-stream owner** | viewer | "What flowed from backlog to delivered, at what cost, with how much rework and human touch?" | Flow view over factory runs (backlog → readiness → RED → build → route → PR → review → merge); cost per accepted change | Per sprint/PI | Cannot be shown honestly until B-9 (merge outcome, human minutes) lands; show *measured* cost per clean attempt and the refusal text meanwhile. |
+| P9 | **External auditor / critical friend** | viewer + export | "Show me the chain and let me re-derive a number." | `crb ledger verify`; JSONL export; evidence pack by hash; apparatus stamp | Occasional | Integrity ≠ truth: the UI must say "unaltered", never "verified" (§6c). |
+| P10 | **Assistant / CLI consumer (Claude Code via MCP)** | viewer/operator service account | "What does the map say about cell X?" | The same JSON the UI renders (`docs/MCP.md` §1) | Continuous | Not a human, but the UI and MCP must agree field-for-field; sign-off and review are UI-only by design. |
+
+*Source for the enterprise-persona split:* Copilot's admin model separates enterprise owners, org owners, billing managers and a fine-grained "View enterprise Copilot metrics" role ([GitHub docs](https://docs.github.com/en/copilot/how-tos/administer-copilot/view-usage-and-adoption)); Snyk gates SSO, custom roles, audit logs and service accounts to Enterprise ([Snyk plans](https://snyk.io/plans/)); DX routes data "to the right managers" by mirroring the org chart ([DX team hierarchies](https://docs.getdx.com/team-hierarchies/)).
+
+---
+
+## 3. What "connecting a repository" means in an enterprise — the federated checklist
+
+### 3.1 What the product does today (verified in code)
+
+- A repository is a row with `url`, `path`, `language`, `runner`, prefixes, `belt_scope`, `runner_opts`, `sandbox_image` (`src/crb/core/spec.py` `RepoConfig`; `docs/ARCHITECTURE.md` §7.3). The worker clones `repos.url` over `https://`/`ssh://` only (`RepoConfigForm.tsx:91`).
+- Reads are git-protocol only; the only egress flows are builder calls, git clone/fetch, and OIDC (`docs/SECURITY.md` §2 table).
+- Factory delivery pushes `crb/<item>-<slug>` with a one-shot `http.extraheader` auth and opens the PR via GitHub's REST API; the token comes from `CRB_GIT_TOKEN` with username `x-access-token`; a plaintext transport is refused (`src/crb/factory/delivery.py:15-179`).
+- Auth is OIDC (Entra) + local admin bootstrap; RBAC viewer/operator/approver/admin; Helm references Key Vault CSI for secrets; egress via `NetworkPolicy` (`docs/ARCHITECTURE.md` §2, §6.2).
+- The MCP server needs a local service account because it cannot do an OIDC round-trip (`docs/MCP.md` §3).
+
+### 3.2 The recurring patterns in comparable products (verified)
+
+| Pattern | Who does it | Evidence |
+|---|---|---|
+| **App installed at org level with "All repositories" / "Only select repositories"** | GitHub Apps generally; SonarQube, Cortex, Compass, LinearB, Swarmia, Renovate | [GitHub: installing an app](https://docs.github.com/en/apps/using-github-apps/installing-a-github-app-from-a-third-party); [Cortex GitHub App](https://docs.cortex.io/ingesting-data-into-cortex/integrations/github); [Compass GitHub app](https://support.atlassian.com/compass/docs/integrate-compass-with-github/); [LinearB](https://linearb.helpdocs.io/article/qlzg38hn0b-connect-github); [Swarmia 15-minute start](https://help.swarmia.com/getting-started/get-started-in-15-minutes); [Renovate install](https://docs.renovatebot.com/getting-started/installing-onboarding/) |
+| **Short-lived installation tokens instead of PATs** | GitHub platform | [1-hour expiry](https://docs.github.com/en/enterprise-cloud@latest/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app); [use an App for org access](https://docs.github.com/en/enterprise-cloud@latest/rest/orgs/personal-access-tokens) |
+| **Least-privilege permission set stated up front** | Cortex lists every permission and why (Contents R/W, Pull requests R/W, Metadata R, Members R/W…) | [Cortex permissions list](https://docs.cortex.io/ingesting-data-into-cortex/integrations/github) |
+| **Enterprise → org → repo policy cascade** ("enable everywhere / disable / let organisations decide") | GitHub Copilot policies; GHAS security configurations; Copilot coding agent "disabled by default, admin enables" | [Copilot policies](https://docs.github.com/en/copilot/concepts/policies); [security configurations at scale](https://docs.github.com/en/enterprise-cloud@latest/code-security/code-scanning/enabling-code-scanning/configuring-default-setup-for-code-scanning-at-scale); [coding agent access](https://docs.github.com/en/copilot/concepts/agents/coding-agent/access-management) |
+| **Target repositories by property, not by list** | GitHub custom properties + rulesets + security configurations; enterprise-level properties | [Custom properties](https://docs.github.com/en/enterprise-cloud@latest/organizations/managing-organization-settings/managing-custom-properties-for-repositories-in-your-organization); [enterprise properties & rulesets](https://github.blog/changelog/2024-12-03-enterprise-repository-properties-policies-and-rulesets-public-preview/) |
+| **Ownership from the catalog, rollups by team** | Backstage `spec.owner` (may come from CODEOWNERS); Cortex `x-cortex-owners` with GitHub teams as provider; Compass owner team; Swarmia imports GitHub teams and keeps them in sync, one parent per team; DX mirrors the org chart via CSV/API; Jellyfish forces Group > Division > Team | [Backstage descriptor](https://backstage.io/docs/features/software-catalog/descriptor-format/); [Cortex](https://docs.cortex.io/ingesting-data-into-cortex/integrations/github); [Compass](https://support.atlassian.com/compass/docs/import-components-from-github/); [Swarmia teams](https://help.swarmia.com/settings/organization/managing-teams); [DX](https://docs.getdx.com/team-hierarchies/); [Jellyfish limits per 10x.pub](https://tianpan.co/forum/t/jellyfish-vs-linearb-vs-dx-vs-swarmia-what-we-learned-evaluating-engineering-intelligence-platforms/312) |
+| **Permission mirroring — users see only repos they can see on the code host** | Sourcegraph (needs an auth provider that maps users + a code host connection with authorization) | [Sourcegraph permissions](https://sourcegraph.com/docs/admin/permissions) |
+| **Try-before-commit / preview PR / dry run** | Renovate's "Configure Renovate" onboarding PR: nothing happens until it is merged; Swarmia auto-creates a trial team so the dashboard has data immediately; GitHub coding agent opens a *draft* PR | [Renovate onboarding](https://docs.renovatebot.com/getting-started/installing-onboarding/); [Swarmia](https://help.swarmia.com/getting-started/get-started-in-15-minutes); [GitHub coding agent](https://github.blog/news-insights/product-news/github-copilot-meet-the-new-coding-agent/) |
+| **Governance of AI-opened PRs** | GitHub: agent pushes only to branches it created; the requester cannot approve; Actions do not run without human approval; egress limited to an allowlist; enterprise-managed permissions can *block / require approval / allow* shell, file and network operations | [Coding agent](https://github.blog/news-insights/product-news/github-copilot-meet-the-new-coding-agent/); [enterprise-managed permissions 2026-09-09](https://github.blog/changelog/2026-09-09-enterprise-managed-permissions-for-github-copilot-agent-operations/) |
+| **Audit-log export to the enterprise SIEM** | GitHub streams to Splunk HEC, Azure Event Hubs, Datadog; Sourcegraph's Cody events share the product audit log | [GitHub audit streaming](https://docs.github.com/en/enterprise-server@3.21/admin/monitoring-activity-in-your-enterprise/reviewing-audit-logs-for-your-enterprise/streaming-the-audit-log-for-your-enterprise); [Sourcegraph](https://sourcegraph.com/docs/cody/enterprise/features) |
+| **SSO/SCIM + IdP as source of truth** | GitHub EMU (IdP provisions users; managed users cannot collaborate outside the enterprise); Sourcegraph SSO + experimental SCIM; SonarQube GitHub-App-based auth with JIT/automatic provisioning | [EMU](https://docs.github.com/en/enterprise-cloud@latest/admin/managing-iam/understanding-iam-for-enterprises/about-enterprise-managed-users); [SonarQube GitHub auth](https://docs.sonarsource.com/sonarqube-server/instance-administration/authentication/github.md) |
+| **Enterprise-level app installation across orgs** (new, 2025-07) — only for apps the enterprise itself owns, which is exactly our self-registered case | GitHub | [Changelog 2025-07-01](https://github.blog/changelog/2025-07-01-enterprise-level-access-for-github-apps-and-installation-automation-apis/) |
+
+Where value is perceived (what is gated to the paid tier): Snyk gates SSO, custom roles, policy, audit logs, service accounts, self-hosted integrations and reporting to Enterprise ([Snyk plans](https://snyk.io/plans/)); Sourcegraph gates self-hosting, SSO/SAML, admin controls and audit logging to Enterprise ([Sourcegraph Enterprise](https://sourcegraph.com/docs/pricing/plans/enterprise)); SonarQube gates monorepo import and multiple GitHub instances to Enterprise Edition ([Sonar docs search result](https://docs.sonarsource.com/sonarqube-server/devops-platform-integration/github-integration/introduction) — the page moved; the claim is from the search summary, not re-verified on the page); Copilot metrics require an enterprise policy and a fine-grained role ([GitHub](https://docs.github.com/en/copilot/how-tos/administer-copilot/view-usage-and-adoption)). **Inference:** the market prices *governance plumbing* (SSO, roles, audit, policy, rollups) as the enterprise feature, not the core analysis — which is where crb's sign-off/attestation/ledger already sits.
+
+### 3.3 The checklist
+
+Legend: **[T]** MUST for a trial (one tech lead, one repo, one afternoon) · **[G]** MUST for governed scale (platform team, hundreds of repos, thousands of developers) · **[L]** LATER. Each line names the source pattern.
+
+**Identity and access**
+- [T] OIDC (Entra) sign-in with local admin bootstrap — *already built* (`docs/ARCHITECTURE.md` §2).
+- [T] Two distinct humans: operator ≠ approver, enforced at sign-off — *already policy* (`ONBOARDING` "Roles you need"). The UI must say so on the get-started list ("invite an approver" is a task).
+- [G] Entra group → crb role mapping (approver group, operator group) so roles come from the IdP, not from a local table — pattern: EMU/SCIM, SonarQube automatic provisioning.
+- [G] Team-scoped visibility: a viewer sees the repositories their team owns, or (stronger) the repositories they can see on the code host — pattern: Sourcegraph permission syncing. **Inference:** the product is single-organisation and has no team concept yet (`docs/ARCHITECTURE.md` §2 "Single-organisation, multi-repo"); adding `team` as a repository attribute is the minimum.
+- [L] SCIM provisioning of local accounts (for the MCP service account lifecycle).
+
+**Code-host connection**
+- [T] **Self-registered GitHub App** (the deployment owns it; private key in Key Vault) with *repository permissions* `Metadata: read`, `Contents: read` — enough to clone over HTTPS with an installation token ([permissions required](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps)); installed on the org with **"Only select repositories"**. No PAT anywhere. Pattern: every product in §3.2.
+- [T] Repository picker fed from the installation's repository list (search, org filter, language, last commit, "has tests"), replacing the typed URL. Pattern: SonarQube "Import from DevOps platforms", LinearB repo selection at the last onboarding step.
+- [T] Fallback for GHES/GitLab/ADO in a trial: git URL + read-only deploy key (today's path), clearly labelled "manual".
+- [G] **Permission escalation is a separate, per-repository, approver-gated step**: switching factory delivery on for a repo requires `Contents: write` (create ref/push — [POST git/refs needs Contents write](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps)) and `Pull requests: write`; the UI shows the diff of permissions and the branch-name prefix, and recommends a repository ruleset protecting the default branch. Pattern: GitHub coding agent's "pushes only to branches it created"; Renovate's "nothing happens until you merge the onboarding PR".
+- [G] Installation token minting in the worker (JWT → installation token, 1 h) feeding the existing `GitCredentials`/`x-access-token` seam (`delivery.py:112-179`) — **inference from code:** the seam already expects this token shape.
+- [G] GitHub Enterprise Server and GitHub Enterprise Cloud with data residency (ghe.com) as configurable API base URLs; EMU orgs can only install apps owned inside the enterprise — which the self-registered app satisfies ([EMU](https://docs.github.com/en/enterprise-cloud@latest/admin/managing-iam/understanding-iam-for-enterprises/about-enterprise-managed-users); [enterprise-level install](https://github.blog/changelog/2025-07-01-enterprise-level-access-for-github-apps-and-installation-automation-apis/)).
+- [G] Repository custom property `crb` (values `off | measure | factory`) written by the platform team so enablement is targetable by GitHub rulesets and visible in GitHub itself — pattern: custom properties + security configurations.
+- [L] GitLab (group access token / OAuth app with `read_repository`, `write_repository`) and Azure DevOps (service connection / workload identity federation) connectors ([GitLab scopes](https://docs.gitlab.com/security/tokens/access_token_scopes/); [ADO WIF](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation)).
+- [L] Enterprise-level installation across many orgs; multiple GitHub instances (SonarQube EE pattern).
+- [L] Webhook on push to re-qualify tasks / mark cells stale by age (the "time-based staleness" item already in DL-038's backlog).
+
+**Ownership and federation**
+- [T] One repository, one operator, one approver. No teams yet.
+- [G] Import teams and ownership from what exists: GitHub teams, CODEOWNERS (GitHub auto-requests owners' review — [About code owners](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)), Backstage/Cortex/Compass descriptors. Store `owner_team` on the repository; one parent per team (Swarmia's constraint is a sensible v1).
+- [G] Rollups by team: measured / unmeasured / signed cells, controls status, spend; the sponsor's page is a rollup of team pages — pattern: DX ("managers see their team, directors see the aggregate"), Planview's portfolio-from-value-stream rollup ([Planview Viz](https://www.planview.com/products-solutions/products/viz/)).
+- [G] Team-level enablement switch and a per-team "who may approve" list — pattern: Copilot "let organisations decide".
+
+**Secrets, egress, retention**
+- [T] Builder credential entered in Settings, never a file (`ONBOARDING` step 0) — *already built* (`ui/src/screens/Settings/ClaudeCodeLoginCard.tsx`). Show `configured / not configured`, never the value — *already* (`SettingsPage.tsx:243`).
+- [T] Retention defaults shown before the first run (zero raw retention) — *already* (`SettingsPage.tsx:253`); needs to appear in the onboarding task list, not only in Settings.
+- [G] Egress allowlist declared in the UI (model endpoint, git host, OIDC issuer) and matched to the `NetworkPolicy`; show the three boundary-crossing flows verbatim from `SECURITY.md` §2.
+- [G] Key Vault reference for the GitHub App private key and model keys (Helm CSI already; surface the *reference*, never the value).
+- [G] Audit export: ledger JSONL + auth/sign-off events to the enterprise SIEM (Splunk HEC / Event Hubs / Datadog) — pattern: GitHub audit-log streaming. **Inference:** the events table + `crb ledger export` are the source; a scheduled push is new work.
+
+**Sandbox and toolchain**
+- [T] `/health` green except `sandbox: degraded` on a laptop (`ONBOARDING` step 0); the get-started list must block "Measure" until the sandbox is `ok` or say plainly it is a development reading.
+- [G] Sealed builder posture (`CRB_BUILDER__EXECUTOR=docker`, ADR-0012) surfaced as a tag on every run and every cell ("host posture — development reading") so an approver never signs a host-posture cell unknowingly.
+- [G] Reference sandbox images per language published and selectable (ARCHITECTURE §9.3 known debt).
+
+**Policy**
+- [T] Routing policy and sign-off policy displayed with version and thresholds — *already served* (`/signoffs/policy`; `SignoffPage.tsx` criteria list).
+- [G] "Relaxed" flag prominent wherever a deployment has loosened thresholds (EVIDENCE §6a) — a red tag on the map and on every sign-off record.
+- [G] Per-team policy view is read-only: the rule is one per deployment (ADR-0003) and the UI must never suggest a per-team knob.
+
+---
+
+## 4. The guided workflow — screen by screen
+
+### 4.1 Principles applied (verified sources)
+
+- **Progressive disclosure**: the initial view communicates what matters most; advanced controls are deferred ([NN/g](https://www.nngroup.com/videos/progressive-disclosure/)).
+- **A wizard only for a required sequence; never to force optional configuration** ([UXPin summary of NN/g](https://www.uxpin.com/studio/blog/what-is-progressive-disclosure/)).
+- **Checklists externalise progress and let users leave and return**; lead with the step that produces value ([Userpilot](https://userpilot.medium.com/onboarding-ux-patterns-and-best-practices-in-saas-c46bcc7d562f)).
+- **Empty states explain what belongs there and give one call to action** ([NN/g via search summary](https://timgraf.com/ui/the-ux-of-empty-states-designing-moments-of-nothing-into-something-exceptional/)).
+- **GOV.UK task list**: for services users cannot complete in one session; whole-row links; sentence-case statuses; completed rows in plain text so incomplete ones stand out ([GOV.UK task list](https://design-system.service.gov.uk/components/task-list/)).
+- **GOV.UK check answers**: increases confidence and reduces error rates by giving a second chance before submitting; "Change" links; action-specific submit button ([GOV.UK check answers](https://design-system.service.gov.uk/patterns/check-answers/)).
+- **GOV.UK confirmation page**: green panel with a reference; "what happens next"; users bookmark it as a receipt ([GOV.UK confirmation pages](https://design-system.service.gov.uk/patterns/confirmation-pages/)).
+- **Time to first value**: Swarmia's onboarding produces a populated dashboard immediately by auto-creating a trial team ([Swarmia](https://help.swarmia.com/getting-started/get-started-in-15-minutes)). Our equivalent: the £0 steps (probe → mine → oracle → controls) produce a real, honest artefact — "this repository's suite catches k of N faults; controls passed with 0 escapes" — before any model money is spent (`ONBOARDING` step 3).
+
+### 4.2 Journey A — one tech lead, one repository, one afternoon
+
+The product's own estimate: "a first repository takes a working day of a developer's attention (most of it on step 2) … a first useful picture (≈ 30 attempts) is under £20" (`docs/ONBOARDING-A-REPO.md`). The screens below are the ONBOARDING steps made into a task list.
+
+| # | Screen | What it shows first | Component (NHS/GOV.UK unless noted) | Exit condition |
+|---|---|---|---|---|
+| A0 | **Sign in** | OIDC button; local admin only if no OIDC configured | Header (logged-in variant, nhsuk-frontend v10) | session |
+| A1 | **Home → "Get started"** (empty state until the first repo is signed) | Task list: 1 Connect GitHub · 2 Choose a repository · 3 Confirm its shape · 4 Prove the instrument (£0) · 5 Measure (spends money) · 6 Read the map · 7 Invite an approver. Statuses: *Completed / Incomplete / Cannot start yet*. A notification banner if `/health` has a red probe. | Task list; Notification banner; Inset text ("Nothing spends money without a queued run you can see and cancel") | user picks task 1 |
+| A2 | **Connect GitHub** | A summary list of exactly what will be requested and why: `Metadata: read`, `Contents: read`, "Only select repositories"; what will *not* be requested (write, PRs) until factory delivery is enabled per repository; the three egress flows. Button "Install on GitHub" → GitHub's own install page (repo selection happens *there*, as every product does) → callback. | Summary list; Details ("Why not a personal access token?"); Button | installation recorded; repos listed |
+| A3 | **Choose a repository** | Table of repositories the installation can see: name, language (detected), last commit, test framework detected, CI present. Filter + sort (MoJ). Hint: "Try on one repository first — the map says nothing about a repository it has not measured" (README "What it is not"). | MoJ Filter + Sortable table; Tag | one repo chosen |
+| A4 | **Confirm its shape** | Auto-detected `language`, `runner`, `src_prefix`, `test_prefix`, `belt_scope`, `lint`, a proposed `probe`, with presets applied — rendered as **Check your answers** with a Change link per row; the "Get it wrong and…" column from ONBOARDING step 1 as hint text. Submit = "Run the probe". | Summary list (check answers); Warning callout for `BARE` on a long suite | probe green (Panel) or a banner naming the failing probe with the fix |
+| A5 | **Prove the instrument (£0)** | Three sub-steps in sequence with live progress (SSE): Mine (target 25) → `gold_clean` count and the notes for each miss; Oracle (mutation strength per task); Controls (constructible k of N, escapes). Result strip: **Controls passed · 0 escapes** (green tag) or **Stop** (red) with "nothing measured here is evidence until this passes" (ONBOARDING step 3). | Step-by-step (three steps) within the task; Tag; Warning callout | controls passed |
+| A6 | **Measure (spends money)** | Form: `limit` (default 10), `retain` (worktrees, transcripts — with the retention consequence spelled out), `preflight` (default on), `outage_stop`. **Cost estimate before start** ("≈ £0.20–£0.60 per attempt with Sonnet"), and the budget cap. Confirm an action (MoJ). Then the Run page: failure split named per row. | Radios/Checkboxes; MoJ Confirm an action; Table | run finished |
+| A7 | **Read the map** | The evidence strip first (false-Q1 = 0 · controls passed · oracle measured k/N · chain verified · posture: host/sealed), then the class × size grid: each cell `n`, `n_tasks`, point, Wilson, route tag with reason code. Under it: "What this licenses you to say" — the permitted claim shape from EVIDENCE §6 filled in with this cell's values. Empty cells say "not measured", never blank. | Table with Tags; Inset text; Details ("How the routing rule decides") | user reads; task 7 prompts "invite an approver" |
+| A8 | **Invite an approver** | Explain the separation (operator ≠ approver), what an approver will be asked to attest, and how to add them (Entra group or local user). | Summary list; Button | approver exists → the Get-started list is complete and Home becomes the results page |
+
+Time to first *honest* value is the end of A5, at £0. Time to first *map* is the end of A7, at under £20.
+
+### 4.3 Journey B — a platform team rolling to 200 repositories under governance
+
+| # | Screen | What it shows first | Component | Exit condition |
+|---|---|---|---|---|
+| B1 | **Deployment posture** (admin) | Version, apparatus, executor posture, OIDC issuer, Key Vault references (names only), egress allowlist, retention, ledger location and backup statement, licence. Printable. | Summary lists grouped; Tag | ARB / AppSec sign-off (outside the product) |
+| B2 | **Organisation connection** (admin + GitHub org owner) | Install the deployment's app on the org (or at enterprise level); choose "Only select repositories" or "All" with the consequence stated; show installation id, permissions granted, who installed, when; "Review on GitHub" link (GitHub lets org owners review and change installed apps — [docs](https://docs.github.com/en/organizations/managing-programmatic-access-to-your-organization/reviewing-github-apps-installed-in-your-organization)). | Summary list; Notification banner on permission drift | installation healthy |
+| B3 | **Teams and ownership** (admin) | Import teams from GitHub teams / CODEOWNERS / catalog file; one parent per team; assign approver group per team from Entra; table of repos → owner team with "unowned" filter first. | MoJ Sortable table + Filter; Tag ("unowned") | every enabled repo has an owner and an approver |
+| B4 | **Enablement policy** (admin) | Per team: `off / measure / factory` with the Copilot-style cascade (deployment default → team override where allowed → repo opt-in). Writes the `crb` custom property to GitHub so rulesets can target it. | Radios in a table; Details | policy saved |
+| B5 | **Bulk onboarding** (operator) | Repo table with detected shape, preset applied, probe status (queued / green / failed with note), gold-clean count after mine; bulk "Prove the instrument" (£0) over selected rows; per-row "Check your answers" for the ones detection got wrong. | MoJ Sortable table + Filter; Progress tracker; Tag | ≥ x % probed and controls passed |
+| B6 | **Rollup by team** (sponsor, managers) | Cards per team: repos measured / unmeasured, cells signed, controls status, false-Q1 (must be 0), spend this month; drill to team → repo → map. | Card; Table; Tag | — |
+| B7 | **Decision inbox** (approvers, per team) | Section 5. | Notification badge (MoJ) on the nav; Table; Tag | — |
+| B8 | **Factory enablement per repository** (approver) | The permission escalation as a check-your-answers: permissions to be added, branch prefix, PR-body standard, ruleset recommendation, the signed cells that gate delivery (ADR-0003 amendment: PR only when the item's cell routes `deliver` on the signed map), retention of transcripts. Confirm an action → confirmation with reference. | Summary list; MoJ Confirm an action; Panel | delivery on for that repo |
+| B9 | **Factory process** (operators, managers) | Step-by-step navigation for one backlog: 1 Freeze backlog → 2 Readiness (structural gaps: sign-off possible; value gaps: never) → 3 RED proof → 4 Build under belts → 5 Route gate → 6 PR opened → 7 Independent review (verdict before edit) → 8 Bounded rework. Each step links to its evidence rows. | Step-by-step navigation; Timeline (MoJ) per item; Tag | — |
+| B10 | **Audit export** (admin, auditor) | Ledger verify result; JSONL export; SIEM destination status. | Summary list; Button | — |
+
+### 4.4 What the results page shows FIRST (all journeys)
+
+1. **Decisions needed for you** (notification banner, role- and team-filtered; count badge in the nav) — or nothing, if none.
+2. **Is this evidence?** strip: false-Q1 = 0 · chain verified · controls passed (k of N, escapes) · oracle measured (k of N tasks) · executor posture · apparatus version · policy version (+ `relaxed` tag). Every item a Tag with a reason on hover/expansion.
+3. **The map** (class × size) with route tags and `n / n_tasks / point / Wilson`; mixed apparatus versions shown separately, never blended (EVIDENCE §5).
+4. **Economics**: cost per attempt, latency, first-pass vs any-attempt (EVIDENCE §3 "Attempt budgets").
+5. Then, and only then, runs, tasks, rows, evidence packs.
+
+Today's landing is `/repos` (`ui/src/App.tsx:60`). It should become the role-aware Home described here once a repository is signed; before that, the task list.
+
+---
+
+## 5. Where sign-off is surfaced, and why
+
+**The unit of the governance act is the cell, not the PR.** A sign-off "lifts a cell's verification tier … never its route, its point or its interval"; the attestation names *one* accepted row the approver read; a per-change verdict is the `review` row type, not the sign-off (`docs/EVIDENCE-AND-CLAIMS.md` §6a). So the UI has two distinct human acts and must not blur them:
+
+| Act | Where | Why there |
+|---|---|---|
+| **Cell sign-off** (attestation) | crb UI, decision inbox → check-your-answers → confirm → confirmation page | Only a human may do it; MCP deliberately cannot (`docs/MCP.md` §2). Every clause is a field of the record and must be *seen* before it is signed. |
+| **Structural-gap sign-off** on a backlog item (readiness gate) | crb UI, same inbox, item-level | "Structural gaps can be signed by an approver; value gaps never" (`ONBOARDING` step 8). |
+| **`deliver_override`** on a factory run | crb UI (and MCP with approver role, recorded as the approver's act) | It is an event in the chain (ADR-0003 amendment). |
+| **Per-PR review and merge** | **GitHub**, under the repository's own rules (CODEOWNERS, required reviews, rulesets) | The enterprise already governs merges there; GitHub's own agent pattern is "human merges; requester cannot approve" ([GitHub blog](https://github.blog/news-insights/product-news/github-copilot-meet-the-new-coding-agent/)). crb records the `ReviewRecord` anchored to `patch_sha256_reviewed` (EVIDENCE §6c) and links both ways. |
+| **Stop conditions** (false-Q1 > 0, chain break, sandbox escape, secret in an artefact) | Not decisions — alarms. Red banner on every screen until cleared; delivery halted (EVIDENCE §8 principle 7). | "The system must be capable of becoming less autonomous." |
+
+**The inbox of decisions.** Approvers should see only decisions that are *ready*: the sign-off preview already evaluates every clause server-side (`SignoffPage.tsx` `criteriaFor`), so the inbox is the set of cells where every clause but the attestation holds, plus readiness gaps and override requests. Items the policy would refuse never reach the inbox (they show on the map as `calibrate` / `human` with reason codes). This matches the enterprise-approval guidance that a queue must be owned, fast and auditable ([Kinetic Data](https://www.kineticdata.com/blog/enterprise-approval-workflows); [Cflow patterns](https://www.cflowapps.com/approval-workflow-design-patterns/)) and the MoJ "notification badge" component for counts.
+
+**The decision page = Check your answers + Confirm an action.** One summary list, one row per policy clause with a status tag and the measured value: `n ≥ 10`, point, Wilson lower, false-Q1 = 0, controls (run id, k of N, escapes), oracle strength (k of N tasks scored), route = deliver (reason code), executor posture, apparatus, policy version and thresholds (`relaxed` tag if so). Below it, the attestation: pick an accepted row, read the diff inline (the human-review guide's checklist beside it), tick "I have read this accepted diff". Then a confirm step whose button says exactly what happens ("Sign off `bug.fix` XS on `cobra` for route deliver") and a warning callout stating what a signature does *not* mean (EVIDENCE §6a's three bullets). The confirmation page shows the sign-off id and row hash as the reference and "what happens next" (the factory may now open PRs for this cell; a later false-Q1 row will invalidate this at read). The three no-knob clauses (false-Q1, oracle unmeasured, attestation missing) render with the existing "cannot be relaxed by any deployment setting" pill (`SignoffPage.tsx:132`).
+
+**Re-attestation and revocation.** Evidence expires when the apparatus changes (EVIDENCE §4); a sign-off is revoked by a newer row. The inbox therefore has a second section, "signed cells now stale", with a revoke/re-sign path — this is a governance feature no comparator offers and worth making visible.
+
+---
+
+## 6. Design-system recommendation
+
+**Recommendation: NHS design system as the base, MoJ patterns as the extension, tokens themeable for non-NHS clients.**
+
+Why NHS/GOV.UK rather than Carbon / Fluent / Atlassian:
+
+1. **The buyer's reviewers already use it.** NHS England's service standard has 17 points including "make your service clinically safe" and "make sure everyone can use the service" for "the public or staff" ([NHS service standard](https://service-manual.nhs.uk/service-standard)); GOV.UK's has 14 ([GOV.UK service standard](https://www.gov.uk/service-manual/service-standard)). Neither standard restricts itself to public-facing services, and the UK accessibility regulations explicitly cover intranets/extranets published after 23 September 2019 ([GOV.UK guidance](https://www.gov.uk/guidance/accessibility-requirements-for-public-sector-websites-and-apps)). A governance tool used by NHS staff is in scope for WCAG 2.2 AA; the NHS/GOV.UK components carry that research and testing (the step-by-step pattern alone went through "8 research rounds including participants with disabilities" and a Digital Accessibility Centre review — [GOV.UK step-by-step](https://design-system.service.gov.uk/patterns/step-by-step-navigation/)).
+2. **The patterns are the screens.** Our onboarding is a task list; our factory is a step-by-step; our sign-off is check-your-answers + confirm + confirmation; our decisions-needed is a notification banner; our routes are tags; our map is a table. No neutral enterprise system ships those transactional patterns with research behind them.
+3. **Staff-facing precedent.** Departments building casework tools "always start with the GOV.UK Design System but may have to design and develop alternative patterns" ([MoJ](https://mojdigital.blog.gov.uk/2019/08/16/introducing-the-moj-design-system/)); the Home Office says internal services "should use Home Office design styles" on the GOV.UK base ([Home Office](https://design.homeoffice.gov.uk/design-system/get-started)). MoJ adds exactly the staff-facing components we lack: filter, sortable table, timeline, badge, notification badge, identity bar, organisation switcher, progress tracker, "confirm an action", "electronic signature" ([MoJ design system](https://design-patterns.service.justice.gov.uk/)).
+4. **Convergence.** nhsuk-frontend v10 was "rebuilt to align with GOV.UK Frontend", adopting GOV.UK components such as the notification banner, and adding a logged-in header with logout ([NHS England blog](https://digital.nhs.uk/blog/design-matters/2025/making-the-nhs-design-system-fit-for-the-future)) — a logged-in header is precisely the staff-facing affordance we need.
+5. **Dogfood.** `nhsuk-react-components` (npm 6.0.1, MIT, "seeking new maintainers" — [npm](https://www.npmjs.com/package/nhsuk-react-components)) is a port of the same components and is one of the three NHS repositories the product measured (`docs/reviews/2026-09-14-nhs-public-repos.md`). Building the UI on the library the instrument measured is a story the buyer will understand.
+
+Caveats, honestly: the NHS system is documented for public-facing services and does not say "use us for admin tools" (verified: the service-manual pages make no such statement); the React port is community-maintained and thin on maintainers; a consultancy selling to non-NHS clients needs neutral theming. Mitigation: consume `nhsuk-frontend` styles (Sass tokens) with a neutral token set for non-NHS deployments, and treat the React wrappers as thin local components (the current UI already has `Pill`, `StatTile`, `TextField`, `JsonView` in `ui/src/components`), so the migration is incremental, component by component.
+
+Carbon (Apache-2.0), Fluent 2 (MIT) and Atlassian are all credible, accessible and open ([comparison](https://inwald.com/2025/11/modern-design-systems-for-react-in-2025-a-pragmatic-comparison/)); they would be the right answer for a US enterprise buyer without the NHS/GOV.UK expectation. They are not wrong; they are not *for this buyer*.
+
+**Component map** (all verified to exist in the named system):
+
+| Our screen | Component / pattern | System |
+|---|---|---|
+| Get-started onboarding | Task list (Completed / Incomplete / Cannot start yet) | GOV.UK + NHS |
+| Factory process | Step-by-step navigation; Timeline per item; Progress tracker | GOV.UK; MoJ |
+| Repo shape, sign-off, factory enablement | Summary list + "Check your answers"; Change links | GOV.UK + NHS |
+| Irreversible acts (sign-off, enable delivery, revoke) | Confirm an action; Warning callout; Button (warning variant) | MoJ; NHS |
+| After a sign-off | Confirmation page (Panel with reference); "What happens next" | GOV.UK; NHS Panel |
+| Decisions needed / stop conditions | Notification banner (success / important); Notification badge on nav | GOV.UK + NHS; MoJ |
+| Route and status | Tag (sentence case; colour by route) | GOV.UK + NHS |
+| Capability map, repo tables, runs | Table; Sortable table + Filter | NHS; MoJ |
+| Evidence pack, policy text | Details; Inset text; Expander | NHS |
+| Team / repo cards on rollups | Card | NHS |
+| "Why not a PAT?" / "How the rule decides" | Details | NHS |
+| Logged-in shell | Header (logged-in), Footer, Skip link, Back link, Breadcrumbs | NHS |
+| Signed-in as / acting for team | Identity bar; Organisation switcher | MoJ |
+
+**Service-standard points that bind an internal tool** (both standards): 1 understand users (the persona set above is the start), 4 simple to use, 5 everyone can use it (WCAG 2.2 AA), 9 secure and privacy-protecting (SECURITY.md already does this work), 10 define success and be open about performance (the evidence strip *is* this), 12 open source (Apache-2.0 — done), 13 open standards and common components (the design system), 14 reliable (health, resume). NHS point 16 "clinically safe": **inference** — DCB0129 binds manufacturers of Health IT and DCB0160 binds deploying organisations, both of which are framed around systems "which involve the handling and processing of patient data" ([NHS England digital clinical safety](https://www.england.nhs.uk/long-read/digital-clinical-safety-assurance/); [DCB0129](https://digital.nhs.uk/data-and-information/information-standards/information-standards-and-data-collections-including-extractions/publications-and-notifications/standards-and-collections/dcb0129-clinical-risk-management-its-application-in-the-manufacture-of-health-it-systems)). crb itself processes no patient data; but if a *subject repository* is Health IT, the change the factory opens is a change to a Health IT system and the trust's DCB0160 process (hazard log, Clinical Safety Officer) applies to *that* change. The UI should therefore let a repository be flagged "Health IT — clinical safety review required" so the PR body and the decision page carry the flag and route to the CSO group. That is a persona-P4 requirement the comparators do not have.
+
+---
+
+## 7. The value-stream view — what governance leads expect, and what the ledger must add
+
+**How VSM products frame it (verified).** Planview's Flow Framework classifies all work into four mutually exclusive flow items — features, defects, risks, debts — and measures flow velocity, time, efficiency, load and distribution, rolling product value streams up to a portfolio view for executives ([Planview Flow Framework](https://www.planview.com/products-solutions/solutions/value-stream-management/use-cases/flow-framework/); [Planview Viz](https://www.planview.com/products-solutions/products/viz/)). Atlassian's VSM combines Jira Align, Enterprise Insights and Analytics for end-to-end bottleneck visibility ([Seibert on Jira Align VSM](https://seibert.group/blog/en/jira-align-value-stream-management/)), and in 2026 Atlassian is "turning Jira into the place where AI work gets assigned, tracked, reviewed and governed" ([DevOps.com](https://devops.com/atlassian-extends-ai-reach-of-jira-into-agentic-engineering-workflows/)). DORA 2025's five metrics are lead time, deployment frequency, failed-deployment recovery time, change failure rate and **rework rate** ([RedMonk](https://redmonk.com/rstephens/2025/12/18/dora2025/); [Faros](https://www.faros.ai/blog/key-takeaways-from-the-dora-report-2025)). LinearB defines AI metrics across adoption, throughput, delivery and quality (cycle time, pickup time, review time, PR size, PR rework, PRs merged without review) and "cost per effective PR" = (people cost + AI spend) ÷ effective merged PRs ([LinearB AI metrics](https://linearb.helpdocs.io/article/t7tcdvx6iu-ai-metrics-explained); [LinearB software factory](https://linearb.io/blog/software-factory-2026-ai-benchmarks-code-review-roi)).
+
+**What a governance lead will expect to see about AI-produced change**, in that frame: share of changes AI-produced; first-pass vs eventual acceptance; rework (attempts to acceptance, review-driven changes); human touch time (review + finishing minutes); merge rate; cost per accepted change; lead time from backlog freeze to merge; and the *distribution* of that work across flow items (our `capability_class` maps cleanly: `bug.fix` → defect, `feature.add` → feature, `refactor`/`perf` → debt, security classes → risk).
+
+**What the ledger supports today vs. not** (from `docs/ARCHITECTURE.md` §7.3 and `docs/EVIDENCE-AND-CLAIMS.md`):
+
+| Flow question | Ledger today | Gap |
+|---|---|---|
+| Attempts, first-pass vs any-attempt | `trial = r1, r2…` rows; attempt-1 / ≤2 / ≤3 / full-budget reported separately | — |
+| AI cost and latency per attempt | `cost_usd`, `latency_s` on `attempts` and `grades` | — |
+| Verdict and belts, DQ, error | `grades` append-only | — |
+| Review verdict on a diff | `ReviewRecord` with `patch_sha256_reviewed` | — |
+| Route and policy stamp | `RouteDecision` with `policy_thresholds` | — |
+| Factory stage timestamps (freeze → readiness → RED → build → PR) | `factory_backlog` / `factory_tasks` / `factory_evidence` | Lead time per stage is derivable but not surfaced |
+| **Merge outcome** (merged / closed / superseded; time to merge) | **Not recorded** (§7; B-9) | Needs a webhook or poll on the PR — the App's `Pull requests: read` covers it |
+| **Human minutes** (review, finishing, rework) | **Not recorded** (B-9) | Needs a review-time capture (start/stop on the review page, or PR review timestamps as a proxy) |
+| **Cost per accepted change** | **Not derivable** without the two above | B-9 |
+| Flow-item distribution | derivable from `capability_class` | UI mapping only |
+| Rework rate (DORA sense: unplanned deployments) | out of scope — the product observes nothing post-merge | Say so on the screen |
+
+**Recommendation.** Ship the flow view *after* B-9, and until then show exactly what the ledger licenses: measured cost per clean attempt, attempt-budget splits, review verdicts, stage timestamps — with the refusal sentence from §7 ("the ledger records neither human hours nor merge outcomes yet") on the screen. When B-9 lands, the honest KPI is LinearB's shape with our denominator: **cost per human-verified change** = (AI spend + human review minutes × rate) ÷ changes that merged *and* passed independent review, per cell, with `n` and an interval.
+
+---
+
+## 8. Competitor pattern table
+
+| Product | Onboarding pattern | Federation pattern | What they charge for / tier | Source |
+|---|---|---|---|---|
+| **GitHub Copilot (enterprise)** | Enterprise owner sets policies; org owners enable; coding agent disabled by default until an admin enables it | Enterprise → org → user policy cascade ("enable / disable / let organisations decide"); team-level usage metrics via a user-teams report; fine-grained "View enterprise Copilot metrics" role | Metrics dashboard requires an enterprise policy; per-seat Business/Enterprise | [Policies](https://docs.github.com/en/copilot/concepts/policies); [Team metrics 2026-05](https://github.blog/changelog/2026-05-14-team-level-copilot-usage-metrics-now-available-via-api/); [Access](https://docs.github.com/en/copilot/concepts/agents/coding-agent/access-management) |
+| **GitHub Advanced Security / CodeQL** | Org-level "security configurations" applied to any repositories; default setup enablement at org level | Configurations + custom properties + rulesets target repositories by property across the enterprise | GHAS licence (per active committer) | [At scale](https://docs.github.com/en/enterprise-cloud@latest/code-security/code-scanning/enabling-code-scanning/configuring-default-setup-for-code-scanning-at-scale); [Security configurations changelog](https://github.blog/changelog/2025-07-14-security-configurations-support-for-running-codeql-in-either-default-or-advanced-setup/) |
+| **Sourcegraph / Cody Enterprise** | Site admin configures code-host connections; instance clones and indexes repos; RBAC for who may use Cody | Repository permission syncing mirrors code-host access; SSO; experimental SCIM; single audit log across search and AI | Self-host, SSO/SAML, admin controls, audit logging on Enterprise; Batch Changes as add-on | [Site admin](https://sourcegraph.com/docs/admin/how-to/site-admin-quickstart); [Permissions](https://sourcegraph.com/docs/admin/permissions); [Enterprise](https://sourcegraph.com/docs/pricing/plans/enterprise) |
+| **Snyk** | Connect account via OAuth/App, select repositories; Group-level integration "for enriched context", Org-level for testing; `snyk-api-import` mirrors GitHub orgs into Snyk orgs | Group → Organisation → Project; recommends one Snyk org per GitHub org | SSO, custom roles, policy, audit logs, service accounts, reporting only on Enterprise; Team capped at 10 devs | [Snyk GitHub](https://docs.snyk.io/developer-tools/integrations/scm-integrations/organization-level-integrations/github.md); [Mirroring orgs](https://docs.snyk.io/developer-tools/snyk-apps/tool-snyk-api-import/mirroring-github.com-and-github-enterprise-organizations-and-repos-in-snyk); [Plans](https://snyk.io/plans/) |
+| **SonarQube Server** | Admin registers a GitHub App (JIT/automatic provisioning); users "Create Project → Import from DevOps platforms" and pick org + repos; quality-gate status posted to PRs | Per-project binding; multiple GitHub instances and monorepo import gated to Enterprise Edition (per search summary) | Developer / Enterprise / Data Center editions | [GitHub auth](https://docs.sonarsource.com/sonarqube-server/instance-administration/authentication/github.md); [Import repos (search summary)](https://docs.sonarsource.com/sonarqube-server/devops-platform-integration/github-integration/importing-github-repositories) |
+| **Renovate (Mend)** | Install the GitHub App on all or selected repos; each repo receives a "Configure Renovate" onboarding PR; nothing happens until it is merged | Self-hosted autodiscovery or fixed repo list; org-level presets | Free app; Mend enterprise for hosting/support | [Installing & onboarding](https://docs.renovatebot.com/getting-started/installing-onboarding/) |
+| **LinearB** | "Authorize GitHub" starts the App install; repository selection is the last onboarding step; permissions limited to reading metadata, commits, branches, PRs, reviews, webhooks | Teams; AI metrics dashboard unified across human and AI PRs; gitStream policy-as-code | Free tier → paid tiers by contributor count (public pricing page) | [Connect GitHub](https://linearb.helpdocs.io/article/qlzg38hn0b-connect-github); [Trial setup](https://linearb.helpdocs.io/article/neiosbenr8-getting-started-with-linear-b); [Pricing](https://linearb.io/pricing) |
+| **Jellyfish** | Connect Jira/Git; team mapped to Jira project via field config | Forces Group > Division > Team; allocations rolled up to the org | Enterprise sales | [Jellyfish allocations](https://jellyfish.co/platform/resource-allocations/); [10x.pub evaluation](https://tianpan.co/forum/t/jellyfish-vs-linearb-vs-dx-vs-swarmia-what-we-learned-evaluating-engineering-intelligence-platforms/312) |
+| **DX** | Start guide; org CSV upload of team hierarchy; API | Team hierarchy mirrors org chart; data routes to managers, rolls up to directors | Enterprise sales | [Team hierarchies](https://docs.getdx.com/team-hierarchies/); [Start guide](https://docs.getdx.com/start-guide/) |
+| **Swarmia** | Sign up with GitHub, install app, select repos, connect Jira/Slack, create teams — 15 minutes; auto-creates a trial team so the dashboard has data immediately; syncs 1 year of history | Import GitHub teams and keep them in sync; parent/sub-team hierarchy, one parent per team | Per-developer pricing; Entra SSO required for MS Teams integration | [15 minutes](https://help.swarmia.com/getting-started/get-started-in-15-minutes); [Teams](https://help.swarmia.com/settings/organization/managing-teams) |
+| **Faros AI** | Bootstrap teams from GitHub/Jira employees and teams | Service catalog with team/individual ownership | Enterprise sales | [Faros org data](https://docs.faros.ai/docs/organizational-data) |
+| **Backstage** | `catalog-info.yaml` per repo with `spec.owner` (may be derived from CODEOWNERS); import Groups before Components | Catalog is the data layer for scorecards, TechDocs, CI views | Open source (Spotify sells add-ons) | [Descriptor format](https://backstage.io/docs/features/software-catalog/descriptor-format/); [Onboarding software](https://backstage.spotify.com/learn/onboarding-software-to-backstage/onboarding-software-to-backstage/4-create-component/) |
+| **Cortex** | Install the Cortex GitHub App at org level (permissions listed with purpose); `cortex.yaml` discovered per repo | GitHub teams as ownership provider; scorecards incl. Onboarding, DORA, Production Readiness; custom roles | Enterprise sales | [Cortex GitHub](https://docs.cortex.io/ingesting-data-into-cortex/integrations/github); [Custom roles](https://docs.cortex.io/configure/settings/managing-users/permissioning/custom-roles) |
+| **Atlassian Compass** | Apps → Install GitHub app → Configure → import repositories as components (owner team, docs auto-populated) | Owner team per component; scorecards | Free tier; premium for advanced scorecards/integrations | [Integrate GitHub](https://support.atlassian.com/compass/docs/integrate-compass-with-github/); [Import](https://support.atlassian.com/compass/docs/import-components-from-github/) |
+| **Planview Viz** | Connect tool chain; model value streams | Product value streams roll up to a portfolio dashboard for executives | Enterprise sales | [Planview Viz](https://www.planview.com/products-solutions/products/viz/) |
+
+**Inference across the table:** nobody in this set makes a *human attestation with a refused-at-write policy* the centrepiece of onboarding. That is crb's distinguishing artefact; the front end should treat the decision inbox and the sign-off record as the product's signature screens, the way SonarQube treats the quality gate and Renovate treats the onboarding PR.
+
+---
+
+## 9. Ordered front-end backlog
+
+Sizes: S ≤ 2 days, M ≤ 2 weeks, L > 2 weeks (one engineer). Order is by value to the first buyer's trial, then to governed scale. Each row names the persona it serves and the pattern it borrows.
+
+| # | Item | Size | Persona | Pattern / source | Notes |
+|---|---|---|---|---|---|
+| F1 | **GitHub App connection**: self-registered app (private key in Key Vault), installation callback, installation record, repository list, installation-token minting in the worker feeding the existing `GitCredentials` seam; `Metadata: read`, `Contents: read` only | L | P2, P3, P5 | GitHub Apps; SonarQube/Cortex/LinearB | Backend + UI. Keep the URL/deploy-key path as "manual" fallback. |
+| F2 | **Get-started task list** (Home empty state) with statuses, health banner, "invite an approver" task | S | P3 | GOV.UK task list; Userpilot checklist research | Reads existing `/health`, repos, signoffs. |
+| F3 | **Repository picker + shape detection + Check your answers + probe** | M | P3 | SonarQube import; GOV.UK check answers | Detection heuristics for language/runner/prefixes/lint from the tree; presets already exist. |
+| F4 | **Prove-the-instrument step** as a three-step sequence with the evidence strip (controls / oracle / gold-clean) | M | P3, P4 | ONBOARDING step 3; Swarmia "value immediately" | Reuses Oracle screen data. |
+| F5 | **Measure step**: cost estimate before start, confirm-an-action, retention consequences | S | P3, P5 | MoJ confirm an action | Reuses run form. |
+| F6 | **Decision inbox** (approver home): ready sign-offs, readiness gaps, override requests, stale signed cells; nav badge | M | P4 | Approval-queue guidance; MoJ notification badge | Server-side: an endpoint listing cells whose preview passes all clauses but attestation. |
+| F7 | **Sign-off as check-your-answers → confirm → confirmation page** with hash reference; inline diff with the human-review guide | M | P4, P9 | GOV.UK check answers + confirmation; MoJ confirm | Refactor of `SignoffPage.tsx`; the criteria list already exists. |
+| F8 | **Results-page ordering**: evidence strip first, decisions banner, map, economics; role-aware Home | M | P1, P3, P4 | Progressive disclosure | Replace `/repos` landing once a repo is signed. |
+| F9 | **Connection review page** (permissions and why, egress flows, executor posture, retention, Key Vault refs, installer, date) | S | P5, P6 | Cortex's permission list; SECURITY.md §2 | Mostly static + settings. |
+| F10 | **Factory enablement per repo** as an approver-gated permission escalation (`Contents: write`, `Pull requests: write`), ruleset recommendation, PR-body standard | M | P4, P5, P7 | GitHub coding agent safeguards; Renovate onboarding PR | Backend: per-repo delivery flag + token scope. |
+| F11 | **Teams and ownership**: import from GitHub teams / CODEOWNERS / catalog; `owner_team` on repos; approver group per team; team-scoped visibility | L | P2, P1 | Swarmia/DX/Cortex ownership | New data model (team), RBAC scoping. |
+| F12 | **Rollup by team** cards → team → repo → map | M | P1, P2 | DX/Planview rollups | Depends on F11. |
+| F13 | **Enablement policy cascade** (`off / measure / factory` per team; writes GitHub custom property) | M | P2 | Copilot policies; custom properties | Depends on F1, F11. |
+| F14 | **Bulk onboarding table** with per-row probe/mine status and bulk £0 runs; MoJ filter + sortable table | M | P2 | GHAS at-scale enablement | Depends on F3. |
+| F15 | **Factory step-by-step + per-item timeline** linking each stage to evidence | M | P8, P7, P4 | GOV.UK step-by-step; MoJ timeline | Reads factory tables. |
+| F16 | **Design-system migration** to nhsuk-frontend v10 tokens + thin React wrappers; neutral theme; accessibility audit to WCAG 2.2 AA | L (incremental) | all | NHS/GOV.UK/MoJ | Start with F2/F7 screens; migrate the rest as touched. |
+| F17 | **Health-IT flag per repository** → CSO group routing on decisions and PR body | S | P4 | DCB0160 (inference) | Config + copy. |
+| F18 | **Audit export to SIEM** (ledger JSONL + auth/sign-off events; Splunk/Event Hubs/Datadog) | M | P5, P9 | GitHub audit streaming | Backend mostly. |
+| F19 | **Deployment posture page** (printable) | S | P6 | Service-standard mapping | Static + `/version`, `/health`. |
+| F20 | **Flow view** (backlog → merge; cost per human-verified change) | M | P8, P1 | DORA 2025; LinearB cost per effective PR | **Blocked on B-9** (merge outcome via PR webhook; human minutes via review-time capture). Until then show the refusal text. |
+| F21 | GitLab / Azure DevOps connectors; GHES/ghe.com base URLs; enterprise-level install | L | P2 | GitLab scopes; ADO WIF; GitHub enterprise install | Later. |
+
+---
+
+## 10. What I verified versus inferred
+
+**Verified by reading the repository:** the role model, onboarding steps, claims policy, sign-off policy clauses, MCP exclusions, the repo form fields, the delivery token seam and its `x-access-token` username, the 14 routed screens, the `/repos` landing, the sign-off screen's criteria list, the B-9 gap, the security boundary table.
+
+**Verified on the web (URL beside each claim):** GitHub App permissions and token lifetime; EMU restrictions; enterprise-level app install; Copilot policy cascade and metrics roles; coding-agent safeguards and enterprise-managed permissions; security configurations, custom properties and rulesets; audit-log streaming destinations; Sourcegraph admin/permissions/enterprise tier; Snyk hierarchy and plan gating; SonarQube GitHub-App auth permissions and import flow (the import page itself 404'd — the flow is from the docs search summary); Renovate onboarding PR semantics; LinearB onboarding and AI metrics; Swarmia onboarding and team sync; DX and Jellyfish hierarchies; Cortex permissions and ownership; Compass import; Backstage ownership; CODEOWNERS behaviour; GOV.UK and NHS component inventories, task list, check answers, step-by-step, confirmation page; MoJ component list and confirm-an-action; NHS service standard's 17 points and GOV.UK's 14; the accessibility regulations' intranet scope; DCB0129/0160 scope framing; nhsuk-frontend v10 realignment; nhsuk-react-components status; DORA 2025 fifth metric; Planview Flow Framework; Kainos–NHS England relationship.
+
+**Inferred (labelled in the text):** that the market prices governance plumbing rather than analysis; that the delivery seam will accept an installation token unchanged; that DCB0160 attaches to the *subject* repository's change rather than to crb; that a neutral token theme suffices for non-NHS clients; that "team" is the minimum new entity for federation; the flow-KPI definition after B-9.
+
+**Not verified:** the practitioner explainer's exact text; SonarQube's edition gating and Snyk's App permission list (both pages moved during research); vendor pricing beyond the public tier statements cited.

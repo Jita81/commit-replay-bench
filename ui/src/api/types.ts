@@ -269,7 +269,7 @@ export interface RepoProfile {
 // ---------------------------------------------------------------------------
 
 /** What a run does; `probe` is queued from the repo page, the rest from the run dialog. */
-export type RunKind = 'mine' | 'replay' | 'blind' | 'oracle' | 'controls' | 'probe'
+export type RunKind = 'mine' | 'replay' | 'blind' | 'oracle' | 'controls' | 'probe' | 'label' | 'factory'
 /** The kinds an operator can start from the run dialog (a probe has its own button). */
 export const RUN_KINDS: readonly RunKind[] = ['mine', 'replay', 'blind', 'oracle', 'controls']
 
@@ -401,6 +401,10 @@ export interface RunCreateRequest {
    * `model` / `provider` / `name` (the recorded identity) and credential-shaped keys.
    */
   builder_config?: Record<string, unknown>
+  /** factory runs only — delivery is route-gated (ADR-0003 amendment 2026-09-16); `deliver_override` needs approver. */
+  deliver?: boolean
+  deliver_override?: boolean
+  max_rework?: number
 }
 
 /** `GET /runs` filters. */
@@ -757,6 +761,8 @@ export interface CapabilityCell {
   oracle_strength_mean: number | null
   route: CellVerdict
   reason: string
+  /** The rule's stable reason code (`deliver`, `n_below_min`, `oracle_weak`, `controls_failed`, …). */
+  reason_code?: string
   verification_tier: VerificationTier
   apparatus_versions: string[]
   belt_set?: string
@@ -802,6 +808,7 @@ export interface RoutingPolicy {
 export interface RouteDecision {
   route: Route
   reason: string
+  reason_code?: string
   cell: Record<string, string>
   n: number
   point: number

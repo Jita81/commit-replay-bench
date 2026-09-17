@@ -26,6 +26,8 @@ import { Navigate, Route, Routes } from 'react-router'
 import { Layout } from './components/Layout'
 import { AuthProvider, RequireAuth } from './lib/auth'
 import { CapabilityPage } from './screens/Capability/CapabilityPage'
+import { ConnectPage, ConnectRepoPage } from './screens/Connect/ConnectPage'
+import { DecisionsPage } from './screens/Decisions/DecisionsPage'
 import { FactoryPage } from './screens/Factory/FactoryPage'
 import { LedgerPage } from './screens/Ledger/LedgerPage'
 import { LoginPage } from './screens/Login/LoginPage'
@@ -34,6 +36,7 @@ import { LearnPage } from './screens/Learn/LearnPage'
 import { OraclePage } from './screens/Oracle/OraclePage'
 import { RepoDetail } from './screens/Repos/RepoDetail'
 import { ReposPage } from './screens/Repos/ReposPage'
+import { ResultsPage } from './screens/Results/ResultsPage'
 import { RoutingPage } from './screens/Routing/RoutingPage'
 import { RunDetailPage } from './screens/Runs/RunDetailPage'
 import { RunsPage } from './screens/Runs/RunsPage'
@@ -57,7 +60,11 @@ export function App() {
             </RequireAuth>
           }
         >
-          <Route index element={<Navigate to="/repos" replace />} />
+          <Route index element={<Navigate to="/connect" replace />} />
+          <Route path="/connect" element={<ConnectPage />} />
+          <Route path="/connect/:name" element={<ConnectRepoPage />} />
+          <Route path="/results" element={<ResultsPage />} />
+          <Route path="/decisions" element={<DecisionsPage />} />
           <Route path="/repos" element={<ReposPage />} />
           <Route path="/repos/:name" element={<RepoDetail />} />
           <Route path="/runs" element={<RunsPage />} />

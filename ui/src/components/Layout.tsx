@@ -37,16 +37,26 @@ import { probeDisplay } from '../lib/verdict'
 export const BRAND = 'Commit Replay Bench'
 
 /** The primary navigation, in display order; a new screen is added here and in `App.tsx`. */
-const NAV: Array<{ to: string; label: string }> = [
-  { to: '/repos', label: 'Repos' },
+/**
+ * The primary nav is the JOURNEY — connect a repository, read its results, decide what is
+ * waiting on a person, run the factory — followed by the explore screens the journey links
+ * into. The journey order is the order an enterprise reader needs; the explore screens are
+ * the evidence behind it (every one still reachable, none demoted from the URL space).
+ */
+const JOURNEY: Array<{ to: string; label: string }> = [
+  { to: '/connect', label: 'Connect' },
+  { to: '/results', label: 'Results' },
+  { to: '/decisions', label: 'Decisions' },
+  { to: '/factory', label: 'Factory' },
+]
+const EXPLORE: Array<{ to: string; label: string }> = [
   { to: '/runs', label: 'Runs' },
-  { to: '/capability', label: 'Capability' },
-  { to: '/routing', label: 'Routing' },
+  { to: '/capability', label: 'Map' },
+  { to: '/routing', label: 'Routes' },
   { to: '/oracle', label: 'Oracle' },
   { to: '/learn', label: 'Learn' },
   { to: '/ledger', label: 'Ledger' },
   { to: '/signoff', label: 'Sign-off' },
-  { to: '/factory', label: 'Factory' },
   { to: '/settings', label: 'Settings' },
 ]
 
@@ -79,14 +89,32 @@ export function Layout() {
             {BRAND}
           </NavLink>
           <nav aria-label="Primary" className="order-last w-full md:order-none md:w-auto md:flex-1">
-            <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
-              {NAV.map((n) => (
+            <ul className="m-0 flex list-none flex-wrap items-center gap-1 p-0">
+              {JOURNEY.map((n, i) => (
                 <li key={n.to}>
                   <NavLink
                     to={n.to}
                     className={({ isActive }) =>
-                      `inline-flex h-9 items-center rounded-[var(--radius-control)] px-3 text-sm no-underline ${
+                      `inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-control)] px-3 text-sm no-underline ${
                         isActive ? 'bg-primary-container font-semibold text-primary' : 'text-on-surface-body hover:bg-surface-high'
+                      }`
+                    }
+                  >
+                    <span className="num font-mono text-[11px] text-on-surface-muted" aria-hidden>
+                      {i + 1}
+                    </span>
+                    {n.label}
+                  </NavLink>
+                </li>
+              ))}
+              <li aria-hidden className="mx-1 h-5 w-px bg-border" />
+              {EXPLORE.map((n) => (
+                <li key={n.to}>
+                  <NavLink
+                    to={n.to}
+                    className={({ isActive }) =>
+                      `inline-flex h-9 items-center rounded-[var(--radius-control)] px-2.5 text-xs no-underline ${
+                        isActive ? 'bg-primary-container font-semibold text-primary' : 'text-on-surface-muted hover:bg-surface-high hover:text-on-surface-body'
                       }`
                     }
                   >

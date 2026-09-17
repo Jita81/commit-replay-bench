@@ -161,7 +161,11 @@ h1 { font-size: 30px; line-height: 36px; }
 h2 { font-size: 20px; line-height: 28px; }
 h3 { font-size: 16px; line-height: 24px; }
 
-a { color: var(--trust); }
+/* Layered so a utility class (a filled LinkButton's `text-on-primary`) can override it:
+   an unlayered element rule beats every Tailwind utility regardless of specificity. */
+@layer base {
+  a { color: var(--trust); }
+}
 
 /* 10px small-caps label — the eyebrow / table-label register. */
 .label {

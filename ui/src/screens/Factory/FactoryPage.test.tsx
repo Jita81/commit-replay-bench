@@ -21,7 +21,7 @@
  * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx
  * Touch when:   a factory action moves into the UI; a `FactoryTaskOut` field is added.
  */
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FactoryBacklog, FactoryTask } from '../../api/types'
 import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
@@ -57,12 +57,35 @@ describe('FactoryPage — the shipped contract', () => {
     expect(screen.getByText('frozen')).toBeInTheDocument()
     expect(screen.getByText('2 items')).toBeInTheDocument()
     expect(screen.getAllByText('Multiply').length).toBeGreaterThan(0)
-    // the task list: status · route hint, the DoR gaps, the review verdict
+    // each item is the six-step process: I-1 done through review, I-2 waiting at readiness
     expect(screen.getByText('accepted · build')).toBeInTheDocument()
     expect(screen.getByText('blocked · human')).toBeInTheDocument()
-    expect(screen.getByText('2 DoR gaps')).toBeInTheDocument()
-    expect(screen.getByText('review: accept')).toBeInTheDocument()
-    expect(screen.getByText('not_started')).toBeInTheDocument()
+    expect(screen.getByTestId('step-I-1-review')).toHaveTextContent('done')
+    expect(screen.getByTestId('step-I-1-outcome')).toHaveTextContent('accepted')
+    expect(screen.getByTestId('step-I-2-readiness')).toHaveTextContent('2 structural gaps unsigned: method_path, response_shape')
+    expect(screen.getByTestId('step-I-2-red')).toHaveTextContent('not yet')
+    // the approver can sign a gap right there; the operator's run controls are present
+    expect(screen.getByRole('form', { name: 'Sign a structural gap for I-2' })).toBeInTheDocument()
+    expect(screen.getByTestId('factory-run-controls')).toBeInTheDocument()
+  })
+
+  it('signing a gap posts the slot and the answer to the item', async () => {
+    const { calls } = mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 },
+      'GET /factory/alpha/backlog': BACKLOG,
+      'GET /factory/alpha/tasks': TASKS,
+      'POST /factory/alpha/tasks/I-2/signoff-gap': { item_id: 'I-2', slot: 'method_path', kind: 'structural' },
+    })
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha&item=I-2' })
+    const form = await screen.findByRole('form', { name: 'Sign a structural gap for I-2' })
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.type(within(form).getByLabelText(/Your answer/), 'GET /health')
+    await userEvent.click(within(form).getByRole('button', { name: 'Sign the gap' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/factory/alpha/tasks/I-2/signoff-gap')).toBe(true))
+    const post = calls.find((c) => c.method === 'POST')!
+    expect(JSON.parse(String(post.init?.body))).toEqual({ slot: 'method_path', answer: 'GET /health' })
+    expect(await screen.findByText('signed — on the chain')).toBeInTheDocument()
   })
 
   it('a 404 is "no backlog registered", not an error and not fabricated rows', async () => {
@@ -74,8 +97,8 @@ describe('FactoryPage — the shipped contract', () => {
     })
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
     await waitFor(() => expect(screen.getByTestId('factory-no-backlog')).toBeInTheDocument())
-    expect(screen.getByText(/POST \/factory\/alpha\/backlog/)).toBeInTheDocument()
+    expect(screen.getByText(/Freeze one: the items are validated, hashed/)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(screen.getByText('No factory tasks yet')).toBeInTheDocument()
+    expect(screen.getByText('No factory items yet')).toBeInTheDocument()
   })
 })

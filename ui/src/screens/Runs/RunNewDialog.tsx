@@ -126,6 +126,8 @@ const KIND_HELP: Record<RunKind, string> = {
   blind: 'Blind replay: the builder sees only the parent + a description; tests are overlaid at grade time.',
   oracle: 'Measure oracle strength (mutation kill-rate) per task.',
   controls: 'Run the negative-control matrix (gold, noop, tamper, stub, …).',
+  label: 'Label mined tasks with an intent class (a model reads the diff; never a grade).',
+  factory: 'Work the frozen backlog: readiness → RED proof → build → route-gated delivery → review.',
   probe: 'Prove the toolchain on a known-green scope.',
 }
 
