@@ -52,9 +52,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from crb.core.execution import DockerSettings, SandboxUnavailable
 from crb.observability.logging import configure_logging
-from crb.server.settings import GitHubAppSettings, Settings
+from crb.server.settings import GitHubAppSettings
 from crb.server.worker import Worker, WorkerSettings
 from crb.store.jobs import RUN_KINDS
 
@@ -146,13 +148,24 @@ def settings_from_args(
     )
 
 
+class _GitHubOnly(BaseSettings):
+    """Just the ``CRB_GITHUB__*`` keys, read the way :class:`Settings` reads them (same
+    prefix, same nested delimiter) and nothing else: the worker must not fail on an
+    unrelated server setting it does not use, and must not START on a malformed GitHub
+    one — a bad ``CRB_GITHUB__API_URL`` is a configuration error the operator fixes, not a
+    worker that quietly runs without the enterprise connection."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="CRB_", env_nested_delimiter="__", extra="ignore", case_sensitive=False
+    )
+    github: GitHubAppSettings = GitHubAppSettings()
+
+
 def _github_settings() -> GitHubAppSettings:
     """``CRB_GITHUB__APP_ID`` / ``__PRIVATE_KEY`` / ``__PRIVATE_KEY_FILE`` / ``__API_URL`` …
-    read the way the API reads them, so one environment configures both processes."""
-    try:
-        return Settings().github
-    except Exception:  # a worker without the server extras (or a bad env) still starts
-        return GitHubAppSettings()
+    read the way the API reads them, so one environment configures both processes. A
+    malformed value raises (``pydantic.ValidationError``) and the worker does not start."""
+    return _GitHubOnly().github
 
 
 def _run_summary(run: Any) -> dict[str, Any]:

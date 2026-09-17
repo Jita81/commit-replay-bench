@@ -6,9 +6,12 @@
  * ----------
  * What it is:   The design's A7 grid: one row per class, one column per size; each measured
  *               cell shows its route as a solid tag, `n=… on … tasks`, the point and the
- *               Wilson interval, and one more line — the reason code, or the sign-off state
- *               ("signed 15 Sep" / "sign-off due" / "sign-off stale"); an unmeasured cell
- *               says "not measured · no attempt sighted" on a pale ground and never zero.
+ *               Wilson interval, the apparatus version(s) the rows carry, and one more line
+ *               — the reason code, or the sign-off state ("signed 15 Sep" / "sign-off due" /
+ *               "sign-off stale"). The five size tiers are the taxonomy (`SizeTier` in
+ *               core), not the API's `sizes` (which lists only measured tiers): a tier with
+ *               no row says "not measured · no attempt sighted" on a pale ground and never
+ *               a number — the honest state, not a fabricated cell.
  *               `licenseSentence` renders "What this licenses you to say" for a signed cell,
  *               with every qualifier the claims policy demands.
  * What it does: Puts the sign-off state where the reader's eye already is — on the cell —
@@ -116,6 +119,8 @@ export function MapTable({ map, signoffs, repo }: { map: CapabilityMap; signoffs
                     </div>
                     <div className="text-[15px] font-bold leading-[1.45]">{c.ci_high - c.ci_low > 0.6 ? '—' : pct(c.point)}</div>
                     <div className="text-[14px] leading-[1.4] text-on-surface-muted">{c.ci_high - c.ci_low > 0.6 ? 'interval too wide' : `[${pct(c.ci_low)}, ${pct(c.ci_high)}]`}</div>
+                    {/* every rendered number carries its apparatus — the reader can tell which instrument produced it */}
+                    <div className="font-mono text-[12px] leading-[1.4] text-on-surface-muted">app {c.apparatus_versions.join(', ') || '—'}</div>
                     <div className="text-[14px] leading-[1.4] text-on-surface-muted">
                       {sign.state === 'due' ? (
                         <Link to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${c.capability_class}|${c.size}`)}`}>{last}</Link>

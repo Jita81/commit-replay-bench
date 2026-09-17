@@ -227,7 +227,15 @@ class GitHubApp:
             except ValueError:
                 msg = r.text[:300]
             raise GitHubAppError(r.status_code, redact(msg)[:300])
-        return r.json() if r.content else {}
+        if not r.content:
+            return {}
+        try:
+            return r.json()
+        except ValueError as e:
+            # a 2xx that is not JSON is GitHub's fault, and the caller's 502 — never a 500
+            raise GitHubAppError(
+                502, f"malformed response from GitHub ({redact(str(e))[:120]})"
+            ) from e
 
     def installation_token(self, installation_id: int, *, now: float | None = None) -> str:
         """A token for ``installation_id`` — minted on first use, cached until five minutes

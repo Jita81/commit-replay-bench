@@ -72,8 +72,21 @@ export function HomePage() {
       })
     : []
   const stage = (id: string) => stages.find((s) => s.id === id)?.status
-  const connected = gh.data?.configured === true && (gh.data.installations.length > 0 || Boolean(chosen))
   const hasRepo = Boolean(chosen)
+  // the connection task is about the App: configured AND at least one installation on record;
+  // a repository connected by URL is a valid deployment, so with no App the task is optional
+  const connected = gh.data?.configured === true && gh.data.installations.length > 0
+  const ghStatus: { status: string; tone: TagTone } = !gh.data
+    ? gh.isError
+      ? { status: 'Unavailable', tone: 'grey' }
+      : { status: 'Checking', tone: 'grey' }
+    : connected
+      ? { status: 'Completed', tone: 'pale' }
+      : gh.data.configured
+        ? { status: 'Incomplete', tone: 'blue' }
+        : hasRepo
+          ? { status: 'Optional', tone: 'grey' }
+          : { status: 'Not configured', tone: 'blue' }
   const proveDone = stage('oracle') === 'done' && stage('controls') === 'done'
   const proveStatus: StageStatus = proveDone ? 'done' : stage('probe') !== 'done' || stage('mine') !== 'done' ? (stage('mine') === 'running' || stage('probe') === 'running' ? 'running' : 'blocked') : stage('oracle') === 'failed' || stage('controls') === 'failed' ? 'failed' : stage('oracle') === 'running' || stage('controls') === 'running' ? 'running' : 'todo'
   const measureStage = stage('measure')
@@ -87,7 +100,7 @@ export function HomePage() {
   const q = chosen ? `?repo=${encodeURIComponent(chosen)}` : ''
   const walk = chosen ? `/connect/${encodeURIComponent(chosen)}` : '/connect'
   const tasks: TaskItem[] = [
-    { num: 1, name: 'Connect GitHub', status: connected ? 'Completed' : gh.data?.configured ? 'Incomplete' : 'Not configured', tone: connected ? 'pale' : 'blue', to: '/connect' },
+    { num: 1, name: 'Connect GitHub', status: ghStatus.status, tone: ghStatus.tone, to: '/connect' },
     { num: 2, name: 'Choose a repository', status: hasRepo ? 'Completed' : 'Incomplete', tone: hasRepo ? 'pale' : 'blue', to: '/connect' },
     { num: 3, name: 'Confirm its shape', status: stage('probe') === 'done' ? 'Completed' : hasRepo ? LABEL[stage('probe') ?? 'todo'] : 'Cannot start yet', tone: stage('probe') === 'done' ? 'pale' : hasRepo ? TONE[stage('probe') ?? 'todo'] : 'grey', to: chosen ? `/repos/${encodeURIComponent(chosen)}` : '/connect' },
     { num: 4, name: 'Prove the instrument (£0)', status: LABEL[proveStatus], tone: TONE[proveStatus], to: walk },

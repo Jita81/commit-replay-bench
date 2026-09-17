@@ -119,7 +119,7 @@ export function Layout() {
                     })
                   }
                 >
-                  Log out
+                  Sign out
                 </button>
               )}
             </div>

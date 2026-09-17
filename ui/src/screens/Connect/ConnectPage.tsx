@@ -82,6 +82,9 @@ export function ConnectPage() {
   const [params] = useSearchParams()
   // the app's setup callback lands here with ?installation=<id> — open the picker on it
   const landedInstallation = Number(params.get('installation') ?? 0) || 0
+  // …and with &unverified=1 when the callback carried no signed state for this session:
+  // nothing was recorded; the operator records it with the CSRF-protected sync
+  const landedUnverified = params.get('unverified') === '1'
   const [newOpen, setNewOpen] = useState(false)
   const [ghOpen, setGhOpen] = useState(landedInstallation > 0)
   const ghConfigured = gh.data?.configured === true
@@ -154,6 +157,7 @@ export function ConnectPage() {
       <GitHubConnectDialog
         open={ghOpen}
         initialInstallation={landedInstallation || undefined}
+        landedUnverified={landedUnverified}
         onClose={() => setGhOpen(false)}
         onUseUrl={() => {
           setGhOpen(false)

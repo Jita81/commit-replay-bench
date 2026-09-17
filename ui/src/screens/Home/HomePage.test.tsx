@@ -91,6 +91,8 @@ describe('HomePage', () => {
     expect(screen.getByRole('heading', { name: 'Where this deployment is' })).toBeInTheDocument()
     expect(screen.getByText(/You can read everything here and change nothing/)).toBeInTheDocument()
     const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    // no App configured but a repository connected by URL: the connection task is optional, not a blocker
+    expect(rows[0]).toHaveTextContent('Optional')
     expect(rows[4]).toHaveTextContent('In progress')
     expect(within(rows[4]!).getByRole('link')).toHaveAttribute('href', '/connect/alpha')
     expect(rows[5]).toHaveTextContent('Read the map')
@@ -98,6 +100,24 @@ describe('HomePage', () => {
     // a non-admin is not sent to a settings page that refuses them
     expect(within(rows[6]!).getByRole('link')).toHaveAttribute('href', '/posture')
     expect(screen.getByRole('link', { name: /Continue/ })).toHaveAttribute('href', '/results?repo=alpha')
+  })
+
+  it('an App that is configured with no installation on record is "Incomplete", never "Completed" because a repository exists', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': { configured: true, app_slug: 'crb', install_url: 'x', api_url: 'y', installations: [] },
+      'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': REPO,
+      'GET /oracle/alpha': () => envelope(404, 'not_found', 'x'),
+      'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'x'),
+      'GET /capability-map': EMPTY_MAP,
+      'GET /health': { status: 'ok', probes: [] },
+      'GET /users': () => envelope(403, 'forbidden', 'x'),
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    await waitFor(() => expect(screen.getByText('You have completed 2 of 7 tasks.')).toBeInTheDocument())
+    const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    expect(rows[0]).toHaveTextContent('Incomplete')
   })
 
   it('with nothing connected every task after the first is not started', async () => {

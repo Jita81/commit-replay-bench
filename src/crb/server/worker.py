@@ -109,6 +109,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -169,7 +170,7 @@ from crb.factory.testfirst import AuthoredTest
 from crb.observability import metrics
 from crb.observability.events import Emitter, JsonlSink, MultiSink, StepStatus
 from crb.server.factory_state import FactoryHome
-from crb.server.github_app import GitHubApp
+from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.settings import GitHubAppSettings
@@ -656,10 +657,24 @@ class Worker:
             self._github_app_client = GitHubApp(self.settings.github)
         return self._github_app_client
 
-    def _github_auth_header(self, cfg: Mapping[str, Any]) -> str | None:
-        """``Authorization: Basic …`` for a clone of a GitHub-App-linked repository, or None."""
+    def _github_host_ok(self, url: str) -> bool:
+        """True when ``url`` is an https URL on the GitHub host the app is registered with:
+        an installation token is only ever sent there (CWE-201 — a repository whose URL was
+        edited to another host gets no token, whatever its link says)."""
+        try:
+            u = urlsplit(url)
+            app_host = urlsplit(self.settings.github.web_url).hostname or ""
+        except ValueError:
+            return False
+        return u.scheme == "https" and bool(u.hostname) and u.hostname == app_host
+
+    def _github_auth_header(self, cfg: Mapping[str, Any], url: str = "") -> str | None:
+        """``Authorization: Basic …`` for a clone of a GitHub-App-linked repository, or None
+        — also None when ``url`` (given) is not on the app's own GitHub host."""
         installation = self._github_installation(cfg)
         if installation is None:
+            return None
+        if url and not self._github_host_ok(url):
             return None
         token = self._github_app().installation_token(installation)
         return GitCredentials(remote="https://github.invalid/x", token=token).basic_auth_header()
@@ -668,10 +683,19 @@ class Worker:
         self, cfg: Mapping[str, Any], remote: str
     ) -> GitCredentialsProvider | None:
         """Delivery credentials for a factory run: the GitHub App's installation token when
-        the repository is linked and the installation may write (``Contents: write`` +
-        ``Pull requests: write``); otherwise None — the loop fails closed (no PR)."""
+        the repository is linked, the remote is on the app's host, and the installation may
+        write — ``Contents: write`` AND ``Pull requests: write``, read from GitHub now (the
+        org admin may have narrowed them since the record); otherwise None — the loop fails
+        closed (no branch, no PR: a push with a read-only PR permission would leave a branch
+        behind before the PR call failed)."""
         installation = self._github_installation(cfg)
-        if installation is None:
+        if installation is None or not self._github_host_ok(remote):
+            return None
+        try:
+            inst = self._github_app().installation(installation)
+        except GitHubAppError:
+            return None
+        if not inst.can_deliver:
             return None
         return _InstallationProvider(self._github_app(), installation, remote)
 
@@ -705,7 +729,7 @@ class Worker:
         # a repository connected through the GitHub App clones with a short-lived
         # installation token (never argv, never on disk — ADR-0014); any other URL clones
         # as the worker's own git can
-        auth_header = self._github_auth_header(cfg)
+        auth_header = self._github_auth_header(cfg, url)
         if emitter is not None:
             emitter.emit(
                 "system",

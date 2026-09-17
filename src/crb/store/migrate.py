@@ -63,8 +63,9 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
 from typing import cast
 
@@ -93,6 +94,7 @@ INITIAL_REVISION = "0001"
 REVISION_MARKERS: tuple[tuple[str, str, str], ...] = (
     ("0002", "grades", "repo_lint_clean"),
     ("0003", "reviews", "review_id"),
+    ("0006", "repos", "github_full_name"),
 )
 #: ``(revision, table)`` — the TABLE each revision after the initial one ADDS. An older
 #: release's ``create_all`` schema lacks it and is still a complete schema *for its
@@ -194,20 +196,24 @@ def _unversioned_revision(connection: Connection) -> str:
     :data:`REVISION_MARKERS`."""
     insp = inspect(connection)
     tables = set(insp.get_table_names())
+
+    def has_column(table: str, column: str) -> bool:
+        return table in tables and column in {c["name"] for c in insp.get_columns(table)}
+
+    def has_index(table: str, index: str) -> bool:
+        return table in tables and index in {ix["name"] for ix in insp.get_indexes(table)}
+
+    # every revision's fingerprint — a column, an index or a table — walked in REVISION
+    # order whatever kind it is: the first fingerprint missing stops the walk, and the
+    # schema is at the last revision whose fingerprint it carries
+    fingerprints: list[tuple[str, Callable[[], bool]]] = [
+        *((rev, partial(has_column, table, column)) for rev, table, column in REVISION_MARKERS),
+        *((rev, partial(has_index, table, index)) for rev, table, index in REVISION_INDEXES),
+        *((rev, partial(tables.__contains__, table)) for rev, table in REVISION_TABLES),
+    ]
     revision = INITIAL_REVISION
-    for rev, table, column in REVISION_MARKERS:
-        if table not in tables or column not in {c["name"] for c in insp.get_columns(table)}:
-            return revision
-        revision = rev
-    for rev, table, index in REVISION_INDEXES:
-        if table not in tables or index not in {ix["name"] for ix in insp.get_indexes(table)}:
-            return revision
-        revision = rev
-    # a revision that only ADDS a table (after the marker and index walks): present = at it
-    for rev, table in REVISION_TABLES:
-        if rev <= revision:
-            continue
-        if table not in tables:
+    for rev, present in sorted(fingerprints, key=lambda x: x[0]):
+        if not present():
             return revision
         revision = rev
     return revision

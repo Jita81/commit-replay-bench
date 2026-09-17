@@ -47,6 +47,23 @@ numbers were never trusted.
 - Backlog: F3b (shape review with risk copy), F5b (per-run spend cap), F7b (separation of
   duties at write — the prototype claims it; the product does not enforce it) added to
   docs/reviews/2026-09-17-enterprise-front-end.md §9; F2 and F19 marked landed.
+- **Review findings on the GitHub App connection (CodeRabbit on #31), fixed here**: the
+  setup callback records an installation only with a signed, session-bound `state` the
+  install link carries (`GET /github/app` mints it for operators; without it the callback
+  writes nothing and lands on Connect `unverified=1`, where the CSRF-protected sync records
+  it — CWE-352); `repos.github_full_name` (revision 0006, unique) makes "one GitHub
+  repository connects once" a database fact and the race a 409; a `PUT /repos/{name}` that
+  changes the URL drops the GitHub link, and the worker sends an installation token only to
+  the app's own host (CWE-201); delivery credentials exist only while the installation
+  grants `contents: write` **and** `pull_requests: write`, read from GitHub at the time
+  (no branch pushed before a PR call could fail); a malformed 2xx from GitHub is a 502, not a
+  500; the per-request GitHub client is closed; the worker reads only `CRB_GITHUB__*` and
+  refuses to start on a malformed value instead of running without the connection; the
+  picker says a search is page-local; the Measure page prices the capped attempt count and
+  derives posture from the probe's explicit `executor`; the Decisions count is never served
+  as ready with a non-404 failure behind it; Home and Deployment do not call an unanswered
+  GitHub App status "not configured"; every map cell carries its apparatus; the unversioned
+  schema walk is revision-ordered across columns, indexes and tables.
 - **Persona walkthrough on the live stack** (docs/reviews/2026-09-17-persona-walkthrough.md):
   every screen of the journey was driven as a viewer, an operator, an approver, an admin, a
   developer, a platform engineer and an MCP consumer, with axe and a phone viewport. What it

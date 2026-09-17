@@ -15,7 +15,10 @@
  * How:          `mockApi` + `renderApp`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0014-github-app-is-the-connection.md
- * Works with:   ui/src/screens/Connect/GitHubConnectDialog.tsx, ui/src/screens/Settings/GitHubAppCard.tsx
+ * Works with:   ui/src/screens/Connect/GitHubConnectDialog.tsx (the component under test),
+ *               ui/src/screens/Settings/GitHubAppCard.tsx (the admin's view of the same `/github/app`),
+ *               ui/src/test/utils.tsx (`mockApi` / `renderApp` — the fake API these tests answer from),
+ *               src/crb/server/routes/github.py (the routes whose shapes the mocks mirror)
  * Tested by:    ui/src/screens/Connect/GitHubConnectDialog.test.tsx
  * Touch when:   the connect body or the picker row changes.
  */

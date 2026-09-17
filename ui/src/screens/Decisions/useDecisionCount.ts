@@ -78,10 +78,17 @@ export function useDecisions(): DecisionsState {
       const m = maps[i]
       const s = signoffs[i]
       const t = tasks[i]
+      // a 404 is an expected absence (never measured, no backlog): the repo simply has no
+      // decisions; any OTHER error means the count is incomplete — never served as ready
+      const failures = [m, s, t].flatMap((q) => (q?.isError && !notFound(q.error) ? [q.error] : []))
+      if (failures.length > 0) {
+        for (const e of failures) errors.push(`${repo}: ${e.message}`)
+        ready = false
+        return
+      }
       const tasksReady = t?.data !== undefined || (t?.isError && notFound(t.error))
-      if (m?.isError && !notFound(m.error)) errors.push(`${repo}: ${m.error.message}`)
       if (!m?.data || !s?.data || !tasksReady) {
-        if (!(m?.isError || s?.isError)) ready = false
+        if (!((m?.isError && notFound(m.error)) || (s?.isError && notFound(s.error)))) ready = false
         return
       }
       byRepo[repo] = decisionsFor({ repo, cells: m.data.cells, signoffs: s.data.items, tasks: t?.data ?? [] })

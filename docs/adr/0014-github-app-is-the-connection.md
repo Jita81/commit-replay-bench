@@ -29,9 +29,13 @@ The product's needs are small and separable: measurement needs `Metadata: read` 
    install it on the repositories it may see; the product records each installation
    (`github_installations`) after verifying it with the app's own credential.
 2. **Tokens are minted, never stored.** The worker mints an installation token when it clones
-   or delivers, caches it in memory until five minutes before its one-hour expiry, and hands it
-   to git as a one-shot `Authorization` header through `GIT_CONFIG_COUNT` — never argv, never
-   `.git/config`, never a row, an event or a log. No API response carries a token.
+   or delivers, caches it in memory until five minutes before the expiry GitHub returned (one
+   hour by GitHub's contract), and hands it to git as a one-shot `Authorization` header through
+   `GIT_CONFIG_COUNT` — never argv, never `.git/config`, never a row, an event or a log. No API
+   response carries a token. **[measured]** `tests/test_server_github_app.py` (fake GitHub
+   transport, apparatus 2.2): the mint, the cache, the refresh at five minutes to expiry, the
+   header in the environment and not in argv, and the absence of `ghs_` from every response
+   and event payload the tests read.
 3. **A connected repository is an ordinary repository.** `POST /github/installations/{id}/connect`
    registers a `Repo` row whose `url` is the https clone URL and whose `config_json.github`
    names the installation; every later run is unchanged. The link survives config updates.

@@ -73,6 +73,22 @@ function usd(x: number): string {
   return `$${x.toFixed(2)}`
 }
 
+/**
+ * The posture sentence from what `/health` actually says: the sandbox probe's `executor`
+ * (explicit) and its status. "Countable as evidence" is claimed only for a docker executor
+ * whose daemon answered; an API-role process that skipped the probe says so rather than
+ * guessing; a local executor is a development reading.
+ */
+export function posturePhrase(sandbox: { status: string; data?: Record<string, unknown> } | undefined): string {
+  if (!sandbox) return 'unknown — the health check has not answered'
+  const executor = String(sandbox.data?.executor ?? '')
+  if (executor === 'docker' && sandbox.status === 'ok') return 'sealed (docker) — countable as evidence'
+  if (executor === 'docker' && sandbox.status === 'skipped') return 'docker executor — the worker’s own health check decides whether it is sealed; this process did not probe it'
+  if (executor === 'docker') return `docker executor, daemon ${sandbox.status} — a development reading, not evidence, until the sandbox answers`
+  if (executor === 'local') return 'local executor — a development reading, not evidence (tests run unisolated)'
+  return `${sandbox.status} — a development reading, not evidence, until the sandbox is available`
+}
+
 export function MeasurePage() {
   const { name = '' } = useParams()
   const navigate = useNavigate()
@@ -92,13 +108,16 @@ export function MeasurePage() {
     const n = cells.reduce((a, c) => a + c.n, 0)
     return cells.reduce((a, c) => a + c.cost_usd_mean * c.n, 0) / n
   }, [map.data])
-  const lo = measuredMean !== null ? measuredMean * 0.8 * limit : RANGE_LOW * limit
-  const hi = measuredMean !== null ? measuredMean * 1.2 * limit : RANGE_HIGH * limit
+  const gold = repo.data?.task_counts.gold_clean ?? 0
+  // the run makes one attempt per gold-clean task: the estimate, the button and the
+  // request all use the SAME capped number, never the radio's face value
+  const runLimit = gold > 0 ? Math.min(limit, gold) : limit
+  const lo = measuredMean !== null ? measuredMean * 0.8 * runLimit : RANGE_LOW * runLimit
+  const hi = measuredMean !== null ? measuredMean * 1.2 * runLimit : RANGE_HIGH * runLimit
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
   const builders = health.data?.probes.find((p) => p.name === 'builders')
   const choice = builderChoice(builders?.data)
-  const sealed = sandbox?.status === 'ok'
-  const gold = repo.data?.task_counts.gold_clean ?? 0
+  const posture = posturePhrase(sandbox)
   const retention = !worktrees && !transcripts ? 'Nothing retained — grades and hashes only' : `${[worktrees && 'worktrees', transcripts && 'transcripts'].filter(Boolean).join(' and ')} kept until deleted`
 
   const start = () => {
@@ -111,7 +130,7 @@ export function MeasurePage() {
         builder: choice.builder,
         model: choice.model,
         ...(choice.builder_config ? { builder_config: choice.builder_config } : {}),
-        limit: Math.min(limit, Math.max(gold, 1)),
+        limit: runLimit,
         retain: { worktrees, transcripts },
       },
       { onSuccess: () => navigate(`/connect/${encodeURIComponent(name)}`) },
@@ -157,11 +176,11 @@ export function MeasurePage() {
         <h2 className="mb-4 text-[24px] font-bold leading-[1.3]">Before you start</h2>
         <SummaryList
           rows={[
-            { key: 'Estimated cost', value: `${usd(lo)} to ${usd(hi)} for ${limit} attempts${measuredMean !== null ? `, at about ${usd(measuredMean)} each (this repository's measured mean)` : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each (the documented range; this repository has no measured mean yet)`}` },
+            { key: 'Estimated cost', value: `${usd(lo)} to ${usd(hi)} for ${runLimit} attempts${measuredMean !== null ? `, at about ${usd(measuredMean)} each (this repository's measured mean)` : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each (the documented range; this repository has no measured mean yet)`}` },
             { key: 'Builder', value: choice ? choice.label : 'No builder is configured on this deployment — an admin adds a provider key (Settings), or use the full run form', changeTo: '/runs', changeLabel: 'Every knob' },
             { key: 'Budget cap', value: 'Per attempt — the builder’s ladder caps turns, tool calls and wall clock; a run can be cancelled at any point' },
             { key: 'Retention', value: retention },
-            { key: 'Posture', value: sealed ? 'sealed (docker) — countable as evidence' : `${sandbox?.status ?? 'unknown'} — a development reading, not evidence, until the sandbox is available` },
+            { key: 'Posture', value: posture },
           ]}
         />
         <p className="mb-4 mt-6 text-[19px] leading-[1.47]">You can cancel the run at any point. Attempts already made are still charged.</p>

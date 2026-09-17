@@ -27,6 +27,18 @@ Tested by:    not applicable — a review record
 Touch when:   a backlog row below lands.
 -->
 
+## How to read the claims in this record
+
+This is a design review, not a measurement. Every statement below about what the *product*
+does was verified by reading the code on `feat/nhs-design-journey` (PR #32) and, where a
+screen is named, by opening it on the development stack — **[hypothesis]** in the
+repository's taxonomy (docs/EVIDENCE-AND-CLAIMS.md §1): implemented and unit-tested, not an
+end-to-end measurement. Every number quoted from the *prototype* (its rates, costs, counts)
+is the prototype's own illustration and is **[aspiration]** — it was never trusted and was
+not carried into the product. Counts of screens or tasks ("seven tasks", "twelve screens")
+are counts of UI elements, not measurements, and carry no `n`. No claim here is
+**[measured]**.
+
 ## Verdict
 
 The prototype is the better *language*; ours is the better *machine*. The prototype speaks

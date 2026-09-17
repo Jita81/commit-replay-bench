@@ -134,9 +134,16 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   `NullProvider` fails closed. [measured] `tests/test_factory_delivery.py`
 - Repositories connected through the **GitHub App** (ADR-0014) are cloned — and, where the
   installation grants write, delivered to — with **installation tokens** the worker mints per
-  use: one hour, scoped to the installation, cached in memory until five minutes before
-  expiry, passed to git through `GIT_CONFIG_COUNT` as a one-shot `Authorization` header —
-  never argv, never `.git/config`, never a row, event, log or API response. The app's private
+  use: scoped to the installation (one hour by GitHub's contract), cached in memory until
+  five minutes before the expiry GitHub returned, passed to git through `GIT_CONFIG_COUNT` as
+  a one-shot `Authorization` header — never argv, never `.git/config`, never a row, event,
+  log or API response. [measured] `tests/test_server_github_app.py` (fake GitHub transport,
+  apparatus 2.2). The token is sent only to the app's own GitHub host — a repository whose
+  URL is edited to another host loses its link and gets no token [measured] the same file;
+  delivery credentials exist only while the installation grants `contents: write` **and**
+  `pull_requests: write`, read from GitHub at the time [measured]; the setup callback records
+  an installation only with a signed, session-bound `state` this deployment minted (CWE-352),
+  otherwise the operator records it through the CSRF-protected sync [measured]. The app's private
   key comes from the environment or a mounted file; `/settings` reports only
   `private_key_configured`. [measured] `tests/test_server_github_app.py`
 - Every string that leaves a sandbox — test output tails, diffs, transcripts, log lines,

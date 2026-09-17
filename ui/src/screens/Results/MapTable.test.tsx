@@ -52,6 +52,8 @@ describe('MapTable', () => {
     expect(screen.getByTestId('cell-bug.fix-XS')).toHaveTextContent('n=31 on 12 tasks')
     expect(screen.getByTestId('cell-bug.fix-XS')).toHaveTextContent('74%')
     expect(screen.getByTestId('cell-bug.fix-XS')).toHaveTextContent('[56%, 87%]')
+    // the number carries its apparatus
+    expect(screen.getByTestId('cell-bug.fix-XS')).toHaveTextContent('app 2.2')
     expect(screen.getByTestId('cell-bug.fix-XS')).toHaveTextContent('signed 15 Sept')
     expect(screen.getByTestId('cell-bug.fix-S')).toHaveTextContent('ci_low_below_bar')
     expect(screen.getByTestId('cell-bug.fix-M')).toHaveTextContent('interval too wide')
