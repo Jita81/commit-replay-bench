@@ -51,7 +51,7 @@ export function PosturePage() {
     {
       name: 'Identity and access',
       rows: [
-        { key: 'Sign-in', value: s ? (s.oidc_enabled ? 'OpenID Connect (organisation account) + local accounts' : 'Local accounts') : adminOnly(undefined) },
+        { key: 'Sign-in', value: version.data ? (version.data.oidc_enabled ? 'OpenID Connect (organisation account) + local accounts' : 'Local accounts only') : '…' },
         { key: 'Roles', value: 'viewer · operator · approver · admin' },
         { key: 'Separation of duties', value: 'Sign-off needs the approver role and an attestation naming the diff read; keeping operator and approver on two people is the deployment’s policy (not enforced at write yet — backlog F7b)' },
         { key: 'Source control', value: gh.data?.configured ? `GitHub App ${gh.data.app_slug} · ${gh.data.installations.length} installation(s) · installation tokens minted per use, never stored` : 'GitHub App not configured — repositories connect by URL' },

@@ -74,6 +74,32 @@ describe('HomePage', () => {
     expect(screen.getByRole('heading', { name: 'Why two people' })).toBeInTheDocument()
   })
 
+  it('a viewer reads the same list as a progress report, a measurement in flight is "In progress", and the map opens from the first row', async () => {
+    const running = { ...REPO, last_run: { id: 'r9', kind: 'replay', status: 'running', created: '2026-09-17T10:00:00Z' } }
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
+      'GET /repos': { items: [running], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': running,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 6 } },
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    await waitFor(() => expect(screen.getByText('The operators have completed 3 of 7 tasks.')).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Where this deployment is' })).toBeInTheDocument()
+    expect(screen.getByText(/You can read everything here and change nothing/)).toBeInTheDocument()
+    const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    expect(rows[4]).toHaveTextContent('In progress')
+    expect(within(rows[4]!).getByRole('link')).toHaveAttribute('href', '/connect/alpha')
+    expect(rows[5]).toHaveTextContent('Read the map')
+    expect(rows[5]).toHaveTextContent('Incomplete')
+    // a non-admin is not sent to a settings page that refuses them
+    expect(within(rows[6]!).getByRole('link')).toHaveAttribute('href', '/posture')
+    expect(screen.getByRole('link', { name: /Continue/ })).toHaveAttribute('href', '/results?repo=alpha')
+  })
+
   it('with nothing connected every task after the first is not started', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },

@@ -26,7 +26,7 @@
  */
 
 import { Link } from 'react-router'
-import { type CapabilityCell, type CapabilityMap, NOT_YET_MEASURED, type Signoff } from '../../api/types'
+import { approverName, type CapabilityCell, type CapabilityMap, NOT_YET_MEASURED, type Signoff } from '../../api/types'
 import type { ControlsVerdict } from '../Capability/contract'
 import { Tag, type TagTone } from '../../components/govuk'
 
@@ -151,5 +151,5 @@ export function licenseSentence(repo: string, map: CapabilityMap & { controls?: 
   const apparatus = c.apparatus_versions.join(', ') || '—'
   const belts = c.belt_sets?.join(', ') || '—'
   const gate = map.controls?.state ? `a ${map.controls.state} controls gate` : 'the controls gate'
-  return `On ${repo} at apparatus ${apparatus}, under belt set ${belts} and ${gate}, ${c.clean} of ${c.n} sighted attempts at ${c.capability_class} × ${c.size}${c.n_tasks ? ` (${c.n_tasks} tasks)` : ''} were graded clean: ${pct(c.point)} (95% Wilson ${pct(c.ci_low)}–${pct(c.ci_high)}), signed by ${so.approver} on ${new Date(so.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}. It says nothing about any other repository, class or size.`
+  return `On ${repo} at apparatus ${apparatus}, under belt set ${belts} and ${gate}, ${c.clean} of ${c.n} sighted attempts at ${c.capability_class} × ${c.size}${c.n_tasks ? ` (${c.n_tasks} tasks)` : ''} were graded clean: ${pct(c.point)} (95% Wilson ${pct(c.ci_low)}–${pct(c.ci_high)}), signed by ${approverName(so)} on ${new Date(so.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}. It says nothing about any other repository, class or size.`
 }

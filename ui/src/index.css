@@ -43,7 +43,7 @@
   --warn-soft: #FFF9C4;        /* the warning callout ground */
   --focus: #FFEB3B;            /* NHS focus yellow */
   --fail: #D5281B;             /* NHS emergency red */
-  --fail-soft: #F9ECEA;
+  --fail-soft: #FDF5F4;        /* lightened from NHS pale red so --fail ink reads at AA (4.7:1) */
   --cat-blue: #005EB8;
   --cat-blue-soft: #E7EFF6;
   --cat-violet: #330072;       /* NHS purple (visited links) — categorical only */

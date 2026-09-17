@@ -89,11 +89,13 @@ OUT_KEYS = {
     "tier",
     "note",
     "approver",
+    "approver_name",
     "stale",
     "apparatus_current",
     "created",
     "revoked",
     "revoked_by",
+    "revoked_by_name",
     "revoked_at",
     "active",
     "current_false_q1",
@@ -270,6 +272,9 @@ class TestCreate:
             "provider": "*",
         }
         assert d["revoked"] is False and d["active"] is True and d["current_false_q1"] == 0
+        # the ledger keeps the approver's id; the reader gets the name resolved at read
+        assert d["approver"] != "appr1" and d["approver_name"] == "appr1"
+        assert d["revoked_by_name"] is None
         # the evidence snapshot: n, point, the interval, false-Q1, oracle, apparatus
         ev = d["evidence"]
         assert ev["n"] == 40 and ev["point"] == 0.95
@@ -983,7 +988,7 @@ class TestListAndRevoke:
         assert r.status_code == 200, r.text
         d = r.json()
         assert d["id"] == sid and d["revoked"] is True and d["active"] is False
-        assert d["revoked_by"] and d["revoked_at"]
+        assert d["revoked_by"] and d["revoked_at"] and d["revoked_by_name"] == "appr1"
         assert d["attestation"] is not None  # the attestation that WAS made stays on the record
         rows = _signoffs(env)
         assert [x.revoke for x in rows] == [False, True]

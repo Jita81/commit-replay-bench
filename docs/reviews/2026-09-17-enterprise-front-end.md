@@ -13,7 +13,7 @@ What it does: Grounds the front end's purpose (DL-040) in comparable products (G
               DX, Renovate, Backstage), UK service-standard patterns (GOV.UK / NHS / MoJ task
               list, step-by-step, check-your-answers, notification banner, tag, timeline) and
               DORA 2025 / cost-per-effective-PR framing; ends in a 21-item ordered backlog
-              (F1–F21) with sizes and personas.
+              (F1–F26) with sizes and personas.
 How:          Web research with cited sources (§10 separates verified from inferred), read
               against the repository's code and documents. Nothing in it is a measurement.
 Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
@@ -356,6 +356,10 @@ Sizes: S ≤ 2 days, M ≤ 2 weeks, L > 2 weeks (one engineer). Order is by valu
 | F19 | **Deployment posture page** (printable) — **landed in PR #32** (`/posture`) | S | P6 | Service-standard mapping | Static + `/version`, `/health`. |
 | F20 | **Flow view** (backlog → merge; cost per human-verified change) | M | P8, P1 | DORA 2025; LinearB cost per effective PR | **Blocked on B-9** (merge outcome via PR webhook; human minutes via review-time capture). Until then show the refusal text. |
 | F21 | GitLab / Azure DevOps connectors; GHES/ghe.com base URLs; enterprise-level install | L | P2 | GitLab scopes; ADO WIF; GitHub enterprise install | Later. |
+| F23 | **User lifecycle** — deactivate a user, reset a local password, `active` / `last_login` in the Users table (the model has `active`; no route sets it, so a leaver keeps a working login) | S | P6 (admin / AppSec) | NHS IG joiners-movers-leavers | From docs/reviews/2026-09-17-persona-walkthrough.md. |
+| F24 | **Backlog freeze as a form** (id, title, class, size, facts) with the JSON as an "advanced" tab — today a raw textarea whose prefilled example is content, not a placeholder | M | P7 (developer) | GOV.UK question pages | Walkthrough. |
+| F25 | Narrow the viewer projection of `GET /settings/secrets` to `present: bool` (it returns `set_by` and the fingerprint today) | S | P6 (AppSec) | least privilege | Walkthrough; low. |
+| F26 | Collapsible navigation under 640 px (the three nav rows take half a phone's first screen) | S | everyone | NHS header pattern | Walkthrough; usable now. |
 
 ---
 

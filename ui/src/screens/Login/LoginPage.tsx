@@ -5,7 +5,8 @@
  * ----------
  * What it is:   The screen at /login, outside the shell.
  * What it does: Signs in with `POST /auth/login` (the local bootstrap account) or hands off to
- *               `GET /auth/oidc/start` (the organisation's identity provider); renders the
+ *               `GET /auth/oidc/start` (the organisation's identity provider — the button is
+ *               offered only when `/version` says one is configured); renders the
  *               error envelope on a wrong password (never a blank form), and returns the user
  *               to the `?next=` path — same-origin paths only, so a crafted link cannot bounce
  *               a session to another host. An already-authenticated visitor is redirected
@@ -26,7 +27,7 @@
  */
 import { useState, type FormEvent } from 'react'
 import { Navigate, useSearchParams } from 'react-router'
-import { useLogin } from '../../api/hooks'
+import { useLogin, useVersion } from '../../api/hooks'
 import { apiUrl } from '../../api/client'
 import { AnchorButton, Button } from '../../components/Button'
 import { ErrorState } from '../../components/ErrorState'
@@ -47,6 +48,9 @@ export function LoginPage() {
   const [params] = useSearchParams()
   const next = safeNext(params.get('next'))
   const login = useLogin()
+  // the organisation button is offered only when `/version` says a provider is configured
+  const version = useVersion()
+  const oidc = version.data?.oidc_enabled === true
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
 
@@ -90,15 +94,19 @@ export function LoginPage() {
             </Button>
           </form>
 
-          <div className="my-5 flex items-center gap-3 text-[11px] text-on-surface-muted">
-            <span className="h-px flex-1 bg-border" />
-            or
-            <span className="h-px flex-1 bg-border" />
-          </div>
+          {oidc && (
+            <>
+              <div className="my-5 flex items-center gap-3 text-[11px] text-on-surface-muted">
+                <span className="h-px flex-1 bg-border" />
+                or
+                <span className="h-px flex-1 bg-border" />
+              </div>
 
-          <AnchorButton href={apiUrl(`/auth/oidc/start?next=${encodeURIComponent(next)}`)} className="w-full">
-            Sign in with organisation account
-          </AnchorButton>
+              <AnchorButton href={apiUrl(`/auth/oidc/start?next=${encodeURIComponent(next)}`)} className="w-full">
+                Sign in with organisation account
+              </AnchorButton>
+            </>
+          )}
         </section>
 
         <p className="text-center text-[11px] text-on-surface-muted">Sessions are cookie-based and expire with the browser unless your organisation's policy says otherwise.</p>

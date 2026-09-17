@@ -45,6 +45,30 @@ const LIMITS: Array<{ n: number; note: string }> = [
 const RANGE_LOW = 0.2
 const RANGE_HIGH = 0.6
 
+export interface BuilderChoice {
+  builder: string
+  model: string
+  builder_config?: Record<string, unknown>
+  /** What the "Before you start" row says. */
+  label: string
+  /** True when the choice is the operator's own CLI login — a development posture. */
+  development: boolean
+}
+
+/**
+ * The builder the walk measures with, from what the deployment has configured (the
+ * `/health` builders probe reports presence only): an Anthropic key → Claude Code in
+ * production auth; only a Claude Code CLI login → Claude Code with `{auth: "cli"}` (the
+ * operator's own login — development and evaluation only, and the row says so); nothing
+ * usable → null (the page points at the full run form).
+ */
+export function builderChoice(keys: Record<string, unknown> | undefined): BuilderChoice | null {
+  if (!keys) return null
+  if (keys.anthropic) return { builder: 'claude_code', model: 'claude-sonnet-5', label: 'Claude Code · claude-sonnet-5 · API key (production)', development: false }
+  if (keys.claude_code_cli) return { builder: 'claude_code', model: 'claude-sonnet-5', builder_config: { auth: 'cli' }, label: 'Claude Code · claude-sonnet-5 · the operator\u2019s own CLI login (development and evaluation only)', development: true }
+  return null
+}
+
 function usd(x: number): string {
   return `$${x.toFixed(2)}`
 }
@@ -71,15 +95,28 @@ export function MeasurePage() {
   const lo = measuredMean !== null ? measuredMean * 0.8 * limit : RANGE_LOW * limit
   const hi = measuredMean !== null ? measuredMean * 1.2 * limit : RANGE_HIGH * limit
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
+  const builders = health.data?.probes.find((p) => p.name === 'builders')
+  const choice = builderChoice(builders?.data)
   const sealed = sandbox?.status === 'ok'
   const gold = repo.data?.task_counts.gold_clean ?? 0
   const retention = !worktrees && !transcripts ? 'Nothing retained — grades and hashes only' : `${[worktrees && 'worktrees', transcripts && 'transcripts'].filter(Boolean).join(' and ')} kept until deleted`
 
-  const start = () =>
+  const start = () => {
+    if (!choice) return
     create.mutate(
-      { repo: name, kind: 'replay', mode: 'sighted', limit: Math.min(limit, Math.max(gold, 1)), retain: { worktrees, transcripts } },
+      {
+        repo: name,
+        kind: 'replay',
+        mode: 'sighted',
+        builder: choice.builder,
+        model: choice.model,
+        ...(choice.builder_config ? { builder_config: choice.builder_config } : {}),
+        limit: Math.min(limit, Math.max(gold, 1)),
+        retain: { worktrees, transcripts },
+      },
       { onSuccess: () => navigate(`/connect/${encodeURIComponent(name)}`) },
     )
+  }
 
   return (
     <>
@@ -121,6 +158,7 @@ export function MeasurePage() {
         <SummaryList
           rows={[
             { key: 'Estimated cost', value: `${usd(lo)} to ${usd(hi)} for ${limit} attempts${measuredMean !== null ? `, at about ${usd(measuredMean)} each (this repository's measured mean)` : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each (the documented range; this repository has no measured mean yet)`}` },
+            { key: 'Builder', value: choice ? choice.label : 'No builder is configured on this deployment — an admin adds a provider key (Settings), or use the full run form', changeTo: '/runs', changeLabel: 'Every knob' },
             { key: 'Budget cap', value: 'Per attempt — the builder’s ladder caps turns, tool calls and wall clock; a run can be cancelled at any point' },
             { key: 'Retention', value: retention },
             { key: 'Posture', value: sealed ? 'sealed (docker) — countable as evidence' : `${sandbox?.status ?? 'unknown'} — a development reading, not evidence, until the sandbox is available` },
@@ -128,7 +166,7 @@ export function MeasurePage() {
         />
         <p className="mb-4 mt-6 text-[19px] leading-[1.47]">You can cancel the run at any point. Attempts already made are still charged.</p>
         {can('operator') ? (
-          <WarningButton onClick={start} disabled={create.isPending || !repo.data}>
+          <WarningButton onClick={start} disabled={create.isPending || !repo.data || !choice}>
             Start the run and spend up to {usd(hi)}
           </WarningButton>
         ) : (

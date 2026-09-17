@@ -25,7 +25,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FactoryBacklog, FactoryTask } from '../../api/types'
 import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
-import { FactoryPage } from './FactoryPage'
+import { FactoryPage, stepsFor } from './FactoryPage'
 
 const BACKLOG: FactoryBacklog = {
   repo: 'alpha',
@@ -41,6 +41,31 @@ const TASKS: FactoryTask[] = [
   { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: null, review_verdict: 'accept', last_event: 'item.outcome' },
   { id: 'I-2', title: 'Divide', capability_class: 'feature.add', size: 'S', kind: 'code', status: 'blocked', dor_gaps: ['method_path', 'response_shape'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked' },
 ]
+
+describe('stepsFor — an item the factory has not touched', () => {
+  it('reads as not assessed / not run / not started, never as done or failed', () => {
+    // exactly what the API folds for a frozen-but-unrun item (factory_state.task_views)
+    const untouched: FactoryTask = { id: 'T-1', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'pending', dor_gaps: [], route_hint: '', red_proof: null, build_status: 'not_built', pr_url: null, review_verdict: null, last_event: '' }
+    const steps = stepsFor(untouched)
+    expect(steps.map((x) => [x.id, x.status])).toEqual([
+      ['readiness', 'current'],
+      ['red', 'todo'],
+      ['build', 'todo'],
+      ['delivery', 'todo'],
+      ['review', 'todo'],
+      ['outcome', 'todo'],
+    ])
+    expect(steps[0]!.detail).toMatch(/not assessed/)
+    expect(steps[2]!.detail).toBe('not started')
+  })
+
+  it('a build that ran and was not clean is the failure, spelled out', () => {
+    const notClean: FactoryTask = { id: 'T-2', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'not_clean', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'not_clean', pr_url: null, review_verdict: null, last_event: 'build' }
+    const build = stepsFor(notClean)[2]!
+    expect(build.status).toBe('failed')
+    expect(build.detail).toBe('not clean')
+  })
+})
 
 describe('FactoryPage — the shipped contract', () => {
   afterEach(() => vi.unstubAllGlobals())

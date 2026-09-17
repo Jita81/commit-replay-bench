@@ -13,7 +13,10 @@
  *               what to do next and what it costs; nothing here spends money without a
  *               queued run they can see and cancel (tasks 1–4 cost nothing). Statuses are
  *               never kept locally: the GitHub App info, the repositories, the chosen
- *               repository's stages (`stagesFor`) and the users list decide them.
+ *               repository's stages (`stagesFor`) and the users list decide them. A viewer
+ *               (sponsor, auditor) gets the same list read as a progress report — "Where
+ *               this deployment is" — not as their to-do list; a measurement in flight
+ *               reads "In progress", and the map opens as soon as any row exists.
  * How:          `useGitHubApp`, `useAllRepos`, the chosen repository (`?repo=` or the most
  *               recently updated) → `useRepo` + `useOracle` + `useOracleControls` +
  *               `useCapabilityMap` → `stagesFor`; `useUsers` (admin) or the principal's role
@@ -73,7 +76,12 @@ export function HomePage() {
   const hasRepo = Boolean(chosen)
   const proveDone = stage('oracle') === 'done' && stage('controls') === 'done'
   const proveStatus: StageStatus = proveDone ? 'done' : stage('probe') !== 'done' || stage('mine') !== 'done' ? (stage('mine') === 'running' || stage('probe') === 'running' ? 'running' : 'blocked') : stage('oracle') === 'failed' || stage('controls') === 'failed' ? 'failed' : stage('oracle') === 'running' || stage('controls') === 'running' ? 'running' : 'todo'
-  const measured = stage('measure') === 'done'
+  const measureStage = stage('measure')
+  const measured = measureStage === 'done'
+  const measuring = measureStage === 'running'
+  // the map is readable from the first row, whether or not a run is still adding to it
+  const anyRows = (map.data?.summary.n_total ?? 0) > 0
+  const operator = can('operator')
   const approverKnown = users.data ? users.data.items.some((u) => u.role === 'approver' || u.role === 'admin') : me?.role === 'approver' || me?.role === 'admin' ? true : undefined
 
   const q = chosen ? `?repo=${encodeURIComponent(chosen)}` : ''
@@ -83,17 +91,23 @@ export function HomePage() {
     { num: 2, name: 'Choose a repository', status: hasRepo ? 'Completed' : 'Incomplete', tone: hasRepo ? 'pale' : 'blue', to: '/connect' },
     { num: 3, name: 'Confirm its shape', status: stage('probe') === 'done' ? 'Completed' : hasRepo ? LABEL[stage('probe') ?? 'todo'] : 'Cannot start yet', tone: stage('probe') === 'done' ? 'pale' : hasRepo ? TONE[stage('probe') ?? 'todo'] : 'grey', to: chosen ? `/repos/${encodeURIComponent(chosen)}` : '/connect' },
     { num: 4, name: 'Prove the instrument (£0)', status: LABEL[proveStatus], tone: TONE[proveStatus], to: walk },
-    { num: 5, name: 'Measure — spends money', status: measured ? 'Completed' : proveDone ? 'Incomplete' : 'Cannot start yet', tone: measured ? 'pale' : proveDone ? 'blue' : 'grey', to: chosen ? `/connect/${encodeURIComponent(chosen)}/measure` : '/connect' },
-    { num: 6, name: 'Read the map', status: measured ? 'Incomplete' : 'Cannot start yet', tone: measured ? 'blue' : 'grey', to: `/results${q}` },
-    { num: 7, name: 'Invite an approver', status: approverKnown === true ? 'Completed' : approverKnown === false ? 'Incomplete' : 'Ask an admin', tone: approverKnown === true ? 'pale' : 'blue', to: '/settings' },
+    { num: 5, name: 'Measure — spends money', status: measured ? 'Completed' : measuring ? 'In progress' : proveDone ? 'Incomplete' : 'Cannot start yet', tone: measured ? 'pale' : measuring || proveDone ? 'blue' : 'grey', to: measuring && chosen ? `/connect/${encodeURIComponent(chosen)}` : chosen ? `/connect/${encodeURIComponent(chosen)}/measure` : '/connect' },
+    { num: 6, name: 'Read the map', status: anyRows ? 'Incomplete' : 'Cannot start yet', tone: anyRows ? 'blue' : 'grey', to: `/results${q}` },
+    // only an admin can invite; everyone else is told whom to ask and is not sent to a page that refuses them
+    { num: 7, name: 'Invite an approver', status: approverKnown === true ? 'Completed' : approverKnown === false ? 'Incomplete' : 'Ask an admin', tone: approverKnown === true ? 'pale' : 'blue', to: can('admin') ? '/settings' : '/posture' },
   ]
   const completed = tasks.filter((t) => t.status === 'Completed').length
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
 
   return (
     <>
-      <Kicker>{chosen ? `${chosen} · ${measured ? 'measured' : 'trial'}` : 'no repository yet'}</Kicker>
-      <PageTitle>Get started</PageTitle>
+      <Kicker>{chosen ? `${chosen} · ${measured ? 'measured' : measuring ? 'measuring' : 'trial'}` : 'no repository yet'}</Kicker>
+      <PageTitle>{operator ? 'Get started' : 'Where this deployment is'}</PageTitle>
+      {!operator && (
+        <Lede className="mb-4">
+          You can read everything here and change nothing. The tasks below are the operators' progress from an empty deployment to a signed cell; the capability map and your decisions are where a {me?.role ?? 'viewer'} spends their time.
+        </Lede>
+      )}
       {sandbox && sandbox.status !== 'ok' && (
         <NotificationBanner title="Important">
           <p className="m-0 mb-2 font-bold">The sandbox probe is {sandbox.status} on this host.</p>
@@ -103,7 +117,7 @@ export function HomePage() {
         </NotificationBanner>
       )}
       <div className="max-w-[44em]">
-        <TaskList tasks={tasks} completed={completed} />
+        <TaskList tasks={tasks} completed={completed} summary={operator ? undefined : `The operators have completed ${completed} of ${tasks.length} tasks.`} />
       </div>
       <InsetText className="mt-8">
         <p className="m-0">Nothing spends money without a queued run you can see and cancel. Tasks 1 to 4 cost nothing.</p>
@@ -112,7 +126,7 @@ export function HomePage() {
       <Lede className="mb-4">
         The operator who queues the runs should not be the approver who signs the result off. Sign-off needs the approver role and an attestation naming the diff they read; keeping the two roles on two people is how a deployment shows separation of duties — task 7 is not optional before a cell can be signed.
       </Lede>
-      <StartButton to="/decisions">Continue</StartButton>
+      <StartButton to={operator ? '/decisions' : anyRows ? `/results${q}` : '/decisions'}>Continue</StartButton>
     </>
   )
 }

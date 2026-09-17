@@ -34,7 +34,7 @@ describe('MeasurePage', () => {
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
       'GET /repos/cobra': REPO,
       'GET /capability-map': MAP,
-      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: {} }] },
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: {} }, { name: 'builders', status: 'ok', detail: 'configured: claude_code_cli', data: { anthropic: false, claude_code_cli: true } }] },
       'POST /runs': () => json({ id: 'run-1', repo: 'cobra', kind: 'replay', status: 'queued' }, 201),
     })
     renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
@@ -50,7 +50,8 @@ describe('MeasurePage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Start the run and spend up to $4.08' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
     const post = calls.find((c) => c.method === 'POST')!
-    expect(JSON.parse(String(post.init?.body))).toEqual({ repo: 'cobra', kind: 'replay', mode: 'sighted', limit: 10, retain: { worktrees: true, transcripts: false } })
+    expect(JSON.parse(String(post.init?.body))).toEqual({ repo: 'cobra', kind: 'replay', mode: 'sighted', builder: 'claude_code', model: 'claude-sonnet-5', builder_config: { auth: 'cli' }, limit: 10, retain: { worktrees: true, transcripts: false } })
+    expect(box).toHaveTextContent('the operator’s own CLI login (development and evaluation only)')
   })
 
   it('a viewer sees the page but no button; no measured mean falls back to the documented range', async () => {
@@ -58,7 +59,7 @@ describe('MeasurePage', () => {
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /repos/cobra': REPO,
       'GET /capability-map': { ...MAP, cells: [] },
-      'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'degraded', detail: '', data: {} }] },
+      'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'degraded', detail: '', data: {} }, { name: 'builders', status: 'degraded', detail: 'configured: none', data: { anthropic: false, claude_code_cli: false } }] },
     })
     renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
     await waitFor(() => expect(screen.getByTestId('before-you-start')).toHaveTextContent('the documented range'))
@@ -67,5 +68,6 @@ describe('MeasurePage', () => {
     expect(box).toHaveTextContent('a development reading, not evidence')
     expect(screen.queryByRole('button', { name: /Start the run/ })).not.toBeInTheDocument()
     expect(within(box).getByText('Starting a run needs the operator role.')).toBeInTheDocument()
+    expect(box).toHaveTextContent('No builder is configured on this deployment')
   })
 })

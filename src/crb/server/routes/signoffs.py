@@ -158,7 +158,7 @@ from crb.server.schemas_signoff import (
     SignoffRouteOut,
     SignoffWithPolicyOut,
 )
-from crb.store.models import Grade, Repo, Signoff, Task
+from crb.store.models import Grade, Repo, Signoff, Task, User
 
 router = APIRouter(tags=["signoffs"])
 _ERR = {"model": ErrorEnvelope}
@@ -649,6 +649,14 @@ def _superseded(row: Signoff, all_rows: Sequence[Signoff]) -> bool:
     return any(r.seq > row.seq and not r.revoke and _scope_key(r) == key for r in all_rows)
 
 
+def _display_name(session: Session, user_id: str) -> str:
+    """The name a reader sees for a ledger actor: resolved from the users table at read
+    time (the session's identity map makes repeats free), empty when the account is
+    gone. The ledger row keeps the id — a name may change, the hash chain may not."""
+    user = session.get(User, user_id)
+    return (user.display_name or user.subject.removeprefix("local:")) if user is not None else ""
+
+
 def signoff_out(
     session: Session, row: Signoff, all_rows: Sequence[Signoff]
 ) -> SignoffWithPolicyOut:
@@ -674,9 +682,13 @@ def signoff_out(
         tier=row.tier,
         note=row.note,
         approver=row.verifier,
+        approver_name=_display_name(session, row.verifier),
         created=row.created,
         revoked=revocation is not None,
         revoked_by=revocation.verifier if revocation is not None else None,
+        revoked_by_name=(
+            _display_name(session, revocation.verifier) if revocation is not None else None
+        ),
         revoked_at=revocation.created if revocation is not None else None,
         active=active,
         current_false_q1=current_fq1,

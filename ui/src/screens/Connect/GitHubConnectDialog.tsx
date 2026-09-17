@@ -88,17 +88,23 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
       onClose={onClose}
       width="lg"
       footer={
-        <>
-          {onUseUrl && (
-            <Button variant="ghost" onClick={onUseUrl}>
-              Connect by URL instead
-            </Button>
-          )}
+        app.data && !app.data.configured ? (
+          // nothing can be connected from here until an admin registers the app: the body's
+          // one "Connect by URL" is the whole offer, so the footer only closes
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="filled" disabled={!picked || !language || !can('operator') || connect.isPending} onClick={submit}>
-            Connect
-          </Button>
-        </>
+        ) : (
+          <>
+            {onUseUrl && (
+              <Button variant="ghost" onClick={onUseUrl}>
+                Connect by URL instead
+              </Button>
+            )}
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="filled" disabled={!picked || !language || !can('operator') || connect.isPending} onClick={submit}>
+              Connect
+            </Button>
+          </>
+        )
       }
     >
       {app.isError && <ErrorState error={app.error} onRetry={() => void app.refetch()} />}

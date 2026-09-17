@@ -25,6 +25,7 @@
  * Touch when:   a human act is added to the product (decisions.ts first).
  */
 
+import { approverName } from '../../api/types'
 import { LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
@@ -122,7 +123,7 @@ export function DecisionsPage() {
                     on {repo} — signed at apparatus {signoff.evidence.apparatus_versions.join(', ') || '?'}, now reading at {signoff.apparatus_current || apparatus}
                   </h3>
                   <p className="m-0 font-mono text-[16px] leading-[1.5] text-on-surface-muted">
-                    signed {signoff.created.slice(0, 10)} by {signoff.approver} · n={signoff.evidence.n} · {pct(signoff.evidence.point)} [{pct(signoff.evidence.ci_low)}, …]
+                    signed {signoff.created.slice(0, 10)} by {approverName(signoff)} · n={signoff.evidence.n} · {pct(signoff.evidence.point)} [{pct(signoff.evidence.ci_low)}, …]
                   </p>
                 </div>
                 <SecondaryButton to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${signoff.cell.capability_class}|${signoff.cell.size}`)}`}>Revoke or re-sign</SecondaryButton>

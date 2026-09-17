@@ -47,6 +47,25 @@ numbers were never trusted.
 - Backlog: F3b (shape review with risk copy), F5b (per-run spend cap), F7b (separation of
   duties at write — the prototype claims it; the product does not enforce it) added to
   docs/reviews/2026-09-17-enterprise-front-end.md §9; F2 and F19 marked landed.
+- **Persona walkthrough on the live stack** (docs/reviews/2026-09-17-persona-walkthrough.md):
+  every screen of the journey was driven as a viewer, an operator, an approver, an admin, a
+  developer, a platform engineer and an MCP consumer, with axe and a phone viewport. What it
+  found and fixed: the Measure page posted no builder (422) — it now derives the builder from
+  the health probe; the connection walk said *Done* while a replay was running — running
+  outranks done; the sign-off form asked for an affirmation without showing the diff — the
+  retained patch is now on the form (`ReadTheDiff`); sign-offs named the approver by user id
+  everywhere including the licence sentence — the API now resolves `approver_name` /
+  `revoked_by_name` at read; **revoke** was one click with no reason — it now confirms and
+  records a required reason as the revocation note, and revoked rows stay listed; Home gave
+  a viewer an operator's to-do list and called a run in flight *Incomplete* — role-aware copy,
+  *In progress*, the map openable from the first row, no non-admin sent to `/settings`; the
+  login page offered the organisation button when no provider existed — `/version` now says
+  `oidc_enabled` and the button and the posture row read it; the admin Users table's Username
+  column was blank (API `subject` vs UI `username`) — `/users` now serves `username`; the
+  Factory chain drew a never-built item as *failed* and an unassessed one as *done* — both
+  read honestly; two WCAG 2.1 AA findings (an undistinguished link in the Important banner,
+  the red pill ink at 4.4:1) — links in prose underline, the red soft fill is lightened to
+  4.7:1; the journey screens joined the walkthrough's axe sweep.
 
 ### 2026-09-17 — the GitHub App is the connection (ADR-0014, DL-041)
 

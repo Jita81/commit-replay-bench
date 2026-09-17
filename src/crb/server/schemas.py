@@ -1056,9 +1056,14 @@ class SignoffOut(BaseModel):
     tier: str
     note: str
     approver: str
+    #: The approver's display name resolved from the users table at READ time; ``approver``
+    #: stays the stable user id the hash chain covers (a name may change, an id may not).
+    #: Empty when the account no longer exists.
+    approver_name: str = ""
     created: str
     revoked: bool
     revoked_by: str | None
+    revoked_by_name: str | None = None
     revoked_at: str | None
     active: bool
     current_false_q1: int

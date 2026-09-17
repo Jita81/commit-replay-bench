@@ -87,6 +87,16 @@ describe('stagesFor', () => {
   })
 })
 
+describe('stagesFor — an active run outranks done', () => {
+  it('a running replay on a measured repository shows as in progress with the run to watch', () => {
+    const r = repo({ probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: '' }, task_counts: { total: 12, standard: 9, hard: 3, gold_clean: 10, gold_failed: 1, unchecked: 1 }, last_run: { id: 'r9', kind: 'replay', status: 'running', finished: null } })
+    const s = stagesFor({ repo: r, oracle: ORACLE, controls: CONTROLS_OK, measuredRows: 54 })
+    expect(s[5]).toMatchObject({ status: 'running', runId: 'r9' })
+    expect(s[5]?.detail).toBe('measuring… (54 rows already on the current apparatus)')
+    expect(stageSummary(s)).toEqual({ label: 'first measurement', status: 'running' })
+  })
+})
+
 describe('nameFromGitUrl', () => {
   it('derives owner-repo from GitHub, GitLab and Azure DevOps URLs', () => {
     expect(nameFromGitUrl('https://github.com/NHSDigital/mesh-client.git')).toBe('nhsdigital-mesh-client')

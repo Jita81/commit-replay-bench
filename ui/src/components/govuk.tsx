@@ -61,11 +61,11 @@ export interface TaskItem {
 }
 
 /** GOV.UK task list: "You have completed n of m tasks" and the numbered rows. */
-export function TaskList({ tasks, completed, label = 'Tasks' }: { tasks: TaskItem[]; completed: number; label?: string }) {
+export function TaskList({ tasks, completed, label = 'Tasks', summary }: { tasks: TaskItem[]; completed: number; label?: string; summary?: string }) {
   return (
     <div>
       <p className="m-0 mb-2 text-[19px] leading-[1.47]">
-        You have completed {completed} of {tasks.length} tasks.
+        {summary ?? `You have completed ${completed} of ${tasks.length} tasks.`}
       </p>
       <ol className="m-0 list-none border-t border-border p-0" aria-label={label}>
         {tasks.map((t) => {
@@ -144,7 +144,7 @@ export function NotificationBanner({ title = 'Important', children, tone = 'blue
   return (
     <div className={`mb-8 max-w-[44em] border-[5px] ${frame} ${className}`} role={tone === 'red' ? 'alert' : 'region'} aria-label={title}>
       <div className={`${bar} px-4 py-2 text-[19px] font-bold leading-[1.4] text-on-primary`}>{title}</div>
-      <div className="p-4 text-[19px] leading-[1.47]">{children}</div>
+      <div className="p-4 text-[19px] leading-[1.47] [&_a]:underline">{children}</div>
     </div>
   )
 }
@@ -154,14 +154,14 @@ export function WarningCallout({ title, children, className = '' }: { title: str
   return (
     <div className={`mb-8 max-w-[44em] border-t-8 border-status-amber-fill bg-status-amber-soft p-6 ${className}`}>
       <h3 className="m-0 mb-2 text-[19px] font-bold uppercase leading-[1.4] tracking-[.05em] text-on-surface">{title}</h3>
-      <div className="text-[19px] leading-[1.47] text-on-surface">{children}</div>
+      <div className="text-[19px] leading-[1.47] text-on-surface [&_a]:underline">{children}</div>
     </div>
   )
 }
 
 /** GOV.UK inset text — the blue-railed aside. */
 export function InsetText({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`mb-8 max-w-[44em] border-l-8 border-primary py-2 pl-6 text-[19px] leading-[1.47] ${className}`}>{children}</div>
+  return <div className={`mb-8 max-w-[44em] border-l-8 border-primary py-2 pl-6 text-[19px] leading-[1.47] [&_a]:underline ${className}`}>{children}</div>
 }
 
 export function BackLink({ to, children }: { to: string; children: ReactNode }) {
@@ -227,5 +227,5 @@ export function PageTitle({ children, className = '' }: { children: ReactNode; c
 }
 
 export function Lede({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <p className={`m-0 mb-8 max-w-[44em] text-[19px] leading-[1.47] ${className}`}>{children}</p>
+  return <p className={`m-0 mb-8 max-w-[44em] text-[19px] leading-[1.47] [&_a]:underline ${className}`}>{children}</p>
 }

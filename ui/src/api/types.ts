@@ -100,6 +100,8 @@ export interface Version {
   crb: string
   apparatus: string
   policy: string
+  /** An organisation (OpenID Connect) sign-in is configured; unauthenticated, names nothing. */
+  oidc_enabled?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -869,7 +871,10 @@ export interface Signoff {
   repo: string
   cell: Record<string, string>
   note: string
+  /** The stable user id the hash chain covers. Show `approverName(s)`, not this. */
   approver: string
+  /** Resolved from the users table at read; empty when the account is gone. */
+  approver_name?: string
   created: string
   revoked: boolean
   /** Made on an earlier apparatus than the one the deployment reads at now: kept, verifying, lifting nothing until re-signed or revoked. */
@@ -878,6 +883,7 @@ export interface Signoff {
   stale?: boolean
   apparatus_current?: string
   revoked_by: string | null
+  revoked_by_name?: string | null
   revoked_at: string | null
   evidence: {
     n: number
@@ -886,6 +892,11 @@ export interface Signoff {
     false_q1: number
     apparatus_versions: string[]
   }
+}
+
+/** Who signed, as a person reads it: the resolved name, else the id the ledger holds. */
+export function approverName(s: Pick<Signoff, 'approver' | 'approver_name'>): string {
+  return s.approver_name || s.approver
 }
 
 /** `POST /signoffs` body (the older shape; the Sign-off screen's fuller request lives in ui/src/screens/Signoff/contract.ts). */
@@ -1065,12 +1076,17 @@ export interface FactoryTask {
 /** `GET /users` item (admin). */
 export interface User {
   id: string
+  /** What a local account types at login; an OIDC account's provider subject. */
   username: string
+  /** The namespaced identity (`local:<name>` or the OIDC `sub`). */
+  subject?: string
   display_name: string
   email: string
   role: Role
   issuer: string
+  active?: boolean
   created: string
+  last_login?: string
 }
 
 /** `POST /users` body — a local account; the password never comes back. */

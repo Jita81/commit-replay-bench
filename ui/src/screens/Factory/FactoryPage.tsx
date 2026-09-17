@@ -74,7 +74,10 @@ export function stepsFor(t: FactoryTask): Step[] {
       ? { id: 'readiness', title: 'Readiness', status: 'current', detail: `${gaps} structural gap${gaps === 1 ? '' : 's'} unsigned: ${t.dor_gaps.join(', ')}` }
       : t.route_hint === 'human' && t.status === 'routed_human'
         ? { id: 'readiness', title: 'Readiness', status: 'failed', detail: 'routed to a human — the loop stops here' }
-        : { id: 'readiness', title: 'Readiness', status: 'done', detail: `route ${t.route_hint}` }
+        : t.route_hint === ''
+          ? // no route event yet: the factory run has not assessed this item
+            { id: 'readiness', title: 'Readiness', status: 'current', detail: 'not assessed — a factory run assesses readiness first' }
+          : { id: 'readiness', title: 'Readiness', status: 'done', detail: `route ${t.route_hint}` }
   const afterReadiness = readiness.status === 'done'
   const red: Step =
     t.red_proof === true
@@ -85,9 +88,10 @@ export function stepsFor(t: FactoryTask): Step[] {
   const buildDone = t.build_status === 'clean'
   const build: Step = buildDone
     ? { id: 'build', title: 'Build under the belts', status: 'done', detail: 'clean' }
-    : t.build_status === 'not_started' || !t.build_status
-      ? { id: 'build', title: 'Build under the belts', status: red.status === 'done' ? 'current' : 'todo', detail: 'not started' }
-      : { id: 'build', title: 'Build under the belts', status: 'failed', detail: t.build_status }
+    : t.build_status === 'not_built' || t.build_status === 'not_started' || !t.build_status
+      ? // the API folds "no build event" as `not_built` (factory_state.task_views)
+        { id: 'build', title: 'Build under the belts', status: red.status === 'done' ? 'current' : 'todo', detail: 'not started' }
+      : { id: 'build', title: 'Build under the belts', status: 'failed', detail: t.build_status.replace(/_/g, ' ') }
   const withheld = buildDone && !t.pr_url && t.last_event === 'delivery.refused'
   const delivery: Step = t.pr_url
     ? { id: 'delivery', title: 'Delivery', status: 'done', detail: 'branch + pull request opened' }
@@ -254,11 +258,11 @@ function ItemRow({ repo, task: t, focused, canSign }: { repo: string; task: Fact
           const d = STEP_DISPLAY[s.status]
           return (
             <li key={s.id} className="min-w-0 rounded-[var(--radius-control)] border border-border p-2" data-testid={`step-${t.id}-${s.id}`}>
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`${s.title}: ${d.label}`}>
                   {d.label}
                 </Pill>
-                <span className="truncate text-xs font-semibold">{s.title}</span>
+                <span className="text-xs font-semibold leading-tight">{s.title}</span>
               </div>
               <div className="mt-1 text-[11px] leading-snug text-on-surface-muted">{s.detail}</div>
             </li>
