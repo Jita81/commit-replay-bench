@@ -50,6 +50,15 @@ function pct(x: number): string {
   return `${(x * 100).toFixed(0)}%`
 }
 
+/** "alpha is" / "alpha and beta are" / "alpha, beta, gamma and 2 more are" — names, never a bare count. */
+function listNames(names: string[]): string {
+  if (names.length === 1) return `${names[0]} is`
+  const shown = names.slice(0, 3)
+  const rest = names.length - shown.length
+  const head = shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}` : shown[0]
+  return rest > 0 ? `${shown.join(', ')} and ${rest} more are` : `${head} are`
+}
+
 export function DecisionsPage() {
   const { can } = useAuth()
   const d = useDecisions()
@@ -79,7 +88,7 @@ export function DecisionsPage() {
         <EmptyState glyph="⎇" title="No repository connected" reason="Decisions appear once a repository has been measured." action={<LinkButton to="/connect">Connect a repository</LinkButton>} />
       )}
       {d.ready && d.connected.length > 0 && repos.length === 0 && (
-        <EmptyState glyph="◌" title="Nothing measured yet" reason={`${d.connected.length === 1 ? `${d.connected[0]} is` : `${d.connected.length} repositories are`} connected but no capability map exists yet. Decisions appear once a measurement has run.`} action={<LinkButton to="/connect">Go to the connection walk</LinkButton>} />
+        <EmptyState glyph="◌" title="Nothing measured yet" reason={`${listNames(d.connected)} connected but no capability map exists yet. Decisions appear once a measurement has run.`} action={<LinkButton to="/connect">Go to the connection walk</LinkButton>} />
       )}
       {repos.map((repo) => {
         const rows = d.byRepo[repo] ?? []
