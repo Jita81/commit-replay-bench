@@ -12,6 +12,9 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0014-github-app-is-the-connection.md
  * Works with:   ui/src/screens/Settings/SettingsPage.tsx (mounts it), src/crb/server/routes/github.py
+ *               (`GET /github/app` and the sync it posts to), ui/src/api/hooks.ts (`useGitHubApp`,
+ *               `useSyncGitHubInstallations`), ui/src/screens/Connect/GitHubConnectDialog.tsx (the
+ *               operator's picker over the same installations), docs/GITHUB-APP.md (the setup guide it links)
  * Tested by:    ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the card is covered there)
  * Touch when:   a field is added to `GitHubAppInfo`.
  */

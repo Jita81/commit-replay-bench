@@ -89,9 +89,13 @@ OUT_KEYS = {
     "tier",
     "note",
     "approver",
+    "approver_name",
+    "stale",
+    "apparatus_current",
     "created",
     "revoked",
     "revoked_by",
+    "revoked_by_name",
     "revoked_at",
     "active",
     "current_false_q1",
@@ -268,6 +272,9 @@ class TestCreate:
             "provider": "*",
         }
         assert d["revoked"] is False and d["active"] is True and d["current_false_q1"] == 0
+        # the ledger keeps the approver's id; the reader gets the name resolved at read
+        assert d["approver"] != "appr1" and d["approver_name"] == "appr1"
+        assert d["revoked_by_name"] is None
         # the evidence snapshot: n, point, the interval, false-Q1, oracle, apparatus
         ev = d["evidence"]
         assert ev["n"] == 40 and ev["point"] == 0.95
@@ -885,7 +892,9 @@ class TestListAndRevoke:
         assert item["route"] == {"route": "", "reason": "", "reason_code": ""}
         assert item["controls"]["verdict"] == "" and item["controls"]["k"] == 0
         assert item["evidence"]["n"] == 40 and item["evidence"]["oracle_strength"] is None
-        assert item["active"] is True  # trust once given stands until revoked / false-Q1
+        # trust once given stands until revoked / false-Q1 — or until the apparatus moves:
+        # this legacy row was stamped at 2.0 and the instrument now reads at a later one
+        assert item["stale"] is True and item["active"] is False
         assert verify_signoff_rows(_signoffs(env)) == 1
         # a new attestation chains after it
         clear_policy(env)
@@ -952,7 +961,11 @@ class TestListAndRevoke:
         assert item["policy_thresholds"] == v1_thresholds
         assert "require_oracle_measured" not in item["policy_thresholds"]
         assert item["evidence"]["oracle_strength"] is None  # what it saw, not today's measurement
-        assert item["attestation"]["reviewed_row_hash"] == row_hash and item["active"] is True
+        assert item["attestation"]["reviewed_row_hash"] == row_hash
+        # stamped at apparatus 2.1 and read at the current one: STALE — served, verifying,
+        # but lifting nothing until re-signed (evidence expires when the apparatus changes)
+        assert item["stale"] is True and item["active"] is False
+        assert item["apparatus_current"] == APPARATUS_VERSION
         assert verify_signoff_rows(_signoffs(env)) == 1
         clear_policy(env)
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
@@ -962,7 +975,7 @@ class TestListAndRevoke:
     def test_revoke_rbac(self, env: Env) -> None:
         clear_policy(env)
         sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
-        assert_rbac(env, "POST", f"/signoffs/{sid}/revoke", min_role="approver")
+        assert_rbac(env, "POST", f"/signoffs/{sid}/revoke", min_role="approver", json={"note": "x"})
 
     def test_revoke_appends_and_hides(self, env: Env) -> None:
         clear_policy(env)
@@ -975,7 +988,7 @@ class TestListAndRevoke:
         assert r.status_code == 200, r.text
         d = r.json()
         assert d["id"] == sid and d["revoked"] is True and d["active"] is False
-        assert d["revoked_by"] and d["revoked_at"]
+        assert d["revoked_by"] and d["revoked_at"] and d["revoked_by_name"] == "appr1"
         assert d["attestation"] is not None  # the attestation that WAS made stays on the record
         rows = _signoffs(env)
         assert [x.revoke for x in rows] == [False, True]
@@ -990,16 +1003,30 @@ class TestListAndRevoke:
             == "automated-pass"
         )
         # twice → 409; unknown → 404; the revocation row itself is not an attestation id
-        r = env.post(f"/signoffs/{sid}/revoke")
+        why = {"note": "again"}
+        r = env.post(f"/signoffs/{sid}/revoke", json=why)
         assert r.status_code == 409 and envelope(r)["code"] == "already_revoked"
-        assert env.post("/signoffs/nope/revoke").status_code == 404
-        assert env.post(f"/signoffs/{rows[1].signoff_id}/revoke").status_code == 404
+        assert env.post("/signoffs/nope/revoke", json=why).status_code == 404
+        assert env.post(f"/signoffs/{rows[1].signoff_id}/revoke", json=why).status_code == 404
         assert env.get(f"/signoffs/{rows[1].signoff_id}").status_code == 404
+
+    def test_revoke_needs_a_reason_at_the_api_not_just_in_the_ui(self, env: Env) -> None:
+        clear_policy(env)
+        sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
+        # no body, an empty note and a blank note are all refused before anything is written
+        assert env.post(f"/signoffs/{sid}/revoke").status_code == 422
+        assert env.post(f"/signoffs/{sid}/revoke", json={}).status_code == 422
+        assert env.post(f"/signoffs/{sid}/revoke", json={"note": ""}).status_code == 422
+        assert env.post(f"/signoffs/{sid}/revoke", json={"note": "   "}).status_code == 422
+        assert env.get(f"/signoffs?repo={ALPHA}").json()["total"] == 1
+        assert [x.revoke for x in _signoffs(env)] == [False]
+        r = env.post(f"/signoffs/{sid}/revoke", json={"note": "  evidence re-examined  "})
+        assert r.status_code == 200 and _signoffs(env)[1].note == "evidence re-examined"
 
     def test_re_attest_after_revoke(self, env: Env) -> None:
         clear_policy(env)
         sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
-        env.post(f"/signoffs/{sid}/revoke")
+        env.post(f"/signoffs/{sid}/revoke", json={"note": "re-examined"})
         r = env.post("/signoffs", json=attested_body(env, DELIVER, note="again"))
         assert r.status_code == 201 and r.json()["active"] is True
         page = env.get(f"/signoffs?repo={ALPHA}").json()

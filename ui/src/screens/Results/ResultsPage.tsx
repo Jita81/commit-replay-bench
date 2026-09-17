@@ -41,6 +41,8 @@ import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { StatTile } from '../../components/StatTile'
 import type { Tone } from '../../lib/verdict'
 import { KIND_LABEL, decisionsFor } from '../Decisions/decisions'
+import { InsetText, WarningCallout } from '../../components/govuk'
+import { MapTable, licenseSentence } from './MapTable'
 
 const CONTROLS_TONE: Record<string, Tone> = { passed: 'green', failed: 'red', thin: 'amber', escaped: 'red', unmeasured: 'muted' }
 
@@ -72,6 +74,18 @@ export function ResultsPage() {
     () => (map.data && signoffs.data ? decisionsFor({ repo, cells: map.data.cells, signoffs: signoffs.data.items, tasks: tasks.data ?? [] }) : []),
     [repo, map.data, signoffs.data, tasks.data],
   )
+  const licence = useMemo(() => (map.data ? licenseSentence(repo, map.data, signoffs.data?.items ?? []) : null), [repo, map.data, signoffs.data])
+  const economics = useMemo(() => {
+    const n = measured.reduce((a, c) => a + c.n, 0)
+    const clean = measured.reduce((a, c) => a + c.clean, 0)
+    const costed = measured.filter((c) => c.cost_usd_mean > 0)
+    const costN = costed.reduce((a, c) => a + c.n, 0)
+    const perAttempt = costN ? costed.reduce((a, c) => a + c.cost_usd_mean * c.n, 0) / costN : null
+    const timed = measured.filter((c) => c.latency_s_mean > 0)
+    const timeN = timed.reduce((a, c) => a + c.n, 0)
+    const latency = timeN ? timed.reduce((a, c) => a + c.latency_s_mean * c.n, 0) / timeN : null
+    return { n, clean, perAttempt, perClean: perAttempt !== null && clean ? (perAttempt * n) / clean : null, latency }
+  }, [measured])
   const controlsNotRun = controls.isError && isApiError(controls.error) && controls.error.status === 404
   const oracleNotRun = oracle.isError && isApiError(oracle.error) && oracle.error.status === 404
   const verdict = controls.data?.verdict
@@ -131,26 +145,27 @@ export function ResultsPage() {
                 <p className="mt-3 max-w-[80ch] text-sm text-on-surface-body">
                   <strong>deliver</strong> means the cell clears the published bar (n ≥ {map.data.policy.min_n}, point ≥ {pct(map.data.policy.min_point)}, Wilson-low ≥ {pct(map.data.policy.min_ci_low)}, false-Q1 = 0, oracle ≥ {pct(map.data.policy.min_oracle_strength)}, controls passed) so the factory may open a branch and a pull request for that class of change under human review. It never means a change is safe to merge or deploy.
                 </p>
-                <ul className="m-0 mt-2 list-none space-y-1 p-0 text-sm">
-                  {measured
-                    .slice()
-                    .sort((a, b) => b.n - a.n)
-                    .slice(0, 8)
-                    .map((c) => (
-                      <li key={`${c.capability_class}|${c.size}`} className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-xs">
-                          {c.capability_class} × {c.size}
-                        </span>
-                        <Pill tone={c.route === 'deliver' ? 'green' : c.route === 'human' ? 'amber' : c.route === 'do_not_ship' ? 'red' : 'muted'} size="xs">
-                          {c.route}
-                        </Pill>
-                        <span className="num font-mono text-xs text-on-surface-muted">
-                          n={c.n}
-                          {c.n_tasks !== undefined ? ` on ${c.n_tasks} tasks` : ''} · {pct(c.point)} [{pct(c.ci_low)}, {pct(c.ci_high)}]{c.reason_code ? ` · ${c.reason_code}` : ''}
-                        </span>
-                      </li>
-                    ))}
-                </ul>
+                <h3 className="mb-2 mt-6 text-[24px] font-bold leading-[1.3]">What it can do, by class and size</h3>
+                <p className="m-0 mb-4 max-w-[44em] text-[16px] leading-[1.5] text-on-surface-body">
+                  Each cell carries its own <code>n</code>, its point estimate and its Wilson interval. An empty cell says "not measured" — it does not say zero.
+                </p>
+                <MapTable map={map.data} signoffs={signoffs.data?.items ?? []} repo={repo} />
+                {licence && (
+                  <InsetText>
+                    <h3 className="m-0 mb-2 text-[19px] font-bold leading-[1.4]">What this licenses you to say</h3>
+                    <p className="m-0" data-testid="licence-sentence">{licence}</p>
+                  </InsetText>
+                )}
+                <h3 className="mb-3 text-[24px] font-bold leading-[1.3]">Economics</h3>
+                <div className="mb-4 grid gap-3 sm:grid-cols-4">
+                  <StatTile label="Cost per attempt" value={economics.perAttempt === null ? '—' : `$${economics.perAttempt.toFixed(2)}`} n={economics.n} apparatus="a mean of builder-reported $ over cells with a known cost, current apparatus — no interval: the API serves the mean only (backlog F35)" />
+                  <StatTile label="Cost per clean attempt" value={economics.perClean === null ? '—' : `$${economics.perClean.toFixed(2)}`} n={economics.clean} apparatus={`${economics.clean} clean of ${economics.n} — the same mean divided by the clean rate; no interval`} />
+                  <StatTile label="Latency per attempt" value={economics.latency === null ? '—' : `${Math.floor(Math.round(economics.latency) / 60)}m ${Math.round(economics.latency) % 60}s`} n={economics.n} apparatus="a mean over cells with a known latency — no interval: the API serves the mean only (backlog F35)" />
+                  <StatTile label="Clean rate" value={economics.n ? pct(economics.clean / economics.n) : '—'} n={economics.n} apparatus="all attempts, all cells — never a routing input" />
+                </div>
+                <WarningCallout title="No throughput headline">
+                  The ledger records neither human hours nor merge outcomes yet, so cost per accepted change cannot be shown here honestly. What is shown is cost per clean attempt, which is measured.
+                </WarningCallout>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <LinkButton size="sm" to={`/routing?${q}`}>
                     Every route with its reason

@@ -6,8 +6,9 @@
  * (shape-valid, fake) `claude setup-token` value through the UI — status, ≤4-char
  * fingerprint, provenance, remove — without the value ever appearing in the page;
  * then axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a Run detail (with real
- * rows), Capability, Ledger and Sign-off — against the live data these specs
- * produced, not fixtures.
+ * rows), Capability, Ledger, Sign-off and the journey screens (Home, Connection,
+ * Measure, Results, Decisions, Factory, Deployment) — against the live data these
+ * specs produced, not fixtures.
  *
  * Navigation
  * ----------
@@ -167,5 +168,35 @@ test.describe('07 settings + accessibility', () => {
     await page.goto(`/oracle?repo=${encodeURIComponent(t.name)}`)
     await expect(page.getByRole('table', { name: 'Negative-control rows' })).toBeVisible()
     await axeClean(page, '/oracle')
+  })
+
+  test('the journey screens — Home, Connection, Measure, Results, Decisions, Factory, Deployment — have no WCAG 2.1 AA violations', async ({ page }) => {
+    await page.goto('/home')
+    await expect(page.getByRole('list', { name: 'Tasks' })).toBeVisible()
+    await axeClean(page, '/home')
+    await page.goto('/connect')
+    await expect(page.getByRole('link', { name: t.name, exact: true })).toBeVisible()
+    await axeClean(page, '/connect')
+    // each wait is for API-backed content, not the heading: the loaded screen is what axe reads
+    await page.goto(`/connect/${encodeURIComponent(t.name)}`)
+    await expect(page.getByTestId('stage-measure')).toBeVisible()
+    await axeClean(page, `/connect/${t.name}`)
+    await page.goto(`/connect/${encodeURIComponent(t.name)}/measure`)
+    await expect(page.getByTestId('before-you-start')).toContainText(/attempts/)
+    await axeClean(page, `/connect/${t.name}/measure`)
+    await page.goto(`/results?repo=${encodeURIComponent(t.name)}`)
+    await expect(page.getByRole('table', { name: `Capability map for ${t.name}` })).toBeVisible()
+    await axeClean(page, '/results')
+    await page.goto('/decisions')
+    // page-level readiness: every repository's map, sign-off and task queries have settled
+    await expect(page.getByTestId('decisions-count')).toHaveAttribute('data-ready', 'true')
+    await axeClean(page, '/decisions')
+    await page.goto(`/factory?repo=${encodeURIComponent(t.name)}`)
+    await expect(page.getByTestId('factory-no-backlog').or(page.getByTestId('factory-run-controls'))).toBeVisible()
+    await axeClean(page, '/factory')
+    await page.goto('/posture')
+    await expect(page.getByText(/^crb \d/)).toBeVisible()
+    await expect(page.getByText(/Append-only, hash-chained/)).toBeVisible()
+    await axeClean(page, '/posture')
   })
 })

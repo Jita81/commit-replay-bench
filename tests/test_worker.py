@@ -1174,3 +1174,21 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     h.enqueue("factory", ladder_json=["fake:m0"])
     again = h.run_one()
     assert again.status == STATUS_FAILED and "no frozen backlog" in again.error
+
+
+def test_github_settings_read_only_their_own_keys_and_refuse_a_malformed_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The worker reads ``CRB_GITHUB__*`` the way the API does and nothing else: an
+    unrelated server setting it does not use cannot stop it, and a malformed GitHub value
+    stops it rather than starting a worker that quietly has no enterprise connection."""
+    import pydantic
+
+    monkeypatch.setenv("CRB_GITHUB__APP_ID", "12345")
+    monkeypatch.setenv("CRB_GITHUB__APP_SLUG", "crb-bench")
+    monkeypatch.setenv("CRB_SESSION_TTL_S", "not-a-number")  # a server key: irrelevant here
+    gh = worker_main._github_settings()
+    assert gh.app_id == "12345" and gh.app_slug == "crb-bench"
+    monkeypatch.setenv("CRB_GITHUB__API_URL", "ftp://not-https")
+    with pytest.raises(pydantic.ValidationError):
+        worker_main._github_settings()

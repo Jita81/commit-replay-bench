@@ -51,6 +51,7 @@ from crb.core.secrets_file import SecretsInsecure
 from crb.core.version import APPARATUS_VERSION
 from crb.observability.probes import probe_builders
 from crb.server.auth import (
+    LOCAL_ISSUER,
     AdminDep,
     ViewerDep,
     count_active_admins,
@@ -74,12 +75,15 @@ _ERR = {"model": ErrorEnvelope}
 
 
 class UserOut(BaseModel):
-    """A user as the admin API reports it — never ``password_hash``."""
+    """A user as the admin API reports it — never ``password_hash``. ``username`` is what
+    a person types at the local login (the ``subject`` without its ``local:`` namespace);
+    for an OIDC account it is the provider's subject, which the admin never typed."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     subject: str
+    username: str = ""
     issuer: str
     email: str
     display_name: str
@@ -94,6 +98,14 @@ class UserList(BaseModel):
 
     items: list[UserOut]
     total: int
+
+
+def _user_out(user: User) -> UserOut:
+    out = UserOut.model_validate(user)
+    out.username = (
+        user.subject.removeprefix("local:") if user.issuer == LOCAL_ISSUER else user.subject
+    )
+    return out
 
 
 class CreateUserRequest(BaseModel):
@@ -184,7 +196,7 @@ def list_users(admin: AdminDep, db: DbDep) -> UserList:
     """Every account, oldest first."""
     del admin
     users = list(db.execute(select(User).order_by(User.created, User.id)).scalars())
-    return UserList(items=[UserOut.model_validate(u) for u in users], total=len(users))
+    return UserList(items=[_user_out(u) for u in users], total=len(users))
 
 
 @router.post(
@@ -206,7 +218,7 @@ def create_user(body: CreateUserRequest, admin: AdminDep, db: DbDep) -> UserOut:
         email=body.email,
     )
     db.commit()
-    return UserOut.model_validate(user)
+    return _user_out(user)
 
 
 @router.put(
@@ -238,7 +250,7 @@ def set_role(user_id: str, body: RoleChange, admin: AdminDep, db: DbDep) -> User
     user.role = body.role
     user.active = new_active
     db.commit()
-    return UserOut.model_validate(user)
+    return _user_out(user)
 
 
 @router.get("/settings", responses={401: _ERR, 403: _ERR}, summary="Non-secret settings")

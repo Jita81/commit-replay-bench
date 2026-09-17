@@ -37,6 +37,7 @@ Touch when:   the policy gains a clause or a version (a refusal case, the defaul
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -823,6 +824,26 @@ def test_invariant_false_q1_can_never_be_signed_off_at_read() -> None:
     m = cap.build_capability_map([*_rows(12, 12), bad])
     out = so.apply_signoffs(m.cells, [_signoff()], repo="todo")
     assert out[0].verification_tier == cap.TIER_UNTRUSTED
+
+
+def test_signoff_made_on_an_earlier_apparatus_is_stale_and_lifts_nothing() -> None:
+    """Evidence expires when the apparatus changes (EVIDENCE §4): a sign-off stamped at
+    an earlier apparatus is kept on the record but lifts nothing at read; one that
+    covers every version the cell is read at still does."""
+    m = cap.build_capability_map(_rows(12, 12))
+    cell = m.cells[0]
+    assert cell.stats is not None and cell.stats.apparatus_versions
+    current = ",".join(cell.stats.apparatus_versions)
+    old = replace(_signoff(), apparatus_version="1.9")
+    assert old.is_stale(cell) and not old.covers_apparatus(cell)
+    out = so.apply_signoffs(m.cells, [old], repo="todo")
+    assert out[0].verification_tier == "automated-pass"
+    fresh = replace(_signoff(), apparatus_version=current)
+    assert fresh.covers_apparatus(cell)
+    assert so.apply_signoffs(m.cells, [fresh], repo="todo")[0].verification_tier == "human-verified"
+    # a v1 record with no stamp is not judged stale here
+    unstamped = replace(_signoff(), apparatus_version="")
+    assert unstamped.covers_apparatus(cell)
 
 
 def test_revoked_signoff_does_not_elevate() -> None:

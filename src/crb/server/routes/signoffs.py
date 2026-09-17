@@ -158,7 +158,7 @@ from crb.server.schemas_signoff import (
     SignoffRouteOut,
     SignoffWithPolicyOut,
 )
-from crb.store.models import Grade, Repo, Signoff, Task
+from crb.store.models import Grade, Repo, Signoff, Task, User
 
 router = APIRouter(tags=["signoffs"])
 _ERR = {"model": ErrorEnvelope}
@@ -649,6 +649,14 @@ def _superseded(row: Signoff, all_rows: Sequence[Signoff]) -> bool:
     return any(r.seq > row.seq and not r.revoke and _scope_key(r) == key for r in all_rows)
 
 
+def _display_name(session: Session, user_id: str) -> str:
+    """The name a reader sees for a ledger actor: resolved from the users table at read
+    time (the session's identity map makes repeats free), empty when the account is
+    gone. The ledger row keeps the id — a name may change, the hash chain may not."""
+    user = session.get(User, user_id)
+    return (user.display_name or user.subject.removeprefix("local:")) if user is not None else ""
+
+
 def signoff_out(
     session: Session, row: Signoff, all_rows: Sequence[Signoff]
 ) -> SignoffWithPolicyOut:
@@ -659,8 +667,14 @@ def signoff_out(
     current_fq1, _ = (
         cell_false_q1(session, row.repo, scope_of(row)) if row.repo != WILDCARD else (0, [])
     )
-    active = revocation is None and not _superseded(row, all_rows) and current_fq1 == 0
     cj = dict(row.cell_json or {})
+    # stale = stamped on an apparatus that no longer matches the instrument reading now;
+    # a v1 record (no stamp) is not judged here
+    stamped = {v.strip() for v in str(cj.get(_EV_APPARATUS, "") or "").split(",") if v.strip()}
+    stale = bool(stamped) and APPARATUS_VERSION not in stamped
+    active = (
+        revocation is None and not _superseded(row, all_rows) and current_fq1 == 0 and not stale
+    )
     return SignoffWithPolicyOut(
         id=row.signoff_id,
         repo=row.repo,
@@ -668,12 +682,18 @@ def signoff_out(
         tier=row.tier,
         note=row.note,
         approver=row.verifier,
+        approver_name=_display_name(session, row.verifier),
         created=row.created,
         revoked=revocation is not None,
         revoked_by=revocation.verifier if revocation is not None else None,
+        revoked_by_name=(
+            _display_name(session, revocation.verifier) if revocation is not None else None
+        ),
         revoked_at=revocation.created if revocation is not None else None,
         active=active,
         current_false_q1=current_fq1,
+        stale=stale,
+        apparatus_current=APPARATUS_VERSION,
         evidence=_evidence(row),
         prev_hash=row.prev_hash,
         row_hash=row.row_hash,
@@ -1188,12 +1208,13 @@ def create_signoff(
 )
 def revoke_signoff(
     signoff_id: str,
+    body: SignoffRevokeRequest,
     approver: ApproverDep,
     db: DbDep,
-    body: SignoffRevokeRequest | None = None,
 ) -> SignoffWithPolicyOut:
     """Append a revocation row for the attestation's scope; the original row is untouched
-    and is returned with ``revoked: true``."""
+    and is returned with ``revoked: true``. The body's ``note`` — the reason — is required
+    (422 without one), the same rule the UI applies."""
     row = db.execute(
         select(Signoff).where(Signoff.signoff_id == signoff_id, Signoff.revoke.is_(False))
     ).scalar_one_or_none()
@@ -1202,7 +1223,7 @@ def revoke_signoff(
     all_rows = load_signoff_rows(db, row.repo)
     if _revocation_for(row, all_rows) is not None:
         raise ApiError(409, "already_revoked", f"attestation {signoff_id!r} is already revoked")
-    note = body.note if body is not None else ""
+    note = body.note
     _lock(db)
     _chain_and_add(
         db,
@@ -1212,7 +1233,7 @@ def revoke_signoff(
             cell_json=scope_of(row).to_dict(),
             tier=row.tier,
             verifier=approver.id,
-            note=redact(note) or f"revokes {signoff_id}",
+            note=redact(note),
             revoke=True,
             evidence_rows=0,
             created=utc_now_iso(),

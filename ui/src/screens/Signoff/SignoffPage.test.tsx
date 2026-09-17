@@ -141,6 +141,8 @@ const SIGNED: SignoffWithPolicy = {
   revoked_by: null,
   revoked_at: null,
   active: true,
+  stale: false,
+  apparatus_current: '2.1',
   current_false_q1: 0,
   prev_hash: '0'.repeat(64),
   row_hash: 'a'.repeat(64),
@@ -347,6 +349,45 @@ describe('SignoffPage (signoff-policy.v2)', () => {
     expect(within(table).getByTestId('signoff-row-policy').textContent).toContain('signoff-policy.v2 · deliver (deliver) · controls passed 12/14 esc 0')
     expect(within(table).getByTestId('signoff-row-attestation').textContent).toContain('cccccccccc · fix: task 4')
     expect(within(table).getByRole('img', { name: 'Active attestation' })).toBeInTheDocument()
+  })
+
+  it('revokes only after a confirmation with a reason, sends the reason as the note, and keeps the revoked row in the list', async () => {
+    document.cookie = 'crb_csrf=t; path=/'
+    let items: SignoffWithPolicy[] = [{ ...SIGNED, approver_name: 'ada' }]
+    const { calls } = mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, controls: PASSED },
+      'GET /signoffs': () => json({ items, total: items.length, limit: 50, offset: 0 }),
+      'GET /signoffs/preview': signablePreview(),
+      [`POST /signoffs/${SIGNED.id}/revoke`]: () => {
+        items = [{ ...SIGNED, approver_name: 'ada', revoked: true, active: false, revoked_by: 'u2', revoked_by_name: 'ada', revoked_at: '2026-09-17T17:00:00+00:00' }]
+        return json(items[0])
+      },
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    const table = await screen.findByRole('table', { name: 'Sign-offs for r' })
+    // the listing asks for the history, and shows the approver by name, not id
+    expect(calls.find((c) => c.path === '/signoffs')!.url).toContain('include_revoked=true')
+    expect(within(table).getByText('ada')).toBeInTheDocument()
+    await user.click(within(table).getByRole('button', { name: 'Revoke' }))
+    // nothing was sent yet: the confirmation asks why
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    const dialog = screen.getByTestId('revoke-confirm')
+    expect(dialog.textContent).toContain('Are you sure you want to revoke this sign-off?')
+    const confirm = within(dialog).getByRole('button', { name: 'Revoke sign-off' })
+    expect(confirm).toBeDisabled()
+    await user.type(within(dialog).getByLabelText(/Why are you revoking it/), 'evidence re-examined')
+    expect(confirm).toBeEnabled()
+    await user.click(confirm)
+    await waitFor(() => expect(screen.queryByTestId('revoke-confirm')).toBeNull())
+    const post = calls.find((c) => c.method === 'POST')!
+    expect(post.path).toBe(`/signoffs/${SIGNED.id}/revoke`)
+    expect(JSON.parse(String(post.init?.body))).toEqual({ note: 'evidence re-examined' })
+    // the row stays on the record, marked revoked, and can no longer be revoked
+    await waitFor(() => expect(within(table).getByRole('img', { name: /Revoked by ada at/ })).toBeInTheDocument())
+    expect(within(table).queryByRole('button', { name: 'Revoke' })).toBeNull()
   })
 
   it('renders a 409 signoff_refused from the server as a gate REFUSED with the clauses, and a 409 false_q1_refused as the floor', async () => {

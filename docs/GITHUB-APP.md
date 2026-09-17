@@ -28,10 +28,18 @@ Touch when:   a permission is added (say what for); GitHub Enterprise Server nee
 A personal access token belongs to a person, outlives their role, and grants whatever that
 person can see. A **GitHub App** belongs to the deployment: an organisation admin installs it
 on *selected* repositories, GitHub records exactly which, and the product mints
-**installation tokens** — one hour, scoped to that installation — on demand. Nothing is
-handed over; nothing long-lived is stored. This is how GitHub's own Copilot and code-security
-enablement, SonarQube, Snyk, Cortex, Compass, LinearB, Swarmia and Renovate all connect
-(the research brief, §3).
+**installation tokens** — scoped to that installation — on demand. The one-hour token
+lifetime is GitHub's documented contract for installation tokens, not something this product
+measures; what the product does with the token is **[measured]**: minted per use with the
+app JWT, cached in memory until five minutes before the `expires_at` GitHub returned, never
+persisted, passed to git as a one-shot header and never on argv
+(`tests/test_server_github_app.py::test_installation_tokens_are_minted_with_the_jwt_cached_and_refreshed_near_expiry`
+and `::test_worker_clones_with_the_installation_token_in_the_environment_never_argv` — a
+fake GitHub transport, 10 cases in the file, apparatus 2.2; the fake returns `expires_at`
+one hour out, a second call inside that hour re-uses the token, and a token inside the
+five-minute margin is re-minted). Nothing is handed over; nothing
+long-lived is stored. That the named vendors connect this way is **[hypothesis]** drawn from
+their public documentation (the research brief, §3), not measured here.
 
 The product needs very little:
 

@@ -43,8 +43,11 @@
  */
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { useRevokeSignoff, useSignoffs } from '../../api/hooks'
-import { NOT_YET_MEASURED } from '../../api/types'
+import { useEvidence, useRevokeSignoff, useSignoffs } from '../../api/hooks'
+import { PatchView } from '../Runs/EvidenceDrawer'
+import { useRetainedPatch } from '../Runs/contract'
+import type { AcceptedRow } from './contract'
+import { approverName, NOT_YET_MEASURED } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { CiBar } from '../../components/CiBar'
@@ -53,6 +56,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextArea } from '../../components/Field'
 import { GateBanner, type GateCriterion } from '../../components/GateBanner'
+import { ConfirmationPanel, SecondaryButton, SummaryList, WarningButton, WarningCallout } from '../../components/govuk'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
@@ -198,7 +202,7 @@ function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { mi
 export function SignoffPage() {
   const [repo, setRepo] = useRepoParam()
   const { can, me } = useAuth()
-  const signoffs = useSignoffs(repo)
+  const signoffs = useSignoffs(repo, { includeRevoked: true })
   const map = useCapabilityMapWithControls(repo, ['capability_class', 'size'])
   const create = useCreateSignoffWithAttestation()
   const revoke = useRevokeSignoff()
@@ -209,6 +213,9 @@ export function SignoffPage() {
   const [read, setRead] = useState(false)
   const [statement, setStatement] = useState('')
   const [note, setNote] = useState('')
+  // the attestation whose revocation is being confirmed, and the reason that will be recorded
+  const [revoking, setRevoking] = useState<SignoffWithPolicy | null>(null)
+  const [revokeReason, setRevokeReason] = useState('')
   const readId = useId()
 
   const measured = useMemo(() => (map.data?.cells ?? []).filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0), [map.data])
@@ -276,17 +283,21 @@ export function SignoffPage() {
       {
         key: 'status',
         header: 'Status',
-        sortValue: (s) => Number(s.revoked),
+        sortValue: (s) => (s.revoked ? 3 : s.active ? 0 : s.stale ? 1 : 2),
         cell: (s) =>
           s.revoked ? (
-            <Pill tone="amber" glyph="⊘" size="xs" label={`Revoked by ${s.revoked_by ?? '—'} at ${fmtDate(s.revoked_at)}`}>revoked</Pill>
+            <Pill tone="amber" glyph="⊘" size="xs" label={`Revoked by ${s.revoked_by_name || s.revoked_by || '—'} at ${fmtDate(s.revoked_at)}`}>revoked</Pill>
           ) : s.active ? (
             <Pill tone="green" glyph="✓" size="xs" label="Active attestation">active</Pill>
-          ) : (
+          ) : s.stale ? (
+            <Pill tone="amber" glyph="◷" size="xs" label={`Stale: signed at apparatus ${s.evidence.apparatus_versions.join(', ') || '?'}, the deployment now reads at ${s.apparatus_current || '?'} — lifts nothing until re-signed`}>stale</Pill>
+          ) : s.current_false_q1 > 0 ? (
             <Pill tone="red" glyph="✗" size="xs" label={`Invalidated: the cell now has false_q1 = ${s.current_false_q1}`}>invalidated</Pill>
+          ) : (
+            <Pill tone="muted" glyph="○" size="xs" label="Superseded by a later attestation on the same scope">superseded</Pill>
           ),
       },
-      { key: 'approver', header: 'Approver', sortValue: (s) => s.approver, cell: (s) => s.approver },
+      { key: 'approver', header: 'Approver', sortValue: (s) => approverName(s), cell: (s) => approverName(s) },
       { key: 'created', header: 'Signed', sortValue: (s) => s.created, cell: (s) => <span className="text-xs text-on-surface-muted">{fmtDate(s.created)}</span> },
       {
         key: 'evidence',
@@ -333,7 +344,7 @@ export function SignoffPage() {
         header: '',
         cell: (s) =>
           !s.revoked && can('approver') ? (
-            <Button size="sm" variant="danger" onClick={() => revoke.mutate({ id: s.id, repo: s.repo })} disabled={revoke.isPending}>
+            <Button size="sm" variant="danger" onClick={() => { setRevoking(s); setRevokeReason(''); revoke.reset() }} disabled={revoke.isPending} aria-haspopup="dialog">
               Revoke
             </Button>
           ) : null,
@@ -341,6 +352,12 @@ export function SignoffPage() {
     ],
     [can, revoke],
   )
+
+  const confirmRevoke = (e: FormEvent) => {
+    e.preventDefault()
+    if (!revoking || revokeReason.trim().length === 0) return
+    revoke.mutate({ id: revoking.id, repo: revoking.repo, note: revokeReason.trim() }, { onSuccess: () => { setRevoking(null); setRevokeReason('') } })
+  }
 
   const policyVersion = previewData?.policy.policy_version ?? SIGNOFF_POLICY_VERSION
   const relaxed = previewData?.policy.relaxed
@@ -389,6 +406,13 @@ export function SignoffPage() {
           {previewData && <EvidencePanel preview={previewData} bars={map.data?.policy ? { min_point: map.data.policy.min_point, min_ci_low: map.data.policy.min_ci_low } : undefined} />}
 
           <Card title="Approver form">
+            <WarningCallout title="What your signature does not mean">
+              <ul className="m-0 pl-6">
+                <li className="mb-2">It does not change the cell's route, its point estimate or its interval.</li>
+                <li className="mb-2">It does not vouch for any other class, size or repository.</li>
+                <li>It is invalidated at read if a false-Q1 row later appears in this cell, or when the apparatus changes.</li>
+              </ul>
+            </WarningCallout>
             <form id="signoff-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
               <SelectField label="Cell" required value={cellKey} onChange={(e) => setCellKey(e.target.value)} hint={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
                 <option value="">Choose a measured cell…</option>
@@ -443,6 +467,11 @@ export function SignoffPage() {
                   </span>
                 </label>
               </div>
+              {rowHash && previewData && (
+                <div className="sm:col-span-2">
+                  <ReadTheDiff repo={repo} row={previewData.accepted_rows.find((r) => r.row_hash === rowHash)} />
+                </div>
+              )}
               <div className="sm:col-span-2">
                 <TextArea label="Attestation statement" required rows={2} value={statement} onChange={(e) => setStatement(e.target.value)} hint="What you read in that diff and why it is acceptable. Recorded verbatim, append-only, redacted." data-testid="attest-statement" />
               </div>
@@ -455,9 +484,24 @@ export function SignoffPage() {
                 </div>
               )}
               {create.isSuccess && (
-                <p className="text-sm text-status-green sm:col-span-2" role="status" data-testid="signoff-recorded">
-                  ✓ Attestation recorded under <span className="font-mono">{create.data.policy_version}</span> — row <span className="font-mono">{shortId(create.data.row_hash)}</span>.
-                </p>
+                <div className="sm:col-span-2" role="status" data-testid="signoff-recorded">
+                  <ConfirmationPanel title="Sign-off recorded" reference={`sgn_${shortId(create.data.row_hash)}`} />
+                  <SummaryList
+                    label="What was recorded"
+                    rows={[
+                      { key: 'Cell', value: <><code>{cellLabel(create.data.cell)}</code> on {create.data.repo}, route {create.data.route.route || '—'}</> },
+                      { key: 'Row hash', value: <code className="break-all">{create.data.row_hash}</code> },
+                      { key: 'Attested by', value: `${approverName(create.data)} at ${create.data.created}` },
+                      { key: 'Policy', value: <><code>{create.data.policy_version}</code> · apparatus {create.data.evidence.apparatus_versions.join(', ') || '—'}</> },
+                    ]}
+                  />
+                  <h3 className="mb-3 mt-6 text-[24px] font-bold leading-[1.3]">What happens next</h3>
+                  <ul className="m-0 max-w-[44em] pl-6 text-[19px] leading-[1.47]">
+                    <li className="mb-2">The factory may now open pull requests for items in this cell, on branches prefixed <code>crb/</code>, for review under the repository's own rules.</li>
+                    <li className="mb-2">The cell's verification tier is lifted on the map. Its route, point and interval are unchanged.</li>
+                    <li>If a false-Q1 row appears in this cell, or the apparatus changes, this sign-off stops counting at read and the cell returns to your decisions.</li>
+                  </ul>
+                </div>
               )}
             </form>
           </Card>
@@ -475,10 +519,26 @@ export function SignoffPage() {
                 />
               )}
             </QueryBoundary>
-            {revoke.isError && (
-              <div className="p-3">
-                <ErrorState compact error={revoke.error} />
-              </div>
+            {revoking && (
+              <form onSubmit={confirmRevoke} className="border-t border-border p-4" role="dialog" aria-labelledby={`${readId}-revoke`} data-testid="revoke-confirm">
+                <WarningCallout title="Are you sure you want to revoke this sign-off?">
+                  <p id={`${readId}-revoke`} className="m-0">
+                    <code>{cellLabel(revoking.cell)}</code> on {revoking.repo}, signed by {approverName(revoking)} on {fmtDate(revoking.created)}. Revoking appends a row to the ledger — the attestation stays on the record, marked revoked — and the cell returns to <em>sign-off due</em> on the map. The factory stops opening pull requests for it.
+                  </p>
+                </WarningCallout>
+                <div className="max-w-[44em]">
+                  <TextArea label="Why are you revoking it?" required rows={2} value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)} hint="Recorded verbatim on the revocation row, append-only. An auditor reads this next to the attestation it withdraws." data-testid="revoke-reason" />
+                </div>
+                {revoke.isError && (
+                  <div className="mt-3">
+                    <ErrorState compact error={revoke.error} />
+                  </div>
+                )}
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <WarningButton type="submit" disabled={revoke.isPending || revokeReason.trim().length === 0}>Revoke sign-off</WarningButton>
+                  <SecondaryButton onClick={() => { setRevoking(null); revoke.reset() }}>Cancel</SecondaryButton>
+                </div>
+              </form>
             )}
           </Card>
         </>
@@ -488,3 +548,46 @@ export function SignoffPage() {
 }
 
 export default SignoffPage
+
+/**
+ * The diff the approver is about to affirm they read — on the screen that asks for the
+ * affirmation, never a hunt through Runs. The retained patch (verified against the pack's
+ * anchor) when the deployment kept it; otherwise the pack's file list and a link to the
+ * task, and the affirmation still means what it says.
+ */
+function ReadTheDiff({ repo, row }: { repo: string; row: AcceptedRow | undefined }) {
+  const evidence = useEvidence(row?.evidence_pack_hash ?? '')
+  const patch = useRetainedPatch(row?.row_hash ?? '', Boolean(row))
+  if (!row) return null
+  const pack = evidence.data?.pack
+  return (
+    <div className="rounded-[var(--radius-control)] border border-border p-3" data-testid="read-the-diff">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-bold">Read the diff</span>
+        <span className="font-mono text-xs text-on-surface-muted">
+          {row.subject || row.task_id} · row {shortId(row.row_hash)} · run {shortId(row.run_id)} · {row.trial} · {row.builder}
+          {row.model ? `/${row.model}` : ''}
+        </span>
+        <LinkButton size="sm" to={`/tasks/${encodeURIComponent(repo)}/${encodeURIComponent(row.task_id)}`}>
+          The task and every attempt
+        </LinkButton>
+        <LinkButton size="sm" to={`/runs/${row.run_id}`}>
+          The run
+        </LinkButton>
+      </div>
+      {patch.isPending && <p className="mb-0 mt-2 text-xs text-on-surface-muted">Loading the retained patch…</p>}
+      {patch.data && pack && (
+        <div className="mt-3">
+          <PatchView patch={patch.data} pack={pack} />
+        </div>
+      )}
+      {patch.isError && (
+        <p className="mb-0 mt-2 text-sm text-on-surface-body">
+          The patch is not retained on this deployment (zero raw retention by default); the evidence pack records its hash
+          {pack?.grade.diff ? ` and ${pack.grade.diff.files.length} file(s), +${pack.grade.diff.additions} −${pack.grade.diff.deletions}` : ''}. Read it from the task page, or re-run with worktrees retained.
+        </p>
+      )}
+    </div>
+  )
+}
+

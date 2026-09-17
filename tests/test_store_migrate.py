@@ -318,7 +318,7 @@ def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
 
     migrate.upgrade(backend.url)  # stamps 0001, applies 0002 (and every later revision)
 
-    assert migrate.current(backend.url) == migrate.head_revision() == "0005"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0006"
     assert migrate.check(backend.url) is True
     assert _autogen_diff(backend.engine) == []
     assert "repo_lint_clean" in {c["name"] for c in inspect(backend.engine).get_columns("grades")}
@@ -407,9 +407,9 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0001")
-    # the refusal rolls the whole downgrade back — 0005's table, 0004's index swap and 0003's drop of
+    # the refusal rolls the whole downgrade back — 0006's column, 0005's table, 0004's index swap and 0003's drop of
     # the (empty) reviews table included — so the database stays exactly where it was
-    assert migrate.current(backend.url) == "0005"
+    assert migrate.current(backend.url) == "0006"
 
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -424,7 +424,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     with pytest.raises(DBAPIError, match="append-only"), fresh.begin() as c:
         c.execute(text("DELETE FROM grades"))
     migrate.upgrade(backend.url)  # and back up again
-    assert migrate.current(backend.url) == "0005" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0006" and _autogen_diff(fresh) == []
 
 
 def test_downgrade_of_an_empty_database_drops_the_schema(backend: Backend) -> None:
@@ -463,6 +463,13 @@ def test_offline_sql_includes_tables_and_triggers(backend: Backend) -> None:
     assert "CREATE TABLE grades" in sql
     assert "grades_no_update" in sql and "signoffs_no_delete" in sql
     assert "alembic_version" in sql
+    # 0006 offline is the whole revision, IN ORDER: the column, then the SQL backfill, then
+    # the unique index — an index before the backfill would fail on a duplicate legacy link
+    col = sql.find("github_full_name VARCHAR(256)")
+    backfill = sql.find("UPDATE repos SET github_full_name = lower(trim(")
+    index = sql.find("CREATE UNIQUE INDEX uq_repos_github_full_name")
+    assert col >= 0 and backfill >= 0 and index >= 0, sql[-2000:]
+    assert col < backfill < index
     assert migrate.current(backend.url) is None  # offline mode touched nothing
 
 
@@ -537,5 +544,47 @@ def test_0004_refuses_a_database_holding_duplicate_trace_seq_pairs(backend: Back
     fresh = _reset(backend)
     migrate.upgrade(backend.url, revision="0003")
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0005" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0006" and _autogen_diff(fresh) == []
     assert "uq_events_trace_seq" in {ix["name"] for ix in inspect(fresh).get_indexes("events")}
+
+
+def test_0006_backfills_the_github_identity_and_refuses_duplicate_legacy_links(
+    backend: Backend,
+) -> None:
+    """Revision 0006 makes ``repos.github_full_name`` unique. A pre-0006 database holds
+    the link only in ``config_json``; the backfill copies it (lower-cased) and creates the
+    index LAST. Two legacy rows linked to the same GitHub repository cannot be judged by a
+    migration: it refuses with both names and moves nothing (the pattern 0004 set)."""
+    migrate.upgrade(backend.url, revision="0005")
+    cols = "name, language, runner, clone_path, url, config_json, probo, probe_detail, created, updated"
+    cols = cols.replace("probo", "probe_status")
+    row = (
+        f"INSERT INTO repos ({cols}) VALUES (:name, 'go', 'go', '', 'https://github.com/acme/calc.git', "
+        ":cfg, 'unknown', '', 'ts', 'ts')"
+    )
+    linked = '{"language": "go", "github": {"installation_id": 77, "full_name": "Acme/Calc"}}'
+    with backend.engine.begin() as c:
+        c.execute(text(row), {"name": "calc", "cfg": linked})
+        c.execute(text(row), {"name": "by-url", "cfg": '{"language": "go"}'})
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == "0006"
+    with backend.engine.connect() as c:
+        got = dict(c.execute(text("SELECT name, github_full_name FROM repos")).all())
+    assert got == {"calc": "acme/calc", "by-url": None}
+    assert "uq_repos_github_full_name" in {
+        ix["name"] for ix in inspect(backend.engine).get_indexes("repos")
+    }
+    # a second row linked to the same repository: refused by name, nothing moved
+    fresh = _reset(backend)
+    migrate.upgrade(backend.url, revision="0005")
+    with fresh.begin() as c:
+        c.execute(text(row), {"name": "calc", "cfg": linked})
+        c.execute(
+            text(row), {"name": "calc-again", "cfg": linked.replace("Acme/Calc", "acme/calc")}
+        )
+    with pytest.raises(
+        RuntimeError, match=r"refusing to upgrade 0006.*acme/calc ← calc, calc-again"
+    ):
+        migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == "0005"
+    assert "github_full_name" not in {c["name"] for c in inspect(fresh).get_columns("repos")}

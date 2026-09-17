@@ -45,6 +45,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import select
 
 from crb.server.app import API_PREFIX
+from crb.server.auth import issue_github_setup_state
 from crb.server.github_app import GitHubApp, GitHubAppError, suggest_config
 from crb.server.routes.github import get_github_app
 from crb.server.settings import GitHubAppSettings
@@ -240,6 +241,20 @@ def test_github_refusals_become_errors_with_status_and_redacted_message(
     with pytest.raises(GitHubAppError, match="unreachable") as e2:
         down.installations()
     assert e2.value.status == 0
+    # a 2xx with no body, or one that is not JSON, is GitHub's fault and a 502 — never a
+    # false "no installations" and never a KeyError from an empty installation
+    for body in (b"", b"<html>maintenance</html>"):
+        odd = GitHubApp(
+            settings_for(pem),
+            httpx.Client(
+                transport=httpx.MockTransport(lambda r, b=body: httpx.Response(200, content=b))
+            ),
+        )
+        with pytest.raises(GitHubAppError, match=r"empty response|malformed response") as e3:
+            odd.installations()
+        assert e3.value.status == 502
+        with pytest.raises(GitHubAppError, match=r"empty response|malformed response"):
+            odd.installation(77)
 
 
 def test_suggest_config_maps_github_language_to_ours() -> None:
@@ -288,6 +303,11 @@ def test_unconfigured_app_is_a_state_not_an_error(tmp_path: Path) -> None:
         assert r.status_code == 404 and envelope(r)["code"] == "github_app_not_configured"
 
 
+def _state_for(env: Any, user_id: str, nonce: str = "n") -> str:
+    """A state signed by the deployment for another principal (a replayed link)."""
+    return issue_github_setup_state(env.settings, user_id, nonce)
+
+
 def test_setup_callback_verifies_records_and_lands_on_connect(
     tmp_path: Path, keypair: tuple[str, Any]
 ) -> None:
@@ -300,11 +320,54 @@ def test_setup_callback_verifies_records_and_lands_on_connect(
             follow_redirects=False,
         )
         assert r.status_code == 502 and envelope(r)["code"] == "github_error"
+        # a callback that carries no state this deployment signed for THIS operator writes
+        # nothing (CWE-352): it lands on Connect flagged unverified, where the CSRF-protected
+        # sync records the installation with the same app-credential check
+        for bad in ("", "&state=not-a-state", f"&state={_state_for(env, 'someone-else')}"):
+            r = env.client.get(
+                f"{API_PREFIX}/github/setup?installation_id=77&setup_action=install{bad}",
+                follow_redirects=False,
+            )
+            assert r.status_code == 303, r.text
+            assert r.headers["location"] == "/connect?installation=77&unverified=1"
+        with env.factory() as s:
+            assert s.get(GitHubInstallation, 77) is None
+        # the install link the operator is given carries the state; GitHub passes it back.
+        # The same response binds the link to THIS browser with a nonce cookie (httponly)
+        r = env.get("/github/app")
+        link = r.json()["install_url"]
+        assert link.startswith("https://github.com/apps/crb-bench/installations/new?state=")
+        state = link.split("state=", 1)[1]
+        assert "crb_github_setup" in r.cookies and "HttpOnly" in r.headers["set-cookie"]
+        # the right state in the wrong browser (no cookie, or another link's cookie) writes nothing
+        cookie = env.client.cookies.get("crb_github_setup")
+        for wrong in (None, "another-links-nonce"):
+            env.client.cookies.delete("crb_github_setup")
+            if wrong:
+                env.client.cookies.set("crb_github_setup", wrong)
+            r = env.client.get(
+                f"{API_PREFIX}/github/setup?installation_id=77&setup_action=install&state={state}",
+                follow_redirects=False,
+            )
+            assert r.headers["location"] == "/connect?installation=77&unverified=1"
+        env.client.cookies.set("crb_github_setup", cookie)
         r = env.client.get(
-            f"{API_PREFIX}/github/setup?installation_id=77&setup_action=install",
+            f"{API_PREFIX}/github/setup?installation_id=77&setup_action=install&state={state}",
             follow_redirects=False,
         )
         assert r.status_code == 303 and r.headers["location"] == "/connect?installation=77"
+        # …and the write consumed the nonce: the response expires the cookie (a browser
+        # drops it on Max-Age=0; the test jar, which held a hand-set copy, is told the same)
+        assert (
+            'crb_github_setup=""' in r.headers["set-cookie"]
+            and "Max-Age=0" in r.headers["set-cookie"]
+        )
+        env.client.cookies.delete("crb_github_setup")
+        r = env.client.get(
+            f"{API_PREFIX}/github/setup?installation_id=77&setup_action=install&state={state}",
+            follow_redirects=False,
+        )
+        assert r.headers["location"] == "/connect?installation=77&unverified=1"
         with env.factory() as s:
             row = s.get(GitHubInstallation, 77)
             assert (
@@ -328,6 +391,7 @@ def test_setup_callback_verifies_records_and_lands_on_connect(
         # the app view now lists it; a viewer may read it
         login(env.client, "viewer")
         body = env.get("/github/app").json()
+        # a viewer's link is plain: a viewer cannot complete the callback, so no state is minted
         assert (
             body["configured"]
             and body["install_url"] == "https://github.com/apps/crb-bench/installations/new"
@@ -423,11 +487,29 @@ def test_picker_lists_with_suggestions_and_connect_registers_a_linked_repo(
             },
         )
         assert r.status_code == 201 and r.json()["config"]["test_prefix"] == "test/"
-        # a config update keeps the link (PRESERVED_KEYS)
+        # a config update keeps the link (PRESERVED_KEYS) and the constrained identity
         r = env.put("/repos/acme-calc", json={"src_prefix": "calc/"})
         assert r.status_code == 200, r.text
         with env.factory() as s:
-            assert s.get(Repo, "acme-calc").config_json["github"]["installation_id"] == 77
+            row = s.get(Repo, "acme-calc")
+            assert row.config_json["github"]["installation_id"] == 77
+            assert row.github_full_name == "acme/calc"
+        # a URL change drops the link: the worker would otherwise mint the installation's
+        # token and hand it to whatever host the new URL names (CWE-201)
+        r = env.put("/repos/acme-calc", json={"url": "https://code.example.org/acme/calc.git"})
+        assert r.status_code == 200, r.text
+        assert "github" not in r.json()["config"]
+        with env.factory() as s:
+            row = s.get(Repo, "acme-calc")
+            assert "github" not in row.config_json and row.github_full_name is None
+            ev = s.execute(select(Event).where(Event.action == "repo.updated")).scalars().all()
+            assert [e.payload_json["github_unlinked"] for e in ev] == [False, True]
+        # …and the same GitHub repository can be connected again afterwards (no ghost row)
+        r = env.post(
+            "/github/installations/77/connect",
+            json={"full_name": "acme/Calc", "name": "acme-calc-2"},
+        )
+        assert r.status_code == 201, r.text
         # a viewer may list but not connect
         login(env.client, "viewer")
         assert env.get("/github/installations/77/repositories").status_code == 200
@@ -461,6 +543,25 @@ def test_worker_clones_with_the_installation_token_in_the_environment_never_argv
     assert (
         worker._github_auth_header({"github": {}}) is None
         and worker._github_auth_header({}) is None
+    )
+    # the token goes only to the app's own host: a URL edited to point elsewhere gets none
+    assert (
+        worker._github_auth_header(
+            {"github": {"installation_id": 77}}, "https://github.com/acme/Calc.git"
+        )
+        is not None
+    )
+    assert (
+        worker._github_auth_header(
+            {"github": {"installation_id": 77}}, "https://evil.example/acme/Calc.git"
+        )
+        is None
+    )
+    assert (
+        worker._github_auth_header(
+            {"github": {"installation_id": 77}}, "http://github.com/acme/Calc.git"
+        )
+        is None
     )
     # an unconfigured app never mints
     unconfigured = w.Worker.__new__(w.Worker)
@@ -499,3 +600,17 @@ def test_worker_clones_with_the_installation_token_in_the_environment_never_argv
         "ghs_token_78_"
     )
     assert "ghs_" not in repr(creds) and worker._delivery_credentials({}, "https://x") is None
+    # a read-only installation (77: contents read) gets no delivery credentials at all — the
+    # loop fails closed before a branch could be pushed; nor does any remote off the app's host
+    assert (
+        worker._delivery_credentials(
+            {"github": {"installation_id": 77}}, "https://github.com/acme/Calc.git"
+        )
+        is None
+    )
+    assert (
+        worker._delivery_credentials(
+            {"github": {"installation_id": 78}}, "https://evil.example/acme/Calc.git"
+        )
+        is None
+    )

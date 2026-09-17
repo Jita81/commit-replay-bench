@@ -125,7 +125,7 @@ export const keys = {
   routes: (repo: string) => ['routes', repo] as const,
   forecastBuild: (repo: string, mix: string) => ['forecast', 'build', repo, mix] as const,
   forecastReadiness: (repo: string) => ['forecast', 'readiness', repo] as const,
-  signoffs: (repo: string) => ['signoffs', repo] as const,
+  signoffs: (repo: string, includeRevoked = false) => ['signoffs', repo, includeRevoked ? 'all' : 'active'] as const,
   ledgerVerify: ['ledger', 'verify'] as const,
   oracle: (repo: string) => ['oracle', repo] as const,
   oracleControls: (repo: string) => ['oracle', repo, 'controls'] as const,
@@ -532,10 +532,11 @@ export function useForecastReadiness(repo: string): UseQueryResult<ForecastReadi
 }
 
 /** `GET /signoffs?repo=` — the attestations (active by default). */
-export function useSignoffs(repo: string): UseQueryResult<Page<Signoff>, ApiError> {
+export function useSignoffs(repo: string, opts: { includeRevoked?: boolean } = {}): UseQueryResult<Page<Signoff>, ApiError> {
+  const includeRevoked = opts.includeRevoked === true
   return useQuery({
-    queryKey: keys.signoffs(repo),
-    queryFn: () => api<Page<Signoff>>(`/signoffs${qs({ repo })}`),
+    queryKey: keys.signoffs(repo, includeRevoked),
+    queryFn: () => api<Page<Signoff>>(`/signoffs${qs({ repo, include_revoked: includeRevoked ? 'true' : undefined })}`),
     enabled: repo.length > 0,
     retry: false,
   })
@@ -547,18 +548,21 @@ export function useCreateSignoff(): UseMutationResult<Signoff, ApiError, Signoff
   return useMutation({
     mutationFn: (body) => api<Signoff>('/signoffs', { method: 'POST', body }),
     onSuccess: (s) => {
-      qc.invalidateQueries({ queryKey: keys.signoffs(s.repo) })
+      qc.invalidateQueries({ queryKey: ['signoffs', s.repo] })
       qc.invalidateQueries({ queryKey: ['capability', s.repo] })
     },
   })
 }
 
-/** `POST /signoffs/{id}/revoke`; invalidates the repo's sign-offs. */
-export function useRevokeSignoff(): UseMutationResult<Signoff, ApiError, { id: string; repo: string }> {
+/** `POST /signoffs/{id}/revoke` with the reason (recorded verbatim on the revocation row); invalidates the repo's sign-offs (both listings) and its capability projections (a revocation drops a tier). */
+export function useRevokeSignoff(): UseMutationResult<Signoff, ApiError, { id: string; repo: string; note: string }> {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id }) => api<Signoff>(`/signoffs/${enc(id)}/revoke`, { method: 'POST' }),
-    onSuccess: (_s, v) => qc.invalidateQueries({ queryKey: keys.signoffs(v.repo) }),
+    mutationFn: ({ id, note }) => api<Signoff>(`/signoffs/${enc(id)}/revoke`, { method: 'POST', body: { note } }),
+    onSuccess: (_s, v) => {
+      qc.invalidateQueries({ queryKey: ['signoffs', v.repo] })
+      qc.invalidateQueries({ queryKey: ['capability', v.repo] })
+    },
   })
 }
 

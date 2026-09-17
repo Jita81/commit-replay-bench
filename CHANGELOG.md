@@ -8,6 +8,111 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-17 — the NHS design system and the prototype's screens, on real data (DL-042)
+
+The operator's Claude Design prototype ("crb Front End", twelve NHS/GOV.UK-patterned
+screens) was read against the front end; the verdict and the screen-by-screen comparison
+are in docs/reviews/2026-09-17-claude-design-prototype.md. Its grammar is adopted; its
+numbers were never trusted.
+
+- **Design system**: the light theme is the NHS palette (NHS blue accent on white, the
+  design system's green / warm yellow / red for status, Arial); the header is the NHS blue
+  bar with the `crb` mark over a dark-blue nav row that carries a **Decisions badge**, with
+  the explore screens on a grey row beneath; a full-width red **stop-condition banner**
+  appears on every screen while the ledger holds a false-Q1 row. New GOV.UK/NHS pattern
+  components: `Tag`, `TaskList`, `SummaryList`, `NotificationBanner`, `WarningCallout`,
+  `InsetText`, `BackLink`, `ConfirmationPanel`, the green / red / grey buttons.
+- **Home** (`/home`) — "Get started": the seven tasks (connect GitHub, choose a repository,
+  confirm its shape, prove the instrument £0, measure — spends money, read the map, invite
+  an approver) with statuses derived from the API, "completed n of 7", the degraded sandbox
+  as an *Important* banner, the cost sentence, "Why two people".
+- **Measure** (`/connect/:name/measure`) — attempts (10/30/60 with what each buys),
+  retention with the policy statement, "Before you start" (the estimate from the
+  repository's own measured cost per attempt, the cap, retention, posture) and one red
+  button that names the spend.
+- **Capability map** on Results — the class × size **table** with the route as a solid
+  tag, `n on tasks`, point and interval, and the sign-off state on the cell (*signed
+  <date>* / *sign-off due* / *sign-off stale*); "What this licenses you to say" for the
+  signed cell with every qualifier the claims policy demands; economics tiles; the "no
+  throughput headline" callout.
+- **Decisions** — the NHS grammar, and a **"Signed cells now stale"** section.
+- **Sign-off** — "What your signature does not mean" before the affirmation; a
+  **confirmation panel** with a reference and "what happens next" after a recorded sign-off.
+- **Deployment posture** (`/posture`) — "About this deployment" for an architecture review
+  board, printable, from `/version`, `/health`, `/settings` and `/ledger/verify`.
+- **Core / API**: a sign-off made on an earlier apparatus is **stale** — it lifts nothing at
+  read (`SignoffRecord.covers_apparatus`, ADR-0002/EVIDENCE §4) and is served with
+  `stale: true`, `apparatus_current` and `active: false`. The prototype drew this as if it
+  existed; it did not.
+- Backlog: F3b (shape review with risk copy), F5b (per-run spend cap), F7b (separation of
+  duties at write — the prototype claims it; the product does not enforce it) added to
+  docs/reviews/2026-09-17-enterprise-front-end.md §9; F2 and F19 marked landed.
+- **Review findings on the GitHub App connection (CodeRabbit on #31), fixed here**: the
+  setup callback records an installation only with a signed `state` the install link carries,
+  bound to the operator AND to a nonce the same response sets as an httponly cookie, consumed
+  by the write (`GET /github/app` mints it for operators; without both the callback writes
+  nothing and lands on Connect `unverified=1`, where the CSRF-protected sync records it —
+  CWE-352); revision 0006 refuses to run while two legacy rows link the same GitHub
+  repository (naming them) and creates its unique index only after the backfill; an empty
+  2xx from GitHub is a 502, never a false "no installations"; `repos.github_full_name` (revision 0006, unique) makes "one GitHub
+  repository connects once" a database fact and the race a 409; a `PUT /repos/{name}` that
+  changes the URL drops the GitHub link, and the worker sends an installation token only to
+  the app's own host (CWE-201); delivery credentials exist only while the installation
+  grants `contents: write` **and** `pull_requests: write`, read from GitHub at the time
+  (no branch pushed before a PR call could fail); a malformed 2xx from GitHub is a 502, not a
+  500; the per-request GitHub client is closed; the worker reads only `CRB_GITHUB__*` and
+  refuses to start on a malformed value instead of running without the connection; the
+  picker says a search is page-local; the Measure page prices the capped attempt count and
+  derives posture from the probe's explicit `executor`; the Decisions count is never served
+  as ready with a non-404 failure behind it; Home and Deployment do not call an unanswered
+  GitHub App status "not configured"; every map cell carries its apparatus; the unversioned
+  schema walk is revision-ordered across columns, indexes and tables.
+- **Four external documents assessed against the product** (docs/reviews/2026-09-17-external-documents-assessment.md,
+  an independent Fable pass): the Quality Floor essay (the product honours every mechanism
+  it names and is stricter on most; the essay copy on disk still carries the pre-correction
+  specification-lever figures — not re-imported), the Automated Agile process architecture
+  (mostly out of scope by DL-001; three transferable items), the AAF ISO architecture and
+  code-quality guide (substance already met; two learnings), and the operator's experience
+  profile (nothing new — the product embodies it). Eight rows F27–F34 added to the backlog:
+  audit sample per signed cell (P1), item route before the run, PR body naming the signed
+  facts and the licensing sign-off, human PR review comments as evidence, the repository's
+  own security scanner as a review probe, review finding → follow-up item, a
+  recurrence-after-prevention alarm, verifier account kind on attestations.
+- **Persona walkthrough on the live stack** (docs/reviews/2026-09-17-persona-walkthrough.md).
+  Scope, stated separately: the journey screens were driven in a real browser as a viewer,
+  an operator, an approver and an admin, each along their own path (not every screen by
+  every persona); the developer and platform-engineer paths were the Factory, a run's
+  evidence pack and the not-configured GitHub dialog; the MCP consumer was driven over stdio
+  as the viewer (38 tools, reads answered, `crb_start_run` refused 403), not through the
+  browser; axe WCAG 2.1 AA covered nine journey screens for three of the four personas; the
+  375 px check covered Home, Results, Sign-off, Decisions and Deployment. What it found and
+  fixed: the Measure page posted no builder (422) — it now derives the builder from
+  the health probe; the connection walk said *Done* while a replay was running — running
+  outranks done; the sign-off form asked for an affirmation without showing the diff — the
+  retained patch is now on the form (`ReadTheDiff`); sign-offs named the approver by user id
+  everywhere including the licence sentence — the API now resolves `approver_name` /
+  `revoked_by_name` at read; **revoke** was one click with no reason — it now confirms and
+  records a required reason as the revocation note, and revoked rows stay listed; Home gave
+  a viewer an operator's to-do list and called a run in flight *Incomplete* — role-aware copy,
+  *In progress*, the map openable from the first row, no non-admin sent to `/settings`; the
+  login page offered the organisation button when no provider existed — `/version` now says
+  `oidc_enabled` and the button and the posture row read it; the admin Users table's Username
+  column was blank (API `subject` vs UI `username`) — `/users` now serves `username`; the
+  Factory chain drew a never-built item as *failed* and an unassessed one as *done* — both
+  read honestly; two WCAG 2.1 AA findings (an undistinguished link in the Important banner,
+  the red pill ink at 4.4:1 — WCAG contrast ratios, not sampled rates) — links in prose
+  underline, the red soft fill is lightened to 4.7:1; the journey screens joined the
+  walkthrough's axe sweep. Figures from the stack, tagged: the operator's run
+  `6fb61af9…` (cobra, replay, sighted, `claude_code / claude-sonnet-5`, apparatus 2.2) made
+  10 attempts, 9 clean, $2.57 builder-reported, against the Measure page's ±20 % planning
+  band around the repository's measured mean [measured — the run's ledger rows]; during the
+  walk cobra's `bug.fix × S` cell moved from *calibrate* (23 of 24 clean, 95.8 %, 95 %
+  Wilson [79.8 %, 99.3 %] — lower below the 80 % bar) to *deliver* (24 of 25 clean,
+  96.0 %, 95 % Wilson [80.5 %, 99.3 %]) under `routing.v1` [measured — `/capability-map`,
+  current apparatus 2.2, sighted, `claude_code / claude-sonnet-5`]; ledger after the walk 602
+  rows, chain intact, false-Q1 0, 0 clean rows without a pack [measured — `/ledger/verify`,
+  apparatus 2.2; exact counts, no interval].
+
 ### 2026-09-17 — the GitHub App is the connection (ADR-0014, DL-041)
 
 The first item of the enterprise front-end backlog (F1): an organisation installs the

@@ -42,11 +42,14 @@ interface Props {
   onConnected: (name: string) => void
   /** Preselect an installation (the setup callback lands on `/connect?installation=`). */
   initialInstallation?: number
+  /** The callback carried no signed state for this session, so the installation was NOT
+   * recorded (`/connect?installation=&unverified=1`): offer the sync that records it. */
+  landedUnverified?: boolean
   /** Offer the URL path (the dialog the walk had before the app existed). */
   onUseUrl?: () => void
 }
 
-export function GitHubConnectDialog({ open, onClose, onConnected, initialInstallation, onUseUrl }: Props) {
+export function GitHubConnectDialog({ open, onClose, onConnected, initialInstallation, landedUnverified = false, onUseUrl }: Props) {
   const { can } = useAuth()
   const app = useGitHubApp()
   const sync = useSyncGitHubInstallations()
@@ -60,9 +63,28 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
   const [runner, setRunner] = useState<Runner | ''>('')
 
   const installations = useMemo(() => (app.data?.installations ?? []).filter((i) => !i.suspended), [app.data])
+  // the selected installation is always one of the ACTIVE options: a preselected id that is
+  // suspended or not on record falls back to the first active one (the picker, the repos
+  // query and the connect request all read the same state)
   useEffect(() => {
-    if (!installation && installations.length > 0) setInstallation(installations[0]!.id)
-  }, [installation, installations])
+    if (installations.length === 0) return
+    if (installations.some((i) => i.id === installation)) return
+    const wanted = initialInstallation ? installations.find((i) => i.id === initialInstallation) : undefined
+    setInstallation(wanted ? wanted.id : installations[0]!.id)
+    // a repository picked under the replaced installation must not be sent under the new one
+    setPicked(null)
+    setName('')
+    setLanguage('')
+    setRunner('')
+    setPage(1)
+  }, [installation, installations, initialInstallation])
+  const landedOnRecord = !initialInstallation || installations.some((i) => i.id === initialInstallation)
+  const syncAndSelect = () =>
+    sync.mutate(undefined, {
+      onSuccess: (rows) => {
+        if (initialInstallation && rows.some((r) => r.id === initialInstallation && !r.suspended)) setInstallation(initialInstallation)
+      },
+    })
   const repos = useGitHubRepos(installation, q, page)
 
   const pick = (r: GitHubPickerRepo) => {
@@ -88,17 +110,23 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
       onClose={onClose}
       width="lg"
       footer={
-        <>
-          {onUseUrl && (
-            <Button variant="ghost" onClick={onUseUrl}>
-              Connect by URL instead
-            </Button>
-          )}
+        app.data && !app.data.configured ? (
+          // nothing can be connected from here until an admin registers the app: the body's
+          // one "Connect by URL" is the whole offer, so the footer only closes
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="filled" disabled={!picked || !language || !can('operator') || connect.isPending} onClick={submit}>
-            Connect
-          </Button>
-        </>
+        ) : (
+          <>
+            {onUseUrl && (
+              <Button variant="ghost" onClick={onUseUrl}>
+                Connect by URL instead
+              </Button>
+            )}
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="filled" disabled={!picked || !language || !can('operator') || connect.isPending} onClick={submit}>
+              Connect
+            </Button>
+          </>
+        )
       }
     >
       {app.isError && <ErrorState error={app.error} onRetry={() => void app.refetch()} />}
@@ -123,7 +151,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
               ))}
             </SelectField>
             {can('operator') && (
-              <Button size="sm" disabled={sync.isPending} onClick={() => sync.mutate()}>
+              <Button size="sm" disabled={sync.isPending} onClick={syncAndSelect}>
                 Sync installations
               </Button>
             )}
@@ -134,6 +162,17 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
             )}
           </div>
           {sync.isError && <ErrorState compact error={sync.error} />}
+          {initialInstallation && !landedOnRecord && (
+            <div className="border-l-4 border-status-amber-fill bg-status-amber-soft p-3 text-sm" role="status" data-testid="installation-unrecorded">
+              <p className="m-0 font-semibold">GitHub sent installation {initialInstallation} back, but it is not on record.</p>
+              <p className="m-0 mt-1">
+                {landedUnverified
+                  ? 'The link you arrived on carried no signed state for your session, so nothing was recorded automatically. '
+                  : ''}
+                Press <strong>Sync installations</strong> to record it: the deployment verifies it with the app’s own credential before anything is written.
+              </p>
+            </div>
+          )}
           {current && (
             <p className="m-0 text-xs text-on-surface-muted">
               {current.repository_selection === 'selected'
@@ -150,7 +189,13 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
               <TextField label="Find a repository" placeholder="owner/name" value={q} onChange={(e) => { setQ(e.target.value); setPage(1) }} />
               {repos.isPending && <p className="text-sm text-on-surface-muted">Loading repositories…</p>}
               {repos.isError && <ErrorState compact error={repos.error} onRetry={() => void repos.refetch()} />}
-              {repos.data && repos.data.items.length === 0 && <EmptyState compact title="No repository matches" />}
+              {repos.data && repos.data.items.length === 0 && (
+                <EmptyState
+                  compact
+                  title={q ? 'No repository matches on this page' : 'No repositories'}
+                  reason={q && repos.data.has_more ? 'The search filters one page of GitHub’s listing at a time; press Next to keep looking.' : undefined}
+                />
+              )}
               {repos.data && repos.data.items.length > 0 && (
                 <ul className="m-0 max-h-72 list-none divide-y divide-border overflow-y-auto rounded-[var(--radius-control)] border border-border p-0" aria-label="Repositories">
                   {repos.data.items.map((r) => {

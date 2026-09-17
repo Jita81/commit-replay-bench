@@ -51,7 +51,7 @@ test.describe('01 login', () => {
 
     await field(page, 'Password').fill(env.pass)
     await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-    await expect(page).toHaveURL(/\/repos$/)
+    await expect(page).toHaveURL(/\/home$/) // a direct login lands on the journey's first screen
     const chip = page.getByTestId('user-chip')
     await expect(chip).toBeVisible()
     await expect(chip).toContainText(/admin/i)

@@ -121,7 +121,7 @@ export function stagesFor(input: StageInputs): Stage[] {
   const tc = repo.task_counts
   const mineRun = lastRunOf(repo, 'mine')
   const mineStatus: StageStatus =
-    tc.total > 0 ? 'done' : mineRun && ACTIVE.includes(mineRun.status) ? 'running' : mineRun?.status === 'failed' ? 'failed' : 'todo'
+    mineRun && ACTIVE.includes(mineRun.status) ? 'running' : tc.total > 0 ? 'done' : mineRun?.status === 'failed' ? 'failed' : 'todo'
   push({
     id: 'mine',
     title: 'Commits mined into tasks',
@@ -195,11 +195,12 @@ export function stagesFor(input: StageInputs): Stage[] {
   })
 
   const replayRun = lastRunOf(repo, 'replay')
+  // an active run outranks "done": the operator who just pressed "spend" must see it
   const measureStatus: StageStatus =
-    (input.measuredRows ?? 0) > 0
-      ? 'done'
-      : replayRun && ACTIVE.includes(replayRun.status)
-        ? 'running'
+    replayRun && ACTIVE.includes(replayRun.status)
+      ? 'running'
+      : (input.measuredRows ?? 0) > 0
+        ? 'done'
         : 'todo'
   push({
     id: 'measure',
@@ -210,7 +211,7 @@ export function stagesFor(input: StageInputs): Stage[] {
       measureStatus === 'done'
         ? `${input.measuredRows} rows on the current apparatus`
         : measureStatus === 'running'
-          ? 'measuring…'
+          ? `measuring… (${input.measuredRows ?? 0} rows already on the current apparatus)`
           : 'start a small sighted replay (spends model budget)',
     runKind: 'replay',
     runId: replayRun?.id ?? null,

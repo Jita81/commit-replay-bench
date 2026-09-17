@@ -89,6 +89,13 @@ class Repo(Base):
     probe_detail: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
     updated: Mapped[str] = mapped_column(String(40), nullable=False, default=_now, onupdate=_now)
+    #: The lower-cased ``owner/name`` this row was connected from through the GitHub App
+    #: (revision 0006 — declared last so ``init_db`` and the migration agree on column
+    #: order); NULL for a repository connected by URL. UNIQUE: one GitHub repository
+    #: connects once, enforced by the database, not by a scan of the JSON.
+    github_full_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+    __table_args__ = (Index("uq_repos_github_full_name", "github_full_name", unique=True),)
 
 
 class Run(Base):

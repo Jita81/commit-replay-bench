@@ -333,6 +333,13 @@ def update_repo(name: str, body: RepoUpdateRequest, operator: OperatorDep, db: D
     new = config.to_dict()
     diff = config_diff(old, new)
     kept = {k: v for k, v in dict(repo.config_json or {}).items() if k in PRESERVED_KEYS and v}
+    # the GitHub link belongs to the URL it was made for: a changed URL drops it, or the
+    # worker would mint the installation's token and hand it to whatever host the new URL
+    # names (CWE-201). The operator re-connects from the picker to link again.
+    unlinked = "github" in kept and config.url != (repo.url or "")
+    if unlinked:
+        kept.pop("github", None)
+        repo.github_full_name = None
     repo.language = config.language.value
     repo.runner = config.runner
     repo.clone_path = config.path
@@ -345,7 +352,7 @@ def update_repo(name: str, body: RepoUpdateRequest, operator: OperatorDep, db: D
         action="repo.updated",
         repo=name,
         actor=operator.id,
-        payload={"diff": diff, "fields": sorted(diff)},
+        payload={"diff": diff, "fields": sorted(diff), "github_unlinked": unlinked},
     )
     db.commit()
     return repo_detail(db, repo)

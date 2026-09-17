@@ -369,6 +369,9 @@ def version(request: Request) -> dict[str, Any]:
         "apparatus": APPARATUS_VERSION,
         "policy": POLICY_VERSION,
         "uptime_s": int(time.time() - started) if started else 0,
+        # whether an organisation sign-in exists is a fact the login page and the posture
+        # page both need before anyone is signed in; it names no provider and no secret
+        "oidc_enabled": getattr(request.app.state, "oidc_client", None) is not None,
     }
 
 

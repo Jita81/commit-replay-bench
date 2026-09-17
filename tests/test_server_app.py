@@ -222,6 +222,9 @@ class TestFactory:
                     users = c.get(f"{API_PREFIX}/users").json()
                     assert users["total"] == 1
                     assert users["items"][0]["role"] == "admin"
+                    # the name a person types at login, not the namespaced subject
+                    assert users["items"][0]["username"] == "root"
+                    assert users["items"][0]["subject"] == "local:root"
         notices = [r for r in caplog.records if "bootstrap admin" in r.message]
         assert len(notices) == 1
         assert ROOT_PW not in notices[0].getMessage()
@@ -265,6 +268,13 @@ class TestFactory:
 
 
 # --- middleware --------------------------------------------------------------------------
+
+
+class TestVersion:
+    def test_version_says_whether_an_organisation_sign_in_exists(self, client: TestClient) -> None:
+        d = client.get(f"{API_PREFIX}/version").json()
+        assert set(d) == {"crb", "apparatus", "policy", "uptime_s", "oidc_enabled"}
+        assert d["oidc_enabled"] is False  # the test settings configure no provider
 
 
 class TestMiddleware:

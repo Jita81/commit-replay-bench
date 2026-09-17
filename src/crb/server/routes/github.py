@@ -34,15 +34,26 @@ Touch when:   the connect body grows a field (mirror it in the UI dialog); GHES 
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
-from crb.server.auth import OperatorDep, ViewerDep
+from crb.server.auth import (
+    GITHUB_SETUP_COOKIE,
+    OperatorDep,
+    ViewerDep,
+    clear_github_setup_cookie,
+    issue_github_setup_state,
+    new_github_setup_nonce,
+    set_github_setup_cookie,
+    verify_github_setup_state,
+)
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep
 from crb.server.github_app import GitHubApp, GitHubAppError, Installation, suggest_config
 from crb.server.routes.repos import _stored_config, _validated_config, repo_detail
@@ -57,15 +68,20 @@ _ERR = {"model": ErrorEnvelope}
 GITHUB_KEY = "github"
 
 
-def get_github_app(settings: SettingsDep) -> GitHubApp:
-    """The configured app, or a 404 the UI renders as "an admin installs the GitHub App"."""
+def get_github_app(settings: SettingsDep) -> Iterator[GitHubApp]:
+    """The configured app, or a 404 the UI renders as "an admin installs the GitHub App".
+    A yielding dependency: the request's ``httpx.Client`` is closed when the request ends."""
     if not settings.github.enabled:
         raise ApiError(
             404,
             "github_app_not_configured",
             "the GitHub App is not configured on this deployment (CRB_GITHUB__APP_ID and a private key — docs/GITHUB-APP.md)",
         )
-    return GitHubApp(settings.github, httpx.Client(timeout=20.0))
+    client = httpx.Client(timeout=20.0)
+    try:
+        yield GitHubApp(settings.github, client)
+    finally:
+        client.close()
 
 
 GitHubAppDep = Annotated[GitHubApp, Depends(get_github_app)]
@@ -199,14 +215,13 @@ def _installation_or_404(db: DbDep, installation_id: int) -> GitHubInstallation:
 
 
 def _connected_names(db: DbDep) -> dict[str, str]:
-    """``owner/name`` → crb repository name for every repository linked to GitHub."""
-    out: dict[str, str] = {}
-    for repo in db.execute(select(Repo)).scalars():
-        link = dict(repo.config_json or {}).get(GITHUB_KEY) or {}
-        full = str(link.get("full_name", ""))
-        if full:
-            out[full.lower()] = repo.name
-    return out
+    """``owner/name`` (lower-cased) → crb repository name for every repository linked to
+    GitHub — read from the constrained column (revision 0006), the same fact the unique
+    index enforces at commit."""
+    rows = db.execute(
+        select(Repo.github_full_name, Repo.name).where(Repo.github_full_name.is_not(None))
+    ).all()
+    return {str(full): str(name) for full, name in rows}
 
 
 # ---------------------------------------------------------------------------
@@ -220,19 +235,30 @@ def _connected_names(db: DbDep) -> dict[str, str]:
     responses={401: _ERR},
     summary="Is the GitHub App configured, where to install it, the installations on record",
 )
-def get_app(viewer: ViewerDep, db: DbDep, settings: SettingsDep) -> GitHubAppOut:
-    """Never 404s: an unconfigured app is a state the Connect screen renders."""
-    del viewer
+def get_app(
+    viewer: ViewerDep, db: DbDep, settings: SettingsDep, response: Response
+) -> GitHubAppOut:
+    """Never 404s: an unconfigured app is a state the Connect screen renders. The install
+    link carries a signed ``state`` bound to this principal AND to this browser (a nonce
+    the response also sets as an httponly cookie; thirty minutes) so the setup callback can
+    tell an install this person started, here, from a link someone else made them open or
+    a stale tab in another session — an operator's link writes; a viewer's is plain (a
+    viewer cannot complete it)."""
     g = settings.github
     rows = (
         db.execute(select(GitHubInstallation).order_by(GitHubInstallation.account_login))
         .scalars()
         .all()
     )
+    install_url = g.install_url if g.enabled else ""
+    if install_url and viewer.role in ("operator", "approver", "admin"):
+        nonce = new_github_setup_nonce()
+        set_github_setup_cookie(response, settings, nonce)
+        install_url = f"{install_url}?state={issue_github_setup_state(settings, viewer.id, nonce)}"
     return GitHubAppOut(
         configured=g.enabled,
         app_slug=g.app_slug,
-        install_url=g.install_url if g.enabled else "",
+        install_url=install_url,
         api_url=g.api_url if g.enabled else "",
         installations=[_out(r) for r in rows],
     )
@@ -267,18 +293,32 @@ def sync_installations(
     responses={401: _ERR, 403: _ERR, 404: _ERR, 502: _ERR},
     summary="Where GitHub sends the installer back (the app's Setup URL); records the installation and lands on Connect",
 )
-def setup_callback(
+def setup_callback(  # noqa: PLR0917 — FastAPI dependencies + query params
+    request: Request,
     operator: OperatorDep,
     db: DbDep,
     app: GitHubAppDep,
+    settings: SettingsDep,
     installation_id: int = Query(ge=1),
     setup_action: str = Query(default="install", max_length=32),
+    state: str = Query(default="", max_length=512),
 ) -> RedirectResponse:
-    """``installation_id`` is untrusted until the app's own credential confirms it."""
+    """``installation_id`` is untrusted until the app's own credential confirms it; the
+    write is made only when ``state`` proves this operator started the install, in this
+    browser, from a link this deployment minted — the state's nonce must match the
+    ``crb_github_setup`` cookie, which is consumed by the write (CWE-352). Without that
+    proof nothing is recorded: the callback lands on Connect with ``unverified=1`` and the
+    operator records the installation with the CSRF-protected sync, which verifies it the
+    same way."""
     try:
         inst = app.installation(installation_id)
     except GitHubAppError as exc:
         raise _github_error(exc) from exc
+    nonce = request.cookies.get(GITHUB_SETUP_COOKIE)
+    if not verify_github_setup_state(settings, state, operator.id, nonce):
+        return RedirectResponse(
+            url=f"/connect?installation={inst.id}&unverified=1", status_code=303
+        )
     row = _upsert(db, inst, by=operator.id)
     append_system_event(
         db,
@@ -295,7 +335,9 @@ def setup_callback(
         },
     )
     db.commit()
-    return RedirectResponse(url=f"/connect?installation={row.installation_id}", status_code=303)
+    out = RedirectResponse(url=f"/connect?installation={row.installation_id}", status_code=303)
+    clear_github_setup_cookie(out, settings)  # one state, one write
+    return out
 
 
 @router.get(
@@ -408,6 +450,7 @@ def connect_repository(
         clone_path="",
         url=config.url,
         config_json=_stored_config(config, {GITHUB_KEY: link}),
+        github_full_name=gh.full_name.lower(),
         probe_status="unknown",
     )
     db.add(repo)
@@ -419,7 +462,17 @@ def connect_repository(
         actor=operator.id,
         payload={"config": config.to_dict(), "github": link},
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        # two operators connected the same repository at once: the unique index on
+        # ``repos.github_full_name`` (or the name's primary key) decided, not the scan above
+        db.rollback()
+        raise ApiError(
+            409,
+            "already_exists",
+            f"{gh.full_name} was connected by another request at the same time (or the name {name!r} is taken)",
+        ) from exc
     return repo_detail(db, repo)
 
 

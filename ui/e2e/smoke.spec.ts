@@ -45,7 +45,7 @@ async function mockApi(page: Page, loggedIn: boolean) {
         : route.fulfill(envelope(401, 'unauthenticated', 'not signed in'))
     }
     if (path === '/health') return json({ status: 'ok', probes: [{ name: 'db', status: 'ok', detail: 'append-only triggers present', data: {} }] })
-    if (path === '/version') return json({ crb: '2.0.0', apparatus: '2.0', policy: 'routing.v1' })
+    if (path === '/version') return json({ crb: '2.0.0', apparatus: '2.0', policy: 'routing.v1', oidc_enabled: true })
     if (path === '/repos') return json({ items: [], total: 0, limit: 50, offset: 0 })
     if (path === '/ledger/verify') return json({ rows: 0, ok: true, false_q1_total: 0 })
     return route.fulfill(envelope(404, 'not_found', `no fixture for ${path}`))

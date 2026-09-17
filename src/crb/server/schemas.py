@@ -1056,12 +1056,23 @@ class SignoffOut(BaseModel):
     tier: str
     note: str
     approver: str
+    #: The approver's display name resolved from the users table at READ time; ``approver``
+    #: stays the stable user id the hash chain covers (a name may change, an id may not).
+    #: Empty when the account no longer exists.
+    approver_name: str = ""
     created: str
     revoked: bool
     revoked_by: str | None
+    revoked_by_name: str | None = None
     revoked_at: str | None
     active: bool
     current_false_q1: int
+    #: The attestation was made on an earlier apparatus than the one this deployment reads
+    #: at now: it stays on the record but lifts nothing (evidence expires when the
+    #: apparatus changes — EVIDENCE-AND-CLAIMS §4); the Decisions inbox offers re-sign or
+    #: revoke. ``apparatus_current`` is the deployment's apparatus for comparison.
+    stale: bool = False
+    apparatus_current: str = ""
     evidence: SignoffEvidence
     prev_hash: str
     row_hash: str
@@ -1091,9 +1102,20 @@ class SignoffCreateRequest(BaseModel):
 
 
 class SignoffRevokeRequest(BaseModel):
+    """``POST /signoffs/{id}/revoke`` body. The reason is REQUIRED (DL-043): a revocation
+    withdraws a human attestation from the record, and an auditor reads why next to it —
+    the API refuses a blank one, not just the UI."""
+
     model_config = ConfigDict(extra="forbid")
 
-    note: str = Field(default="", max_length=4000)
+    note: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("note")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("a revocation needs a reason")
+        return v.strip()
 
 
 # ---------------------------------------------------------------------------
