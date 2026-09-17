@@ -79,4 +79,19 @@ describe('DecisionsPage', () => {
     await waitFor(() => expect(screen.getByText('Nothing is waiting on a person')).toBeInTheDocument())
     expect(screen.getByText('0 waiting')).toBeInTheDocument()
   })
+
+  it('a connected but unmeasured repository is "nothing measured yet", never "no repository connected"', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
+      'GET /capability-map': () => envelope(404, 'not_found', 'no rows for alpha'), // the permitted 404: never measured
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+    })
+    renderApp(<DecisionsPage />, { route: '/decisions' })
+    await waitFor(() => expect(screen.getByTestId('decisions-count')).toHaveAttribute('data-ready', 'true'))
+    expect(screen.getByText('Nothing measured yet')).toBeInTheDocument()
+    expect(screen.getByText(/alpha is connected but no capability map exists yet/)).toBeInTheDocument()
+    expect(screen.queryByText('No repository connected')).toBeNull()
+  })
 })

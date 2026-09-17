@@ -75,8 +75,11 @@ export function DecisionsPage() {
       {d.errors.map((e) => (
         <ErrorState key={e} error={new Error(e)} compact />
       ))}
-      {d.ready && repos.length === 0 && d.decisions.length === 0 && (
+      {d.ready && d.connected.length === 0 && (
         <EmptyState glyph="⎇" title="No repository connected" reason="Decisions appear once a repository has been measured." action={<LinkButton to="/connect">Connect a repository</LinkButton>} />
+      )}
+      {d.ready && d.connected.length > 0 && repos.length === 0 && (
+        <EmptyState glyph="◌" title="Nothing measured yet" reason={`${d.connected.length === 1 ? `${d.connected[0]} is` : `${d.connected.length} repositories are`} connected but no capability map exists yet. Decisions appear once a measurement has run.`} action={<LinkButton to="/connect">Go to the connection walk</LinkButton>} />
       )}
       {repos.map((repo) => {
         const rows = d.byRepo[repo] ?? []

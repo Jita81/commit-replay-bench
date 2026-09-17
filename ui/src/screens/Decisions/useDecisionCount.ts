@@ -37,6 +37,8 @@ export interface DecisionsState {
   decisions: Decision[]
   stale: StaleSignoff[]
   byRepo: Record<string, Decision[]>
+  /** Every repository on record (measured or not) — the empty state's truth, not `byRepo`'s keys. */
+  connected: string[]
   errors: string[]
 }
 
@@ -69,7 +71,7 @@ export function useDecisions(): DecisionsState {
     })),
   })
   return useMemo(() => {
-    if (!repos.data) return { ready: false, decisions: [], stale: [], byRepo: {}, errors: repos.isError ? [String(repos.error?.message ?? 'repos')] : [] }
+    if (!repos.data) return { ready: false, decisions: [], stale: [], byRepo: {}, connected: [], errors: repos.isError ? [String(repos.error?.message ?? 'repos')] : [] }
     const byRepo: Record<string, Decision[]> = {}
     const stale: StaleSignoff[] = []
     const errors: string[] = []
@@ -97,7 +99,9 @@ export function useDecisions(): DecisionsState {
       byRepo[repo] = decisionsFor({ repo, cells: m.data.cells, signoffs: s.data.items, tasks: t?.data ?? [] })
       for (const so of s.data.items) if (so.stale && !so.revoked) stale.push({ repo, signoff: so })
     })
-    return { ready, decisions: Object.values(byRepo).flat(), stale, byRepo, errors }
+    // `connected` is every repository on record; `byRepo` only those with a measured map — an
+    // unmeasured repository is connected and has no decisions, not "no repository"
+    return { ready, decisions: Object.values(byRepo).flat(), stale, byRepo, connected: names, errors }
   }, [repos.data, repos.isError, repos.error, names, maps, signoffs, tasks])
 }
 
