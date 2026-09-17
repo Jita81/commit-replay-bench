@@ -37,31 +37,32 @@ import { useDecisionCount } from '../screens/Decisions/useDecisionCount'
 /** The one brand string in chrome (design law 9): header, footer and the login page use it. */
 export const BRAND = 'Commit Replay Bench'
 
-/** The primary navigation, in display order; a new screen is added here and in `App.tsx`. */
 /**
- * The primary nav is the JOURNEY — connect a repository, read its results, decide what is
- * waiting on a person, run the factory — followed by the explore screens the journey links
- * into. The journey order is the order an enterprise reader needs; the explore screens are
- * the evidence behind it (every one still reachable, none demoted from the URL space).
+ * The primary nav is the JOURNEY — connect a repository, earn its baseline, decide what is
+ * waiting on a person, run the factory (DL-044: the factory and the self-improvement loop
+ * are the product; the rest is the on-ramp that earns their baseline). Every role sees the
+ * journey. The INSTRUMENT row beneath it is the operator's tooling — runs, the map grid,
+ * routes, the oracle, the learning loop — plus the ledger for every role (an auditor's
+ * screen) and Settings for admins. Nothing is removed from the URL space: the repositories
+ * list, the sign-off form and the map grid stay routable, reached from the journey (the
+ * Connection page lists repositories; Decisions and the map link to the sign-off form).
  */
 const JOURNEY: Array<{ to: string; label: string; badge?: boolean }> = [
   { to: '/home', label: 'Home' },
   { to: '/connect', label: 'Connection' },
-  { to: '/repos', label: 'Repositories' },
-  { to: '/results', label: 'Capability map' },
+  { to: '/results', label: 'Baseline' },
   { to: '/decisions', label: 'Decisions', badge: true },
   { to: '/factory', label: 'Factory' },
   { to: '/posture', label: 'Deployment' },
 ]
-const EXPLORE: Array<{ to: string; label: string }> = [
-  { to: '/runs', label: 'Runs' },
-  { to: '/capability', label: 'Map grid' },
-  { to: '/routing', label: 'Routes' },
-  { to: '/oracle', label: 'Oracle' },
-  { to: '/learn', label: 'Learn' },
-  { to: '/ledger', label: 'Ledger' },
-  { to: '/signoff', label: 'Sign-off' },
-  { to: '/settings', label: 'Settings' },
+const INSTRUMENT: Array<{ to: string; label: string; role: 'viewer' | 'operator' | 'admin' }> = [
+  { to: '/runs', label: 'Runs', role: 'operator' },
+  { to: '/capability', label: 'Map grid', role: 'operator' },
+  { to: '/routing', label: 'Routes', role: 'operator' },
+  { to: '/oracle', label: 'Oracle', role: 'operator' },
+  { to: '/learn', label: 'Learn', role: 'operator' },
+  { to: '/ledger', label: 'Ledger', role: 'viewer' },
+  { to: '/settings', label: 'Settings', role: 'admin' },
 ]
 
 /** Sun / moon / half-disc for the theme toggle; the glyph is decorative, the `aria-label` carries the state. */
@@ -74,7 +75,8 @@ const THEME_GLYPH = { light: '☀', dark: '☾', system: '◐' } as const
  * is a provenance fact the auditor needs.
  */
 export function Layout() {
-  const { me } = useAuth()
+  const { me, can } = useAuth()
+  const instrument = INSTRUMENT.filter((n) => can(n.role))
   const [theme, , cycle] = useTheme()
   const logout = useLogout()
   const navigate = useNavigate()
@@ -144,12 +146,12 @@ export function Layout() {
             ))}
           </ul>
         </nav>
-        <nav aria-label="Explore" className="border-b border-border bg-surface-high">
+        <nav aria-label="Instrument" className="border-b border-border bg-surface-high">
           <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap items-center gap-1 px-5 py-1 p-0">
             <li className="pr-2 text-[11px] font-bold uppercase tracking-[.08em] text-on-surface-muted" aria-hidden>
-              Explore
+              {instrument.length > 1 ? 'Instrument' : 'Record'}
             </li>
-            {EXPLORE.map((n) => (
+            {instrument.map((n) => (
               <li key={n.to}>
                 <NavLink
                   to={n.to}

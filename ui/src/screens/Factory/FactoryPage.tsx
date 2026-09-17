@@ -34,14 +34,14 @@
 
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { useCreateRun, useFactoryBacklog, useFactoryTasks, useRegisterBacklog, useSignGap } from '../../api/hooks'
-import type { FactoryTask } from '../../api/types'
+import { useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useRegisterBacklog, useSignGap } from '../../api/hooks'
+import type { FactoryCatalogue, FactoryTask } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Dialog } from '../../components/Dialog'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
-import { TextArea, TextField } from '../../components/Field'
+import { SelectField, TextArea, TextField } from '../../components/Field'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
@@ -190,6 +190,11 @@ export function FactoryPage() {
                       <input type="checkbox" checked={deliver} onChange={(e) => setDeliver(e.target.checked)} />
                       Open pull requests where the map routes <code>deliver</code>
                     </label>
+                    {tasks.data && (
+                      <span className="text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
+                        {deliverableCount(tasks.data)} of {tasks.data.length} items sit in a cell that routes <code>deliver</code> today; the rest would be built and withheld
+                      </span>
+                    )}
                     {deliver && can('approver') && (
                       <label className="flex items-center gap-2" title="Recorded on the chain as your override of the route gate">
                         <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} />
@@ -244,6 +249,7 @@ function ItemRow({ repo, task: t, focused, canSign }: { repo: string; task: Fact
         <span className="font-mono text-xs text-on-surface-muted">
           {t.capability_class} · {t.size} · {t.kind}
         </span>
+        <CellRoutePill t={t} />
         <span className="ml-auto font-mono text-xs" title="item status">
           {t.status} · {t.route_hint}
         </span>
@@ -301,18 +307,117 @@ function ItemRow({ repo, task: t, focused, canSign }: { repo: string; task: Fact
   )
 }
 
+/** How many items sit in a cell the map routes `deliver` — what a run could actually deliver. */
+export function deliverableCount(tasks: FactoryTask[]): number {
+  return tasks.filter((t) => t.cell_route?.deliverable).length
+}
+
+/**
+ * F28 — the item's cell route BEFORE the run, from the same signed map the delivery gate
+ * reads: "routes deliver" (green), "routes calibrate — delivery will be withheld" (amber),
+ * or "cell not measured — delivery will be withheld" (grey). Never a guess: `route: ''`
+ * means nobody has measured the cell.
+ */
+function CellRoutePill({ t }: { t: FactoryTask }) {
+  const r = t.cell_route
+  if (!r || !r.route) {
+    return (
+      <Pill tone="muted" glyph="○" size="xs" label={`Cell ${t.capability_class} × ${t.size} is not measured on this repository: delivery would be withheld`} data-testid={`cell-route-${t.id}`}>
+        cell not measured · delivery withheld
+      </Pill>
+    )
+  }
+  if (r.deliverable) {
+    return (
+      <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver (n=${r.n}): a clean build may open a pull request`} data-testid={`cell-route-${t.id}`}>
+        routes deliver · n={r.n}
+      </Pill>
+    )
+  }
+  return (
+    <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}, n=${r.n}): delivery would be withheld — ${r.reason}`} data-testid={`cell-route-${t.id}`}>
+      routes {r.route} · {r.reason_code} · delivery withheld
+    </Pill>
+  )
+}
+
+interface DraftItem {
+  id: string
+  title: string
+  capability_class: string
+  size_estimate: string
+  kind: string
+  level: string
+  description: string
+  depends_on: string
+  /** slot name → the fact, for the chosen class's structural slots */
+  facts: Record<string, string>
+}
+
+const emptyItem = (n: number, cat: FactoryCatalogue | undefined): DraftItem => ({
+  id: `I-${n}`,
+  title: '',
+  capability_class: cat?.classes[0]?.capability_class ?? 'bug.fix',
+  size_estimate: 'XS',
+  kind: cat?.kinds[0] ?? 'code',
+  level: cat?.levels[0] ?? 'L1',
+  description: '',
+  depends_on: '',
+  facts: {},
+})
+
+/** The request body the form produces: `structural_facts` are `slot: text` lines (readiness.py). */
+export function draftToBody(items: DraftItem[]): { items: Array<Record<string, unknown>> } {
+  return {
+    items: items.map((d) => ({
+      id: d.id.trim(),
+      title: d.title.trim(),
+      kind: d.kind,
+      level: d.level,
+      description: d.description.trim(),
+      capability_class: d.capability_class,
+      size_estimate: d.size_estimate,
+      structural_facts: Object.entries(d.facts)
+        .filter(([, v]) => v.trim().length > 0)
+        .map(([k, v]) => `${k}: ${v.trim()}`),
+      depends_on: d.depends_on
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean),
+    })),
+  }
+}
+
+/**
+ * F24 — the backlog as a person writes it: one card per item with the class's structural
+ * questions from the readiness catalogue as the fields (an unanswered structural slot is
+ * exactly the gap the run will stop on), plus an "advanced" JSON view for a prepared file.
+ */
 function RegisterBacklogDialog({ open, repo, onClose }: { open: boolean; repo: string; onClose: () => void }) {
   const register = useRegisterBacklog()
+  const catalogue = useFactoryCatalogue(open)
+  const [mode, setMode] = useState<'form' | 'json'>('form')
+  const [items, setItems] = useState<DraftItem[]>([emptyItem(1, undefined)])
   const [text, setText] = useState('{\n  "items": [\n    {"id": "I-1", "title": "…", "capability_class": "bug.fix", "size_estimate": "XS", "structural_facts": []}\n  ]\n}')
   const [parseError, setParseError] = useState('')
+  const cat = catalogue.data
+  const slotsFor = (cls: string) => cat?.classes.find((c) => c.capability_class === cls)?.slots ?? []
+  const update = (i: number, patch: Partial<DraftItem>) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)))
+  const setFact = (i: number, slot: string, value: string) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, facts: { ...x.facts, [slot]: value } } : x)))
+  const formValid = items.every((d) => d.id.trim() && d.title.trim())
+
   const submit = () => {
     let body: unknown
-    try {
-      body = JSON.parse(text)
-      setParseError('')
-    } catch (e) {
-      setParseError(`not JSON: ${(e as Error).message}`)
-      return
+    if (mode === 'json') {
+      try {
+        body = JSON.parse(text)
+        setParseError('')
+      } catch (e) {
+        setParseError(`not JSON: ${(e as Error).message}`)
+        return
+      }
+    } else {
+      body = draftToBody(items)
     }
     register.mutate({ repo, body }, { onSuccess: onClose })
   }
@@ -321,19 +426,106 @@ function RegisterBacklogDialog({ open, repo, onClose }: { open: boolean; repo: s
       open={open}
       title="Freeze a backlog"
       onClose={onClose}
+      width="lg"
       footer={
         <>
+          <Button variant="ghost" onClick={() => setMode(mode === 'form' ? 'json' : 'form')}>
+            {mode === 'form' ? 'Advanced: paste JSON instead' : 'Back to the form'}
+          </Button>
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="filled" disabled={register.isPending} onClick={submit}>
-            Freeze
+          <Button variant="filled" disabled={register.isPending || (mode === 'form' && !formValid)} onClick={submit}>
+            Freeze {mode === 'form' ? `${items.length} item${items.length === 1 ? '' : 's'}` : ''}
           </Button>
         </>
       }
     >
       <p className="mt-0 text-sm text-on-surface-body">
-        The items are validated, hashed and recorded as the first event of the chain. Shape as <code>docs/API.md</code> "Factory": <code>items[]</code> with <code>id</code>, <code>title</code>, <code>capability_class</code>, <code>size_estimate</code>, <code>structural_facts</code>; optional <code>authored</code> tests. Refused with 409 while a factory run is active.
+        The items are validated, hashed and recorded as the first event of the chain. Each class asks for the facts a good test needs; a <strong>structural</strong> fact left empty is the gap the run will stop on until an approver signs it. Refused with 409 while a factory run is active.
       </p>
-      <TextArea label="Backlog JSON" value={text} onChange={(e) => setText(e.target.value)} rows={12} className="font-mono text-xs" error={parseError || undefined} />
+      {mode === 'json' ? (
+        <>
+          <TextArea label="Backlog JSON" value={text} onChange={(e) => setText(e.target.value)} rows={12} className="font-mono text-xs" error={parseError || undefined} hint={'Shape as docs/API.md "Factory": items[] with id, title, capability_class, size_estimate, structural_facts; optional authored tests.'} />
+        </>
+      ) : (
+        <div className="space-y-4" data-testid="backlog-form">
+          {catalogue.isError && <ErrorState compact error={catalogue.error} onRetry={() => void catalogue.refetch()} />}
+          {items.map((d, i) => {
+            const slots = slotsFor(d.capability_class)
+            return (
+              <fieldset key={i} className="m-0 rounded-[var(--radius-control)] border border-border p-3" data-testid={`backlog-item-${i}`}>
+                <legend className="px-1 text-xs font-semibold text-on-surface-muted">Item {i + 1}</legend>
+                <div className="grid gap-3 sm:grid-cols-[10ch_1fr]">
+                  <TextField label="Id" required value={d.id} onChange={(e) => update(i, { id: e.target.value })} hint="letters, digits, . _ -" />
+                  <TextField label="Title" required value={d.title} onChange={(e) => update(i, { title: e.target.value })} />
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-4">
+                  <SelectField label="Class" value={d.capability_class} onChange={(e) => update(i, { capability_class: e.target.value, facts: {} })}>
+                    {(cat?.classes ?? [{ capability_class: d.capability_class, slots: [] }]).map((c) => (
+                      <option key={c.capability_class} value={c.capability_class}>
+                        {c.capability_class}
+                      </option>
+                    ))}
+                  </SelectField>
+                  <SelectField label="Size" value={d.size_estimate} onChange={(e) => update(i, { size_estimate: e.target.value })}>
+                    {(cat?.sizes ?? ['XS', 'S', 'M', 'L', 'XL']).map((sz) => (
+                      <option key={sz} value={sz}>
+                        {sz}
+                      </option>
+                    ))}
+                  </SelectField>
+                  <SelectField label="Kind" value={d.kind} onChange={(e) => update(i, { kind: e.target.value })}>
+                    {(cat?.kinds ?? ['code']).map((k) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
+                  </SelectField>
+                  <SelectField label="Level" value={d.level} onChange={(e) => update(i, { level: e.target.value })}>
+                    {(cat?.levels ?? ['L1']).map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
+                  </SelectField>
+                </div>
+                <div className="mt-3">
+                  <TextArea label="Description" rows={2} value={d.description} onChange={(e) => update(i, { description: e.target.value })} hint="What and why, as the issue would say it. Never a diff." />
+                </div>
+                {slots.length > 0 && (
+                  <div className="mt-3 space-y-2" data-testid={`backlog-item-${i}-facts`}>
+                    <p className="m-0 text-xs font-semibold text-on-surface-muted">What a good test for {d.capability_class} needs to know</p>
+                    {slots.map((sl) => (
+                      <TextField
+                        key={sl.name}
+                        label={`${sl.question}${sl.kind === 'structural' ? '' : ' (value — optional)'}`}
+                        value={d.facts[sl.name] ?? ''}
+                        onChange={(e) => setFact(i, sl.name, e.target.value)}
+                        hint={sl.kind === 'structural' ? `structural · ${sl.name} — empty = a gap the run stops on` : `value · ${sl.name} — routes, never blocks`}
+                      />
+                    ))}
+                  </div>
+                )}
+                {slots.length === 0 && cat && (
+                  <p className="mt-3 text-xs text-on-surface-muted">
+                    {d.capability_class} declares no structural facts: the run assesses readiness from the description alone.
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap items-end gap-3">
+                  <TextField label="Depends on" value={d.depends_on} onChange={(e) => update(i, { depends_on: e.target.value })} hint="item ids, comma-separated" className="min-w-[20ch]" />
+                  {items.length > 1 && (
+                    <Button size="sm" variant="ghost" onClick={() => setItems((xs) => xs.filter((_, j) => j !== i))}>
+                      Remove item
+                    </Button>
+                  )}
+                </div>
+              </fieldset>
+            )
+          })}
+          <Button size="sm" onClick={() => setItems((xs) => [...xs, emptyItem(xs.length + 1, cat)])}>
+            Add another item
+          </Button>
+        </div>
+      )}
       {register.isError && <ErrorState compact error={register.error} />}
     </Dialog>
   )

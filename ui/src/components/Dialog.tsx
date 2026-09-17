@@ -45,7 +45,9 @@ export function Dialog({ open, title, onClose, children, footer, width = 'md' }:
       if (typeof el.showModal === 'function') el.showModal()
       else el.setAttribute('open', '')
     } else if (!open && el.open) {
-      el.close()
+      // jsdom lacks close() too: mirror the fallback so a closing dialog never throws there
+      if (typeof el.close === 'function') el.close()
+      else el.removeAttribute('open')
     }
   }, [open])
 

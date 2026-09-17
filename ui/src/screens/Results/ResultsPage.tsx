@@ -95,9 +95,9 @@ export function ResultsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Journey · 2 of 4"
-        title="Results"
-        purpose="What the evidence says about this repository, in the order it matters: is the instrument trustworthy here, what may the builder be trusted to do, and what is waiting on a person."
+        eyebrow="Journey · 2 of 4 · the baseline"
+        title="Baseline"
+        purpose="What the evidence says about this repository — the baseline the factory runs on — in the order it matters: is the instrument trustworthy here, what may the builder be trusted to do, and what is waiting on a person."
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
       {!repo && <EmptyState title="Choose a repository" reason="Results are per repository — a cell says nothing about a repository it was not measured on." action={<LinkButton to="/connect">Connect one</LinkButton>} />}

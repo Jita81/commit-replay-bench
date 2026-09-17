@@ -45,14 +45,20 @@ from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
+from crb.core.capability import PROJECTION_CLASS_SIZE
+from crb.core.routing import ROUTE_DELIVER
+from crb.core.spec import SIZE_TIER_NAMES
 from crb.factory.backlog import KINDS, LEVELS, BacklogError, BacklogItem
 from crb.factory.evidence import verify_events
-from crb.factory.readiness import SLOT_VALUE, sign, slots_for
+from crb.factory.readiness import CATALOGUE, SLOT_VALUE, sign, slots_for
 from crb.factory.testfirst import AuthoredTest
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep
+from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
+from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
+from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
+from crb.store.ledger import DbLedger
 from crb.store.models import Run
 
 router = APIRouter(tags=["factory"])
@@ -113,6 +119,20 @@ class FactoryBacklogOut(BaseModel):
     items: list[BacklogItemOut]
 
 
+class CellRouteOut(BaseModel):
+    """The capability map's decision for the item's (class × size) cell — the SAME signed
+    map the delivery gate reads (sighted rows, current apparatus, the repo's latest
+    controls verdict, sign-offs overlaid — DL-038), shown BEFORE a run spends anything.
+    ``route`` is empty when nobody has measured the cell: delivery would be withheld."""
+
+    route: str = ""
+    reason_code: str = ""
+    reason: str = ""
+    n: int = 0
+    #: True only when the gate would let a clean build of this item open a pull request.
+    deliverable: bool = False
+
+
 class FactoryTaskOut(BaseModel):
     id: str
     title: str
@@ -127,6 +147,31 @@ class FactoryTaskOut(BaseModel):
     pr_url: str | None
     review_verdict: str | None
     last_event: str
+    #: F28 — the cell's route before the run (absent fields = not measured).
+    cell_route: CellRouteOut = CellRouteOut()
+
+
+class CatalogueSlotOut(BaseModel):
+    name: str
+    question: str
+    #: ``structural`` blocks the build until signed; ``value`` only routes (readiness.py).
+    kind: str
+
+
+class CatalogueClassOut(BaseModel):
+    capability_class: str
+    slots: list[CatalogueSlotOut]
+
+
+class FactoryCatalogueOut(BaseModel):
+    """What a backlog item may be made of: the change classes the readiness gate knows and
+    the facts each needs (F24 — the freeze form asks these questions instead of taking raw
+    JSON), the size tiers and the item kinds / levels the backlog accepts."""
+
+    classes: list[CatalogueClassOut]
+    sizes: list[str]
+    kinds: list[str]
+    levels: list[str]
 
 
 class GapSignoffIn(BaseModel):
@@ -206,6 +251,31 @@ def _backlog_out(home: FactoryHome) -> FactoryBacklogOut | None:
 
 
 # --- routes ----------------------------------------------------------------------------
+
+
+@router.get(
+    "/factory/catalogue",
+    response_model=FactoryCatalogueOut,
+    responses={401: _ERR},
+    summary="The change classes, their structural-fact slots, the sizes, kinds and levels a backlog item may use",
+)
+def factory_catalogue(viewer: ViewerDep) -> FactoryCatalogueOut:
+    del viewer
+    return FactoryCatalogueOut(
+        classes=[
+            CatalogueClassOut(
+                capability_class=cls,
+                slots=[
+                    CatalogueSlotOut(name=sl.name, question=sl.question, kind=sl.kind)
+                    for sl in slots
+                ],
+            )
+            for cls, slots in CATALOGUE.items()
+        ],
+        sizes=list(SIZE_TIER_NAMES),
+        kinds=list(KINDS),
+        levels=list(LEVELS),
+    )
 
 
 @router.get(
@@ -292,11 +362,43 @@ def register_backlog(
     summary="Every backlog item's latest state — DoR gaps, route, RED proof, build, PR, verdict — from the evidence",
 )
 def list_tasks(
-    repo: str, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+    repo: str, viewer: ViewerDep, db: DbDep, factory: SessionFactoryDep, settings: SettingsDep
 ) -> list[FactoryTaskOut]:
     del viewer
     get_repo_or_404(db, repo)
-    return [FactoryTaskOut(**v.to_dict()) for v in _home(settings, repo).task_views()]
+    views = _home(settings, repo).task_views()
+    routes = _cell_routes(db, factory, repo) if views else {}
+    return [
+        FactoryTaskOut(
+            **v.to_dict(), cell_route=routes.get(f"{v.capability_class}|{v.size}", CellRouteOut())
+        )
+        for v in views
+    ]
+
+
+def _cell_routes(db: DbDep, factory: SessionFactoryDep, repo: str) -> dict[str, CellRouteOut]:
+    """``class|size`` → the map's decision, from exactly the reading the worker's delivery
+    gate uses (:meth:`crb.server.worker.Worker._route_lookup`): sighted rows on the current
+    apparatus, the repo's latest controls verdict, sign-offs overlaid."""
+    rows = rows_for_apparatus(
+        rows_for_mode(DbLedger(factory).rows(repo=repo), "sighted"), "current"
+    )
+    cmap, _ = signed_map(
+        rows, PROJECTION_CLASS_SIZE, db, repo, controls=latest_controls_verdict(db, repo)
+    )
+    out: dict[str, CellRouteOut] = {}
+    for c in cmap.cells:
+        if c.decision is None:
+            continue
+        d = c.decision
+        out[f"{c.key.capability_class}|{c.key.size}"] = CellRouteOut(
+            route=d.route,
+            reason_code=d.reason_code,
+            reason=d.reason,
+            n=c.stats.n if c.stats is not None else 0,
+            deliverable=d.route == ROUTE_DELIVER,
+        )
+    return out
 
 
 @router.post(

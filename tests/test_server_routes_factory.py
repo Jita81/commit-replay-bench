@@ -35,6 +35,7 @@ from crb.server.app import API_PREFIX
 from crb.server.factory_state import FactoryHome
 from crb.store.models import Run
 from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
+from fixtures.signoff_seed import clear_policy
 
 PATHS: list[tuple[str, str, str]] = [
     ("GET", f"/factory/{ALPHA}/backlog", "viewer"),
@@ -126,8 +127,52 @@ def test_register_freezes_hashes_and_records(env: Env) -> None:
         ("I-1", "pending", "not_built", None),
         ("I-2", "pending", "not_built", None),
     ]
+    # F28 — the cell's route BEFORE any run: bug.fix × XS is not measured on ALPHA, so the
+    # gate would withhold delivery, and the task says so now rather than after a paid build
+    assert tasks[0]["cell_route"] == {
+        "route": "",
+        "reason_code": "",
+        "reason": "",
+        "n": 0,
+        "deliverable": False,
+    }
     e = env.get(f"/factory/{ALPHA}/evidence").json()
     assert e["total"] == 1 and e["verified"] is True and e["items"][0]["kind"] == EV_BACKLOG_FROZEN
+
+
+def test_catalogue_serves_the_classes_their_slots_and_the_vocabularies(env: Env) -> None:
+    """F24: the freeze form asks the readiness catalogue's questions, so the API serves it."""
+    login(env.client, "viewer")
+    d = env.get("/factory/catalogue").json()
+    assert d["sizes"] == ["XS", "S", "M", "L", "XL"]
+    assert d["kinds"] == ["code", "infra", "operator"] and d["levels"] == ["L1", "L2", "L3"]
+    by_class = {c["capability_class"]: c["slots"] for c in d["classes"]}
+    assert "backend.route.add" in by_class and "bug.fix" in by_class
+    route_add = {sl["name"]: sl for sl in by_class["backend.route.add"]}
+    assert route_add["method_path"]["kind"] == "structural"
+    assert route_add["method_path"]["question"].startswith("What HTTP method and path")
+    assert route_add["example_payload"]["kind"] == "value"
+    logout(env.client)
+    assert env.get("/factory/catalogue").status_code == 401
+
+
+def test_tasks_carry_the_cell_route_the_delivery_gate_will_read(env: Env) -> None:
+    """F28: the (class × size) route from the same signed map the worker's gate uses —
+    sighted rows, current apparatus, the repo's controls verdict — on every task, before a
+    run spends anything: the seeded deliver cell reads deliverable, the thin cell does not."""
+    deliver = {**ITEM, "id": "D-1", "capability_class": "bug.fix", "size_estimate": "S"}
+    thin = {**ITEM, "id": "T-1", "capability_class": "backend.route.add", "size_estimate": "M"}
+    assert _register(env, [deliver, thin]).status_code == 201
+    # before the controls gate passes and the oracle is scored, even the strong cell routes
+    # to a human — and the task says so
+    by_id = {t["id"]: t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}
+    assert by_id["D-1"]["route"] == "human" and by_id["D-1"]["deliverable"] is False
+    clear_policy(env)
+    by_id = {t["id"]: t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}
+    assert by_id["D-1"]["route"] == "deliver" and by_id["D-1"]["deliverable"] is True
+    assert by_id["D-1"]["n"] >= 10 and by_id["D-1"]["reason_code"] == "deliver"
+    assert by_id["T-1"]["route"] != "deliver" and by_id["T-1"]["deliverable"] is False
+    assert by_id["T-1"]["reason_code"] and by_id["T-1"]["n"] > 0
 
 
 def test_register_refuses_invalid_items_and_unknown_authored(env: Env) -> None:

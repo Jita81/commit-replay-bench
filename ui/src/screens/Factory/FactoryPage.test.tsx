@@ -24,7 +24,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FactoryBacklog, FactoryTask } from '../../api/types'
-import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { FactoryPage, stepsFor } from './FactoryPage'
 
 const BACKLOG: FactoryBacklog = {
@@ -38,14 +38,14 @@ const BACKLOG: FactoryBacklog = {
 }
 
 const TASKS: FactoryTask[] = [
-  { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: null, review_verdict: 'accept', last_event: 'item.outcome' },
-  { id: 'I-2', title: 'Divide', capability_class: 'feature.add', size: 'S', kind: 'code', status: 'blocked', dor_gaps: ['method_path', 'response_shape'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked' },
+  { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: null, review_verdict: 'accept', last_event: 'item.outcome', cell_route: { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, deliverable: true } },
+  { id: 'I-2', title: 'Divide', capability_class: 'feature.add', size: 'S', kind: 'code', status: 'blocked', dor_gaps: ['method_path', 'response_shape'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked', cell_route: { route: '', reason_code: '', reason: '', n: 0, deliverable: false } },
 ]
 
 describe('stepsFor — an item the factory has not touched', () => {
   it('reads as not assessed / not run / not started, never as done or failed', () => {
     // exactly what the API folds for a frozen-but-unrun item (factory_state.task_views)
-    const untouched: FactoryTask = { id: 'T-1', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'pending', dor_gaps: [], route_hint: '', red_proof: null, build_status: 'not_built', pr_url: null, review_verdict: null, last_event: '' }
+    const untouched: FactoryTask = { id: 'T-1', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'pending', dor_gaps: [], route_hint: '', red_proof: null, build_status: 'not_built', pr_url: null, review_verdict: null, last_event: '', cell_route: { route: '', reason_code: '', reason: '', n: 0, deliverable: false } }
     const steps = stepsFor(untouched)
     expect(steps.map((x) => [x.id, x.status])).toEqual([
       ['readiness', 'current'],
@@ -60,7 +60,7 @@ describe('stepsFor — an item the factory has not touched', () => {
   })
 
   it('a build that ran and was not clean is the failure, spelled out', () => {
-    const notClean: FactoryTask = { id: 'T-2', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'not_clean', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'not_clean', pr_url: null, review_verdict: null, last_event: 'build' }
+    const notClean: FactoryTask = { id: 'T-2', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'not_clean', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'not_clean', pr_url: null, review_verdict: null, last_event: 'build', cell_route: { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, deliverable: true } }
     const build = stepsFor(notClean)[2]!
     expect(build.status).toBe('failed')
     expect(build.detail).toBe('not clean')
@@ -92,6 +92,46 @@ describe('FactoryPage — the shipped contract', () => {
     // the approver can sign a gap right there; the operator's run controls are present
     expect(screen.getByRole('form', { name: 'Sign a structural gap for I-2' })).toBeInTheDocument()
     expect(screen.getByTestId('factory-run-controls')).toBeInTheDocument()
+    // F28 — each item shows its cell's route BEFORE the run, and the controls count the deliverable ones
+    expect(screen.getByTestId('cell-route-I-1')).toHaveTextContent('routes deliver · n=40')
+    expect(screen.getByTestId('cell-route-I-2')).toHaveTextContent('cell not measured · delivery withheld')
+    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('1 of 2 items sit in a cell that routes deliver today')
+  })
+
+  it('the freeze form asks the class\'s structural questions and posts slot: fact lines (F24)', async () => {
+    const CATALOGUE = {
+      classes: [
+        { capability_class: 'backend.route.add', slots: [{ name: 'method_path', question: 'What HTTP method and path does the new route answer?', kind: 'structural' }, { name: 'example_payload', question: 'A representative request and its exact expected response.', kind: 'value' }] },
+        { capability_class: 'bug.fix', slots: [{ name: 'reproduction', question: 'How is the bug reproduced?', kind: 'structural' }] },
+      ],
+      sizes: ['XS', 'S', 'M', 'L', 'XL'],
+      kinds: ['code', 'infra', 'operator'],
+      levels: ['L1', 'L2', 'L3'],
+    }
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 },
+      'GET /factory/alpha/backlog': () => envelope(404, 'not_found', "no backlog registered for 'alpha'"),
+      'GET /factory/alpha/tasks': [],
+      'GET /factory/catalogue': CATALOGUE,
+      'POST /factory/alpha/backlog': () => json(BACKLOG, 201),
+    })
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Freeze a backlog…' }))[0]!)
+    const form = await screen.findByTestId('backlog-form')
+    // the class's structural question is the field; a value slot is marked optional
+    await userEvent.selectOptions(within(form).getByLabelText(/^Class/), 'backend.route.add')
+    expect(within(form).getByLabelText(/What HTTP method and path does the new route answer\?/)).toBeInTheDocument()
+    expect(within(form).getByLabelText(/A representative request and its exact expected response\. \(value — optional\)/)).toBeInTheDocument()
+    await userEvent.type(within(form).getByLabelText(/^Title/), 'Add /health')
+    await userEvent.type(within(form).getByLabelText(/What HTTP method and path/), 'GET /health')
+    await userEvent.click(screen.getByRole('button', { name: 'Freeze 1 item' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/factory/alpha/backlog')).toBe(true))
+    const body = JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))
+    expect(body).toEqual({
+      items: [{ id: 'I-1', title: 'Add /health', kind: 'code', level: 'L1', description: '', capability_class: 'backend.route.add', size_estimate: 'XS', structural_facts: ['method_path: GET /health'], depends_on: [] }],
+    })
   })
 
   it('signing a gap posts the slot and the answer to the item', async () => {

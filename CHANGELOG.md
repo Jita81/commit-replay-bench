@@ -8,6 +8,30 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-17 — the factory is the point (DL-044): route before the spend, a backlog as a person writes it, the journey re-centred
+
+- **DL-044** — the factory and the self-improvement loop are the product; connect → measure →
+  sign-off is the on-ramp that earns their baseline; the end state is a framework the teams
+  using it improve. README says so; the backlog is re-ordered by it.
+- **F28 — the cell's route before the run.** Every factory task carries `cell_route`
+  (`route`, `reason_code`, `reason`, `n`, `deliverable`) from the SAME signed map the
+  delivery gate reads; the Factory page shows *routes deliver · n=…* / *routes calibrate —
+  delivery withheld* / *cell not measured — delivery withheld* on each item and counts how
+  many items a run could actually deliver, before anything is spent.
+- **F24 — the backlog as a person writes it.** `GET /factory/catalogue` serves the readiness
+  catalogue (each class's structural and value slots with their questions, the sizes, kinds
+  and levels); the freeze dialog is a form that asks those questions per item and posts
+  `slot: fact` lines, with "Advanced: paste JSON" for a prepared file. An empty structural
+  answer is exactly the gap the run will stop on.
+- **The journey re-centred.** The nav is Home · Connection · **Baseline** · Decisions ·
+  Factory · Deployment for every role; the operator's tooling (Runs, Map grid, Routes,
+  Oracle, Learn) sits on an *Instrument* row operators see, Ledger stays for every role,
+  Settings for admins; Repositories and Sign-off left the nav (still routable — Connection
+  lists repositories, Decisions and the map link to the sign-off form). Home's walk ends at
+  task 8 **Deliver your first change**, with its status from the backlog and items; the
+  Results page is titled *Baseline*.
+- Test infrastructure: `Dialog` mirrors its jsdom fallback for `close()`.
+
 ### 2026-09-17 — the NHS design system and the prototype's screens, on real data (DL-042)
 
 The operator's Claude Design prototype ("crb Front End", twelve NHS/GOV.UK-patterned

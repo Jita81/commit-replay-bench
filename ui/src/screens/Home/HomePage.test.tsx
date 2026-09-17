@@ -24,7 +24,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
-import { HomePage } from './HomePage'
+import { HomePage, factoryStatusFor } from './HomePage'
 
 const REPO = {
   name: 'alpha',
@@ -41,6 +41,19 @@ const REPO = {
 }
 const EMPTY_MAP = { repo: 'alpha', by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells: [], summary: { trusted_autonomy_coverage: 0, total_cells: 0, measured_cells: 0, deliver_cells: 0, n_total: 0, false_q1_total: 0, apparatus_versions: [] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' } }
 
+describe('factoryStatusFor', () => {
+  it('reads the factory task from the API facts, delivered first', () => {
+    const t = (over: Partial<{ pr_url: string | null; status: string }>) => ({ pr_url: null, status: 'pending', ...over })
+    expect(factoryStatusFor({ measured: false, deliverCells: false, backlog: 'none', items: [] })).toBe('blocked')
+    expect(factoryStatusFor({ measured: true, deliverCells: false, backlog: 'none', items: [] })).toBe('no_deliver_cell')
+    expect(factoryStatusFor({ measured: true, deliverCells: true, backlog: 'none', items: [] })).toBe('ready')
+    expect(factoryStatusFor({ measured: true, deliverCells: true, backlog: 'frozen', items: [t({})] })).toBe('running')
+    expect(factoryStatusFor({ measured: true, deliverCells: true, backlog: 'frozen', items: [t({ pr_url: 'https://x/pr/1' })] })).toBe('delivered')
+    expect(factoryStatusFor({ measured: true, deliverCells: true, backlog: 'frozen', items: [t({ status: 'accepted' })] })).toBe('delivered')
+    expect(factoryStatusFor({ measured: true, deliverCells: true, backlog: 'unknown', items: [] })).toBe('unknown')
+  })
+})
+
 describe('HomePage', () => {
   afterEach(() => vi.unstubAllGlobals())
 
@@ -55,12 +68,14 @@ describe('HomePage', () => {
       'GET /capability-map': EMPTY_MAP,
       'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'degraded', detail: 'docker not reachable', data: {} }] },
       'GET /users': { items: [{ id: 'u2', username: 'ada', display_name: 'Ada', email: '', role: 'approver', issuer: 'local', created: '' }], total: 1, limit: 50, offset: 0 },
+      'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /factory/alpha/tasks': [],
     })
     renderApp(<HomePage />, { route: '/home' })
-    await waitFor(() => expect(screen.getByText('You have completed 5 of 7 tasks.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('You have completed 5 of 8 tasks.')).toBeInTheDocument())
     const list = screen.getByRole('list', { name: 'Tasks' })
     const rows = within(list).getAllByRole('listitem')
-    expect(rows).toHaveLength(7)
+    expect(rows).toHaveLength(8)
     expect(rows[0]).toHaveTextContent('Connect GitHub')
     expect(rows[0]).toHaveTextContent('Completed')
     expect(rows[3]).toHaveTextContent('Prove the instrument (£0)')
@@ -70,6 +85,10 @@ describe('HomePage', () => {
     expect(rows[5]).toHaveTextContent('Cannot start yet')
     expect(rows[6]).toHaveTextContent('Invite an approver')
     expect(rows[6]).toHaveTextContent('Completed')
+    // the destination: nothing measured yet, so the factory cannot start
+    expect(rows[7]).toHaveTextContent('Deliver your first change')
+    expect(rows[7]).toHaveTextContent('Cannot start yet')
+    expect(within(rows[7]!).getByRole('link')).toHaveAttribute('href', '/factory?repo=alpha')
     expect(within(rows[4]!).getByRole('link')).toHaveAttribute('href', '/connect/alpha/measure')
     // the degraded sandbox is the Important banner; the cost statement and why two people
     expect(screen.getByRole('region', { name: 'Important' })).toHaveTextContent('The sandbox probe is degraded on this host.')
@@ -88,9 +107,11 @@ describe('HomePage', () => {
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
       'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 6 } },
       'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /factory/alpha/backlog': { repo: 'alpha', hash: 'b'.repeat(64), frozen_at: '2026-09-17T10:00:00Z', items: [] },
+      'GET /factory/alpha/tasks': [{ id: 'T-1', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'pending', dor_gaps: [], route_hint: '', red_proof: null, build_status: 'not_built', pr_url: null, review_verdict: null, last_event: '', cell_route: { route: '', reason_code: '', reason: '', n: 0, deliverable: false } }],
     })
     renderApp(<HomePage />, { route: '/home' })
-    await waitFor(() => expect(screen.getByText('The operators have completed 3 of 7 tasks.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('The operators have completed 3 of 8 tasks.')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'Where this deployment is' })).toBeInTheDocument()
     expect(screen.getByText(/You can read everything here and change nothing/)).toBeInTheDocument()
     const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
@@ -102,6 +123,8 @@ describe('HomePage', () => {
     expect(rows[5]).toHaveTextContent('Incomplete')
     // a non-admin is not sent to a settings page that refuses them
     expect(within(rows[6]!).getByRole('link')).toHaveAttribute('href', '/posture')
+    // a frozen backlog with nothing delivered yet: the factory is in progress
+    expect(rows[7]).toHaveTextContent('In progress')
     expect(screen.getByRole('link', { name: /Continue/ })).toHaveAttribute('href', '/results?repo=alpha')
   })
 
@@ -116,9 +139,11 @@ describe('HomePage', () => {
       'GET /capability-map': EMPTY_MAP,
       'GET /health': { status: 'ok', probes: [] },
       'GET /users': () => envelope(403, 'forbidden', 'x'),
+      'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /factory/alpha/tasks': [],
     })
     renderApp(<HomePage />, { route: '/home' })
-    await waitFor(() => expect(screen.getByText('You have completed 2 of 7 tasks.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('You have completed 2 of 8 tasks.')).toBeInTheDocument())
     const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
     expect(rows[0]).toHaveTextContent('Incomplete')
   })
@@ -132,7 +157,7 @@ describe('HomePage', () => {
       'GET /users': () => envelope(403, 'forbidden', 'x'),
     })
     renderApp(<HomePage />, { route: '/home' })
-    await waitFor(() => expect(screen.getByText('You have completed 0 of 7 tasks.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('You have completed 0 of 8 tasks.')).toBeInTheDocument())
     expect(screen.getByText('Not configured')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Important' })).not.toBeInTheDocument()
   })
