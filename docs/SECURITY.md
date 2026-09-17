@@ -137,23 +137,26 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   use: scoped to the installation (one hour by GitHub's contract), cached in memory until
   five minutes before the expiry GitHub returned, passed to git through `GIT_CONFIG_COUNT` as
   a one-shot `Authorization` header — never argv, never `.git/config`, never a row, event,
-  log or API response. [measured] `tests/test_server_github_app.py::test_installation_tokens_are_minted_with_the_jwt_cached_and_refreshed_near_expiry`
-  (the mint, the cache, the refresh inside the five-minute margin) and
-  `::test_worker_clones_with_the_installation_token_in_the_environment_never_argv` (the
-  header reaches git through `GIT_CONFIG_*`, never argv), fake GitHub transport, apparatus 2.2.
-  The token is sent only to the app's own GitHub host — a repository whose URL is edited to
-  another host loses its link (`::test_picker_lists_with_suggestions_and_connect_registers_a_linked_repo`,
-  the `PUT /repos/{name}` step) and gets no token (`::test_worker_clones_…`, the host-pinning
-  asserts) [measured, apparatus 2.2]. Delivery credentials exist only while the installation
-  grants `contents: write` **and** `pull_requests: write`, read from GitHub at the time
-  (`::test_worker_clones_…`: installation 77 read-only → none; 78 read-write → a provider)
-  [measured, apparatus 2.2]. The setup callback records an installation only with a signed
-  `state` bound to the operator and to the browser that fetched the install link (a nonce
-  in an httponly cookie, consumed by the write — CWE-352); otherwise the operator records it
-  through the CSRF-protected sync (`::test_setup_callback_verifies_records_and_lands_on_connect`:
-  no state, a forged state, another principal's state, the right state without the cookie or
-  with another link's cookie, and a replay after the write all land unverified with nothing
-  written) [measured, apparatus 2.2]. The app's private
+  log or API response. [measured, n = 3 cases: mint on first use, re-use inside the hour,
+  re-mint inside the five-minute margin — `tests/test_server_github_app.py::test_installation_tokens_are_minted_with_the_jwt_cached_and_refreshed_near_expiry`;
+  n = 1 clone: the header reaches git through `GIT_CONFIG_*` and is absent from argv —
+  `::test_worker_clones_with_the_installation_token_in_the_environment_never_argv`; fake
+  GitHub transport, apparatus 2.2]. The token is sent only to the app's own GitHub host — a
+  repository whose URL is edited to another host loses its link [measured, n = 1 URL change,
+  `::test_picker_lists_with_suggestions_and_connect_registers_a_linked_repo`, apparatus 2.2]
+  and gets no token [measured, n = 3 URLs: the app's host → header, another host → none,
+  plain http → none — `::test_worker_clones_…`, apparatus 2.2]. Delivery credentials exist
+  only while the installation grants `contents: write` **and** `pull_requests: write`, read
+  from GitHub at the time [measured, n = 2 installations: 77 read-only → none, 78 read-write
+  → a provider, plus 1 off-host remote → none — `::test_worker_clones_…`, apparatus 2.2].
+  The setup callback records an installation only with a signed `state` bound to the
+  operator and to the browser that fetched the install link (a nonce in an httponly cookie,
+  consumed by the write — CWE-352); otherwise the operator records it through the
+  CSRF-protected sync [measured, n = 7 callbacks: no state, a forged state, another
+  principal's state, the right state without the cookie, with another link's cookie, the
+  genuine one (written), and a replay after the write — six land unverified with nothing
+  written, one writes — `::test_setup_callback_verifies_records_and_lands_on_connect`,
+  apparatus 2.2]. The app's private
   key comes from the environment or a mounted file; `/settings` reports only
   `private_key_configured`. [measured] `tests/test_server_github_app.py`
 - Every string that leaves a sandbox — test output tails, diffs, transcripts, log lines,

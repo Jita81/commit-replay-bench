@@ -463,6 +463,10 @@ def test_offline_sql_includes_tables_and_triggers(backend: Backend) -> None:
     assert "CREATE TABLE grades" in sql
     assert "grades_no_update" in sql and "signoffs_no_delete" in sql
     assert "alembic_version" in sql
+    # 0006 offline is the whole revision: the column, a SQL backfill, the unique index
+    assert "ADD COLUMN github_full_name" in sql or "ADD github_full_name" in sql
+    assert "UPDATE repos SET github_full_name = lower(trim(" in sql
+    assert "CREATE UNIQUE INDEX uq_repos_github_full_name" in sql
     assert migrate.current(backend.url) is None  # offline mode touched nothing
 
 
