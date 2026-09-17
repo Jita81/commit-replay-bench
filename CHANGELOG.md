@@ -64,6 +64,17 @@ numbers were never trusted.
   as ready with a non-404 failure behind it; Home and Deployment do not call an unanswered
   GitHub App status "not configured"; every map cell carries its apparatus; the unversioned
   schema walk is revision-ordered across columns, indexes and tables.
+- **Four external documents assessed against the product** (docs/reviews/2026-09-17-external-documents-assessment.md,
+  an independent Fable pass): the Quality Floor essay (the product honours every mechanism
+  it names and is stricter on most; the essay copy on disk still carries the pre-correction
+  specification-lever figures — not re-imported), the Automated Agile process architecture
+  (mostly out of scope by DL-001; three transferable items), the AAF ISO architecture and
+  code-quality guide (substance already met; two learnings), and the operator's experience
+  profile (nothing new — the product embodies it). Eight rows F27–F34 added to the backlog:
+  audit sample per signed cell (P1), item route before the run, PR body naming the signed
+  facts and the licensing sign-off, human PR review comments as evidence, the repository's
+  own security scanner as a review probe, review finding → follow-up item, a
+  recurrence-after-prevention alarm, verifier account kind on attestations.
 - **Persona walkthrough on the live stack** (docs/reviews/2026-09-17-persona-walkthrough.md):
   every screen of the journey was driven as a viewer, an operator, an approver, an admin, a
   developer, a platform engineer and an MCP consumer, with axe and a phone viewport. What it
