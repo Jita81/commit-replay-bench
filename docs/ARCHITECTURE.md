@@ -196,7 +196,7 @@ punch-list), `federated` (abstract-cell export).
 | `crb.server` | FastAPI: OIDC + local admin, RBAC, routes, SSE from the events table, `/metrics`, `/health`; `worker.py`. | P4 |
 | `crb.cli` | `crb repo add\|probe · mine · run · grade · oracle · route · forecast · ledger export\|verify\|stats · factory … · worker · serve · mcp`. | P2 |
 | `crb.mcp` | The API as Model Context Protocol tools (`crb mcp`, stdio): a client of `/api/v1` over HTTP — never an importer of `crb.server` — under the deployment's RBAC; sign-offs and reviews deliberately not tools ([MCP](MCP.md)). | P8 |
-| `ui/` | Vite + React + TanStack Query + Tailwind; screens listed in the plan. | P5 |
+| `ui/` | Vite + React + TanStack Query + Tailwind. The primary nav is the **journey** — Connect (`/connect`, the guided walk; `/connect/:name` the six-stage task list derived from the API) → Results (`/results`) → Decisions (`/decisions`, the inbox of human acts) → Factory (`/factory`, the process per item with sign-a-gap / freeze / run) — and the **explore** screens behind it (runs, map, routes, oracle, learn, ledger, sign-off, settings). Three surfaces — UI, CLI, MCP — over one API and one RBAC. | P5, P9 |
 
 ---
 

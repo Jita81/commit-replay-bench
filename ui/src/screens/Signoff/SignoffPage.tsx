@@ -42,7 +42,7 @@
  *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
  */
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { useRevokeSignoff, useSignoffs } from '../../api/hooks'
 import { NOT_YET_MEASURED } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
@@ -202,7 +202,9 @@ export function SignoffPage() {
   const map = useCapabilityMapWithControls(repo, ['capability_class', 'size'])
   const create = useCreateSignoffWithAttestation()
   const revoke = useRevokeSignoff()
-  const [cellKey, setCellKey] = useState('')
+  const [params] = useSearchParams()
+  // `?cell=class|size` preselects the cell (the Decisions inbox links here with it)
+  const [cellKey, setCellKey] = useState(params.get('cell') ?? '')
   const [rowHash, setRowHash] = useState('')
   const [read, setRead] = useState(false)
   const [statement, setStatement] = useState('')

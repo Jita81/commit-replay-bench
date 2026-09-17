@@ -8,7 +8,38 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
-Nothing yet — `main` is 2.0.0a1 below.
+### 2026-09-17 — the front end has a purpose: connect → results → decisions → factory (DL-040)
+
+The operator's brief: "if we are keeping the front end it should have a purpose. It should be
+the points where human sign-off is surfaced. It should be the process of the factory, and
+before that a guided walk through GitHub and a results page for enterprises to select a
+repo." The primary navigation is now that journey; the evidence screens sit behind it as
+*Explore* (every old route still works — nothing was removed from the URL space).
+
+- **Connect** (`/connect`, `/connect/:name`) — a guided walk from a Git URL to a results
+  page: register → probe → mine → oracle → controls → first measurement, as a task list whose
+  statuses are *derived from the API* (`ui/src/screens/Connect/connection.ts`: a stage is
+  done only when the API holds its evidence; a 404 oracle/controls is "not started", never
+  an error; a running run is watched and the inputs refetched when it ends). Each stage says
+  what it proves and what it costs ("no model involved" / "spends model budget"); actions are
+  operator-gated like the API; the list shows every connected repository's next stage.
+- **Results** (`/results?repo=`) — the answer in the order an enterprise reader needs: is the
+  instrument trustworthy here (controls verdict, oracle mean, false-Q1, each with n); what may
+  the builder be trusted to do (cells per route with n, the top cells, and a sentence saying
+  what `deliver` means and does not mean, with the policy's numbers); what waits on a person.
+- **Decisions** (`/decisions`) — the inbox: across repositories, every cell whose sign-off is
+  due (unsigned `deliver`), every cell routed to a human with its reason, every `do_not_ship`,
+  every factory item blocked on a structural gap, routed to a human, asked for rework, or
+  withheld by the route gate — ordered by what blocks what, each row linking to the surface
+  where the act is recorded (`/signoff?cell=` preselects the cell; `/factory?item=` scrolls
+  to the item). A viewer sees the same rows with "View" and the role that acts.
+- **Factory** (`/factory`) — the process, item by item: readiness → RED proof → build →
+  delivery → review → outcome as a six-step list per item with why it is where it is; the
+  human acts in place — an approver signs a structural gap (`POST …/signoff-gap`), an operator
+  freezes a backlog (JSON, `POST /factory/{repo}/backlog`) and runs the loop (`POST /runs`
+  kind `factory`, the `deliver` toggle; `deliver_override` shown to approvers only).
+- UI types caught up with the API: `RunKind` gains `label` and `factory`; `RunCreateRequest`
+  gains `deliver`, `deliver_override`, `max_rework`; cells and decisions carry `reason_code`.
 
 ## [2.0.0a1] — 2026-09-16 — first releasable v2, tagged on `main`
 
