@@ -163,13 +163,16 @@ from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace
 from crb.factory.backlog import BacklogItem
+from crb.factory.delivery import GitCredentials, GitCredentialsProvider, github_open_pr_fn
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.testfirst import AuthoredTest
 from crb.observability import metrics
 from crb.observability.events import Emitter, JsonlSink, MultiSink, StepStatus
 from crb.server.factory_state import FactoryHome
+from crb.server.github_app import GitHubApp
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
+from crb.server.settings import GitHubAppSettings
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
@@ -271,6 +274,22 @@ def default_worker_id() -> str:
 # ---------------------------------------------------------------------------
 
 
+class _InstallationProvider:
+    """A ``GitCredentialsProvider`` over one GitHub App installation: every ``resolve``
+    mints (or reuses, until near expiry) the installation's token — never stored."""
+
+    def __init__(self, app: GitHubApp, installation_id: int, remote: str) -> None:
+        self._app = app
+        self._installation = installation_id
+        self._remote = remote
+
+    def resolve(self, repo: str) -> GitCredentials:
+        del repo
+        return GitCredentials(
+            remote=self._remote, token=self._app.installation_token(self._installation)
+        )
+
+
 @dataclass(frozen=True)
 class WorkerSettings:
     """Everything a worker needs, resolved once by the entrypoint.
@@ -292,6 +311,9 @@ class WorkerSettings:
     kinds: tuple[str, ...] = ()
     keep_worktrees: bool = False
     max_reclaims: int = 3
+    #: The GitHub App this deployment is registered as (``CRB_GITHUB__*``): the worker
+    #: mints installation tokens to clone and deliver linked repositories (ADR-0014).
+    github: GitHubAppSettings = field(default_factory=GitHubAppSettings)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", Path(self.home).expanduser())
@@ -470,6 +492,7 @@ Handler = Callable[[RunContext], tuple[str, dict[str, Any], str]]
 class Worker:
     def __init__(self, settings: WorkerSettings, *, engine: Engine | None = None) -> None:
         self.settings = settings
+        self._github_app_client: GitHubApp | None = None
         self.engine = engine or make_engine(settings.database_url or None)
         init_db(self.engine)
         self.factory = make_session_factory(self.engine)
@@ -616,6 +639,42 @@ class Worker:
         )
 
     # --- repo / harness ----------------------------------------------------------
+    def _github_installation(self, cfg: Mapping[str, Any]) -> int | None:
+        """The installation a repository is linked to (``config_json.github``), when the
+        GitHub App is configured on this deployment."""
+        if not self.settings.github.enabled:
+            return None
+        link = dict(cfg.get("github") or {})
+        try:
+            return int(link.get("installation_id") or 0) or None
+        except (TypeError, ValueError):
+            return None
+
+    def _github_app(self) -> GitHubApp:
+        """The app client, built once per worker (its token cache is per installation)."""
+        if self._github_app_client is None:
+            self._github_app_client = GitHubApp(self.settings.github)
+        return self._github_app_client
+
+    def _github_auth_header(self, cfg: Mapping[str, Any]) -> str | None:
+        """``Authorization: Basic …`` for a clone of a GitHub-App-linked repository, or None."""
+        installation = self._github_installation(cfg)
+        if installation is None:
+            return None
+        token = self._github_app().installation_token(installation)
+        return GitCredentials(remote="https://github.invalid/x", token=token).basic_auth_header()
+
+    def _delivery_credentials(
+        self, cfg: Mapping[str, Any], remote: str
+    ) -> GitCredentialsProvider | None:
+        """Delivery credentials for a factory run: the GitHub App's installation token when
+        the repository is linked and the installation may write (``Contents: write`` +
+        ``Pull requests: write``); otherwise None — the loop fails closed (no PR)."""
+        installation = self._github_installation(cfg)
+        if installation is None:
+            return None
+        return _InstallationProvider(self._github_app(), installation, remote)
+
     def _load_repo(self, name: str, emitter: Emitter | None = None) -> tuple[RepoConfig, GitRepo]:
         """The repo's config and clone. A row with a ``url`` but no usable clone
         (``clone_path`` empty or not a git repository) is cloned once into
@@ -643,10 +702,20 @@ class Worker:
         dest = self.home / "repos" / name
         safe_url = redact_url(url)
         started = time.monotonic()
+        # a repository connected through the GitHub App clones with a short-lived
+        # installation token (never argv, never on disk — ADR-0014); any other URL clones
+        # as the worker's own git can
+        auth_header = self._github_auth_header(cfg)
         if emitter is not None:
-            emitter.emit("system", "repo.clone.start", url=safe_url, dest=str(dest))
+            emitter.emit(
+                "system",
+                "repo.clone.start",
+                url=safe_url,
+                dest=str(dest),
+                github_app=bool(auth_header),
+            )
         try:
-            head = clone_repo(url, dest, timeout=DEFAULT_CLONE_TIMEOUT_S)
+            head = clone_repo(url, dest, timeout=DEFAULT_CLONE_TIMEOUT_S, auth_header=auth_header)
         except (CloneUrlError, GitError) as exc:
             if emitter is not None:
                 emitter.error("system", "repo.clone.done", exc, url=safe_url, dest=str(dest))
@@ -1341,6 +1410,20 @@ class Worker:
             budget=budget.to_dict(),
             ladder=[r.label for r in ladder.rungs],
         )
+        # delivery through the GitHub App: the linked installation's token pushes the branch
+        # and opens the pull request against the repository's default branch (ADR-0014);
+        # an unlinked repository has no credentials and the loop fails closed on delivery
+        with self.factory() as s:
+            row = s.get(Repo, run.repo)
+            cfg_json = dict(row.config_json or {}) if row is not None else {}
+        link = dict(cfg_json.get("github") or {})
+        remote = str(ctx.config.url or "")
+        creds = self._delivery_credentials(cfg_json, remote) if remote else None
+        api_base = self.settings.github.api_url if creds is not None else "https://api.github.com"
+
+        def open_pr(**kw: Any) -> tuple[str, int]:
+            return github_open_pr_fn(api_base=api_base, **kw)
+
         spec = FactorySpec(
             config=ctx.config,
             runner=runner,
@@ -1354,6 +1437,9 @@ class Worker:
             budget=budget,
             gap_ledger=home.gap_ledger(),
             deliver=bool(p.get("deliver", False)),
+            creds=creds,
+            open_pr_fn=open_pr if creds is not None else None,
+            target_default_branch=str(link.get("default_branch") or "main"),
             # the route gate: the same signed (class × size) map the API serves, under the
             # repo's latest controls verdict, sighted rows of the current apparatus
             route_decision_for=self._route_lookup(run.repo),

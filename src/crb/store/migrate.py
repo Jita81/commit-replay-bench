@@ -97,7 +97,10 @@ REVISION_MARKERS: tuple[tuple[str, str, str], ...] = (
 #: ``(revision, table)`` — the TABLE each revision after the initial one ADDS. An older
 #: release's ``create_all`` schema lacks it and is still a complete schema *for its
 #: release*: adoption tolerates its absence (the revision that adds it will create it).
-REVISION_TABLES: tuple[tuple[str, str], ...] = (("0003", "reviews"),)
+REVISION_TABLES: tuple[tuple[str, str], ...] = (
+    ("0003", "reviews"),
+    ("0005", "github_installations"),
+)
 #: ``(revision, table, index)`` — the INDEX a revision adds when it adds no column or table.
 #: Walked after :data:`REVISION_MARKERS` in the same way: a ``create_all`` schema that
 #: carries the index is at least at that revision.
@@ -198,6 +201,13 @@ def _unversioned_revision(connection: Connection) -> str:
         revision = rev
     for rev, table, index in REVISION_INDEXES:
         if table not in tables or index not in {ix["name"] for ix in insp.get_indexes(table)}:
+            return revision
+        revision = rev
+    # a revision that only ADDS a table (after the marker and index walks): present = at it
+    for rev, table in REVISION_TABLES:
+        if rev <= revision:
+            continue
+        if table not in tables:
             return revision
         revision = rev
     return revision

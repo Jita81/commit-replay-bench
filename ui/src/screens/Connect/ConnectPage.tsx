@@ -30,11 +30,12 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   useAllRepos,
   useCapabilityMap,
   useCreateRun,
+  useGitHubApp,
   useOracle,
   useOracleControls,
   useProbeRepo,
@@ -53,6 +54,7 @@ import { useAuth } from '../../lib/auth'
 import type { Tone } from '../../lib/verdict'
 import { RepoNewDialog } from '../Repos/RepoNewDialog'
 import { RunNewDialog } from '../Runs/RunNewDialog'
+import { GitHubConnectDialog } from './GitHubConnectDialog'
 import { type Stage, type StageStatus, stageSummary, stagesFor } from './connection'
 
 const STATUS_DISPLAY: Record<StageStatus, { label: string; tone: Tone; glyph: string }> = {
@@ -76,7 +78,13 @@ export function ConnectPage() {
   const repos = useAllRepos()
   const { can } = useAuth()
   const navigate = useNavigate()
+  const gh = useGitHubApp()
+  const [params] = useSearchParams()
+  // the app's setup callback lands here with ?installation=<id> — open the picker on it
+  const landedInstallation = Number(params.get('installation') ?? 0) || 0
   const [newOpen, setNewOpen] = useState(false)
+  const [ghOpen, setGhOpen] = useState(landedInstallation > 0)
+  const ghConfigured = gh.data?.configured === true
 
   return (
     <>
@@ -86,12 +94,22 @@ export function ConnectPage() {
         purpose="Point the instrument at a repository, let it learn how the code tests itself, and get to a results page. Nothing is written to the repository; the first five stages involve no model."
         actions={
           can('operator') ? (
-            <Button variant="filled" onClick={() => setNewOpen(true)}>
-              Connect a repository
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant={ghConfigured ? 'filled' : 'outlined'} onClick={() => setGhOpen(true)}>
+                Connect from GitHub
+              </Button>
+              <Button variant={ghConfigured ? 'outlined' : 'filled'} onClick={() => setNewOpen(true)}>
+                Connect by URL
+              </Button>
+            </div>
           ) : undefined
         }
       />
+      {gh.data && !gh.data.configured && can('admin') && (
+        <p className="m-0 -mt-3 text-xs text-on-surface-muted" data-testid="github-app-hint">
+          The GitHub App is not configured: an admin registers it once (app id + private key, <code>docs/GITHUB-APP.md</code>) and organisations then install it on the repositories it may see — the enterprise way to connect, no tokens to hand over.
+        </p>
+      )}
       <Card title="Connected repositories" eyebrow="where each one is on the walk">
         {repos.isPending && <p className="text-sm text-on-surface-muted">Loading…</p>}
         {repos.isError && <ErrorState error={repos.error} onRetry={() => void repos.refetch()} />}
@@ -100,7 +118,7 @@ export function ConnectPage() {
             glyph="⎇"
             title="No repository connected yet"
             reason="Connect one to start the walk: register, probe, mine, oracle, controls, then a first measurement."
-            action={can('operator') ? <Button variant="filled" onClick={() => setNewOpen(true)}>Connect a repository</Button> : undefined}
+            action={can('operator') ? <Button variant="filled" onClick={() => (ghConfigured ? setGhOpen(true) : setNewOpen(true))}>Connect a repository</Button> : undefined}
           />
         )}
         {repos.data && repos.data.items.length > 0 && (
@@ -130,6 +148,19 @@ export function ConnectPage() {
         onClose={() => setNewOpen(false)}
         onCreated={(name) => {
           setNewOpen(false)
+          navigate(`/connect/${encodeURIComponent(name)}`)
+        }}
+      />
+      <GitHubConnectDialog
+        open={ghOpen}
+        initialInstallation={landedInstallation || undefined}
+        onClose={() => setGhOpen(false)}
+        onUseUrl={() => {
+          setGhOpen(false)
+          setNewOpen(true)
+        }}
+        onConnected={(name) => {
+          setGhOpen(false)
           navigate(`/connect/${encodeURIComponent(name)}`)
         }}
       />

@@ -198,6 +198,7 @@ class TestFactory:
             "capability",
             "factory",
             "forecast",
+            "github",
             "grades",
             "learn",
             "ledger",

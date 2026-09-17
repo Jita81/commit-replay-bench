@@ -62,6 +62,59 @@ ROLE_RANK: dict[str, int] = {r: i for i, r in enumerate(ROLE_LADDER)}
 MIN_PASSWORD_LENGTH = 12
 
 
+class GitHubAppSettings(BaseModel):
+    """The GitHub App this deployment is registered as (docs/GITHUB-APP.md) — the enterprise
+    connection: an org installs the app on *selected* repositories, the product mints
+    short-lived installation tokens to clone (and, where the installation grants it, to
+    deliver). Enabled when ``app_id`` and a private key are set. ``CRB_GITHUB__*``.
+
+    The private key is the app's RS256 key (PEM): ``private_key`` inline (a secret store
+    hands it over as one value) or ``private_key_file`` (a mounted file). ``api_url`` and
+    ``web_url`` point at GitHub Enterprise Server when the org runs one.
+    """
+
+    app_id: str = ""
+    #: The app's URL slug (``https://github.com/apps/<slug>``) — the install link.
+    app_slug: str = ""
+    private_key: SecretStr | None = None
+    private_key_file: str = ""
+    webhook_secret: SecretStr | None = None
+    api_url: str = "https://api.github.com"
+    web_url: str = "https://github.com"
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.app_id.strip()) and bool(self.private_key_pem())
+
+    def private_key_pem(self) -> str:
+        """The PEM text, from the inline value or the file; ``""`` when neither is set."""
+        if self.private_key and self.private_key.get_secret_value().strip():
+            return self.private_key.get_secret_value()
+        if self.private_key_file:
+            try:
+                return Path(self.private_key_file).read_text(encoding="utf-8")
+            except OSError:
+                return ""
+        return ""
+
+    @property
+    def install_url(self) -> str:
+        """Where an org admin installs the app (the ``Setup URL`` brings them back)."""
+        return (
+            f"{self.web_url.rstrip('/')}/apps/{self.app_slug}/installations/new"
+            if self.app_slug
+            else ""
+        )
+
+    @field_validator("api_url", "web_url")
+    @classmethod
+    def _https_only(cls, v: str) -> str:
+        raw = v.strip().rstrip("/")
+        if raw and not raw.lower().startswith("https://"):
+            raise ValueError(f"GitHub URLs must be https://, got {raw!r}")
+        return raw
+
+
 class OidcSettings(BaseModel):
     """OpenID Connect (Entra ID or any compliant issuer). Enabled when issuer + client id are set."""
 
@@ -211,6 +264,7 @@ class Settings(BaseSettings):
     #: ``None`` resolves to ``env != "dev"``; an explicit value always wins.
     cookie_secure: bool | None = None
     oidc: OidcSettings = Field(default_factory=OidcSettings)
+    github: GitHubAppSettings = Field(default_factory=GitHubAppSettings)
     local_auth_enabled: bool = True
     bootstrap_admin: BootstrapAdmin = Field(default_factory=BootstrapAdmin)
     #: Comma-separated or a JSON list in the environment (``NoDecode`` hands us the raw string).
@@ -329,6 +383,17 @@ class Settings(BaseSettings):
             "session_ttl": self.session_ttl,
             "cookie_secure": self.resolved_cookie_secure,
             "local_auth_enabled": self.local_auth_enabled,
+            "github": {
+                "enabled": self.github.enabled,
+                "app_id": self.github.app_id,
+                "app_slug": self.github.app_slug,
+                "api_url": self.github.api_url,
+                "install_url": self.github.install_url,
+                "private_key_configured": bool(self.github.private_key_pem()),
+                "webhook_secret_configured": bool(
+                    self.github.webhook_secret and self.github.webhook_secret.get_secret_value()
+                ),
+            },
             "oidc": {
                 "enabled": self.oidc.enabled,
                 "issuer": self.oidc.issuer,

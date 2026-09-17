@@ -8,6 +8,39 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-17 — the GitHub App is the connection (ADR-0014, DL-041)
+
+The first item of the enterprise front-end backlog (F1): an organisation installs the
+deployment's GitHub App on *selected* repositories and the product connects them from a
+picker — no personal access token, nothing long-lived stored.
+
+- **`crb.server.github_app`** — the app client: an RS256 app JWT (nine minutes), the app's
+  installations, an installation's repositories, and installation tokens minted per use,
+  cached in memory until five minutes before their one-hour expiry, never persisted. GHES via
+  `CRB_GITHUB__API_URL` / `__WEB_URL`.
+- **Routes** — `GET /github/app` (configured? install link? installations on record — never
+  404s), `GET /github/setup` (the app's Setup URL: verifies the installation with the app's
+  own credential, records it, lands on Connect), `POST /github/installations/sync`,
+  `GET /github/installations/{id}/repositories` (the picker, with a suggested name /
+  language / runner per repository and `connected_as` for those already connected),
+  `POST /github/installations/{id}/connect` (an ordinary repository row, linked through
+  `config_json.github`; the link survives config updates).
+- **Worker** — a linked repository clones with the installation's token passed to git as a
+  one-shot `Authorization` header through `GIT_CONFIG_COUNT` (never argv, never
+  `.git/config`); a factory run on a linked repository whose installation may write gets
+  its delivery credentials from the same token and opens the pull request against the
+  repository's default branch; a read-only installation fails closed on delivery.
+- **Store** — revision `0005`: `github_installations` (mutable state, no triggers).
+- **UI** — *Connect from GitHub* on the Connect screen (installation → search → pick →
+  confirm the pre-filled name/language/runner → connect; a connected repository is marked
+  and cannot be connected twice; an unconfigured app is a state with the URL fallback, not
+  an error); the setup callback lands on `/connect?installation=` with the picker open;
+  Settings gains a GitHub App card (configured / install link / installations, "can
+  deliver" vs "read-only", sync).
+- Docs: `docs/GITHUB-APP.md` (register once, install per organisation, the permission table
+  and what each is for, federation, trial without the app); ADR-0014; API, DEPLOYMENT
+  (`CRB_GITHUB__*` on the API **and** the worker), SECURITY §3.3, OPERATOR §2.0.
+
 ### 2026-09-17 — the front end has a purpose: connect → results → decisions → factory (DL-040)
 
 The operator's brief: "if we are keeping the front end it should have a purpose. It should be
