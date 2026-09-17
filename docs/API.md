@@ -58,6 +58,18 @@ in parallel, so changes here are changes to both.
 | POST | `/repos/{name}/probe` | operator | enqueues a `probe` run → 201 run; 503 `queue_unavailable` when no job queue is installed |
 | GET | `/repos/{name}/profile` | viewer | change profile `{repo, ref, n_commits, examined, skipped, classes, sizes, cells: [{capability_class, size, count, share}], class_totals, size_totals, computed_at}`; cached on the repo, `?refresh=true` recomputes (operator — it is a git walk and a config write; 403 for a viewer), `?log_n=` bounds the walk; 409 `no_clone_path` / `clone_unavailable` / `profile_failed` |
 
+## GitHub App (the enterprise connection — ADR-0014, docs/GITHUB-APP.md)
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/github/app` | viewer | `{configured, app_slug, install_url, api_url, installations: [{id, account_login, account_type, repository_selection, html_url, suspended, permissions, can_deliver, recorded_by, updated}]}` — never 404s; `configured: false` is a state |
+| GET | `/github/setup?installation_id=&setup_action=` | operator | the app's **Setup URL**: verifies the installation with the app credential (`GET /app/installations/{id}`), records it (+ `github.installation.recorded` event), 303 → `/connect?installation={id}` |
+| POST | `/github/installations/sync` | operator | refresh from GitHub; an installation GitHub no longer lists is marked `suspended` |
+| GET | `/github/installations/{id}/repositories?q=&page=&per_page=` | viewer | the picker: `{items: [{full_name, name, html_url, clone_url, default_branch, private, language, archived, suggested: {name, language, runner}, connected_as}], total, page, per_page, has_more}` |
+| POST | `/github/installations/{id}/connect` | operator | `{full_name, name?, language?, runner?, src_prefix?, test_prefix?, ext?, test_mode?, test_suffix?, belt_scope?}` → 201 `RepoDetail` whose `config.url` is the clone URL and whose row carries `config_json.github = {installation_id, full_name, default_branch, html_url, private}`; 404 when the installation cannot see it, 409 `already_exists` (with `detail.repo`), 422 when GitHub reports no language and none is given (`detail.suggested`) |
+
+Errors from GitHub are 502 `github_error` with `detail.github_status`; an unconfigured app is 404 `github_app_not_configured` on every route but `GET /github/app`. No response, row, event or log ever carries an installation token.
+
 ## Runs
 
 | Method | Path | Role | Notes |

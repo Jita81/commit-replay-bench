@@ -23,6 +23,7 @@ and be recorded here.
 | [0011](0011-repo-lint-belt.md) | Belt 5: the repository's own formatter/linter (`repo_lint_clean`; apparatus 2.2, belt set `v5`, failure kind `lint`; amends ADR-0001 and ADR-0002 rule 2) | Accepted | 2026-09-14 |
 | [0012](0012-builder-in-a-sealed-container.md) | The builder runs in a sealed container: an exported checkout that cannot contain the gold commit, a hardened container, one allowlisting egress sidecar (`CRB_BUILDER__EXECUTOR=docker`; amends ADR-0005's scope) | Accepted | 2026-09-14 |
 | [0013](0013-external-review-is-advisory-and-recorded.md) | An external reviewer's verdict (CodeRabbit on PRs; later a factory `Reviewer`) is recorded and advisory to humans — never an input to a verdict, a route or a sign-off | Proposed | 2026-09-15 |
+| [0014](0014-github-app-is-the-connection.md) | The GitHub App is the connection: org-level install on selected repositories, installation tokens minted per use and never stored, write per installation; personal access tokens are not | Accepted | 2026-09-17 |
 
 ## Format
 

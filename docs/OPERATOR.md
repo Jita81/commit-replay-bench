@@ -81,7 +81,16 @@ toolchain and the dependencies are in place. Belt scope options:
 
 The census `configs.json` shape is accepted unchanged by `RepoConfig.from_dict`.
 
-### 2.0 Configuring a repository from the UI
+### 2.0 Connecting and configuring a repository from the UI
+
+**Connect** is the first screen of the journey. With the GitHub App configured
+([GITHUB-APP](GITHUB-APP.md)), *Connect from GitHub* lists the repositories each
+organisation's installation may see and registers the one you pick with a pre-filled name,
+language and runner — no token is handed over; the worker mints the installation's own.
+Without the app, *Connect by URL* registers a public repository (or one the worker's git can
+reach). Either way the repository then walks the six stages (probe → mine → oracle →
+controls → first measurement) on `/connect/<name>`, each saying what it proves and what it
+costs, and lands on **Results**.
 
 A registered repository is edited on its page under **Configuration** (operators and
 admins edit; viewers see the same form read-only). The form covers every field

@@ -100,7 +100,9 @@ def test_first_run_clones_by_url_and_persists_the_path(
     actions = [e.action for e in ev]
     assert actions[:3] == ["run.claimed", "repo.clone.start", "repo.clone.done"]
     start = ev[1]
-    assert start.stage == "system" and start.payload == {"url": remote, "dest": str(dest)}
+    # `github_app` says whether an installation token was minted for the clone (ADR-0014)
+    assert start.stage == "system"
+    assert start.payload == {"url": remote, "dest": str(dest), "github_app": False}
     finish = ev[2]
     assert finish.stage == "system" and finish.status is StepStatus.OK
     assert finish.duration_ms is not None and finish.duration_ms >= 0

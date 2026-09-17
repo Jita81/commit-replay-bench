@@ -92,6 +92,9 @@ router = APIRouter(tags=["repos"])
 _ERR = {"model": ErrorEnvelope}
 
 PROFILE_KEY = "profile"
+#: ``config_json`` keys that are NOT repository config and survive every config update:
+#: the cached change profile, and the GitHub App link (src/crb/server/routes/github.py).
+PRESERVED_KEYS: tuple[str, ...] = (PROFILE_KEY, "github")
 PROBE_STATES: frozenset[str] = frozenset({"ok", "degraded", "down"})
 
 
@@ -119,7 +122,7 @@ def _validated_config(name: str, raw: Mapping[str, Any]) -> RepoConfig:
 
 def _config_of(repo: Repo) -> RepoConfig:
     """The row's ``RepoConfig`` (the cached profile is not part of the config)."""
-    raw = {k: v for k, v in dict(repo.config_json or {}).items() if k != PROFILE_KEY}
+    raw = {k: v for k, v in dict(repo.config_json or {}).items() if k not in PRESERVED_KEYS}
     raw.setdefault("path", repo.clone_path)
     raw.setdefault("url", repo.url)
     return _validated_config(repo.name, raw)
@@ -137,7 +140,7 @@ def config_diff(old: Mapping[str, Any], new: Mapping[str, Any]) -> dict[str, dic
     """``{field: {"from": …, "to": …}}`` over the keys that changed (profile cache excluded)."""
     out: dict[str, dict[str, Any]] = {}
     for key in sorted(set(old) | set(new)):
-        if key == PROFILE_KEY:
+        if key in PRESERVED_KEYS:
             continue
         if old.get(key) != new.get(key):
             out[key] = {"from": old.get(key), "to": new.get(key)}
@@ -329,12 +332,12 @@ def update_repo(name: str, body: RepoUpdateRequest, operator: OperatorDep, db: D
     config = _validated_config(name, merged)
     new = config.to_dict()
     diff = config_diff(old, new)
-    cached = dict(repo.config_json or {}).get(PROFILE_KEY)
+    kept = {k: v for k, v in dict(repo.config_json or {}).items() if k in PRESERVED_KEYS and v}
     repo.language = config.language.value
     repo.runner = config.runner
     repo.clone_path = config.path
     repo.url = config.url
-    repo.config_json = _stored_config(config, {PROFILE_KEY: cached} if cached else None)
+    repo.config_json = _stored_config(config, kept or None)
     repo.updated = _now()
     append_system_event(
         db,

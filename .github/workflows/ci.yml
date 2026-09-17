@@ -125,7 +125,9 @@ jobs:
   test:
     name: test (py${{ matrix.python }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # the hermetic suite takes 23–29 min on the hosted runner (py3.13 is the slower); 30 tipped
+    # over twice on 2026-09-17 at 98 % — headroom until the suite is split and parallelised
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

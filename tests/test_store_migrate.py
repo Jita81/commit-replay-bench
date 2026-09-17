@@ -318,7 +318,7 @@ def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
 
     migrate.upgrade(backend.url)  # stamps 0001, applies 0002 (and every later revision)
 
-    assert migrate.current(backend.url) == migrate.head_revision() == "0004"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0005"
     assert migrate.check(backend.url) is True
     assert _autogen_diff(backend.engine) == []
     assert "repo_lint_clean" in {c["name"] for c in inspect(backend.engine).get_columns("grades")}
@@ -407,9 +407,9 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0001")
-    # the refusal rolls the whole downgrade back — 0004's index swap and 0003's drop of
+    # the refusal rolls the whole downgrade back — 0005's table, 0004's index swap and 0003's drop of
     # the (empty) reviews table included — so the database stays exactly where it was
-    assert migrate.current(backend.url) == "0004"
+    assert migrate.current(backend.url) == "0005"
 
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -424,7 +424,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     with pytest.raises(DBAPIError, match="append-only"), fresh.begin() as c:
         c.execute(text("DELETE FROM grades"))
     migrate.upgrade(backend.url)  # and back up again
-    assert migrate.current(backend.url) == "0004" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0005" and _autogen_diff(fresh) == []
 
 
 def test_downgrade_of_an_empty_database_drops_the_schema(backend: Backend) -> None:
@@ -537,5 +537,5 @@ def test_0004_refuses_a_database_holding_duplicate_trace_seq_pairs(backend: Back
     fresh = _reset(backend)
     migrate.upgrade(backend.url, revision="0003")
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0004" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0005" and _autogen_diff(fresh) == []
     assert "uq_events_trace_seq" in {ix["name"] for ix in inspect(fresh).get_indexes("events")}

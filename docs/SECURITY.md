@@ -132,6 +132,13 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   *whether* each is configured (`crb.server.settings.Settings.redacted_dict`). [measured]
 - Git delivery credentials (forward mode) come from an injected provider; the default
   `NullProvider` fails closed. [measured] `tests/test_factory_delivery.py`
+- Repositories connected through the **GitHub App** (ADR-0014) are cloned — and, where the
+  installation grants write, delivered to — with **installation tokens** the worker mints per
+  use: one hour, scoped to the installation, cached in memory until five minutes before
+  expiry, passed to git through `GIT_CONFIG_COUNT` as a one-shot `Authorization` header —
+  never argv, never `.git/config`, never a row, event, log or API response. The app's private
+  key comes from the environment or a mounted file; `/settings` reports only
+  `private_key_configured`. [measured] `tests/test_server_github_app.py`
 - Every string that leaves a sandbox — test output tails, diffs, transcripts, log lines,
   event payloads — passes through `crb.core.redact` (bearer/basic headers, well-known key
   prefixes, JWTs, `key=value` secrets, URL userinfo, private-key blocks). [measured]

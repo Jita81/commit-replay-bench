@@ -54,6 +54,7 @@ from typing import Any
 
 from crb.core.execution import DockerSettings, SandboxUnavailable
 from crb.observability.logging import configure_logging
+from crb.server.settings import GitHubAppSettings, Settings
 from crb.server.worker import Worker, WorkerSettings
 from crb.store.jobs import RUN_KINDS
 
@@ -140,7 +141,18 @@ def settings_from_args(
         stale_after_s=float(args.stale_after),
         kinds=kinds,
         keep_worktrees=bool(args.keep_worktrees),
+        # the same CRB_GITHUB__* the API reads (pydantic-settings parses the nested keys)
+        github=_github_settings(),
     )
+
+
+def _github_settings() -> GitHubAppSettings:
+    """``CRB_GITHUB__APP_ID`` / ``__PRIVATE_KEY`` / ``__PRIVATE_KEY_FILE`` / ``__API_URL`` …
+    read the way the API reads them, so one environment configures both processes."""
+    try:
+        return Settings().github
+    except Exception:  # a worker without the server extras (or a bad env) still starts
+        return GitHubAppSettings()
 
 
 def _run_summary(run: Any) -> dict[str, Any]:

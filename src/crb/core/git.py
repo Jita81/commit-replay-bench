@@ -326,8 +326,14 @@ def clone_repo(
     timeout: int = DEFAULT_CLONE_TIMEOUT_S,
     git_binary: str = "git",
     allow_local: bool | None = None,
+    auth_header: str | None = None,
 ) -> str:
     """Clone ``url`` (full history, ``--no-tags``) into ``dest``; return the HEAD sha.
+
+    ``auth_header`` (``"Authorization: Basic …"`` — a GitHub App installation token, see
+    src/crb/server/github_app.py) is handed to git through the ``GIT_CONFIG_COUNT``
+    environment mechanism as ``http.extraheader``: it never appears in argv, in
+    ``.git/config`` or in any error this function raises.
 
     Invariants:
 
@@ -364,6 +370,15 @@ def clone_repo(
     # the real argv (may carry a token) runs; the redacted one is what any error shows
     safe_argv = [git_binary, "clone", "--quiet", "--no-tags", safe, str(tmp)]
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+    if auth_header:
+        # one-shot credential for this process only (git ≥ 2.31): not argv, not on disk
+        env.update(
+            {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "http.extraheader",
+                "GIT_CONFIG_VALUE_0": auth_header,
+            }
+        )
     try:
         p = subprocess.run(
             argv, capture_output=True, text=True, timeout=timeout, check=False, env=env

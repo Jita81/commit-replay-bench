@@ -52,6 +52,10 @@ import {
 import { api, ApiError, qs } from './client'
 import { RunEventStream, type EventSourceFactory, type SseSnapshot } from './sse'
 import type {
+  GitHubAppInfo,
+  GitHubConnectRequest,
+  GitHubInstallation,
+  GitHubPickerPage,
   CapabilityMap,
   CellField,
   ControlsReport,
@@ -130,6 +134,8 @@ export const keys = {
   factoryEvidence: (repo: string) => ['factory', repo, 'evidence'] as const,
   users: ['users'] as const,
   settings: ['settings'] as const,
+  githubApp: ['github', 'app'] as const,
+  githubRepos: (installation: number, q: string, page: number) => ['github', 'repos', installation, q, page] as const,
 }
 
 const enc = encodeURIComponent
@@ -685,3 +691,42 @@ export function useSetUserRole(): UseMutationResult<User, ApiError, { id: string
 export function useSettings(enabled: boolean): UseQueryResult<Settings, ApiError> {
   return useQuery({ queryKey: keys.settings, queryFn: () => api<Settings>('/settings'), enabled, retry: false })
 }
+
+// --- GitHub App (the enterprise connection) ----------------------------------------------
+
+/** `GET /github/app` — configured or not, the install link, the installations on record. */
+export function useGitHubApp(): UseQueryResult<GitHubAppInfo, ApiError> {
+  return useQuery({ queryKey: keys.githubApp, queryFn: () => api<GitHubAppInfo>('/github/app'), retry: false })
+}
+
+/** `POST /github/installations/sync` (operator) — refresh the installations from GitHub. */
+export function useSyncGitHubInstallations(): UseMutationResult<GitHubInstallation[], ApiError, void> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<GitHubInstallation[]>('/github/installations/sync', { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.githubApp }),
+  })
+}
+
+/** `GET /github/installations/{id}/repositories?q=&page=` — the picker page. */
+export function useGitHubRepos(installation: number, q: string, page = 1): UseQueryResult<GitHubPickerPage, ApiError> {
+  return useQuery({
+    queryKey: keys.githubRepos(installation, q, page),
+    queryFn: () => api<GitHubPickerPage>(`/github/installations/${installation}/repositories${qs({ q: q || undefined, page, per_page: 50 })}`),
+    enabled: installation > 0,
+    retry: false,
+  })
+}
+
+/** `POST /github/installations/{id}/connect` (operator) — register a linked repository. */
+export function useConnectGitHubRepo(): UseMutationResult<RepoDetail, ApiError, { installation: number; body: GitHubConnectRequest }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ installation, body }) => api<RepoDetail>(`/github/installations/${installation}/connect`, { method: 'POST', body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.repos })
+      void qc.invalidateQueries({ queryKey: ['github', 'repos'] })
+    },
+  })
+}
+

@@ -1091,3 +1091,68 @@ export interface Settings {
   apparatus_version: string
   policy_version: string
 }
+
+// ---------------------------------------------------------------------------
+// GitHub App — `src/crb/server/routes/github.py` (the enterprise connection, ADR-0014)
+// ---------------------------------------------------------------------------
+
+/** One installation of the deployment's GitHub App (`InstallationOut`). */
+export interface GitHubInstallation {
+  id: number
+  account_login: string
+  account_type: string
+  repository_selection: string
+  html_url: string
+  suspended: boolean
+  permissions: Record<string, string>
+  /** `contents: write` + `pull_requests: write` — what factory delivery needs. */
+  can_deliver: boolean
+  recorded_by: string
+  updated: string
+}
+
+/** `GET /github/app` — never 404s: `configured: false` is a state the Connect screen renders. */
+export interface GitHubAppInfo {
+  configured: boolean
+  app_slug: string
+  install_url: string
+  api_url: string
+  installations: GitHubInstallation[]
+}
+
+/** One repository an installation may see, with what the connect form pre-fills (`PickerRepoOut`). */
+export interface GitHubPickerRepo {
+  full_name: string
+  name: string
+  html_url: string
+  clone_url: string
+  default_branch: string
+  private: boolean
+  language: string
+  archived: boolean
+  suggested: { name: string; language: string; runner: string }
+  connected_as: string | null
+}
+
+export interface GitHubPickerPage {
+  items: GitHubPickerRepo[]
+  total: number
+  page: number
+  per_page: number
+  has_more: boolean
+}
+
+/** `POST /github/installations/{id}/connect` (`ConnectRequest`). */
+export interface GitHubConnectRequest {
+  full_name: string
+  name?: string
+  language?: string
+  runner?: string
+  src_prefix?: string
+  test_prefix?: string
+  ext?: string
+  test_mode?: 'prefix' | 'suffix'
+  test_suffix?: string
+  belt_scope?: string | string[]
+}
+

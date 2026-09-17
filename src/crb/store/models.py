@@ -324,6 +324,27 @@ class User(Base):
     __table_args__ = (UniqueConstraint("issuer", "subject", name="uq_users_issuer_subject"),)
 
 
+class GitHubInstallation(Base):
+    """One installation of the deployment's GitHub App (docs/GITHUB-APP.md): the account it
+    lives on and what it may see, as GitHub reported it when the installer arrived on the
+    setup callback or an operator synced. Mutable (a re-sync refreshes it; a removed
+    installation is marked ``suspended``); never a token — tokens are minted per use and
+    live only in the process that minted them (ADR-0014)."""
+
+    __tablename__ = "github_installations"
+    installation_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    account_login: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    account_type: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    repository_selection: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    html_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    permissions_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    suspended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Who brought it in (the setup callback's operator, or the syncing operator).
+    recorded_by: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    created: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
+    updated: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
+
+
 #: Every append-only table of the CURRENT schema. A revision script pins the tuple that
 #: existed at its own revision (a table a later revision adds has no triggers to install
 #: yet); ``init_db`` and ``migrate.upgrade`` use this live one.
