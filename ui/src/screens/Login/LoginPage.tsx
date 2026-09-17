@@ -35,11 +35,12 @@ import { TextField } from '../../components/Field'
 import { BRAND } from '../../components/Layout'
 import { useAuth } from '../../lib/auth'
 
-/** Where a safe `?next=` may point: same-origin paths only. */
+/** Where a safe `?next=` may point: same-origin paths only; a direct login lands on the
+ * journey's first screen (`/home`), the same place the index route sends everyone. */
 function safeNext(raw: string | null): string {
-  if (!raw) return '/repos'
+  if (!raw) return '/home'
   const decoded = decodeURIComponent(raw)
-  return decoded.startsWith('/') && !decoded.startsWith('//') ? decoded : '/repos'
+  return decoded.startsWith('/') && !decoded.startsWith('//') ? decoded : '/home'
 }
 
 /** The screen; redirects to `next` once a session exists. */
