@@ -15,7 +15,8 @@ completing. One real sign-off was made and then revoked so the dev ledger record
 test.
 
 The defects found were fixed in the same branch as they were found; the table says what
-each person saw before and after. Tests were added for every fix.
+each person saw before and after. Every behavioural fix (1–12) carries a test; the two
+layout-only fixes (13, 14 — a wrapping title and a wrapping hash) do not.
 
 ## Verdict per persona
 
@@ -38,10 +39,12 @@ The operator's run (`6fb61af9…`; cobra, replay, sighted, `claude_code / claude
 with `auth: cli`, apparatus 2.2) finished during the walk: 10 tasks, 9 clean, 1 not clean
 (the lint belt — gofmt), 0 disqualified, 0 harness errors, $2.57 builder-reported
 **[measured — the run's ledger rows, read on `/runs/{id}`]**. Between the start and the end
-of the walk `bug.fix × S` on cobra crossed the bar — n=24, 96 % (95 % Wilson [80 %, 99 %]),
-route *calibrate* (`ci_low_below_bar`) → n=25, 96 %, Wilson lower ≥ 80 %, route *deliver*
-under `routing.v1` **[measured — `/capability-map?repo=cobra`, current apparatus 2.2,
-sighted rows]**; the Decisions inbox picked it up
+of the walk `bug.fix × S` on cobra crossed the bar — 23 of 24 clean, 95.8 % (95 % Wilson
+[79.8 %, 99.3 %]), route *calibrate* (`ci_low_below_bar`: the lower bound sat under the
+80 % bar) → 24 of 25 clean, 96.0 % (95 % Wilson [80.5 %, 99.3 %]), route *deliver* under
+`routing.v1` **[measured — `/capability-map?repo=cobra`, current apparatus 2.2, sighted
+rows, `claude_code / claude-sonnet-5`; the intervals are the API's `wilson_interval`]**;
+the Decisions inbox picked it up
 without anyone reloading anything, and showed the viewer *approver acts* next to it. The
 badge is honest by role: the approver saw 1 waiting before the sign-off and the viewer saw 3
 after the revoke (two cobra cells due, one click cell routed to a human).

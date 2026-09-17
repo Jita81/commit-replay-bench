@@ -67,7 +67,7 @@ export function DecisionsPage() {
         Only decisions that are ready appear here. A cell the policy would refuse anyway is never sent to you — it stays on the map with its reason code. The instrument measured; a person decides.
       </Lede>
       <div className="mb-6">
-        <Pill tone={total > 0 ? 'primary' : 'green'} size="sm" label={`${total} decisions waiting`}>
+        <Pill tone={total > 0 ? 'primary' : 'green'} size="sm" label={`${total} decisions waiting`} data-testid="decisions-count" data-ready={d.ready ? 'true' : 'false'}>
           {d.ready ? `${total} waiting` : 'counting…'}
         </Pill>
       </div>

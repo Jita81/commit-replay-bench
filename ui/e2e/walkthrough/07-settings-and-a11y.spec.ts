@@ -188,7 +188,8 @@ test.describe('07 settings + accessibility', () => {
     await expect(page.getByRole('table', { name: `Capability map for ${t.name}` })).toBeVisible()
     await axeClean(page, '/results')
     await page.goto('/decisions')
-    await expect(page.getByText(/\d+ waiting|Nothing is waiting on a person/).first()).toBeVisible()
+    // page-level readiness: every repository's map, sign-off and task queries have settled
+    await expect(page.getByTestId('decisions-count')).toHaveAttribute('data-ready', 'true')
     await axeClean(page, '/decisions')
     await page.goto(`/factory?repo=${encodeURIComponent(t.name)}`)
     await expect(page.getByTestId('factory-no-backlog').or(page.getByTestId('factory-run-controls'))).toBeVisible()

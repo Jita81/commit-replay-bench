@@ -38,16 +38,20 @@ from collections.abc import Iterator
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from crb.server.auth import (
+    GITHUB_SETUP_COOKIE,
     OperatorDep,
     ViewerDep,
+    clear_github_setup_cookie,
     issue_github_setup_state,
+    new_github_setup_nonce,
+    set_github_setup_cookie,
     verify_github_setup_state,
 )
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep
@@ -231,11 +235,15 @@ def _connected_names(db: DbDep) -> dict[str, str]:
     responses={401: _ERR},
     summary="Is the GitHub App configured, where to install it, the installations on record",
 )
-def get_app(viewer: ViewerDep, db: DbDep, settings: SettingsDep) -> GitHubAppOut:
+def get_app(
+    viewer: ViewerDep, db: DbDep, settings: SettingsDep, response: Response
+) -> GitHubAppOut:
     """Never 404s: an unconfigured app is a state the Connect screen renders. The install
-    link carries a signed ``state`` bound to this principal (thirty minutes) so the setup
-    callback can tell an install this person started from a link someone else made them
-    open — an operator's link writes; a viewer's is plain (a viewer cannot complete it)."""
+    link carries a signed ``state`` bound to this principal AND to this browser (a nonce
+    the response also sets as an httponly cookie; thirty minutes) so the setup callback can
+    tell an install this person started, here, from a link someone else made them open or
+    a stale tab in another session — an operator's link writes; a viewer's is plain (a
+    viewer cannot complete it)."""
     g = settings.github
     rows = (
         db.execute(select(GitHubInstallation).order_by(GitHubInstallation.account_login))
@@ -244,7 +252,9 @@ def get_app(viewer: ViewerDep, db: DbDep, settings: SettingsDep) -> GitHubAppOut
     )
     install_url = g.install_url if g.enabled else ""
     if install_url and viewer.role in ("operator", "approver", "admin"):
-        install_url = f"{install_url}?state={issue_github_setup_state(settings, viewer.id)}"
+        nonce = new_github_setup_nonce()
+        set_github_setup_cookie(response, settings, nonce)
+        install_url = f"{install_url}?state={issue_github_setup_state(settings, viewer.id, nonce)}"
     return GitHubAppOut(
         configured=g.enabled,
         app_slug=g.app_slug,
@@ -284,6 +294,7 @@ def sync_installations(
     summary="Where GitHub sends the installer back (the app's Setup URL); records the installation and lands on Connect",
 )
 def setup_callback(  # noqa: PLR0917 — FastAPI dependencies + query params
+    request: Request,
     operator: OperatorDep,
     db: DbDep,
     app: GitHubAppDep,
@@ -293,15 +304,18 @@ def setup_callback(  # noqa: PLR0917 — FastAPI dependencies + query params
     state: str = Query(default="", max_length=512),
 ) -> RedirectResponse:
     """``installation_id`` is untrusted until the app's own credential confirms it; the
-    write is made only when ``state`` proves this operator started the install from a link
-    this deployment minted (CWE-352). Without that proof nothing is recorded: the callback
-    lands on Connect with ``unverified=1`` and the operator records the installation with
-    the CSRF-protected sync, which verifies it the same way."""
+    write is made only when ``state`` proves this operator started the install, in this
+    browser, from a link this deployment minted — the state's nonce must match the
+    ``crb_github_setup`` cookie, which is consumed by the write (CWE-352). Without that
+    proof nothing is recorded: the callback lands on Connect with ``unverified=1`` and the
+    operator records the installation with the CSRF-protected sync, which verifies it the
+    same way."""
     try:
         inst = app.installation(installation_id)
     except GitHubAppError as exc:
         raise _github_error(exc) from exc
-    if not verify_github_setup_state(settings, state, operator.id):
+    nonce = request.cookies.get(GITHUB_SETUP_COOKIE)
+    if not verify_github_setup_state(settings, state, operator.id, nonce):
         return RedirectResponse(
             url=f"/connect?installation={inst.id}&unverified=1", status_code=303
         )
@@ -321,7 +335,9 @@ def setup_callback(  # noqa: PLR0917 — FastAPI dependencies + query params
         },
     )
     db.commit()
-    return RedirectResponse(url=f"/connect?installation={row.installation_id}", status_code=303)
+    out = RedirectResponse(url=f"/connect?installation={row.installation_id}", status_code=303)
+    clear_github_setup_cookie(out, settings)  # one state, one write
+    return out
 
 
 @router.get(

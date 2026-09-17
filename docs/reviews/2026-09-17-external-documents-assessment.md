@@ -29,16 +29,26 @@ Tested by:    not applicable — a review record
 Touch when:   a row below lands (mark it with the PR); a document is re-issued.
 -->
 
+## How to read the claims in this record
+
+This is a reading, not a measurement (docs/EVIDENCE-AND-CLAIMS.md §1). Every statement
+that the product *does* something is **[hypothesis]**: verified by reading the code named
+beside it on `feat/nhs-design-journey`, and by its unit tests where they are cited, never by
+an end-to-end measurement. Every "designed, not run" item and every proposed row (F27–F34)
+is **[aspiration]**. Numbers quoted from the essay, the profile or the product's own
+documents are quoted with their source and inherit that source's tag; none is re-measured
+here and none is **[measured]** by this record.
+
 ## 1. Executive summary
 
 1. **The Quality Floor (essay edition, labelled v3.0)** — the argument the product was built from: four belts, false-Q1 = 0, test-conditioned vs blind, the routing bar, the DoR gate, independent review, the frozen backlog, the empty half of the ledger.
-   *Verdict:* the product honours every mechanism the essay names and is stricter on most (five belts, oracle-unmeasured refusal, per-mode reporting, task count beside n); the copy on disk still carries the **pre-correction specification-lever numbers** (+23 points) that the product's own documents record as leakage — do not re-import them; two designed-but-unrun ideas are worth building (an audited sample per signed cell; a path from a review finding back into the registered backlog).
+   *Verdict* **[hypothesis — verified by reading the code, not measured]:** the product honours every mechanism the essay names and is stricter on most (five belts, oracle-unmeasured refusal, per-mode reporting, task count beside n); the copy on disk still carries the **pre-correction specification-lever numbers** (+23 points) that the product's own documents record as leakage — do not re-import them; two designed-but-unrun ideas are worth building (an audited sample per signed cell; a path from a review finding back into the registered backlog).
 2. **Automated Agile — Process Architecture v1.0 (March 2026)** — the upstream inputs → decisions → outputs model: twelve decision types, seven meeting types, the self-curating context graph, integrations, the sign-off matrix.
-   *Verdict:* mostly out of scope by decision (DL-001 carved the instrument out of the discovery/inception pipeline) and "the platform proposes; humans approve" is already the product's write boundary; three small, transferable items — show an item's predicted route before money is spent, capture human PR review comments as evidence, and put the signed facts in the PR body.
+   *Verdict* **[hypothesis — verified by reading the code, not measured]:** mostly out of scope by decision (DL-001 carved the instrument out of the discovery/inception pipeline) and "the platform proposes; humans approve" is already the product's write boundary; three small, transferable items — show an item's predicted route before money is spent, capture human PR review comments as evidence, and put the signed facts in the PR body.
 3. **AAF ISO Guide to Architecture & Code Quality v1.0 (April 2026)** — ISO 42010 viewpoints and ADR rules, ISO 25010 characteristics with evidence artefacts, SOLID, OWASP-by-change-type, ISO 9001 nonconformity handling, Stage-5 review and Q1/Q2/Q3 scoring.
-   *Verdict:* the product already meets the standard's substance (layers enforced in CI, ADRs with alternatives, tamper-evident records, N/A never silent, corrective action re-verified on the same task); two learnings — a recurrence alarm after a prevention lands, and the repository's own security scanner as a review probe — plus two hygiene corrections (ADR-0013 is in force but "Proposed"; ADRs name no approver).
+   *Verdict* **[hypothesis — verified by reading the code, not measured]:** the product already meets the standard's substance (layers enforced in CI, ADRs with alternatives, tamper-evident records, N/A never silent, corrective action re-verified on the same task); two learnings — a recurrence alarm after a prevention lands, and the repository's own security scanner as a review probe — plus two hygiene corrections (ADR-0013 is in force but "Proposed"; ADRs name no approver).
 4. **Paul Glover — Experience and Knowledge Profile (August 2026)** — the operator's record of standards and practices: upstream control, DoR gates, oracle-led production, fail-closed belts, measured routing, refusal as a positive behaviour, provenance, clinical-safety framing, evidence boundaries.
-   *Verdict:* **nothing new** — the product is the embodiment of the practices the profile records; the one thing it surfaces is a prioritisation note (the operator's client base is Azure DevOps-heavy, so F21's ADO half should lead its GitLab half).
+   *Verdict* **[hypothesis — verified by reading the code, not measured]:** **nothing new** — the product is the embodiment of the practices the profile records; the one thing it surfaces is a prioritisation note (the operator's client base is Azure DevOps-heavy, so F21's ADO half should lead its GitLab half).
 
 The working tree's uncommitted edits (approver display names on sign-off records, the sign-off, measure, home and login screens, admin routes) do not overlap any row proposed below.
 
@@ -46,7 +56,7 @@ The working tree's uncommitted edits (approver display names on sign-off records
 
 ## 2. The Quality Floor essay
 
-### 2a. What it says that the product already does — verified in code
+### 2a. What it says that the product already does — verified in code **[hypothesis]**
 
 | Essay mechanism | Where the product does it | Note |
 |---|---|---|
@@ -80,7 +90,7 @@ The working tree's uncommitted edits (approver display names on sign-off records
 
 7. **"Operator-delegated" is not a tier the product can express.** The essay stamps delegated sign-offs "as such, a weaker tier of proof". The product's tiers are `untrusted / automated-pass / human-verified / ab-confirmed` (`capability.py:141–146`); a `GapSignoff` and a `SignoffRecord` carry `verifier` as an account id with no marker of whether that account is a person's OIDC subject or a local service account holding the approver role. Through the API the approver role is required (`routes/factory.py:313`, `routes/signoffs.py`) and the MCP excludes sign-offs, so today the risk is a service account given the approver role — exactly what the operator's own pilots did. See F34.
 
-8. **The two "designed, not run" items are still not run.** (i) "No independent semantic audit of a random sample of accepted changes to convert the observed zero into a confidence bound": the product has the *record type* (`ReviewRecord`, byte-anchored, `review_cell_stats` joining `n_reviewed` / `n_review_defects` onto cells) and proposals to use reviews at sign-off (B-3) and as a routing clause (B-12), but nothing *asks for the sample* — no rule, no inbox item, no "audited false-Q1" figure beside the mechanical zero. See F27. (ii) "No prospective frozen-policy trial": the route now gates delivery (DL-038), but `policy_hash` is not pinned beside `backlog_hash` (B-0b, open; grep finds none).
+8. **The two "designed, not run" items are still not run** **[aspiration]**. (i) "No independent semantic audit of a random sample of accepted changes to convert the observed zero into a confidence bound": the product has the *record type* (`ReviewRecord`, byte-anchored, `review_cell_stats` joining `n_reviewed` / `n_review_defects` onto cells) and proposals to use reviews at sign-off (B-3) and as a routing clause (B-12), but nothing *asks for the sample* — no rule, no inbox item, no "audited false-Q1" figure beside the mechanical zero. See F27. (ii) "No prospective frozen-policy trial": the route now gates delivery (DL-038), but `policy_hash` is not pinned beside `backlog_hash` (B-0b, open; grep finds none).
 
 ### 2c. Candidate learnings
 
@@ -96,7 +106,7 @@ The working tree's uncommitted edits (approver display names on sign-off records
 
 ## 3. Automated Agile — Process Architecture v1.0
 
-### 3a. What it says that the product already does — verified in code
+### 3a. What it says that the product already does — verified in code **[hypothesis]**
 
 - **"The platform proposes; humans approve. Every time."** — `crb.core.learn.triage_refusals` can only emit `unsure` (the dataclass refuses any other verdict); a model label never overwrites a human label (`classify.resolve`, human > intent > path); a gap is signed by an approver (`routes/factory.py:303–342`); a cell sign-off is refused at write unless every clause holds (`signoff.check_signable` → 409).
 - **D7 "Nothing enters the manufacturing pipeline without a signed-off context package"** — `readiness.NotReady`: an unsigned structural slot stops the item before any builder runs; the run cannot skip the step (`loop.py` `_assess` first).
@@ -128,7 +138,7 @@ The working tree's uncommitted edits (approver display names on sign-off records
 
 ## 4. AAF ISO Guide to Architecture & Code Quality v1.0
 
-### 4a. What it says that the product already does — verified in code
+### 4a. What it says that the product already does — verified in code **[hypothesis]**
 
 | Guide requirement | Product | Evidence |
 |---|---|---|
@@ -166,7 +176,7 @@ The working tree's uncommitted edits (approver display names on sign-off records
 
 ## 5. The operator's experience profile
 
-### 5a. What it records that the product already embodies — verified in code
+### 5a. What it records that the product already embodies — verified in code **[hypothesis]**
 
 The profile's "unifying theme" — *clarify what must be true, structure the knowledge, build quality in, measure, escalate where evidence is insufficient* — is the run pipeline in one sentence (README "The instrument in six steps"). Item by item, from its §2 "AI-enabled software manufacturing": Definition-of-Ready gates that stop on unsigned facts (`readiness.NotReady`); classification-specific rather than generic context (structural slots per class; the corrected context finding in EVIDENCE §6b); oracle-led production (`testfirst.prove_red`, belt 1 byte-identity); belts that fail closed on modified tests, regressions, or an absent source change (`grade.py`); routing on measured capability, oracle strength and confidence (`routing.py`); independent review and an append-only ledger (`review.py`, ADR-0002, `factory/evidence.py`); refusal and escalation as positive behaviours (`calibrate` / `human` "are product successes", EVIDENCE §6). From §3: mechanical vs semantic kept apart (EVIDENCE §2); held-out tests over self-assessment (no builder self-report is ever consulted, §6c rung 1); oracle adequacy measured (`crb.core.oracle`, per-task, DL-021). From §1 and §6: provenance with ownership and versioning (apparatus stamp, `policy_thresholds`, `verifier` on every record); "targeted regeneration when guidance changes" is exactly *evidence expires* (stale sign-offs at read, `crb learn remeasure`); traceability from intent to evidence (backlog item → gap sign-off → RED proof → pack hash → ledger row → PR body). The profile's "Evidence boundaries" section is EVIDENCE-AND-CLAIMS §7 in prose.
 
@@ -183,7 +193,7 @@ None that are not already above or already on the backlog. **Verdict: nothing ne
 
 ---
 
-## 6. Proposed backlog rows
+## 6. Proposed backlog rows **[aspiration]**
 
 For docs/reviews/2026-09-17-enterprise-front-end.md §9 (F23–F26 are already taken by docs/reviews/2026-09-17-persona-walkthrough.md, so these start at F27). Only adopt / consider items; ordered by priority then effort. Sources: QF = the Quality Floor essay; AA = Automated Agile process architecture; ISO = AAF ISO guide.
 

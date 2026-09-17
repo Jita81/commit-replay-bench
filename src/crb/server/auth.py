@@ -104,6 +104,10 @@ LOCAL_ISSUER = "local"
 _SESSION_SALT = "crb.session.v1"
 _OIDC_SALT = "crb.oidc.v1"
 _GITHUB_SETUP_SALT = "crb.github-setup.v1"
+#: The cookie that binds an install link's ``state`` to the browser that fetched it: the
+#: state carries a nonce, the cookie carries the same nonce, and the setup callback needs
+#: both — a state alone (a link forwarded, a stale tab in another session) writes nothing.
+GITHUB_SETUP_COOKIE = "crb_github_setup"
 #: How long an install link's ``state`` stays valid: long enough to install the app on an
 #: organisation, short enough that a leaked link is not a standing capability.
 GITHUB_SETUP_STATE_TTL_S = 30 * 60
@@ -575,18 +579,47 @@ def read_oidc_cookie(settings: Settings, token: str | None) -> OidcState:
         raise ApiError(400, "oidc_state_invalid", "OIDC state cookie is malformed") from exc
 
 
-def issue_github_setup_state(settings: Settings, user_id: str) -> str:
+def issue_github_setup_state(settings: Settings, user_id: str, nonce: str) -> str:
     """The ``state`` an install link carries so the GitHub App's setup callback can prove
-    the operator who receives it is the one who started the install (CWE-352): signed,
-    bound to the principal, thirty minutes. GitHub passes it through untouched."""
-    return str(_serializer(settings, _GITHUB_SETUP_SALT).dumps({"sub": user_id}))
+    the operator who receives it is the one who started the install, in the browser that
+    started it (CWE-352): signed, bound to the principal AND to ``nonce`` — the value the
+    :data:`GITHUB_SETUP_COOKIE` set on the same response carries — thirty minutes. GitHub
+    passes the state through untouched."""
+    return str(_serializer(settings, _GITHUB_SETUP_SALT).dumps({"sub": user_id, "nonce": nonce}))
 
 
-def verify_github_setup_state(settings: Settings, state: str | None, user_id: str) -> bool:
-    """True only for a state this deployment signed, for this principal, inside the TTL.
-    Never raises: a callback without a valid state is not an error, it is one that may not
-    write (the operator records the installation through the CSRF-protected sync)."""
-    if not state:
+def new_github_setup_nonce() -> str:
+    """A fresh nonce for one install link (128 bits, URL-safe)."""
+    return secrets.token_urlsafe(16)
+
+
+def set_github_setup_cookie(response: Response, settings: Settings, nonce: str) -> None:
+    """Bind the install link to this browser for the state's lifetime (httponly)."""
+    _set_cookie(
+        response,
+        settings,
+        GITHUB_SETUP_COOKIE,
+        nonce,
+        max_age=GITHUB_SETUP_STATE_TTL_S,
+        httponly=True,
+    )
+
+
+def clear_github_setup_cookie(response: Response, settings: Settings) -> None:
+    """Consume the nonce: a state is good for one callback in the browser that minted it."""
+    response.delete_cookie(
+        GITHUB_SETUP_COOKIE, path="/", secure=settings.resolved_cookie_secure, samesite="lax"
+    )
+
+
+def verify_github_setup_state(
+    settings: Settings, state: str | None, user_id: str, nonce: str | None
+) -> bool:
+    """True only for a state this deployment signed, for this principal, carrying the
+    nonce this browser's cookie holds, inside the TTL. Never raises: a callback without a
+    valid state is not an error, it is one that may not write (the operator records the
+    installation through the CSRF-protected sync)."""
+    if not state or not nonce:
         return False
     try:
         data = _serializer(settings, _GITHUB_SETUP_SALT).loads(
@@ -594,7 +627,10 @@ def verify_github_setup_state(settings: Settings, state: str | None, user_id: st
         )
     except (SignatureExpired, BadSignature):
         return False
-    return isinstance(data, dict) and data.get("sub") == user_id
+    if not isinstance(data, dict) or data.get("sub") != user_id:
+        return False
+    expected = str(data.get("nonce", ""))
+    return bool(expected) and hmac.compare_digest(expected.encode(), nonce.encode())
 
 
 def _claim_values(claims: Mapping[str, Any], name: str) -> list[str]:
@@ -751,6 +787,7 @@ class AuthlibOidcClient:
 __all__ = [
     "CSRF_COOKIE",
     "CSRF_HEADER",
+    "GITHUB_SETUP_COOKIE",
     "GITHUB_SETUP_STATE_TTL_S",
     "LOCAL_ISSUER",
     "OIDC_COOKIE",
@@ -767,6 +804,7 @@ __all__ = [
     "authenticate_local",
     "bootstrap_admin_if_empty",
     "clear_auth_cookies",
+    "clear_github_setup_cookie",
     "count_active_admins",
     "count_users",
     "create_local_user",
@@ -778,11 +816,13 @@ __all__ = [
     "issue_session",
     "map_role",
     "new_csrf_token",
+    "new_github_setup_nonce",
     "read_oidc_cookie",
     "read_session",
     "require_role",
     "safe_next_path",
     "set_csrf_cookie",
+    "set_github_setup_cookie",
     "set_oidc_cookie",
     "set_session_cookie",
     "upsert_oidc_user",

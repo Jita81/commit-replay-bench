@@ -62,7 +62,7 @@ describe('MeasurePage', () => {
       'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'degraded', detail: '', data: { executor: 'local' } }, { name: 'builders', status: 'degraded', detail: 'configured: none', data: { anthropic: false, claude_code_cli: false } }] },
     })
     renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
-    await waitFor(() => expect(screen.getByTestId('before-you-start')).toHaveTextContent('the documented range'))
+    await waitFor(() => expect(screen.getByTestId('before-you-start')).toHaveTextContent('a planning range, not a measured interval'))
     const box = screen.getByTestId('before-you-start')
     expect(box).toHaveTextContent('$6.00 to $18.00 for 30 attempts')
     await waitFor(() => expect(box).toHaveTextContent('local executor — a development reading, not evidence'))

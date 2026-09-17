@@ -241,6 +241,20 @@ def test_github_refusals_become_errors_with_status_and_redacted_message(
     with pytest.raises(GitHubAppError, match="unreachable") as e2:
         down.installations()
     assert e2.value.status == 0
+    # a 2xx with no body, or one that is not JSON, is GitHub's fault and a 502 — never a
+    # false "no installations" and never a KeyError from an empty installation
+    for body in (b"", b"<html>maintenance</html>"):
+        odd = GitHubApp(
+            settings_for(pem),
+            httpx.Client(
+                transport=httpx.MockTransport(lambda r, b=body: httpx.Response(200, content=b))
+            ),
+        )
+        with pytest.raises(GitHubAppError, match=r"empty response|malformed response") as e3:
+            odd.installations()
+        assert e3.value.status == 502
+        with pytest.raises(GitHubAppError, match=r"empty response|malformed response"):
+            odd.installation(77)
 
 
 def test_suggest_config_maps_github_language_to_ours() -> None:
@@ -289,9 +303,9 @@ def test_unconfigured_app_is_a_state_not_an_error(tmp_path: Path) -> None:
         assert r.status_code == 404 and envelope(r)["code"] == "github_app_not_configured"
 
 
-def _state_for(env: Any, user_id: str) -> str:
+def _state_for(env: Any, user_id: str, nonce: str = "n") -> str:
     """A state signed by the deployment for another principal (a replayed link)."""
-    return issue_github_setup_state(env.settings, user_id)
+    return issue_github_setup_state(env.settings, user_id, nonce)
 
 
 def test_setup_callback_verifies_records_and_lands_on_connect(
@@ -318,15 +332,42 @@ def test_setup_callback_verifies_records_and_lands_on_connect(
             assert r.headers["location"] == "/connect?installation=77&unverified=1"
         with env.factory() as s:
             assert s.get(GitHubInstallation, 77) is None
-        # the install link the operator is given carries the state; GitHub passes it back
-        link = env.get("/github/app").json()["install_url"]
+        # the install link the operator is given carries the state; GitHub passes it back.
+        # The same response binds the link to THIS browser with a nonce cookie (httponly)
+        r = env.get("/github/app")
+        link = r.json()["install_url"]
         assert link.startswith("https://github.com/apps/crb-bench/installations/new?state=")
         state = link.split("state=", 1)[1]
+        assert "crb_github_setup" in r.cookies and "HttpOnly" in r.headers["set-cookie"]
+        # the right state in the wrong browser (no cookie, or another link's cookie) writes nothing
+        cookie = env.client.cookies.get("crb_github_setup")
+        for wrong in (None, "another-links-nonce"):
+            env.client.cookies.delete("crb_github_setup")
+            if wrong:
+                env.client.cookies.set("crb_github_setup", wrong)
+            r = env.client.get(
+                f"{API_PREFIX}/github/setup?installation_id=77&setup_action=install&state={state}",
+                follow_redirects=False,
+            )
+            assert r.headers["location"] == "/connect?installation=77&unverified=1"
+        env.client.cookies.set("crb_github_setup", cookie)
         r = env.client.get(
             f"{API_PREFIX}/github/setup?installation_id=77&setup_action=install&state={state}",
             follow_redirects=False,
         )
         assert r.status_code == 303 and r.headers["location"] == "/connect?installation=77"
+        # …and the write consumed the nonce: the response expires the cookie (a browser
+        # drops it on Max-Age=0; the test jar, which held a hand-set copy, is told the same)
+        assert (
+            'crb_github_setup=""' in r.headers["set-cookie"]
+            and "Max-Age=0" in r.headers["set-cookie"]
+        )
+        env.client.cookies.delete("crb_github_setup")
+        r = env.client.get(
+            f"{API_PREFIX}/github/setup?installation_id=77&setup_action=install&state={state}",
+            follow_redirects=False,
+        )
+        assert r.headers["location"] == "/connect?installation=77&unverified=1"
         with env.factory() as s:
             row = s.get(GitHubInstallation, 77)
             assert (

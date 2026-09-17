@@ -71,6 +71,12 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
     if (installations.some((i) => i.id === installation)) return
     const wanted = initialInstallation ? installations.find((i) => i.id === initialInstallation) : undefined
     setInstallation(wanted ? wanted.id : installations[0]!.id)
+    // a repository picked under the replaced installation must not be sent under the new one
+    setPicked(null)
+    setName('')
+    setLanguage('')
+    setRunner('')
+    setPage(1)
   }, [installation, installations, initialInstallation])
   const landedOnRecord = !initialInstallation || installations.some((i) => i.id === initialInstallation)
   const syncAndSelect = () =>

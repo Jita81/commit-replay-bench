@@ -48,10 +48,13 @@ numbers were never trusted.
   duties at write — the prototype claims it; the product does not enforce it) added to
   docs/reviews/2026-09-17-enterprise-front-end.md §9; F2 and F19 marked landed.
 - **Review findings on the GitHub App connection (CodeRabbit on #31), fixed here**: the
-  setup callback records an installation only with a signed, session-bound `state` the
-  install link carries (`GET /github/app` mints it for operators; without it the callback
-  writes nothing and lands on Connect `unverified=1`, where the CSRF-protected sync records
-  it — CWE-352); `repos.github_full_name` (revision 0006, unique) makes "one GitHub
+  setup callback records an installation only with a signed `state` the install link carries,
+  bound to the operator AND to a nonce the same response sets as an httponly cookie, consumed
+  by the write (`GET /github/app` mints it for operators; without both the callback writes
+  nothing and lands on Connect `unverified=1`, where the CSRF-protected sync records it —
+  CWE-352); revision 0006 refuses to run while two legacy rows link the same GitHub
+  repository (naming them) and creates its unique index only after the backfill; an empty
+  2xx from GitHub is a 502, never a false "no installations"; `repos.github_full_name` (revision 0006, unique) makes "one GitHub
   repository connects once" a database fact and the race a 409; a `PUT /repos/{name}` that
   changes the URL drops the GitHub link, and the worker sends an installation token only to
   the app's own host (CWE-201); delivery credentials exist only while the installation
@@ -103,9 +106,10 @@ numbers were never trusted.
   `6fb61af9…` (cobra, replay, sighted, `claude_code / claude-sonnet-5`, apparatus 2.2) made
   10 attempts, 9 clean, $2.57 builder-reported, against the Measure page's ±20 % planning
   band around the repository's measured mean [measured — the run's ledger rows]; during the
-  walk cobra's `bug.fix × S` cell moved from *calibrate* (n=24, 96 %, 95 % Wilson
-  [80 %, 99 %]) to *deliver* (n=25, 96 %, Wilson lower ≥ 80 %) under `routing.v1`
-  [measured — `/capability-map`, current apparatus 2.2, sighted]; ledger after the walk 602
+  walk cobra's `bug.fix × S` cell moved from *calibrate* (23 of 24 clean, 95.8 %, 95 %
+  Wilson [79.8 %, 99.3 %] — lower below the 80 % bar) to *deliver* (24 of 25 clean,
+  96.0 %, 95 % Wilson [80.5 %, 99.3 %]) under `routing.v1` [measured — `/capability-map`,
+  current apparatus 2.2, sighted, `claude_code / claude-sonnet-5`]; ledger after the walk 602
   rows, chain intact, false-Q1 0, 0 clean rows without a pack [measured — `/ledger/verify`,
   apparatus 2.2; exact counts, no interval].
 

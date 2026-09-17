@@ -227,8 +227,11 @@ class GitHubApp:
             except ValueError:
                 msg = r.text[:300]
             raise GitHubAppError(r.status_code, redact(msg)[:300])
+        # every endpoint this client calls answers with a JSON body: an empty 2xx would
+        # otherwise read as "no installations" / "no repositories" — a false empty — or as a
+        # KeyError in ``Installation.from_api``; it is GitHub's fault and the caller's 502
         if not r.content:
-            return {}
+            raise GitHubAppError(502, f"empty response from GitHub for {method} {path}")
         try:
             return r.json()
         except ValueError as e:

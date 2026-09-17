@@ -10,10 +10,12 @@ What it does: Makes "one GitHub repository connects once" a database fact. Befor
               check was a Python scan of committed JSON, so two concurrent connects of the
               same repository could both pass it (PostgreSQL) and leave two rows minting
               tokens for one repository. Now the second commit fails and the route says 409.
-How:          ``op.add_column`` + a unique index, guarded by an existence check (an
-              ``init_db`` schema from this release already has both); the backfill reads the
-              JSON in Python (dialect-neutral). ``downgrade`` drops the index and column —
-              allowed: the link survives in ``config_json``.
+How:          a duplicate preflight over the JSON links (refused with the names, as 0004
+              refuses duplicate events); ``op.add_column`` guarded by an existence check (an
+              ``init_db`` schema from this release already has it); the backfill reads the
+              JSON in Python (dialect-neutral); the unique index is created LAST, and only
+              if absent. ``downgrade`` drops the index and column — allowed: the link
+              survives in ``config_json``.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0014-github-app-is-the-connection.md
 Works with:   src/crb/store/models.py (``Repo.github_full_name``), src/crb/store/migrate.py
@@ -49,24 +51,49 @@ def _column_exists() -> bool:
     return COLUMN in {c["name"] for c in insp.get_columns(TABLE)}
 
 
-def upgrade() -> None:
-    """Add the column and its unique index unless ``init_db`` already did; backfill."""
-    if not _column_exists():
-        op.add_column(TABLE, sa.Column(COLUMN, sa.String(length=256), nullable=True))
-        op.create_index(INDEX, TABLE, [COLUMN], unique=True)
-    if context.is_offline_mode():
-        return
-    bind = op.get_bind()
-    rows = bind.execute(sa.text("SELECT name, config_json FROM repos")).all()
-    for name, raw in rows:
+def _linked_names(bind: sa.engine.Connection) -> dict[str, list[str]]:
+    """``owner/name`` (lower-cased) → the repository names whose JSON link carries it."""
+    out: dict[str, list[str]] = {}
+    for name, raw in bind.execute(sa.text("SELECT name, config_json FROM repos")).all():
         cfg = raw if isinstance(raw, dict) else (json.loads(raw) if raw else {})
         link = (cfg or {}).get("github") or {}
         full = str(link.get("full_name", "")).strip().lower()
         if full:
-            bind.execute(
-                sa.text("UPDATE repos SET github_full_name = :full WHERE name = :name"),
-                {"full": full, "name": name},
+            out.setdefault(full, []).append(str(name))
+    return out
+
+
+def upgrade() -> None:
+    """Preflight the legacy JSON links for duplicates (refuse, naming them, as 0004 does for
+    duplicate events — an operator decides which row keeps the link); then add the column,
+    backfill it, and only then create the unique index, so the index is never asked to
+    judge a row the backfill has not reached."""
+    linked: dict[str, list[str]] = {}
+    if not context.is_offline_mode():
+        linked = _linked_names(op.get_bind())
+        dupes = {full: names for full, names in linked.items() if len(names) > 1}
+        if dupes:
+            listing = "; ".join(
+                f"{full} ← {', '.join(sorted(n))}" for full, n in sorted(dupes.items())
             )
+            raise RuntimeError(
+                "refusing to upgrade 0006: the same GitHub repository is linked from more than "
+                f"one row ({listing}) — unlink all but one (PUT /repos/{{name}} with a new url "
+                "drops the link, or edit config_json.github) and re-run the migration"
+            )
+    if not _column_exists():
+        op.add_column(TABLE, sa.Column(COLUMN, sa.String(length=256), nullable=True))
+    if context.is_offline_mode():
+        return
+    bind = op.get_bind()
+    for full, names in linked.items():
+        bind.execute(
+            sa.text("UPDATE repos SET github_full_name = :full WHERE name = :name"),
+            {"full": full, "name": names[0]},
+        )
+    insp = sa.inspect(bind)
+    if INDEX not in {ix["name"] for ix in insp.get_indexes(TABLE)}:
+        op.create_index(INDEX, TABLE, [COLUMN], unique=True)
 
 
 def downgrade() -> None:

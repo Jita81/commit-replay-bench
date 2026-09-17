@@ -41,7 +41,8 @@ const LIMITS: Array<{ n: number; note: string }> = [
   { n: 30, note: 'the first useful picture' },
   { n: 60, note: 'tighter intervals, longer wait' },
 ]
-//: the documented per-attempt range when the repository has no measured mean yet
+//: the per-attempt planning band docs/ONBOARDING-A-REPO.md quotes for Claude Sonnet (not a measured
+//: interval for THIS repository) — used only while the repository has no measured mean of its own
 const RANGE_LOW = 0.2
 const RANGE_HIGH = 0.6
 
@@ -185,7 +186,7 @@ export function MeasurePage() {
         <h2 className="mb-4 text-[24px] font-bold leading-[1.3]">Before you start</h2>
         <SummaryList
           rows={[
-            { key: 'Estimated cost', value: `${usd(lo)} to ${usd(hi)} for ${runLimit} attempts${measured ? `, at about ${usd(measured.mean)} each (this repository's measured mean over n=${measured.n} attempts at apparatus ${measured.apparatus || '—'}; the range is a ±20 % planning band, not a measured interval)` : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each (the documented range; this repository has no measured mean yet)`}` },
+            { key: 'Estimated cost', value: `${usd(lo)} to ${usd(hi)} for ${runLimit} attempts${measured ? `, at about ${usd(measured.mean)} each (this repository's measured mean over n=${measured.n} attempts at apparatus ${measured.apparatus || '—'}; the range is a ±20 % planning band, not a measured interval)` : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each — a planning range, not a measured interval: this repository has no measured mean yet (n = 0 on the current apparatus); the range is the per-attempt band docs/ONBOARDING-A-REPO.md quotes for Claude Sonnet across earlier repositories, and carries no apparatus of its own`}` },
             { key: 'Builder', value: choice ? choice.label : 'No builder is configured on this deployment — an admin adds a provider key (Settings), or use the full run form', changeTo: '/runs', changeLabel: 'Every knob' },
             { key: 'Budget cap', value: 'Per attempt — the builder’s ladder caps turns, tool calls and wall clock; a run can be cancelled at any point' },
             { key: 'Retention', value: retention },

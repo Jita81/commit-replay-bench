@@ -86,11 +86,14 @@ export function useDecisions(): DecisionsState {
         ready = false
         return
       }
-      const tasksReady = t?.data !== undefined || (t?.isError && notFound(t.error))
-      if (!m?.data || !s?.data || !tasksReady) {
-        if (!((m?.isError && notFound(m.error)) || (s?.isError && notFound(s.error)))) ready = false
+      // each source is settled when it has data or its permitted 404; the repo counts only
+      // when ALL THREE are settled — a settled 404 on one must not hide a pending other
+      const settled = (q: { data?: unknown; isError: boolean; error: unknown } | undefined) => q?.data !== undefined || (q?.isError === true && notFound(q.error))
+      if (!settled(m) || !settled(s) || !settled(t)) {
+        ready = false
         return
       }
+      if (!m?.data || !s?.data) return // a permitted 404: never measured / no sign-offs — no decisions here
       byRepo[repo] = decisionsFor({ repo, cells: m.data.cells, signoffs: s.data.items, tasks: t?.data ?? [] })
       for (const so of s.data.items) if (so.stale && !so.revoked) stale.push({ repo, signoff: so })
     })
