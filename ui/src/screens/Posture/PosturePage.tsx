@@ -61,7 +61,7 @@ export function PosturePage() {
       name: 'Execution and egress',
       rows: [
         { key: 'Test executor', value: s ? `${s.sandbox_mode}${s.sandbox_mode === 'docker' ? ' (sealed)' : ' — host posture: a development reading, not evidence'}` : `${probe('sandbox')?.status ?? '…'} (sandbox probe)` },
-        { key: 'Builder posture', value: s ? adminOnly((s as unknown as { builder?: { executor?: string } }).builder?.executor ?? s.sandbox_mode) : adminOnly(undefined) },
+        { key: 'Builder posture', value: s ? adminOnly(s.raw?.builder?.executor ? `${s.raw.builder.executor}${s.raw.builder.egress_network ? ` · egress ${s.raw.builder.egress_network}` : ''}` : 'not reported by this deployment') : adminOnly(undefined) },
         { key: 'Toolchains', value: probe('toolchains')?.detail ?? '…' },
         { key: 'Secrets', value: 'Read from the environment or mounted files; never persisted, never returned by the API' },
       ],

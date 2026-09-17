@@ -141,6 +141,8 @@ const SIGNED: SignoffWithPolicy = {
   revoked_by: null,
   revoked_at: null,
   active: true,
+  stale: false,
+  apparatus_current: '2.1',
   current_false_q1: 0,
   prev_hash: '0'.repeat(64),
   row_hash: 'a'.repeat(64),

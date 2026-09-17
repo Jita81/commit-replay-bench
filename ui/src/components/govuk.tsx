@@ -16,13 +16,18 @@
  *               attention, a warning for what a signature does not mean, a confirmation
  *               with a reference after an irreversible act. All tokens from ui/src/index.css
  *               — nothing hard-coded, so the dark theme keeps working.
- * How:          Plain React over Tailwind utilities bound to the theme tokens; status tags
- *               take a tone from ui/src/lib/verdict.ts plus the NHS solid fills.
+ * How:          Plain React over Tailwind utilities bound to the theme tokens; `Tag` maps its
+ *               own `TagTone` (green / blue / grey / amber / red / pale) to the NHS solid
+ *               fills through the local `TAG` table — separate from the `Pill` tones in
+ *               ui/src/lib/verdict.ts, which are the soft-fill verdict chips.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none (DL-042 adopted the NHS design system for the journey)
- * Works with:   ui/src/screens/Home/HomePage.tsx, ui/src/screens/Connect/*, ui/src/screens/
- *               Results/ResultsPage.tsx, ui/src/screens/Decisions/DecisionsPage.tsx,
- *               ui/src/screens/Signoff/SignoffPage.tsx, ui/src/components/Layout.tsx
+ * Works with:   ui/src/screens/Home/HomePage.tsx (TaskList, NotificationBanner, InsetText, StartButton),
+ *               ui/src/screens/Connect/MeasurePage.tsx (SummaryList, WarningButton, BackLink),
+ *               ui/src/screens/Results/ResultsPage.tsx (InsetText, WarningCallout; Tag through MapTable),
+ *               ui/src/screens/Decisions/DecisionsPage.tsx (Tag, StartButton, SecondaryButton),
+ *               ui/src/screens/Signoff/SignoffPage.tsx (WarningCallout, ConfirmationPanel, SummaryList, WarningButton),
+ *               ui/src/screens/Posture/PosturePage.tsx (SummaryList), ui/src/components/Layout.tsx (the shell these sit in)
  * Tested by:    ui/src/components/govuk.test.tsx
  * Touch when:   a pattern is added (name it after the GOV.UK/NHS component it is).
  */

@@ -24,6 +24,7 @@ and be recorded here.
 | [0012](0012-builder-in-a-sealed-container.md) | The builder runs in a sealed container: an exported checkout that cannot contain the gold commit, a hardened container, one allowlisting egress sidecar (`CRB_BUILDER__EXECUTOR=docker`; amends ADR-0005's scope) | Accepted | 2026-09-14 |
 | [0013](0013-external-review-is-advisory-and-recorded.md) | An external reviewer's verdict (CodeRabbit on PRs; later a factory `Reviewer`) is recorded and advisory to humans — never an input to a verdict, a route or a sign-off | Proposed | 2026-09-15 |
 | [0014](0014-github-app-is-the-connection.md) | The GitHub App is the connection: org-level install on selected repositories, installation tokens minted per use and never stored, write per installation; personal access tokens are not | Accepted | 2026-09-17 |
+| [0015](0015-signoffs-expire-with-the-apparatus.md) | A sign-off expires with the apparatus: `covers_apparatus` at read, served `stale` / `active: false`, never edited; no apparatus bump (a read rule, not a moved instrument) | Accepted | 2026-09-17 |
 
 ## Format
 

@@ -75,10 +75,15 @@ numbers were never trusted.
   facts and the licensing sign-off, human PR review comments as evidence, the repository's
   own security scanner as a review probe, review finding → follow-up item, a
   recurrence-after-prevention alarm, verifier account kind on attestations.
-- **Persona walkthrough on the live stack** (docs/reviews/2026-09-17-persona-walkthrough.md):
-  every screen of the journey was driven as a viewer, an operator, an approver, an admin, a
-  developer, a platform engineer and an MCP consumer, with axe and a phone viewport. What it
-  found and fixed: the Measure page posted no builder (422) — it now derives the builder from
+- **Persona walkthrough on the live stack** (docs/reviews/2026-09-17-persona-walkthrough.md).
+  Scope, stated separately: the journey screens were driven in a real browser as a viewer,
+  an operator, an approver and an admin, each along their own path (not every screen by
+  every persona); the developer and platform-engineer paths were the Factory, a run's
+  evidence pack and the not-configured GitHub dialog; the MCP consumer was driven over stdio
+  as the viewer (38 tools, reads answered, `crb_start_run` refused 403), not through the
+  browser; axe WCAG 2.1 AA covered nine journey screens for three of the four personas; the
+  375 px check covered Home, Results, Sign-off, Decisions and Deployment. What it found and
+  fixed: the Measure page posted no builder (422) — it now derives the builder from
   the health probe; the connection walk said *Done* while a replay was running — running
   outranks done; the sign-off form asked for an affirmation without showing the diff — the
   retained patch is now on the form (`ReadTheDiff`); sign-offs named the approver by user id
@@ -92,8 +97,17 @@ numbers were never trusted.
   column was blank (API `subject` vs UI `username`) — `/users` now serves `username`; the
   Factory chain drew a never-built item as *failed* and an unassessed one as *done* — both
   read honestly; two WCAG 2.1 AA findings (an undistinguished link in the Important banner,
-  the red pill ink at 4.4:1) — links in prose underline, the red soft fill is lightened to
-  4.7:1; the journey screens joined the walkthrough's axe sweep.
+  the red pill ink at 4.4:1 — WCAG contrast ratios, not sampled rates) — links in prose
+  underline, the red soft fill is lightened to 4.7:1; the journey screens joined the
+  walkthrough's axe sweep. Figures from the stack, tagged: the operator's run
+  `6fb61af9…` (cobra, replay, sighted, `claude_code / claude-sonnet-5`, apparatus 2.2) made
+  10 attempts, 9 clean, $2.57 builder-reported, against the Measure page's ±20 % planning
+  band around the repository's measured mean [measured — the run's ledger rows]; during the
+  walk cobra's `bug.fix × S` cell moved from *calibrate* (n=24, 96 %, 95 % Wilson
+  [80 %, 99 %]) to *deliver* (n=25, 96 %, Wilson lower ≥ 80 %) under `routing.v1`
+  [measured — `/capability-map`, current apparatus 2.2, sighted]; ledger after the walk 602
+  rows, chain intact, false-Q1 0, 0 clean rows without a pack [measured — `/ledger/verify`,
+  apparatus 2.2; exact counts, no interval].
 
 ### 2026-09-17 — the GitHub App is the connection (ADR-0014, DL-041)
 

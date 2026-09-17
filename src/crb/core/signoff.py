@@ -105,7 +105,8 @@ How:          ``JsonlSignoffLedger.append`` → ``check_signable`` (first failin
               ``active_signoffs`` (latest per scope, revoked dropped) → ``apply_signoffs``
               (``key_matches`` on the cell pattern) → ``CapabilityCell.with_tier``.
 Layer:        core — docs/ARCHITECTURE.md#54-a-sign-off-refused-with-409-p4
-ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0003-one-routing-rule.md
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0003-one-routing-rule.md,
+              docs/adr/0015-signoffs-expire-with-the-apparatus.md
 Works with:   src/crb/core/capability.py (the cell and the tiers it may reach),
               src/crb/core/routing.py (the decision and the controls verdict a sign-off is
               judged on), src/crb/server/routes/signoffs.py (the write boundary that holds
@@ -1018,7 +1019,7 @@ def apply_signoffs(
     an active attestation covers it for ``repo`` (``"*"`` applies only records
     that are themselves repo-agnostic — an unscoped read never borrows another
     repo's attestation) **on the apparatus the cell is read at** — a sign-off made
-    under an earlier apparatus is stale and lifts nothing (2026-09-17; evidence
+    under an earlier apparatus is stale and lifts nothing (ADR-0015, 2026-09-17; evidence
     expires when the apparatus changes). The highest matching earned tier wins.
     Everything else passes through unchanged.
     """

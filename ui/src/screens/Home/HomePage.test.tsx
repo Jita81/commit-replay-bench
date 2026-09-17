@@ -4,10 +4,13 @@
  * Navigation
  * ----------
  * What it is:   Tests for the Get-started task list.
- * What it does: Pins that a deployment with the app configured, a probed + mined repository
- *               with oracle and controls done but nothing measured reads "4 of 7"
- *               (connect, choose, shape, prove complete; measure incomplete; map cannot
- *               start; approver — an admin who can list users sees one exists), that the
+ * What it does: Pins that a deployment with the app configured and installed, a probed +
+ *               mined repository with oracle and controls done but nothing measured reads
+ *               "5 of 7" (connect, choose, shape, prove and approver complete — an admin who
+ *               can list users sees one exists; measure incomplete; map cannot start); that
+ *               a viewer reads the same list as a progress report, a run in flight is "In
+ *               progress" and the map opens from the first row; that an App with no
+ *               installation is "Incomplete" and no App with a URL repository "Optional"; that the
  *               degraded sandbox is an "Important" banner, and that the cost statement and
  *               "Why two people" are present.
  * How:          `mockApi` + `renderApp`.

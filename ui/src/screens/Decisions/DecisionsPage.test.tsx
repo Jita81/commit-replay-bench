@@ -61,7 +61,7 @@ describe('DecisionsPage', () => {
       'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
     })
     renderApp(<DecisionsPage />, { route: '/decisions' })
-    await waitFor(() => expect(screen.getAllByText('1 waiting').length).toBeGreaterThan(0)) // the pill and the card eyebrow
+    await waitFor(() => expect(screen.getAllByText('1 waiting')).toHaveLength(2)) // the pill AND the card eyebrow
     expect(screen.getByRole('link', { name: 'Read' })).toBeInTheDocument()
     expect(screen.getByText('approver acts')).toBeInTheDocument()
   })

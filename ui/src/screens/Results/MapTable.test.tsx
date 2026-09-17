@@ -13,7 +13,9 @@
  * How:          Pure renders over hand-built cells and sign-offs.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/src/screens/Results/MapTable.tsx
+ * Works with:   ui/src/screens/Results/MapTable.tsx (renders the behaviour tested here),
+ *               ui/src/api/types.ts (`signoffScopeMatches`, the scope rule the sign-off state follows),
+ *               ui/src/screens/Results/ResultsPage.tsx (mounts the table and the licence sentence)
  * Tested by:    ui/src/screens/Results/MapTable.test.tsx
  * Touch when:   a cell line or the sentence's qualifiers change.
  */
@@ -28,7 +30,7 @@ function cell(over: Partial<CapabilityCell>): CapabilityCell {
   return { capability_class: 'bug.fix', size: 'XS', n: 31, n_tasks: 12, clean: 23, point: 0.74, ci_low: 0.56, ci_high: 0.87, false_q1: 0, route: 'deliver', reason: 'ok', reason_code: 'deliver', verification_tier: 'automated-pass', apparatus_versions: ['2.2'], belt_sets: ['v5'], cost_usd_mean: 0.34, latency_s_mean: 252, ...over } as CapabilityCell
 }
 function signoff(over: Partial<Signoff>): Signoff {
-  return { id: 's1', repo: 'cobra', cell: { capability_class: 'bug.fix', size: 'XS' }, approver: 'a.okafor', created: '2026-09-15T10:00:00Z', revoked: false, active: true, stale: false, evidence: { n: 31, point: 0.74, ci_low: 0.56, false_q1: 0, apparatus_versions: ['2.2'] }, ...over } as Signoff
+  return { id: 's1', repo: 'cobra', cell: { capability_class: 'bug.fix', size: 'XS' }, approver: 'a.okafor', created: '2026-09-15T10:00:00Z', revoked: false, active: true, stale: false, apparatus_current: '2.2', evidence: { n: 31, point: 0.74, ci_low: 0.56, ci_high: 0.87, false_q1: 0, apparatus_versions: ['2.2'] }, ...over } as Signoff
 }
 const MAP = (cells: CapabilityCell[]): CapabilityMap => ({ repo: 'cobra', by: ['capability_class', 'size'], classes: ['bug.fix', 'refactor'], sizes: ['XS', 'S', 'M', 'L', 'XL'], languages: [], models: [], cells, summary: { trusted_autonomy_coverage: 0, total_cells: 10, measured_cells: cells.length, deliver_cells: 1, n_total: 31, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' } })
 
@@ -42,7 +44,7 @@ describe('MapTable', () => {
       cell({ capability_class: 'refactor', size: 'XS', n: 14, n_tasks: 7, clean: 10, point: 0.71, ci_low: 0.45, ci_high: 0.88 }),
       cell({ capability_class: 'refactor', size: 'S', n: 22, n_tasks: 10, clean: 15, point: 0.68, ci_low: 0.47, ci_high: 0.84, route: 'human', reason_code: 'ci_low_below_bar' }),
     ]
-    const signoffs = [signoff({}), signoff({ id: 's2', cell: { capability_class: 'refactor', size: 'S' }, active: false, stale: true, apparatus_current: '2.2', evidence: { n: 22, point: 0.68, ci_low: 0.47, false_q1: 0, apparatus_versions: ['2.1'] } })]
+    const signoffs = [signoff({}), signoff({ id: 's2', cell: { capability_class: 'refactor', size: 'S' }, active: false, stale: true, apparatus_current: '2.2', evidence: { n: 22, point: 0.68, ci_low: 0.47, ci_high: 0.84, false_q1: 0, apparatus_versions: ['2.1'] } })]
     render(
       <MemoryRouter>
         <MapTable map={MAP(cells)} signoffs={signoffs} repo="cobra" />
@@ -69,11 +71,22 @@ describe('MapTable', () => {
     expect(signStateOf(cells[5]!, signoffs).state).toBe('stale')
   })
 
-  it('the licence sentence carries every qualifier and is null with no signed cell', () => {
+  it('the licence sentence quotes the STAMPED snapshot with every qualifier, says when the cell has moved on, and is null with no signed cell', () => {
     const map = { ...MAP([cell({})]), controls: { measured: true, passed: true, complete: true, constructible: 31, total: 56, share: 0.55, escapes: 0, run_id: 'r', created: 'x', state: 'passed' as const } }
     const s = licenseSentence('cobra', map, [signoff({})])
-    expect(s).toBe('On cobra at apparatus 2.2, under belt set v5 and a passed controls gate, 23 of 31 sighted attempts at bug.fix × XS (12 tasks) were graded clean: 74% (95% Wilson 56%–87%), signed by a.okafor on 15 September 2026. It says nothing about any other repository, class or size.')
+    expect(s).toBe('On cobra at apparatus 2.2, under belt set v5 and a passed controls gate, 31 sighted attempts at bug.fix × XS were graded clean at 74% (95% Wilson 56%–87%) with false-Q1 0, as signed by a.okafor on 15 September 2026. It says nothing about any other repository, class or size.')
+    // rows added since signing: the sentence still quotes what was signed, and says the cell moved
+    const grown = { ...map, cells: [cell({ n: 40, clean: 32, point: 0.8, ci_low: 0.65, ci_high: 0.9 })] }
+    expect(licenseSentence('cobra', grown, [signoff({})])).toContain('31 sighted attempts at bug.fix × XS were graded clean at 74%')
+    expect(licenseSentence('cobra', grown, [signoff({})])).toContain('The cell has since grown to n=40 (80%); that is not what was signed.')
     expect(licenseSentence('cobra', MAP([cell({})]), [])).toBeNull()
     expect(licenseSentence('cobra', MAP([cell({})]), [signoff({ stale: true, active: false })])).toBeNull()
+  })
+
+  it('sign-off scope follows the server: a size wildcard covers the cell, a narrower model does not', () => {
+    const c = cell({})
+    expect(signStateOf(c, [signoff({ cell: { capability_class: 'bug.fix', size: '*' } })]).state).toBe('signed')
+    expect(signStateOf(c, [signoff({ cell: { capability_class: 'bug.fix', size: 'XS', model: 'claude-sonnet-5' } })]).state).toBe('due')
+    expect(signStateOf(c, [signoff({ cell: { capability_class: 'feature.add', size: '*' } })]).state).toBe('due')
   })
 })

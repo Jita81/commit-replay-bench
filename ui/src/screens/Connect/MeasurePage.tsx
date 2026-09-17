@@ -101,13 +101,17 @@ export function MeasurePage() {
   const [worktrees, setWorktrees] = useState(false)
   const [transcripts, setTranscripts] = useState(false)
 
-  // the repository's own measured mean per attempt, when it has one
-  const measuredMean = useMemo(() => {
+  // the repository's own measured mean per attempt, when it has one: a row-weighted mean
+  // over the map's measured cells (the map is served on the current apparatus, so the
+  // versions are the same set on every cell), carrying the n it rests on and that apparatus
+  const measured = useMemo(() => {
     const cells = (map.data?.cells ?? []).filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0 && c.cost_usd_mean > 0)
     if (cells.length === 0) return null
     const n = cells.reduce((a, c) => a + c.n, 0)
-    return cells.reduce((a, c) => a + c.cost_usd_mean * c.n, 0) / n
+    const apparatus = Array.from(new Set(cells.flatMap((c) => c.apparatus_versions))).join(', ')
+    return { mean: cells.reduce((a, c) => a + c.cost_usd_mean * c.n, 0) / n, n, apparatus }
   }, [map.data])
+  const measuredMean = measured?.mean ?? null
   const gold = repo.data?.task_counts.gold_clean ?? 0
   // the run makes one attempt per gold-clean task: the estimate, the button and the
   // request all use the SAME capped number, never the radio's face value
@@ -159,6 +163,11 @@ export function MeasurePage() {
             {name} has {gold} gold-clean tasks, so this run makes {gold} attempts (one per task).
           </p>
         )}
+        {repo.data && gold === 0 && (
+          <p className="m-0 mt-2 text-[16px] font-bold text-status-red" data-testid="no-gold">
+            {name} has no gold-clean task to replay: a run would make no attempt. Mine the repository and check its gold status first (task 4).
+          </p>
+        )}
       </div>
       <h2 className="mb-2 text-[24px] font-bold leading-[1.3]">Retention</h2>
       <Lede className="mb-2">This deployment retains no raw artefacts by default. Anything you keep here is stored until you delete it and is in scope for your own retention policy.</Lede>
@@ -176,7 +185,7 @@ export function MeasurePage() {
         <h2 className="mb-4 text-[24px] font-bold leading-[1.3]">Before you start</h2>
         <SummaryList
           rows={[
-            { key: 'Estimated cost', value: `${usd(lo)} to ${usd(hi)} for ${runLimit} attempts${measuredMean !== null ? `, at about ${usd(measuredMean)} each (this repository's measured mean)` : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each (the documented range; this repository has no measured mean yet)`}` },
+            { key: 'Estimated cost', value: `${usd(lo)} to ${usd(hi)} for ${runLimit} attempts${measured ? `, at about ${usd(measured.mean)} each (this repository's measured mean over n=${measured.n} attempts at apparatus ${measured.apparatus || '—'}; the range is a ±20 % planning band, not a measured interval)` : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each (the documented range; this repository has no measured mean yet)`}` },
             { key: 'Builder', value: choice ? choice.label : 'No builder is configured on this deployment — an admin adds a provider key (Settings), or use the full run form', changeTo: '/runs', changeLabel: 'Every knob' },
             { key: 'Budget cap', value: 'Per attempt — the builder’s ladder caps turns, tool calls and wall clock; a run can be cancelled at any point' },
             { key: 'Retention', value: retention },
@@ -185,7 +194,7 @@ export function MeasurePage() {
         />
         <p className="mb-4 mt-6 text-[19px] leading-[1.47]">You can cancel the run at any point. Attempts already made are still charged.</p>
         {can('operator') ? (
-          <WarningButton onClick={start} disabled={create.isPending || !repo.data || !choice}>
+          <WarningButton onClick={start} disabled={create.isPending || !repo.data || !choice || gold === 0}>
             Start the run and spend up to {usd(hi)}
           </WarningButton>
         ) : (

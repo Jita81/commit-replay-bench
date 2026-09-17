@@ -29,14 +29,16 @@
  */
 
 import { Link } from 'react-router'
-import { approverName, type CapabilityCell, type CapabilityMap, NOT_YET_MEASURED, type Signoff } from '../../api/types'
+import { approverName, type CapabilityCell, type CapabilityMap, NOT_YET_MEASURED, type Signoff, signoffScopeMatches } from '../../api/types'
 import type { ControlsVerdict } from '../Capability/contract'
 import { Tag, type TagTone } from '../../components/govuk'
 
 export type SignState = 'signed' | 'due' | 'stale' | 'none'
 
 export function signStateOf(cell: CapabilityCell, signoffs: Signoff[]): { state: SignState; signoff?: Signoff } {
-  const mine = signoffs.filter((s) => !s.revoked && s.cell.capability_class === cell.capability_class && s.cell.size === cell.size)
+  // the server's scope rule (`key_matches`): a `*` on the sign-off covers any value; a
+  // sign-off narrower than this aggregate cell on some dimension does not cover it
+  const mine = signoffs.filter((s) => !s.revoked && signoffScopeMatches(s.cell, cell as unknown as Record<string, string | undefined>))
   const active = mine.find((s) => s.active !== false && !s.stale)
   if (active) return { state: 'signed', signoff: active }
   const stale = mine.find((s) => s.stale)
@@ -142,8 +144,11 @@ export function MapTable({ map, signoffs, repo }: { map: CapabilityMap; signoffs
 /**
  * "What this licenses you to say": the one sentence a signed cell permits, with every
  * qualifier EVIDENCE-AND-CLAIMS §6 requires — repo, apparatus, belt set, the controls
- * gate, n and tasks, the class × size, the rate with its interval, who signed and when,
- * and what it says nothing about. Null when no cell is signed.
+ * gate, n, the class × size, the rate with its interval, who signed and when, and what it
+ * says nothing about. Every figure comes from the sign-off's STAMPED snapshot (what the
+ * approver attested, hash-covered), never from the cell as it reads now: rows added since
+ * signing change the cell's statistics without changing what was signed. When the cell has
+ * moved on, the sentence says so with the current n. Null when no cell is signed.
  */
 export function licenseSentence(repo: string, map: CapabilityMap & { controls?: ControlsVerdict }, signoffs: Signoff[]): string | null {
   const signed = map.cells
@@ -153,8 +158,10 @@ export function licenseSentence(repo: string, map: CapabilityMap & { controls?: 
   if (!signed || !signed.s.signoff) return null
   const c = signed.c
   const so = signed.s.signoff
-  const apparatus = c.apparatus_versions.join(', ') || '—'
+  const ev = so.evidence
+  const apparatus = ev.apparatus_versions.join(', ') || '—'
   const belts = c.belt_sets?.join(', ') || '—'
   const gate = map.controls?.state ? `a ${map.controls.state} controls gate` : 'the controls gate'
-  return `On ${repo} at apparatus ${apparatus}, under belt set ${belts} and ${gate}, ${c.clean} of ${c.n} sighted attempts at ${c.capability_class} × ${c.size}${c.n_tasks ? ` (${c.n_tasks} tasks)` : ''} were graded clean: ${pct(c.point)} (95% Wilson ${pct(c.ci_low)}–${pct(c.ci_high)}), signed by ${approverName(so)} on ${new Date(so.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}. It says nothing about any other repository, class or size.`
+  const moved = c.n !== ev.n ? ` The cell has since grown to n=${c.n} (${pct(c.point)}); that is not what was signed.` : ''
+  return `On ${repo} at apparatus ${apparatus}, under belt set ${belts} and ${gate}, ${ev.n} sighted attempts at ${c.capability_class} × ${c.size} were graded clean at ${pct(ev.point)} (95% Wilson ${pct(ev.ci_low)}–${pct(ev.ci_high)}) with false-Q1 ${ev.false_q1}, as signed by ${approverName(so)} on ${new Date(so.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.${moved} It says nothing about any other repository, class or size.`
 }

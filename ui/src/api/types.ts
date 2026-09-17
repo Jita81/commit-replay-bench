@@ -101,7 +101,7 @@ export interface Version {
   apparatus: string
   policy: string
   /** An organisation (OpenID Connect) sign-in is configured; unauthenticated, names nothing. */
-  oidc_enabled?: boolean
+  oidc_enabled: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -877,21 +877,38 @@ export interface Signoff {
   approver_name?: string
   created: string
   revoked: boolean
-  /** Made on an earlier apparatus than the one the deployment reads at now: kept, verifying, lifting nothing until re-signed or revoked. */
   /** Live: not revoked, not superseded, the cell still false-Q1-free and the apparatus unchanged. */
-  active?: boolean
-  stale?: boolean
-  apparatus_current?: string
+  active: boolean
+  /** Made on an earlier apparatus than the one the deployment reads at now (ADR-0015): kept, verifying, lifting nothing until re-signed or revoked. */
+  stale: boolean
+  /** The deployment's current apparatus, for comparison with `evidence.apparatus_versions`. */
+  apparatus_current: string
   revoked_by: string | null
   revoked_by_name?: string | null
   revoked_at: string | null
+  /** The snapshot stamped at signing (hash-covered): what the approver saw, not the cell now. */
   evidence: {
     n: number
     point: number
     ci_low: number
+    ci_high: number
     false_q1: number
     apparatus_versions: string[]
   }
+}
+
+/**
+ * Does a sign-off's scope cover a cell, the way the server's `key_matches` reads it: a `*`
+ * on the sign-off matches anything; a concrete value must equal the cell's value, and a cell
+ * that aggregates a dimension (`*`, or the key absent) is NOT covered by a sign-off narrower
+ * on that dimension.
+ */
+export function signoffScopeMatches(scope: Record<string, string>, cell: Record<string, string | undefined>): boolean {
+  return Object.entries(scope).every(([key, want]) => {
+    if (want === '*' || want === undefined || want === '') return true
+    const have = cell[key] ?? '*'
+    return have === want
+  })
 }
 
 /** Who signed, as a person reads it: the resolved name, else the id the ledger holds. */
@@ -1107,12 +1124,19 @@ export interface BuilderConfigured {
 /** `GET /settings` — non-secret settings only. */
 export interface Settings {
   builders: BuilderConfigured[]
+  /** The TEST executor (`raw.sandbox.executor`): `docker` (sealed) or `local`. */
   sandbox_mode: string
   retention: Record<string, unknown>
   oidc_enabled: boolean
   ledger_backend: string
   apparatus_version: string
   policy_version: string
+  /** The full redacted settings; only the parts a screen reads are typed here. */
+  raw?: {
+    /** The BUILDER posture (`BuilderSettings.redacted()`): where the model-driven builder runs. */
+    builder?: { executor: string; image?: string; egress_network?: string; allow_hosts?: string[] }
+    sandbox?: { executor: string; image?: string }
+  }
 }
 
 // ---------------------------------------------------------------------------

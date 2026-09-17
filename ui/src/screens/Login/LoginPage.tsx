@@ -94,6 +94,12 @@ export function LoginPage() {
             </Button>
           </form>
 
+          {version.isPending && <p className="mt-5 text-center text-[11px] text-on-surface-muted">Checking for an organisation sign-in…</p>}
+          {version.isError && (
+            <div className="mt-5">
+              <ErrorState compact error={version.error} onRetry={() => void version.refetch()} title="Could not check for an organisation sign-in" />
+            </div>
+          )}
           {oidc && (
             <>
               <div className="my-5 flex items-center gap-3 text-[11px] text-on-surface-muted">

@@ -1208,12 +1208,13 @@ def create_signoff(
 )
 def revoke_signoff(
     signoff_id: str,
+    body: SignoffRevokeRequest,
     approver: ApproverDep,
     db: DbDep,
-    body: SignoffRevokeRequest | None = None,
 ) -> SignoffWithPolicyOut:
     """Append a revocation row for the attestation's scope; the original row is untouched
-    and is returned with ``revoked: true``."""
+    and is returned with ``revoked: true``. The body's ``note`` — the reason — is required
+    (422 without one), the same rule the UI applies."""
     row = db.execute(
         select(Signoff).where(Signoff.signoff_id == signoff_id, Signoff.revoke.is_(False))
     ).scalar_one_or_none()
@@ -1222,7 +1223,7 @@ def revoke_signoff(
     all_rows = load_signoff_rows(db, row.repo)
     if _revocation_for(row, all_rows) is not None:
         raise ApiError(409, "already_revoked", f"attestation {signoff_id!r} is already revoked")
-    note = body.note if body is not None else ""
+    note = body.note
     _lock(db)
     _chain_and_add(
         db,
@@ -1232,7 +1233,7 @@ def revoke_signoff(
             cell_json=scope_of(row).to_dict(),
             tier=row.tier,
             verifier=approver.id,
-            note=redact(note) or f"revokes {signoff_id}",
+            note=redact(note),
             revoke=True,
             evidence_rows=0,
             created=utc_now_iso(),

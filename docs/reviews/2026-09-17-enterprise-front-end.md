@@ -13,7 +13,7 @@ What it does: Grounds the front end's purpose (DL-040) in comparable products (G
               DX, Renovate, Backstage), UK service-standard patterns (GOV.UK / NHS / MoJ task
               list, step-by-step, check-your-answers, notification banner, tag, timeline) and
               DORA 2025 / cost-per-effective-PR framing; ends in a 21-item ordered backlog
-              (F1–F34) with sizes and personas.
+              (F1–F35) with sizes and personas.
 How:          Web research with cited sources (§10 separates verified from inferred), read
               against the repository's code and documents. Nothing in it is a measurement.
 Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
@@ -356,6 +356,7 @@ Sizes: S ≤ 2 days, M ≤ 2 weeks, L > 2 weeks (one engineer). Order is by valu
 | F19 | **Deployment posture page** (printable) — **landed in PR #32** (`/posture`) | S | P6 | Service-standard mapping | Static + `/version`, `/health`. |
 | F20 | **Flow view** (backlog → merge; cost per human-verified change) | M | P8, P1 | DORA 2025; LinearB cost per effective PR | **Blocked on B-9** (merge outcome via PR webhook; human minutes via review-time capture). Until then show the refusal text. |
 | F21 | GitLab / Azure DevOps connectors; GHES/ghe.com base URLs; enterprise-level install | L | P2 | GitLab scopes; ADO WIF; GitHub enterprise install | Later. |
+| F22 | *(not used — a numbering gap left when F23–F26 were added from the persona walkthrough; kept so later references stay stable)* | — | — | — | — |
 | F23 | **User lifecycle** — deactivate a user, reset a local password, `active` / `last_login` in the Users table (the model has `active`; no route sets it, so a leaver keeps a working login) | S | P6 (admin / AppSec) | NHS IG joiners-movers-leavers | From docs/reviews/2026-09-17-persona-walkthrough.md. |
 | F24 | **Backlog freeze as a form** (id, title, class, size, facts) with the JSON as an "advanced" tab — today a raw textarea whose prefilled example is content, not a placeholder | M | P7 (developer) | GOV.UK question pages | Walkthrough. |
 | F25 | Narrow the viewer projection of `GET /settings/secrets` to `present: bool` (it returns `set_by` and the fingerprint today) | S | P6 (AppSec) | least privilege | Walkthrough; low. |
@@ -368,6 +369,7 @@ Sizes: S ≤ 2 days, M ≤ 2 weeks, L > 2 weeks (one engineer). Order is by valu
 | F32 | **Review finding → proposed follow-up item** — `crb learn followups`: each `defect` / `regression` finding on a delivered item, and any builder-stated dispute of a signed fact, becomes an *unfrozen* `BacklogItem` with `supersedes`; freezing stays a human act | S | developer, operator | QF; ISO (§7.2 pass-with-observations → follow-on items) | P3. Closes "reviewers minted new registered issues" without letting the product edit its frozen record; `learn.py` already emits items this way. From docs/reviews/2026-09-17-external-documents-assessment.md. |
 | F33 | **Recurrence-after-prevention alarm** — the learning loop remembers which refusal shapes / failure kinds have an accepted prevention and raises an inbox item when one recurs; recurrence per class is the reported metric | S | operator, developer | ISO (§6.3) | P3. "3+ occurrences escalate" made mechanical; nothing today measures whether a prevention held. From docs/reviews/2026-09-17-external-documents-assessment.md. |
 | F34 | **Verifier account kind on attestations** — `verifier_kind ∈ {oidc, local, service}` stamped on `SignoffRecord` and `GapSignoff` at write; the UI and the licence sentence say "signed by a service account" when so | S | auditor/ARB, approver | QF ("operator-delegated … stamped as such") | P3. Makes the essay's weaker-tier caveat machine-readable; a delegated signature cannot read as a person's. From docs/reviews/2026-09-17-external-documents-assessment.md. |
+| F35 | **Economics with provenance and intervals** — the capability map serves `cost_usd_mean` / `latency_s_mean` only; add known-attempt and known-clean counts (row-level `cost_known` / `latency_known`, preserving a known $0) as the denominators, and a bootstrap or t interval per cell, so the Results economics tiles can carry an interval and the correct `n` instead of "mean only" | S | P8, P1 (value stream) | EVIDENCE-AND-CLAIMS §3 (every number carries n, interval, apparatus) | From CodeRabbit on PR #32; the tiles say "no interval — the API serves the mean only" until this lands. |
 
 ---
 

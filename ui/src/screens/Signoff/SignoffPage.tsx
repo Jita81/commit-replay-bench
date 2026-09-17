@@ -283,14 +283,18 @@ export function SignoffPage() {
       {
         key: 'status',
         header: 'Status',
-        sortValue: (s) => Number(s.revoked),
+        sortValue: (s) => (s.revoked ? 3 : s.active ? 0 : s.stale ? 1 : 2),
         cell: (s) =>
           s.revoked ? (
             <Pill tone="amber" glyph="⊘" size="xs" label={`Revoked by ${s.revoked_by_name || s.revoked_by || '—'} at ${fmtDate(s.revoked_at)}`}>revoked</Pill>
           ) : s.active ? (
             <Pill tone="green" glyph="✓" size="xs" label="Active attestation">active</Pill>
-          ) : (
+          ) : s.stale ? (
+            <Pill tone="amber" glyph="◷" size="xs" label={`Stale: signed at apparatus ${s.evidence.apparatus_versions.join(', ') || '?'}, the deployment now reads at ${s.apparatus_current || '?'} — lifts nothing until re-signed`}>stale</Pill>
+          ) : s.current_false_q1 > 0 ? (
             <Pill tone="red" glyph="✗" size="xs" label={`Invalidated: the cell now has false_q1 = ${s.current_false_q1}`}>invalidated</Pill>
+          ) : (
+            <Pill tone="muted" glyph="○" size="xs" label="Superseded by a later attestation on the same scope">superseded</Pill>
           ),
       },
       { key: 'approver', header: 'Approver', sortValue: (s) => approverName(s), cell: (s) => approverName(s) },

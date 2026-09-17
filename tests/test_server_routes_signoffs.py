@@ -975,7 +975,7 @@ class TestListAndRevoke:
     def test_revoke_rbac(self, env: Env) -> None:
         clear_policy(env)
         sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
-        assert_rbac(env, "POST", f"/signoffs/{sid}/revoke", min_role="approver")
+        assert_rbac(env, "POST", f"/signoffs/{sid}/revoke", min_role="approver", json={"note": "x"})
 
     def test_revoke_appends_and_hides(self, env: Env) -> None:
         clear_policy(env)
@@ -1003,16 +1003,30 @@ class TestListAndRevoke:
             == "automated-pass"
         )
         # twice → 409; unknown → 404; the revocation row itself is not an attestation id
-        r = env.post(f"/signoffs/{sid}/revoke")
+        why = {"note": "again"}
+        r = env.post(f"/signoffs/{sid}/revoke", json=why)
         assert r.status_code == 409 and envelope(r)["code"] == "already_revoked"
-        assert env.post("/signoffs/nope/revoke").status_code == 404
-        assert env.post(f"/signoffs/{rows[1].signoff_id}/revoke").status_code == 404
+        assert env.post("/signoffs/nope/revoke", json=why).status_code == 404
+        assert env.post(f"/signoffs/{rows[1].signoff_id}/revoke", json=why).status_code == 404
         assert env.get(f"/signoffs/{rows[1].signoff_id}").status_code == 404
+
+    def test_revoke_needs_a_reason_at_the_api_not_just_in_the_ui(self, env: Env) -> None:
+        clear_policy(env)
+        sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
+        # no body, an empty note and a blank note are all refused before anything is written
+        assert env.post(f"/signoffs/{sid}/revoke").status_code == 422
+        assert env.post(f"/signoffs/{sid}/revoke", json={}).status_code == 422
+        assert env.post(f"/signoffs/{sid}/revoke", json={"note": ""}).status_code == 422
+        assert env.post(f"/signoffs/{sid}/revoke", json={"note": "   "}).status_code == 422
+        assert env.get(f"/signoffs?repo={ALPHA}").json()["total"] == 1
+        assert [x.revoke for x in _signoffs(env)] == [False]
+        r = env.post(f"/signoffs/{sid}/revoke", json={"note": "  evidence re-examined  "})
+        assert r.status_code == 200 and _signoffs(env)[1].note == "evidence re-examined"
 
     def test_re_attest_after_revoke(self, env: Env) -> None:
         clear_policy(env)
         sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
-        env.post(f"/signoffs/{sid}/revoke")
+        env.post(f"/signoffs/{sid}/revoke", json={"note": "re-examined"})
         r = env.post("/signoffs", json=attested_body(env, DELIVER, note="again"))
         assert r.status_code == 201 and r.json()["active"] is True
         page = env.get(f"/signoffs?repo={ALPHA}").json()

@@ -1102,9 +1102,20 @@ class SignoffCreateRequest(BaseModel):
 
 
 class SignoffRevokeRequest(BaseModel):
+    """``POST /signoffs/{id}/revoke`` body. The reason is REQUIRED (DL-043): a revocation
+    withdraws a human attestation from the record, and an auditor reads why next to it —
+    the API refuses a blank one, not just the UI."""
+
     model_config = ConfigDict(extra="forbid")
 
-    note: str = Field(default="", max_length=4000)
+    note: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("note")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("a revocation needs a reason")
+        return v.strip()
 
 
 # ---------------------------------------------------------------------------

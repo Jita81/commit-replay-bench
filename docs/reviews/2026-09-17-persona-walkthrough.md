@@ -34,10 +34,14 @@ each person saw before and after. Tests were added for every fix.
 
 ## What the instrument did while we watched
 
-The operator's run (`6fb61af9…`) finished during the walk: 10 tasks, 9 clean, 1 not clean
-(the lint belt — gofmt), 0 disqualified, 0 harness errors, $2.57 builder-reported. Between
-the start and the end of the walk `bug.fix × S` on cobra crossed the bar (n 24 → 25, Wilson
-lower ≥ 80 %) and moved from *calibrate* to *deliver*; the Decisions inbox picked it up
+The operator's run (`6fb61af9…`; cobra, replay, sighted, `claude_code / claude-sonnet-5`
+with `auth: cli`, apparatus 2.2) finished during the walk: 10 tasks, 9 clean, 1 not clean
+(the lint belt — gofmt), 0 disqualified, 0 harness errors, $2.57 builder-reported
+**[measured — the run's ledger rows, read on `/runs/{id}`]**. Between the start and the end
+of the walk `bug.fix × S` on cobra crossed the bar — n=24, 96 % (95 % Wilson [80 %, 99 %]),
+route *calibrate* (`ci_low_below_bar`) → n=25, 96 %, Wilson lower ≥ 80 %, route *deliver*
+under `routing.v1` **[measured — `/capability-map?repo=cobra`, current apparatus 2.2,
+sighted rows]**; the Decisions inbox picked it up
 without anyone reloading anything, and showed the viewer *approver acts* next to it. The
 badge is honest by role: the approver saw 1 waiting before the sign-off and the viewer saw 3
 after the revoke (two cobra cells due, one click cell routed to a human).
@@ -79,7 +83,10 @@ after the revoke (two cobra cells due, one click cell routed to a human).
   revoked)".
 - One test backlog (`T-1 walkthrough test item`, hash `1644eba4…`) is frozen on cobra; the
   factory was not run on it.
-- Ledger after the walk: 602 rows, chain intact, false-Q1 0, 0 clean rows without a pack.
+- Ledger after the walk: 602 rows, chain intact, false-Q1 0, 0 clean rows without a pack
+  **[measured — `/ledger/verify`, apparatus 2.2; exact counts, no interval]**.
+- The two WCAG figures (4.4:1 before, 4.7:1 after) are contrast ratios computed from the
+  tokens, not sampled rates: no `n`, no interval.
 
 ## How to repeat it
 
