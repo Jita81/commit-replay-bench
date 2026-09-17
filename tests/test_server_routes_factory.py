@@ -30,6 +30,7 @@ from typing import Any
 
 import pytest
 
+from crb.core.version import APPARATUS_VERSION
 from crb.factory.evidence import EV_BACKLOG_FROZEN, EV_GAP_SIGNOFF
 from crb.server.app import API_PREFIX
 from crb.server.factory_state import FactoryHome
@@ -134,6 +135,10 @@ def test_register_freezes_hashes_and_records(env: Env) -> None:
         "reason_code": "",
         "reason": "",
         "n": 0,
+        "point": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "apparatus_versions": [],
         "deliverable": False,
     }
     e = env.get(f"/factory/{ALPHA}/evidence").json()
@@ -171,6 +176,10 @@ def test_tasks_carry_the_cell_route_the_delivery_gate_will_read(env: Env) -> Non
     by_id = {t["id"]: t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}
     assert by_id["D-1"]["route"] == "deliver" and by_id["D-1"]["deliverable"] is True
     assert by_id["D-1"]["n"] >= 10 and by_id["D-1"]["reason_code"] == "deliver"
+    # the provenance behind the route: the rate, its interval and the apparatus
+    d1 = by_id["D-1"]
+    assert d1["point"] >= 0.9 and d1["ci_low"] >= 0.8 and d1["ci_high"] >= d1["point"]
+    assert d1["apparatus_versions"] == [APPARATUS_VERSION]
     assert by_id["T-1"]["route"] != "deliver" and by_id["T-1"]["deliverable"] is False
     assert by_id["T-1"]["reason_code"] and by_id["T-1"]["n"] > 0
 

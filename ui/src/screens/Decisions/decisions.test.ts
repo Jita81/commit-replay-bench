@@ -31,7 +31,7 @@ function signoff(over: Partial<Signoff>): Signoff {
   return { id: 's1', repo: 'alpha', cell: { capability_class: 'bug.fix', size: 'XS' }, revoked: false, ...over } as Signoff
 }
 function task(over: Partial<FactoryTask>): FactoryTask {
-  return { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'ready', dor_gaps: [], route_hint: 'build', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.assessed', cell_route: { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 22, deliverable: true }, ...over }
+  return { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'ready', dor_gaps: [], route_hint: 'build', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.assessed', cell_route: { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 22, point: 1, ci_low: 0.851, ci_high: 1, apparatus_versions: ['2.2'], deliverable: true }, ...over }
 }
 
 describe('decisionsFor', () => {

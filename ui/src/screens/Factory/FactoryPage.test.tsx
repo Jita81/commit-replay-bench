@@ -25,7 +25,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FactoryBacklog, FactoryTask } from '../../api/types'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
-import { FactoryPage, stepsFor } from './FactoryPage'
+import { FactoryPage, nextId, stepsFor } from './FactoryPage'
 
 const BACKLOG: FactoryBacklog = {
   repo: 'alpha',
@@ -38,14 +38,14 @@ const BACKLOG: FactoryBacklog = {
 }
 
 const TASKS: FactoryTask[] = [
-  { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: null, review_verdict: 'accept', last_event: 'item.outcome', cell_route: { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, deliverable: true } },
-  { id: 'I-2', title: 'Divide', capability_class: 'feature.add', size: 'S', kind: 'code', status: 'blocked', dor_gaps: ['method_path', 'response_shape'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked', cell_route: { route: '', reason_code: '', reason: '', n: 0, deliverable: false } },
+  { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: null, review_verdict: 'accept', last_event: 'item.outcome', cell_route: { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, apparatus_versions: ['2.2'], deliverable: true } },
+  { id: 'I-2', title: 'Divide', capability_class: 'feature.add', size: 'S', kind: 'code', status: 'blocked', dor_gaps: ['method_path', 'response_shape'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked', cell_route: { route: '', reason_code: '', reason: '', n: 0, point: 0, ci_low: 0, ci_high: 0, apparatus_versions: [], deliverable: false } },
 ]
 
 describe('stepsFor — an item the factory has not touched', () => {
   it('reads as not assessed / not run / not started, never as done or failed', () => {
     // exactly what the API folds for a frozen-but-unrun item (factory_state.task_views)
-    const untouched: FactoryTask = { id: 'T-1', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'pending', dor_gaps: [], route_hint: '', red_proof: null, build_status: 'not_built', pr_url: null, review_verdict: null, last_event: '', cell_route: { route: '', reason_code: '', reason: '', n: 0, deliverable: false } }
+    const untouched: FactoryTask = { id: 'T-1', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'pending', dor_gaps: [], route_hint: '', red_proof: null, build_status: 'not_built', pr_url: null, review_verdict: null, last_event: '', cell_route: { route: '', reason_code: '', reason: '', n: 0, point: 0, ci_low: 0, ci_high: 0, apparatus_versions: [], deliverable: false } }
     const steps = stepsFor(untouched)
     expect(steps.map((x) => [x.id, x.status])).toEqual([
       ['readiness', 'current'],
@@ -60,7 +60,7 @@ describe('stepsFor — an item the factory has not touched', () => {
   })
 
   it('a build that ran and was not clean is the failure, spelled out', () => {
-    const notClean: FactoryTask = { id: 'T-2', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'not_clean', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'not_clean', pr_url: null, review_verdict: null, last_event: 'build', cell_route: { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, deliverable: true } }
+    const notClean: FactoryTask = { id: 'T-2', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'not_clean', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'not_clean', pr_url: null, review_verdict: null, last_event: 'build', cell_route: { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, apparatus_versions: ['2.2'], deliverable: true } }
     const build = stepsFor(notClean)[2]!
     expect(build.status).toBe('failed')
     expect(build.detail).toBe('not clean')
@@ -93,7 +93,7 @@ describe('FactoryPage — the shipped contract', () => {
     expect(screen.getByRole('form', { name: 'Sign a structural gap for I-2' })).toBeInTheDocument()
     expect(screen.getByTestId('factory-run-controls')).toBeInTheDocument()
     // F28 — each item shows its cell's route BEFORE the run, and the controls count the deliverable ones
-    expect(screen.getByTestId('cell-route-I-1')).toHaveTextContent('routes deliver · n=40')
+    expect(screen.getByTestId('cell-route-I-1')).toHaveTextContent('routes deliver · n=40 · 95% [84%, 99%] · app 2.2')
     expect(screen.getByTestId('cell-route-I-2')).toHaveTextContent('cell not measured · delivery withheld')
     expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('1 of 2 items sit in a cell that routes deliver today')
   })
@@ -126,12 +126,21 @@ describe('FactoryPage — the shipped contract', () => {
     expect(within(form).getByLabelText(/A representative request and its exact expected response\. \(value — optional\)/)).toBeInTheDocument()
     await userEvent.type(within(form).getByLabelText(/^Title/), 'Add /health')
     await userEvent.type(within(form).getByLabelText(/What HTTP method and path/), 'GET /health')
+    // enabled only once the catalogue answered and every item has an id and a title
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Freeze 1 item' })).toBeEnabled())
     await userEvent.click(screen.getByRole('button', { name: 'Freeze 1 item' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/factory/alpha/backlog')).toBe(true))
     const body = JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))
     expect(body).toEqual({
       items: [{ id: 'I-1', title: 'Add /health', kind: 'code', level: 'L1', description: '', capability_class: 'backend.route.add', size_estimate: 'XS', structural_facts: ['method_path: GET /health'], depends_on: [] }],
     })
+  })
+
+  it('a generated item id never recycles one still in use', () => {
+    const d = (id: string) => ({ id, title: '', capability_class: 'bug.fix', size_estimate: 'XS', kind: 'code', level: 'L1', description: '', depends_on: '', facts: {} })
+    expect(nextId([])).toBe('I-1')
+    expect(nextId([d('I-1'), d('I-3')])).toBe('I-4') // I-2 was removed; length+1 = I-3 is taken
+    expect(nextId([d('I-1'), d('I-2')])).toBe('I-3')
   })
 
   it('signing a gap posts the slot and the answer to the item', async () => {

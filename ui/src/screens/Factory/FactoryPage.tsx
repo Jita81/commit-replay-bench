@@ -192,7 +192,7 @@ export function FactoryPage() {
                     </label>
                     {tasks.data && (
                       <span className="text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
-                        {deliverableCount(tasks.data)} of {tasks.data.length} items sit in a cell that routes <code>deliver</code> today; the rest would be built and withheld
+                        {deliverableCount(tasks.data)} of {tasks.data.length} items sit in a cell that routes <code>deliver</code> today; the rest cannot be delivered under the current route (readiness, a dependency or the RED proof may stop them earlier)
                       </span>
                     )}
                     {deliver && can('approver') && (
@@ -327,18 +327,24 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
       </Pill>
     )
   }
+  // every number carries its n, its interval and its apparatus
+  const prov = `n=${r.n} · ${pct(r.point)} [${pct(r.ci_low)}, ${pct(r.ci_high)}] · app ${r.apparatus_versions.join(', ') || '—'}`
   if (r.deliverable) {
     return (
-      <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver (n=${r.n}): a clean build may open a pull request`} data-testid={`cell-route-${t.id}`}>
-        routes deliver · n={r.n}
+      <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver — ${prov}: a clean build may open a pull request`} data-testid={`cell-route-${t.id}`}>
+        routes deliver · {prov}
       </Pill>
     )
   }
   return (
-    <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}, n=${r.n}): delivery would be withheld — ${r.reason}`} data-testid={`cell-route-${t.id}`}>
-      routes {r.route} · {r.reason_code} · delivery withheld
+    <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: delivery would be withheld — ${r.reason}`} data-testid={`cell-route-${t.id}`}>
+      routes {r.route} · {r.reason_code} · {prov} · delivery withheld
     </Pill>
   )
+}
+
+function pct(x: number): string {
+  return `${(x * 100).toFixed(0)}%`
 }
 
 interface DraftItem {
@@ -354,8 +360,16 @@ interface DraftItem {
   facts: Record<string, string>
 }
 
-const emptyItem = (n: number, cat: FactoryCatalogue | undefined): DraftItem => ({
-  id: `I-${n}`,
+/** The next `I-n` no current item uses (removing a middle item must not recycle its id). */
+export function nextId(items: DraftItem[]): string {
+  const taken = new Set(items.map((d) => d.id.trim()))
+  let n = items.length + 1
+  while (taken.has(`I-${n}`)) n += 1
+  return `I-${n}`
+}
+
+const emptyItem = (id: string, cat: FactoryCatalogue | undefined): DraftItem => ({
+  id,
   title: '',
   capability_class: cat?.classes[0]?.capability_class ?? 'bug.fix',
   size_estimate: 'XS',
@@ -397,14 +411,16 @@ function RegisterBacklogDialog({ open, repo, onClose }: { open: boolean; repo: s
   const register = useRegisterBacklog()
   const catalogue = useFactoryCatalogue(open)
   const [mode, setMode] = useState<'form' | 'json'>('form')
-  const [items, setItems] = useState<DraftItem[]>([emptyItem(1, undefined)])
+  const [items, setItems] = useState<DraftItem[]>([emptyItem('I-1', undefined)])
   const [text, setText] = useState('{\n  "items": [\n    {"id": "I-1", "title": "…", "capability_class": "bug.fix", "size_estimate": "XS", "structural_facts": []}\n  ]\n}')
   const [parseError, setParseError] = useState('')
   const cat = catalogue.data
   const slotsFor = (cls: string) => cat?.classes.find((c) => c.capability_class === cls)?.slots ?? []
   const update = (i: number, patch: Partial<DraftItem>) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)))
   const setFact = (i: number, slot: string, value: string) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, facts: { ...x.facts, [slot]: value } } : x)))
-  const formValid = items.every((d) => d.id.trim() && d.title.trim())
+  // the form can only ask the class's questions once the catalogue answered: until then a
+  // freeze would record gaps the operator never saw (JSON mode stays the explicit fallback)
+  const formValid = catalogue.data !== undefined && items.every((d) => d.id.trim() && d.title.trim())
 
   const submit = () => {
     let body: unknown
@@ -448,7 +464,8 @@ function RegisterBacklogDialog({ open, repo, onClose }: { open: boolean; repo: s
         </>
       ) : (
         <div className="space-y-4" data-testid="backlog-form">
-          {catalogue.isError && <ErrorState compact error={catalogue.error} onRetry={() => void catalogue.refetch()} />}
+          {catalogue.isPending && <p className="m-0 text-sm text-on-surface-muted">Loading the questions each class asks…</p>}
+          {catalogue.isError && <ErrorState compact error={catalogue.error} onRetry={() => void catalogue.refetch()} title="The catalogue did not load — the form cannot ask the right questions; retry, or paste JSON" />}
           {items.map((d, i) => {
             const slots = slotsFor(d.capability_class)
             return (
@@ -521,7 +538,7 @@ function RegisterBacklogDialog({ open, repo, onClose }: { open: boolean; repo: s
               </fieldset>
             )
           })}
-          <Button size="sm" onClick={() => setItems((xs) => [...xs, emptyItem(xs.length + 1, cat)])}>
+          <Button size="sm" onClick={() => setItems((xs) => [...xs, emptyItem(nextId(xs), cat)])}>
             Add another item
           </Button>
         </div>

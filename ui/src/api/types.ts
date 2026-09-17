@@ -1086,7 +1086,7 @@ export interface FactoryTask {
   last_event: string
   /** F28 — the capability map's route for the item's (class × size) cell, from the same
    * signed map the delivery gate reads; `route: ''` = nobody has measured the cell. */
-  cell_route: { route: string; reason_code: string; reason: string; n: number; deliverable: boolean }
+  cell_route: { route: string; reason_code: string; reason: string; n: number; point: number; ci_low: number; ci_high: number; apparatus_versions: string[]; deliverable: boolean }
 }
 
 /** `GET /factory/catalogue` — what a backlog item may be made of (F24: the freeze form asks these). */

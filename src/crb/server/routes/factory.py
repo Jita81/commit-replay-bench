@@ -129,6 +129,12 @@ class CellRouteOut(BaseModel):
     reason_code: str = ""
     reason: str = ""
     n: int = 0
+    #: The cell's measured clean rate with its 95 % Wilson interval and the apparatus its
+    #: rows carry — the provenance behind the route (0 / empty when not measured).
+    point: float = 0.0
+    ci_low: float = 0.0
+    ci_high: float = 0.0
+    apparatus_versions: list[str] = []
     #: True only when the gate would let a clean build of this item open a pull request.
     deliverable: bool = False
 
@@ -391,11 +397,16 @@ def _cell_routes(db: DbDep, factory: SessionFactoryDep, repo: str) -> dict[str, 
         if c.decision is None:
             continue
         d = c.decision
+        st = c.stats
         out[f"{c.key.capability_class}|{c.key.size}"] = CellRouteOut(
             route=d.route,
             reason_code=d.reason_code,
             reason=d.reason,
-            n=c.stats.n if c.stats is not None else 0,
+            n=st.n if st is not None else 0,
+            point=st.point if st is not None else 0.0,
+            ci_low=st.ci.low if st is not None else 0.0,
+            ci_high=st.ci.high if st is not None else 0.0,
+            apparatus_versions=list(st.apparatus_versions) if st is not None else [],
             deliverable=d.route == ROUTE_DELIVER,
         )
     return out
