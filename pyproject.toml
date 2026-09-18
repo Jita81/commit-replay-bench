@@ -152,6 +152,7 @@ type = "layers"
 # Parenthesised layers are optional: packages land phase by phase (cli/server/factory/store).
 layers = [
   "(crb.cli)",
+  "(crb.desktop)",
   "(crb.mcp)",
   "(crb.server)",
   "(crb.factory)",

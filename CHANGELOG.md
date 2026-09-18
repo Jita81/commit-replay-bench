@@ -8,6 +8,32 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-18 — a double-clickable macOS app (DL-044, ADR-0016)
+
+The product can be started by a person who has no toolchain: `macos/build_app.sh` produces a
+self-contained `crb.app` that embeds a CPython runtime, the `[server]` extra and the built SPA.
+Nothing is required on the target Mac but macOS 12 — and `git`, for anything beyond browsing.
+
+- **A launcher, not a second front end.** `crb.desktop` is standard-library only. It prepares
+  state, spawns the same `crb serve` as a child process, waits for readiness and opens a browser.
+  It renders nothing and imports no inner layer (import-linter places it above `crb.cli`).
+- **Readiness is `/api/v1/health/live`.** The SPA is mounted at `/` with an `index.html` fallback
+  for deep links, so any unmatched path answers 200 with HTML: a launcher that polled `/health`
+  would read a false ready signal from the static-file mount before the API existed.
+- **A desktop run is a development reading, and says so.** A Mac with no Docker daemon runs
+  `CRB_SANDBOX__EXECUTOR=local`, which is not isolated. The app relaxes that one setting — and
+  `CRB_ROLE=api`, so the deep health check does not report `down` for a sandbox this process was
+  never going to own — then states both in the first-run output. No belt, threshold, routing rule
+  or sign-off clause is weakened; the apparatus stays 2.2.
+- **First-run credentials, not an authentication bypass.** There is no unauthenticated mode. The
+  launcher generates the bootstrap admin password and the session signing key once, stores them
+  under `$CRB_HOME` at mode 0600 and prints the credentials. An ephemeral signing key would drop
+  every session on every launch.
+- **Signing is separated from building.** A locally built app carries no quarantine attribute and
+  opens on a double-click with no Apple Developer account; a downloaded copy needs a Developer ID
+  and notarisation. `.github/workflows/macos-app.yml` builds and smoke-tests on `macos-14`
+  unconditionally, and signs only when the Apple secrets are present.
+
 ### 2026-09-17 — the NHS design system and the prototype's screens, on real data (DL-042)
 
 The operator's Claude Design prototype ("crb Front End", twelve NHS/GOV.UK-patterned

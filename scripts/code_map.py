@@ -47,7 +47,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "CODE-MAP.md"
-SOURCE_ROOTS: tuple[str, ...] = ("src", "tests", "ui/src", "ui/e2e", "scripts", "deploy")
+SOURCE_ROOTS: tuple[str, ...] = ("src", "tests", "ui/src", "ui/e2e", "scripts", "deploy", "macos")
 SUFFIXES: tuple[str, ...] = (".py", ".ts", ".tsx", ".sh")
 SKIP_DIRS: frozenset[str] = frozenset({"node_modules", "__pycache__", "dist", ".venv"})
 #: Files that legitimately carry no block (say why in the map).
@@ -67,7 +67,7 @@ REQUIRED_KEYS: tuple[str, ...] = (
 OPTIONAL_KEYS: tuple[str, ...] = ("Claims",)
 KEYS: tuple[str, ...] = REQUIRED_KEYS + OPTIONAL_KEYS
 LINK_KEYS: tuple[str, ...] = ("Layer", "ADRs", "Works with", "Tested by", "Touch when", "Claims")
-_PATH_RE = re.compile(r"(?<![\w/.-])((?:src|tests|ui|docs|deploy|scripts|\.github)/[\w./-]+)")
+_PATH_RE = re.compile(r"(?<![\w/.-])((?:src|tests|ui|docs|deploy|scripts|macos|\.github)/[\w./-]+)")
 _KEY_RE = re.compile(r"^(" + "|".join(re.escape(k) for k in KEYS) + r"):\s*(.*)$")
 
 

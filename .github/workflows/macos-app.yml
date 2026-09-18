@@ -1,0 +1,257 @@
+# The macOS application: build dist/crb.app on an Apple Silicon runner, prove it boots, and
+# publish it.
+#
+#   build   macos/build_app.sh assembles a self-contained bundle (embedded CPython +
+#           crb[server] + the built SPA), then a smoke test boots THAT bundle's own
+#           interpreter headless, waits for /api/v1/health/live and asserts the SPA is served.
+#           The smoke test is blocking: a bundle that does not become ready fails the job and
+#           the captured server output is printed.
+#   sign    Developer ID signing and notarisation, conditional on the Apple secrets existing.
+#           With no Apple Developer account the job is still green and still publishes an
+#           UNSIGNED .app — which is what a developer building locally gets anyway. The day
+#           the secrets are added the same workflow starts signing, notarising and shipping a
+#           stapled .dmg, with no edit here.
+#
+# Secrets (all optional; signing is enabled by APPLE_TEAM_ID being non-empty):
+#   APPLE_TEAM_ID          the 10-character team identifier — the switch for the whole path
+#   APPLE_SIGN_IDENTITY    "Developer ID Application: NAME (TEAMID)"
+#   APPLE_CERT_P12_BASE64  the Developer ID Application certificate + key, .p12, base64
+#   APPLE_CERT_PASSWORD    the .p12 export password
+#   APPLE_ID               an Apple ID on the team
+#   APPLE_APP_PASSWORD     an app-specific password for that Apple ID
+#
+# The certificate is imported into a TEMPORARY keychain created for this run and deleted in an
+# always() step, so a cancelled or failed run never leaves a key on the runner image.
+#
+# The `secrets` context is not available in a step-level `if`, so the first step turns
+# APPLE_TEAM_ID into a step output and every conditional reads that output instead.
+#
+# Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
+
+name: macos-app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    name: app (build + smoke + sign/notarise when configured)
+    runs-on: macos-14 # Apple Silicon: the bundle embeds an arm64 CPython
+    timeout-minutes: 45
+    env:
+      # Artifact names may not contain `/`; a dispatch from a `feat/…` branch would.
+      ARTIFACT_SUFFIX: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+      SMOKE_PORT: "8765"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Is signing configured?
+        id: signing
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${TEAM_ID:-}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "signing is configured — the bundle will be signed and notarised"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "no APPLE_TEAM_ID secret — building an UNSIGNED bundle (this is not a failure)"
+          fi
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Import the Developer ID certificate into a temporary keychain
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "${CERT_P12_BASE64:-}" || { echo "::error::APPLE_TEAM_ID is set but APPLE_CERT_P12_BASE64 is not"; exit 1; }
+          KEYCHAIN="$RUNNER_TEMP/crb-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          CERT_PATH="$RUNNER_TEMP/crb-developer-id.p12"
+          printf '%s' "$CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -P "${CERT_PASSWORD:-}" -k "$KEYCHAIN" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          # Without this, codesign blocks on a GUI prompt for keychain access that no one can answer.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # Put the temporary keychain FIRST in the user's search list without dropping the
+          # runner's own (`security list-keychains -s` replaces the list, it does not add to it).
+          keychains=("$KEYCHAIN")
+          while IFS= read -r line; do
+            kc="$(printf '%s' "$line" | sed -e 's/^[[:space:]]*"\{0,1\}//' -e 's/"\{0,1\}[[:space:]]*$//')"
+            if [ -n "$kc" ] && [ "$kc" != "$KEYCHAIN" ]; then keychains+=("$kc"); fi
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "${keychains[@]}"
+          rm -f "$CERT_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - name: Build dist/crb.app (signed when a Developer ID certificate is available)
+        env:
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
+        run: |
+          set -euo pipefail
+          if [ "$SIGNING_ENABLED" = "true" ]; then
+            test -n "${SIGN_IDENTITY:-}" || { echo "::error::APPLE_TEAM_ID is set but APPLE_SIGN_IDENTITY is not"; exit 1; }
+            macos/build_app.sh --sign "$SIGN_IDENTITY"
+          else
+            macos/build_app.sh
+          fi
+
+      - name: Smoke the built bundle — its OWN interpreter, headless, readiness then the SPA
+        # This is a gate. The bundle is only shippable if the embedded runtime boots the server
+        # and serves the SPA with nothing from the runner's Python or node on the path.
+        run: |
+          set -euo pipefail
+          APP="$PWD/dist/crb.app"
+          PY="$APP/Contents/Resources/python/bin/python3"
+          BASE="http://127.0.0.1:$SMOKE_PORT"
+          LOG="$RUNNER_TEMP/crb-desktop-smoke.log"
+
+          test -x "$PY" || { echo "::error::no embedded interpreter at $PY"; exit 1; }
+          test -x "$APP/Contents/MacOS/crb" || { echo "::error::the launcher is missing or not executable"; exit 1; }
+          test -f "$APP/Contents/Resources/ui/index.html" || { echo "::error::the SPA is missing from the bundle"; exit 1; }
+          if find "$APP/Contents/Resources/ui" -name '*.map' | grep -q .; then
+            echo "::error::source maps were bundled into Resources/ui"; exit 1
+          fi
+
+          # The launcher exports these; the smoke test drives the module directly so the failure
+          # it reports is the server's, not the shell's.
+          export CRB_UI_DIST="$APP/Contents/Resources/ui"
+          export CRB_DESKTOP_CRB_BIN="$APP/Contents/Resources/python/bin/crb"
+
+          # Cheapest possible check that the module imports inside the bundle at all.
+          "$PY" -m crb.desktop --version
+
+          "$PY" -m crb.desktop --no-browser --port "$SMOKE_PORT" > "$LOG" 2>&1 &
+          PID=$!
+
+          fail() {
+            echo "::error::$1"
+            echo "----- crb.desktop output -----"
+            # crb.desktop prints the bootstrap admin password it generated for this run's
+            # throwaway state home; it is useless off this runner, but it does not belong in
+            # a log anyone can read.
+            sed -E 's/^([[:space:]]*password:[[:space:]]*).*$/\1<redacted>/' "$LOG" || true
+            echo "------------------------------"
+            kill "$PID" 2>/dev/null || true
+            wait "$PID" 2>/dev/null || true
+            exit 1
+          }
+
+          # Bounded: 90 attempts at 2s — three minutes, well past a cold first-run migration.
+          ready=0
+          for _ in $(seq 1 90); do
+            if ! kill -0 "$PID" 2>/dev/null; then
+              fail "crb.desktop exited before it became ready"
+            fi
+            code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/health/live" || true)"
+            if [ "$code" = "200" ]; then ready=1; break; fi
+            sleep 2
+          done
+          [ "$ready" -eq 1 ] || fail "$BASE/api/v1/health/live never returned 200 within 180s"
+          echo "smoke: readiness ok ($BASE/api/v1/health/live -> 200)"
+
+          body="$(curl -fsSL "$BASE/" || true)"
+          printf '%s' "$body" | grep -q '<html' || fail "GET / did not return HTML"
+          printf '%s' "$body" | grep -q 'Commit Replay Bench' || fail "GET / returned HTML without 'Commit Replay Bench'"
+          echo "smoke: the SPA is served at / and carries the product name"
+
+          kill "$PID" 2>/dev/null || true
+          wait "$PID" 2>/dev/null || true
+          echo "smoke: ok — the bundle boots and serves on its own"
+
+      - name: Zip the .app (ditto, so symlinks and extended attributes survive)
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent dist/crb.app "dist/crb-macos-arm64-${ARTIFACT_SUFFIX}.zip"
+          ls -lh dist/*.zip
+
+      - name: Notarise a .dmg and staple it
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: macos/notarise.sh dist/crb.app --dmg "dist/crb-macos-arm64-${ARTIFACT_SUFFIX}.dmg"
+
+      - name: Upload the .app (zipped)
+        uses: actions/upload-artifact@v7
+        continue-on-error: true # a full artifact-storage quota is not a build failure
+        with:
+          name: crb-macos-app-${{ env.ARTIFACT_SUFFIX }}
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 365
+
+      - name: Upload the notarised .dmg
+        # Only the signing path produces a .dmg; `if-no-files-found: error` would fail an
+        # unsigned run that legitimately has none, so the step is conditional rather than the
+        # setting weakened.
+        if: steps.signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v7
+        continue-on-error: true # a full artifact-storage quota is not a build failure
+        with:
+          name: crb-macos-dmg-${{ env.ARTIFACT_SUFFIX }}
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 365
+
+      - name: Delete the temporary signing keychain
+        if: always()
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/crb-signing.keychain-db"
+          rm -f "$RUNNER_TEMP/crb-developer-id.p12"
+          if [ -f "$KEYCHAIN" ]; then
+            security delete-keychain "$KEYCHAIN" || true
+            echo "temporary signing keychain deleted"
+          else
+            echo "no temporary signing keychain to delete"
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
+        run: |
+          {
+            echo "## macOS application"
+            echo
+            if [ -d dist/crb.app ]; then
+              echo "Built \`dist/crb.app\` — $(du -sh dist/crb.app | cut -f1), self-contained (embedded CPython + SPA)."
+            else
+              echo "No bundle was produced."
+            fi
+            echo
+            if [ "$SIGNING_ENABLED" = "true" ]; then
+              echo "Signed with a Developer ID certificate and notarised; the \`.dmg\` carries a stapled ticket."
+            else
+              echo "**Unsigned** (no \`APPLE_TEAM_ID\` secret). The bundle runs locally without a Gatekeeper"
+              echo "prompt, but a downloaded copy is quarantined. Add the Apple secrets and this same"
+              echo "workflow signs, notarises and publishes a \`.dmg\` with no edit."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -34,6 +34,36 @@ repositories under measurement.
 
 Server, worker and UI (`crb serve`, `crb worker`) land in P4–P5.
 
+### 1a. On a Mac, without a toolchain
+
+To look at the product rather than operate it, build the double-clickable application
+([ADR-0016](adr/0016-a-double-clickable-macos-app.md)). It carries its own CPython, the
+`[server]` extra and the built interface, so nothing above is required on the machine that
+runs it — only `git`, and only for the steps that touch a repository.
+
+```bash
+macos/build_app.sh          # needs uv and npm at BUILD time, neither at run time
+open dist/crb.app
+```
+
+It opens your browser on `http://127.0.0.1:<port>/` and prints a generated `admin` password,
+also written to `~/Library/Application Support/crb/first-run-credentials.txt` (mode 0600).
+That directory is the whole of its state: the SQLite database, the session signing key and
+the server log. Delete it to start again.
+
+An application you build on the machine that runs it carries no `com.apple.quarantine`
+attribute, so it opens on a double-click. A copy **downloaded** from anywhere is quarantined
+and stays refused until it is signed with a Developer ID and notarised —
+`.github/workflows/macos-app.yml` does that automatically once the Apple secrets exist.
+
+> **What a desktop run may not be used for.** A Mac with no Docker daemon runs
+> `CRB_SANDBOX__EXECUTOR=local`: test runs are **not isolated**, which is the posture
+> [§7](#7-when-the-sandbox-is-unavailable) describes. The application relaxes that one
+> setting so it can start at all, reports it in the first-run output and in
+> `/api/v1/health`, and changes no belt, threshold, routing rule or sign-off clause. Numbers
+> produced this way are a development reading. Measure on a sealed executor before anything
+> is read as evidence.
+
 ## 2. Configure a repository
 
 A repository is described by a `RepoConfig` (see `crb.core.spec`): language, runner,

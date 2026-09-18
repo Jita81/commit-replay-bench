@@ -25,6 +25,7 @@ and be recorded here.
 | [0013](0013-external-review-is-advisory-and-recorded.md) | An external reviewer's verdict (CodeRabbit on PRs; later a factory `Reviewer`) is recorded and advisory to humans — never an input to a verdict, a route or a sign-off | Proposed | 2026-09-15 |
 | [0014](0014-github-app-is-the-connection.md) | The GitHub App is the connection: org-level install on selected repositories, installation tokens minted per use and never stored, write per installation; personal access tokens are not | Accepted | 2026-09-17 |
 | [0015](0015-signoffs-expire-with-the-apparatus.md) | A sign-off expires with the apparatus: `covers_apparatus` at read, served `stale` / `active: false`, never edited; no apparatus bump (a read rule, not a moved instrument) | Accepted | 2026-09-17 |
+| [0016](0016-a-double-clickable-macos-app.md) | The desktop app is a launcher around the same server with an embedded runtime; a Docker-less Mac relaxes the executor and nothing else, and says so | Proposed | 2026-09-18 |
 
 ## Format
 

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The template for dist/crb.app/Contents/Info.plist. macos/build_app.sh substitutes
+  __CRB_SHORT_VERSION__ (the full PEP 440 version from pyproject.toml, e.g. 2.0.0a1),
+  __CRB_BUNDLE_VERSION__ (its numeric prefix, because CFBundleVersion accepts only dotted
+  integers) and the __CRB_ICON_ENTRY__ comment (replaced by a CFBundleIconFile entry only
+  when macos/crb.icns exists, removed otherwise).
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>uk.co.automatedagile.crb</string>
+
+    <key>CFBundleName</key>
+    <string>crb</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>Commit Replay Bench</string>
+
+    <key>CFBundleExecutable</key>
+    <string>crb</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>__CRB_SHORT_VERSION__</string>
+
+    <key>CFBundleVersion</key>
+    <string>__CRB_BUNDLE_VERSION__</string>
+
+    <!-- __CRB_ICON_ENTRY__ -->
+
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!--
+      crb.desktop starts a local server and opens the user's own browser at it; the bundle
+      draws no window of its own. Without LSUIElement macOS treats it as a regular GUI
+      application and waits for a window that never appears: the icon bounces in the Dock
+      and the app is reported as "not responding" while it is in fact serving happily.
+      LSUIElement makes it an accessory (agent) process — no Dock tile, no menu bar, no
+      stuck launch. The day crb.desktop grows a real window of its own, this must go back
+      to false in the same change.
+    -->
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>
