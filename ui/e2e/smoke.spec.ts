@@ -80,7 +80,8 @@ test.describe('shell', () => {
     await mockApi(page, true)
     await page.goto('/ledger')
     await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible()
-    for (const label of ['Repos', 'Runs', 'Capability', 'Routing', 'Oracle', 'Ledger', 'Sign-off', 'Factory', 'Settings']) {
+    // an approver sees the journey and, of the instrument row, only the ledger
+    for (const label of ['Home', 'Connection', 'Baseline', 'Decisions', 'Factory', 'Deployment', 'Ledger']) {
       await expect(page.getByRole('link', { name: label, exact: true })).toBeVisible()
     }
     await expect(page.getByTestId('user-chip')).toContainText('approver')

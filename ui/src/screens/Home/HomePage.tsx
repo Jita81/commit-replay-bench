@@ -1,12 +1,12 @@
 /**
- * Home — "Get started": the seven tasks between an empty deployment and a signed cell.
+ * Home — "Get started": the eight tasks between an empty deployment and a delivered change.
  *
  * Navigation
  * ----------
  * What it is:   The landing screen (/home): a GOV.UK task list — Connect GitHub, Choose a
  *               repository, Confirm its shape, Prove the instrument (£0), Measure (spends
  *               money), Read the map, Invite an approver — with a status per task derived
- *               from the API, "You have completed n of 7", the instrument's health as a
+ *               from the API, "You have completed n of 8", the instrument's health as a
  *               notification banner when it is degraded, the cost statement, and "Why two
  *               people" (the operator who queues the runs is not the approver who signs).
  * What it does: Gives a tech lead trying the product in an afternoon one page that says
@@ -32,7 +32,7 @@
 
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router'
-import { useAllRepos, useCapabilityMap, useGitHubApp, useHealth, useOracle, useOracleControls, useRepo, useUsers } from '../../api/hooks'
+import { useAllRepos, useCapabilityMap, useFactoryBacklog, useFactoryTasks, useGitHubApp, useHealth, useOracle, useOracleControls, useRepo, useUsers } from '../../api/hooks'
 import { isApiError } from '../../api/client'
 import { InsetText, Kicker, Lede, NotificationBanner, PageTitle, StartButton, type TagTone, TaskList, type TaskItem } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
@@ -43,6 +43,32 @@ const LABEL: Record<StageStatus, string> = { done: 'Completed', running: 'In pro
 
 function notRun(err: unknown): boolean {
   return isApiError(err) && err.status === 404
+}
+
+export type FactoryStatus = 'delivered' | 'running' | 'ready' | 'no_deliver_cell' | 'blocked' | 'unknown'
+const FACTORY_LABEL: Record<FactoryStatus, string> = {
+  delivered: 'Completed',
+  running: 'In progress',
+  ready: 'Incomplete',
+  no_deliver_cell: 'No cell routes deliver yet',
+  blocked: 'Cannot start yet',
+  unknown: 'Checking',
+}
+const FACTORY_TONE: Record<FactoryStatus, TagTone> = { delivered: 'pale', running: 'blue', ready: 'blue', no_deliver_cell: 'grey', blocked: 'grey', unknown: 'grey' }
+
+/**
+ * Task 8's status from the API: Completed once an item has a pull request or was accepted;
+ * In progress once a backlog is frozen (items exist, none delivered); Incomplete when the
+ * map has a cell that routes `deliver` and no backlog yet; "No cell routes deliver yet"
+ * when measured but nothing licensed (a run would build and withhold); Cannot start yet
+ * before any measurement.
+ */
+export function factoryStatusFor(input: { measured: boolean; deliverCells: boolean; backlog: 'frozen' | 'none' | 'unknown'; items: Array<{ pr_url: string | null; status: string }> }): FactoryStatus {
+  if (input.items.some((t) => t.pr_url || t.status === 'accepted')) return 'delivered'
+  if (input.backlog === 'unknown') return 'unknown'
+  if (input.backlog === 'frozen') return 'running'
+  if (!input.measured) return 'blocked'
+  return input.deliverCells ? 'ready' : 'no_deliver_cell'
 }
 
 export function HomePage() {
@@ -62,6 +88,8 @@ export function HomePage() {
   const oracle = useOracle(chosen)
   const controls = useOracleControls(chosen)
   const map = useCapabilityMap(chosen, ['capability_class', 'size'])
+  const backlog = useFactoryBacklog(chosen)
+  const factoryTasks = useFactoryTasks(chosen)
 
   const stages = repo.data
     ? stagesFor({
@@ -99,6 +127,12 @@ export function HomePage() {
 
   const q = chosen ? `?repo=${encodeURIComponent(chosen)}` : ''
   const walk = chosen ? `/connect/${encodeURIComponent(chosen)}` : '/connect'
+  const factoryStatus = factoryStatusFor({
+    measured: anyRows,
+    deliverCells: (map.data?.summary.deliver_cells ?? 0) > 0,
+    backlog: backlog.data ? 'frozen' : backlog.isError && notRun(backlog.error) ? 'none' : 'unknown',
+    items: factoryTasks.data ?? [],
+  })
   const tasks: TaskItem[] = [
     { num: 1, name: 'Connect GitHub', status: ghStatus.status, tone: ghStatus.tone, to: '/connect' },
     { num: 2, name: 'Choose a repository', status: hasRepo ? 'Completed' : 'Incomplete', tone: hasRepo ? 'pale' : 'blue', to: '/connect' },
@@ -108,6 +142,8 @@ export function HomePage() {
     { num: 6, name: 'Read the map', status: anyRows ? 'Incomplete' : 'Cannot start yet', tone: anyRows ? 'blue' : 'grey', to: `/results${q}` },
     // only an admin can invite; everyone else is told whom to ask and is not sent to a page that refuses them
     { num: 7, name: 'Invite an approver', status: approverKnown === true ? 'Completed' : approverKnown === false ? 'Incomplete' : 'Ask an admin', tone: approverKnown === true ? 'pale' : 'blue', to: can('admin') ? '/settings' : '/posture' },
+    // the destination (DL-044): the factory delivers a change under the baseline the walk earned
+    { num: 8, name: 'Deliver your first change', status: FACTORY_LABEL[factoryStatus], tone: FACTORY_TONE[factoryStatus], to: chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory' },
   ]
   const completed = tasks.filter((t) => t.status === 'Completed').length
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
@@ -133,13 +169,13 @@ export function HomePage() {
         <TaskList tasks={tasks} completed={completed} summary={operator ? undefined : `The operators have completed ${completed} of ${tasks.length} tasks.`} />
       </div>
       <InsetText className="mt-8">
-        <p className="m-0">Nothing spends money without a queued run you can see and cancel. Tasks 1 to 4 cost nothing.</p>
+        <p className="m-0">Nothing spends money without a queued run you can see and cancel. Tasks 1 to 4 cost nothing; tasks 5 and 8 spend model budget and say so first. The factory (task 8) is what the rest is for: it delivers changes only in cells the baseline licenses.</p>
       </InsetText>
       <h2 className="mb-4 text-[32px] font-bold leading-[1.25]">Why two people</h2>
       <Lede className="mb-4">
         The operator who queues the runs should not be the approver who signs the result off. Sign-off needs the approver role and an attestation naming the diff they read; keeping the two roles on two people is how a deployment shows separation of duties — task 7 is not optional before a cell can be signed.
       </Lede>
-      <StartButton to={operator ? '/decisions' : anyRows ? `/results${q}` : '/decisions'}>Continue</StartButton>
+      <StartButton to={operator ? (factoryStatus === 'ready' || factoryStatus === 'running' ? `/factory${q}` : '/decisions') : anyRows ? `/results${q}` : '/decisions'}>Continue</StartButton>
     </>
   )
 }

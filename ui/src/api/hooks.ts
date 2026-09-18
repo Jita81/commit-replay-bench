@@ -62,6 +62,7 @@ import type {
   EvidencePack,
   EvidenceResponse,
   FactoryBacklog,
+  FactoryCatalogue,
   FactoryTask,
   ForecastBuild,
   ForecastReadiness,
@@ -129,6 +130,7 @@ export const keys = {
   ledgerVerify: ['ledger', 'verify'] as const,
   oracle: (repo: string) => ['oracle', repo] as const,
   oracleControls: (repo: string) => ['oracle', repo, 'controls'] as const,
+  factoryCatalogue: ['factory', 'catalogue'] as const,
   factoryBacklog: (repo: string) => ['factory', repo, 'backlog'] as const,
   factoryTasks: (repo: string) => ['factory', repo, 'tasks'] as const,
   factoryEvidence: (repo: string) => ['factory', repo, 'evidence'] as const,
@@ -609,6 +611,17 @@ export function useOracleControls(repo: string): UseQueryResult<ControlsReport, 
 // ---------------------------------------------------------------------------
 
 /** `GET /factory/{repo}/backlog` (P6; 501 until it lands — the screen renders that honestly). */
+/** `GET /factory/catalogue` — the classes, their slots, sizes, kinds and levels; static per release. */
+export function useFactoryCatalogue(enabled = true): UseQueryResult<FactoryCatalogue, ApiError> {
+  return useQuery({
+    queryKey: keys.factoryCatalogue,
+    queryFn: () => api<FactoryCatalogue>('/factory/catalogue'),
+    enabled,
+    staleTime: 60 * 60_000,
+    retry: false,
+  })
+}
+
 export function useFactoryBacklog(repo: string): UseQueryResult<FactoryBacklog, ApiError> {
   return useQuery({
     queryKey: keys.factoryBacklog(repo),

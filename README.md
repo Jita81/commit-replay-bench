@@ -9,7 +9,16 @@ Every verdict is written to an **append-only, hash-chained ledger** with a per-t
 **evidence pack**, and every number the product displays carries its sample size `n`, a
 Wilson 95% interval, and the version of the apparatus that produced it. On that evidence
 it **routes** each class of change to `deliver` / `calibrate` / `granularize` / `human`, and
-— in a later phase — manufactures new work under the same governance.
+manufactures new work under the same governance.
+
+**What the product is** (DL-044): the **factory** — new changes delivered as branches and
+pull requests only in the cells the evidence licenses — and the **self-improvement loop**
+that turns every refusal, review and re-measurement back into a better next run. Connecting
+a repository, measuring it and signing a cell off is the on-ramp that earns the baseline
+those two run on. And the end state is a framework the teams using it improve: every
+builder, runner, control, review probe, readiness slot and policy is a documented seam, the
+loop runs on `crb`'s own repository, and what one team learns reaches another only as
+abstract cells, never code.
 
 > Status: **2.0.0a1 on `main`** (apparatus **2.2**, belt set v5) — a public, Apache-2.0
 > repository since 2026-09-16 with **CI green on `main`** (eleven jobs, required by branch
