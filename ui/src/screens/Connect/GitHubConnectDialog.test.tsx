@@ -123,6 +123,41 @@ describe('GitHubConnectDialog', () => {
     expect(JSON.parse(String(post.init?.body))).toEqual({ installation_id: 77, full_name: 'acme/Calc' })
   })
 
+  it("link mode says it is loading, describes its hint to the select, and a refused attempt's alert clears when the mode is switched", async () => {
+    const repo = (name: string, github_full_name: string | null) => ({ name, language: 'go', runner: 'go', url: `https://example.org/${name}.git`, clone_path: '', probe: { status: 'not_probed', run_id: null, checked: null, detail: '' }, task_counts: { total: 0, standard: 0, hard: 0, gold_clean: 0, gold_failed: 0, unchecked: 0 }, last_run: null, created: 'x', updated: 'x', github_full_name })
+    let releaseRepos: (v: Response) => void = () => undefined
+    const reposPending = new Promise<Response>((resolve) => {
+      releaseRepos = resolve
+    })
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': APP,
+      'GET /github/installations/77/repositories': PAGE,
+      'GET /repos': () => reposPending,
+      'POST /repos/cobra/github-link': () => envelope(409, 'already_exists', 'acme/Calc is already connected as \'other\'', { repo: 'other' }),
+    })
+    renderApp(<GitHubConnectDialog open onClose={() => undefined} onConnected={() => undefined} />)
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Repositories' })).toBeInTheDocument())
+    await userEvent.click(within(screen.getByRole('list', { name: 'Repositories' })).getByRole('button', { name: /acme\/Calc/ }))
+    const modes = screen.getByRole('radiogroup', { name: 'How to connect' })
+    await userEvent.click(within(modes).getByRole('radio', { name: /Link to an existing repository/ }))
+    // while the repository list is still loading the empty select says so — not "nothing to link"
+    const select = screen.getByLabelText(/Existing repository/)
+    expect(select).toHaveAccessibleDescription('Loading repositories…')
+    releaseRepos(json({ items: [repo('cobra', null)], total: 1, limit: 500, offset: 0 }))
+    await waitFor(() => expect(select).toHaveAccessibleDescription('Only repositories with no GitHub link are listed.'))
+    // the long clone URL wraps rather than widening the dialog at phone width
+    expect(screen.getByText(CALC.clone_url, { selector: 'code' })).toHaveClass('break-all')
+    // a refused link is an alert with the API's words …
+    await userEvent.selectOptions(select, 'cobra')
+    await userEvent.click(screen.getByRole('button', { name: 'Link' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/already connected as 'other'/))
+    // … which does not outlive the form it describes
+    await userEvent.click(within(modes).getByRole('radio', { name: /Register as a new repository/ }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByTestId('github-connect-confirm')).toBeInTheDocument()
+  })
+
   it('the Connect screen opens the picker on ?installation= (the setup callback lands there)', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },

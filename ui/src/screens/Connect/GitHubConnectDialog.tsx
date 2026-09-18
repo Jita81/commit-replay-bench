@@ -271,7 +271,12 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
             <div role="radiogroup" aria-label="How to connect" className="grid gap-2 sm:grid-cols-2">
               {MODES.map((m) => (
                 <label key={m.id} className={`flex cursor-pointer items-start gap-2 rounded-[var(--radius-control)] border px-3 py-2 text-sm ${mode === m.id ? 'border-primary bg-primary-container' : 'border-border'}`}>
-                  <input type="radio" name="github-connect-mode" value={m.id} checked={mode === m.id} onChange={() => setMode(m.id)} className="mt-1" />
+                  <input type="radio" name="github-connect-mode" value={m.id} checked={mode === m.id} onChange={() => {
+                      setMode(m.id)
+                      // a failed attempt's alert describes the other form: clear it
+                      connect.reset()
+                      link.reset()
+                    }} className="mt-1" />
                   <span className="min-w-0">
                     <span className="block font-semibold">{m.title}</span>
                     <span className="block text-xs text-on-surface-muted">{m.note}</span>
@@ -282,7 +287,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
           )}
           {picked && mode === 'link' && (
             <div className="space-y-2 rounded-[var(--radius-control)] border border-border p-3" data-testid="github-link-existing">
-              <SelectField label="Existing repository" value={existing} onChange={(e) => setExisting(e.target.value)} hint={unlinked.length === 0 && allRepos.data ? 'Every repository already has a GitHub link.' : 'Only repositories with no GitHub link are listed.'}>
+              <SelectField label="Existing repository" value={existing} onChange={(e) => setExisting(e.target.value)} hint={allRepos.isPending ? 'Loading repositories…' : unlinked.length === 0 && allRepos.data ? 'Every repository already has a GitHub link.' : 'Only repositories with no GitHub link are listed.'}>
                 <option value="">— choose —</option>
                 {unlinked.map((r) => (
                   <option key={r.name} value={r.name}>
@@ -292,7 +297,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
               </SelectField>
               {allRepos.isError && <ErrorState compact error={allRepos.error} onRetry={() => void allRepos.refetch()} />}
               <p className="m-0 text-xs text-on-surface-muted">
-                The repository keeps its name and its measured evidence; its URL becomes <code>{picked.clone_url}</code>, cloned with a short-lived installation token. Language, runner and layout are not changed — edit them under Configuration if the fork differs. The link is recorded on the repository’s events.
+                The repository keeps its name and its measured evidence; its URL becomes <code className="break-all">{picked.clone_url}</code>, cloned with a short-lived installation token. Language, runner and layout are not changed — edit them under Configuration if the fork differs. The link is recorded on the repository’s events.
               </p>
             </div>
           )}
@@ -316,7 +321,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
                 ))}
               </SelectField>
               <p className="m-0 text-xs text-on-surface-muted sm:col-span-3">
-                Clones <code>{picked.clone_url}</code> with a short-lived installation token; default branch <code>{picked.default_branch}</code>. Source and test layout can be adjusted afterwards under Configuration.
+                Clones <code className="break-all">{picked.clone_url}</code> with a short-lived installation token; default branch <code>{picked.default_branch}</code>. Source and test layout can be adjusted afterwards under Configuration.
               </p>
             </div>
           )}

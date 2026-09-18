@@ -168,6 +168,16 @@ class PickerPage(BaseModel):
     has_more: bool
 
 
+#: GitHub's own grammar: a login is alphanumerics and hyphens, never leading or trailing;
+#: a repository name is ``[A-Za-z0-9_.-]`` with at least one character that is not a dot —
+#: so a dot segment (``.`` / ``..``) can be neither owner nor name. Defence in depth for the
+#: URL layer, which would collapse ``/repos/../rate_limit`` into a different endpoint under
+#: the installation's bearer; :meth:`GitHubApp.repository` refuses the same shapes itself.
+FULL_NAME_PATTERN = (
+    r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*$"
+)
+
+
 class ConnectRequest(BaseModel):
     """``POST /github/installations/{id}/connect`` — one repository the installation may
     see, plus the fields the operator confirmed (the rest come from the suggestion)."""
@@ -175,7 +185,7 @@ class ConnectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     full_name: str = Field(
-        min_length=3, max_length=200, pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        min_length=3, max_length=200, pattern=FULL_NAME_PATTERN
     )
     name: str | None = Field(default=None, min_length=1, max_length=64)
     language: str | None = Field(default=None, max_length=32)
@@ -197,7 +207,7 @@ class LinkRequest(BaseModel):
 
     installation_id: int = Field(ge=1)
     full_name: str = Field(
-        min_length=3, max_length=200, pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        min_length=3, max_length=200, pattern=FULL_NAME_PATTERN
     )
 
 
@@ -250,8 +260,10 @@ def _installation_or_404(db: DbDep, installation_id: int) -> GitHubInstallation:
 
 def _visible_repository(app: GitHubApp, installation_id: int, full_name: str) -> InstallationRepo:
     """The repository as the installation sees it — GitHub's 404 becomes the API's words
-    (select it in the app's repository access); an archived one is a 422. Shared by connect
-    and link so both refuse the same repositories the same way."""
+    (select it in the app's repository access); a 301 (renamed or transferred) is GitHub's
+    refusal, a 502 naming it; an answer that is not the repository asked for is refused by
+    :func:`_not_the_one_asked_for`; an archived one is a 422. Shared by connect and link so
+    both refuse the same repositories the same way."""
     try:
         gh = app.repository(installation_id, full_name)
     except GitHubAppError as exc:
@@ -261,10 +273,40 @@ def _visible_repository(app: GitHubApp, installation_id: int, full_name: str) ->
                 "not_found",
                 f"{full_name} is not visible to installation {installation_id} — select it in the app's repository access",
             ) from exc
+        if exc.status == 422:
+            # the client's own refusal of the name (a dot segment), or GitHub's: not a
+            # gateway fault, the input's
+            raise ApiError(422, "validation_error", exc.message) from exc
         raise _github_error(exc) from exc
+    not_it = _not_the_one_asked_for(gh, full_name)
+    if not_it is not None:
+        raise not_it
     if gh.archived:
         raise ApiError(422, "validation_error", f"{gh.full_name} is archived")
     return gh
+
+
+def _not_the_one_asked_for(gh: InstallationRepo, full_name: str) -> ApiError | None:
+    """GitHub's answer must BE the repository asked for: a record with no ``full_name`` or
+    ``clone_url`` (a body that is not a repository) is GitHub's fault (502); a different
+    ``full_name`` (a renamed or transferred repository answered under its new name) is the
+    operator's stale input (422, naming the new one). Without this a link would commit
+    ``url=""`` over a measured row and call it 200."""
+    if not gh.full_name or not gh.clone_url:
+        return ApiError(
+            502,
+            "github_error",
+            f"GitHub did not answer with a repository for {full_name}",
+            detail={"github_status": 200},
+        )
+    if gh.full_name.lower() != full_name.lower():
+        return ApiError(
+            422,
+            "validation_error",
+            f"{full_name} is now {gh.full_name} on GitHub — select it under its current name",
+            detail={"full_name": gh.full_name},
+        )
+    return None
 
 
 def _link_of(inst: GitHubInstallation, gh: InstallationRepo) -> dict[str, Any]:
@@ -584,6 +626,10 @@ def link_repository(
                 "url_before": url_before,
                 "url_after": config.url,
                 "previous_full_name": previous.get("full_name") or None,
+                # the same ``fields`` / ``diff`` shape ``repo.updated`` carries, so the
+                # Configuration tab's audit trail renders "Changed: url" with the diff
+                "fields": ["url"],
+                "diff": {"url": {"from": url_before, "to": config.url}},
             },
         )
         db.commit()

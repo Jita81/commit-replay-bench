@@ -10,7 +10,8 @@
  *               coloured. `InlineSelect` is the compact labelled select toolbars use
  *               (`RepoPicker`, filters).
  * How:          `useId()` for the id when none is given; one shared class string for the
- *               control; the error replaces the hint in the same slot.
+ *               control; the error replaces the hint in the same slot, and all three
+ *               stacked fields point `aria-describedby` at that slot (`<id>-desc`).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/components/RepoPicker.tsx (`InlineSelect`),
@@ -18,8 +19,9 @@
  *               and ui/src/screens/Runs/RunNewDialog.tsx (the largest forms),
  *               ui/e2e/walkthrough/support.ts (`field(scope, 'Label')` matches the `Label *`
  *               rendering exactly)
- * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx,
- *               ui/src/screens/Runs/RunNewDialog.test.tsx,
+ * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx (the `aria-describedby` wiring),
+ *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (a select's hint as its
+ *               accessible description), ui/src/screens/Runs/RunNewDialog.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe: labels and descriptions)
  * Touch when:   the required-marker rendering changes — update `field()` in
  *               ui/e2e/walkthrough/support.ts with it; never for a new repository.
@@ -83,10 +85,21 @@ export function SelectField({
         {label}
         {required && <span aria-hidden className="text-status-red"> *</span>}
       </label>
-      <select id={fid} required={required} aria-invalid={error ? true : undefined} className={`${control} h-10 ${className}`} {...rest}>
+      <select
+        id={fid}
+        required={required}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={hint || error ? `${fid}-desc` : undefined}
+        className={`${control} h-10 ${className}`}
+        {...rest}
+      >
         {children}
       </select>
-      {(hint || error) && <div className={`text-xs ${error ? 'text-status-red' : 'text-on-surface-muted'}`}>{error ?? hint}</div>}
+      {(hint || error) && (
+        <div id={`${fid}-desc`} className={`text-xs ${error ? 'text-status-red' : 'text-on-surface-muted'}`}>
+          {error ?? hint}
+        </div>
+      )}
     </div>
   )
 }
@@ -101,8 +114,19 @@ export function TextArea({ label, hint, error, required, id, className = '', ...
         {label}
         {required && <span aria-hidden className="text-status-red"> *</span>}
       </label>
-      <textarea id={fid} required={required} aria-invalid={error ? true : undefined} className={`${control} py-2 ${className}`} {...rest} />
-      {(hint || error) && <div className={`text-xs ${error ? 'text-status-red' : 'text-on-surface-muted'}`}>{error ?? hint}</div>}
+      <textarea
+        id={fid}
+        required={required}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={hint || error ? `${fid}-desc` : undefined}
+        className={`${control} py-2 ${className}`}
+        {...rest}
+      />
+      {(hint || error) && (
+        <div id={`${fid}-desc`} className={`text-xs ${error ? 'text-status-red' : 'text-on-surface-muted'}`}>
+          {error ?? hint}
+        </div>
+      )}
     </div>
   )
 }

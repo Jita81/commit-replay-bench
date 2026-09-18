@@ -121,6 +121,10 @@ class FakeGitHub:
         self.calls: list[tuple[str, str, dict[str, str]]] = []
         self.tokens_minted = 0
         self.installations: list[dict[str, Any]] = [INSTALLATION, INSTALLATION_RW]
+        self.moved: set[str] = set()  # lower-cased ``owner/name`` that answer 301
+        # lower-cased ``owner/name`` → the ``owner/name`` GitHub answers 200 with instead
+        # (a redirect the transport followed, or a transfer answered under the new owner)
+        self.answered_as: dict[str, str] = {}
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -160,6 +164,15 @@ class FakeGitHub:
         if path.startswith("/repos/"):
             assert bearer.startswith("ghs_token_")
             full = path.removeprefix("/repos/")
+            if full.lower() in self.moved:
+                # a renamed or transferred repository: GitHub answers 301 (the client never
+                # follows it) with a body that is not a repository
+                return httpx.Response(
+                    301,
+                    json={"message": "Moved Permanently", "url": f"/repositories/{full}"},
+                    headers={"Location": f"https://api.github.invalid/repositories/{full}"},
+                )
+            full = self.answered_as.get(full.lower(), full)
             for r in REPOS["repositories"]:
                 if r["full_name"].lower() == full.lower():
                     return httpx.Response(200, json=r)
@@ -578,6 +591,15 @@ def test_link_attaches_an_installation_repository_to_an_existing_row(
                 "url_before": "https://github.com/spf13/cobra.git",
                 "url_after": "https://github.com/acme/Calc.git",
                 "previous_full_name": None,
+                # the ``repo.updated`` shape too, so the Configuration tab's audit trail
+                # renders "Changed: url" with the before/after diff
+                "fields": ["url"],
+                "diff": {
+                    "url": {
+                        "from": "https://github.com/spf13/cobra.git",
+                        "to": "https://github.com/acme/Calc.git",
+                    }
+                },
             }
             assert "ghs_" not in json.dumps(ev.payload_json)
         # the repo's own event trail shows the seam, newest first
@@ -702,6 +724,100 @@ def test_link_refusals_and_the_relink_seam(tmp_path: Path, keypair: tuple[str, A
         # a viewer may not link
         login(env.client, "viewer")
         assert env.post("/repos/cobra/github-link", json=body).status_code == 403
+
+
+def test_link_refuses_an_answer_that_is_not_the_repository_asked_for(
+    tmp_path: Path, keypair: tuple[str, Any]
+) -> None:
+    """GitHub's answer must BE the repository asked for, or nothing is written. A renamed or
+    transferred repository answers 301 (a body that is not a repository): 502 naming it,
+    not a 200 that commits ``url=""`` over a measured row. A dot segment that passes a
+    loose pattern would be collapsed by the URL layer (``/repos/../rate_limit`` →
+    ``GET /rate_limit`` under the installation's bearer): refused before any GitHub call. A
+    200 under a different ``full_name`` (a followed redirect) is a 422 naming the new one.
+    The guards sit on the path connect shares, so connect is cured the same way."""
+    pem, public = keypair
+    with make_env(tmp_path, role="operator") as env:
+        gh = _wire(env, pem, public)
+        assert env.post("/github/installations/sync").status_code == 200
+        _seed_repo(env)
+        untouched = {"url": "https://github.com/spf13/cobra.git", "github_full_name": None}
+
+        def row_is_untouched() -> None:
+            with env.factory() as s:
+                row = s.get(Repo, "cobra")
+                assert row.url == untouched["url"]
+                assert row.github_full_name is None and "github" not in row.config_json
+                linked = select(Event).where(Event.action == "repo.github_linked")
+                assert s.execute(linked).first() is None
+
+        # a renamed repository: GitHub's 301 is a refusal, in GitHub's words
+        gh.moved.add("acme/renamed")
+        r = env.post(
+            "/repos/cobra/github-link", json={"installation_id": 77, "full_name": "acme/renamed"}
+        )
+        assert r.status_code == 502, r.text
+        assert envelope(r)["code"] == "github_error"
+        assert "Moved Permanently" in envelope(r)["message"]
+        assert envelope(r)["detail"]["github_status"] == 301
+        row_is_untouched()
+        # connect shares the guard
+        r = env.post("/github/installations/77/connect", json={"full_name": "acme/renamed"})
+        assert r.status_code == 502 and envelope(r)["detail"]["github_status"] == 301
+        # a dot segment never reaches GitHub — the pattern refuses it (422) and the client
+        # would refuse it too; no request outside ``/repos/`` was made under the bearer
+        before = len(gh.calls)
+        for bad in ("../rate_limit", "acme/..", "./meta", "acme/.", "-acme/x", "acme-/x"):
+            r = env.post(
+                "/repos/cobra/github-link", json={"installation_id": 77, "full_name": bad}
+            )
+            assert r.status_code == 422, (bad, r.text)
+            r = env.post("/github/installations/77/connect", json={"full_name": bad})
+            assert r.status_code == 422, (bad, r.text)
+        assert gh.calls[before:] == []
+        assert all(path.startswith(("/app/", "/repos/", "/installation/")) for _, path, _ in gh.calls)
+        row_is_untouched()
+        # the client itself refuses a dot segment even without the pattern in front of it
+        app = GitHubApp(settings_for(pem), httpx.Client(transport=gh.transport()))
+        for bad in ("../rate_limit", "acme/..", "a/b/c"):
+            with pytest.raises(GitHubAppError) as ei:
+                app.repository(77, bad)
+            assert ei.value.status == 422
+        assert not any(path == "/rate_limit" for _, path, _ in gh.calls)
+        # a 200 that names a DIFFERENT repository (a redirect the transport followed, or a
+        # transfer answered under the new owner) is the operator's stale input: 422 naming it
+        REPOS["repositories"].append(
+            {
+                "full_name": "newowner/Calc",
+                "name": "Calc",
+                "html_url": "https://github.com/newowner/Calc",
+                "clone_url": "https://github.com/newowner/Calc.git",
+                "default_branch": "main",
+                "private": False,
+                "language": "Go",
+                "archived": False,
+            }
+        )
+        gh.answered_as["acme/moved"] = "newowner/Calc"
+        try:
+            r = env.post(
+                "/repos/cobra/github-link", json={"installation_id": 77, "full_name": "acme/moved"}
+            )
+            assert r.status_code == 422, r.text
+            assert envelope(r)["code"] == "validation_error"
+            assert "newowner/Calc" in envelope(r)["message"]
+            assert envelope(r)["detail"]["full_name"] == "newowner/Calc"
+            row_is_untouched()
+            # an answer with no clone URL at all is GitHub's fault
+            REPOS["repositories"][-1]["clone_url"] = ""
+            r = env.post(
+                "/repos/cobra/github-link",
+                json={"installation_id": 77, "full_name": "newowner/Calc"},
+            )
+            assert r.status_code == 502 and envelope(r)["code"] == "github_error"
+            row_is_untouched()
+        finally:
+            REPOS["repositories"].pop()
 
 
 def test_link_race_is_decided_by_the_unique_index(

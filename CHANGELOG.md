@@ -20,7 +20,21 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   `url_before` / `url_after` / `previous_full_name` — a visible seam on the events table,
   not a silent edit. 409 when the GitHub repository is linked to a different row (the unique
   index decides a race); a viewer may not link. The worker's host rule is unchanged: a token
-  goes only to an https remote on the app's own host (CWE-201).
+  goes only to an https remote on the app's own host (CWE-201). The event also carries the
+  `repo.updated` shape (`fields: ["url"]`, `diff: {url: {from, to}}`) so the Configuration
+  tab's audit trail renders "Changed: url" with the before/after.
+- **Written only when GitHub's answer IS the repository asked for** (connect and link share
+  the guard): the client now treats GitHub's 3xx as a refusal (a renamed or transferred
+  repository's 301 is a 502 naming it — it never follows redirects, and the redirect body
+  read as an EMPTY record before), refuses a dot segment as owner or name (`../rate_limit`
+  would be collapsed by the URL layer into `GET /rate_limit` under the installation's
+  bearer) — the request bodies carry GitHub's own `owner/name` grammar — and refuses a 200
+  whose `full_name` is not the one asked for (422 naming the current name) or that has no
+  `clone_url` (502). Before this a renamed repository linked as `url=""` with a 200.
+- **Connect dialog polish:** the link-mode select says *Loading repositories…* while the
+  list loads; a failed attempt's alert clears when the mode is switched; a long clone URL
+  wraps at phone width. `SelectField` and `TextArea` now describe their hint / error to the
+  control through `aria-describedby` as `TextField` always did.
 - **Connect dialog:** once a repository is picked, two ways — *Register as a new repository*
   (the form as before) or *Link to an existing repository* (a select of the repositories
   with no GitHub link). `GET /repos` rows carry `github_full_name` so the select can filter.

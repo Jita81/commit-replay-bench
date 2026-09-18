@@ -6,7 +6,7 @@
  * ----------
  * What it is:   The Configuration tab of the repo page: the form with Save / Discard / Run
  *               probe, the inline probe result, the stored config as returned, and the audit
- *               trail of `repo.created` / `repo.updated` events.
+ *               trail of `repo.created` / `repo.updated` / `repo.github_linked` events.
  * What it does: Sends ONLY the changed fields to `PUT /repos/{name}` (diffed against the last
  *               state the SERVER confirmed, never a stale prop), shows a toast naming what was
  *               sent, and offers "Run probe now" so the new configuration is proven rather
@@ -24,9 +24,10 @@
  *               ui/src/screens/Repos/repoConfigModel.ts (diff and validation),
  *               ui/src/screens/Repos/RepoConfigForm.tsx (the fields), ui/src/api/hooks.ts
  *               (`useProbeRepo`, `useRun`), ui/src/screens/Repos/RepoDetail.tsx (the host tab),
- *               src/crb/server/routes/repos.py (the PUT, the events, the probe)
+ *               src/crb/server/routes/repos.py (the PUT, the events, the probe),
+ *               src/crb/server/routes/github.py (the `repo.github_linked` event the trail renders)
  * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx, ui/e2e/walkthrough/repo-config.spec.ts
- * Touch when:   the audit event payload changes (`system/repo.updated` in docs/API.md) —
+ * Touch when:   the audit event payload changes (`system/repo.updated` / `repo.github_linked` in docs/API.md) —
  *               update `fieldsOf`; never for a new repository (this IS the surface that
  *               onboards one).
  */
@@ -99,7 +100,7 @@ function ProbeResult({ runId, repo }: { runId: string; repo: RepoDetail }) {
   )
 }
 
-/** The changed field names of a `repo.updated` event (`payload.fields`, else the diff's keys). */
+/** The changed field names of a `repo.updated` / `repo.github_linked` event (`payload.fields`, else the diff's keys). */
 function fieldsOf(ev: StepEvent): string[] {
   const p = ev.payload
   if (Array.isArray(p.fields)) return p.fields.map(String)
@@ -116,7 +117,7 @@ function AuditTrail({ name }: { name: string }) {
         <QueryBoundary query={events} loading="Loading the audit trail…">
           {(page) =>
             page.items.length === 0 ? (
-              <EmptyState compact title="No configuration events" reason="A repo registered through the API carries a repo.created event and one repo.updated event per save, each with the redacted field diff. This repo has none on record." />
+              <EmptyState compact title="No configuration events" reason="A repo registered through the API carries a repo.created event, one repo.updated event per save and a repo.github_linked event per GitHub link, each with the redacted field diff. This repo has none on record." />
             ) : (
               <ol className="m-0 list-none space-y-2 p-0" data-testid="repo-config-audit-list">
                 {page.items.map((ev) => {
