@@ -8,6 +8,25 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-18 — link a repository you already measured to the GitHub App
+
+- **`POST /repos/{name}/github-link`** `{installation_id, full_name}` (operator) attaches an
+  EXISTING crb repository to one of an installation's repositories: the row keeps its name —
+  and so its ledger rows, map and sign-offs — while its `url` becomes the https clone URL,
+  `github_full_name` the constrained identity and `config_json.github` the link connect
+  writes. Language, runner, layout and belt scope are not touched. The case it exists for:
+  a repository measured before the app existed, or whose history now lives on a fork
+  (`cobra` → `Jita81/cobra`, B-1b). Recorded as a `repo.github_linked` event with
+  `url_before` / `url_after` / `previous_full_name` — a visible seam on the events table,
+  not a silent edit. 409 when the GitHub repository is linked to a different row (the unique
+  index decides a race); a viewer may not link. The worker's host rule is unchanged: a token
+  goes only to an https remote on the app's own host (CWE-201).
+- **Connect dialog:** once a repository is picked, two ways — *Register as a new repository*
+  (the form as before) or *Link to an existing repository* (a select of the repositories
+  with no GitHub link). `GET /repos` rows carry `github_full_name` so the select can filter.
+- Connect and link both catch the unique-index refusal at the event's autoflush as well as
+  at commit (a race answered 409, never 500).
+
 ### 2026-09-17 — the factory is the point (DL-044): route before the spend, a backlog as a person writes it, the journey re-centred
 
 - **DL-044** — the factory and the self-improvement loop are the product; connect → measure →

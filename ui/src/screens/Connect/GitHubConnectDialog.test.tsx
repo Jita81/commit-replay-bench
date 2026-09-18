@@ -10,8 +10,11 @@
  *               disables it; that picking pre-fills name / language / runner; that a
  *               repository without a language asks for one and the Connect button waits;
  *               that Connect posts `{full_name, name, language, runner}` to the right
- *               installation and hands the new name back; and that the Connect screen opens
- *               the picker on `?installation=` (the setup callback's landing).
+ *               installation and hands the new name back; that link mode lists only the
+ *               repositories with no GitHub link, posts `{installation_id, full_name}` to
+ *               `/repos/{name}/github-link` and selects that repository; and that the
+ *               Connect screen opens the picker on `?installation=` (the setup callback's
+ *               landing).
  * How:          `mockApi` + `renderApp`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0014-github-app-is-the-connection.md
@@ -84,6 +87,40 @@ describe('GitHubConnectDialog', () => {
     const post = calls.find((c) => c.method === 'POST')!
     expect(post.path).toBe('/github/installations/77/connect')
     expect(JSON.parse(String(post.init?.body))).toEqual({ full_name: 'acme/Calc', name: 'acme-calc', language: 'python', runner: 'pytest' })
+  })
+
+  it('link mode lists the repositories without a GitHub link, posts the link and selects the repository', async () => {
+    const repo = (name: string, github_full_name: string | null) => ({ name, language: 'go', runner: 'go', url: `https://example.org/${name}.git`, clone_path: '', probe: { status: 'not_probed', run_id: null, checked: null, detail: '' }, task_counts: { total: 0, standard: 0, hard: 0, gold_clean: 0, gold_failed: 0, unchecked: 0 }, last_run: null, created: 'x', updated: 'x', github_full_name })
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': APP,
+      'GET /github/installations/77/repositories': PAGE,
+      'GET /repos': { items: [repo('cobra', null), repo('acme-done', 'acme/done'), repo('alpha', null)], total: 3, limit: 500, offset: 0 },
+      'POST /repos/cobra/github-link': () => json({ ...repo('cobra', 'acme/calc'), url: CALC.clone_url, config: {} }, 200),
+    })
+    const onConnected = vi.fn()
+    renderApp(<GitHubConnectDialog open onClose={() => undefined} onConnected={onConnected} />)
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Repositories' })).toBeInTheDocument())
+    // the two ways appear only once a repository is picked
+    expect(screen.queryByRole('radiogroup', { name: 'How to connect' })).not.toBeInTheDocument()
+    await userEvent.click(within(screen.getByRole('list', { name: 'Repositories' })).getByRole('button', { name: /acme\/Calc/ }))
+    const modes = screen.getByRole('radiogroup', { name: 'How to connect' })
+    expect(within(modes).getByRole('radio', { name: /Register as a new repository/ })).toBeChecked()
+    await userEvent.click(within(modes).getByRole('radio', { name: /Link to an existing repository/ }))
+    // the new-repository form is gone; the select lists only the rows without a link
+    expect(screen.queryByTestId('github-connect-confirm')).not.toBeInTheDocument()
+    const select = screen.getByLabelText(/Existing repository/)
+    const names = within(select).getAllByRole('option').map((o) => o.textContent)
+    expect(names).toEqual(['— choose —', 'cobra', 'alpha'])
+    expect(screen.getByText(/keeps its name and its measured evidence/)).toBeInTheDocument()
+    // nothing chosen → the button waits
+    expect(screen.getByRole('button', { name: 'Link' })).toBeDisabled()
+    await userEvent.selectOptions(select, 'cobra')
+    await userEvent.click(screen.getByRole('button', { name: 'Link' }))
+    await waitFor(() => expect(onConnected).toHaveBeenCalledWith('cobra'))
+    const post = calls.find((c) => c.method === 'POST')!
+    expect(post.path).toBe('/repos/cobra/github-link')
+    expect(JSON.parse(String(post.init?.body))).toEqual({ installation_id: 77, full_name: 'acme/Calc' })
   })
 
   it('the Connect screen opens the picker on ?installation= (the setup callback lands there)', async () => {

@@ -5,28 +5,36 @@
  * ----------
  * What it is:   The enterprise way onto the Connect walk: choose an installation (the org
  *               that installed the app, and what it may see), search its repositories, pick
- *               one, confirm the pre-filled name / language / runner, connect. Where the
- *               app is not configured, the dialog says what an admin does instead and
+ *               one, then either register it as a NEW crb repository (confirm the pre-filled
+ *               name / language / runner) or LINK it to an existing one (a repository
+ *               measured before the app existed, or whose history now lives on a fork —
+ *               it keeps its name and its evidence; its URL becomes the clone URL). Where
+ *               the app is not configured, the dialog says what an admin does instead and
  *               offers the URL path.
  * What it does: Makes "connect a repository" the org-install → repository-selection flow
  *               every comparable product uses (docs/GITHUB-APP.md, ADR-0014) without asking
  *               anyone for a token: the deployment's app mints its own. Repositories already
  *               connected are marked and cannot be connected twice; a repository GitHub
- *               reports no language for asks for one; the operator role gates the act, as
- *               the API does.
+ *               reports no language for asks for one; the link select offers only rows with
+ *               no GitHub link; the operator role gates both acts, as the API does.
  * How:          `useGitHubApp` (configured? installations?), `useSyncGitHubInstallations`,
- *               `useGitHubRepos(installation, q, page)`, `useConnectGitHubRepo` → on success
- *               `onConnected(name)` (the Connect screen navigates to the walk).
+ *               `useGitHubRepos(installation, q, page)`, then `useConnectGitHubRepo` (new) or
+ *               `useLinkRepoToGitHub` (existing, over `useAllRepos` filtered to
+ *               `github_full_name === null`) → on success `onConnected(name)` (the Connect
+ *               screen navigates to the walk).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0014-github-app-is-the-connection.md
- * Works with:   ui/src/screens/Connect/ConnectPage.tsx (opens it), ui/src/api/hooks.ts,
+ * Works with:   ui/src/screens/Connect/ConnectPage.tsx (opens it), ui/src/api/hooks.ts
+ *               (`useConnectGitHubRepo`, `useLinkRepoToGitHub`, `useAllRepos`),
+ *               ui/src/api/types.ts (`RepoSummary.github_full_name`),
  *               src/crb/server/routes/github.py (the routes), docs/GITHUB-APP.md
  * Tested by:    ui/src/screens/Connect/GitHubConnectDialog.test.tsx
- * Touch when:   the connect body grows a field (mirror `ConnectRequest`).
+ * Touch when:   the connect body grows a field (mirror `ConnectRequest`); the link body
+ *               changes (mirror `LinkRequest`).
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { useConnectGitHubRepo, useGitHubApp, useGitHubRepos, useSyncGitHubInstallations } from '../../api/hooks'
+import { useAllRepos, useConnectGitHubRepo, useGitHubApp, useGitHubRepos, useLinkRepoToGitHub, useSyncGitHubInstallations } from '../../api/hooks'
 import { LANGUAGES, RUNNERS, type GitHubPickerRepo, type Language, type Runner } from '../../api/types'
 import { Button } from '../../components/Button'
 import { Dialog } from '../../components/Dialog'
@@ -35,6 +43,13 @@ import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextField } from '../../components/Field'
 import { Pill } from '../../components/Pill'
 import { useAuth } from '../../lib/auth'
+
+type ConnectMode = 'new' | 'link'
+
+const MODES: ReadonlyArray<{ id: ConnectMode; title: string; note: string }> = [
+  { id: 'new', title: 'Register as a new repository', note: 'A new crb repository, named from the suggestion; its evidence starts here.' },
+  { id: 'link', title: 'Link to an existing repository', note: 'A repository measured before the app existed, or whose history now lives on this fork.' },
+]
 
 interface Props {
   open: boolean
@@ -54,6 +69,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
   const app = useGitHubApp()
   const sync = useSyncGitHubInstallations()
   const connect = useConnectGitHubRepo()
+  const link = useLinkRepoToGitHub()
   const [installation, setInstallation] = useState<number>(initialInstallation ?? 0)
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
@@ -61,6 +77,12 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
   const [name, setName] = useState('')
   const [language, setLanguage] = useState<Language | ''>('')
   const [runner, setRunner] = useState<Runner | ''>('')
+  // 'new' = register a new crb repository (today's form); 'link' = attach the picked GitHub
+  // repository to a repository that already exists (it keeps its name and its evidence)
+  const [mode, setMode] = useState<ConnectMode>('new')
+  const [existing, setExisting] = useState('')
+  const allRepos = useAllRepos()
+  const unlinked = useMemo(() => (allRepos.data?.items ?? []).filter((r) => !r.github_full_name), [allRepos.data])
 
   const installations = useMemo(() => (app.data?.installations ?? []).filter((i) => !i.suspended), [app.data])
   // the selected installation is always one of the ACTIVE options: a preselected id that is
@@ -76,6 +98,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
     setName('')
     setLanguage('')
     setRunner('')
+    setExisting('')
     setPage(1)
   }, [installation, installations, initialInstallation])
   const landedOnRecord = !initialInstallation || installations.some((i) => i.id === initialInstallation)
@@ -94,12 +117,20 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
     setRunner((r.suggested.runner || '') as Runner | '')
   }
   const submit = () => {
-    if (!picked || !language) return
+    if (!picked) return
+    if (mode === 'link') {
+      if (!existing) return
+      link.mutate({ name: existing, installation, full_name: picked.full_name }, { onSuccess: (repo) => onConnected(repo.name) })
+      return
+    }
+    if (!language) return
     connect.mutate(
       { installation, body: { full_name: picked.full_name, name: name.trim() || undefined, language, runner: runner || undefined } },
       { onSuccess: (repo) => onConnected(repo.name) },
     )
   }
+  const ready = mode === 'link' ? Boolean(existing) : Boolean(language)
+  const pending = connect.isPending || link.isPending
 
   const current = installations.find((i) => i.id === installation)
 
@@ -122,8 +153,8 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
               </Button>
             )}
             <Button onClick={onClose}>Cancel</Button>
-            <Button variant="filled" disabled={!picked || !language || !can('operator') || connect.isPending} onClick={submit}>
-              Connect
+            <Button variant="filled" disabled={!picked || !ready || !can('operator') || pending} onClick={submit}>
+              {mode === 'link' ? 'Link' : 'Connect'}
             </Button>
           </>
         )
@@ -237,6 +268,35 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
             </>
           )}
           {picked && (
+            <div role="radiogroup" aria-label="How to connect" className="grid gap-2 sm:grid-cols-2">
+              {MODES.map((m) => (
+                <label key={m.id} className={`flex cursor-pointer items-start gap-2 rounded-[var(--radius-control)] border px-3 py-2 text-sm ${mode === m.id ? 'border-primary bg-primary-container' : 'border-border'}`}>
+                  <input type="radio" name="github-connect-mode" value={m.id} checked={mode === m.id} onChange={() => setMode(m.id)} className="mt-1" />
+                  <span className="min-w-0">
+                    <span className="block font-semibold">{m.title}</span>
+                    <span className="block text-xs text-on-surface-muted">{m.note}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          {picked && mode === 'link' && (
+            <div className="space-y-2 rounded-[var(--radius-control)] border border-border p-3" data-testid="github-link-existing">
+              <SelectField label="Existing repository" value={existing} onChange={(e) => setExisting(e.target.value)} hint={unlinked.length === 0 && allRepos.data ? 'Every repository already has a GitHub link.' : 'Only repositories with no GitHub link are listed.'}>
+                <option value="">— choose —</option>
+                {unlinked.map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name}
+                  </option>
+                ))}
+              </SelectField>
+              {allRepos.isError && <ErrorState compact error={allRepos.error} onRetry={() => void allRepos.refetch()} />}
+              <p className="m-0 text-xs text-on-surface-muted">
+                The repository keeps its name and its measured evidence; its URL becomes <code>{picked.clone_url}</code>, cloned with a short-lived installation token. Language, runner and layout are not changed — edit them under Configuration if the fork differs. The link is recorded on the repository’s events.
+              </p>
+            </div>
+          )}
+          {picked && mode === 'new' && (
             <div className="grid gap-3 rounded-[var(--radius-control)] border border-border p-3 sm:grid-cols-3" data-testid="github-connect-confirm">
               <TextField label="Name in crb" value={name} onChange={(e) => setName(e.target.value)} hint="lowercase; the ledger key" />
               <SelectField label="Language" value={language} onChange={(e) => setLanguage(e.target.value as Language | '')} error={language ? undefined : 'GitHub reports no language — choose one'}>
@@ -261,6 +321,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
             </div>
           )}
           {connect.isError && <ErrorState compact error={connect.error} />}
+          {link.isError && <ErrorState compact error={link.error} />}
           {!can('operator') && <p className="m-0 text-xs text-on-surface-muted">Connecting needs the operator role.</p>}
         </div>
       )}
