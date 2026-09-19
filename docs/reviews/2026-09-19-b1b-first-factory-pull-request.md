@@ -5,6 +5,16 @@ backlog to a branch and a pull request, under the same governance as measurement
 before any build, the four belts and the lint belt, the route gate on the signed map, an
 independent review — with every step on the evidence chain? And what does it cost?
 
+**Claims in this record.** Everything quoted from the run — the belts, the costs, the turns,
+the token counts, the durations, the route line, the ledger count — is **[measured — run
+`e9acd89c…`, apparatus 2.2, `routing.v1`, `claude_code / claude-sonnet-5`, sighted, local
+executor; n = 2 items, 3 builds; read from `/runs/{id}`, `/factory/cobra/evidence` and the
+three evidence packs named below]**. Two items is a demonstration, not a rate: no interval is
+quoted for the factory itself, and none should be read into "2 of 2". The two rules that
+follow from the findings are **[hypothesis]** until the fix PRs land with their tests; the
+backlog file and the two Go tests beside this record are the *registered inputs* the ledger's
+hashes name — they are kept byte-for-byte and carry no claim tags because they are not claims.
+
 **Answer:** yes, twice, for $0.69 in total, on a development posture. Two pull requests were
 opened on the fork [Jita81/cobra](https://github.com/Jita81/cobra) (`main` = `adbc881`,
 byte-identical to `spf13/cobra` that day) — nothing was pushed to `main`, nothing to
@@ -83,12 +93,22 @@ the name-match the adversarial pass had shown would slip through a weaker test.
    (26 or 27 both route *deliver*) but it is circular at the margin: the map that licenses a
    delivery should be the map as it stood before this attempt. Fix: evaluate the route once, at
    readiness, from rows that precede the run, and stamp that decision on the item.
-3. **The reviewer was right about the oracle.** Our adversarial pass had attacked the test
-   against the *unfixed* code; the reviewer attacked it against the *delivered* code and found
-   that deleting the `if cmd.DisableFlagParsing { helpArgs = flags }` guard still passes — the
-   item's own caveat ("DisableFlagParsing edge … not asserted") made real. The loop's answer
-   (strengthen the test, rebuild) is the right one; finding 1 is what stopped it landing. A
-   human merging PR #1 should know the guard is untested.
+3. **The reviewer was right about the oracle — and the rebuild made it worse.** Our
+   adversarial pass had attacked the test against the *unfixed* code; the reviewer attacked it
+   against the *delivered* code and found that deleting the `if cmd.DisableFlagParsing {
+   helpArgs = flags }` guard still passes — the item's own caveat ("DisableFlagParsing edge …
+   not asserted") made real. A second gap, found in review of this record: `help sub --count 3
+   arg1` through the built-in `help` command is not asserted either, so a fix that forwards the
+   help command's remaining arguments raw (which is what build 1 does) passes. The rework then
+   showed the sharper defect: this deployment has **no test-author rung**, so the loop rebuilt
+   against the *same* oracle, and the builder found another way to pass it — a 6-line change
+   that drops the `DisableFlagParsing` guard, a regression nothing tests. Finding 1 is the only
+   reason that build is not on PR #1. Rule (in the fix PR): a `weak_oracle` verdict must never
+   trigger a rebuild against an unchanged oracle — without a test author the item stops and
+   routes to a human; with one, the oracle's hash must change first. PR #1 is **held**, with
+   this on the PR; the strengthened oracle (both cases) goes in as a superseding item and the
+   factory delivers the build that passes it. The frozen test file beside this record is not
+   edited: it is what hash `616342ad…` names.
 4. **"Run the factory" from the UI posted no builder** (HTTP 422) — known from the journeys
    audit (J-FAC-1); the run was queued through the product's API with the builder the Measure
    page derives. The fix is on the journeys branch.
