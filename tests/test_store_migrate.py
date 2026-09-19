@@ -500,15 +500,28 @@ def test_cli_default_url_comes_from_environment(
 
 
 def test_module_is_runnable_as_main(backend: Backend) -> None:
+    import os
     import subprocess
     import sys
 
+    # The child must import the SAME ``crb`` this test did (pytest's ``pythonpath = ["src"]``
+    # does not reach a subprocess): with an editable install of another checkout in the
+    # venv, ``python -m`` would migrate to THAT tree's head and this test would fail — or
+    # pass — for a tree it never ran. Point it at the src this module came from.
+    src_dir = str(Path(migrate.__file__).resolve().parents[2])
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join([src_dir, os.environ.get("PYTHONPATH", "")]).rstrip(
+            os.pathsep
+        ),
+    }
     r = subprocess.run(
         [sys.executable, "-m", "crb.store.migrate", "check", "--url", backend.url],
         capture_output=True,
         text=True,
         check=False,
         timeout=120,
+        env=env,
     )
     assert r.returncode == 1 and "pending" in r.stdout, r.stderr
     r = subprocess.run(
@@ -517,6 +530,7 @@ def test_module_is_runnable_as_main(backend: Backend) -> None:
         text=True,
         check=False,
         timeout=120,
+        env=env,
     )
     assert r.returncode == 0, r.stderr
     assert migrate.check(backend.url) is True
