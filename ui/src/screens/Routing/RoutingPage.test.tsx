@@ -21,7 +21,8 @@
  * Touch when:   a reason code or policy threshold is added — extend the fixture and the
  *               rule-text assertion.
  */
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import type { ControlsVerdict, RouteDecisionWithControls, RoutesWithControls } from '../Capability/contract'
@@ -129,5 +130,48 @@ describe('RoutingPage — reason codes, the controls verdict and the split (A2)'
     // model_ci_* from the fixture default: 0.835–0.987 on 40; the third serves none)
     expect(models.some((t) => t?.includes('model 67%') && t.includes('(2/3'))).toBe(true)
     expect(models.some((t) => t?.includes('model 95%') && t.includes('[84%–99%]'))).toBe(true)
+  })
+
+  it('a reason code opens its sentence inline — a button, not a hover title (J-HEL-15)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 },
+      'GET /routes': ROUTES_BODY,
+    })
+    renderApp(<RoutingPage />, { route: '/routing?repo=alpha' })
+    await waitFor(() => expect(screen.getAllByTestId('reason-code').length).toBe(2))
+    const code = screen.getAllByTestId('reason-code').find((c) => c.textContent === 'n_below_min')!
+    expect(code.getAttribute('title')).toBeNull()
+    const button = code.closest('button')!
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('not enough evidence (n below the bar)')).toBeNull()
+    await userEvent.click(button)
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    const note = document.getElementById(button.getAttribute('aria-controls')!)!
+    expect(note.textContent).toContain('not enough evidence (n below the bar)')
+    expect(within(note).getByRole('link', { name: 'glossary' })).toHaveAttribute('href', '/help#reason_code')
+    await userEvent.keyboard('{Escape}')
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('empty states: no repo sends every role to Connection; no decisions offers the run only to an operator (J-FAC-12)', async () => {
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /repos': { items: [], total: 0, limit: 50, offset: 0 } })
+    const idle = renderApp(<RoutingPage />, { route: '/routing' })
+    expect(await screen.findByRole('link', { name: 'Connect a repository' })).toHaveAttribute('href', '/connect')
+    idle.unmount()
+    vi.unstubAllGlobals()
+
+    const none: RoutesWithControls = { ...ROUTES_BODY, decisions: [] }
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 }, 'GET /routes': none })
+    const viewer = renderApp(<RoutingPage />, { route: '/routing?repo=alpha' })
+    expect(await screen.findByText('No decisions yet')).toBeInTheDocument()
+    expect(screen.getByText(/an operator starts a replay run/)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Start a replay run' })).toBeNull()
+    viewer.unmount()
+    vi.unstubAllGlobals()
+
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'operator' }, 'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 }, 'GET /routes': none })
+    renderApp(<RoutingPage />, { route: '/routing?repo=alpha' })
+    expect(await screen.findByRole('link', { name: 'Start a replay run' })).toHaveAttribute('href', '/runs?repo=alpha&new=replay')
   })
 })

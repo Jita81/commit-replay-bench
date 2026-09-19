@@ -18,11 +18,13 @@
  * Works with:   ui/src/api/hooks.ts (`useLedgerVerify`, `useGrades`), ui/src/api/types.ts
  *               (`GradeRow`, `LedgerVerify`, `beltsOf`), ui/src/components/GateBanner.tsx (the
  *               gate), ui/src/components/BeltPills.tsx and ui/src/components/Provenance.tsx
- *               (per row), src/crb/server/routes/ledger.py (verify and export),
- *               src/crb/server/routes/grades.py (the rows, served column-by-column)
- * Tested by:    ui/e2e/walkthrough/05-replay-fake.spec.ts (gate OPEN with false-Q1 = 0, rows
- *               listed, the JSONL export verifies with `crb ledger verify`),
- *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ *               (per row), ui/src/components/Help.tsx (`Term` — clean, sighted and blind open
+ *               their definitions beside the filters), src/crb/server/routes/ledger.py (verify
+ *               and export), src/crb/server/routes/grades.py (the rows, served column-by-column)
+ * Tested by:    ui/src/screens/Ledger/LedgerPage.test.tsx (the abstract export's sentence per
+ *               role, the filter terms), ui/e2e/walkthrough/05-replay-fake.spec.ts (gate OPEN
+ *               with false-Q1 = 0, rows listed, the JSONL export verifies with
+ *               `crb ledger verify`), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   a filter is added to `GET /grades` (docs/API.md) — add it to `FILTER_KEYS`
  *               and `GradeListParams` in ui/src/api/types.ts; never for a new repository.
  * Claims:       A verified chain proves the rows were not edited, reordered or removed — not
@@ -41,6 +43,7 @@ import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
 import { GateBanner } from '../../components/GateBanner'
 import { InlineSelect } from '../../components/Field'
+import { Term } from '../../components/Help'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
@@ -117,7 +120,7 @@ export function LedgerPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Ledger"
+        eyebrow="Instrument · Ledger"
         title="Ledger"
         purpose="Every graded trial, append-only and hash-chained. Verify proves nothing was edited, reordered or removed; false-Q1 total is the number everything else defends."
         actions={
@@ -130,13 +133,18 @@ export function LedgerPage() {
               Export CSV
             </AnchorButton>
             {can('operator') && (
-              <AnchorButton size="sm" href={apiUrl('/ledger/export/abstract')} download title="Abstract cells only — no code, no ids (federated, k-anonymous)">
+              <AnchorButton size="sm" href={apiUrl('/ledger/export/abstract')} download aria-describedby="abstract-export-note">
                 Export abstract
               </AnchorButton>
             )}
           </>
         }
       />
+      {can('operator') && (
+        <p id="abstract-export-note" className="-mt-4 text-xs text-on-surface-muted" data-testid="abstract-export-note">
+          Export abstract — Cells only: no code, no identifiers; what a federated deployment may share.
+        </p>
+      )}
 
       <QueryBoundary query={verify} loading="Verifying the hash chain…">
         {(v) => (
@@ -209,6 +217,9 @@ export function LedgerPage() {
           </>
         }
       >
+        <p className="border-b border-border px-3 py-2 text-xs text-on-surface-muted" data-testid="ledger-filter-legend">
+          A row is <Term id="clean">clean</Term> when every evaluated <Term id="belt">belt</Term> held. Mode is <Term id="sighted">sighted</Term> (the builder saw the failing test) or <Term id="blind">blind</Term> (it did not); the two are never one rate.
+        </p>
         <QueryBoundary query={grades} loading="Loading ledger rows…">
           {(page) => (
             <>
