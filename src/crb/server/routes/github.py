@@ -184,9 +184,7 @@ class ConnectRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    full_name: str = Field(
-        min_length=3, max_length=200, pattern=FULL_NAME_PATTERN
-    )
+    full_name: str = Field(min_length=3, max_length=200, pattern=FULL_NAME_PATTERN)
     name: str | None = Field(default=None, min_length=1, max_length=64)
     language: str | None = Field(default=None, max_length=32)
     runner: str | None = Field(default=None, max_length=16)
@@ -206,9 +204,7 @@ class LinkRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     installation_id: int = Field(ge=1)
-    full_name: str = Field(
-        min_length=3, max_length=200, pattern=FULL_NAME_PATTERN
-    )
+    full_name: str = Field(min_length=3, max_length=200, pattern=FULL_NAME_PATTERN)
 
 
 # ---------------------------------------------------------------------------

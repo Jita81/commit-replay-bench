@@ -225,9 +225,16 @@ class GitHubApp:
         # renamed or transferred repository would otherwise read as an EMPTY record (every
         # field "") that a caller could write over a real row
         if r.status_code >= 300:
+            # a proxy or gateway may answer a 3xx/5xx with a body that is not GitHub's
+            # ``{"message"}`` object (HTML, a JSON string or array): read the message only
+            # from an object, else fall back to the text — never let the error path raise
             try:
-                msg = str(r.json().get("message", "")) or r.reason_phrase
+                body: Any = r.json()
             except ValueError:
+                body = None
+            if isinstance(body, dict):
+                msg = str(body.get("message", "")) or r.reason_phrase
+            else:
                 msg = r.text[:300] or r.reason_phrase
             raise GitHubAppError(r.status_code, redact(msg)[:300])
         # every endpoint this client calls answers with a JSON body: an empty 2xx would

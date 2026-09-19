@@ -122,6 +122,9 @@ class FakeGitHub:
         self.tokens_minted = 0
         self.installations: list[dict[str, Any]] = [INSTALLATION, INSTALLATION_RW]
         self.moved: set[str] = set()  # lower-cased ``owner/name`` that answer 301
+        #: lower-cased ``owner/name`` whose 301 carries a NON-object JSON body (a gateway's
+        #: answer, not GitHub's ``{"message"}`` shape)
+        self.moved_odd_body: set[str] = set()
         # lower-cased ``owner/name`` → the ``owner/name`` GitHub answers 200 with instead
         # (a redirect the transport followed, or a transfer answered under the new owner)
         self.answered_as: dict[str, str] = {}
@@ -164,6 +167,9 @@ class FakeGitHub:
         if path.startswith("/repos/"):
             assert bearer.startswith("ghs_token_")
             full = path.removeprefix("/repos/")
+            if full.lower() in self.moved_odd_body:
+                # a gateway in front of GitHub answering the redirect with a JSON array
+                return httpx.Response(301, json=["moved", f"/repositories/{full}"])
             if full.lower() in self.moved:
                 # a renamed or transferred repository: GitHub answers 301 (the client never
                 # follows it) with a body that is not a repository
@@ -764,18 +770,28 @@ def test_link_refuses_an_answer_that_is_not_the_repository_asked_for(
         # connect shares the guard
         r = env.post("/github/installations/77/connect", json={"full_name": "acme/renamed"})
         assert r.status_code == 502 and envelope(r)["detail"]["github_status"] == 301
+        # a 3xx whose JSON body is not an object (a gateway's array) is still the 502, in
+        # the status line's words — never a 500 from reading ``.get`` on a list
+        gh.moved_odd_body.add("acme/gateway")
+        r = env.post(
+            "/repos/cobra/github-link", json={"installation_id": 77, "full_name": "acme/gateway"}
+        )
+        assert r.status_code == 502, r.text
+        assert envelope(r)["detail"]["github_status"] == 301
+        assert '"moved"' in envelope(r)["message"]  # the body's text, since it had no message
+        row_is_untouched()
         # a dot segment never reaches GitHub — the pattern refuses it (422) and the client
         # would refuse it too; no request outside ``/repos/`` was made under the bearer
         before = len(gh.calls)
         for bad in ("../rate_limit", "acme/..", "./meta", "acme/.", "-acme/x", "acme-/x"):
-            r = env.post(
-                "/repos/cobra/github-link", json={"installation_id": 77, "full_name": bad}
-            )
+            r = env.post("/repos/cobra/github-link", json={"installation_id": 77, "full_name": bad})
             assert r.status_code == 422, (bad, r.text)
             r = env.post("/github/installations/77/connect", json={"full_name": bad})
             assert r.status_code == 422, (bad, r.text)
         assert gh.calls[before:] == []
-        assert all(path.startswith(("/app/", "/repos/", "/installation/")) for _, path, _ in gh.calls)
+        assert all(
+            path.startswith(("/app/", "/repos/", "/installation/")) for _, path, _ in gh.calls
+        )
         row_is_untouched()
         # the client itself refuses a dot segment even without the pattern in front of it
         app = GitHubApp(settings_for(pem), httpx.Client(transport=gh.transport()))
