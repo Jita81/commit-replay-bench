@@ -1088,6 +1088,23 @@ export interface FactoryBacklogItem {
   depends_on: string[]
   structural_facts: string[]
   has_authored_test: boolean
+  /** What and why, as the operator wrote it (J-FAC-15: a revised backlog starts from it). */
+  description: string
+}
+
+/**
+ * J-FAC-3 — whether a factory run could open a pull request for this repository, by the
+ * worker's own credentials rule, answered from the record BEFORE any build is paid for.
+ * `reason` is the sentence to show (with the next step) when it cannot.
+ */
+export interface FactoryDeliveryPreflight {
+  can_deliver: boolean
+  reason_code: 'ok' | 'not_linked' | 'app_not_configured' | 'host_mismatch' | 'installation_missing' | 'installation_suspended' | 'read_only'
+  reason: string
+  full_name: string
+  default_branch: string
+  installation_id: number | null
+  account_login: string
 }
 
 /** `GET /factory/{repo}/backlog` — the ACTIVE frozen backlog; 404 `not_found` when none is registered. */
@@ -1096,6 +1113,15 @@ export interface FactoryBacklog {
   hash: string
   frozen_at: string | null
   items: FactoryBacklogItem[]
+  delivery: FactoryDeliveryPreflight
+}
+
+/** J-FAC-4 — why the loop stopped an item, as recorded on the chain; `step` names where. */
+export interface FactoryRefusal {
+  step: 'readiness' | 'red' | 'delivery' | 'dependency'
+  reason: string
+  reason_code: string
+  measured_route: string
 }
 
 /** `GET /factory/{repo}/tasks` — a bare list (not a `Page`): the latest state of every active item, folded from the evidence chain. */
@@ -1106,13 +1132,27 @@ export interface FactoryTask {
   size: string
   kind: string
   status: string
+  /** The unsigned STRUCTURAL slots: what blocks the build and what an approver can sign. */
   dor_gaps: string[]
+  /** The open VALUE slots: they route the item test-first and are never signable
+   * (optional so a mock built before the field still types; the server always sends it). */
+  value_gaps?: string[]
   route_hint: string
   red_proof: boolean | null
   build_status: string
   pr_url: string | null
   review_verdict: string | null
   last_event: string
+  /** The newest refusal since the item's last readiness pass; `null` = not refused. (The
+   * server always sends these five; optional so a mock built before J-FAC-4 still types.) */
+  refusal?: FactoryRefusal | null
+  /** The outcome's error (a harness failure, a refused push); `''` when none. */
+  error?: string
+  /** F15 — the newest build's ledger task (the oracle commit), run, pack and row; `''` before a build. */
+  task_id?: string
+  run_id?: string
+  pack_hash?: string
+  row_hash?: string
   /** F28 — the capability map's route for the item's (class × size) cell, from the same
    * signed map the delivery gate reads; `route: ''` = nobody has measured the cell. */
   cell_route: { route: string; reason_code: string; reason: string; n: number; point: number; ci_low: number; ci_high: number; apparatus_versions: string[]; deliverable: boolean }

@@ -10,44 +10,65 @@
  *               take at the step that is waiting on them: sign a structural gap (approver),
  *               freeze a backlog and run the loop (operator).
  * What it does: Makes the factory legible as a process rather than a table: which step each
- *               item is at, why it is there (the gap slots, the route, the verdict), and what
- *               the route gate withheld. Every act goes through the API under its role; the
+ *               item is at, why it is there (the gap slots, the route, the verdict, the
+ *               refusal's own reason from the chain — J-FAC-4), and what the route gate
+ *               withheld. Before the run it says what will be spent, with which builder,
+ *               how many items can be worked and delivered, and where a pull request would
+ *               go — or why delivery is not possible for this repository (J-FAC-2/3). While
+ *               a factory run is active the chain polls and a banner names the run and the
+ *               item in hand (J-FAC-5 / J-TEL-9). A built item opens its evidence (F15); a
+ *               stopped item says the way forward, and a revised backlog starts from the
+ *               active one (J-FAC-15). Every act goes through the API under its role; the
  *               chain (`/factory/{repo}/evidence`) is the record, and this screen renders the
  *               folded view of it (`task_views`).
- * How:          `useFactoryBacklog` + `useFactoryTasks` → `stepsFor(task)` → `<StepList>`;
- *               `useSignGap` (POST signoff-gap), `useRegisterBacklog` (POST backlog, JSON in
- *               a dialog), `useCreateRun` (kind `factory`, `deliver` toggle; `deliver_override`
- *               for an approver). A 404 = no backlog registered: the instruction, not an error.
- *               `?item=` scrolls to and highlights one item (the Decisions inbox links here).
+ * How:          `useFactoryBacklog` + `useFactoryTasks` (polled while `useRuns` lists an
+ *               active factory run) → `stepsFor(task)` → `<StepList>`; `builderChoice(health)`
+ *               picks the builder exactly as Measure does (an operator may name another —
+ *               the factory has no "every knob" form); `estimateFromMap` is Measure's
+ *               row-weighted measured mean per attempt; `useSignGap` (POST signoff-gap),
+ *               `useRegisterBacklog` (POST backlog, the form or JSON in a dialog),
+ *               `useCreateRun` (kind `factory`, `deliver` toggle gated by the backlog's
+ *               delivery pre-flight; `deliver_override` for an approver); `EvidenceDrawer`
+ *               opens the newest build's pack; `useNarrow` (matchMedia at Tailwind's `sm`)
+ *               folds an item's six step cards behind a Details at phone width (J-FAC-14).
+ *               A 404 = no backlog registered: the instruction, not an error. `?item=`
+ *               scrolls to and highlights one item (the Decisions inbox links here).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md (amendment 2026-09-16: the route gate)
  * Works with:   ui/src/api/hooks.ts (`useFactoryBacklog`, `useFactoryTasks`, `useSignGap`,
- *               `useRegisterBacklog`, `useCreateRun`), ui/src/api/types.ts (`FactoryTask`),
- *               src/crb/server/routes/factory.py, src/crb/server/factory_state.py
- *               (`task_views`), src/crb/factory/loop.py (the process itself),
- *               ui/src/screens/Decisions/decisions.ts (the inbox rows that link here),
- *               docs/API.md "Factory"
- * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx
+ *               `useRegisterBacklog`, `useCreateRun`, `useCancelRun`, `useRuns`, `useHealth`,
+ *               `useCapabilityMap`), ui/src/api/types.ts (`FactoryTask`, `FactoryBacklog`),
+ *               ui/src/lib/builder.ts (`builderChoice`, shared with Measure),
+ *               ui/src/screens/Runs/EvidenceDrawer.tsx (the pack view an item row opens),
+ *               ui/src/components/Help.tsx (`Term`, `DocLink`), src/crb/server/routes/factory.py,
+ *               src/crb/server/factory_state.py (`task_views`), src/crb/factory/loop.py (the
+ *               process itself), ui/src/screens/Decisions/decisions.ts (the inbox rows that
+ *               link here), docs/API.md "Factory"
+ * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx, ui/e2e/walkthrough/10-factory.spec.ts
  * Touch when:   a step is added to the loop (add it to `stepsFor` and the loop's docstring);
- *               a field is added to `FactoryTaskOut`.
+ *               a field is added to `FactoryTaskOut`; a refusal is recorded in a new shape.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'react-router'
-import { useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useRegisterBacklog, useSignGap } from '../../api/hooks'
-import type { FactoryCatalogue, FactoryTask } from '../../api/types'
+import { useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useRegisterBacklog, useRuns, useSignGap } from '../../api/hooks'
+import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryTask, type Run } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Dialog } from '../../components/Dialog'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextArea, TextField } from '../../components/Field'
+import { DocLink, Term } from '../../components/Help'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
+import { Details, NotificationBanner, SummaryList, WarningButton } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
+import { builderChoice } from '../../lib/builder'
 import { fmtDate, fmtInt, shortId } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
+import { EvidenceDrawer } from '../Runs/EvidenceDrawer'
 
 type StepStatus = 'done' | 'current' | 'todo' | 'failed' | 'skipped'
 
@@ -66,38 +87,155 @@ const STEP_DISPLAY: Record<StepStatus, { tone: Tone; glyph: string; label: strin
   skipped: { tone: 'muted', glyph: '–', label: 'skipped' },
 }
 
+/** The item statuses the loop records (src/crb/factory/loop.py), as a person reads them. */
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Not started',
+  accepted: 'Accepted',
+  rejected: 'Rejected by review',
+  not_ready: 'Not ready',
+  routed_human: 'Goes to a person',
+  no_oracle: 'No test to prove',
+  not_red: 'RED proof refused',
+  not_clean: 'Build not clean',
+  disqualified: 'Disqualified',
+  delivery_failed: 'Delivery failed',
+  rework_exhausted: 'Rework exhausted',
+  blocked_on_dependency: 'Waiting on a dependency',
+  error: 'Error',
+}
+
+const FAILED_STATUSES = ['rejected', 'rework_exhausted', 'disqualified', 'delivery_failed', 'error', 'not_clean']
+
+/** The reason a delivery refusal records when the opt-in was off (src/crb/factory/loop.py `_deliver`). */
+const OPT_IN_OFF = /^delivery is opt-in and OFF/
+const ROUTE_GATE = /^route gate: /
+
+/** What an open value slot means, after the readiness detail: it routes, it is never signed. */
+function valueGapNote(t: FactoryTask): string {
+  const v = t.value_gaps ?? []
+  return v.length ? ` · value gap${v.length === 1 ? '' : 's'} ${v.join(', ')} route${v.length === 1 ? 's' : ''} test-first, never signed` : ''
+}
+
 /** The six steps of the loop for one item, from the folded task view. */
 export function stepsFor(t: FactoryTask): Step[] {
   const gaps = t.dor_gaps.length
+  const r = t.refusal
   const readiness: Step =
     gaps > 0
-      ? { id: 'readiness', title: 'Readiness', status: 'current', detail: `${gaps} structural gap${gaps === 1 ? '' : 's'} unsigned: ${t.dor_gaps.join(', ')}` }
-      : t.route_hint === 'human' && t.status === 'routed_human'
-        ? { id: 'readiness', title: 'Readiness', status: 'failed', detail: 'routed to a human — the loop stops here' }
-        : t.route_hint === ''
-          ? // no route event yet: the factory run has not assessed this item
-            { id: 'readiness', title: 'Readiness', status: 'current', detail: 'not assessed — a factory run assesses readiness first' }
-          : { id: 'readiness', title: 'Readiness', status: 'done', detail: `route ${t.route_hint}` }
+      ? {
+          id: 'readiness',
+          title: 'Readiness',
+          status: 'current',
+          detail: `${gaps} structural gap${gaps === 1 ? '' : 's'} unsigned: ${t.dor_gaps.join(', ')}${valueGapNote(t)}`,
+        }
+      : r?.step === 'readiness'
+        ? {
+            id: 'readiness',
+            title: 'Readiness',
+            status: 'failed',
+            detail: `Routed to a person — ${r.reason}.`,
+          }
+        : t.route_hint === 'human' && t.status === 'routed_human'
+          ? {
+              id: 'readiness',
+              title: 'Readiness',
+              status: 'failed',
+              detail: 'Routed to a person — the loop stops here.',
+            }
+          : t.route_hint === ''
+            ? // no route event yet: the factory run has not assessed this item
+              {
+                id: 'readiness',
+                title: 'Readiness',
+                status: 'current',
+                detail: 'not assessed — a factory run assesses readiness first',
+              }
+            : {
+                id: 'readiness',
+                title: 'Readiness',
+                status: 'done',
+                detail: `route ${t.route_hint}${valueGapNote(t)}`,
+              }
   const afterReadiness = readiness.status === 'done'
   const red: Step =
     t.red_proof === true
-      ? { id: 'red', title: 'RED proof', status: 'done', detail: 'the authored test fails before the change' }
-      : t.red_proof === false
-        ? { id: 'red', title: 'RED proof', status: 'failed', detail: 'the test did not fail at the parent — refused' }
-        : { id: 'red', title: 'RED proof', status: afterReadiness ? 'current' : 'todo', detail: 'not run' }
+      ? {
+          id: 'red',
+          title: 'RED proof',
+          status: 'done',
+          detail: 'the authored test fails before the change',
+        }
+      : t.red_proof === false || r?.step === 'red'
+        ? {
+            id: 'red',
+            title: 'RED proof',
+            status: 'failed',
+            detail: r?.step === 'red' ? `RED proof refused — the authored test passed at the parent, so it proves nothing: ${r.reason}.` : 'RED proof refused — the test did not fail at the parent.',
+          }
+        : {
+            id: 'red',
+            title: 'RED proof',
+            status: afterReadiness ? 'current' : 'todo',
+            detail: 'not run',
+          }
+  // a refusal at the RED step with no oracle at all is worded by the chain ("no authored test…")
+  if (r?.step === 'red' && /^no authored test/.test(r.reason)) red.detail = `RED proof refused — ${r.reason}.`
   const buildDone = t.build_status === 'clean'
   const build: Step = buildDone
-    ? { id: 'build', title: 'Build under the belts', status: 'done', detail: 'clean' }
+    ? {
+        id: 'build',
+        title: 'Build under the belts',
+        status: 'done',
+        detail: 'clean',
+      }
     : t.build_status === 'not_built' || t.build_status === 'not_started' || !t.build_status
       ? // the API folds "no build event" as `not_built` (factory_state.task_views)
-        { id: 'build', title: 'Build under the belts', status: red.status === 'done' ? 'current' : 'todo', detail: 'not started' }
-      : { id: 'build', title: 'Build under the belts', status: 'failed', detail: t.build_status.replace(/_/g, ' ') }
-  const withheld = buildDone && !t.pr_url && t.last_event === 'delivery.refused'
+        {
+          id: 'build',
+          title: 'Build under the belts',
+          status: red.status === 'done' ? 'current' : 'todo',
+          detail: 'not started',
+        }
+      : {
+          id: 'build',
+          title: 'Build under the belts',
+          status: 'failed',
+          detail: t.build_status.replace(/_/g, ' '),
+        }
   const delivery: Step = t.pr_url
-    ? { id: 'delivery', title: 'Delivery', status: 'done', detail: 'branch + pull request opened' }
-    : withheld
-      ? { id: 'delivery', title: 'Delivery', status: 'skipped', detail: 'withheld — the route gate or delivery opt-in (see the chain)' }
-      : { id: 'delivery', title: 'Delivery', status: buildDone ? 'current' : 'todo', detail: buildDone ? 'pending' : 'not yet' }
+    ? {
+        id: 'delivery',
+        title: 'Delivery',
+        status: 'done',
+        detail: 'branch + pull request opened',
+      }
+    : r?.step === 'delivery'
+      ? OPT_IN_OFF.test(r.reason)
+        ? {
+            id: 'delivery',
+            title: 'Delivery',
+            status: 'skipped',
+            detail: 'Delivery withheld — delivery was off for this run. Built and graded locally only.',
+          }
+        : ROUTE_GATE.test(r.reason)
+          ? {
+              id: 'delivery',
+              title: 'Delivery',
+              status: 'skipped',
+              detail: `Delivery withheld — the route gate: ${t.capability_class} × ${t.size} ${r.measured_route ? `routes ${r.measured_route}` : 'is not measured'}${r.reason_code ? ` (${r.reason_code}${t.cell_route?.reason_code === r.reason_code && t.cell_route.reason ? `: ${t.cell_route.reason}` : ''})` : ''}. Built, graded and reviewed; no pull request opened.`,
+            }
+          : {
+              id: 'delivery',
+              title: 'Delivery',
+              status: 'failed',
+              detail: `Delivery failed — the push was refused: ${r.reason}.`,
+            }
+      : {
+          id: 'delivery',
+          title: 'Delivery',
+          status: buildDone ? 'current' : 'todo',
+          detail: buildDone ? 'pending' : 'not yet',
+        }
   const review: Step = t.review_verdict
     ? {
         id: 'review',
@@ -105,17 +243,115 @@ export function stepsFor(t: FactoryTask): Step[] {
         status: t.review_verdict === 'accept' ? 'done' : t.review_verdict === 'reject' ? 'failed' : 'current',
         detail: t.review_verdict.replace(/_/g, ' '),
       }
-    : { id: 'review', title: 'Independent review', status: buildDone ? 'current' : 'todo', detail: 'not yet' }
+    : {
+        id: 'review',
+        title: 'Independent review',
+        status: buildDone ? 'current' : 'todo',
+        detail: 'not yet',
+      }
   const outcome: Step =
     t.status === 'accepted'
       ? { id: 'outcome', title: 'Outcome', status: 'done', detail: 'accepted' }
-      : ['rejected', 'rework_exhausted', 'disqualified', 'delivery_failed', 'error', 'not_clean'].includes(t.status)
-        ? { id: 'outcome', title: 'Outcome', status: 'failed', detail: t.status.replace(/_/g, ' ') }
-        : { id: 'outcome', title: 'Outcome', status: 'todo', detail: t.status.replace(/_/g, ' ') }
+      : FAILED_STATUSES.includes(t.status)
+        ? {
+            id: 'outcome',
+            title: 'Outcome',
+            status: 'failed',
+            detail: `${t.status.replace(/_/g, ' ')}${t.error ? ` — ${t.error}` : ''}`,
+          }
+        : {
+            id: 'outcome',
+            title: 'Outcome',
+            status: 'todo',
+            detail: t.status.replace(/_/g, ' '),
+          }
   return [readiness, red, build, delivery, review, outcome]
 }
 
+/**
+ * J-FAC-15 — for an item the loop stopped, one plain sentence with the chain's reason and
+ * the two ways forward; `''` when the item is not stopped.
+ */
+export function refusalSentence(t: FactoryTask): string {
+  const r = t.refusal
+  const forward = 'To bring it back into the factory, add the fact and freeze a revised backlog (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.'
+  if (r?.step === 'dependency') return `${r.reason.replace(/^waiting on /, 'Waiting on ')}, which has not been accepted yet.`
+  if (r?.step === 'readiness') return `This item goes to a person: ${r.reason}. ${forward}`
+  if (r?.step === 'red') return `The factory could not prove the test: ${r.reason}. ${forward.replace('add the fact', 'author a test that fails today')}`
+  if (t.status === 'rejected' || t.status === 'rework_exhausted')
+    return `The review said ${t.review_verdict?.replace(/_/g, ' ') ?? t.status.replace(/_/g, ' ')}. Read the evidence, then either open the change by hand or freeze a revised backlog with the fact the review asked for (a new hash, the old chain stays).`
+  if (t.status === 'no_oracle' || t.status === 'not_red')
+    return `No failing test proves this item${r ? `: ${r.reason}` : ''}. Author a test that fails today and freeze a revised backlog (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.`
+  return ''
+}
+
+/** How a person reads the item's status line. */
+function statusLabel(t: FactoryTask): string {
+  if (t.dor_gaps.length > 0) return 'Waiting on a signature'
+  return STATUS_LABEL[t.status] ?? t.status.replace(/_/g, ' ')
+}
+
+/**
+ * J-FAC-2 — the repository's own measured mean per attempt, when it has one: a
+ * row-weighted mean over the map's measured cells (the map is served on the current
+ * apparatus, so the versions are the same set on every cell), carrying the n it rests on
+ * and that apparatus. The same calculation as Measure's; `null` when nothing is measured.
+ */
+export function estimateFromMap(cells: CapabilityCell[]): { mean: number; n: number; apparatus: string } | null {
+  const measured = cells.filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0 && c.cost_usd_mean > 0)
+  if (measured.length === 0) return null
+  const n = measured.reduce((a, c) => a + c.n, 0)
+  const apparatus = Array.from(new Set(measured.flatMap((c) => c.apparatus_versions))).join(', ')
+  return {
+    mean: measured.reduce((a, c) => a + c.cost_usd_mean * c.n, 0) / n,
+    n,
+    apparatus,
+  }
+}
+
+//: the per-attempt planning band the onboarding guide (ONBOARDING-A-REPO) quotes for Claude Sonnet (not a
+//: measured interval for THIS repository) — used only while the repository has no measured mean
+const RANGE_LOW = 0.2
+const RANGE_HIGH = 0.6
+
+/** Dollars to the cent — an estimate, not a ledger figure (which `fmtUsd` shows to the mil). */
+function usd(x: number): string {
+  return `$${x.toFixed(2)}`
+}
+
+/** What the chain's newest event for an item means, for the active-run banner. */
+const EVENT_PHRASE: Record<string, string> = {
+  'readiness.assessed': 'readiness assessed',
+  'route.decided': 'route decided',
+  'red.proved': 'RED proof — the authored test failed at the parent, so the build may start',
+  'red.refused': 'RED proof refused',
+  'build.graded': 'build graded under the belts',
+  'delivery.opened': 'branch and pull request opened',
+  'delivery.refused': 'delivery withheld',
+  'review.verdict': 'review recorded',
+  'edit.permitted': 'rework permitted',
+  'gap.signoff': 'a gap was signed',
+  'item.outcome': 'outcome recorded',
+}
+
 const noBacklog = (e: unknown) => e !== null && typeof e === 'object' && 'status' in e && (e as { status: number }).status === 404
+
+/** Tailwind's `sm` breakpoint: below it the six step cards sit behind a Details (J-FAC-14). */
+const NARROW = '(max-width: 639px)'
+const narrowQuery = () => (typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(NARROW) : null)
+
+/** True at phone width; false where `matchMedia` is absent (jsdom), so tests see the grid. */
+function useNarrow(): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      const mq = narrowQuery()
+      mq?.addEventListener('change', notify)
+      return () => mq?.removeEventListener('change', notify)
+    },
+    () => narrowQuery()?.matches ?? false,
+    () => false,
+  )
+}
 
 export function FactoryPage() {
   const [repo, setRepo] = useRepoParam()
@@ -123,25 +359,49 @@ export function FactoryPage() {
   const focus = params.get('item') ?? ''
   const { can } = useAuth()
   const backlog = useFactoryBacklog(repo)
-  const tasks = useFactoryTasks(repo)
-  const run = useCreateRun()
+  // J-FAC-5 / J-TEL-9 — the newest factory runs of this repository: an active one means
+  // the chain is moving, so the items poll and the banner names the run
+  const runs = useRuns({ repo, kind: 'factory', limit: 10 })
+  const activeRun = runs.data?.items.find((r) => !isRunTerminal(r.status)) ?? null
+  const lastRun = !activeRun ? (runs.data?.items[0] ?? null) : null
+  const tasks = useFactoryTasks(repo, { poll: activeRun !== null })
   const [registerOpen, setRegisterOpen] = useState(false)
-  const [deliver, setDeliver] = useState(false)
-  const [override, setOverride] = useState(false)
+  const [dialogKey, setDialogKey] = useState(0)
+  const [prefill, setPrefill] = useState<FactoryBacklog | null>(null)
+  const [pack, setPack] = useState<{ pack: string; row: string } | null>(null)
 
   useEffect(() => {
     if (focus) document.getElementById(`item-${focus}`)?.scrollIntoView?.({ block: 'center' })
   }, [focus, tasks.data])
 
-  const startRun = () =>
-    run.mutate({ repo, kind: 'factory', deliver, ...(deliver && override ? { deliver_override: true } : {}) })
+  // when the active run ends, the chain has its final events: read them once more
+  const activeId = activeRun?.id ?? ''
+  const [seenActive, setSeenActive] = useState('')
+  useEffect(() => {
+    if (activeId) setSeenActive(activeId)
+    else if (seenActive) {
+      setSeenActive('')
+      void tasks.refetch()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId])
+
+  const openFreeze = (from: FactoryBacklog | null) => {
+    setPrefill(from)
+    setDialogKey((k) => k + 1)
+    setRegisterOpen(true)
+  }
 
   return (
     <>
       <PageHeader
-        eyebrow="Journey · 4 of 4"
         title="Factory"
-        purpose="New work under the same governance as replay: a frozen backlog, structural gaps signed by an approver, a RED proof before any build, a build under the belts, a branch and pull request only where the map routes deliver, an independent review — every step on the evidence chain."
+        purpose={
+          <>
+            New work under the same governance as replay: a frozen backlog, structural gaps signed by an approver, a <Term id="red_proof">RED proof</Term> before any build, a build under the belts, a branch and pull request only where the
+            map routes <Term id="deliver">deliver</Term> (the <Term id="route_gate">route gate</Term>), an independent review — every step on the evidence chain.
+          </>
+        }
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
       {!repo && <EmptyState title="Choose a repository" reason="The factory works one repository at a time." action={<LinkButton to="/connect">Connect one</LinkButton>} />}
@@ -153,7 +413,7 @@ export function FactoryPage() {
             actions={
               can('operator') ? (
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => setRegisterOpen(true)}>
+                  <Button size="sm" onClick={() => openFreeze(null)} disabled={activeRun !== null}>
                     Freeze a backlog…
                   </Button>
                 </div>
@@ -167,7 +427,13 @@ export function FactoryPage() {
                   glyph="⚙"
                   title="No backlog registered for this repository"
                   reason="Freeze one: the items are validated, hashed and recorded as the first event of the evidence chain; a factory run then works them in dependency order."
-                  action={can('operator') ? <Button variant="filled" onClick={() => setRegisterOpen(true)}>Freeze a backlog…</Button> : undefined}
+                  action={
+                    can('operator') ? (
+                      <Button variant="filled" onClick={() => openFreeze(null)}>
+                        Freeze a backlog…
+                      </Button>
+                    ) : undefined
+                  }
                   data-testid="factory-no-backlog"
                 />
               ) : (
@@ -184,35 +450,9 @@ export function FactoryPage() {
                   </span>
                   <span className="text-xs text-on-surface-muted">{fmtInt(backlog.data.items.length)} items</span>
                 </div>
-                {can('operator') && (
-                  <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-control)] border border-border p-3 text-sm" data-testid="factory-run-controls">
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={deliver} onChange={(e) => setDeliver(e.target.checked)} />
-                      Open pull requests where the map routes <code>deliver</code>
-                    </label>
-                    {tasks.data && (
-                      <span className="text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
-                        {deliverableCount(tasks.data)} of {tasks.data.length} items sit in a cell that routes <code>deliver</code> today; the rest cannot be delivered under the current route (readiness, a dependency or the RED proof may stop them earlier)
-                      </span>
-                    )}
-                    {deliver && can('approver') && (
-                      <label className="flex items-center gap-2" title="Recorded on the chain as your override of the route gate">
-                        <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} />
-                        Override the route gate (approver — recorded)
-                      </label>
-                    )}
-                    <Button variant="filled" size="sm" disabled={run.isPending} onClick={startRun}>
-                      Run the factory
-                    </Button>
-                    {run.data && (
-                      <LinkButton size="sm" to={`/runs/${run.data.id}`}>
-                        run {shortId(run.data.id)}
-                      </LinkButton>
-                    )}
-                    <span className="text-xs text-on-surface-muted">spends model budget</span>
-                  </div>
-                )}
-                {run.isError && <ErrorState compact error={run.error} />}
+                {activeRun && <ActiveRunBanner run={activeRun} tasks={tasks.data ?? []} canCancel={can('operator')} />}
+                {!activeRun && lastRun && <LastRunLine run={lastRun} />}
+                {!activeRun && can('operator') && <BeforeYouStart repo={repo} backlog={backlog.data} tasks={tasks.data} canOverride={can('approver')} />}
               </div>
             )}
           </Card>
@@ -224,23 +464,251 @@ export function FactoryPage() {
             {tasks.data && tasks.data.length > 0 && (
               <ul className="m-0 list-none divide-y divide-border p-0">
                 {tasks.data.map((t) => (
-                  <ItemRow key={t.id} repo={repo} task={t} focused={t.id === focus} canSign={can('approver')} />
+                  <ItemRow
+                    key={t.id}
+                    repo={repo}
+                    task={t}
+                    focused={t.id === focus}
+                    canSign={can('approver')}
+                    canFreeze={can('operator') && activeRun === null}
+                    onFreeze={() => openFreeze(backlog.data ?? null)}
+                    onEvidence={(p, row) => setPack({ pack: p, row })}
+                  />
                 ))}
               </ul>
             )}
           </Card>
         </>
       )}
-      <RegisterBacklogDialog open={registerOpen} repo={repo} onClose={() => setRegisterOpen(false)} />
+      <RegisterBacklogDialog key={dialogKey} open={registerOpen} repo={repo} from={prefill} onClose={() => setRegisterOpen(false)} />
+      <EvidenceDrawer packHash={pack?.pack ?? null} rowHash={pack?.row || null} onClose={() => setPack(null)} />
     </>
   )
 }
 
-function ItemRow({ repo, task: t, focused, canSign }: { repo: string; task: FactoryTask; focused: boolean; canSign: boolean }) {
+/** J-FAC-5 / J-TEL-9 — the run working this backlog, its progress, the item in hand, and Cancel for an operator. */
+function ActiveRunBanner({ run, tasks, canCancel }: { run: Run; tasks: FactoryTask[]; canCancel: boolean }) {
+  const cancel = useCancelRun()
+  const total = run.progress?.total || tasks.length
+  const done = run.progress?.done ?? 0
+  // the item in hand: the first one the chain has touched that has no outcome yet
+  const current = tasks.find((t) => t.status === 'pending' && t.last_event !== '')
+  const phrase = current ? `${current.id}: ${EVENT_PHRASE[current.last_event] ?? current.last_event.replace(/[._]/g, ' ')}` : run.status === 'queued' ? 'waiting for a worker' : 'starting the next item'
+  return (
+    <NotificationBanner title="Factory run in progress" className="mb-0">
+      <p className="m-0" data-testid="factory-active-run">
+        Factory run {shortId(run.id)} is working the backlog — item {Math.min(done + 1, Math.max(total, 1))} of {total} ({phrase}).
+        {run.cost_usd > 0 ? ` ${usd(run.cost_usd)} so far.` : ''}
+        {run.started ? ` Started ${fmtDate(run.started)}.` : ''}{' '}
+        <LinkButton size="sm" to={`/runs/${run.id}`}>
+          Open the run
+        </LinkButton>
+        {canCancel && (
+          <>
+            {' '}
+            <Button size="sm" onClick={() => cancel.mutate(run.id)} disabled={cancel.isPending || cancel.isSuccess}>
+              {cancel.isSuccess ? 'Cancelling…' : 'Cancel the run'}
+            </Button>
+          </>
+        )}
+      </p>
+      {canCancel && <p className="mb-0 mt-2 text-[16px] text-on-surface-muted">Cancelling stops the loop after the item in hand. Items already built are still charged.</p>}
+      {cancel.isError && <ErrorState compact error={cancel.error} />}
+    </NotificationBanner>
+  )
+}
+
+/** After the run: what the newest finished factory run did, in one line. */
+function LastRunLine({ run }: { run: Run }) {
+  const d = (run.counts?.detail ?? {}) as Record<string, unknown>
+  const by = (d.by_status ?? {}) as Record<string, number>
+  const parts = Object.entries(by)
+    .filter(([k]) => k !== 'accepted')
+    .map(([k, v]) => `${v} ${STATUS_LABEL[k]?.toLowerCase() ?? k.replace(/_/g, ' ')}`)
+  const items = typeof d.items === 'number' ? d.items : null
+  const accepted = typeof d.accepted === 'number' ? d.accepted : null
+  return (
+    <p className="m-0 text-sm text-on-surface-muted" data-testid="factory-last-run">
+      Factory run {shortId(run.id)} {run.status}
+      {items !== null && accepted !== null ? ` — ${accepted} of ${items} items accepted${parts.length ? `, ${parts.join(', ')}` : ''}` : ''}
+      {run.finished ? ` · ${fmtDate(run.finished)}` : ''} ·{' '}
+      <LinkButton size="sm" to={`/runs/${run.id}`}>
+        run {shortId(run.id)}
+      </LinkButton>
+    </p>
+  )
+}
+
+/**
+ * J-FAC-1/2/3 — the Measure "Before you start" pattern for the factory: the builder the
+ * deployment can run (or the operator's own choice), what will be worked and delivered,
+ * the estimated spend with the n and apparatus it rests on, where a pull request would
+ * go (or why delivery is not possible), and one red button that names the amount.
+ */
+function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; backlog: FactoryBacklog; tasks: FactoryTask[] | undefined; canOverride: boolean }) {
+  const health = useHealth()
+  const map = useCapabilityMap(repo, ['capability_class', 'size'])
+  const run = useCreateRun()
+  const [deliver, setDeliver] = useState(false)
+  const [override, setOverride] = useState(false)
+  const [ownBuilder, setOwnBuilder] = useState('')
+  const [ownModel, setOwnModel] = useState('')
+  const choice = builderChoice(health.data)
+  const measured = useMemo(() => estimateFromMap(map.data?.cells ?? []), [map.data])
+  // an API older than J-FAC-3 serves no pre-flight: say so rather than guess (never a white screen)
+  const delivery: FactoryDeliveryPreflight = backlog.delivery ?? {
+    can_deliver: false,
+    reason_code: 'not_linked',
+    reason: 'Delivery is not possible: this API did not report the delivery pre-flight. Update the API, then reload.',
+    full_name: '',
+    default_branch: '',
+    installation_id: null,
+    account_login: '',
+  }
+  const canDeliver = delivery.can_deliver
+  const list = tasks ?? []
+  const total = backlog.items.length
+  const gapped = list.filter((t) => t.dor_gaps.length > 0).length
+  const worked = Math.max(total - gapped, 0)
+  const deliverable = deliverableCount(list)
+  const lo = measured ? measured.mean * 0.8 * worked : RANGE_LOW * worked
+  const hi = measured ? measured.mean * 1.2 * worked : RANGE_HIGH * worked
+  const own = ownBuilder.trim()
+  const builderRow = own
+    ? `${own}${ownModel.trim() ? ` · ${ownModel.trim()}` : ''} — named by you (every knob)`
+    : choice
+      ? choice.label
+      : 'No builder is configured on this deployment — an admin adds a provider key (Settings), or name one below'
+  const target = canDeliver ? `pushes a branch to ${delivery.full_name} and opens a pull request against ${delivery.default_branch}; nothing is written to ${delivery.default_branch}` : ''
+  const startable = (own.length > 0 || choice !== null) && !run.isPending && worked > 0
+
+  const startRun = () => {
+    const body = own
+      ? { builder: own, ...(ownModel.trim() ? { model: ownModel.trim() } : {}) }
+      : choice
+        ? {
+            builder: choice.builder,
+            model: choice.model,
+            ...(Object.keys(choice.builder_config).length > 0 ? { builder_config: choice.builder_config } : {}),
+          }
+        : null
+    if (!body) return
+    run.mutate({
+      repo,
+      kind: 'factory',
+      deliver: deliver && canDeliver,
+      ...body,
+      ...(deliver && canDeliver && override ? { deliver_override: true } : {}),
+    })
+  }
+
+  return (
+    <div className="rounded-[var(--radius-control)] border border-border p-4" data-testid="before-you-start">
+      <h3 className="mb-3 mt-0 text-base font-bold">Before you run</h3>
+      <SummaryList
+        rows={[
+          { key: 'Builder', value: builderRow },
+          {
+            key: 'Items',
+            value: `${worked} of ${total} will be worked${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell that routes deliver`,
+            note: 'Readiness is assessed again at the run; an item with an unsigned structural gap is refused before any spend.',
+          },
+          {
+            key: 'Estimated cost',
+            value:
+              worked === 0 ? (
+                'nothing — no item can be worked'
+              ) : measured ? (
+                `${usd(lo)} to ${usd(hi)} for ${worked} item${worked === 1 ? '' : 's'} at about ${usd(measured.mean)} each (this repository's measured mean over n = ${measured.n} attempts at apparatus ${measured.apparatus || '—'}; the band is a ±20 % planning range, not a measured interval)`
+              ) : (
+                // no path literal here: an unbreakable token this long overflows the 375 px column (J-FAC-14)
+                <>
+                  {usd(lo)} to {usd(hi)} for {worked} item{worked === 1 ? '' : 's'} at about {usd(RANGE_LOW)}–{usd(RANGE_HIGH)} each — a planning range, not a measured interval: this repository has no measured mean yet (n = 0 on the current apparatus); the range is the per-attempt band the{' '}
+                  <DocLink to="ONBOARDING-A-REPO">onboarding guide</DocLink> quotes for Claude Sonnet across earlier repositories, and carries no apparatus of its own
+                </>
+              ),
+          },
+          {
+            key: 'Delivery',
+            value: !canDeliver ? 'not linked — no pull request' : deliver ? `on — a clean build in a deliver cell ${target}.` : `off — built and graded locally only. When on, a clean build in a deliver cell ${target}.`,
+            note: !canDeliver ? delivery.reason : undefined,
+          },
+          {
+            key: 'Budget cap',
+            value: 'no spend cap yet — the builder’s ladder caps turns, tool calls and wall clock per attempt',
+          },
+        ]}
+        label="Before you run"
+      />
+      <div className="mt-3 space-y-2 text-sm">
+        <label className="flex items-start gap-2">
+          <input type="checkbox" className="mt-1" checked={deliver && canDeliver} disabled={!canDeliver} onChange={(e) => setDeliver(e.target.checked)} />
+          <span>
+            Open pull requests where the map routes <code>deliver</code>
+            {tasks && (
+              <span className="block text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
+                {deliverable} of {tasks.length} items sit in a cell that routes <code>deliver</code> today; the rest are built and withheld under the current route
+              </span>
+            )}
+          </span>
+        </label>
+        {deliver && canDeliver && canOverride && (
+          <label className="flex items-start gap-2">
+            <input type="checkbox" className="mt-1" checked={override} onChange={(e) => setOverride(e.target.checked)} />
+            <span>
+              Override the route gate (approver)
+              <span className="block text-xs text-on-surface-muted">Recorded on the evidence chain as your override of the route gate, under your name.</span>
+            </span>
+          </label>
+        )}
+        <Details summary="Use a different builder" className="mb-0 mt-2 text-sm">
+          <p className="m-0 mb-2 text-xs text-on-surface-muted">
+            The factory has no full run form: name a registered builder here (as the run form's Builder field) when the deployment's default is not the one you mean. Blank = the builder above.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <TextField label="Builder" value={ownBuilder} onChange={(e) => setOwnBuilder(e.target.value)} hint="a registered builder name" />
+            <TextField label="Model" value={ownModel} onChange={(e) => setOwnModel(e.target.value)} hint="optional — the builder's default when blank" />
+          </div>
+        </Details>
+      </div>
+      <p className="mb-3 mt-3 text-sm">You can cancel the run at any point. Items already built are still charged.</p>
+      <div className="flex flex-wrap items-center gap-3" data-testid="factory-run-controls">
+        <WarningButton onClick={startRun} disabled={!startable}>
+          {worked > 0 && (measured || own || choice) ? `Run the factory and spend up to ${usd(hi)}` : 'Run the factory'}
+        </WarningButton>
+        {run.data && (
+          <LinkButton size="sm" to={`/runs/${run.data.id}`}>
+            run {shortId(run.data.id)}
+          </LinkButton>
+        )}
+      </div>
+      {run.isError && <ErrorState compact error={run.error} />}
+    </div>
+  )
+}
+
+function ItemRow({
+  repo,
+  task: t,
+  focused,
+  canSign,
+  canFreeze,
+  onFreeze,
+  onEvidence,
+}: {
+  repo: string
+  task: FactoryTask
+  focused: boolean
+  canSign: boolean
+  canFreeze: boolean
+  onFreeze: () => void
+  onEvidence: (pack: string, row: string) => void
+}) {
   const steps = stepsFor(t)
-  const sign = useSignGap()
-  const [slot, setSlot] = useState(t.dor_gaps[0] ?? '')
-  const [answer, setAnswer] = useState('')
+  const current = steps.find((s) => s.status === 'current' || s.status === 'failed') ?? steps[steps.length - 1]!
+  const currentIndex = steps.indexOf(current) + 1
+  const sentence = refusalSentence(t)
+  const narrow = useNarrow()
   return (
     <li id={`item-${t.id}`} className={`py-3 ${focused ? 'rounded-[var(--radius-control)] bg-primary-container/30 px-2' : ''}`} data-testid={`factory-item-${t.id}`}>
       <div className="flex flex-wrap items-center gap-2">
@@ -250,60 +718,129 @@ function ItemRow({ repo, task: t, focused, canSign }: { repo: string; task: Fact
           {t.capability_class} · {t.size} · {t.kind}
         </span>
         <CellRoutePill t={t} />
-        <span className="ml-auto font-mono text-xs" title="item status">
-          {t.status} · {t.route_hint}
+        <span className="ml-auto text-xs" title="item status" data-testid={`item-status-${t.id}`}>
+          {statusLabel(t)}
         </span>
+        {t.run_id && (
+          <LinkButton size="sm" to={`/runs/${t.run_id}`}>
+            run {shortId(t.run_id)}
+          </LinkButton>
+        )}
+        {t.pack_hash && (
+          <Button size="sm" onClick={() => onEvidence(t.pack_hash ?? '', t.row_hash ?? '')} data-testid={`evidence-${t.id}`}>
+            Evidence
+          </Button>
+        )}
         {t.pr_url && (
           <a href={t.pr_url} className="text-xs" target="_blank" rel="noreferrer">
             PR ↗
           </a>
         )}
       </div>
-      <ol className="m-0 mt-2 grid list-none gap-2 p-0 sm:grid-cols-6" aria-label={`Steps for ${t.id}`}>
-        {steps.map((s) => {
-          const d = STEP_DISPLAY[s.status]
-          return (
-            <li key={s.id} className="min-w-0 rounded-[var(--radius-control)] border border-border p-2" data-testid={`step-${t.id}-${s.id}`}>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`${s.title}: ${d.label}`}>
-                  {d.label}
-                </Pill>
-                <span className="text-xs font-semibold leading-tight">{s.title}</span>
-              </div>
-              <div className="mt-1 text-[11px] leading-snug text-on-surface-muted">{s.detail}</div>
-            </li>
-          )
-        })}
-      </ol>
-      {t.dor_gaps.length > 0 && canSign && (
-        <form
-          className="mt-2 flex flex-wrap items-end gap-2 rounded-[var(--radius-control)] border border-border p-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (slot && answer.trim()) sign.mutate({ repo, itemId: t.id, slot, answer: answer.trim() }, { onSuccess: () => setAnswer('') })
-          }}
-          aria-label={`Sign a structural gap for ${t.id}`}
-        >
-          <label className="text-xs">
-            Gap
-            <select className="ml-1 rounded border border-border bg-surface px-1 py-1 text-xs" value={slot} onChange={(e) => setSlot(e.target.value)}>
-              {t.dor_gaps.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </label>
-          <TextField label="Your answer (the structural fact)" value={answer} onChange={(e) => setAnswer(e.target.value)} className="min-w-[24ch] flex-1" required />
-          <Button type="submit" size="sm" variant="filled" disabled={sign.isPending || !answer.trim()}>
-            Sign the gap
-          </Button>
-          {sign.isError && <ErrorState compact error={sign.error} />}
-          {sign.isSuccess && <span className="text-xs text-status-green">signed — on the chain</span>}
-        </form>
+      {sentence && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] border border-border bg-surface p-2 text-sm" data-testid={`refusal-${t.id}`}>
+          <p className="m-0 flex-1 basis-[28em]">{sentence}</p>
+          {canFreeze && (
+            <Button size="sm" onClick={onFreeze}>
+              Freeze a revised backlog…
+            </Button>
+          )}
+        </div>
       )}
+      {narrow && (
+        // J-FAC-14 — at phone width one line says where the item is; the six cards wait behind a Details
+        <p className="m-0 mt-2 flex flex-wrap items-center gap-1.5 text-xs" data-testid={`steps-compact-${t.id}`}>
+          <Pill tone={STEP_DISPLAY[current.status].tone} glyph={STEP_DISPLAY[current.status].glyph} size="xs" label={`${current.title}: ${STEP_DISPLAY[current.status].label}`}>
+            {STEP_DISPLAY[current.status].label}
+          </Pill>
+          <span className="font-semibold">{current.title}</span>
+          <span className="text-on-surface-muted">
+            step {currentIndex} of {steps.length}
+          </span>
+        </p>
+      )}
+      {narrow ? (
+        <Details summary={`All ${steps.length} steps`} className="mb-0 mt-2 text-sm">
+          <StepGrid t={t} steps={steps} />
+        </Details>
+      ) : (
+        <StepGrid t={t} steps={steps} />
+      )}
+      {t.dor_gaps.length > 0 && canSign && <GapForm repo={repo} task={t} />}
       {t.dor_gaps.length > 0 && !canSign && <p className="m-0 mt-2 text-xs text-on-surface-muted">An approver signs the structural gap(s); a value gap is never signed — it routes test-first.</p>}
     </li>
+  )
+}
+
+/** The six step cards: pill, title and the detail from the chain. */
+function StepGrid({ t, steps }: { t: FactoryTask; steps: Step[] }) {
+  return (
+    <ol className="m-0 mt-2 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-6" aria-label={`Steps for ${t.id}`}>
+      {steps.map((s) => {
+        const d = STEP_DISPLAY[s.status]
+        return (
+          <li key={s.id} className="min-w-0 rounded-[var(--radius-control)] border border-border p-2" data-testid={`step-${t.id}-${s.id}`}>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`${s.title}: ${d.label}`}>
+                {d.label}
+              </Pill>
+              <span className="text-xs font-semibold leading-tight">{s.title}</span>
+            </div>
+            <div className="mt-1 break-words text-[11px] leading-snug text-on-surface-muted">{s.detail}</div>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+/** J-FAC-16 — sign one structural gap: the catalogue's question as the label, the signer and time on success. */
+function GapForm({ repo, task: t }: { repo: string; task: FactoryTask }) {
+  const sign = useSignGap()
+  const catalogue = useFactoryCatalogue(true)
+  const [slot, setSlot] = useState(t.dor_gaps[0] ?? '')
+  const [answer, setAnswer] = useState('')
+  const questions = new Map((catalogue.data?.classes.find((c) => c.capability_class === t.capability_class)?.slots ?? []).map((s) => [s.name, s.question]))
+  const question = questions.get(slot)
+  return (
+    <form
+      className="mt-2 flex flex-wrap items-end gap-2 rounded-[var(--radius-control)] border border-border p-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (slot && answer.trim()) sign.mutate({ repo, itemId: t.id, slot, answer: answer.trim() }, { onSuccess: () => setAnswer('') })
+      }}
+      aria-label={`Sign a structural gap for ${t.id}`}
+    >
+      {/* a select is as wide as its longest option (the catalogue's question): the label must be
+          allowed to shrink (min-w-0) and the select to fill it, or the page scrolls sideways at 375 px */}
+      <label className="min-w-0 flex-1 basis-[30ch] text-xs">
+        Gap
+        <select className="mt-1 block w-full rounded border border-border bg-surface px-1 py-1 text-xs" value={slot} onChange={(e) => setSlot(e.target.value)}>
+          {t.dor_gaps.map((g) => (
+            <option key={g} value={g}>
+              {questions.get(g) ? `${questions.get(g)} (${g})` : g}
+            </option>
+          ))}
+        </select>
+      </label>
+      <TextField
+        label="Your answer (the structural fact)"
+        value={answer}
+        onChange={(e) => setAnswer(e.target.value)}
+        className="min-w-[24ch] flex-1"
+        required
+        hint={question ? `${question} As a reviewer could check it, for example “GET /v1/orders/{id}”.` : 'The structural fact, as a reviewer could check it.'}
+      />
+      <Button type="submit" size="sm" variant="filled" disabled={sign.isPending || !answer.trim()}>
+        Sign the gap
+      </Button>
+      {sign.isError && <ErrorState compact error={sign.error} />}
+      {sign.isSuccess && (
+        <span className="text-xs text-status-green">
+          Signed by {String((sign.data as { verifier?: string })?.verifier ?? 'you')} at {fmtDate((sign.data as { signed_at?: string })?.signed_at)} — on the chain
+        </span>
+      )}
+    </form>
   )
 }
 
@@ -313,38 +850,43 @@ export function deliverableCount(tasks: FactoryTask[]): number {
 }
 
 /**
- * F28 — the item's cell route BEFORE the run, from the same signed map the delivery gate
- * reads: "routes deliver" (green), "routes calibrate — delivery will be withheld" (amber),
- * or "cell not measured — delivery will be withheld" (grey). Never a guess: `route: ''`
- * means nobody has measured the cell.
+ * F28 / J-FAC-14 — the item's cell route BEFORE the run, from the same signed map the
+ * delivery gate reads: "routes deliver" (green), "routes calibrate · withheld" (amber),
+ * or "not measured · withheld" (grey). The pill is short; the n · point [interval] ·
+ * apparatus follow in a span that wraps at phone width (the aria-label carries them all).
+ * Never a guess: `route: ''` means nobody has measured the cell.
  */
 function CellRoutePill({ t }: { t: FactoryTask }) {
   const r = t.cell_route
   if (!r || !r.route) {
     return (
       <Pill tone="muted" glyph="○" size="xs" label={`Cell ${t.capability_class} × ${t.size} is not measured on this repository: delivery would be withheld`} data-testid={`cell-route-${t.id}`}>
-        cell not measured · delivery withheld
+        not measured · withheld
       </Pill>
     )
   }
   // every number carries its n, its interval and its apparatus
-  const prov = `n=${r.n} · ${pct(r.point)} [${pct(r.ci_low)}, ${pct(r.ci_high)}] · app ${r.apparatus_versions.join(', ') || '—'}`
-  if (r.deliverable) {
-    return (
-      <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver — ${prov}: a clean build may open a pull request`} data-testid={`cell-route-${t.id}`}>
-        routes deliver · {prov}
-      </Pill>
-    )
-  }
+  const prov = `n = ${r.n} · ${pct(r.point)} [${pct(r.ci_low)}, ${pct(r.ci_high)}] · apparatus ${r.apparatus_versions.join(', ') || '—'}`
   return (
-    <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: delivery would be withheld — ${r.reason}`} data-testid={`cell-route-${t.id}`}>
-      routes {r.route} · {r.reason_code} · {prov} · delivery withheld
-    </Pill>
+    <>
+      {r.deliverable ? (
+        <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver — ${prov}: a clean build may open a pull request`} data-testid={`cell-route-${t.id}`}>
+          routes deliver
+        </Pill>
+      ) : (
+        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: delivery would be withheld — ${r.reason}`} data-testid={`cell-route-${t.id}`}>
+          routes {r.route} · withheld
+        </Pill>
+      )}
+      <span className="font-mono text-[11px] text-on-surface-muted" aria-hidden data-testid={`cell-route-${t.id}-prov`}>
+        {prov}
+      </span>
+    </>
   )
 }
 
 function pct(x: number): string {
-  return `${(x * 100).toFixed(0)}%`
+  return `${(x * 100).toFixed(0)} %`
 }
 
 interface DraftItem {
@@ -380,8 +922,30 @@ const emptyItem = (id: string, cat: FactoryCatalogue | undefined): DraftItem => 
   facts: {},
 })
 
+/** J-FAC-15 — the active backlog's item as a draft, so one item can be edited and the rest kept. */
+function draftFrom(i: FactoryBacklogItem): DraftItem {
+  const facts: Record<string, string> = {}
+  for (const line of i.structural_facts) {
+    const at = line.indexOf(':')
+    if (at > 0) facts[line.slice(0, at).trim()] = line.slice(at + 1).trim()
+  }
+  return {
+    id: i.id,
+    title: i.title,
+    capability_class: i.capability_class,
+    size_estimate: i.size,
+    kind: i.kind,
+    level: i.level,
+    description: i.description ?? '',
+    depends_on: i.depends_on.join(', '),
+    facts,
+  }
+}
+
 /** The request body the form produces: `structural_facts` are `slot: text` lines (readiness.py). */
-export function draftToBody(items: DraftItem[]): { items: Array<Record<string, unknown>> } {
+export function draftToBody(items: DraftItem[]): {
+  items: Array<Record<string, unknown>>
+} {
   return {
     items: items.map((d) => ({
       id: d.id.trim(),
@@ -406,12 +970,13 @@ export function draftToBody(items: DraftItem[]): { items: Array<Record<string, u
  * F24 — the backlog as a person writes it: one card per item with the class's structural
  * questions from the readiness catalogue as the fields (an unanswered structural slot is
  * exactly the gap the run will stop on), plus an "advanced" JSON view for a prepared file.
+ * `from` prefills the form from the active backlog (J-FAC-15: revise one item, keep the rest).
  */
-function RegisterBacklogDialog({ open, repo, onClose }: { open: boolean; repo: string; onClose: () => void }) {
+function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; repo: string; from: FactoryBacklog | null; onClose: () => void }) {
   const register = useRegisterBacklog()
   const catalogue = useFactoryCatalogue(open)
   const [mode, setMode] = useState<'form' | 'json'>('form')
-  const [items, setItems] = useState<DraftItem[]>([emptyItem('I-1', undefined)])
+  const [items, setItems] = useState<DraftItem[]>(() => (from && from.items.length > 0 ? from.items.map(draftFrom) : [emptyItem('I-1', undefined)]))
   const [text, setText] = useState('{\n  "items": [\n    {"id": "I-1", "title": "…", "capability_class": "bug.fix", "size_estimate": "XS", "structural_facts": []}\n  ]\n}')
   const [parseError, setParseError] = useState('')
   const cat = catalogue.data
@@ -440,7 +1005,7 @@ function RegisterBacklogDialog({ open, repo, onClose }: { open: boolean; repo: s
   return (
     <Dialog
       open={open}
-      title="Freeze a backlog"
+      title={from ? 'Freeze a revised backlog' : 'Freeze a backlog'}
       onClose={onClose}
       width="lg"
       footer={
@@ -456,11 +1021,26 @@ function RegisterBacklogDialog({ open, repo, onClose }: { open: boolean; repo: s
       }
     >
       <p className="mt-0 text-sm text-on-surface-body">
-        The items are validated, hashed and recorded as the first event of the chain. Each class asks for the facts a good test needs; a <strong>structural</strong> fact left empty is the gap the run will stop on until an approver signs it. Refused with 409 while a factory run is active.
+        The items are validated, hashed and recorded as the first event of the chain. Each class asks for the facts a good test needs; a <strong>structural</strong> fact left empty is the gap the run will stop on until an approver signs it.
+        Refused with 409 while a factory run is active.
+        {from ? ' This form starts from the active backlog: change what you need and keep the rest; the freeze records a new hash and the old chain stays.' : ''}
       </p>
       {mode === 'json' ? (
         <>
-          <TextArea label="Backlog JSON" value={text} onChange={(e) => setText(e.target.value)} rows={12} className="font-mono text-xs" error={parseError || undefined} hint={'Shape as docs/API.md "Factory": items[] with id, title, capability_class, size_estimate, structural_facts; optional authored tests.'} />
+          <TextArea
+            label="Backlog JSON"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={12}
+            className="font-mono text-xs"
+            error={parseError || undefined}
+            hint={
+              <>
+                Shape as the API's Factory section: items[] with id, title, capability_class, size_estimate, structural_facts; optional authored tests. See{' '}
+                <DocLink to="ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted">Forward mode</DocLink>.
+              </>
+            }
+          />
         </>
       ) : (
         <div className="space-y-4" data-testid="backlog-form">
@@ -522,11 +1102,7 @@ function RegisterBacklogDialog({ open, repo, onClose }: { open: boolean; repo: s
                     ))}
                   </div>
                 )}
-                {slots.length === 0 && cat && (
-                  <p className="mt-3 text-xs text-on-surface-muted">
-                    {d.capability_class} declares no structural facts: the run assesses readiness from the description alone.
-                  </p>
-                )}
+                {slots.length === 0 && cat && <p className="mt-3 text-xs text-on-surface-muted">{d.capability_class} declares no structural facts: the run assesses readiness from the description alone.</p>}
                 <div className="mt-3 flex flex-wrap items-end gap-3">
                   <TextField label="Depends on" value={d.depends_on} onChange={(e) => update(i, { depends_on: e.target.value })} hint="item ids, comma-separated" className="min-w-[20ch]" />
                   {items.length > 1 && (
