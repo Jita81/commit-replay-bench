@@ -158,8 +158,16 @@ test.describe('08 sign-off policy', () => {
     await expect(page.getByTestId('signoff-tile-point')).toContainText('100.0%')
     await expect(page.getByTestId('signoff-tile-false-q1')).toContainText('0')
     const controls = page.getByTestId('signoff-controls')
-    await expect(controls.getByTestId('controls-escaped')).toBeVisible() // 04's real finding
-    await expect(controls).toContainText('1 escape(s)')
+    // 04's controls run: the tier-1 fixture's literal-assert tests let `hardcode_cheat`
+    // grade clean (1 escape — a real finding); a public repository's tests may catch every
+    // control (0 escapes). The page must say which, and the refusal list must agree.
+    const escaped = env.publicTier ? await controls.getByTestId('controls-escaped').count() > 0 : true
+    if (escaped) {
+      await expect(controls.getByTestId('controls-escaped')).toBeVisible()
+      await expect(controls).toContainText('1 escape(s)')
+    } else {
+      await expect(controls).toContainText('0 escape(s)')
+    }
     await expect(page.getByTestId('signoff-route')).toContainText('n_below_min')
 
     // every failing clause is listed with the number that failed and the bar it missed
@@ -167,12 +175,16 @@ test.describe('08 sign-off policy', () => {
     await expect(refusals).toBeVisible()
     const thin = refusals.getByTestId('refusal-thin_cell')
     await expect(thin).toContainText('thin cell')
-    await expect(thin).toContainText('observed 2')
+    await expect(thin).toContainText(env.publicTier ? /observed [1-9]\b/ : 'observed 2')
     await expect(thin).toContainText('threshold 10')
     const escape = refusals.getByTestId('refusal-controls_escapes')
-    await expect(escape).toContainText('a measurement control escaped the oracle')
-    await expect(escape).toContainText('observed 1')
-    await expect(escape).toContainText('threshold 0')
+    if (escaped) {
+      await expect(escape).toContainText('a measurement control escaped the oracle')
+      await expect(escape).toContainText('observed 1')
+      await expect(escape).toContainText('threshold 0')
+    } else {
+      await expect(escape).toHaveCount(0)
+    }
     await expect(refusals.getByTestId('refusal-route_not_deliver:n_below_min')).toContainText('observed calibrate')
     await expect(refusals.getByTestId('refusal-attestation_missing')).toContainText('non-overridable')
 
@@ -181,7 +193,7 @@ test.describe('08 sign-off policy', () => {
     await expect(gateRow(gate, 'Cell is measured')).toContainText(/✓\s*satisfied:/)
     await expect(gateRow(gate, 'false-Q1 = 0')).toContainText(/✓\s*satisfied:/)
     await expect(gateRow(gate, 'n ≥ 10')).toContainText(/✗\s*not satisfied:/)
-    await expect(gateRow(gate, /Negative controls passed/)).toContainText(/✗\s*not satisfied:/)
+    await expect(gateRow(gate, /Negative controls passed/)).toContainText(escaped ? /✗\s*not satisfied:/ : /✓\s*satisfied:/)
     await expect(gateRow(gate, 'Route = deliver')).toContainText(/✗\s*not satisfied:/)
     // even a named, affirmed row cannot open it
     await field(page, 'Accepted row').selectOption({ index: 1 })

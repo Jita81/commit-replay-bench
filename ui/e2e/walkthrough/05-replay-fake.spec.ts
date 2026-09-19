@@ -46,7 +46,7 @@
  *               ui/src/screens/Signoff/SignoffPage.tsx (the screens under test)
  * Tested by:    ui/e2e/walkthrough/05-replay-fake.spec.ts
  * Touch when:   a screen's test ids change, or the thin-cell refusal wording changes (08
- *               asserts on the same cell's n = 2).
+ *               asserts on the same cell's n).
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
@@ -70,6 +70,7 @@ const tileValue = (tile: Locator) => tile.locator(':scope > div').nth(1)
 test.describe(`05 replay (${BUILDER})`, () => {
   const t = primary()
   let runId = ''
+  let cellN = 0 // the graded cell's n, read from the map; the sign-off test asserts the same number
   let cellClass = ''
   let cellSize = ''
 
@@ -179,6 +180,7 @@ test.describe(`05 replay (${BUILDER})`, () => {
     const m = /^([a-z.]+) (XS|S|M|L|XL): (\w+), n (\d+), point ([\d.]+%), 95% CI [\d.]+% to [\d.]+%, false-Q1 (\d+), apparatus \S+ · belts \S+$/.exec(label)
     expect(m, `cell aria-label ${label}`).toBeTruthy()
     const n = Number(m![4])
+    cellN = n
     expect(n).toBeGreaterThanOrEqual(1)
     expect(n).toBeLessThan(10)
     expect(m![3], 'a cell with n < 10 routes to calibrate').toBe('calibrate')
@@ -211,7 +213,9 @@ test.describe(`05 replay (${BUILDER})`, () => {
     await expect(row('false-Q1 = 0')).toContainText(/✓\s*satisfied:/)
     await expect(row('n ≥ 10')).toContainText(/✗\s*not satisfied:/)
     await expect(row('Route = deliver')).toContainText(/✗\s*not satisfied:/)
-    await expect(page.getByTestId('signoff-refusals').getByTestId('refusal-thin_cell')).toContainText('observed 2')
+    // the cell's own n (2 in tier 1, where both tasks share a cell; whatever the real mine
+    // produced in tier 2 — the two graded tasks may land in different cells)
+    await expect(page.getByTestId('signoff-refusals').getByTestId('refusal-thin_cell')).toContainText(`observed ${cellN}`)
     await expect(page.getByRole('button', { name: 'Sign off' })).toBeDisabled()
     await expect(page.getByTestId('signoff-recorded')).toHaveCount(0)
     await expect(page.getByRole('table', { name: `Sign-offs for ${t.name}` })).toContainText('No attestations yet')
