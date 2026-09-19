@@ -8,34 +8,43 @@
  *               route" / "the first useful picture" / "tighter intervals, longer wait"), the
  *               two retention switches with the policy statement, a "Before you start"
  *               summary (estimated cost from the repository's own measured cost per
- *               attempt, the budget cap, retention, posture) and one red button that says
- *               the amount — the MoJ "confirm an action" pattern.
+ *               attempt, the absence of a spend cap, retention, posture) and one red button
+ *               that names the estimate — the MoJ "confirm an action" pattern. While a
+ *               replay is already queued or running for the repository the button and the
+ *               estimate give way to a banner naming that run, so the page can never queue
+ *               a second spend by accident (J-ONR-4).
  * What it does: Replaces the technical run dialog for the person who has never used the
  *               product: every number on the page is the deployment's (the cost estimate is
  *               the repository's measured mean per attempt when it has one, else the
- *               documented range), the posture is the real sandbox mode, and nothing is
- *               queued until the red button.
- * How:          `useRepo`, `useCapabilityMap` (cost_usd_mean over measured cells),
- *               `useSettings` (sandbox posture; admin only — falls back to /health),
- *               `builderChoice` (ui/src/lib/builder.ts) for the builder the deployment can
- *               run, `useCreateRun` with `{kind: replay, mode: sighted, limit, retain}`; on
- *               success the walk resumes on the repository with the run watched.
+ *               documented range), the button says "estimated" because the request carries
+ *               no cost cap (F5b: nothing on this page promises a ceiling nothing enforces),
+ *               the posture is the real sandbox mode, and nothing is queued until the red
+ *               button.
+ * How:          `useRepo` (+ `last_run` → `useRun`, polled, for the in-flight banner),
+ *               `useCapabilityMap` (cost_usd_mean over measured cells), `useHealth` (sandbox
+ *               posture and the builder), `builderChoice` (ui/src/lib/builder.ts) for the
+ *               builder the deployment can run, `useCreateRun` with `{kind: replay, mode:
+ *               sighted, limit, retain}`; on success the walk resumes on the repository with
+ *               the run watched. The kicker is `journeyEyebrow(pathname, 'task 5 of 8 · …')`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
  * Works with:   ui/src/lib/builder.ts (`builderChoice`, shared with the Factory),
- *               ui/src/components/govuk.tsx, ui/src/screens/Connect/ConnectPage.tsx (the
- *               walk that lands here), ui/src/screens/Runs/RunNewDialog.tsx (the full form
- *               for an operator who wants every knob), src/crb/server/routes/runs.py
+ *               ui/src/components/govuk.tsx, ui/src/components/Layout.tsx (`journeyEyebrow`),
+ *               ui/src/components/Help.tsx (`DocLink`), ui/src/screens/Connect/ConnectPage.tsx
+ *               (the walk that lands here), ui/src/screens/Runs/RunNewDialog.tsx (the full
+ *               form for an operator who wants every knob), src/crb/server/routes/runs.py
  * Tested by:    ui/src/screens/Connect/MeasurePage.test.tsx
  * Touch when:   the run request grows a field the walk should expose.
  */
 
 import { useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
-import { useCapabilityMap, useCreateRun, useHealth, useRepo } from '../../api/hooks'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
+import { useCapabilityMap, useCreateRun, useHealth, useRepo, useRun } from '../../api/hooks'
 import { NOT_YET_MEASURED } from '../../api/types'
 import { ErrorState } from '../../components/ErrorState'
-import { BackLink, Kicker, Lede, PageTitle, SummaryList, WarningButton } from '../../components/govuk'
+import { DocLink } from '../../components/Help'
+import { journeyEyebrow } from '../../components/Layout'
+import { BackLink, Kicker, Lede, NotificationBanner, PageTitle, SummaryList, WarningButton, type SummaryRow } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
 import { builderChoice } from '../../lib/builder'
 
@@ -69,11 +78,23 @@ export function posturePhrase(sandbox: { status: string; data?: Record<string, u
   return `${sandbox.status} — a development reading, not evidence, until the sandbox is available`
 }
 
+/** "14:05" — when the in-flight run started. */
+function clock(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+}
+
 export function MeasurePage() {
   const { name = '' } = useParams()
+  const { pathname } = useLocation()
   const navigate = useNavigate()
   const { can } = useAuth()
   const repo = useRepo(name)
+  // a replay already queued or running for this repository: the page must name it, not
+  // offer a second spend (the API exposes it as the repository's last run)
+  const lastRun = repo.data?.last_run
+  const activeId = lastRun && lastRun.kind === 'replay' && (lastRun.status === 'queued' || lastRun.status === 'running') ? lastRun.id : ''
+  const active = useRun(activeId, { poll: Boolean(activeId) })
+  const inFlight = activeId.length > 0 && (!active.data || active.data.status === 'queued' || active.data.status === 'running')
   const map = useCapabilityMap(name, ['capability_class', 'size'])
   const health = useHealth()
   const create = useCreateRun()
@@ -102,9 +123,21 @@ export function MeasurePage() {
   const choice = builderChoice(health.data)
   const posture = posturePhrase(sandbox)
   const retention = !worktrees && !transcripts ? 'Nothing retained — grades and hashes only' : `${[worktrees && 'worktrees', transcripts && 'transcripts'].filter(Boolean).join(' and ')} kept until deleted`
+  const estimate: SummaryRow = {
+    key: 'Estimated cost',
+    value: (
+      <>
+        {usd(lo)} to {usd(hi)} for {runLimit} attempts
+        {measured
+          ? `, at about ${usd(measured.mean)} each (this repository's measured mean over n=${measured.n} attempts at apparatus ${measured.apparatus || '—'}; the range is a ±20 % planning band, not a measured interval).`
+          : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each — a planning range, not a measured interval: this repository has no measured mean yet (n = 0 on the current apparatus); the range is the per-attempt band the onboarding guide quotes for Claude Sonnet across earlier repositories, and carries no apparatus of its own.`}{' '}
+        <DocLink to="ONBOARDING-A-REPO#step-4--measure-operator-the-money-step">Measure: the money step</DocLink>
+      </>
+    ),
+  }
 
   const start = () => {
-    if (!choice) return
+    if (!choice || inFlight) return
     create.mutate(
       {
         repo: name,
@@ -122,12 +155,30 @@ export function MeasurePage() {
 
   return (
     <>
-      <BackLink to={`/connect/${encodeURIComponent(name)}`}>Back to the instrument proof</BackLink>
+      <BackLink to={`/connect/${encodeURIComponent(name)}`}>Back to the walk for {name}</BackLink>
       <div>
-        <Kicker>Task 5 of 7 · this step spends money</Kicker>
+        <Kicker>{journeyEyebrow(pathname, 'task 5 of 8 · this step spends money')}</Kicker>
       </div>
       <PageTitle>Measure {name}</PageTitle>
       {repo.isError && <ErrorState error={repo.error} onRetry={() => void repo.refetch()} />}
+      {inFlight && (
+        <NotificationBanner title="Important">
+          <p className="m-0 mb-2 font-bold">
+            A measurement is already {active.data?.status === 'queued' ? 'queued' : 'running'} for {name}.
+            {active.data && (
+              <>
+                {' '}
+                {active.data.started ? `Started ${clock(active.data.started)}; ` : 'Not started yet; '}
+                {active.data.progress.total > 0 ? `${active.data.progress.done} of ${active.data.progress.total} attempts made` : 'no attempt made yet'}; {usd(active.data.cost_usd)} spent so far.
+              </>
+            )}
+          </p>
+          <p className="m-0 mb-2">
+            <Link to={`/runs/${encodeURIComponent(activeId)}`}>Open the run</Link> · <Link to={`/connect/${encodeURIComponent(name)}`}>Back to the walk</Link>
+          </p>
+          <p className="m-0">Start another run only when this one has finished or been cancelled.</p>
+        </NotificationBanner>
+      )}
       <h2 className="mb-2 text-[24px] font-bold leading-[1.3]">How many attempts</h2>
       <div className="mb-8 max-w-[44em]">
         {LIMITS.map((l) => (
@@ -144,7 +195,7 @@ export function MeasurePage() {
         )}
         {repo.data && gold === 0 && (
           <p className="m-0 mt-2 text-[16px] font-bold text-status-red" data-testid="no-gold">
-            {name} has no gold-clean task to replay: a run would make no attempt. Mine the repository and check its gold status first (task 4).
+            {name} has no gold-clean task to replay, so a run would make no attempt. Mine the repository first (stage 3 of the walk) and check its gold status under <Link to={`/repos/${encodeURIComponent(name)}`}>Configuration</Link>.
           </p>
         )}
       </div>
@@ -164,20 +215,28 @@ export function MeasurePage() {
         <h2 className="mb-4 text-[24px] font-bold leading-[1.3]">Before you start</h2>
         <SummaryList
           rows={[
-            { key: 'Estimated cost', value: `${usd(lo)} to ${usd(hi)} for ${runLimit} attempts${measured ? `, at about ${usd(measured.mean)} each (this repository's measured mean over n=${measured.n} attempts at apparatus ${measured.apparatus || '—'}; the range is a ±20 % planning band, not a measured interval)` : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each — a planning range, not a measured interval: this repository has no measured mean yet (n = 0 on the current apparatus); the range is the per-attempt band docs/ONBOARDING-A-REPO.md quotes for Claude Sonnet across earlier repositories, and carries no apparatus of its own`}` },
+            // the estimate gives way to the banner while a run is in flight: no second spend is priced
+            ...(inFlight ? [] : [estimate]),
             { key: 'Builder', value: choice ? choice.label : 'No builder is configured on this deployment — an admin adds a provider key (Settings), or use the full run form', changeTo: '/runs', changeLabel: 'Every knob' },
-            { key: 'Budget cap', value: 'Per attempt — the builder’s ladder caps turns, tool calls and wall clock; a run can be cancelled at any point' },
+            // honest until F5b (a per-run cap summed over attempts) lands: the request carries no cap
+            { key: 'Budget cap', value: 'No spend cap on this run yet. Each attempt is capped on turns, tool calls and wall clock; you can cancel at any point and attempts already made are still charged.' },
             { key: 'Retention', value: retention },
             { key: 'Posture', value: posture },
           ]}
         />
-        <p className="mb-4 mt-6 text-[19px] leading-[1.47]">You can cancel the run at any point. Attempts already made are still charged.</p>
-        {can('operator') ? (
-          <WarningButton onClick={start} disabled={create.isPending || !repo.data || !choice || gold === 0}>
-            Start the run and spend up to {usd(hi)}
-          </WarningButton>
+        {inFlight ? (
+          <p className="mb-0 mt-6 text-[19px] leading-[1.47]">A measurement is in flight for {name} (see above). Cancel it from the run page if you need to; attempts already made are still charged.</p>
         ) : (
-          <p className="m-0 text-[16px] text-on-surface-muted">Starting a run needs the operator role.</p>
+          <>
+            <p className="mb-4 mt-6 text-[19px] leading-[1.47]">You can cancel the run at any point. Attempts already made are still charged.</p>
+            {can('operator') ? (
+              <WarningButton onClick={start} disabled={create.isPending || !repo.data || !choice || gold === 0}>
+                Start the run — estimated {usd(lo)} to {usd(hi)}
+              </WarningButton>
+            ) : (
+              <p className="m-0 text-[16px] text-on-surface-muted">Starting a run needs the operator role.</p>
+            )}
+          </>
         )}
         {create.isError && <ErrorState compact error={create.error} />}
       </div>
