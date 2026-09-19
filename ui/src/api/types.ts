@@ -296,8 +296,10 @@ export interface RunCounts {
   first_pass_clean: number
   rows: number
   /** A non-build kind's own counters, verbatim (a mine run's examined / found /
-   *  gold_clean / gold_dirty / skipped / known / pool); `{}` for build kinds. */
-  detail?: Record<string, number | string>
+   *  gold_clean / gold_dirty / skipped / known / pool; an oracle, controls or label
+   *  run's raw counts object, which may nest); `{}` for build kinds, absent on an
+   *  older server. */
+  detail?: Record<string, unknown>
 }
 
 /** Tasks done of total, and the task in flight (the run page's progress bar). */
@@ -344,6 +346,18 @@ export function ladderEntryLabel(entry: LadderEntry): string {
   return `${entry.builder}:${entry.model}${entry.provider ? `@${entry.provider}` : ''}${caps.length ? ` [${caps.join(' ')}]` : ''}`
 }
 
+/**
+ * A factory run's delivery switch as the worker read it (`RunOut.factory`): whether
+ * delivery was on, who overrode the route gate (id and display name) and the frozen
+ * backlog's hash. `null` for every other kind; absent on an older server.
+ */
+export interface RunFactory {
+  deliver: boolean
+  deliver_override_by: string | null
+  deliver_override_by_name: string | null
+  backlog_hash: string | null
+}
+
 /** @contract API.md "GET /runs/{id}: run + counts + progress". */
 export interface Run {
   id: string
@@ -373,6 +387,15 @@ export interface Run {
   error: string
   cost_usd: number
   apparatus_version: string
+  /** The worker that claimed the run and its last heartbeat (`null` until claimed); absent on an older server. */
+  worker_id?: string
+  heartbeat?: string | null
+  /** 1-based place in the FIFO queue while `queued`; `null` once claimed; absent on an older server. */
+  queue_position?: number | null
+  /** The kinds of the runs ahead in the queue, in order; absent on an older server. */
+  queue_kinds_ahead?: string[]
+  /** The factory's delivery switch (kind `factory` only, else `null`); absent on an older server. */
+  factory?: RunFactory | null
   counts: RunCounts
   progress: RunProgress
 }
