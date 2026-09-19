@@ -283,4 +283,31 @@ describe('RepoConfigTab', () => {
     expect(screen.getByTestId('repo-config-probe-reason')).toHaveTextContent('probe not green: rc=1')
     expect(screen.getByTestId('repo-config-audit')).toBeInTheDocument()
   })
+
+  it('a repo.github_linked event renders as a change — "Changed: url" with the before/after diff', async () => {
+    // the link route writes the `repo.updated` shape (`fields`, `diff`) beside its own keys so
+    // the seam an auditor reads is visible here, not only on the API
+    const linked = event(2, 'repo.github_linked', {
+      github: { installation_id: 77, full_name: 'acme/Calc', default_branch: 'main', html_url: 'https://github.com/acme/Calc', private: true },
+      url_before: 'https://github.com/spf13/cobra.git',
+      url_after: 'https://github.com/acme/Calc.git',
+      previous_full_name: null,
+      fields: ['url'],
+      diff: { url: { from: 'https://github.com/spf13/cobra.git', to: 'https://github.com/acme/Calc.git' } },
+    })
+    mockApi({
+      'GET /auth/me': OPERATOR,
+      [`GET /repos/${REPO.name}/events`]: { items: [linked, event(1, 'repo.created', { config: REPO.config })], total: 2, limit: 50, offset: 0 },
+    })
+    renderApp(<RepoConfigTab repo={REPO} />)
+    await waitFor(() => expect(screen.getAllByTestId('repo-config-audit-event')).toHaveLength(2))
+    const [newest] = screen.getAllByTestId('repo-config-audit-event')
+    expect(newest).toHaveAttribute('data-action', 'repo.github_linked')
+    expect(within(newest!).getByTestId('repo-config-audit-fields')).toHaveTextContent('url')
+    expect(within(newest!).getByText('Diff (redacted at write)')).toBeInTheDocument()
+    // the house fields describe their hint / error to the control (SelectField, like TextField)
+    const language = screen.getByLabelText(/^Language/)
+    expect(language).toHaveAttribute('aria-describedby')
+    expect(document.getElementById(language.getAttribute('aria-describedby')!)).not.toBeNull()
+  })
 })

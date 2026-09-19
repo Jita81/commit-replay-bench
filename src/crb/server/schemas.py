@@ -197,6 +197,10 @@ class RepoSummary(BaseModel):
     last_run: RepoLastRun | None
     created: str
     updated: str
+    #: ``owner/name`` (lower-cased) of the GitHub repository the row is linked to through
+    #: the GitHub App (``repos.github_full_name``); ``None`` for a repository registered by
+    #: URL — what the Connect dialog's "link to an existing repository" select filters on.
+    github_full_name: str | None = None
 
 
 class RepoDetail(RepoSummary):

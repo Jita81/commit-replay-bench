@@ -218,6 +218,12 @@ export interface RepoSummary {
   last_run: RepoLastRun | null
   created: string
   updated: string
+  /**
+   * `owner/name` (lower-cased) of the GitHub repository the row is linked to through the
+   * GitHub App; `null` for a repository registered by URL. The Connect dialog's "link to an
+   * existing repository" select lists the rows where this is `null`.
+   */
+  github_full_name: string | null
 }
 
 /** `GET /repos/{name}` — repo + config. */

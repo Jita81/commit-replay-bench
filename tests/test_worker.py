@@ -1192,3 +1192,43 @@ def test_github_settings_read_only_their_own_keys_and_refuse_a_malformed_one(
     monkeypatch.setenv("CRB_GITHUB__API_URL", "ftp://not-https")
     with pytest.raises(pydantic.ValidationError):
         worker_main._github_settings()
+
+
+def test_delivery_credentials_follow_a_linked_row_to_its_own_https_remote() -> None:
+    """After ``POST /repos/{name}/github-link`` a row carries ``config_json.github`` and an
+    https URL on the app's host: the worker resolves a delivery provider for THAT remote and
+    for no other — the CWE-201 rule (a token goes only to the host the link was made for)
+    holds for a linked row exactly as for a connected one. A stub app stands in for GitHub;
+    no key, no network."""
+    from crb.server.settings import GitHubAppSettings
+
+    class _Inst:
+        can_deliver = True
+
+    class _StubApp:
+        def installation(self, iid: int) -> _Inst:
+            assert iid == 78
+            return _Inst()
+
+        def installation_token(self, iid: int) -> str:
+            return f"ghs_stub_{iid}"
+
+    worker = Worker.__new__(Worker)
+    worker.settings = WorkerSettings(
+        home=Path("/nonexistent"),
+        github=GitHubAppSettings(app_id="1", app_slug="crb", private_key="-----BEGIN"),
+    )
+    worker._github_app_client = _StubApp()  # type: ignore[assignment]
+    linked = {
+        "language": "go",
+        "runner": "go",
+        "url": "https://github.com/acme/cobra.git",
+        "github": {"installation_id": 78, "full_name": "acme/cobra"},
+    }
+    provider = worker._delivery_credentials(linked, linked["url"])
+    assert provider is not None and provider.resolve("cobra").remote == linked["url"]
+    # the link names the installation, but the remote decides where a token may go
+    assert worker._delivery_credentials(linked, "https://evil.example/acme/cobra.git") is None
+    assert worker._delivery_credentials(linked, "http://github.com/acme/cobra.git") is None
+    # a row with no link (a URL-only registration) gets no credentials at all
+    assert worker._delivery_credentials({"url": linked["url"]}, linked["url"]) is None

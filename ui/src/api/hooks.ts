@@ -34,7 +34,8 @@
  * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx,
  *               ui/src/screens/Capability/CapabilityPage.test.tsx,
  *               ui/src/screens/Routing/RoutingPage.test.tsx,
- *               ui/src/screens/Signoff/SignoffPage.test.tsx
+ *               ui/src/screens/Signoff/SignoffPage.test.tsx,
+ *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the GitHub App hooks)
  *               (every screen test exercises its hooks through `mockApi`)
  * Touch when:   an endpoint is added or its path / params change (docs/API.md) — add the type
  *               in ui/src/api/types.ts, the key in `keys` and the hook here, then the screen;
@@ -741,6 +742,24 @@ export function useConnectGitHubRepo(): UseMutationResult<RepoDetail, ApiError, 
   return useMutation({
     mutationFn: ({ installation, body }) => api<RepoDetail>(`/github/installations/${installation}/connect`, { method: 'POST', body }),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.repos })
+      void qc.invalidateQueries({ queryKey: ['github', 'repos'] })
+    },
+  })
+}
+
+/**
+ * `POST /repos/{name}/github-link` (operator) — link an EXISTING repository (its name, and
+ * so its ledger rows, stay) to one of an installation's repositories; the row's URL becomes
+ * the GitHub clone URL. Invalidates the repo, the list and the picker, as connect does.
+ */
+export function useLinkRepoToGitHub(): UseMutationResult<RepoDetail, ApiError, { name: string; installation: number; full_name: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, installation, full_name }) =>
+      api<RepoDetail>(`/repos/${enc(name)}/github-link`, { method: 'POST', body: { installation_id: installation, full_name } }),
+    onSuccess: (_repo, { name }) => {
+      void qc.invalidateQueries({ queryKey: keys.repo(name) })
       void qc.invalidateQueries({ queryKey: keys.repos })
       void qc.invalidateQueries({ queryKey: ['github', 'repos'] })
     },

@@ -86,7 +86,9 @@ The census `configs.json` shape is accepted unchanged by `RepoConfig.from_dict`.
 **Connect** is the first screen of the journey. With the GitHub App configured
 ([GITHUB-APP](GITHUB-APP.md)), *Connect from GitHub* lists the repositories each
 organisation's installation may see and registers the one you pick with a pre-filled name,
-language and runner — no token is handed over; the worker mints the installation's own.
+language and runner — no token is handed over; the worker mints the installation's own. A
+repository you already measured can instead be *linked* to the picked GitHub repository — it
+keeps its name and its evidence; only its URL moves ([GITHUB-APP §4](GITHUB-APP.md)).
 Without the app, *Connect by URL* registers a public repository (or one the worker's git can
 reach). Either way the repository then walks the six stages (probe → mine → oracle →
 controls → first measurement) on `/connect/<name>`, each saying what it proves and what it
