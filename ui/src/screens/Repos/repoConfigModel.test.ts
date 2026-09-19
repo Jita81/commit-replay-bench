@@ -37,6 +37,7 @@ export const REPO: RepoDetail = {
   last_run: null,
   created: '2026-09-13T09:00:00+00:00',
   updated: '2026-09-13T09:00:00+00:00',
+  github_full_name: null,
   config: {
     name: 'walk-pyrepo',
     language: 'python',

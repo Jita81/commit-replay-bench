@@ -33,8 +33,11 @@ Works with:   src/crb/core/spec.py (``RepoConfig`` — the shape stored in ``con
               src/crb/core/capability.py (``profile_repo`` / ``RepoChangeProfile``),
               src/crb/server/routes/runs.py (``new_run`` / ``append_system_event`` /
               ``system_trace_id``), src/crb/server/schemas.py (``RepoCreateRequest`` and the
-              ``Repo*`` shapes), src/crb/store/models.py (``Repo``, ``Task``),
-              docs/OPERATOR.md#20-configuring-a-repository-from-the-ui,
+              ``Repo*`` shapes — ``RepoSummary.github_full_name`` is read off the row here),
+              src/crb/store/models.py (``Repo``, ``Task``), src/crb/server/routes/github.py
+              (connect and link reuse ``get_repo_or_404`` / ``_config_of`` /
+              ``_stored_config`` / ``PRESERVED_KEYS`` and write the ``github`` key this
+              module preserves), docs/OPERATOR.md#20-configuring-a-repository-from-the-ui,
               ui/src/screens/Repos
 Tested by:    tests/test_server_routes_repos.py, tests/test_server_routes_w3b.py
 Touch when:   THIS is the route a new repository goes through — but adding one is
@@ -233,6 +236,7 @@ def repo_summary(session: Session, repo: Repo) -> RepoSummary:
         ),
         created=repo.created,
         updated=repo.updated,
+        github_full_name=repo.github_full_name,
     )
 
 

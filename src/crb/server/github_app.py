@@ -221,11 +221,21 @@ class GitHubApp:
             )
         except httpx.HTTPError as e:
             raise GitHubAppError(0, redact(str(e))[:300]) from e
-        if r.status_code >= 400:
+        # a 3xx is an error too: the client never follows redirects, and GitHub's 301 for a
+        # renamed or transferred repository would otherwise read as an EMPTY record (every
+        # field "") that a caller could write over a real row
+        if r.status_code >= 300:
+            # a proxy or gateway may answer a 3xx/5xx with a body that is not GitHub's
+            # ``{"message"}`` object (HTML, a JSON string or array): read the message only
+            # from an object, else fall back to the text — never let the error path raise
             try:
-                msg = str(r.json().get("message", ""))
+                body: Any = r.json()
             except ValueError:
-                msg = r.text[:300]
+                body = None
+            if isinstance(body, dict):
+                msg = str(body.get("message", "")) or r.reason_phrase
+            else:
+                msg = r.text[:300] or r.reason_phrase
             raise GitHubAppError(r.status_code, redact(msg)[:300])
         # every endpoint this client calls answers with a JSON body: an empty 2xx would
         # otherwise read as "no installations" / "no repositories" — a false empty — or as a
@@ -299,7 +309,9 @@ class GitHubApp:
         """One repository by ``owner/name`` — 404 from GitHub when the installation cannot
         see it, which is the check the connect route relies on."""
         owner, _, name = full_name.partition("/")
-        if not owner or not name:
+        if not owner or not name or owner in (".", "..") or name in (".", "..") or "/" in name:
+            # a dot segment would be collapsed by the URL layer: ``/repos/../rate_limit``
+            # is ``GET /rate_limit`` under the installation's bearer — never build it
             raise GitHubAppError(422, f"not an owner/name: {full_name!r}")
         return InstallationRepo.from_api(
             self._get(f"/repos/{owner}/{name}", bearer=self.installation_token(installation_id))

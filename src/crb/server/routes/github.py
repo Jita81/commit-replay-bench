@@ -1,4 +1,4 @@
-"""GitHub App routes — install, list an installation's repositories, connect one.
+"""GitHub App routes — install, list an installation's repositories, connect or link one.
 
 Navigation
 ----------
@@ -8,28 +8,36 @@ What it is:   The HTTP surface of the enterprise connection: ``GET /github/app``
               verified with the app's own credential, recorded, and the browser lands on
               the Connect screen), ``POST /github/installations/sync`` (refresh from GitHub),
               ``GET /github/installations/{id}/repositories`` (the picker, with a suggested
-              config per repository) and ``POST /github/installations/{id}/connect``
-              (register one of them as a crb repository, linked to the installation).
+              config per repository), ``POST /github/installations/{id}/connect``
+              (register one of them as a NEW crb repository, linked to the installation)
+              and ``POST /repos/{name}/github-link`` (attach one of them to an EXISTING crb
+              repository — it keeps its name and its evidence; its URL becomes the clone URL).
 What it does: Makes "connect a repository" the org-level-install → repository-selection
               flow every comparable product uses (docs/GITHUB-APP.md), under the API's RBAC:
-              a viewer may list, an operator may sync and connect. A connected repository is
-              an ordinary ``Repo`` row whose ``config_json.github`` names the installation;
+              a viewer may list, an operator may sync, connect and link. A connected repository
+              is an ordinary ``Repo`` row whose ``config_json.github`` names the installation;
               the worker mints a token for that installation to clone (and, where the
               installation grants write, to deliver). No token is ever stored or returned.
+              A link is a visible seam on the events table (``repo.github_linked`` with the
+              URL before and after), never a silent edit.
 How:          ``GitHubAppDep`` builds a :class:`GitHubApp` from settings (a 404
               ``github_app_not_configured`` when it is not); GitHub's refusals map to 502
               ``github_error``; the setup callback verifies ``installation_id`` via
-              ``GET /app/installations/{id}`` before writing anything.
+              ``GET /app/installations/{id}`` before writing anything; connect and link
+              share ``_visible_repository`` / ``_link_of`` and both let the unique index on
+              ``repos.github_full_name`` decide a race (409, at autoflush or at commit).
 Layer:        server — docs/ARCHITECTURE.md#43-server
 ADRs:         docs/adr/0014-github-app-is-the-connection.md
 Works with:   src/crb/server/github_app.py (the client), src/crb/store/models.py
               (``GitHubInstallation``, ``Repo``), src/crb/server/routes/repos.py (the
-              repository row and its ``repo.created`` event — reused here), src/crb/server/
-              worker.py (clones with an installation token), ui/src/screens/Connect/
-              GitHubConnectDialog.tsx (the picker), docs/API.md "GitHub App"
+              repository row, ``get_repo_or_404`` / ``_config_of`` / ``PRESERVED_KEYS`` and
+              its ``repo.created`` event — reused here), src/crb/server/worker.py (clones
+              with an installation token; ``_github_host_ok`` is the CWE-201 rule a link
+              relies on), ui/src/screens/Connect/GitHubConnectDialog.tsx (the picker and
+              its two ways), docs/API.md "GitHub App", docs/GITHUB-APP.md
 Tested by:    tests/test_server_github_app.py
-Touch when:   the connect body grows a field (mirror it in the UI dialog); GHES needs a
-              different discovery path.
+Touch when:   the connect or link body grows a field (mirror it in the UI dialog); GHES
+              needs a different discovery path.
 """
 
 from __future__ import annotations
@@ -55,8 +63,21 @@ from crb.server.auth import (
     verify_github_setup_state,
 )
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep
-from crb.server.github_app import GitHubApp, GitHubAppError, Installation, suggest_config
-from crb.server.routes.repos import _stored_config, _validated_config, repo_detail
+from crb.server.github_app import (
+    GitHubApp,
+    GitHubAppError,
+    Installation,
+    InstallationRepo,
+    suggest_config,
+)
+from crb.server.routes.repos import (
+    PRESERVED_KEYS,
+    _config_of,
+    _stored_config,
+    _validated_config,
+    get_repo_or_404,
+    repo_detail,
+)
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.schemas import RepoDetail
 from crb.server.settings import Settings
@@ -147,15 +168,23 @@ class PickerPage(BaseModel):
     has_more: bool
 
 
+#: GitHub's own grammar: a login is alphanumerics and hyphens, never leading or trailing;
+#: a repository name is ``[A-Za-z0-9_.-]`` with at least one character that is not a dot —
+#: so a dot segment (``.`` / ``..``) can be neither owner nor name. Defence in depth for the
+#: URL layer, which would collapse ``/repos/../rate_limit`` into a different endpoint under
+#: the installation's bearer; :meth:`GitHubApp.repository` refuses the same shapes itself.
+FULL_NAME_PATTERN = (
+    r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*$"
+)
+
+
 class ConnectRequest(BaseModel):
     """``POST /github/installations/{id}/connect`` — one repository the installation may
     see, plus the fields the operator confirmed (the rest come from the suggestion)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    full_name: str = Field(
-        min_length=3, max_length=200, pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
-    )
+    full_name: str = Field(min_length=3, max_length=200, pattern=FULL_NAME_PATTERN)
     name: str | None = Field(default=None, min_length=1, max_length=64)
     language: str | None = Field(default=None, max_length=32)
     runner: str | None = Field(default=None, max_length=16)
@@ -165,6 +194,17 @@ class ConnectRequest(BaseModel):
     test_mode: str | None = None
     test_suffix: str | None = Field(default=None, max_length=128)
     belt_scope: str | list[str] | None = None
+
+
+class LinkRequest(BaseModel):
+    """``POST /repos/{name}/github-link`` — the installation and one repository it may see,
+    to attach to a crb repository that already exists (its name, and so its ledger rows,
+    stay)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    installation_id: int = Field(ge=1)
+    full_name: str = Field(min_length=3, max_length=200, pattern=FULL_NAME_PATTERN)
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +252,69 @@ def _installation_or_404(db: DbDep, installation_id: int) -> GitHubInstallation:
             f"installation {installation_id} is not on record — sync installations, or install the app",
         )
     return row
+
+
+def _visible_repository(app: GitHubApp, installation_id: int, full_name: str) -> InstallationRepo:
+    """The repository as the installation sees it — GitHub's 404 becomes the API's words
+    (select it in the app's repository access); a 301 (renamed or transferred) is GitHub's
+    refusal, a 502 naming it; an answer that is not the repository asked for is refused by
+    :func:`_not_the_one_asked_for`; an archived one is a 422. Shared by connect and link so
+    both refuse the same repositories the same way."""
+    try:
+        gh = app.repository(installation_id, full_name)
+    except GitHubAppError as exc:
+        if exc.status == 404:
+            raise ApiError(
+                404,
+                "not_found",
+                f"{full_name} is not visible to installation {installation_id} — select it in the app's repository access",
+            ) from exc
+        if exc.status == 422:
+            # the client's own refusal of the name (a dot segment), or GitHub's: not a
+            # gateway fault, the input's
+            raise ApiError(422, "validation_error", exc.message) from exc
+        raise _github_error(exc) from exc
+    not_it = _not_the_one_asked_for(gh, full_name)
+    if not_it is not None:
+        raise not_it
+    if gh.archived:
+        raise ApiError(422, "validation_error", f"{gh.full_name} is archived")
+    return gh
+
+
+def _not_the_one_asked_for(gh: InstallationRepo, full_name: str) -> ApiError | None:
+    """GitHub's answer must BE the repository asked for: a record with no ``full_name`` or
+    ``clone_url`` (a body that is not a repository) is GitHub's fault (502); a different
+    ``full_name`` (a renamed or transferred repository answered under its new name) is the
+    operator's stale input (422, naming the new one). Without this a link would commit
+    ``url=""`` over a measured row and call it 200."""
+    if not gh.full_name or not gh.clone_url:
+        return ApiError(
+            502,
+            "github_error",
+            f"GitHub did not answer with a repository for {full_name}",
+            detail={"github_status": 200},
+        )
+    if gh.full_name.lower() != full_name.lower():
+        return ApiError(
+            422,
+            "validation_error",
+            f"{full_name} is now {gh.full_name} on GitHub — select it under its current name",
+            detail={"full_name": gh.full_name},
+        )
+    return None
+
+
+def _link_of(inst: GitHubInstallation, gh: InstallationRepo) -> dict[str, Any]:
+    """What ``config_json.github`` holds: the installation the worker mints a token for and
+    the repository facts the UI shows. Never a token."""
+    return {
+        "installation_id": inst.installation_id,
+        "full_name": gh.full_name,
+        "default_branch": gh.default_branch,
+        "html_url": gh.html_url,
+        "private": gh.private,
+    }
 
 
 def _connected_names(db: DbDep) -> dict[str, str]:
@@ -391,18 +494,7 @@ def connect_repository(
     the row's ``url`` is the https clone URL and ``config_json.github`` names the
     installation the worker mints a token for."""
     inst = _installation_or_404(db, installation_id)
-    try:
-        gh = app.repository(installation_id, body.full_name)
-    except GitHubAppError as exc:
-        if exc.status == 404:
-            raise ApiError(
-                404,
-                "not_found",
-                f"{body.full_name} is not visible to installation {installation_id} — select it in the app's repository access",
-            ) from exc
-        raise _github_error(exc) from exc
-    if gh.archived:
-        raise ApiError(422, "validation_error", f"{gh.full_name} is archived")
+    gh = _visible_repository(app, installation_id, body.full_name)
     already = _connected_names(db).get(gh.full_name.lower())
     if already:
         raise ApiError(
@@ -436,13 +528,7 @@ def connect_repository(
         config = _validated_config(name, raw)
     except ValueError as exc:
         raise ApiError(422, "validation_error", str(exc)) from exc
-    link = {
-        "installation_id": inst.installation_id,
-        "full_name": gh.full_name,
-        "default_branch": gh.default_branch,
-        "html_url": gh.html_url,
-        "private": gh.private,
-    }
+    link = _link_of(inst, gh)
     repo = Repo(
         name=config.name,
         language=config.language.value,
@@ -454,15 +540,16 @@ def connect_repository(
         probe_status="unknown",
     )
     db.add(repo)
-    append_system_event(
-        db,
-        trace_id=system_trace_id("repo", config.name),
-        action="repo.created",
-        repo=config.name,
-        actor=operator.id,
-        payload={"config": config.to_dict(), "github": link},
-    )
     try:
+        # the event's seq query autoflushes the row: the index may refuse here or at commit
+        append_system_event(
+            db,
+            trace_id=system_trace_id("repo", config.name),
+            action="repo.created",
+            repo=config.name,
+            actor=operator.id,
+            payload={"config": config.to_dict(), "github": link},
+        )
         db.commit()
     except IntegrityError as exc:
         # two operators connected the same repository at once: the unique index on
@@ -472,6 +559,84 @@ def connect_repository(
             409,
             "already_exists",
             f"{gh.full_name} was connected by another request at the same time (or the name {name!r} is taken)",
+        ) from exc
+    return repo_detail(db, repo)
+
+
+@router.post(
+    "/repos/{name}/github-link",
+    response_model=RepoDetail,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR, 502: _ERR},
+    summary="Link an EXISTING crb repository to one of an installation's repositories (operator)",
+)
+def link_repository(
+    name: str, body: LinkRequest, operator: OperatorDep, db: DbDep, app: GitHubAppDep
+) -> RepoDetail:
+    """The row keeps its name — and with it every ledger row, map and sign-off made under
+    it: this is the path for a repository measured before the app existed, or whose history
+    now lives on a fork (``cobra`` → ``Jita81/cobra``). What changes: ``url`` becomes the
+    https clone URL, ``github_full_name`` the constrained identity, ``config_json.github``
+    the same link connect writes. Language, runner, layout and belt scope are NOT touched —
+    the measured config stands; the operator edits it separately if the fork differs — and
+    an existing clone is kept (same history). Re-linking the row to another repository
+    replaces the link (the operator's explicit act) and the event records the previous
+    ``full_name``. The link is a visible seam on the events table
+    (``repo.github_linked`` with ``url_before`` / ``url_after``), never a silent edit.
+
+    CWE-201 holds as for connect: the worker sends an installation token only to an https
+    remote on the app's own host (``Worker._github_host_ok``), whatever the link says, and
+    a later ``PUT /repos/{name}`` that changes the URL drops the link."""
+    repo = get_repo_or_404(db, name)
+    inst = _installation_or_404(db, body.installation_id)
+    gh = _visible_repository(app, body.installation_id, body.full_name)
+    already = _connected_names(db).get(gh.full_name.lower())
+    if already and already != repo.name:
+        raise ApiError(
+            409,
+            "already_exists",
+            f"{gh.full_name} is already connected as {already!r}",
+            detail={"repo": already},
+        )
+    link = _link_of(inst, gh)
+    previous = dict(dict(repo.config_json or {}).get(GITHUB_KEY) or {})
+    url_before = str(repo.url or "")
+    # the config re-validates with the new URL (the policy check every stored config passes);
+    # the cached profile is history and survives, the old link is replaced
+    config = _validated_config(name, {**_config_of(repo).to_dict(), "url": gh.clone_url})
+    kept = {k: v for k, v in dict(repo.config_json or {}).items() if k in PRESERVED_KEYS and v}
+    kept[GITHUB_KEY] = link
+    repo.url = config.url
+    repo.config_json = _stored_config(config, kept)
+    repo.github_full_name = gh.full_name.lower()
+    repo.updated = _now()
+    try:
+        # the event's seq query autoflushes the row: the index may refuse here or at commit
+        append_system_event(
+            db,
+            trace_id=system_trace_id("repo", name),
+            action="repo.github_linked",
+            repo=name,
+            actor=operator.id,
+            payload={
+                "github": link,
+                "url_before": url_before,
+                "url_after": config.url,
+                "previous_full_name": previous.get("full_name") or None,
+                # the same ``fields`` / ``diff`` shape ``repo.updated`` carries, so the
+                # Configuration tab's audit trail renders "Changed: url" with the diff
+                "fields": ["url"],
+                "diff": {"url": {"from": url_before, "to": config.url}},
+            },
+        )
+        db.commit()
+    except IntegrityError as exc:
+        # two operators linked the same repository to two rows at once: the unique index
+        # on ``repos.github_full_name`` decided, not the scan above
+        db.rollback()
+        raise ApiError(
+            409,
+            "already_exists",
+            f"{gh.full_name} was connected by another request at the same time",
         ) from exc
     return repo_detail(db, repo)
 

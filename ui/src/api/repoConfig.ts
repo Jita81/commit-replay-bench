@@ -2,7 +2,8 @@
  * Repository configuration editing — the client side of `PUT /repos/{name}` (a
  * PARTIAL update: only the fields sent change) and the config audit trail
  * `GET /repos/{name}/events` (the repo's system trace — `repo.created`, then one
- * `repo.updated` per save carrying the REDACTED field diff — newest first).
+ * `repo.updated` per save and one `repo.github_linked` per GitHub link, each carrying the
+ * REDACTED field diff — newest first).
  *
  * Kept apart from the shared `hooks.ts` on purpose: this is the repo-config
  * workstream's own wire surface. Query keys nest under `keys.repo(name)` so the
@@ -14,8 +15,9 @@
  *               `useRepoEvents` (`GET /repos/{name}/events`), with the `RepoUpdateRequest` body.
  * What it does: Sends a PARTIAL update — only the fields the form changed — and replaces the
  *               cached repo detail with the server's fresh one; reads the repo's system trace
- *               (`repo.created`, one `repo.updated` per save with the redacted field diff) as
- *               the Configuration tab's audit trail.
+ *               (`repo.created`, one `repo.updated` per save, one `repo.github_linked` per
+ *               GitHub link, each with the redacted field diff) as the Configuration tab's
+ *               audit trail.
  * How:          A `useMutation` whose `onSuccess` seeds `keys.repo(name)` and invalidates the
  *               list and the events page; a `useQuery` keyed under `['repos', name, 'events']`
  *               so the shared invalidations (create, probe) reach it too.

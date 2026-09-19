@@ -114,6 +114,25 @@ What the API records: an ordinary repository row whose `url` is the https clone 
 `config_json.github` is `{installation_id, full_name, default_branch, html_url, private}`.
 A config update keeps that link. The row carries no token.
 
+### Linking a repository you already measured
+
+A repository connected by URL before the app existed — or one whose history now lives on a
+fork the app can see (`cobra`, measured on `spf13/cobra`, delivered on `Jita81/cobra`) —
+keeps its name, and with it its ledger rows, its capability map and its sign-offs. Pick the
+GitHub repository as above, then choose **Link to an existing repository** and select the
+crb repository (only repositories with no GitHub link are offered). The API
+(`POST /repos/{name}/github-link`) changes the row's `url` to the clone URL and writes the
+same `config_json.github` link; language, runner, layout and belt scope are left as measured
+(edit them under Configuration if the fork differs), and an existing clone is kept. The act
+is recorded as a `repo.github_linked` event carrying the URL before and after, so the seam
+is visible on the repository's events rather than a silent edit; linking the row to another
+repository later replaces the link and records the previous `full_name`. A GitHub repository
+already linked to a different crb repository is refused (409) — one repository, one row.
+The row is written only when GitHub's answer IS the repository asked for: a repository
+GitHub has since renamed or transferred is refused (its 301, or a 200 under the new name,
+which the refusal names — select it under its current name), never written as an empty
+link over a measured row. The same guard sits under connect.
+
 ## 5. What happens at clone and at delivery
 
 - **Clone** (any run): the worker sees `config_json.github.installation_id`, mints an
