@@ -403,3 +403,33 @@ describe('EvidenceDrawer: Review panel', () => {
     expect(within(screen.getByTestId('reviews-list')).getAllByTestId('review-item')).toHaveLength(1)
   })
 })
+
+describe('EvidenceDrawer: Pack tab headline (J-FAC-9)', () => {
+  const routes = (p: EvidencePack, verified = true) => ({
+    'GET /auth/me': PRINCIPAL,
+    [`GET /evidence/${PACK_HASH}`]: { pack: p, verified },
+    [`GET /grades/${ROW}/retained`]: RETAINED,
+    'GET /reviews': { items: [], total: 0, limit: 200, offset: 0 },
+  })
+
+  it('opens with one sentence: clean names the belt count and what verified does not mean', async () => {
+    mockApi(routes(pack()))
+    renderApp(<EvidenceDrawer packHash={PACK_HASH} rowHash={ROW} onClose={() => {}} />, { me: PRINCIPAL })
+    const h = await screen.findByTestId('pack-headline')
+    expect(h.textContent).toBe('Clean: all four belts held and the pack’s hash verifies. This says nothing about whether the change is mergeable.')
+  })
+
+  it('not clean names the first failed belt and its cause', async () => {
+    mockApi(routes(pack({ clean: false, no_new_failures: false, new_failures: ['test_divide_zero', 'test_divide_negative'] })))
+    renderApp(<EvidenceDrawer packHash={PACK_HASH} rowHash={ROW} onClose={() => {}} />, { me: PRINCIPAL })
+    const h = await screen.findByTestId('pack-headline')
+    expect(h.textContent).toBe('Not clean: belt 3 (the repository’s own suite) — 2 new failures: test_divide_zero, test_divide_negative.')
+  })
+
+  it('a hash mismatch is the headline, never hidden behind a clean grade', async () => {
+    mockApi(routes(pack(), false))
+    renderApp(<EvidenceDrawer packHash={PACK_HASH} rowHash={ROW} onClose={() => {}} />, { me: PRINCIPAL })
+    const h = await screen.findByTestId('pack-headline')
+    expect(h.textContent).toContain('does not verify — treat this evidence as untrusted')
+  })
+})
