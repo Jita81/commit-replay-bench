@@ -9,8 +9,11 @@ recorded before any edit — :mod:`crb.factory.loop`). This module serves its re
   written under ``CRB_HOME`` with the freeze recorded in the evidence chain; optional
   operator-authored oracles per item. Refused (409) while a ``factory`` run for the repo
   is queued or running — the hash a run verifies against must not move under it.
-* ``GET /factory/{repo}/backlog`` — the active frozen backlog (404 when none).
-* ``GET /factory/{repo}/tasks`` — every item's latest state, folded from the evidence.
+* ``GET /factory/{repo}/backlog`` — the active frozen backlog (404 when none), with the
+  delivery pre-flight (``delivery``): whether a run could open a pull request for this
+  repository, by the same rule the worker's credentials follow (J-FAC-3).
+* ``GET /factory/{repo}/tasks`` — every item's latest state, folded from the evidence,
+  with every refusal's reason and the newest build's ids (J-FAC-4 / F15).
 * ``POST /factory/{repo}/tasks/{id}/signoff-gap`` (approver) — sign one structural
   gap: appended to the hash-chained gap ledger and echoed into the evidence chain.
   Value slots cannot be signed (the DoR gate refuses them by design).
@@ -30,7 +33,9 @@ Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/server/factory_state.py (the state), src/crb/factory/backlog.py (item
               validation + hash), src/crb/factory/readiness.py (slots, sign), src/crb/server/worker.py
-              (the ``factory`` run kind that consumes the backlog), docs/API.md (the contract),
+              (the ``factory`` run kind that consumes the backlog; ``_delivery_credentials`` is
+              the rule ``_delivery_preflight`` mirrors), src/crb/server/routes/github.py (the
+              installation record the pre-flight reads), docs/API.md (the contract),
               ui/src/screens/Factory/FactoryPage.tsx (the screen)
 Tested by:    tests/test_server_routes_factory.py
 Touch when:   a factory record gains a field the UI needs (extend TaskView + FactoryTask in
@@ -40,6 +45,7 @@ Touch when:   a factory record gains a field the UI needs (extend TaskView + Fac
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -59,7 +65,7 @@ from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, sign
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
 from crb.store.ledger import DbLedger
-from crb.store.models import Run
+from crb.store.models import GitHubInstallation, Grade, Repo, Run
 
 router = APIRouter(tags=["factory"])
 _ERR = {"model": ErrorEnvelope}
@@ -110,6 +116,27 @@ class BacklogItemOut(BaseModel):
     depends_on: list[str]
     structural_facts: list[str]
     has_authored_test: bool
+    #: What and why, as the operator wrote it — served so a revised backlog can start
+    #: from the active one (J-FAC-15).
+    description: str = ""
+
+
+class DeliveryPreflightOut(BaseModel):
+    """Whether a factory run could open a pull request for this repository — the worker's
+    credentials rule (``Worker._delivery_credentials``) answered BEFORE any build is paid
+    for: linked through the GitHub App, on the app's own host, the installation on record,
+    not suspended, holding ``Contents: write`` and ``Pull requests: write``. ``reason`` is
+    the sentence the page shows when it cannot; ``reason_code`` is one of ``ok``,
+    ``not_linked``, ``app_not_configured``, ``host_mismatch``, ``installation_missing``,
+    ``installation_suspended``, ``read_only``."""
+
+    can_deliver: bool = False
+    reason_code: str = "not_linked"
+    reason: str = ""
+    full_name: str = ""
+    default_branch: str = ""
+    installation_id: int | None = None
+    account_login: str = ""
 
 
 class FactoryBacklogOut(BaseModel):
@@ -117,6 +144,8 @@ class FactoryBacklogOut(BaseModel):
     hash: str
     frozen_at: str | None
     items: list[BacklogItemOut]
+    #: J-FAC-3 — where a run would deliver, or why it cannot.
+    delivery: DeliveryPreflightOut = DeliveryPreflightOut()
 
 
 class CellRouteOut(BaseModel):
@@ -139,6 +168,15 @@ class CellRouteOut(BaseModel):
     deliverable: bool = False
 
 
+class RefusalOut(BaseModel):
+    """Why the loop stopped the item, from the chain (``factory_state.Refusal``)."""
+
+    step: str
+    reason: str
+    reason_code: str = ""
+    measured_route: str = ""
+
+
 class FactoryTaskOut(BaseModel):
     id: str
     title: str
@@ -146,13 +184,25 @@ class FactoryTaskOut(BaseModel):
     size: str
     kind: str
     status: str
+    #: The unsigned STRUCTURAL slots: what blocks the build and what an approver can sign.
     dor_gaps: list[str]
+    #: The open VALUE slots: they route the item test-first and are never signable.
+    value_gaps: list[str] = []
     route_hint: str
     red_proof: bool | None
     build_status: str
     pr_url: str | None
     review_verdict: str | None
     last_event: str
+    #: J-FAC-4 — the newest refusal since the item's last readiness pass; null = none.
+    refusal: RefusalOut | None = None
+    #: The outcome's error (a harness failure, a refused push); "" when none.
+    error: str = ""
+    #: F15 — the newest build's ledger task (the oracle commit), run, pack and row.
+    task_id: str = ""
+    run_id: str = ""
+    pack_hash: str = ""
+    row_hash: str = ""
     #: F28 — the cell's route before the run (absent fields = not measured).
     cell_route: CellRouteOut = CellRouteOut()
 
@@ -230,7 +280,83 @@ def _active_factory_run(db: Any, repo: str) -> Run | None:
     return run
 
 
-def _backlog_out(home: FactoryHome) -> FactoryBacklogOut | None:
+def _delivery_preflight(db: Any, settings: Any, repo: Repo) -> DeliveryPreflightOut:
+    """The worker's ``_delivery_credentials`` rule, answered from the record (no call to
+    GitHub: the worker re-reads the permissions live at delivery, so a pass here is
+    "nothing on record stops it", never a promise)."""
+    link = dict(dict(repo.config_json or {}).get("github") or {})
+    try:
+        installation_id = int(link.get("installation_id") or 0) or None
+    except (TypeError, ValueError):
+        installation_id = None
+    out = DeliveryPreflightOut(
+        full_name=str(link.get("full_name") or ""),
+        default_branch=str(link.get("default_branch") or ""),
+        installation_id=installation_id,
+    )
+    admin_next = "then Sync installations in Settings."
+    if installation_id is None:
+        out.reason_code = "not_linked"
+        out.reason = (
+            "Delivery is not possible for this repository: it is connected by URL, not "
+            "through the GitHub App. Connect it through the GitHub App with Contents: write "
+            f"and Pull requests: write, {admin_next}"
+        )
+        return out
+    if not settings.github.enabled:
+        out.reason_code = "app_not_configured"
+        out.reason = (
+            "Delivery is not possible: the GitHub App is not configured on this deployment, "
+            "so no installation token can be minted. An admin registers the app for this "
+            "deployment (the GitHub App guide), then syncs installations in Settings."
+        )
+        return out
+    try:
+        host = urlsplit(str(repo.url or "")).hostname or ""
+        app_host = urlsplit(str(settings.github.web_url)).hostname or ""
+    except ValueError:
+        host, app_host = "", ""
+    if not host or host != app_host:
+        out.reason_code = "host_mismatch"
+        out.reason = (
+            f"Delivery is not possible: the repository URL is not on {app_host or 'the GitHub host the app is registered with'}, "
+            "so the installation token is never sent to it. Set the URL back to the linked "
+            "GitHub repository in the repository's config."
+        )
+        return out
+    inst = db.get(GitHubInstallation, installation_id)
+    if inst is None:
+        out.reason_code = "installation_missing"
+        out.reason = (
+            f"Delivery is not possible: installation {installation_id} is not on record. "
+            f"Sync installations in Settings; if it stays missing, reinstall the app on "
+            f"{out.full_name.split('/')[0] or 'the organisation'} and connect the repository again."
+        )
+        return out
+    out.account_login = inst.account_login
+    if inst.suspended:
+        out.reason_code = "installation_suspended"
+        out.reason = (
+            f"Delivery is not possible: the {inst.account_login} installation is suspended "
+            "or was removed. Restore it in GitHub, then Sync installations in Settings."
+        )
+        return out
+    perms = dict(inst.permissions_json or {})
+    if perms.get("contents") != "write" or perms.get("pull_requests") != "write":
+        held = ", ".join(f"{k}: {v}" for k, v in sorted(perms.items())) or "none"
+        out.reason_code = "read_only"
+        out.reason = (
+            f"Delivery is not possible: the {inst.account_login} installation is read-only "
+            f"({held}). Grant Contents: write and Pull requests: write on the installation in "
+            f"GitHub, {admin_next}"
+        )
+        return out
+    out.can_deliver = True
+    out.reason_code = "ok"
+    return out
+
+
+def _backlog_out(home: FactoryHome, delivery: DeliveryPreflightOut) -> FactoryBacklogOut | None:
     backlog = home.load_backlog()
     if backlog is None:
         return None
@@ -239,6 +365,7 @@ def _backlog_out(home: FactoryHome) -> FactoryBacklogOut | None:
         repo=home.repo,
         hash=backlog.backlog_hash,
         frozen_at=backlog.frozen_at or None,
+        delivery=delivery,
         items=[
             BacklogItemOut(
                 id=i.id,
@@ -250,6 +377,7 @@ def _backlog_out(home: FactoryHome) -> FactoryBacklogOut | None:
                 depends_on=list(i.depends_on),
                 structural_facts=list(i.structural_facts),
                 has_authored_test=i.id in authored,
+                description=i.description,
             )
             for i in backlog.ordered()
         ],
@@ -294,8 +422,8 @@ def get_backlog(
     repo: str, viewer: ViewerDep, db: DbDep, settings: SettingsDep
 ) -> FactoryBacklogOut:
     del viewer
-    get_repo_or_404(db, repo)
-    out = _backlog_out(_home(settings, repo))
+    row = get_repo_or_404(db, repo)
+    out = _backlog_out(_home(settings, repo), _delivery_preflight(db, settings, row))
     if out is None:
         raise ApiError(404, "not_found", f"no backlog registered for {repo!r}")
     return out
@@ -311,7 +439,7 @@ def get_backlog(
 def register_backlog(
     repo: str, body: BacklogRegisterIn, operator: OperatorDep, db: DbDep, settings: SettingsDep
 ) -> FactoryBacklogOut:
-    get_repo_or_404(db, repo)
+    row = get_repo_or_404(db, repo)
     active = _active_factory_run(db, repo)
     if active is not None:
         raise ApiError(
@@ -356,7 +484,7 @@ def register_backlog(
     except (BacklogError, ValueError) as exc:
         raise ApiError(422, "validation_error", str(exc)) from exc
     home.save_authored(authored)
-    out = _backlog_out(home)
+    out = _backlog_out(home, _delivery_preflight(db, settings, row))
     assert out is not None and out.hash == backlog.backlog_hash
     return out
 
@@ -374,12 +502,27 @@ def list_tasks(
     get_repo_or_404(db, repo)
     views = _home(settings, repo).task_views()
     routes = _cell_routes(db, factory, repo) if views else {}
-    return [
-        FactoryTaskOut(
-            **v.to_dict(), cell_route=routes.get(f"{v.capability_class}|{v.size}", CellRouteOut())
+    # F15 — the run that produced the newest build, from the ledger row the build event
+    # names (the chain carries the row, the row carries the run)
+    row_ids = [v.row_id for v in views if v.row_id]
+    run_by_row: dict[str, str] = {}
+    if row_ids:
+        for row_id, run_id in db.execute(
+            select(Grade.row_id, Grade.run_id).where(Grade.row_id.in_(row_ids))
+        ).all():
+            run_by_row[str(row_id)] = str(run_id or "")
+    out: list[FactoryTaskOut] = []
+    for v in views:
+        d = v.to_dict()
+        d.pop("row_id")
+        out.append(
+            FactoryTaskOut(
+                **d,
+                run_id=run_by_row.get(v.row_id, ""),
+                cell_route=routes.get(f"{v.capability_class}|{v.size}", CellRouteOut()),
+            )
         )
-        for v in views
-    ]
+    return out
 
 
 def _cell_routes(db: DbDep, factory: SessionFactoryDep, repo: str) -> dict[str, CellRouteOut]:

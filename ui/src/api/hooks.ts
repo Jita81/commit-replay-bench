@@ -631,14 +631,19 @@ export function useFactoryBacklog(repo: string): UseQueryResult<FactoryBacklog, 
   })
 }
 
-/** `GET /factory/{repo}/tasks` (P6). */
-export function useFactoryTasks(repo: string): UseQueryResult<FactoryTask[], ApiError> {
+/** Poll period for the factory item chain while a factory run is working it (J-FAC-5). */
+export const FACTORY_POLL_MS = 5_000
+
+/** `GET /factory/{repo}/tasks` (P6); polls every 5 s while `poll` (a factory run is active), never in a hidden tab. */
+export function useFactoryTasks(repo: string, opts: { poll?: boolean } = {}): UseQueryResult<FactoryTask[], ApiError> {
   return useQuery({
     queryKey: keys.factoryTasks(repo),
     // the server answers a bare list here (docs/API.md), not a Page
     queryFn: () => api<FactoryTask[]>(`/factory/${enc(repo)}/tasks`),
     enabled: repo.length > 0,
     retry: false,
+    refetchInterval: opts.poll ? FACTORY_POLL_MS : false,
+    refetchIntervalInBackground: false,
   })
 }
 
