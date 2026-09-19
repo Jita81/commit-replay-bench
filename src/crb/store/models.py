@@ -13,6 +13,8 @@ signoffs   — APPEND-ONLY: human attestations (revocations are new rows)
 reviews    — APPEND-ONLY: human post-hoc verdicts on ONE graded row each, hash-chained
              (``ReviewRecord`` columns; revision 0003)
 users      — local accounts / OIDC subjects and their role
+workers    — one row per worker process, upserted every heartbeat even when idle (the
+             ``/health`` worker probe's liveness source; revision 0007)
 
 Navigation
 ----------
@@ -34,8 +36,10 @@ Works with:   src/crb/core/ledger.py (``GradeRow`` — the ``grades`` columns mu
               ``create_all`` — the parity test), src/crb/observability/events.py
               (``StepEvent`` — the ``events`` columns), src/crb/core/review.py
               (``ReviewRecord`` — the ``reviews`` columns)
+              src/crb/server/worker.py (upserts ``WorkerRow`` on every check-in),
+              src/crb/server/routes/system.py (the worker probe reads ``WorkerRow``)
 Tested by:    tests/test_store_migrate.py, tests/test_store_db.py, tests/test_store_ledger.py,
-              tests/test_store_events.py, tests/test_store_reviews.py
+              tests/test_store_events.py, tests/test_store_reviews.py, tests/test_worker.py
 Touch when:   never for a new repository (``repos.config_json`` absorbs any ``RepoConfig``
               change); adding a column or table means a new Alembic revision under
               src/crb/store/migrations/versions/ plus a ``REVISION_MARKERS`` /
@@ -350,6 +354,31 @@ class GitHubInstallation(Base):
     recorded_by: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     created: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
     updated: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
+
+
+class WorkerRow(Base):
+    """One worker process's liveness, upserted by its loop every ``heartbeat_s`` whether or
+    not it holds a run (revision 0007, J-TEL-2). Before this table the only liveness signal
+    was a RUNNING run's heartbeat, so a crashed worker with three queued runs read
+    healthy. ``heartbeat_s`` is the worker's own interval, so the health probe judges
+    staleness against what that worker promised (3 × ``heartbeat_s``), not a server-side
+    guess; ``stopped`` is stamped on a clean exit so a shut-down worker is not reported as
+    a crash. Mutable state, no evidence: no append-only triggers."""
+
+    __tablename__ = "workers"
+    worker_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    executor: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    #: The run kinds this worker accepts (``[]`` = every kind).
+    kinds: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    started: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    heartbeat: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    heartbeat_s: Mapped[float] = mapped_column(Float, nullable=False, default=10.0)
+    #: The run it is executing (``""`` while idle).
+    current_run_id: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    version: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    #: Stamped on a clean stop (``""`` while the process lives).
+    stopped: Mapped[str] = mapped_column(String(40), nullable=False, default="")
 
 
 #: Every append-only table of the CURRENT schema. A revision script pins the tuple that

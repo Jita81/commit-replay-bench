@@ -347,10 +347,25 @@ class RunCounts(BaseModel):
     rows: int = 0
     duration_s: float = 0.0
     stopped_reason: str = ""
-    #: The run kind's OWN counters when they are not a RunSummary — a mine run's
-    #: ``{examined, found, gold_clean, gold_dirty, skipped, known, pool}``, a setup run's
-    #: steps — served verbatim from the worker's ``counts_json`` (``{}`` otherwise).
+    #: The run kind's OWN counters when the kind is not a build (replay / blind / factory
+    #: keep the RunSummary above): served VERBATIM from the worker's ``counts_json`` —
+    #: a mine run's ``{examined, found, gold_clean, gold_dirty, skipped, known, pool}``, a
+    #: setup run's steps, an oracle run's ``{scoreable, mutants, killed, escaped, errors,
+    #: oracle_strength, …}``, a controls run's ``{rows, violations, escapes, …}``, a label
+    #: run's ``{labelled, labels, usage: {calls, cost_usd, cost_known, …}}``
+    #: (docs/API.md#runs). ``{}`` for build kinds.
     detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunFactoryOut(BaseModel):
+    """What a factory run was allowed to do (J-FAC-6), from its ``params``: delivery on or
+    off, the approver who overrode the route gate (id, and the display name resolved at
+    read time as sign-offs do — the row keeps the id), and the backlog hash it worked."""
+
+    deliver: bool
+    deliver_override_by: str | None
+    deliver_override_by_name: str | None
+    backlog_hash: str
 
 
 class RunProgress(BaseModel):
@@ -498,6 +513,13 @@ class RunOut(BaseModel):
     heartbeat: str | None
     counts: RunCounts
     progress: RunProgress
+    #: 1-based place in the FIFO queue (queued runs created before this one + 1); ``null``
+    #: unless the run is queued (J-TEL-3).
+    queue_position: int | None = None
+    #: The kinds of the queued runs ahead of this one, oldest first (``[]`` unless queued).
+    queue_kinds_ahead: list[str] = Field(default_factory=list)
+    #: A factory run's delivery posture; ``null`` for every other kind (J-FAC-6).
+    factory: RunFactoryOut | None = None
 
 
 class RunRetention(BaseModel):

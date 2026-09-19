@@ -116,6 +116,12 @@ api:
 worker:
   enabled: true
   replicaCount: 1
+  # The worker's own Prometheus exposition (docs/DEPLOYMENT.md §9): the build / grade /
+  # cost / delivery / token-mint series are recorded in the worker process, so the api's
+  # /metrics never carries them. A headless Service exposes the port to the scraper;
+  # serviceMonitor.worker adds the ServiceMonitor. port 0 switches it off.
+  metrics:
+    port: 9464
   resources:
     requests: { cpu: 500m, memory: 1Gi }
     limits: { cpu: "4", memory: 4Gi }
@@ -234,8 +240,13 @@ tmp:
 home:
   sizeLimit: 64Mi
 
-# Prometheus Operator ServiceMonitor for /metrics (requires the CRD).
+# Prometheus Operator ServiceMonitors for /metrics (requires the CRD). `enabled` scrapes the
+# api (HTTP + ledger gauges, crb_false_q1_total). `worker.enabled` scrapes each worker pod's
+# own port (runs, tasks, belts, tokens, cost, deliveries, queue depth) — without it those
+# series are absent from every dashboard.
 serviceMonitor:
   enabled: false
   interval: 30s
   labels: {}
+  worker:
+    enabled: false

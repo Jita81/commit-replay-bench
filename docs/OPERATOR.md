@@ -480,10 +480,14 @@ schedule — the token is long-lived):
    evaluation is over — `auth: cli` is a developer/evaluation mode; production runs use
    `ANTHROPIC_API_KEY` on the worker and never read the file.
 
-What you will see (events; UI live progress in P5): `mine.candidate` → `mine.red` /
-`mine.skip` → `mine.gold` → `build.*` → `grade.belt` (four per task) → `ledger.append`.
-Skips are normal: a commit whose target is already green at the parent, or times out, is
-not a valid oracle and is excluded, not counted.
+What you will see (the run's live log on `/runs/<id>`, and `crb` on the terminal):
+`mine.candidate` → `mine.red` / `mine.skip` → `mine.gold` → `build.*` → `grade.belt` (five
+per task with belt 5, `repo_lint_clean`; four on a repository without a lint plan) →
+`ledger.append`. The full vocabulary — every action, its payload and who reads it — is
+[API.md § Event vocabulary](API.md#event-vocabulary). Skips are normal: a commit whose
+target is already green at the parent, or times out, is not a valid oracle and is
+excluded, not counted. A queued run shows its place in the line ("Queued — 3 runs ahead of
+it"); if the health check's `worker` probe is not `ok`, no worker will take it — see §7.
 
 Every graded task produces an **evidence pack** (redacted; no raw diff, no transcript by
 default) and a **ledger row** that carries the pack's hash. A row cannot be `clean` without
@@ -598,6 +602,14 @@ What to do:
    `daemon not reachable`, `refusing to run untrusted tests as root`, `refusing to mount …`).
 4. Fix the cause and **re-run**; the worker (P4) resumes blocked runs. Tasks that were
    never graded have no rows — nothing needs correcting in the ledger.
+
+Where to look first: `GET /api/v1/health` — the `sandbox` probe (on the worker, or a
+one-process deployment) says whether the daemon answers, and the `worker` probe says
+whether any worker has checked in at all (a run that stays "Queued" with a healthy
+sandbox is a worker that is not running — the probe names the last one seen and how long
+ago). On the dashboards `crb_sandbox_unavailable_total` counts every run that stopped
+this way; the alert rules and the metrics table are
+[DEPLOYMENT.md §9](DEPLOYMENT.md#9-observability).
 
 Do **not** switch the executor to `local` for a repository you do not fully trust; the
 local executor exists for development and fixture repositories and is visible on every

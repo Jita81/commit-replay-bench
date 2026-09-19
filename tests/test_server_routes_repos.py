@@ -68,7 +68,7 @@ def fake_jobs(monkeypatch: pytest.MonkeyPatch) -> list[Run]:
             s.commit()
         return run
 
-    def request_cancel(factory: Any, run_id: str) -> bool:
+    def request_cancel(factory: Any, run_id: str, *, actor: str = "") -> bool:
         return True
 
     mod = types.ModuleType("crb.store.jobs")

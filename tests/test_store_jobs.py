@@ -229,29 +229,44 @@ def test_zombie_worker_cannot_overwrite(queue: JobQueue) -> None:
 # --- cancel ------------------------------------------------------------------------
 
 
-def test_cancel_queued_run_is_terminal_immediately(queue: JobQueue) -> None:
+def test_cancel_queued_run_is_terminal_immediately_and_recorded(queue: JobQueue) -> None:
+    """J-TEL-7: cancelling a QUEUED run is a state change like any other — it writes
+    ``run.cancel_requested`` naming the person who cancelled (not the run's creator) and
+    the status it was in; before this it flipped to ``cancelled`` with no record."""
     run = _enqueue(queue)
-    got = queue.request_cancel(run.id)
+    got = queue.request_cancel(run.id, actor="op-2")
     assert got is not None and got.status == STATUS_CANCELLED and got.finished
     assert got.cancel_requested is True
     assert queue.claim_next("w1") is None  # never handed to a worker
-    assert queue.request_cancel("missing") is None
+    events = read_events(queue._factory, run.id)
+    assert [e.action for e in events] == ["run.cancel_requested"]
+    assert events[0].actor == "op-2" and events[0].actor != run.actor
+    assert events[0].payload == {"status_at_request": "queued"}
+    assert queue.request_cancel("missing", actor="op-2") is None
 
 
 def test_cancel_running_run_sets_flag_and_records_event(queue: JobQueue) -> None:
     run = _enqueue(queue)
     queue.claim_next("w1")
     assert queue.is_cancel_requested(run.id) is False
-    got = queue.request_cancel(run.id)
+    got = queue.request_cancel(run.id, actor="op-2")
     assert got is not None and got.status == STATUS_RUNNING and got.cancel_requested
     assert queue.is_cancel_requested(run.id) is True
     events = read_events(queue._factory, run.id)
     assert [e.action for e in events] == ["run.cancel_requested"]
     assert events[0].stage == "system" and events[0].seq == 1
+    # the actor is the canceller, not the creator (an auditor reads who stopped it)
+    assert events[0].actor == "op-2" and run.actor != "op-2"
+    assert events[0].payload == {"status_at_request": "running"}
     # the worker then finishes it cancelled with whatever it measured
     done = queue.finish(run.id, STATUS_CANCELLED, counts={"tasks": 1}, worker_id="w1")
     assert done.status == STATUS_CANCELLED and done.counts_json == {"tasks": 1}
-    assert queue.request_cancel(run.id).status == STATUS_CANCELLED  # type: ignore[union-attr]
+    # a terminal run: returned unchanged, no second event
+    got = queue.request_cancel(run.id, actor="op-3")
+    assert got is not None and got.status == STATUS_CANCELLED
+    assert len(read_events(queue._factory, run.id)) == 1
+    with pytest.raises(ValueError, match="actor"):
+        queue.request_cancel(run.id, actor="")
 
 
 def test_cancel_flag_on_a_queued_run_is_honoured_at_claim(

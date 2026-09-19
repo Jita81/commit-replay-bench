@@ -1,0 +1,46 @@
+{{- if and .Values.worker.enabled (gt (int .Values.worker.metrics.port) 0) }}
+# A headless Service over the worker pods so a scraper can reach each pod's own /metrics
+# (the build / grade / cost series live in the worker process — docs/DEPLOYMENT.md §9).
+# clusterIP: None: nothing load-balances a per-process exposition.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "crb.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: {{ int .Values.worker.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "crb.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+{{- if .Values.serviceMonitor.worker.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "crb.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "crb.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}
+{{- end }}

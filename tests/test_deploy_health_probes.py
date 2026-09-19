@@ -12,9 +12,9 @@ What it is:   The deploy artefacts' probe test suite — liveness at ``/health/l
               at ``/health``, roles per pod.
 What it does: Pins that the Dockerfile's ``HEALTHCHECK`` is the liveness endpoint, that the Helm
               API deployment probes liveness on ``/health/live`` and readiness on ``/health`` and
-              runs as ``CRB_ROLE=api``, that the worker deployment runs as ``CRB_ROLE=worker``,
-              and (with ``helm`` on PATH) that the chart renders those probes and lints
-              ``--strict``. A liveness check on the deep endpoint restarted a healthy API for a
+              runs as ``CRB_ROLE=api``, that the worker deployment runs as ``CRB_ROLE=worker``
+              and exposes its own metrics port in compose and the chart (J-TEL-1), and (with
+              ``helm`` on PATH) that the chart renders those probes and lints ``--strict``. A liveness check on the deep endpoint restarted a healthy API for a
               docker socket the serve container is not meant to have (A11).
 How:          Reads ``deploy/Dockerfile`` and the chart templates as text; ``helm template`` /
               ``helm lint`` when available.
@@ -22,6 +22,8 @@ Layer:        tests — docs/ARCHITECTURE.md#6-deployment-view
 ADRs:         none
 Works with:   deploy/Dockerfile (the HEALTHCHECK), deploy/helm/crb/templates/api-deployment.yaml
               and deploy/helm/crb/templates/worker-deployment.yaml (the probes and roles),
+              deploy/helm/crb/templates/worker-service.yaml and deploy/docker-compose.yml (the
+              worker's metrics port),
               src/crb/server/routes/system.py (the endpoints), tests/test_server_system.py (the
               endpoints' own suite), docs/DEPLOYMENT.md (the image and its roles, §2)
 Tested by:    tests/test_deploy_health_probes.py
@@ -76,6 +78,32 @@ def test_helm_worker_runs_as_role_worker() -> None:
     assert re.search(r"name:\s*CRB_ROLE\s*\n\s*value:\s*\"worker\"", text)
 
 
+def test_worker_exposes_its_own_metrics_port_in_every_shipped_shape() -> None:
+    """J-TEL-1: the build / grade / cost series are recorded in the worker process, so a
+    scrape of the api alone shows none of them. Compose exposes the worker's port on the
+    internal network; the chart sets ``CRB_METRICS_PORT``, names a container port, fronts
+    it with a headless Service and (opt-in) a ServiceMonitor for ``component: worker``."""
+    compose = (ROOT / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
+    worker = compose.split("\n  worker:\n", 1)[1]
+    assert "CRB_METRICS_PORT: ${CRB_METRICS_PORT:-9464}" in worker
+    assert re.search(r"\n    expose:\n      - \"\$\{CRB_METRICS_PORT:-9464\}\"", worker)
+    assert "ports:" not in worker.split("healthcheck:")[0]  # internal only, never published
+    deployment = WORKER_DEPLOYMENT.read_text(encoding="utf-8")
+    assert re.search(
+        r"name:\s*CRB_METRICS_PORT\s*\n\s*value:\s*\{\{ .Values.worker.metrics.port", deployment
+    )
+    assert (
+        "name: metrics" in deployment
+        and "containerPort: {{ int .Values.worker.metrics.port }}" in deployment
+    )
+    service = (CHART / "templates" / "worker-service.yaml").read_text(encoding="utf-8")
+    assert "clusterIP: None" in service and "kind: ServiceMonitor" in service
+    assert "app.kubernetes.io/component: worker" in service
+    values = (CHART / "values.yaml").read_text(encoding="utf-8")
+    assert re.search(r"\n  metrics:\n    port: 9464\n", values)
+    assert re.search(r"serviceMonitor:\n(?:.*\n)*?  worker:\n    enabled: false", values)
+
+
 @pytest.mark.skipif(shutil.which("helm") is None, reason="helm not on PATH")
 def test_helm_renders_the_probes_and_lints_strict() -> None:
     lint = subprocess.run(
@@ -116,3 +144,28 @@ def test_helm_renders_the_probes_and_lints_strict() -> None:
     assert _probe_path(api_doc, "livenessProbe") == LIVE
     assert _probe_path(api_doc, "readinessProbe") == DEEP
     assert re.search(r"name:\s*CRB_ROLE\s*\n\s*value:\s*\"api\"", api_doc)
+    # J-TEL-1: the worker pod carries the metrics port and a headless Service fronts it
+    worker_doc = next(d for d in api if "app.kubernetes.io/component: worker" in d)
+    assert re.search(r"name:\s*CRB_METRICS_PORT\s*\n\s*value:\s*\"9464\"", worker_doc)
+    assert "containerPort: 9464" in worker_doc
+    services = render.stdout.split("kind: Service\n")[1:]
+    assert any("clusterIP: None" in d and "component: worker" in d for d in services)
+    # port 0 switches every worker-metrics object off
+    off = subprocess.run(
+        [
+            "helm",
+            "template",
+            "crb",
+            str(CHART),
+            "--set",
+            "networkPolicy.postgres.cidrs={10.0.0.0/8}",
+            "--set",
+            "worker.metrics.port=0",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert off.returncode == 0, off.stderr
+    assert "crb-worker-metrics-ingress" not in off.stdout and "name: metrics" not in off.stdout

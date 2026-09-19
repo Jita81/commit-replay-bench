@@ -80,7 +80,7 @@ from crb.store.jobs import (
     STATUS_SUCCEEDED,
     JobQueue,
 )
-from crb.store.models import Repo, Run, Task
+from crb.store.models import Repo, Run, Task, WorkerRow
 from fixtures import pyrepo as pr
 
 # --- a scripted builder ----------------------------------------------------------------
@@ -430,7 +430,7 @@ def test_cancel_between_tasks_keeps_partial_counts(h: Harness) -> None:
     run = h.enqueue("replay")
 
     def cancel_during_first_build(_ws: Workspace, _brief: BuildBrief) -> None:
-        got = h.queue.request_cancel(run.id)
+        got = h.queue.request_cancel(run.id, actor="tester")
         assert got is not None and got.status == STATUS_RUNNING and got.cancel_requested
         time.sleep(0.12)  # let the heartbeat thread tick at least once while running
 
@@ -926,6 +926,52 @@ def test_run_forever_processes_then_stops(h: Harness) -> None:
     assert h.queue.get(run.id).status == STATUS_SUCCEEDED  # type: ignore[union-attr]
 
 
+def test_worker_checks_in_while_idle_and_names_its_run(h: Harness) -> None:
+    """J-TEL-2: the loop upserts its ``workers`` row every ``heartbeat_s`` even when the
+    queue is empty (the health probe's liveness source); while a run executes the row
+    names it; a clean stop is stamped so the probe does not read it as a crash."""
+    stop = threading.Event()
+    t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
+    t.start()
+    deadline = time.monotonic() + 10
+    row: WorkerRow | None = None
+    while time.monotonic() < deadline:
+        with h.factory() as s:
+            row = s.get(WorkerRow, "w-test")
+        if row is not None and row.heartbeat:
+            break
+        time.sleep(0.05)
+    assert row is not None, "the idle loop never checked in"
+    assert row.hostname and row.executor == "local" and row.kinds == []
+    assert row.started and row.heartbeat >= row.started and row.stopped == ""
+    assert row.heartbeat_s == pytest.approx(0.05) and row.current_run_id == ""
+    assert row.version
+    first = row.heartbeat
+    seen_run: list[str] = []
+
+    def observe(_ws: Workspace, _brief: BuildBrief) -> None:
+        with h.factory() as s:
+            live = s.get(WorkerRow, "w-test")
+            seen_run.append(live.current_run_id if live is not None else "")
+
+    FakeBuilder.hook = observe
+    run = h.enqueue("replay")
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        got = h.queue.get(run.id)
+        if got is not None and got.status == STATUS_SUCCEEDED:
+            break
+        time.sleep(0.05)
+    time.sleep(1.1)  # second-precision stamps: let the idle check-in tick past ``first``
+    stop.set()
+    t.join(timeout=5)
+    assert seen_run == [run.id]
+    with h.factory() as s:
+        row = s.get(WorkerRow, "w-test")
+    assert row is not None
+    assert row.heartbeat > first and row.current_run_id == "" and row.stopped
+
+
 def test_run_forever_survives_a_broken_iteration(
     h: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -981,6 +1027,9 @@ def test_once_main(h: Harness, capsys: pytest.CaptureFixture[str]) -> None:
         and out["counts"]["clean"] == 1
     )
     assert h.queue.get(run.id).worker_id == "w-cli"  # type: ignore[union-attr]
+    with h.factory() as s:
+        row = s.get(WorkerRow, "w-cli")
+    assert row is not None and row.stopped and row.current_run_id == ""  # one-shot: left cleanly
     # nothing left: idle exit code
     assert worker_main.main(argv) == worker_main.EXIT_IDLE
     idle = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
@@ -1012,6 +1061,15 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     s = worker_main.settings_from_args(args, env)
     assert s.home == tmp_path / "h" and s.executor == "docker"
     assert s.docker is not None and s.docker.image == "img:1" and s.worker_id == "env-w"
+    # J-TEL-1: the worker's own /metrics port — CRB_METRICS_PORT (default 9464; 0 = off),
+    # gated by the same CRB_METRICS_ENABLED the API reads
+    assert s.metrics_enabled is True and s.metrics_port == 9464
+    s_off = worker_main.settings_from_args(
+        args, {**env, "CRB_METRICS_PORT": "0", "CRB_METRICS_ENABLED": "false"}
+    )
+    assert s_off.metrics_port == 0 and s_off.metrics_enabled is False
+    with pytest.raises(ValueError, match="CRB_METRICS_PORT"):
+        worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "70000"})
     args = parser.parse_args(
         ["--home", str(tmp_path / "flag"), "--executor", "local", "--kinds", "mine, probe"]
     )
@@ -1187,11 +1245,13 @@ def test_github_settings_read_only_their_own_keys_and_refuse_a_malformed_one(
     monkeypatch.setenv("CRB_GITHUB__APP_ID", "12345")
     monkeypatch.setenv("CRB_GITHUB__APP_SLUG", "crb-bench")
     monkeypatch.setenv("CRB_SESSION_TTL_S", "not-a-number")  # a server key: irrelevant here
-    gh = worker_main._github_settings()
+    shared = worker_main._shared_settings()
+    gh = shared.github
     assert gh.app_id == "12345" and gh.app_slug == "crb-bench"
+    assert shared.metrics_enabled is True and shared.metrics_port == 9464
     monkeypatch.setenv("CRB_GITHUB__API_URL", "ftp://not-https")
     with pytest.raises(pydantic.ValidationError):
-        worker_main._github_settings()
+        worker_main._shared_settings()
 
 
 def test_delivery_credentials_follow_a_linked_row_to_its_own_https_remote() -> None:

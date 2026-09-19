@@ -73,7 +73,7 @@ def jobs(monkeypatch: pytest.MonkeyPatch) -> list[Run]:
 
     mod = types.ModuleType("crb.store.jobs")
     mod.enqueue = enqueue  # type: ignore[attr-defined]
-    mod.request_cancel = lambda factory, run_id: True  # type: ignore[attr-defined]
+    mod.request_cancel = lambda factory, run_id, actor="": True  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "crb.store.jobs", mod)
     return calls
 
