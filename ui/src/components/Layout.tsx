@@ -1,35 +1,44 @@
 /**
  * The app shell — brand, primary nav, instrument health, user chip with role, theme toggle,
- * provenance footer.
+ * Help, the About block under every screen, provenance footer.
  *
  * Navigation
  * ----------
- * What it is:   The `Layout` shell every authenticated route renders inside (`<Outlet>`).
- * What it does: One brand name in chrome, the primary nav (Repos … Settings), the instrument
- *               health pill from `GET /health`, the user chip showing the principal's ROLE (so a
- *               viewer knows why a button is missing), theme cycling and sign-out. The footer
- *               carries crb / apparatus / policy versions — the one place internals appear,
- *               because an auditor needs the provenance of what they are reading.
+ * What it is:   The `Layout` shell every authenticated route renders inside (`<Outlet>`), plus
+ *               `JOURNEY_STEPS` and `journeyEyebrow()` — the one source of "where am I".
+ * What it does: One brand name in chrome, the journey nav and the instrument row, the
+ *               instrument health pill from `GET /health`, the user chip showing the
+ *               principal's ROLE (so a viewer knows why a button is missing), theme cycling,
+ *               Help and sign-out. `AboutThisScreen` is mounted once after the outlet so every
+ *               screen carries its help with no wiring. The footer carries crb / apparatus /
+ *               policy versions — the one place internals appear, because an auditor needs
+ *               the provenance of what they are reading — and links to Help and the glossary.
+ *               `journeyEyebrow(pathname, sub?)` derives `Journey · 2 of 4 · Baseline` from
+ *               the four steps so no screen hand-types its position.
  * How:          `useAuth` for the principal, `useHealth` / `useVersion` for the chrome facts,
  *               `useLogout` then navigate to `/login`; a skip link precedes the header.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/App.tsx (mounts this under `RequireAuth`), ui/src/lib/auth.tsx (the
+ * Works with:   ui/src/App.tsx (mounts this under `RequireAuth`), ui/src/components/Help.tsx
+ *               (`AboutThisScreen`, mounted once here), ui/src/components/PageHeader.tsx
+ *               (defaults its eyebrow to `journeyEyebrow`), ui/src/lib/auth.tsx (the
  *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`),
  *               ui/src/lib/theme.ts (the toggle), ui/src/lib/verdict.ts (`probeDisplay` for
  *               the health pill), ui/src/screens/Login/LoginPage.tsx (uses `BRAND`)
- * Tested by:    ui/e2e/smoke.spec.ts (the shell renders the nav),
+ * Tested by:    ui/src/components/Layout.test.tsx (the steps, the eyebrow, Help, the About
+ *               block), ui/e2e/smoke.spec.ts (the shell renders the nav),
  *               ui/e2e/walkthrough/01-login.spec.ts
  *               (the role chip reads the bootstrap admin's role), ui/src/test/utils.tsx
  *               (`renderApp` mounts the shell for every screen test)
  * Touch when:   a screen is added — add its `NAV` entry here and its route in ui/src/App.tsx;
  *               never for a new repository.
  */
-import { NavLink, Outlet, useNavigate } from 'react-router'
+import { NavLink, Outlet, matchPath, useNavigate } from 'react-router'
 import { useHealth, useLogout, useVersion } from '../api/hooks'
 import { useAuth } from '../lib/auth'
 import { useTheme } from '../lib/theme'
 import { Button } from './Button'
+import { AboutThisScreen } from './Help'
 import { Pill } from './Pill'
 import { probeDisplay } from '../lib/verdict'
 import { useDecisionCount } from '../screens/Decisions/useDecisionCount'
@@ -55,6 +64,43 @@ const JOURNEY: Array<{ to: string; label: string; badge?: boolean }> = [
   { to: '/factory', label: 'Factory' },
   { to: '/posture', label: 'Deployment' },
 ]
+/**
+ * The four journey STEPS the eyebrow counts (Home is the start; Deployment is a review page,
+ * not a step). Every journey screen derives "Journey · n of 4 · Step" from this list through
+ * `journeyEyebrow`, so the position a reader sees cannot drift from the nav.
+ */
+export const JOURNEY_STEPS: readonly { label: string; to: string }[] = [
+  { label: 'Connection', to: '/connect' },
+  { label: 'Baseline', to: '/results' },
+  { label: 'Decisions', to: '/decisions' },
+  { label: 'Factory', to: '/factory' },
+]
+
+/** Route pattern → the step it belongs to (index into `JOURNEY_STEPS`) and its own sub-label. */
+const STEP_OF: Array<{ pattern: string; step: number; sub?: string }> = [
+  { pattern: '/connect/*', step: 0 },
+  { pattern: '/results', step: 1 },
+  { pattern: '/decisions', step: 2 },
+  { pattern: '/signoff', step: 2, sub: 'sign-off' },
+  { pattern: '/factory', step: 3 },
+]
+
+/**
+ * The eyebrow for a journey route: `Journey · 2 of 4 · Baseline`, plus ` · <sub>` when the
+ * screen passes one (Measure: `task 5 of 8 · this step spends money`); `Journey · start` on
+ * Home; `''` for every other route, so a PageHeader there renders no eyebrow unless the
+ * screen passes its own.
+ */
+export function journeyEyebrow(pathname: string, sub?: string): string {
+  if (matchPath('/home', pathname)) return sub ? `Journey · start · ${sub}` : 'Journey · start'
+  const hit = STEP_OF.find((s) => matchPath(s.pattern, pathname))
+  if (!hit) return ''
+  const parts = ['Journey', `${hit.step + 1} of ${JOURNEY_STEPS.length}`, JOURNEY_STEPS[hit.step]!.label]
+  if (hit.sub) parts.push(hit.sub)
+  if (sub) parts.push(sub)
+  return parts.join(' · ')
+}
+
 const INSTRUMENT: Array<{ to: string; label: string; role: 'viewer' | 'operator' | 'admin' }> = [
   { to: '/runs', label: 'Runs', role: 'operator' },
   { to: '/capability', label: 'Map grid', role: 'operator' },
@@ -96,7 +142,7 @@ export function Layout() {
               <span className="block rounded-[2px] bg-on-primary px-2.5 pb-[7px] pt-[9px] text-[22px] font-bold leading-none tracking-[-.02em] text-primary">crb</span>
               <span className="text-[22px] font-bold leading-none">{BRAND}</span>
             </NavLink>
-            <div className="ml-auto flex items-center gap-4 text-[16px]">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-[16px]">
               {h && (
                 <Pill tone={h.tone} glyph={h.glyph} size="xs" label={`Instrument health: ${h.label}`}>
                   {h.label}
@@ -108,6 +154,9 @@ export function Layout() {
                   <span className="label rounded-[4px] bg-on-primary px-2 py-1 text-[13px] font-bold uppercase tracking-[.05em] text-primary">{me.role}</span>
                 </span>
               )}
+              <NavLink to="/help" className="text-[16px] text-on-primary underline">
+                Help
+              </NavLink>
               <Button size="sm" variant="ghost" className="text-on-primary" onClick={cycle} aria-label={`Theme: ${theme}. Switch theme`} title={`Theme: ${theme}`}>
                 <span aria-hidden>{THEME_GLYPH[theme]}</span>
               </Button>
@@ -171,6 +220,7 @@ export function Layout() {
       </header>
       <main id="main" className="mx-auto w-full max-w-[1400px] flex-1 space-y-7 px-5 py-7">
         <Outlet />
+        <AboutThisScreen />
       </main>
       <footer className="border-t border-border px-5 py-3 text-center text-[11px] text-on-surface-muted">
         {BRAND}
@@ -180,6 +230,14 @@ export function Layout() {
             · crb {version.data.crb} · apparatus {version.data.apparatus} · policy {version.data.policy}
           </span>
         )}
+        {' · '}
+        <NavLink to="/help" className="underline">
+          Help
+        </NavLink>
+        {' · '}
+        <NavLink to="/help#terms" className="underline">
+          Glossary
+        </NavLink>
       </footer>
     </div>
   )

@@ -6,8 +6,9 @@
  * What it is:   Tests for the GOV.UK / NHS pattern components and the Posture page.
  * What it does: Pins the task list's "completed n of m" and row links; the summary list's
  *               key / value / change cells; the banner's landmark and title; the
- *               confirmation panel's reference; and that the posture page renders every
- *               group from the API without a secret value.
+ *               confirmation panel's reference; the details pattern (a native `<details>`
+ *               whose summary is the one line shown, closed unless `open`); and that the
+ *               posture page renders every group from the API without a secret value.
  * How:          Plain renders; `mockApi` + `renderApp` for the page.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -21,7 +22,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PosturePage } from '../screens/Posture/PosturePage'
 import { PRINCIPAL, envelope, mockApi, renderApp } from '../test/utils'
-import { ConfirmationPanel, NotificationBanner, SummaryList, TaskList } from './govuk'
+import { ConfirmationPanel, Details, NotificationBanner, SummaryList, TaskList } from './govuk'
 
 describe('govuk patterns', () => {
   it('task list, summary list, banner and confirmation panel', () => {
@@ -41,6 +42,25 @@ describe('govuk patterns', () => {
     expect(screen.getByRole('link', { name: /Change/ })).toHaveAttribute('href', '/repos/x')
     expect(screen.getByRole('region', { name: 'Important' })).toHaveTextContent('The sandbox probe is degraded.')
     expect(screen.getByText('sgn_7f3c04a9')).toBeInTheDocument()
+  })
+
+  it('details is a native <details> with the summary as its one visible line, closed by default', () => {
+    const { container } = render(
+      <>
+        <Details summary="What these words mean" id="words">
+          <p>cell — one class of change at one size.</p>
+        </Details>
+        <Details summary="Already open" open>
+          <p>shown</p>
+        </Details>
+      </>,
+    )
+    const [closed, opened] = Array.from(container.querySelectorAll('details'))
+    expect(closed).toHaveAttribute('id', 'words')
+    expect(closed).not.toHaveAttribute('open')
+    expect(closed!.querySelector('summary')).toHaveTextContent('What these words mean')
+    expect(screen.getByText('cell — one class of change at one size.')).toBeInTheDocument()
+    expect(opened).toHaveAttribute('open')
   })
 })
 

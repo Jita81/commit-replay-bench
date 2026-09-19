@@ -17,11 +17,13 @@
  *               queued until the red button.
  * How:          `useRepo`, `useCapabilityMap` (cost_usd_mean over measured cells),
  *               `useSettings` (sandbox posture; admin only — falls back to /health),
- *               `useCreateRun` with `{kind: replay, mode: sighted, limit, retain}`; on
+ *               `builderChoice` (ui/src/lib/builder.ts) for the builder the deployment can
+ *               run, `useCreateRun` with `{kind: replay, mode: sighted, limit, retain}`; on
  *               success the walk resumes on the repository with the run watched.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
- * Works with:   ui/src/components/govuk.tsx, ui/src/screens/Connect/ConnectPage.tsx (the
+ * Works with:   ui/src/lib/builder.ts (`builderChoice`, shared with the Factory),
+ *               ui/src/components/govuk.tsx, ui/src/screens/Connect/ConnectPage.tsx (the
  *               walk that lands here), ui/src/screens/Runs/RunNewDialog.tsx (the full form
  *               for an operator who wants every knob), src/crb/server/routes/runs.py
  * Tested by:    ui/src/screens/Connect/MeasurePage.test.tsx
@@ -35,6 +37,7 @@ import { NOT_YET_MEASURED } from '../../api/types'
 import { ErrorState } from '../../components/ErrorState'
 import { BackLink, Kicker, Lede, PageTitle, SummaryList, WarningButton } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
+import { builderChoice } from '../../lib/builder'
 
 const LIMITS: Array<{ n: number; note: string }> = [
   { n: 10, note: 'enough to see the shape, not to route' },
@@ -45,30 +48,6 @@ const LIMITS: Array<{ n: number; note: string }> = [
 //: interval for THIS repository) — used only while the repository has no measured mean of its own
 const RANGE_LOW = 0.2
 const RANGE_HIGH = 0.6
-
-export interface BuilderChoice {
-  builder: string
-  model: string
-  builder_config?: Record<string, unknown>
-  /** What the "Before you start" row says. */
-  label: string
-  /** True when the choice is the operator's own CLI login — a development posture. */
-  development: boolean
-}
-
-/**
- * The builder the walk measures with, from what the deployment has configured (the
- * `/health` builders probe reports presence only): an Anthropic key → Claude Code in
- * production auth; only a Claude Code CLI login → Claude Code with `{auth: "cli"}` (the
- * operator's own login — development and evaluation only, and the row says so); nothing
- * usable → null (the page points at the full run form).
- */
-export function builderChoice(keys: Record<string, unknown> | undefined): BuilderChoice | null {
-  if (!keys) return null
-  if (keys.anthropic) return { builder: 'claude_code', model: 'claude-sonnet-5', label: 'Claude Code · claude-sonnet-5 · API key (production)', development: false }
-  if (keys.claude_code_cli) return { builder: 'claude_code', model: 'claude-sonnet-5', builder_config: { auth: 'cli' }, label: 'Claude Code · claude-sonnet-5 · the operator\u2019s own CLI login (development and evaluation only)', development: true }
-  return null
-}
 
 function usd(x: number): string {
   return `$${x.toFixed(2)}`
@@ -120,8 +99,7 @@ export function MeasurePage() {
   const lo = measuredMean !== null ? measuredMean * 0.8 * runLimit : RANGE_LOW * runLimit
   const hi = measuredMean !== null ? measuredMean * 1.2 * runLimit : RANGE_HIGH * runLimit
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
-  const builders = health.data?.probes.find((p) => p.name === 'builders')
-  const choice = builderChoice(builders?.data)
+  const choice = builderChoice(health.data)
   const posture = posturePhrase(sandbox)
   const retention = !worktrees && !transcripts ? 'Nothing retained — grades and hashes only' : `${[worktrees && 'worktrees', transcripts && 'transcripts'].filter(Boolean).join(' and ')} kept until deleted`
 
@@ -134,7 +112,7 @@ export function MeasurePage() {
         mode: 'sighted',
         builder: choice.builder,
         model: choice.model,
-        ...(choice.builder_config ? { builder_config: choice.builder_config } : {}),
+        ...(Object.keys(choice.builder_config).length > 0 ? { builder_config: choice.builder_config } : {}),
         limit: runLimit,
         retain: { worktrees, transcripts },
       },
