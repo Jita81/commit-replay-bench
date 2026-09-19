@@ -375,14 +375,28 @@ A dedicated `SECURITY.md` and `THREAT-MODEL.md` land in P7.
 
 Every stage emits a `StepEvent` (`crb.observability.events`): `trace_id` = run,
 `step_id` = task, `stage ∈ {mine, prep, build, grade, ledger, oracle, factory, system}`,
-plus the action names the core already emits (`mine.candidate`, `mine.red`, `mine.gold`,
-`grade.belt`, `grade.tamper`, `grade.malformed_oracle`, `grade.error`, …). Sinks:
-`MemorySink`, `JsonlSink`, `MultiSink`, `CallbackSink`; the server adds an events table and
-SSE. Prometheus: `crb_tasks_total{status}`, `crb_belt_failures_total{belt}`,
-`crb_builder_tokens_total`, `crb_builder_cost_usd_total`, `crb_grade_latency_seconds`,
-`crb_false_q1_total` (**must stay 0**; a non-zero value is a stop condition). JSON logs pass
-through the same redaction as evidence packs. `/health` probes: database, docker sandbox,
-toolchains, builders.
+`action` from the vocabulary in [API.md](API.md#event-vocabulary) (about a hundred
+actions — `mine.candidate`, `grade.belt`, `delivery.opened`, `run.cancel_requested`, … —
+each with its payload keys and consumer; `tests/test_event_vocabulary.py` keeps the table
+in step with the code). Sinks: `MemorySink`, `JsonlSink`, `MultiSink`, `CallbackSink`; the
+server adds an events table and SSE; the worker's emitter also feeds a metering sink.
+
+Prometheus is two expositions, because the registry is per process: the **api** serves
+`crb_http_requests_total{method, route, status}`, `crb_http_request_duration_seconds`,
+`crb_ledger_rows` and `crb_false_q1_total` (recounted on every scrape; **must stay 0** — a
+non-zero value is a stop condition) at `/metrics`; the **worker** serves
+`crb_runs_total{kind, status}`, `crb_tasks_total{repo, outcome}`,
+`crb_belt_failures_total{belt}`, `crb_builder_tokens_total{repo, builder, model, kind}`,
+`crb_builder_cost_usd_total{repo, builder, model}`, `crb_grade_latency_seconds{runner}`,
+`crb_build_latency_seconds{builder}`, `crb_sandbox_unavailable_total`,
+`crb_deliveries_total{repo, outcome}`, `crb_github_tokens_minted_total{installation}` and
+`crb_queue_depth` on its own port (`CRB_METRICS_PORT`, default 9464). The table with
+meanings, the scrape targets per deployment shape and the alert rules are
+[DEPLOYMENT.md §9](DEPLOYMENT.md#9-observability). JSON logs pass through the same
+redaction as evidence packs (message, arguments, extras and tracebacks). `/health` runs
+seven probes — `db`, `append_only`, `ledger`, `sandbox` (skipped for the api role),
+`toolchains`, `builders`, `worker` (the `workers` table every worker upserts each
+`heartbeat_s`, idle or not) — and `/health/live` one (`db`).
 
 ### 7.3 Data model (store, P4)
 
@@ -401,6 +415,7 @@ DB triggers forbidding `UPDATE` and `DELETE`, and rows carry `prev_hash` / `row_
 | `signoffs` **(append-only)** | `cell`, `route`, `actor`, `reason`, `revoked_by` | 409 on any false-Q1 in the cell; revocation is a new row. |
 | `factory_backlog` / `factory_tasks` / `factory_evidence` | frozen backlog hash; per-item DoR gaps, RED proof, PR ref, review verdict | P6. |
 | `users` / `roles` | `sub` (OIDC) or local id, `role ∈ viewer\|operator\|approver\|admin` | Argon2 for the bootstrap admin only. |
+| `workers` | `worker_id`, `hostname`, `executor`, `kinds`, `started`, `heartbeat`, `heartbeat_s`, `current_run_id`, `version`, `stopped` | One row per worker process, upserted every `heartbeat_s` even when idle (revision 0007). The `/health` worker probe's liveness source; a clean stop is stamped, a crash leaves the row to go stale. Mutable, no triggers. |
 
 ### 7.4 Versioning
 

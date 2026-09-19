@@ -1225,7 +1225,7 @@ def revoke_signoff(
         raise ApiError(409, "already_revoked", f"attestation {signoff_id!r} is already revoked")
     note = body.note
     _lock(db)
-    _chain_and_add(
+    revocation = _chain_and_add(
         db,
         Signoff(
             signoff_id=uuid.uuid4().hex,
@@ -1239,13 +1239,21 @@ def revoke_signoff(
             created=utc_now_iso(),
         ),
     )
+    # the event carries both hashes so it can be reconciled against the chain without a
+    # search by scope and time (J-TEL-8): the revocation row's, and the revoked row's
     append_system_event(
         db,
         trace_id=system_trace_id("signoffs", row.repo),
         action="signoff.revoked",
         repo=row.repo,
         actor=approver.id,
-        payload={"signoff_id": signoff_id, "cell": scope_of(row).to_dict()},
+        payload={
+            "signoff_id": signoff_id,
+            "cell": scope_of(row).to_dict(),
+            "row_hash": revocation.row_hash,
+            "revokes_row_hash": row.row_hash,
+            "note": revocation.note,
+        },
     )
     db.commit()
     return signoff_out(db, row, load_signoff_rows(db, row.repo))
