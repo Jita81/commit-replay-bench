@@ -18,9 +18,11 @@
  *               comment at the column).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/src/screens/Capability/contract.ts (the extended decision type, the hook,
- *               `REASON_DISPLAY`), ui/src/screens/Capability/FailureSplit.tsx (controls pill,
- *               split, model point), ui/src/api/types.ts (`RouteDecision`, `ROUTES`),
+ * Works with:   ui/src/screens/Capability/contract.ts (the extended decision type and the hook),
+ *               ui/src/screens/Capability/ReasonCode.tsx (a reason code's sentence, inline),
+ *               ui/src/screens/Capability/FailureSplit.tsx (controls pill, split, model point),
+ *               ui/src/lib/auth.tsx (`can` — the run action is an operator's),
+ *               ui/src/api/types.ts (`RouteDecision`, `ROUTES`),
  *               src/crb/core/routing.py (`route()` — the rule this page describes),
  *               src/crb/server/routes/capability.py (the `/routes` route),
  *               ui/src/components/VerdictPill.tsx and ui/src/components/CiBar.tsx
@@ -45,11 +47,13 @@ import { QueryBoundary } from '../../components/QueryBoundary'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { StatTile } from '../../components/StatTile'
 import { VerdictPill } from '../../components/VerdictPill'
+import { useAuth } from '../../lib/auth'
 import { fmtInt, fmtPct, fmtRatio } from '../../lib/format'
 import { ROUTES } from '../../api/types'
 import { routeDisplay } from '../../lib/verdict'
-import { REASON_DISPLAY, useRoutesWithControls, type ControlsVerdict, type RouteDecisionWithControls, type RoutingPolicyWithControls } from '../Capability/contract'
+import { useRoutesWithControls, type ControlsVerdict, type RouteDecisionWithControls, type RoutingPolicyWithControls } from '../Capability/contract'
 import { ControlsPill, FailureSplitPills, ModelPointLine } from '../Capability/FailureSplit'
+import { ReasonCode } from '../Capability/ReasonCode'
 
 /** A decision as the base contract types it, with the A2 fields optional so an older server still renders. */
 type Decision = RouteDecision & Partial<RouteDecisionWithControls>
@@ -107,6 +111,7 @@ const cellLabel = (c: Record<string, string>) =>
 /** The screen; `?repo=` from the URL. */
 export function RoutingPage() {
   const [repo, setRepo] = useRepoParam()
+  const { can } = useAuth()
   const routes = useRoutesWithControls(repo)
 
   const columns = useMemo<Column<Decision>[]>(
@@ -118,7 +123,7 @@ export function RoutingPage() {
         header: 'Why',
         mono: true,
         sortValue: (d) => d.reason_code ?? '',
-        cell: (d) => (d.reason_code ? <code className="rounded bg-surface-high px-1 py-0.5 text-[11px]" title={REASON_DISPLAY[d.reason_code]} data-testid="reason-code">{d.reason_code}</code> : <span className="text-xs text-on-surface-muted">—</span>),
+        cell: (d) => (d.reason_code ? <ReasonCode code={d.reason_code} /> : <span className="text-xs text-on-surface-muted">—</span>),
       },
       { key: 'n', header: 'n', numeric: true, sortValue: (d) => d.n, cell: (d) => fmtInt(d.n) },
       { key: 'point', header: 'Point', numeric: true, sortValue: (d) => d.point, cell: (d) => fmtPct(d.point) },
@@ -153,12 +158,12 @@ export function RoutingPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Routing"
+        eyebrow="Instrument · Routes"
         title="Routing"
         purpose="What the factory may do with each class of change, decided by the one published rule over measured evidence. Every decision carries its reason and the policy version that produced it."
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
-      <QueryBoundary query={routes} loading="Loading route decisions…" idle={<EmptyState title="Choose a repo to see its routing decisions" reason="Routes are derived from the repo's capability cells." action={<LinkButton to="/repos">Go to repos</LinkButton>} />}>
+      <QueryBoundary query={routes} loading="Loading route decisions…" idle={<EmptyState title="Choose a repo to see its routing decisions" reason="Routes are derived from the repo's capability cells." action={<LinkButton to="/connect">Connect a repository</LinkButton>} />}>
         {(r) => {
           const counts = new Map<string, number>()
           for (const d of r.decisions) counts.set(d.route, (counts.get(d.route) ?? 0) + 1)
@@ -180,7 +185,13 @@ export function RoutingPage() {
                   rowKey={(d) => cellLabel(d.cell)}
                   caption={`Route decisions for ${repo}`}
                   initialSort={{ key: 'route', dir: 'asc' }}
-                  empty={<EmptyState title="No decisions yet" reason="A decision exists per measured cell. Run a replay to populate the ledger." action={<LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=replay`}>Start a replay run</LinkButton>} />}
+                  empty={
+                    can('operator') ? (
+                      <EmptyState title="No decisions yet" reason="A decision exists per measured cell. Run a replay to populate the ledger." action={<LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=replay`}>Start a replay run</LinkButton>} />
+                    ) : (
+                      <EmptyState title="No decisions yet" reason="A decision exists per measured cell; an operator starts a replay run to populate the ledger." />
+                    )
+                  }
                 />
               </Card>
             </div>

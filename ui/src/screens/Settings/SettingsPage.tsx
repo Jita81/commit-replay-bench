@@ -20,12 +20,14 @@
  * Works with:   ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useSettings`, `useUsers`,
  *               `useCreateUser`, `useSetUserRole`), ui/src/api/types.ts (`Settings`, `User`,
  *               `Probe`), ui/src/screens/Settings/ClaudeCodeLoginCard.tsx,
- *               src/crb/server/routes/admin.py (settings and users),
+ *               ui/src/screens/Settings/GitHubAppCard.tsx, ui/src/components/Help.tsx
+ *               (`DocLink` — the roles guide), src/crb/server/routes/admin.py (settings and users),
  *               src/crb/observability/probes.py
  *               (the probes the health card lists)
- * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (builders as configured yes /
- *               no, sandbox mode, versions; axe), ui/e2e/walkthrough/01-login.spec.ts (the
- *               health probes it relies on)
+ * Tested by:    ui/src/screens/Settings/SettingsPage.test.tsx (the roles guide link, the
+ *               eyebrow), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (builders as
+ *               configured yes / no, sandbox mode, versions; axe),
+ *               ui/e2e/walkthrough/01-login.spec.ts (the health probes it relies on)
  * Touch when:   `GET /settings` gains a non-secret field (src/crb/server/routes/admin.py
  *               `get_settings_view`, docs/API.md "Admin") — type it in ui/src/api/types.ts
  *               and add its `<dt>`; never for a new repository.
@@ -39,6 +41,7 @@ import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextField } from '../../components/Field'
+import { DocLink } from '../../components/Help'
 import { JsonView } from '../../components/JsonView'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
@@ -154,6 +157,9 @@ function UsersCard() {
   return (
     <Card title="Users" eyebrow="admin">
       <div className="space-y-4">
+        <p className="m-0 text-sm text-on-surface-muted">
+          Roles are a ladder: viewer, operator, approver, admin. An approver account is what sign-off needs; local accounts are for bootstrap and air-gapped installs. Guide: <DocLink to="SECURITY#34-authentication-and-authorisation--crbserverauth">How sign-in and roles work</DocLink>.
+        </p>
         <QueryBoundary query={users} loading="Loading users…">
           {(page) => <DataTable rows={page.items} columns={columns} rowKey={(u) => u.id} caption="Users" dense empty={<EmptyState compact title="No users" reason="Create the first local account below." />} />}
         </QueryBoundary>
@@ -194,7 +200,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Settings" title="Settings" purpose="Non-secret configuration and the instrument's health. Secrets are never returned by the API and never shown here; a builder is reported as configured or not, nothing more — the Claude Code login card reports at most the last four characters of a stored token." />
+      <PageHeader eyebrow="Instrument · Settings" title="Settings" purpose="Non-secret configuration and the instrument's health. Secrets are never returned by the API and never shown here; a builder is reported as configured or not, nothing more — the Claude Code login card reports at most the last four characters of a stored token." />
       <HealthCard />
       <ClaudeCodeLoginCard />
       <GitHubAppCard />

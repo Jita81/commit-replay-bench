@@ -12,24 +12,29 @@
  *               replayable commits were mined and how many are gold-clean, and how the repo's
  *               real commits distribute over (class × size) — the denominator behind coverage.
  *               Operators can probe now or start a run from here.
- * How:          `useRepo` / `useRepoProfile` / `useRepoTasks`; tab state is local;
+ * How:          `useRepo` / `useRepoProfile` / `useRepoTasks`; the tab lives in `?tab=` so a
+ *               link can land on Configuration (an unknown value is Overview);
  *               `RunNewDialog` is mounted for "Start a run"; the Configuration tab is keyed by
- *               repo name so it remounts per repo.
+ *               repo name so it remounts per repo. Next steps lead to the journey (the
+ *               Connection walk, the Factory) as well as the instrument screens.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useRepo`, `useRepoProfile`, `useRepoTasks`,
  *               `useProbeRepo`), ui/src/api/types.ts (`RepoDetail`, `TaskSpec`,
  *               `ProfileCell`), ui/src/screens/Repos/RepoConfigTab.tsx (the fourth tab),
- *               ui/src/screens/Runs/RunNewDialog.tsx (start a run), src/crb/server/routes/repos.py
- *               (detail, profile, tasks, probe)
- * Tested by:    ui/e2e/walkthrough/02-repo-onboard.spec.ts (probe pill reads OK with the
- *               runner's summary), ui/e2e/walkthrough/03-mine.spec.ts (the Tasks tab lists a
- *               mined task), ui/e2e/walkthrough/repo-config.spec.ts
+ *               ui/src/screens/Runs/RunNewDialog.tsx (start a run),
+ *               ui/src/screens/Connect/ConnectPage.tsx (`ConnectRepoPage`) and ui/src/screens/Factory/FactoryPage.tsx
+ *               (where Next steps lead), src/crb/server/routes/repos.py (detail, profile,
+ *               tasks, probe)
+ * Tested by:    ui/src/screens/Repos/RepoDetail.test.tsx (Next steps, `?tab=`, the operator-only
+ *               run button), ui/e2e/walkthrough/02-repo-onboard.spec.ts (probe pill reads OK
+ *               with the runner's summary), ui/e2e/walkthrough/03-mine.spec.ts (the Tasks tab
+ *               lists a mined task), ui/e2e/walkthrough/repo-config.spec.ts
  * Touch when:   a field is added to `GET /repos/{name}` or the profile (docs/API.md "Repos")
  *               — type it in ui/src/api/types.ts first; never for a new repository.
  */
 import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useProbeRepo, useRepo, useRepoProfile, useRepoTasks } from '../../api/hooks'
 import type { ProfileCell, RepoDetail as RepoDetailT, TaskSpec } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
@@ -49,6 +54,7 @@ import { RepoConfigTab } from './RepoConfigTab'
 
 /** The four tabs. */
 type Tab = 'overview' | 'profile' | 'tasks' | 'config'
+const TABS: readonly Tab[] = ['overview', 'profile', 'tasks', 'config']
 
 const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL']
 
@@ -181,6 +187,8 @@ function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => v
               Start a run
             </Button>
           )}
+          <LinkButton to={`/connect/${encodeURIComponent(repo.name)}`}>Connection walk</LinkButton>
+          <LinkButton to={`/factory?repo=${encodeURIComponent(repo.name)}`}>Factory</LinkButton>
           <LinkButton to={`/capability?repo=${encodeURIComponent(repo.name)}`}>Capability map</LinkButton>
           <LinkButton to={`/oracle?repo=${encodeURIComponent(repo.name)}`}>Oracle adequacy</LinkButton>
           <LinkButton to={`/runs?repo=${encodeURIComponent(repo.name)}`}>Runs</LinkButton>
@@ -237,12 +245,20 @@ function TasksTab({ name }: { name: string }) {
   )
 }
 
-/** The screen: tab state is local; the config tab is keyed by repo name. */
+/** The screen: the tab is `?tab=` (Overview when absent or unknown); the config tab is keyed by repo name. */
 export function RepoDetail() {
   const { name = '' } = useParams()
   const repo = useRepo(name)
   const profile = useRepoProfile(name)
-  const [tab, setTab] = useState<Tab>('overview')
+  const [params, setParams] = useSearchParams()
+  const wanted = params.get('tab')
+  const tab: Tab = TABS.includes(wanted as Tab) ? (wanted as Tab) : 'overview'
+  const setTab = (t: Tab) => {
+    const next = new URLSearchParams(params)
+    if (t === 'overview') next.delete('tab')
+    else next.set('tab', t)
+    setParams(next, { replace: true })
+  }
   const [starting, setStarting] = useState(false)
   const navigate = useNavigate()
 
@@ -255,7 +271,7 @@ export function RepoDetail() {
 
   return (
     <>
-      <PageHeader eyebrow="Repositories" title={name} purpose="The repository as an instrument: probe, mined tasks, change profile, and the config that governs how its commits are replayed." />
+      <PageHeader eyebrow="Instrument · Repositories" title={name} purpose="The repository as an instrument: probe, mined tasks, change profile, and the config that governs how its commits are replayed." />
       <div role="tablist" aria-label="Repository sections" className="flex gap-1 border-b border-border">
         {tabs.map((t) => (
           <button
