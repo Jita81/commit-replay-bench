@@ -293,6 +293,7 @@ export const ACTION_HELP: Record<string, string> = {
   // audit traces — out-of-band records, never rendered in the log but named for completeness
   'repo.created': 'The repository was registered.',
   'repo.updated': 'The repository’s configuration was changed; the diff is recorded.',
+  'repo.github_linked': 'The repository was linked to a GitHub App installation; its clone URL changed and both URLs are recorded.',
   'github.installation.recorded': 'A GitHub App installation was recorded for this deployment.',
   'signoff.created': 'An approver signed off a cell; the attested row’s hash is recorded.',
   'signoff.refused': 'A sign-off was refused by the policy; the refusal names the clause.',

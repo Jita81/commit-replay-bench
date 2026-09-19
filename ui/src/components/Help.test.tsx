@@ -77,6 +77,17 @@ describe('DocLink', () => {
     )
     expect(screen.getByRole('link', { name: 'the GitHub App guide' })).toHaveAttribute('href', '/help/docs/GITHUB-APP#2-register-the-app-once-per-deployment')
   })
+
+  it('is underlined, so a link inside a sentence is told apart from its text without colour (WCAG 1.4.1)', () => {
+    render(
+      <MemoryRouter>
+        <p>
+          Guide: <DocLink to="GITHUB-APP">Register the GitHub App</DocLink>.
+        </p>
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: 'Register the GitHub App' })).toHaveClass('underline')
+  })
 })
 
 describe('AboutThisScreen', () => {

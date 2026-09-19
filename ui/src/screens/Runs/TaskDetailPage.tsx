@@ -9,7 +9,10 @@
  *               test and source files, RED-checked, gold status, the full JSON behind a
  *               disclosure) and every grade row in chain order — clean / DQ / error, belts,
  *               cost, latency, provenance, the STANDING review verdict per row (the latest
- *               review wins) and the evidence link that opens the drawer on that row.
+ *               review wins) and the evidence link that opens the drawer on that row. A task
+ *               the factory built (`labels.process === 'factory'`) is introduced as one
+ *               factory item with its backlog id, and its id explained (the authored test's
+ *               sha), so it is not read as a commit (J-FAC-18).
  * How:          `useTask` + `useReviews({repo, task_id})` → a `Map` of row hash → latest review
  *               → `DataTable`; the drawer is opened with both the pack hash and the row hash
  *               so the Patch / Review tabs need no resolution.
@@ -19,17 +22,18 @@
  *               `beltsOf`), ui/src/screens/Runs/contract.ts (`useReviews`),
  *               ui/src/screens/Runs/EvidenceDrawer.tsx and ui/src/screens/Runs/ReviewPanel.tsx
  *               (`VerdictPill`), src/crb/server/routes/grades.py (the task route),
- *               src/crb/core/spec.py (`TaskSpec`)
- * Tested by:    ui/e2e/walkthrough/09-review.spec.ts (the task page shows the recorded
- *               verdict); the rest is untested — a read-only table over two hooks each pinned
- *               elsewhere
+ *               src/crb/core/spec.py (`TaskSpec`), src/crb/factory/build.py (the labels a
+ *               factory task carries: `item_id`, `process`, `red_proof`)
+ * Tested by:    ui/src/screens/Runs/TaskDetailPage.test.tsx (a factory item is named as one;
+ *               a commit keeps the commit wording), ui/e2e/walkthrough/09-review.spec.ts (the
+ *               task page shows the recorded verdict)
  * Touch when:   `TaskSpec` gains a field worth showing (src/crb/core/spec.py, then
  *               ui/src/api/types.ts); never for a new repository.
  */
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { useTask } from '../../api/hooks'
-import { beltsOf, type GradeRow } from '../../api/types'
+import { beltsOf, type GradeRow, type TaskSpec } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
 import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
@@ -45,6 +49,11 @@ import { EvidenceDrawer } from './EvidenceDrawer'
 import { VerdictPill } from './ReviewPanel'
 
 /** `GET /tasks/{repo}/{task_id}` — the spec and every grade row for it. */
+/** A task the factory built rather than a mined commit (`labels.process`, src/crb/factory/build.py). */
+function isFactory(spec: TaskSpec): boolean {
+  return spec.labels.process === 'factory'
+}
+
 export function TaskDetailPage() {
   const { repo = '', taskId = '' } = useParams()
   const q = useTask(repo, taskId)
@@ -113,9 +122,14 @@ export function TaskDetailPage() {
         {(t) => (
           <div className="space-y-6">
             <Card title={t.spec.subject} eyebrow={`${t.spec.capability_class} · ${t.spec.size} · ${t.spec.pool} · ${t.spec.language || '—'}`}>
+              {isFactory(t.spec) && (
+                <p className="mb-3 text-sm text-on-surface-muted">
+                  One factory item{t.spec.labels.item_id ? ` (${t.spec.labels.item_id})` : ''} — not a replayed commit: the id is the authored test's sha, the RED proof the factory wrote before building. Its graded trials sit in the same table as a commit's.
+                </p>
+              )}
               <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                 <div>
-                  <dt className="label">Commit</dt>
+                  <dt className="label">{isFactory(t.spec) ? 'Factory item' : 'Commit'}</dt>
                   <dd className="font-mono text-xs">{t.spec.task_id}</dd>
                 </div>
                 <div>
@@ -153,7 +167,7 @@ export function TaskDetailPage() {
               </details>
             </Card>
             <Card padded={false} title="Grade rows">
-              <DataTable rows={t.grades} columns={columns} rowKey={(r) => r.row_id} caption="Grade rows for this task" dense initialSort={{ key: 'created', dir: 'desc' }} empty={<EmptyState compact title="Not graded yet" reason="No run has replayed this task." />} />
+              <DataTable rows={t.grades} columns={columns} rowKey={(r) => r.row_id} caption="Grade rows for this task" dense initialSort={{ key: 'created', dir: 'desc' }} empty={<EmptyState compact title="Not graded yet" reason={isFactory(t.spec) ? 'The factory has not built this item yet.' : 'No run has replayed this task.'} />} />
             </Card>
           </div>
         )}

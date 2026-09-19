@@ -148,7 +148,13 @@ export function Term({ id, children }: { id: TermId; children?: ReactNode }) {
   )
 }
 
-/** A link into a bundled guide section — replaces every `<code>docs/X.md</code>` mention. */
+/** A link into a bundled guide section — replaces every `<code>docs/X.md</code>` mention.
+ *  Underlined: it sits inside a sentence, so colour alone may not mark it (WCAG 1.4.1;
+ *  axe `link-in-text-block` on /settings). */
 export function DocLink({ to, children }: { to: DocAnchor; children: ReactNode }) {
-  return <Link to={docHref(to)}>{children}</Link>
+  return (
+    <Link to={docHref(to)} className="underline underline-offset-4">
+      {children}
+    </Link>
+  )
 }

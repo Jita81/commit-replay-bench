@@ -47,7 +47,7 @@ const VOCABULARY = [
   'review.start', 'review.probe', 'review.verdict', 'review.recorded', 'rework.start', 'horizon.checkpoint',
   'backlog.frozen', 'backlog.evolved', 'gap.signoff', 'edit.permitted',
   // audit traces
-  'repo.created', 'repo.updated', 'github.installation.recorded', 'signoff.created', 'signoff.refused', 'signoff.revoked', 'review.created', 'review.refused',
+  'repo.created', 'repo.updated', 'repo.github_linked', 'github.installation.recorded', 'signoff.created', 'signoff.refused', 'signoff.revoked', 'review.created', 'review.refused',
 ]
 
 describe('route, band and gate copy', () => {

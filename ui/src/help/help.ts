@@ -113,7 +113,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'If a gate is amber, go back to the walk and run what is missing. If a cell reads calibrate, more attempts move it; if it reads human, more attempts will not.',
       approver: 'A cell that routes deliver and is not yet signed appears under Waiting on a person; Attest takes you to the sign-off form.',
     },
-    numbers: 'Every rate carries n (attempts), a 95 % Wilson interval and the apparatus version that produced it. The interval is the claim, not the point. Economics tiles are means only: the API does not yet serve an interval for cost or latency (backlog F35).',
+    numbers: 'Every rate carries n (attempts), a 95 % Wilson interval and the apparatus version that produced it. The interval is the claim, not the point. Economics tiles are means only: the API does not yet serve an interval for cost or latency.',
     terms: ['cell', 'wilson', 'apparatus', 'false_q1', 'oracle_strength', 'negative_controls', 'deliver', 'calibrate', 'human', 'granularize'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-5--read-the-map-everyone', label: 'Read the map' },

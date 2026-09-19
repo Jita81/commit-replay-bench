@@ -252,6 +252,7 @@ that is not here fails the suite.
 | factory | `review.start` / `review.probe` / `review.verdict` / `review.recorded` / `rework.start` | ok | `reviewer`, `builder`, `pr_ref` / `probe`, `passed`, `required` / `verdict`, `reason`, `event` / `verdict`, `event` / `n`, `after` | factory/review.py, factory/loop.py | LOG |
 | factory | `horizon.checkpoint` | ok | `level`, `observations` | factory/loop.py | stored only |
 | system (audit traces) | `repo.created` / `repo.updated` | ok | `diff`, `fields`, `github_unlinked` | routes/repos.py, routes/github.py | AUDIT |
+| system (audit traces) | `repo.github_linked` | ok | `github`, `url_before`, `url_after`, `previous_full_name`, `fields: ["url"]`, `diff: {url: {from, to}}` (the `repo.updated` shape, so the audit trail renders the change) | routes/github.py (`POST /repos/{name}/github-link`) | AUDIT |
 | system | `github.installation.recorded` | ok | `installation` | routes/github.py | stored only |
 | system | `signoff.created` / `signoff.refused` / `signoff.revoked` | ok | created: `signoff_id`, `cell`, `tier`, `n`, `point`, `ci_low`, `policy_version`, …, `row_hash`; refused: `refusals`; revoked: `signoff_id`, `cell`, `row_hash` (the revocation row), `revokes_row_hash` (the row it revokes), `note` | routes/signoffs.py | stored only (the sign-off rows themselves are shown) |
 | system | `review.created` / `review.refused` | ok | the record / the refusal | routes/reviews.py | stored only (the review rows are shown) |

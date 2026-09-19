@@ -6,7 +6,9 @@
  * What it is:   Tests for the Runs list screen against a mocked API.
  * What it does: Pins that the Kind filter can select every kind a run can have (factory,
  *               probe and label included, not only the kinds the dialog starts), that the
- *               purpose and empty-state copy name the factory, and that a factory run lists.
+ *               purpose and empty-state copy name the factory, that a factory run lists, and
+ *               that `?new=<kind>` opens the start dialog only for a role that can start a
+ *               run (J-FAC-12) — a viewer reads who acts instead.
  * How:          `renderApp` at `/runs` with `mockApi`; assertions on the select's options
  *               and the header copy.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -14,7 +16,8 @@
  * Works with:   ui/src/screens/Runs/RunsPage.tsx (the code under test), ui/src/api/types.ts
  *               (`RUN_KINDS`, `RunKind`), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Runs/RunsPage.test.tsx
- * Touch when:   a run kind is added — extend the expected option list.
+ * Touch when:   a run kind is added — extend the expected option list; the role that may
+ *               start a run changes — update the ?new= gate test.
  */
 import { screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -79,5 +82,19 @@ describe('RunsPage', () => {
     })
     renderApp(<RunsPage />, { route: '/runs', path: '/runs' })
     expect(await screen.findByText(/mine, replay, blind, oracle, controls or factory job over one repo/)).toBeInTheDocument()
+  })
+
+  it('?new= opens the start dialog for an operator, never for a viewer (J-FAC-12)', async () => {
+    const viewer = { ...PRINCIPAL, role: 'viewer' as const }
+    mockApi({
+      'GET /auth/me': viewer,
+      'GET /repos': { items: [], total: 0, limit: 200, offset: 0 },
+      'GET /runs': { items: [], total: 0, limit: 200, offset: 0 },
+    })
+    renderApp(<RunsPage />, { route: '/runs?new=replay', path: '/runs' })
+    await screen.findByText('No runs match')
+    expect(screen.queryByRole('dialog', { name: 'Start a run' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Start a run' })).toBeNull()
+    expect(screen.getByText(/An operator starts a run/)).toBeInTheDocument()
   })
 })

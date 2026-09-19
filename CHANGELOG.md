@@ -8,6 +8,210 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-19 — journeys that explain themselves: contextual help, honest in-flight states, telemetry a platform team can use
+
+Six streams on one foundation. Every screen now says what it is for, what to do next
+for the role reading it, what its numbers mean and where the definition is; every
+in-flight state names the stage, the count and the money; and the run, the queue and
+the worker report the same facts to the person and to the platform team's dashboards.
+
+**On-ramp** (`/home`, `/connect`, `/connect/:name`, `/connect/:name/measure`, `/login`)
+
+- **Home:** the green button reads *Continue to task N: name* and lands on the first task
+  the person can act on (nothing connected → task 2 → `/connect`, never an empty
+  Decisions). Task 6 is *Read the baseline* and completes once the repository has an active
+  sign-off, so 8 of 8 is reachable. Task 8 reads *Backlog frozen — run the factory* with a
+  frozen backlog and no run, and *In progress — item k of n* only while a factory run is
+  queued or running. A non-admin sees task 7 as *Not known yet* with who can add users.
+  The degraded-sandbox banner opens `/posture`, not raw JSON.
+- **Connection list:** the journey eyebrow; *gold-clean* is a term with its definition one
+  click away; a measured repository's button reads *Baseline*.
+- **Connection walk:** a queued run shows *Queued — n runs ahead of it*; a running stage
+  shows its own counter (*Probing — running the repository's own suite (started 40 s
+  ago)*, *Mining — 4 tasks found · 37 commits examined · target 25*, *Scoring oracles —
+  task 3 of 12*, *Measuring — attempt 3 of 10 · $0.42 so far, builder-reported*) and an
+  in-flight panel with *Open the run* and, for an operator, *Cancel the run* behind a
+  confirm that says attempts already made are still charged. A failed measurement with no
+  rows reads *Failed* with *Retry*; a cancelled one says how many rows landed. A viewer or
+  approver reads *An operator runs this* instead of the bare word *operator*. Oracle
+  strength and negative controls carry their definitions.
+- **Measure:** the kicker says *task 5 of 8 · this step spends money*; the button reads
+  *Start the run — estimated $8.16 to $12.24* (no promised cap) and the Budget cap row
+  says there is no spend cap yet, what each attempt is capped on, and that cancelling
+  still charges attempts made. The estimate links *Measure: the money step* in the bundled
+  guide. While a replay is queued or running the red button is gone and a banner says
+  *A measurement is already running for repo — started 14:05; 3 of 10 attempts made;
+  $1.02 spent so far*. The no-gold message points at stage 3 and links Configuration.
+- **Login:** *Measures what an AI builder can be trusted to change in your repository,
+  graded by your own tests.*
+- **Baseline** (`/results`): reached from the nav with no repository chosen, the most
+  recently updated repository is picked and written into the URL; *Loading the baseline
+  for repo…* while the map loads; a blue *A measurement is running* banner (attempt,
+  spend so far, *Open the run*) while a replay is in flight. The Oracle strength tile
+  shows n, *95% CI —* with *no interval: a mean of per-task scores, not a rate* and an
+  apparatus line from the report and the policy in force; the Negative controls tile's
+  apparatus line is the report's own stamp. The four route names are terms. A viewer
+  sees *Read* + *approver acts* instead of *Attest*; *sign-off due* is plain text for
+  anyone who cannot sign.
+- **Decisions** (`/decisions`): kicker *Under apparatus 2.2* with apparatus as a term;
+  each row's reason code is a term with its meaning beside it; *Revoke or re-sign* only
+  for an approver.
+- **Sign-off** (`/signoff`): eyebrow *Journey · 3 of 4 · Decisions · sign-off*; a
+  two-sentence purpose; the seven refusal clauses behind *Why a sign-off can be refused*
+  with each term defined inline; a viewer or operator keeps the gate, the evidence and
+  the attestations but never the approver form, and is told so. Not found goes *Back to
+  Home*.
+
+**Factory** (`/factory`, `/posture`)
+
+- **Run the factory** works from the UI: it posts the builder `builderChoice` picks (as
+  Measure does) and is disabled with Measure's reason when there is none; an operator can
+  name another builder. A *Before you run* summary states the builder, *k of m will be
+  worked (j wait on a signed gap); d sit in a cell that routes deliver*, the estimated
+  cost as a ±20 % band on the repository's measured mean with n and apparatus (or the
+  guide's planning band, said to be unmeasured), the delivery target (*not linked — no
+  pull request* with the reason and the admin's next step, or *pushes a branch to
+  owner/repo and opens a pull request against main; nothing is written to main*), that
+  there is no spend cap yet and that cancelling still charges built items; the button
+  names the amount.
+- **`GET /factory/{repo}/backlog`** carries `delivery: {can_deliver, reason_code, reason,
+  full_name, default_branch, installation_id, account_login}` — a server pre-flight
+  answered by the same rule as the worker's delivery credentials (host check included,
+  CWE-201). The deliver checkbox is enabled only when it says the repository can deliver;
+  the approver's override explanation is visible text.
+- **Every item says why it stopped**, from the chain: a structural gap and how to bring
+  it back, a RED refusal with its reason, *Delivery withheld — the route gate*, *Delivery
+  failed — the push was refused*, a dependency wait naming the item. `FactoryTaskOut`
+  gains `value_gaps`, `refusal {step, reason, reason_code, measured_route}`, `error`,
+  `task_id`, `run_id`, `pack_hash`, `row_hash`; `dor_gaps` is structural slots only.
+  *Freeze a revised backlog…* opens the dialog prefilled from the active backlog. A built
+  item has an Evidence button and a *run id* link. While a run is active the items poll
+  every 5 s under a banner (*item 2 of 5 … $0.31 so far · Open the run · Cancel*);
+  afterwards one line summarises the last run. At 375 px each item is one line with the
+  six readiness cards behind *All 6 steps*, and the page no longer scrolls sideways.
+- **Deployment** (`/posture`): every row that is not the production posture ends with
+  what to do, with a Settings link for admins and a guide link for everyone; a Delivery
+  group (Writes, Permissions with *k of n installations can deliver*, Route gate under the
+  live policy name, Override, Credentials).
+
+**Instrument** (`/capability`, `/routing`, `/oracle`, `/learn`, `/ledger`, `/settings`,
+`/repos`, `/runs`)
+
+- **Map grid:** the tile's five abbreviated numbers no longer rely on hover titles — every
+  tile is `aria-describedby` one visually-hidden legend and a visible legend sits under
+  the grid; the reason code in the cell card opens its sentence inline (`ReasonCode`, the
+  same a11y contract as `Term`); the idle state's action is *Connect a repository*;
+  *Start a replay run* is operator-only.
+- **Routes:** each reason code opens its plain sentence inline; *No decisions yet* offers
+  the run to operators only.
+- **Oracle:** the purpose says what a green is worth; the two *auto-ship* strings are
+  gone; a legend explains Band and Gate; the controls section explains negative controls,
+  VIOLATION and controls escape; Run oracle / Run controls are operator-only.
+- **Learn:** card eyebrows are *Refusals*, *Weak oracles*, *Stale evidence*; each report
+  opens with what a person does with it; codes are plain words.
+- **Ledger:** the abstract export's meaning is visible text (*Cells only: no code, no
+  identifiers; what a federated deployment may share*); a filter legend defines clean,
+  belt, sighted and blind.
+- **Settings:** a read-only GitHub App installation says which permissions to grant and
+  to sync; the not-configured state, the builder-token card and the Users card link the
+  bundled guides; the Users card explains the role ladder.
+- **Repositories:** Next steps are Connection walk · Factory · Capability map · Oracle
+  adequacy · Runs; the active tab lives in `?tab=`; the run button is operator-only. All
+  instrument screens carry an *Instrument · name* eyebrow.
+- **Runs** (`/runs`, `/runs/:id`): the Kind filter offers probe, label and factory. The
+  Progress card has a *Now* line (*Started 12 min ago · 3 of 10 tasks done · $0.84 so far
+  · about 28 minutes left if the 7 remaining take the mean of the 3 done — a planning
+  estimate, not a measurement*), a queue line (*Queued — position 3 of 7 · ahead of it:
+  2 replay, 1 mine*, or that the server does not report the position), a stage line from
+  the last event (*Task 4 of 12 · build · turn 7 of 25*), and a heartbeat line that turns
+  amber only when older than the worker probe's `stale_after_s`. A factory run's header
+  reads *delivery on (override by name)* when the server sends `factory`. The live log
+  reads *belt ✓* / *belt ✗ — 2 new failures* with a red glyph, and every row carries
+  `actionHelp(action)` as a muted second line (*Explain each row*, on by default). The
+  Evidence drawer's Pack tab opens with one headline sentence (*Not clean: belt 3 (the
+  repository's own suite) — 2 new failures: …*; *Clean: all five belts held and the
+  pack's hash verifies. This says nothing about whether the change is mergeable*).
+  Oracle, controls and label runs render `counts.detail` as tiles.
+
+**Telemetry** (`/health`, `/runs/:id`, `/metrics`, events)
+
+- **Worker heartbeats:** a `workers` table every worker upserts each `heartbeat_s` even
+  when idle. The `/health` worker probe reads it: three queued runs with a crashed worker
+  read `down` *3 queued, no worker has checked in for 360 s (w-1)* instead of ok *idle,
+  3 queued*; a fresh store says *no worker has checked in yet*; ok reads *1 worker, last
+  check-in 4 s ago · 2 runs queued*. `data` carries `workers[]`, `queued`, `stale`,
+  `stale_after_s`; alive = a heartbeat within 3 × that worker's `heartbeat_s`.
+- **`RunOut`** gains `queue_position` (1-based FIFO; null unless queued),
+  `queue_kinds_ahead` (oldest first) and `factory {deliver, deliver_override_by,
+  deliver_override_by_name, backlog_hash}` (null for every other kind). An oracle,
+  controls or label run serves its own counters verbatim under `counts.detail`, so it no
+  longer renders as *Clean 0.0 %* with a Wilson interval over the wrong n; a label run's
+  spend is in `detail.usage.cost_usd`. Shapes per kind are in API.md.
+- **Events:** `run.cancel_requested` is written for queued and running runs and names the
+  operator who asked (not the run's creator), with `status_at_request`;
+  `signoff.revoked` carries `row_hash`, `revokes_row_hash` and the note, so an auditor
+  reconciles against the chain without searching by time. `tests/test_event_vocabulary.py`
+  fails on a missing or a ghost action in API.md.
+- **Metrics:** the worker serves its own `/metrics` on `CRB_METRICS_PORT` (default 9464;
+  0 = off; compose internal; Helm container port + headless Service + opt-in
+  `serviceMonitor.worker` + NetworkPolicy rule). `crb_builder_tokens_total` and
+  `crb_builder_cost_usd_total` gain a leading `repo` label; new
+  `crb_deliveries_total{repo, outcome ∈ opened|withheld|failed}` (metered from the
+  worker's event sink), `crb_github_tokens_minted_total{installation}` (a real mint only,
+  by digest — never the token), `crb_queue_depth`. DEPLOYMENT.md §9 Observability: the
+  metrics table by process (ratchet-tested against `metrics.py`), four alert rules,
+  scrape targets, logs, events.
+- **Logging:** the text formatter now redacts tracebacks; a broken %-format record no
+  longer reaches `Handler.handleError` with raw args.
+- **Fixed:** `tests/test_store_migrate.py::test_module_is_runnable_as_main` ran the venv's
+  editable install instead of the worktree; the child now gets `PYTHONPATH` pointing at
+  the src the module was imported from.
+
+**Help** (`/help`, `/help/docs/:name`, every route)
+
+- **One help mechanism.** `ui/src/help/`: `glossary.ts` (22 terms, plain English, each
+  with a guide anchor), `docs.ts` (the eight user-facing guides bundled at UI build time
+  as lazy chunks — the repository is private and a deployment may have no egress; DL-045),
+  `markdown.ts` (a subset renderer to React elements, never raw HTML), `help.ts` (`HELP`,
+  one entry per route in App.tsx; `helpFor` via `matchPath`). `AboutThisScreen` is
+  mounted once in Layout after the outlet: purpose · next step by role · what the numbers
+  mean · terms · read more · glossary link. `Term` is a real button
+  (`aria-expanded`/`aria-controls`, Escape closes, no hover tooltip); `DocLink` opens a
+  bundled guide at its heading. `PageHeader` defaults its eyebrow to the journey position
+  (`journeyEyebrow`).
+- **`/help`** (glossary, guide index, ADR titles) and **`/help/docs/:name`** (a bundled
+  guide, scrolls to the hash; unknown name → empty state). Help in the top bar; Help ·
+  Glossary in the footer; the top-bar group wraps at 375 px.
+- **Copy:** the human route names all three causes; deliver, the strong band and the
+  oracle gate say *a branch and pull request under review, never a merge* — the
+  *Auto-ship* label is gone (API enum values unchanged). `ACTION_HELP` / `actionHelp`:
+  one plain sentence per event action.
+
+**On the merge** (what fell between the streams): `/runs?new=<kind>` opens the start
+dialog only for a role that can start a run — a viewer or approver reads *An operator
+starts a run; it spends model budget* (J-FAC-12); a task the factory built is introduced
+on `/tasks/:repo/:taskId` as *One factory item (I-2) — not a replayed commit: the id is the
+authored test's sha* (J-FAC-18); `DocLink` is underlined, so a guide link inside a
+sentence is told apart without colour (axe `link-in-text-block` on `/settings`, WCAG
+1.4.1); `repo.github_linked` (#34) joins the event vocabulary table and `ACTION_HELP` —
+the ratchet caught it; the `/results` help copy no longer cites a backlog id.
+
+**Tests.** UI: 49 files / 340 tests — `Help`, `Layout`, `PageHeader`, `govuk`, `StatTile`,
+`help/{glossary,docs,help,markdown}`, `verdict`, `builder`, `connection`, `HomePage`,
+`ConnectPage`, `MeasurePage`, `LoginPage`, `ResultsPage`, `MapTable`, `DecisionsPage`,
+`decisions`, `SignoffPage`, `NotFoundPage`, `FactoryPage`, `CapabilityPage`, `RoutingPage`,
+`OraclePage`, `LearnPage`, `LedgerPage`, `SettingsPage`, `GitHubAppCard`,
+`ClaudeCodeLoginCard`, `RepoDetail`, `RunsPage`, `RunDetailPage`, `telemetry`, `ReviewPanel`,
+`HelpPage`; the help ratchet checks every App route has an entry and every anchor resolves
+to a real heading. Python: `test_deploy_health_probes` (worker probe),
+`test_server_routes_runs` (queue position, per-kind counts, factory), `test_worker` and
+`test_worker_label` (heartbeat table, metered GitHub app, counters), `test_store_jobs`,
+`test_event_vocabulary`, `test_observability_metrics`, `test_observability_logging`,
+`test_server_routes_factory` (delivery pre-flight, refusal), `test_server_routes_signoffs`
+(revoked payload), `test_server_system`, `test_store_migrate`. Walkthrough: `10-factory`
+(freeze → run → chain → evidence → Runs → 375 px) and `11-screens` (every route × persona ×
+width, the About block on every authenticated route).
+
 ### 2026-09-18 — link a repository you already measured to the GitHub App
 
 - **`POST /repos/{name}/github-link`** `{installation_id, full_name}` (operator) attaches an

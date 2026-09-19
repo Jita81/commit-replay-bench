@@ -8,6 +8,12 @@ is marked with the phase that delivers it.
 Read alongside: [README](../README.md) · [ARCHITECTURE](ARCHITECTURE.md) ·
 [EVIDENCE-AND-CLAIMS](EVIDENCE-AND-CLAIMS.md) · [ADR-0005 (sandbox)](adr/0005-fail-closed-docker-sandbox.md).
 
+This guide is also bundled into the UI: open **Help** in the top bar (`/help`) for the
+glossary and the guide index, or `/help/docs/OPERATOR` for this page, so an operator on a
+deployment with no egress reads the same text the build was made from (DL-045). Every
+screen ends with an *About this screen* block: its purpose, the next step for your role,
+what the numbers mean and where the terms are defined.
+
 Contents: [1 Install](#1-install) · [2 Configure a repository](#2-configure-a-repository) ·
 [3 Run a sweep](#3-run-a-sweep) · [4 Read the capability map](#4-read-the-capability-map) ·
 [5 Sign off](#5-sign-off-p4) · [6 Export the ledger](#6-export-and-verify-the-ledger) ·

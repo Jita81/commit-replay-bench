@@ -10,7 +10,8 @@
  *               tasks, DQ / errors, builder, cost; polls only while a listed run is
  *               non-terminal; rows open the run page. `?new=<kind>` opens the run dialog
  *               pre-set to that kind (how "Start a replay run" links from empty states
- *               arrive here); operators get "Start run".
+ *               arrive here) only for a role that can start one; a viewer or approver
+ *               reads who acts instead (J-FAC-12); operators get "Start run".
  * How:          `useRepoParam` + `useSearchParams` for the filters → `useRuns` → `DataTable`;
  *               `RunNewDialog` navigates to the new run on success.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -20,7 +21,7 @@
  *               ui/src/screens/Runs/RunDetailPage.tsx (where a row leads; imports `Progress`),
  *               src/crb/server/routes/runs.py
  * Tested by:    ui/src/screens/Runs/RunsPage.test.tsx (the kind filter and the copy name every
- *               kind), ui/e2e/walkthrough/03-mine.spec.ts (the Runs list shows the run, the
+ *               kind; ?new= opens the dialog for an operator only), ui/e2e/walkthrough/03-mine.spec.ts (the Runs list shows the run, the
  *               progress bar reports the run's own counts), ui/e2e/walkthrough/06-cancel.spec.ts,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   a run kind is added (src/crb/core/run.py, docs/API.md "Runs") — extend
@@ -157,7 +158,13 @@ export function RunsPage() {
               empty={
                 <EmptyState
                   title="No runs match"
-                  reason={repo || kind || status ? 'Nothing matches these filters yet.' : 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. Start one here to produce ledger rows; the factory is started from Factory.'}
+                  reason={
+                    repo || kind || status
+                      ? 'Nothing matches these filters yet.'
+                      : can('operator')
+                        ? 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. Start one here to produce ledger rows; the factory is started from Factory.'
+                        : 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. An operator starts a run; it spends model budget. The factory is started from Factory.'
+                  }
                   action={can('operator') ? <Button variant="filled" onClick={() => setStarting(true)}>Start a run</Button> : undefined}
                 />
               }
@@ -166,7 +173,7 @@ export function RunsPage() {
         </QueryBoundary>
       </Card>
       <RunNewDialog
-        open={starting}
+        open={starting && can('operator')}
         onClose={() => {
           setStarting(false)
           if (initialNew !== null) setFilter('new', '')
