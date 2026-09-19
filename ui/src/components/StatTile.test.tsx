@@ -44,6 +44,19 @@ describe('StatTile', () => {
     expect(tile.querySelector('.text-on-surface-muted.num')).not.toBeNull()
   })
 
+  it('the apparatus line is read in full, never cut to one line behind a hover title', () => {
+    const long = 'a mean of builder-reported $ over cells with a known cost, current apparatus — no interval yet: the API serves the mean only'
+    render(<StatTile label="Cost per attempt" value="$0.12" n={40} apparatus={long} data-testid="tile" />)
+    const dd = screen.getByText(long)
+    expect(dd).not.toHaveAttribute('title')
+    expect(dd.className).not.toMatch(/truncate/)
+  })
+
+  it('the label may be a node, so a route name can be a term with its definition', () => {
+    render(<StatTile label={<button type="button">deliver</button>} value="1" n={22} apparatus="1 of 2 measured cells" data-testid="tile" />)
+    expect(screen.getByRole('button', { name: 'deliver' })).toBeInTheDocument()
+  })
+
   it('never renders NaN when given a non-finite n', () => {
     render(<StatTile label="X" value="1" n={Number.NaN} apparatus="a" data-testid="tile" />)
     expect(screen.getByTestId('tile').textContent).not.toContain('NaN')

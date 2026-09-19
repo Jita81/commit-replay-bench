@@ -8,7 +8,9 @@
  *               cell shows its route as a solid tag, `n=… on … tasks`, the point and the
  *               Wilson interval, the apparatus version(s) the rows carry, and one more line
  *               — the reason code, or the sign-off state ("signed 15 Sep" / "sign-off due" /
- *               "sign-off stale"). The five size tiers are the taxonomy (`SizeTier` in
+ *               "sign-off stale"); "sign-off due" is a link to the form only for a reader
+ *               who can sign (`canSign`), plain text for everyone else — a viewer is never
+ *               shown an action they cannot take. The five size tiers are the taxonomy (`SizeTier` in
  *               core), not the API's `sizes` (which lists only measured tiers): a tier with
  *               no row says "not measured · no attempt sighted" on a pale ground and never
  *               a number — the honest state, not a fabricated cell.
@@ -21,8 +23,9 @@
  *               sizes are the map's `sizes`, the classes its `classes`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/src/screens/Results/ResultsPage.tsx (mounts it), ui/src/components/govuk.tsx
- *               (Tag), ui/src/screens/Decisions/decisions.ts (the same sign-off state rules),
+ * Works with:   ui/src/screens/Results/ResultsPage.tsx (mounts it, passes `can('approver')`),
+ *               ui/src/components/govuk.tsx (Tag), ui/src/screens/Decisions/decisions.ts (the
+ *               same sign-off state rules), ui/src/lib/auth.tsx (`can` — the role rule),
  *               docs/EVIDENCE-AND-CLAIMS.md §6 (the permitted claim shape)
  * Tested by:    ui/src/screens/Results/MapTable.test.tsx
  * Touch when:   a cell field is added that a reader needs on the grid.
@@ -58,7 +61,8 @@ function shortDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-export function MapTable({ map, signoffs, repo }: { map: CapabilityMap; signoffs: Signoff[]; repo: string }) {
+/** `canSign`: the reader holds the approver role, so "sign-off due" may link to the form. Default off: a viewer-safe grid. */
+export function MapTable({ map, signoffs, repo, canSign = false }: { map: CapabilityMap; signoffs: Signoff[]; repo: string; canSign?: boolean }) {
   // every size tier, always — an absent column would hide the honest "not measured"
   const sizes = ['XS', 'S', 'M', 'L', 'XL']
   const classes = map.classes.length ? map.classes : Array.from(new Set(map.cells.map((c) => c.capability_class)))
@@ -124,7 +128,7 @@ export function MapTable({ map, signoffs, repo }: { map: CapabilityMap; signoffs
                     {/* every rendered number carries its apparatus — the reader can tell which instrument produced it */}
                     <div className="font-mono text-[12px] leading-[1.4] text-on-surface-muted">app {c.apparatus_versions.join(', ') || '—'}</div>
                     <div className="text-[14px] leading-[1.4] text-on-surface-muted">
-                      {sign.state === 'due' ? (
+                      {sign.state === 'due' && canSign ? (
                         <Link to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${c.capability_class}|${c.size}`)}`}>{last}</Link>
                       ) : (
                         last

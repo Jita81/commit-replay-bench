@@ -11,13 +11,18 @@
  * What it does: Answers "what needs me, now?" for an approver, and "what is waiting on a
  *               person?" for everyone else. The rows are facts from the map, the sign-offs
  *               and the factory chain (`decisionsFor`); the screen never decides anything
- *               and never hides a row a viewer may read — it only changes the verb.
+ *               and never hides a row a viewer may read — it only changes the verb, on the
+ *               stale rows too (a viewer reads; "approver acts"). The one line of evidence
+ *               is readable without a guide: the reason code is a term with its meaning
+ *               beside it, and the kicker names the apparatus as a term.
  * How:          `useAllRepos` → one `<RepoDecisions>` per repository, each with
  *               `useCapabilityMap` + `useSignoffs` + `useFactoryTasks` (a 404 on the factory
  *               = no backlog, no rows); the counts roll up into the header.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/src/screens/Decisions/decisions.ts (the derivation),
+ * Works with:   ui/src/screens/Decisions/decisions.ts (the derivation, `evidenceStats`),
+ *               ui/src/screens/Capability/contract.ts (`REASON_DISPLAY`),
+ *               ui/src/components/Help.tsx (`Term`),
  *               ui/src/screens/Signoff/SignoffPage.tsx (Attest → the cell preselected),
  *               ui/src/screens/Factory/FactoryPage.tsx (Sign a gap → the item),
  *               ui/src/screens/Routing/RoutingPage.tsx (Read why)
@@ -31,9 +36,11 @@ import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { Kicker, Lede, PageTitle, SecondaryButton, StartButton, Tag, type TagTone } from '../../components/govuk'
+import { Term } from '../../components/Help'
 import { Pill } from '../../components/Pill'
 import { useAuth } from '../../lib/auth'
-import { type DecisionKind, KIND_LABEL } from './decisions'
+import { REASON_DISPLAY, type ReasonCode } from '../Capability/contract'
+import { type DecisionKind, KIND_LABEL, evidenceStats } from './decisions'
 import { useApparatus, useDecisions } from './useDecisionCount'
 
 const KIND_TAG: Record<DecisionKind, TagTone> = {
@@ -69,7 +76,15 @@ export function DecisionsPage() {
   return (
     <>
       <div>
-        <Kicker>{apparatus ? `apparatus ${apparatus}` : ''}</Kicker>
+        <Kicker>
+          {apparatus ? (
+            <>
+              Under <Term id="apparatus">apparatus</Term> {apparatus}
+            </>
+          ) : (
+            ''
+          )}
+        </Kicker>
       </div>
       <PageTitle>Your decisions</PageTitle>
       <Lede>
@@ -103,7 +118,16 @@ export function DecisionsPage() {
                     <div>
                       <Tag tone={KIND_TAG[row.kind]}>{KIND_LABEL[row.kind]}</Tag>
                       <h3 className="mb-1 mt-2 text-[24px] font-bold leading-[1.3]">{row.title}</h3>
-                      <p className="m-0 font-mono text-[16px] leading-[1.5] text-on-surface-muted">{row.evidence}</p>
+                      <p className="m-0 font-mono text-[16px] leading-[1.5] text-on-surface-muted">
+                        {evidenceStats(row)}
+                        {row.reasonCode && (
+                          <>
+                            {' · '}
+                            <Term id="reason_code">{row.reasonCode}</Term>
+                            {row.reasonCode in REASON_DISPLAY && <span className="font-sans"> — {REASON_DISPLAY[row.reasonCode as ReasonCode]}</span>}
+                          </>
+                        )}
+                      </p>
                     </div>
                     <div className="text-right">
                       {allowed && row.role !== 'viewer' ? <StartButton to={row.href}>{row.act}</StartButton> : <SecondaryButton to={row.href}>{allowed ? row.act : 'Read'}</SecondaryButton>}
@@ -139,7 +163,10 @@ export function DecisionsPage() {
                     signed {signoff.created.slice(0, 10)} by {approverName(signoff)} · n={signoff.evidence.n} · {pct(signoff.evidence.point)} [{pct(signoff.evidence.ci_low)}, …]
                   </p>
                 </div>
-                <SecondaryButton to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${signoff.cell.capability_class}|${signoff.cell.size}`)}`}>Revoke or re-sign</SecondaryButton>
+                <div className="text-right">
+                  <SecondaryButton to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${signoff.cell.capability_class}|${signoff.cell.size}`)}`}>{can('approver') ? 'Revoke or re-sign' : 'Read'}</SecondaryButton>
+                  {!can('approver') && <div className="mt-1 text-[13px] text-on-surface-muted">approver acts</div>}
+                </div>
               </li>
             ))}
           </ul>

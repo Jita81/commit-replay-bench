@@ -5,7 +5,8 @@
  * ----------
  * What it is:   Tests for the class × size table and `licenseSentence`.
  * What it does: Pins that a signed cell reads "signed <date>", an unsigned deliver cell
- *               "sign-off due" (a link to the sign-off with the cell preselected), a stale
+ *               "sign-off due" (a link to the sign-off with the cell preselected only for a
+ *               reader who can sign; plain text otherwise), a stale
  *               sign-off "sign-off stale", an unmeasured cell "not measured · no attempt
  *               sighted", a wide interval "—" + "interval too wide"; and that the licence
  *               sentence names repo, apparatus, belt set, gate, n, class × size, rate with
@@ -47,7 +48,7 @@ describe('MapTable', () => {
     const signoffs = [signoff({}), signoff({ id: 's2', cell: { capability_class: 'refactor', size: 'S' }, active: false, stale: true, apparatus_current: '2.2', evidence: { n: 22, point: 0.68, ci_low: 0.47, ci_high: 0.84, false_q1: 0, apparatus_versions: ['2.1'] } })]
     render(
       <MemoryRouter>
-        <MapTable map={MAP(cells)} signoffs={signoffs} repo="cobra" />
+        <MapTable map={MAP(cells)} signoffs={signoffs} repo="cobra" canSign />
       </MemoryRouter>,
     )
     expect(screen.getByTestId('cell-bug.fix-XS')).toHaveTextContent('deliver')
@@ -69,6 +70,17 @@ describe('MapTable', () => {
     expect(due.querySelector('a')).toHaveAttribute('href', '/signoff?repo=cobra&cell=refactor%7CXS')
     expect(screen.getByTestId('cell-refactor-S')).toHaveTextContent('sign-off stale')
     expect(signStateOf(cells[5]!, signoffs).state).toBe('stale')
+  })
+
+  it('a reader who cannot sign sees "sign-off due" as plain text, never as an action', () => {
+    render(
+      <MemoryRouter>
+        <MapTable map={MAP([cell({ capability_class: 'refactor', size: 'XS', n: 14, n_tasks: 7, clean: 10, point: 0.71, ci_low: 0.45, ci_high: 0.88 })])} signoffs={[]} repo="cobra" />
+      </MemoryRouter>,
+    )
+    const due = screen.getByTestId('cell-refactor-XS')
+    expect(due).toHaveTextContent('sign-off due')
+    expect(due.querySelector('a')).toBeNull()
   })
 
   it('the licence sentence quotes the STAMPED snapshot with every qualifier, says when the cell has moved on, and is null with no signed cell', () => {
