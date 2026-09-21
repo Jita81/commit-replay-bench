@@ -40,7 +40,7 @@ sign-offs and ledger rows like any other, so it deserves a fixed address.
 
 ```
 ~/crb-stack/                 # the stack root — a PERSISTENT path, never a temporary one
-├── home/                    # CRB_HOME: evidence packs, events, factory worktrees, clones
+├── home/                    # CRB_HOME: evidence packs, events, factory evidence, transcripts, clones
 │   └── secrets/             # the Claude Code login token (mode 0700; files 0600)
 ├── crb.db                   # the SQLite store (CRB_DATABASE_URL=sqlite:///~/crb-stack/crb.db)
 └── env.sh / restart.sh      # the environment and the two commands, kept next to the data
@@ -314,9 +314,13 @@ the repositories; convenient to keep).
   every upgrade and monthly for off-platform retention.
 * **Compose**: `pg_dump` + tar of `/srv/crb` — commands in
   [deploy/README.md §4](../deploy/README.md#4-backup-and-restore).
-* **Verify every backup**: `crb ledger verify` (or `GET /api/v1/ledger/verify`) before and
-  after a restore must report the same row count and last `row_hash`. A restore that
-  changes either is not a restore; treat it as an incident.
+* **Verify every backup**: the store's row count and last `row_hash` before and after a
+  restore must be the same, read from the database itself
+  (`SELECT count(*), max(seq) FROM grades; SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1;`),
+  and `GET /api/v1/ledger/verify` on the restored API must read `chain intact, false_q1=0`
+  with that count. A restore that changes either is not a restore; treat it as an incident.
+  `crb ledger verify` walks the core JSONL ledger at `$CRB_HOME/ledger.jsonl`, not the
+  database — it cannot prove a database copy.
 
 Restore order: database (on an *empty* target) → work volume → `migrate` (no-op at head; it
 re-asserts the triggers) → api/worker → ledger verify → the `migrations` and `append_only`
@@ -329,31 +333,50 @@ holds real sign-offs and ledger rows — back it up like the production store. A
 while the worker writes can be torn; `sqlite3 .backup` copies a consistent snapshot even
 so, but stopping the worker first is the simplest guarantee.
 
+The proof that a copy is a backup reads the copy: SQLite's own `integrity_check`, the
+`grades` row count and the last `row_hash`, taken from the file with `sqlite3`. (`crb ledger
+verify` walks the core JSONL ledger at `$CRB_HOME/ledger.jsonl`, ignores `CRB_DATABASE_URL`
+and passes an empty or torn `crb.db` — do not use it here.) The same three-line query on
+the live file, the copy and the restored file must give the same count and hash; a torn or
+empty file fails it with a non-zero exit (`database disk image is malformed`, `no such
+table: grades`).
+
 ```bash
 # 1. quiesce — no run in flight (the API may keep serving reads)
 pkill -f 'crb worker' || true                      # or your restart script's stop step
-crb ledger verify                                  # record the row count and the last row_hash
+CHECK='PRAGMA integrity_check; SELECT count(*), max(seq) FROM grades;
+       SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1;'
+sqlite3 ~/crb-stack/crb.db "$CHECK"                # record: ok, the row count, the last row_hash
 
 # 2. copy: the store with SQLite's own online-backup API, then the home directories
 STAMP=$(date -u +%Y-%m-%dT%H%MZ); DEST=~/crb-backups/$STAMP; mkdir -p "$DEST"
 sqlite3 ~/crb-stack/crb.db ".backup '$DEST/crb.db'"
 tar -C ~/crb-stack -czf "$DEST/home.tgz" \
-  $(cd ~/crb-stack && ls -d home/evidence home/events home/factory home/secrets 2>/dev/null)
+  $(cd ~/crb-stack && ls -d home/evidence home/events home/factory home/transcripts home/secrets 2>/dev/null)
 
 # 3. prove the copy is a backup, not a torn file
-CRB_DATABASE_URL="sqlite:///$DEST/crb.db" crb ledger verify      # same row count, same last row_hash
+sqlite3 "$DEST/crb.db" "$CHECK"                    # ok, the same row count, the same last row_hash
 chmod -R go-rwx "$DEST"                            # it carries the login token
 ```
 
 Restore, in this order, onto an **empty** `CRB_HOME`: stop the worker and the API →
 `sqlite3 ~/crb-stack/crb.db ".restore '$DEST/crb.db'"` (or copy the file into place) →
-`tar -C ~/crb-stack -xzf "$DEST/home.tgz"` → `chmod 0700 ~/crb-stack/home/secrets` →
-`crb migrate` (a no-op at head; it re-asserts the append-only triggers) → `crb ledger verify`
-must report the count and the last `row_hash` you recorded at step 1 → `crb doctor` → start
-the API and the worker → `GET /api/v1/health` green. A restore that changes the count or
-the hash is not a restore; treat it as an incident (§5). Clones under `home/repos` and
-worktrees under `home/factory` are reproducible from the repositories and may be left out;
-`home/secrets` may be left out only if you are prepared to sign in again.
+`sqlite3 ~/crb-stack/crb.db "$CHECK"` must report `ok`, the count and the last `row_hash`
+you recorded at step 1 → `tar -C ~/crb-stack -xzf "$DEST/home.tgz"` →
+`chmod 0700 ~/crb-stack/home/secrets` → `crb migrate` (a no-op at head; it re-asserts the
+append-only triggers) → `crb doctor` → start the API and the worker →
+`GET /api/v1/health` green → `GET /api/v1/ledger/verify` (signed in) reads
+`chain intact, false_q1=0` with the same row count. A restore that changes the count or the
+hash, or breaks the chain, is not a restore; treat it as an incident (§5).
+
+What the tar holds: `home/evidence` (the evidence packs the ledger cites), `home/events`,
+`home/factory` (the factory evidence chain — each repository's frozen backlog,
+`evidence.jsonl` and gap sign-offs),
+`home/transcripts` (retained builder transcripts; the review screen serves them from the
+path on the grade row, and after a restore without them every transcript link answers
+"not retained") and `home/secrets` (the login token — leave it out only if you are prepared
+to sign in again). Clones under `home/repos` and retained worktrees under `home/scratch`
+are reproducible from the repositories and are left out.
 
 ## 6. Upgrade
 
@@ -429,7 +452,8 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
       reason you have written down; no `fail`. It covers what `/health` cannot see from
       inside a pod — the GitHub App's installations, the secrets directory mode, the
       `CRB_HOME` location and the help bundle ([OPERATOR.md §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
-- [ ] `crb ledger verify` succeeds; the last `row_hash` is recorded out of band.
+- [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0`; the last `row_hash`
+      (`SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1`) is recorded out of band.
 - [ ] OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the
       bootstrap admin password has been rotated or the account disabled.
 - [ ] Egress test from a worker pod fails to any public address.

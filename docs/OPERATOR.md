@@ -67,7 +67,7 @@ Run it on the API host and on the worker host after installing, after changing a
 | `github_app` | the app is configured, the key file is readable and parses, GitHub answers `/app/installations`, how many installations can deliver | half configured, an unreadable or malformed key, GitHub refusing (`skip` when not configured; `warn` with no installation yet) |
 | `database` | the store answers, the append-only triggers fire (an UPDATE on `grades` is refused) | not initialised — `crb migrate` |
 | `migrations` | the store's Alembic revision is the code's head — the same reading as `/health` | behind, ahead or unstamped: both revisions named — `crb migrate` |
-| `worker` | the worker heartbeat and queue depth, as `/health` reads them | `warn` when a run's heartbeat is stale or nothing has checked in |
+| `worker` | the worker heartbeat and queue depth, as `/health` reads them | `warn` when a running run's heartbeat is stale or absent (an idle queue is `ok`) |
 | `ui` | the built UI the API serves and the help bundle in it (one chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
 
 `/health` on the running API answers the same questions from inside the process
