@@ -12,8 +12,9 @@ for that version. Pushing the tag runs
 package and the container image, smokes both, writes an SBOM, pushes the image to GHCR and
 signs it keyless. Nothing is published to PyPI; the Helm chart is installed from the git
 tag. The package version is one number in three files, pinned equal by
-`tests/test_version_consistency.py`, and the CHANGELOG must carry a dated header for it —
-so a bump that misses one is a failing test, never a refused tag.
+`tests/test_version_consistency.py` (which also pins the chart's own `version` to the
+SemVer form of that number), and the CHANGELOG must carry a dated header for it — so a
+bump that misses one is a failing test, never a refused tag.
 
 Contents: [1 Numbers](#1-the-numbers-and-where-they-live) ·
 [2 Cut a release](#2-cut-a-release) · [3 What the pipeline does](#3-what-the-pipeline-does) ·
@@ -42,10 +43,13 @@ annotation and nothing is built.
 Work on a branch (`chore/release-X.Y.Z`) and land it through a pull request like any other
 change; the tag is pushed **after** the merge, on the merge commit.
 
-1. **Bump the three files together**: `pyproject.toml`, `src/crb/core/version.py`,
-   `deploy/helm/crb/Chart.yaml` `appVersion` (quoted). Bump the chart's own `version` to
-   the SemVer form of the same number. `pytest tests/test_version_consistency.py` is the
-   check.
+1. **Bump the four numbers together**: `pyproject.toml`, `src/crb/core/version.py`,
+   `deploy/helm/crb/Chart.yaml` `appVersion` (quoted), and the chart's own `version` — the
+   SemVer form of the same number (`2.0.0b1` → `2.0.0-b1`; a final release is the same
+   string). `pytest tests/test_version_consistency.py` is the check:
+   `test_package_version_is_one_number_in_three_places` pins the first three equal, and
+   `test_chart_version_is_the_semver_form_of_the_package_version` pins the chart `version`
+   to `semver_of(__version__)` — the rule lives in that test file.
 2. **Cut the CHANGELOG**: rename the `## [Unreleased]` block to `## [X.Y.Z] — YYYY-MM-DD —
    <one line>`, keep its dated sub-sections as they are, open a new empty `## [Unreleased]`
    above it, and add the compare link at the foot of the file (and repoint the `[Unreleased]`
@@ -129,6 +133,8 @@ Copy into the release pull request.
 
 - [ ] `pyproject.toml`, `src/crb/core/version.py`, `Chart.yaml` `appVersion` = `X.Y.Z`;
       `Chart.yaml` `version` = the SemVer form — `pytest tests/test_version_consistency.py`
+      (`test_package_version_is_one_number_in_three_places` +
+      `test_chart_version_is_the_semver_form_of_the_package_version`)
 - [ ] CHANGELOG: `## [Unreleased]` → `## [X.Y.Z] — YYYY-MM-DD — …`; new empty
       `## [Unreleased]`; compare link `[X.Y.Z]: …/compare/v<previous>...vX.Y.Z`; `[Unreleased]`
       link repointed; no `tag pending` left in the section

@@ -444,10 +444,9 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
 - [ ] The running image is a released digest: `deploy/verify-image.sh <version> --digest
       sha256:<pinned>` passes (§2.2) and the digest is what `image.digest` / `CRB_IMAGE` says.
 - [ ] `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
-      `database at <rev> = code head` (the probe is `down`, and the endpoint 503, when the
-      store is behind, ahead, empty or cannot be inspected — a half-migrated database
-      cannot pass this line; an unstamped `create_all` schema that matches the head is
-      `degraded`, still served, until `crb migrate` stamps it), `append_only` proves an
+      `database at <rev> = code head` — its contract is
+      [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead or empty — both revisions named, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
+      line. `append_only` proves an
       UPDATE refused, `ledger` reads `false_q1=0`, `builders`
       configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
       worker owns it; prove it with `crb doctor` on the worker host).

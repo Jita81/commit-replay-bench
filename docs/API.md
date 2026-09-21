@@ -30,10 +30,25 @@ in parallel, so changes here are changes to both.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/health` | `{"status": "ok|degraded|down", "probes": [...]}` — `db`, `migrations` (the store's Alembic revision is the code's head: `ok` at head; `degraded` for an unstamped `create_all` store whose schema equals the head; `down` → 503 when behind, ahead or empty, `data: {database, head, at_head, unversioned_at, matches_models}`), `append_only` (an UPDATE proven refused), `ledger` (false-Q1 = 0), `sandbox` (skipped for `CRB_ROLE=api`), `toolchains`, `builders`, `worker` (heartbeat) |
+| GET | `/health` | `{"status": "ok|degraded|down", "probes": [{name, status, detail, data}, …]}` — `db`, `migrations` (the store's Alembic revision is the code's head — the contract is [The `migrations` probe](#the-migrations-probe) below), `append_only` (an UPDATE proven refused), `ledger` (false-Q1 = 0), `sandbox` (skipped for `CRB_ROLE=api`), `toolchains`, `builders`, `worker` (heartbeat). **A probe whose read raises never serves the exception**: it is `down` with the one fixed detail `<probe> could not be read — see the API log, request id <id>` and `data: {}`; the exception is logged under that id (the `X-Request-ID` the response echoes) — the route is unauthenticated (CWE-209) |
 | GET | `/health/live` | – | process up + database reachable; never probes the sandbox (container HEALTHCHECK / Helm liveness); 503 when the store is gone |
 | GET | `/metrics` | Prometheus text (`crb_false_q1_total` must be 0) |
 | GET | `/version` | `{"crb": "...", "apparatus": "2.2", "policy": "routing.v1", "uptime_s": 0, "oidc_enabled": false}` — `oidc_enabled` says whether an organisation (OpenID Connect) sign-in is configured, so the login page offers the button only when it works and the posture page can state the sign-in mode; it names no provider and no secret |
+
+### The `migrations` probe
+
+The one statement of the contract. [DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist),
+[OPERATOR §1.1](OPERATOR.md#11-check-the-installation-crb-doctor) and the CHANGELOG repeat
+its sentence and link here; `crb doctor`'s `migrations` line renders the same
+`migrations_result`, so the two surfaces cannot disagree. In one sentence: `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead or empty — both revisions named, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id.
+
+| State | HTTP | `detail` | `data` |
+|---|---|---|---|
+| `ok` — at head | 200 | `database at <rev> = code head` | `{database, head, at_head, unversioned_at, matches_models}` |
+| `degraded` — an unstamped `create_all` schema that matches the head (complete; still served) | 200 | ``schema matches head <rev> but carries no alembic_version (a create_all store) — run `crb migrate` to stamp it`` | the same shape |
+| `down` — behind or ahead | 503 | ``database at <db rev>, code head <rev> — run `crb migrate` …`` | the same shape |
+| `down` — empty, or an unversioned older schema | 503 | ``database not migrated (empty)`` or ``database not migrated (unversioned schema at <rev>)``, then ``, code head <rev> — run `crb migrate` …`` | the same shape |
+| `down` — cannot be read | 503 | `migrations could not be read — see the API log, request id <id>` (fixed; the exception is in the API log under that id, never served) | `{}` |
 
 ## Auth
 

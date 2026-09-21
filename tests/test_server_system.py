@@ -8,8 +8,9 @@ What it does: Pins the health shape and its append-only probe (an UPDATE is prov
               a false-Q1 row bypassing the ledger is caught, that a stale worker heartbeat is
               flagged, that the ``migrations`` probe is ok at head / degraded for an unstamped
               ``create_all`` store / down (503, both revisions named) when the store is behind
-              or empty / down with a FIXED detail (the exception logged, never served) when
-              the head cannot be read, that health needs no auth; the role-aware sandbox probe (an ``api``
+              or empty, that EVERY probe whose read raises serves one FIXED detail naming the
+              request id (the exception logged under that id, never served — CWE-209 on an
+              unauthenticated route), that health needs no auth; the role-aware sandbox probe (an ``api``
               process reports it ``skipped`` and is not degraded by it; ``worker`` and ``all``
               probe it; the gate is at the function); liveness as a database-only probe that
               never touches the sandbox (the A11 container) and ignores a false-Q1 ledger but
@@ -50,10 +51,10 @@ from crb.core.ledger import BELT_SET_V3_LEGACY
 from crb.core.routing import POLICY_VERSION
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.observability import metrics
-from crb.observability.probes import ProbeResult
+from crb.observability.probes import ProbeResult, failure_detail
 from crb.server.app import API_PREFIX, create_app
 from crb.server.routes.system import (
-    MIGRATIONS_INSPECT_FAILED,
+    collect_health,
     ledger_counts,
     migrations_result,
     probe_migrations,
@@ -295,23 +296,91 @@ class TestHealth:
     def test_migrations_probe_hides_the_exception_from_the_unauthenticated_route(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """CWE-209: when the head cannot be read the detail is a fixed sentence — never the
-        exception's type or message (a driver error can carry a path, a DSN or SQL) — and
-        the exception goes to the server log instead."""
+        """CWE-209: when the head cannot be read the detail is the fixed sentence — never
+        the exception's type or message (a driver error can carry a path, a DSN or SQL) —
+        and the exception goes to the log instead."""
         secret = "postgresql://crb:hunter2@db.internal/crb — relation alembic_version"
 
         def _factory() -> Session:
             raise RuntimeError(secret)
 
-        with caplog.at_level(logging.ERROR, logger="crb.server.system"):
-            r = probe_migrations(_factory)  # type: ignore[arg-type]
+        with caplog.at_level(logging.ERROR, logger="crb.observability.probes"):
+            r = probe_migrations(_factory, request_id="rid-1")  # type: ignore[arg-type]
         assert r.status == "down"
-        assert r.detail == MIGRATIONS_INSPECT_FAILED
+        assert r.detail == failure_detail("migrations", "rid-1")
+        assert r.detail == "migrations could not be read — see the API log, request id rid-1"
         assert "RuntimeError" not in r.detail and "hunter2" not in r.detail
         assert r.data == {}
         assert any(
-            "migration inspection failed" in rec.message and rec.exc_info for rec in caplog.records
+            rec.message == "migrations probe failed (request_id=rid-1)" and rec.exc_info
+            for rec in caplog.records
         )
+
+    def test_every_raising_probe_serves_the_fixed_detail_and_logs_under_the_request_id(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The whole ``/health`` body, not one probe: a store that raises reaches ``db``,
+        ``migrations``, ``append_only``, ``ledger`` and ``worker``; a probe module that
+        raises reaches ``sandbox``, ``toolchains`` and ``builders``. Each serves ONE fixed
+        sentence (``<probe> could not be read — see the API log, request id …``) with
+        empty ``data``; the driver message — which for PostgreSQL carries host, user and
+        DSN — appears nowhere in the body and once per probe in the log, with the id."""
+        secret = (
+            'connection to server at "db.internal" failed: FATAL password authentication '
+            'failed for user "crb" (postgresql://crb:hunter2@db.internal/crb)'
+        )
+
+        def _factory() -> Session:
+            raise RuntimeError(secret)
+
+        def _boom(*_: Any, **__: Any) -> ProbeResult:
+            raise OSError("/var/run/docker.sock: permission denied for uid 10001")
+
+        for fn in ("probe_docker", "probe_toolchains", "probe_builders"):
+            monkeypatch.setattr(f"crb.server.routes.system.probes.{fn}", _boom)
+        settings = make_settings(tmp_path, sandbox={"executor": "docker"})
+        with caplog.at_level(logging.ERROR, logger="crb.observability.probes"):
+            body = collect_health(_factory, settings, role="all", request_id="req-42")  # type: ignore[arg-type]
+        assert body["status"] == "down"
+        assert {p["name"] for p in body["probes"]} == PROBE_NAMES
+        for p in body["probes"]:
+            assert p["status"] == "down", p
+            assert p["detail"] == failure_detail(p["name"], "req-42"), p
+            assert p["detail"].endswith("— see the API log, request id req-42"), p
+            assert p["data"] == {}, p
+        served = json.dumps(body)
+        for leak in ("RuntimeError", "OSError", "hunter2", "db.internal", "docker.sock", "FATAL"):
+            assert leak not in served, leak
+        logged = [rec for rec in caplog.records if rec.message.endswith("(request_id=req-42)")]
+        assert sorted(rec.message.split(" probe failed")[0] for rec in logged) == sorted(
+            PROBE_NAMES
+        )
+        assert all(rec.exc_info and getattr(rec, "request_id", "") == "req-42" for rec in logged)
+        assert any("hunter2" in str(rec.exc_info[1]) for rec in logged if rec.exc_info)
+
+    def test_the_route_stamps_the_caller_s_request_id_into_the_fixed_detail(
+        self, client: TestClient
+    ) -> None:
+        """Through HTTP: the id the middleware assigned (or accepted from ``X-Request-ID``)
+        is the one the detail names and the response header echoes, so an operator can
+        find the logged exception; the driver's message is not in the body."""
+        secret = 'FATAL: password authentication failed for user "crb" (host db.internal)'
+
+        def _dead() -> Session:
+            raise RuntimeError(secret)
+
+        client.app.state.session_factory = _dead
+        r = client.get(f"{API_PREFIX}/health", headers={"X-Request-ID": "trace-abc"})
+        assert r.status_code == 503 and r.headers["X-Request-ID"] == "trace-abc"
+        body = r.json()
+        for name in ("db", "migrations", "append_only", "ledger", "worker"):
+            assert _probe(body, name)["detail"] == failure_detail(name, "trace-abc")
+            assert _probe(body, name)["data"] == {}
+        assert "RuntimeError" not in r.text and "db.internal" not in r.text
+        # the id is assigned when the caller sends none — and still named
+        r = client.get(f"{API_PREFIX}/health")
+        rid = r.headers["X-Request-ID"]
+        assert rid and _probe(r.json(), "db")["detail"] == failure_detail("db", rid)
 
     def test_health_needs_no_auth(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/health").status_code == 200
@@ -429,7 +498,9 @@ class TestLiveness:
         assert r.status_code == 503
         body = r.json()
         assert body["status"] == "down" and _probe(body, "db")["status"] == "down"
-        assert "OperationalError" in _probe(body, "db")["detail"]
+        # the same fixed sentence as the deep probe: the driver's message stays in the log
+        assert _probe(body, "db")["detail"] == failure_detail("db", r.headers["X-Request-ID"])
+        assert "OperationalError" not in r.text
 
 
 class TestMetrics:

@@ -132,7 +132,7 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         dest="live",
         action="store_true",
         help="also run the Claude Code login probe — one no-tool Haiku turn on the stored "
-        "token (~2 s when invalid); never run without this flag (--verify is the old name)",
+        "token; never run without this flag (--verify is the old name)",
     )
     doctor.set_defaults(func=cmd_doctor)
 

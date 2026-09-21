@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "commit-replay-bench"
-version = "2.0.0a1"
+version = "2.0.0b1"
 description = "Commit Replay Bench — grade an AI builder against a repository's own held-out tests, ledger every verdict, route change-classes on measured evidence, and manufacture new work under the same governance."
 readme = "README.md"
 requires-python = ">=3.12"

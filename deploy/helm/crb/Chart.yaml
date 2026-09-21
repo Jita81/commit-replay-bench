@@ -6,8 +6,8 @@ description: >-
   chain, and route change-classes on measured evidence. API + worker + migration Job,
   hardened for a regulated, self-hosting organisation.
 type: application
-version: 0.1.0
-appVersion: "2.0.0a1"
+version: 2.0.0-b1
+appVersion: "2.0.0b1"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/Jita81/commit-replay-bench
 sources:
