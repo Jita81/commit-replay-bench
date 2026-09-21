@@ -23,7 +23,7 @@
  * Touch when:   a cell field or controls state is added — extend the fixtures and assert its
  *               rendering here.
  */
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CapabilityCell, CapabilityMap } from '../../api/types'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
@@ -108,10 +108,67 @@ describe('CapabilityPage', () => {
     expect(screen.getByTestId('cell-measured').textContent).toContain('92.5%')
   })
 
-  it('shows the designed empty state when no repo is chosen', async () => {
+  it('shows the designed empty state when no repo is chosen; its action is Connection, not the repo list (J-HEL-14)', async () => {
     mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /repos': { items: [], total: 0, limit: 50, offset: 0 } })
     renderApp(<CapabilityPage />, { route: '/capability' })
     expect(await screen.findByText('Choose a repo to see its capability map')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Connect a repository' })).toHaveAttribute('href', '/connect')
+  })
+
+  it('a tile carries no hover titles: its five numbers are described by one legend; the open cell shows the legend with terms (J-HEL-14)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': MAP,
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    const tile = await screen.findByTestId('cell-measured')
+
+    // no hover-only meaning on the numbers (the route pill is the shared Pill's concern)
+    expect(within(tile).getByTestId('cell-numbers').querySelectorAll('[title]')).toHaveLength(0)
+    expect(within(tile).getByText('92.5%').getAttribute('title')).toBeNull()
+    // the tile is described by the one legend under the grid, which names every number
+    const legendId = tile.getAttribute('aria-describedby')
+    expect(legendId).toBeTruthy()
+    const legend = document.getElementById(legendId!)!
+    expect(legend.textContent).toContain('fQ1')
+    expect(legend.textContent).toContain('false-Q1')
+    expect(legend.textContent).toContain('oracle strength')
+    expect(legend.textContent).toContain('verification tier')
+    // no button (a Term) sits inside the tile button
+    expect(tile.querySelectorAll('button')).toHaveLength(0)
+
+    // open the cell: the legend line is visible text with Terms that open inline
+    fireEvent.click(tile)
+    const line = await screen.findByTestId('cell-legend-line')
+    expect(line.textContent).toContain('fQ1')
+    const term = within(line).getByRole('button', { name: /false-Q1/ })
+    expect(term).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(term)
+    expect(term).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('a viewer on an unmeasured repo reads who starts the run; an operator gets the link (J-FAC-12)', async () => {
+    const empty = { ...MAP, cells: [], summary: { ...MAP.summary, measured_cells: 0, n_total: 0, false_q1_total: 0 } }
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': empty,
+    })
+    const first = renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    expect(await screen.findByText('Nothing measured for this repo yet')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Start a replay run' })).toBeNull()
+    expect(screen.getByText(/an operator starts a replay run/i)).toBeInTheDocument()
+    first.unmount()
+    vi.unstubAllGlobals()
+
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': empty,
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    expect(await screen.findByRole('link', { name: 'Start a replay run' })).toBeInTheDocument()
   })
 
   it('renders the error envelope honestly when the map fails', async () => {

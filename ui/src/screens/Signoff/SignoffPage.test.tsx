@@ -12,8 +12,12 @@
  *               preview lists no refusal is signed with an attestation and listed with its
  *               snapshot; that a 409 `signoff_refused` renders as a REFUSED gate with the
  *               clauses and a 409 `false_q1_refused` as the floor; that other errors render
- *               as the envelope with the gate as the preview says; and that a pre-policy
- *               record is listed without a fabricated snapshot next to a policy record.
+ *               as the envelope with the gate as the preview says; that a pre-policy
+ *               record is listed without a fabricated snapshot next to a policy record;
+ *               that the header says in two sentences what the screen is for and keeps the
+ *               refusal clauses behind a Details; that a viewer gets the gate, the evidence
+ *               and the attestations but never the form; and that with no repository the
+ *               exit is Connect, never the legacy repository list.
  * How:          `mockApi` with capability, preview and sign-off fixtures; `userEvent` picks
  *               the cell and row, ticks the affirmation and submits; assertions on the
  *               `signoff-*` / `refusal-*` / `attest-*` test ids and the gate's `data-state`.
@@ -179,6 +183,75 @@ function signablePreview(over: Partial<SignoffPreview> = {}): SignoffPreview {
 
 describe('SignoffPage (signoff-policy.v2)', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('says what the screen is for in two sentences, keeps the refusal clauses behind a Details, and takes the journey eyebrow', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': MAP,
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /signoffs/preview': preview(),
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    await screen.findByTestId('signoff-gate')
+    expect(screen.getByText('Journey · 3 of 4 · Decisions · sign-off')).toBeInTheDocument()
+    expect(screen.getByText('Record that you reviewed this cell’s evidence and read one accepted change. The server refuses a sign-off that does not meet the published policy; a refusal is the gate working, not an error.')).toBeInTheDocument()
+    const why = screen.getByText('Why a sign-off can be refused').closest('details')!
+    expect(why).not.toHaveAttribute('open')
+    expect(why).toHaveTextContent('a thin cell')
+    expect(why).toHaveTextContent('no attestation that you read an accepted diff')
+    // the clauses' terms carry their definitions
+    expect(within(why).getByRole('button', { name: 'false-Q1' })).toBeInTheDocument()
+    expect(within(why).getByRole('button', { name: /negative controls/ })).toBeInTheDocument()
+  })
+
+  it('a viewer reads the gate, the evidence and the attestations, and is never shown the approver form', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': MAP,
+      'GET /signoffs': { items: [SIGNED], total: 1, limit: 50, offset: 0 },
+      'GET /signoffs/preview': preview(),
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r&cell=bug.fix%7CS' })
+    const gate = await screen.findByTestId('signoff-gate')
+    await waitFor(() => expect(gate).toHaveTextContent('Attest bug.fix × S'))
+    expect(gate).toHaveTextContent('Requires the approver role (you are viewer).')
+    await screen.findByTestId('signoff-evidence')
+    expect(screen.getByText('Only an approver can sign. You are signed in as viewer: you can read the gate, the evidence and the attestations on this page, and nothing here changes because you read it.')).toBeInTheDocument()
+    expect(screen.queryByText('Approver form')).toBeNull()
+    expect(screen.queryByTestId('attest-row')).toBeNull()
+    expect(screen.queryByTestId('attest-read')).toBeNull()
+    expect(screen.queryByTestId('attest-statement')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sign off' })).toBeNull()
+    // the attestations table is theirs to read; Revoke is not theirs
+    await waitFor(() => expect(screen.getByRole('table', { name: 'Sign-offs for r' })).toHaveTextContent('active'))
+    expect(screen.queryByRole('button', { name: 'Revoke' })).toBeNull()
+  })
+
+  it('with no repository at all the exit is Connect, never the legacy repository list', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [], total: 0, limit: 50, offset: 0 },
+    })
+    renderApp(<SignoffPage />, { route: '/signoff' })
+    await screen.findByText('Choose a repository')
+    expect(screen.getByRole('link', { name: 'Connect a repository' })).toHaveAttribute('href', '/connect')
+    expect(screen.queryByRole('link', { name: 'Go to repos' })).toBeNull()
+  })
+
+  it('with no ?repo= the most recently updated repository is chosen for you', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'old', updated: '2026-09-01T00:00:00Z' }, { name: 'r', updated: '2026-09-15T00:00:00Z' }], total: 2, limit: 50, offset: 0 },
+      'GET /capability-map': MAP,
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /signoffs/preview': preview(),
+    })
+    renderApp(<SignoffPage />, { route: '/signoff' })
+    await waitFor(() => expect(screen.getByRole('table', { name: 'Sign-offs for r' })).toBeInTheDocument())
+    expect(screen.queryByText('Choose a repository')).toBeNull()
+  })
 
   it('shows the bar before the approver tries: the seeded deliver cell is refused on the controls escape, with observed vs threshold', async () => {
     mockApi({

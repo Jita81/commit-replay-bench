@@ -323,7 +323,7 @@ def test_label_run_cancel_between_tasks_keeps_partial_counts(
     class CancellingLabeller(ScriptedLabeller):
         def label(self, **kw: Any) -> c.IntentLabel:
             out = super().label(**kw)
-            h.queue.request_cancel(run.id)
+            h.queue.request_cancel(run.id, actor="tester")
             return out
 
     scripted["labeller"] = CancellingLabeller([("feature.add", 0.9), ("perf", 0.9)])

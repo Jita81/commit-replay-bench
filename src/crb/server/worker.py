@@ -47,8 +47,34 @@ Honesty properties
   the DB always has its pack in the DB ("no pack ⇒ no Q1").
 * **Cancellation is cooperative and recorded.** ``stop`` is polled between
   tasks; a cancelled run ends ``cancelled`` with its partial counts.
+* **An unconfirmed container kill is visible and reaped, never a silent terminal
+  state.** A ``docker kill`` (cancel or wall clock) that the daemon did not confirm
+  within ``KILL_CONFIRM_S`` reaches the worker as ``on_kill_unconfirmed`` — from a
+  sealed attempt (its build stream or its tool-loop executor, via the session's
+  ``unconfirmed_kills`` and the adapter) or from the run's own docker executor (the
+  grade stage's belt / oracle test run, via ``DockerExecutor.on_kill_unconfirmed``): it
+  writes a system ``run.kill_unconfirmed`` (status error) on the run's trace, appends
+  "container <name> may still be running — it will be reaped by the worker; ``docker
+  rm -f <name>`` reaps it by hand" to the run's error, and queues the name in the
+  reaper's durable file ``<home>/unconfirmed-containers.json`` (:mod:`crb.server.reaper`).
+  The run still ends ``cancelled`` / timed out (it did stop building) and a sealed
+  attempt's pack notes carry ``kill_confirmed: false``. Every poll of
+  :meth:`Worker.run_forever` makes one reap pass — ``docker inspect``, ``docker rm -f``,
+  ``inspect`` — under a TIME BUDGET of ``heartbeat_s / 2`` (each docker call capped to
+  the remainder; entries the budget did not reach wait for the next poll) so the pass
+  can never hold the loop past the worker's own liveness bound; it writes
+  ``run.kill_reaped`` or, at the bound (20 passes), ``run.kill_reap_failed`` (status
+  error) on that run's trace; the check-in row carries the pending count
+  (``unconfirmed_containers``) so ``/health`` reads ``degraded`` until the queue is empty.
 * **Resumable event cursors.** A reclaimed run's emitter resumes ``seq`` after
   the last stored event so ``?after=<seq>`` never replays or skips.
+* **Liveness is a fact, not an inference.** The worker upserts its ``workers`` row
+  every ``heartbeat_s`` whether or not it holds a run (:meth:`Worker.checkin`), names
+  the run it holds, and stamps ``stopped`` on a clean exit — so ``/health`` can say
+  "no worker has checked in for 6 minutes" instead of "idle, 3 queued" (J-TEL-2).
+* **Measured in this process.** Every build / grade / cost / delivery / token-mint
+  series is recorded here and served on the worker's own ``/metrics`` port
+  (``CRB_METRICS_PORT``); the API's ``/metrics`` never carries them (J-TEL-1).
 * **Clone once, by policy.** A repo registered by URL only is cloned on its first
   run (:meth:`Worker._load_repo`): https/ssh only, credentials redacted from every
   event and error, ``repo.clone.start`` / ``repo.clone.done`` on the run's trace,
@@ -72,7 +98,11 @@ What it does: Polls the job queue, claims one run, dispatches by kind (setup, pr
               grade rows through the append-only ledger with the run's labels stamped,
               records the apparatus, and marks the run succeeded / failed / cancelled
               honestly (all-attempts-errored is a failure; a provider outage streak stops
-              the run; a harness error on one mined candidate skips it).
+              the run; a harness error on one mined candidate skips it). Checks in to the
+              ``workers`` table every ``heartbeat_s`` (idle or not, with the reaper's
+              pending count) and records every worker-side metric, including deliveries
+              by outcome and real installation-token mints. Reaps a container whose kill
+              went unconfirmed on every poll and puts the outcome on the run's trace.
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
               emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
               ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
@@ -81,13 +111,18 @@ Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0012-builder-in-a-sealed-container.md
 Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finish),
+              src/crb/store/models.py (``WorkerRow`` — the check-in row the health probe
+              reads), src/crb/observability/metrics.py (the recorders, ``record_event`` on
+              the emitter's metering sink, ``crb_queue_depth`` on check-in),
               src/crb/core/run.py (a replay's task loop), src/crb/builders/adapter.py (the
-              build function, ladder, pre-flight), src/crb/core/mine.py (mining),
-              src/crb/core/oracle/mutation.py (oracle scores), src/crb/core/oracle/controls.py
-              (negative controls), src/crb/factory/loop.py (forward mode),
-              src/crb/server/factory_state.py (the factory's files), src/crb/store/ledger.py
+              build function, ladder, pre-flight), src/crb/core/mine.py (mining; the oracle
+              and controls kinds call their core modules the same way),
+              src/crb/factory/loop.py (forward mode — its files live in
+              src/crb/server/factory_state.py), src/crb/server/reaper.py (the durable
+              queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
-              tests/test_worker_clone.py, tests/test_store_jobs.py
+              tests/test_worker_clone.py, tests/test_store_jobs.py,
+              tests/test_observability_metrics.py
 Touch when:   a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
               every run must carry is added (``_RunLedger._stamp``); never for a new
@@ -99,6 +134,7 @@ Claims:       Nothing here decides a verdict: the grader does; the worker only s
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -111,7 +147,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.builders import builder_for_rung
@@ -125,9 +161,11 @@ from crb.builders.adapter import (
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.budget import budget_for_rung
+from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
+from crb.core.evidence import utc_now_iso
 from crb.core.execution import DockerSettings, Executor, SandboxUnavailable, make_executor
 from crb.core.git import (
     DEFAULT_CLONE_TIMEOUT_S,
@@ -161,7 +199,7 @@ from crb.core.runners import get_runner
 from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
 from crb.core.stats import mean
-from crb.core.version import APPARATUS_VERSION
+from crb.core.version import APPARATUS_VERSION, __version__
 from crb.core.workspace import Workspace
 from crb.factory.backlog import BacklogItem
 from crb.factory.delivery import (
@@ -173,9 +211,10 @@ from crb.factory.delivery import (
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.testfirst import AuthoredTest
 from crb.observability import metrics
-from crb.observability.events import Emitter, JsonlSink, MultiSink, StepStatus
+from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.server.factory_state import FactoryHome
 from crb.server.github_app import GitHubApp, GitHubAppError
+from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.settings import GitHubAppSettings
@@ -193,12 +232,13 @@ from crb.store.jobs import (
     KIND_SETUP,
     STATUS_CANCELLED,
     STATUS_FAILED,
+    STATUS_QUEUED,
     STATUS_SUCCEEDED,
     JobQueue,
     StaleClaim,
 )
 from crb.store.ledger import DbLedger
-from crb.store.models import EvidencePackRow, Repo, Run, Task
+from crb.store.models import EvidencePackRow, Repo, Run, Task, WorkerRow
 
 #: Stop a build run after this many consecutive attempts the provider refused
 #: (``failure_kind == outage``); ``params.outage_stop`` overrides, 0 disables.
@@ -229,6 +269,26 @@ _STAGE_FOR_PREFIX: dict[str, str] = {
 def stage_for(action: str) -> str:
     """``grade.belt`` → ``grade``; unknown prefixes land in ``system``."""
     return _STAGE_FOR_PREFIX.get(action.split(".", 1)[0], "system")
+
+
+def unconfirmed_note(container: str) -> str:
+    """The sentence a run's ``error`` carries for a container whose kill went unconfirmed —
+    what the reaper will do and what the operator can do now."""
+    return (
+        f"container {container} may still be running — it will be reaped by the worker; "
+        f"`{by_hand(container)}` reaps it by hand"
+    )
+
+
+def _reaper_docker() -> str:
+    """The docker binary the reaper calls: the builder posture's (``CRB_BUILDER__DOCKER_BINARY``)
+    when one is set, else ``docker`` on PATH. A posture that fails closed is not this
+    function's concern (the run reports it); the reaper still gets a binary name."""
+    try:
+        settings = container_settings_from_env()
+    except SandboxUnavailable:
+        return "docker"
+    return (settings.docker_binary if settings is not None else "") or "docker"
 
 
 #: Row labels the worker stamps per rung (``_RunLedger``). Hashed like every label.
@@ -280,6 +340,27 @@ def default_worker_id() -> str:
 # ---------------------------------------------------------------------------
 
 
+class _MeteredGitHubApp(GitHubApp):
+    """The app client with ``crb_github_tokens_minted_total{installation}`` on every REAL
+    mint (J-TEL-13). A cache hit returns the token the last call returned; a mint returns
+    a new one — so a token that differs from the last one seen for that installation is a
+    mint. Only a truncated digest is kept for the comparison, never the token, and the
+    label is the installation id, never the token (the cheapest abuse detector that can
+    never log a credential)."""
+
+    def __init__(self, settings: GitHubAppSettings) -> None:
+        super().__init__(settings)
+        self._seen_digest: dict[int, str] = {}
+
+    def installation_token(self, installation_id: int, *, now: float | None = None) -> str:
+        token = super().installation_token(installation_id, now=now)
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+        if self._seen_digest.get(installation_id) != digest:
+            self._seen_digest[installation_id] = digest
+            metrics.github_tokens_minted_total.labels(str(installation_id)).inc()
+        return token
+
+
 class _InstallationProvider:
     """A ``GitCredentialsProvider`` over one GitHub App installation: every ``resolve``
     mints (or reuses, until near expiry) the installation's token — never stored."""
@@ -317,6 +398,15 @@ class WorkerSettings:
     kinds: tuple[str, ...] = ()
     keep_worktrees: bool = False
     max_reclaims: int = 3
+    #: The worker's own Prometheus exposition (J-TEL-1): every build / grade / cost series
+    #: is recorded in THIS process, so the API's ``/metrics`` never carries them. Served by
+    #: ``prometheus_client.start_http_server`` on ``metrics_host:metrics_port``
+    #: (``CRB_METRICS_HOST``, default loopback like the API's bind — a container sets
+    #: ``0.0.0.0``; ``CRB_METRICS_PORT``, default 9464; ``0`` = off) when ``metrics_enabled``
+    #: (``CRB_METRICS_ENABLED``, the same switch the API reads) and the client is installed.
+    metrics_enabled: bool = True
+    metrics_host: str = "127.0.0.1"
+    metrics_port: int = 9464
     #: The GitHub App this deployment is registered as (``CRB_GITHUB__*``): the worker
     #: mints installation tokens to clone and deliver linked repositories (ADR-0014).
     github: GitHubAppSettings = field(default_factory=GitHubAppSettings)
@@ -327,6 +417,10 @@ class WorkerSettings:
         object.__setattr__(self, "kinds", tuple(self.kinds))
         if self.poll_s <= 0 or self.heartbeat_s <= 0 or self.stale_after_s <= 0:
             raise ValueError("poll_s, heartbeat_s and stale_after_s must be positive")
+        if not 0 <= int(self.metrics_port) <= 65535:
+            raise ValueError("CRB_METRICS_PORT must be 0 (off) or a port 1-65535")
+        if not str(self.metrics_host).strip():
+            raise ValueError("CRB_METRICS_HOST must name an address to bind (127.0.0.1, 0.0.0.0)")
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +448,12 @@ class RunContext:
     config: RepoConfig
     git: GitRepo
     counts: dict[str, Any] = field(default_factory=dict)
+    #: Sentences appended to the run's ``error`` whatever its final status (an
+    #: unconfirmed container kill) — a cancelled run is still cancelled, but never quietly.
+    notes: list[str] = field(default_factory=list)
+    #: The task the run is on (set by each kind's task loop) — the ``task_id`` an
+    #: executor-level report (``run.kill_unconfirmed`` from the grade stage) is filed under.
+    task_id: str = ""
     _runner: BaseRunner | None = None
     _executor: Executor | None = None
 
@@ -470,6 +570,7 @@ class _RunLedger:
             duration_s=float(grade.get("duration_s") or 0.0),
         )
         metrics.record_build(
+            repo=row.repo,
             builder=row.builder,
             model=row.model,
             tokens_in=row.tokens_in,
@@ -505,6 +606,9 @@ class Worker:
         self.queue = JobQueue(self.factory, max_reclaims=settings.max_reclaims)
         self.ledger = DbLedger(self.factory)
         self.worker_id = settings.worker_id
+        self._checkin_lock = threading.Lock()
+        self._last_checkin = 0.0
+        self.reaper = ContainerReaper(self.home / STATE_FILENAME, docker=_reaper_docker())
         self._handlers: dict[str, Handler] = {
             KIND_SETUP: self._run_setup,
             KIND_PROBE: self._run_probe,
@@ -553,9 +657,13 @@ class Worker:
         return self.queue.get(run.id)
 
     def run_forever(self, stop: threading.Event) -> None:
-        """Poll until ``stop`` is set. One run at a time; never raises."""
+        """Poll until ``stop`` is set. One run at a time; never raises. The worker checks
+        in (:meth:`checkin`) every ``heartbeat_s`` whether or not it holds a run, and stamps
+        its row ``stopped`` on the way out."""
         _LOG.info("worker %s started (executor=%s)", self.worker_id, self.settings.executor)
         while not stop.is_set():
+            self._checkin_if_due()
+            self.reap()
             try:
                 run = self.run_once()
             except Exception:  # the loop must survive anything a run throws
@@ -563,11 +671,137 @@ class Worker:
                 run = None
             if run is None:
                 stop.wait(self.settings.poll_s)
+        self.checkin(stopped=True)
         _LOG.info("worker %s stopped", self.worker_id)
+
+    # --- the reaper ---------------------------------------------------------------
+    @property
+    def reap_budget_s(self) -> float:
+        """The time one reap pass may hold the idle loop: half the heartbeat, so the
+        check-in that follows the pass is never later than the worker's own liveness
+        bound (``3 × heartbeat_s``) — even when the daemon answers nothing."""
+        return float(self.settings.heartbeat_s) / 2
+
+    def reap(self) -> int:
+        """One bounded pass of the container reaper (every poll), under
+        :attr:`reap_budget_s`: each container that ended this pass gets ``run.kill_reaped``
+        (ok) or ``run.kill_reap_failed`` (error, with the by-hand command) on its run's
+        trace. Returns how many ended. Never raises."""
+        try:
+            ended = self.reaper.reap_once(budget_s=self.reap_budget_s)
+        except Exception:  # the loop must survive the reaper too
+            _LOG.exception("container reaper pass failed")
+            return 0
+        for res in ended:
+            self._record_reap(res)
+        return len(ended)
+
+    def _record_reap(self, res: ReapResult) -> None:
+        run = self.queue.get(res.entry.run_id)
+        if run is None:  # the run row is gone; the log is all that is left
+            _LOG.warning(
+                "reaper: run %s not found for container %s (%s)",
+                res.entry.run_id[:8],
+                res.entry.container,
+                "reaped" if res.reaped else res.detail,
+            )
+            return
+        try:
+            emitter = self._emitter(run)
+            if res.reaped:
+                emitter.emit(
+                    "system",
+                    "run.kill_reaped",
+                    task_id=res.entry.task_id,
+                    container=res.entry.container,
+                    attempts=res.attempts,
+                )
+            else:
+                emitter.emit(
+                    "system",
+                    "run.kill_reap_failed",
+                    status=StepStatus.ERROR,
+                    task_id=res.entry.task_id,
+                    error=f"container {res.entry.container} not reaped: {res.detail}",
+                    container=res.entry.container,
+                    attempts=res.attempts,
+                )
+        except Exception:
+            _LOG.exception("reaper: could not record %s on run %s", res.entry.container, run.id[:8])
+
+    def _kill_unconfirmed(self, ctx: RunContext, task_id: str, kill: UnconfirmedKill) -> None:
+        """``on_kill_unconfirmed`` for the run's build function AND its docker executor
+        (module docstring): the event, the note on the run's error, the reaper's queue.
+        Never raises."""
+        note = unconfirmed_note(kill.container)
+        try:
+            ctx.emit(
+                "system",
+                "run.kill_unconfirmed",
+                status=StepStatus.ERROR,
+                task_id=task_id,
+                error=note,
+                container=kill.container,
+                run_id=ctx.run.id,
+                bound_s=float(kill.bound_s),
+            )
+        except Exception:
+            _LOG.exception("could not record run.kill_unconfirmed for %s", kill.container)
+        if note not in ctx.notes:
+            ctx.notes.append(note)
+        try:
+            self.reaper.add(kill.container, run_id=ctx.run.id, task_id=task_id)
+        except Exception:
+            _LOG.exception("could not queue %s for the reaper", kill.container)
+
+    # --- liveness ---------------------------------------------------------------
+    def _checkin_if_due(self) -> None:
+        """Idle-loop check-in, throttled to ``heartbeat_s`` (the loop wakes every ``poll_s``)."""
+        if time.monotonic() - self._last_checkin >= self.settings.heartbeat_s:
+            self.checkin()
+
+    def checkin(self, *, current_run_id: str = "", stopped: bool = False) -> None:
+        """Upsert this worker's ``workers`` row (J-TEL-2): hostname, executor, kinds,
+        ``heartbeat`` = now, its own ``heartbeat_s`` (what the health probe judges staleness
+        against), the run it holds, the package version, and ``stopped`` on a clean exit.
+        Also sets ``crb_queue_depth``. Never raises — liveness must not take a run down."""
+        now = utc_now_iso()
+        with self._checkin_lock:
+            self._last_checkin = time.monotonic()
+            try:
+                with self.factory() as s:
+                    row = s.get(WorkerRow, self.worker_id)
+                    if row is None:
+                        row = WorkerRow(worker_id=self.worker_id, started=now)
+                        s.add(row)
+                    row.hostname = socket.gethostname()
+                    row.executor = self.settings.executor
+                    row.kinds = list(self.settings.kinds)
+                    row.heartbeat = now
+                    row.heartbeat_s = float(self.settings.heartbeat_s)
+                    row.current_run_id = current_run_id
+                    row.version = __version__
+                    row.stopped = now if stopped else ""
+                    row.unconfirmed_containers = self.reaper.pending_count()
+                    queued = int(
+                        s.execute(
+                            select(func.count(Run.id)).where(Run.status == STATUS_QUEUED)
+                        ).scalar_one()
+                    )
+                    s.commit()
+                metrics.queue_depth.set(queued)
+            except Exception:
+                _LOG.exception("worker %s check-in failed", self.worker_id)
 
     # --- execution ------------------------------------------------------------
     def _emitter(self, run: Run) -> Emitter:
-        sink = MultiSink(DbEventSink(self.factory), JsonlSink(self.events_path(run.id)))
+        # the third sink meters delivery outcomes (``crb_deliveries_total``, J-TEL-13) from
+        # the same events the log shows — one vocabulary, no second code path
+        sink = MultiSink(
+            DbEventSink(self.factory),
+            JsonlSink(self.events_path(run.id)),
+            CallbackSink(metrics.record_event),
+        )
         return _ResumingEmitter(
             sink,
             trace_id=run.id,
@@ -585,6 +819,7 @@ class Worker:
                         return
                 except Exception:
                     _LOG.exception("heartbeat failed for run %s", run.id[:8])
+                self.checkin(current_run_id=run.id)
 
         t = threading.Thread(target=loop, name=f"crb-heartbeat-{run.id[:8]}", daemon=True)
         t.start()
@@ -594,6 +829,7 @@ class Worker:
         """Execute a *claimed* run and finish it. Never raises."""
         emitter = self._emitter(run)
         emitter.emit("system", "run.claimed", worker=self.worker_id, kind=run.kind, mode=run.mode)
+        self.checkin(current_run_id=run.id)
         hb_stop = threading.Event()
         hb = self._heartbeat_thread(run, hb_stop)
         ctx: RunContext | None = None
@@ -627,6 +863,9 @@ class Worker:
         finally:
             hb_stop.set()
             hb.join(timeout=5)
+            self.checkin()
+        if ctx is not None and ctx.notes:  # whatever the status: never a quiet unconfirmed kill
+            error = "; ".join([error, *ctx.notes] if error else ctx.notes)[:2000]
         try:
             self.queue.finish(run.id, status, counts=counts, error=error, worker_id=self.worker_id)
         except StaleClaim as exc:  # reclaimed underneath us: the new owner's record stands
@@ -659,7 +898,7 @@ class Worker:
     def _github_app(self) -> GitHubApp:
         """The app client, built once per worker (its token cache is per installation)."""
         if self._github_app_client is None:
-            self._github_app_client = GitHubApp(self.settings.github)
+            self._github_app_client = _MeteredGitHubApp(self.settings.github)
         return self._github_app_client
 
     def _github_host_ok(self, url: str) -> bool:
@@ -794,8 +1033,14 @@ class Worker:
         if kind == "docker":
             docker = docker_settings_for(ctx.config, self.settings.docker, ctx.params)
         # The cancel token: a requested cancel kills the running test process (local) or
-        # container (docker) instead of waiting for the wall-clock timeout.
-        ctx._executor = make_executor(kind, docker=docker, cancel=lambda: self._cancelled(ctx))
+        # container (docker) instead of waiting for the wall-clock timeout. A docker kill
+        # the daemon never confirms is reported the same way a sealed attempt's is.
+        ctx._executor = make_executor(
+            kind,
+            docker=docker,
+            cancel=lambda: self._cancelled(ctx),
+            on_kill_unconfirmed=lambda kill: self._kill_unconfirmed(ctx, ctx.task_id, kill),
+        )
         ctx.emit("system", "run.executor", **ctx._executor.describe())
         return ctx._executor
 
@@ -1238,12 +1483,14 @@ class Worker:
             builder_overrides=dict(p.get("builder_config") or {}),
             container=container_settings_from_env(),  # CRB_BUILDER__EXECUTOR=docker (ADR-0012)
             preflight=preflight,
+            on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
         )
         self._progress(ctx, 0, total)
 
         def tracked() -> Iterator[TaskSpec]:
             for i, t in enumerate(tasks):
                 ctx.counts["tasks"] = i
+                ctx.task_id = t.task_id
                 self._progress(ctx, i, total)
                 yield t
 
@@ -1324,6 +1571,7 @@ class Worker:
             if self._cancelled(ctx):
                 cancelled = True
                 break
+            ctx.task_id = task.task_id
             dest = self.scratch_dir / f"oracle-{ctx.config.name}-{task.short_id}-{run.id[:8]}"
             with Workspace.create(ctx.git, task.task_id, dest, config=ctx.config) as ws:
                 ws.overlay_tests(task.test_files)
@@ -1540,6 +1788,7 @@ class Worker:
             if self._cancelled(ctx):
                 cancelled = True
                 break
+            ctx.task_id = task.task_id
             rows.extend(
                 controls_for_task(
                     ctx.git,

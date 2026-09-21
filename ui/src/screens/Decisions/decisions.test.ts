@@ -22,7 +22,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { CapabilityCell, FactoryTask, Signoff } from '../../api/types'
-import { decisionsFor } from './decisions'
+import { decisionsFor, evidenceStats } from './decisions'
 
 function cell(over: Partial<CapabilityCell>): CapabilityCell {
   return { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22 …', reason_code: 'deliver', ...over } as CapabilityCell
@@ -40,6 +40,10 @@ describe('decisionsFor', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ kind: 'signoff_due', role: 'approver', act: 'Attest', href: '/signoff?repo=alpha&cell=bug.fix%7CXS' })
     expect(rows[0]?.evidence).toBe('n=22 on 9 tasks · 100% [85%, 100%] · deliver')
+    // the code travels on its own too, so the screen can render it as a term; the stats line drops it
+    expect(rows[0]?.reasonCode).toBe('deliver')
+    expect(evidenceStats(rows[0]!)).toBe('n=22 on 9 tasks · 100% [85%, 100%]')
+    expect(evidenceStats({ evidence: 'method_path, response_shape' })).toBe('method_path, response_shape')
   })
 
   it('an active sign-off clears the row; a revoked one does not', () => {

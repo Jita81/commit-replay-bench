@@ -6,10 +6,13 @@
  * ----------
  * What it is:   The side drawer opened from a run's task table, the task page and the sweep
  *               views; four tabs: Pack, Patch, Transcript, Review.
- * What it does: Renders `GET /evidence/{hash}` — spec, belts (with the target / belt / lint run
- *               tails, redacted at capture), diff stats, builder ref, apparatus stamp and the
- *               full JSON — with the `verified` badge (the pack's canonical hash recomputed on
- *               read equals its key; a mismatch is red, never hidden). The Patch tab fetches
+ * What it does: Renders `GET /evidence/{hash}` — one headline sentence first (for a not-clean
+ *               row the first failed belt by name and its cause; for a clean row the belt
+ *               count and what verified does not mean), then the pills, spec, belts (with
+ *               the target / belt / lint run tails, redacted at capture), diff stats, builder
+ *               ref, apparatus stamp and the full JSON — with the `verified` badge (the
+ *               pack's canonical hash recomputed on read equals its key; a mismatch is red,
+ *               never hidden, and is the headline). The Patch tab fetches
  *               the retained worktree's diff on demand, hashes the served bytes and shows
  *               whether they match the pack's anchor; the Transcript tab reports why a
  *               transcript is unavailable rather than showing nothing; the Review tab hosts
@@ -23,11 +26,12 @@
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
  *               docs/adr/0011-repo-lint-belt.md
  * Works with:   ui/src/screens/Runs/contract.ts (retained-patch fetch, diff parser, review
- *               hooks), ui/src/screens/Runs/ReviewPanel.tsx (the Review tab), ui/src/api/types.ts
- *               (`EvidencePack`, `TestRun`, `LintRun`), ui/src/components/BeltPills.tsx and
- *               ui/src/components/Provenance.tsx, ui/src/screens/Runs/RunDetailPage.tsx and
- *               ui/src/screens/Runs/TaskDetailPage.tsx (the openers), src/crb/core/evidence.py
- *               (the pack's shape and `verify_pack`)
+ *               hooks), ui/src/screens/Runs/telemetry.ts (`packHeadline`),
+ *               ui/src/screens/Runs/ReviewPanel.tsx (the Review tab), ui/src/api/types.ts
+ *               (`EvidencePack`, `TestRun`, `LintRun`), ui/src/components/BeltPills.tsx (the
+ *               belt pills), ui/src/screens/Runs/RunDetailPage.tsx (the opener; the task
+ *               page opens it the same way), src/crb/core/evidence.py (the pack's shape and
+ *               `verify_pack`)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx (Patch tab: verified / redacted /
  *               unavailable; row resolution from the task),
  *               ui/src/screens/Runs/RunDetailPage.test.tsx
@@ -53,6 +57,7 @@ import { Provenance } from '../../components/Provenance'
 import { fmtDate, fmtInt, fmtSeconds, fmtUsd, shortId } from '../../lib/format'
 import { parseUnifiedDiff, useRetainedPatch, useRetainedStatus, useRetainedTranscript, useReviews, type RetainedPatch } from './contract'
 import { ReviewPanel, VerdictPill } from './ReviewPanel'
+import { packHeadline } from './telemetry'
 
 interface Props {
   packHash: string | null
@@ -178,12 +183,15 @@ function TestRunTail({ label, run }: { label: string; run: TestRun | null }) {
   )
 }
 
-/** The Pack tab: grade pills, verified badge, spec, belts with run tails, diff stats, builder ref, apparatus, full JSON. */
+/** The Pack tab: the headline sentence, grade pills, verified badge, spec, belts with run tails, diff stats, builder ref, apparatus, full JSON. */
 function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean }) {
   const g = pack.grade
   const b = pack.builder
   return (
     <div className="space-y-6">
+      <p className={`m-0 text-sm ${g.clean && verified ? 'text-on-surface-body' : g.disqualified ? 'text-status-amber' : 'text-status-red'}`} data-testid="pack-headline">
+        {packHeadline(g, verified)}
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         {g.clean ? (
           <Pill tone="green" glyph="✓" label="Grade: clean — all four belts held">clean</Pill>

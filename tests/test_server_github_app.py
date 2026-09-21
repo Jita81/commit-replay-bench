@@ -50,7 +50,13 @@ from sqlalchemy import select
 
 from crb.server.app import API_PREFIX
 from crb.server.auth import issue_github_setup_state
-from crb.server.github_app import GitHubApp, GitHubAppError, suggest_config
+from crb.server.github_app import (
+    DELIVERY_PERMISSIONS,
+    GitHubApp,
+    GitHubAppError,
+    permissions_allow_delivery,
+    suggest_config,
+)
 from crb.server.routes.github import get_github_app
 from crb.server.settings import GitHubAppSettings
 from crb.store.models import Event, GitHubInstallation, Repo
@@ -238,6 +244,28 @@ def test_installation_tokens_are_minted_with_the_jwt_cached_and_refreshed_near_e
     inst = app.installation(78)
     assert inst.can_deliver and not app.installation(77).can_deliver
     assert [i.id for i in app.installations()] == [77, 78]
+
+
+def test_one_delivery_permission_predicate() -> None:
+    """``Installation.can_deliver``, the factory pre-flight and the installations route
+    all read ``permissions_allow_delivery``: both write scopes, exactly; a missing scope,
+    a read level, an empty or absent mapping, and a stored row's non-string level all say no."""
+    assert DELIVERY_PERMISSIONS == {"contents": "write", "pull_requests": "write"}
+    assert permissions_allow_delivery({"contents": "write", "pull_requests": "write"})
+    assert permissions_allow_delivery(
+        {"contents": "write", "pull_requests": "write", "metadata": "read"}
+    )
+    assert not permissions_allow_delivery({"contents": "write"})
+    assert not permissions_allow_delivery({"contents": "read", "pull_requests": "write"})
+    assert not permissions_allow_delivery({"contents": "write", "pull_requests": "read"})
+    assert not permissions_allow_delivery({})
+    assert not permissions_allow_delivery(None)
+    assert not permissions_allow_delivery({"contents": None, "pull_requests": "write"})
+    # the dataclass property is the same predicate
+    from crb.server.github_app import Installation
+
+    inst = Installation.from_api({"id": 1, "permissions": {"contents": "write"}})
+    assert inst.can_deliver is permissions_allow_delivery(inst.permissions) is False
 
 
 def test_github_refusals_become_errors_with_status_and_redacted_message(

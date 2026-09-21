@@ -52,7 +52,11 @@ What it does: Per attempt: resolves the rung, derives the brief (never ``src_fil
               test-shaped in blind mode), runs one ``builder.build`` — on the host or against
               a sealed checkout in a container — writes the redacted transcript to a file,
               maps the outcome to a ``BuildAttempt`` and discards the source edits of any
-              errored attempt so it can never grade clean-with-error.
+              errored attempt so it can never grade clean-with-error. A sealed attempt whose
+              container kill went UNCONFIRMED (cancel / wall clock; the daemon never reported
+              it stopped) is never silent: the outcome's errors and ``extra`` say so, the
+              attempt's pack notes carry ``kill_confirmed: false``, and ``on_kill_unconfirmed``
+              hands the container to the caller (the worker records it and reaps it).
 How:          ``ladder_from_spec`` → ``rung_index`` → ``build``: ``sighted_test_command``
               (services up, env prefix) → ``BuildBrief.from_task`` → ``budget_for_rung`` →
               ``builder.build`` / ``sealed_build`` (``SealedCheckout`` + ``ContainerSession``
@@ -63,7 +67,9 @@ ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/core/run.py (defines ``BuildFn``/``BuildAttempt`` and calls this),
               src/crb/builders/base.py (brief, budget, outcome), src/crb/builders/__init__.py
-              (``builder_for_rung``), src/crb/builders/container.py (the sealed path),
+              (``builder_for_rung``), src/crb/builders/container.py (the sealed path;
+              ``ContainerSession.unconfirmed_kills``), src/crb/server/reaper.py (what the
+              worker does with an ``UnconfirmedKill``),
               src/crb/builders/budget.py (per-rung budget), src/crb/core/ledger.py (why an
               errored attempt must not carry a patch), src/crb/server/worker.py (the caller
               that supplies ``container`` from the environment)
@@ -78,6 +84,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import shlex
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -104,6 +111,7 @@ from crb.builders.container import (
     ContainerSession,
     SealedCheckout,
     SessionFactory,
+    UnconfirmedKill,
 )
 from crb.core.evidence import BuilderRef
 from crb.core.execution import Command, Executor, SandboxUnavailable
@@ -116,8 +124,56 @@ from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 
+_LOG = logging.getLogger(__name__)
+
 #: ``message_for(task) -> str`` — the full commit message (``GitRepo.message(sha)``).
 MessageFn = Callable[[TaskSpec], str]
+
+#: ``on_kill_unconfirmed(task_id, kill)`` — a sealed attempt's container whose enforced kill
+#: the daemon did not confirm (it may still be running). The worker records the event on
+#: the run's trace and queues the reaper; the callback must not raise into the build.
+KillUnconfirmedFn = Callable[[str, UnconfirmedKill], None]
+
+#: ``BuildOutcome.extra`` keys a sealed attempt stamps when its kill went unconfirmed.
+EXTRA_KILL_CONFIRMED = "kill_confirmed"
+EXTRA_CONTAINER = "container"
+
+
+def unconfirmed_kill_error(kill: UnconfirmedKill) -> str:
+    """The outcome error an unconfirmed kill adds (prefix ``container:`` — not a
+    protocol violation and not a model error, so the attempt is still graded)."""
+    return (
+        f"container: kill unconfirmed — {kill.container} may still be running "
+        f"(the daemon did not report it stopped within {kill.bound_s:g} s)"
+    )
+
+
+def note_unconfirmed_kills(outcome: BuildOutcome, kills: Sequence[UnconfirmedKill]) -> BuildOutcome:
+    """The outcome with each unconfirmed kill on its errors and ``extra`` (``kill_confirmed:
+    False``, ``container``) — the record an evidence pack and a transcript keep."""
+    if not kills:
+        return outcome
+    return replace(
+        outcome,
+        errors=(*outcome.errors, *(unconfirmed_kill_error(k) for k in kills)),
+        extra={
+            **outcome.extra,
+            EXTRA_KILL_CONFIRMED: False,
+            EXTRA_CONTAINER: kills[-1].container,
+        },
+    )
+
+
+def attempt_notes(outcome: BuildOutcome) -> dict[str, Any]:
+    """The pack notes an outcome earns: ``{kill_confirmed: False, container}`` when its
+    container kill went unconfirmed, else nothing."""
+    if outcome.extra.get(EXTRA_KILL_CONFIRMED) is False:
+        return {
+            EXTRA_KILL_CONFIRMED: False,
+            EXTRA_CONTAINER: str(outcome.extra.get(EXTRA_CONTAINER, "")),
+        }
+    return {}
+
 
 #: The worker's builder-container posture from ``CRB_BUILDER__*`` (``None`` = host);
 #: raises ``SandboxUnavailable`` when ``docker`` is requested but incomplete.
@@ -420,6 +476,7 @@ def build_fn_for(
     container: BuilderContainerSettings | None = None,
     session_factory: SessionFactory = ContainerSession,
     preflight: Preflight | None = None,
+    on_kill_unconfirmed: KillUnconfirmedFn | None = None,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -449,6 +506,11 @@ def build_fn_for(
         :class:`SealedCheckout` inside a :class:`ContainerSession`; other builders
         (the test-only gold replay) keep the real worktree. ``session_factory``
         exists for tests.
+    on_kill_unconfirmed:
+        Receives ``(task_id, UnconfirmedKill)`` for every sealed container whose
+        enforced kill the daemon did not confirm — after the attempt, whether the
+        builder returned or raised. Without it the kill is still on the outcome and
+        the pack, and logged; the container is nobody's to reap.
     """
     index = rung_index(ladder)
     overrides = dict(builder_overrides or {})
@@ -527,9 +589,15 @@ def build_fn_for(
                     builder = builder_for_rung(
                         rung, **{**session.overrides_for(rung.builder), **overrides}
                     )
-                    outcome = builder.build(
-                        sealed.workspace(), brief, rung_budget, on_event=builder_on_event
-                    )
+                    try:
+                        outcome = builder.build(
+                            sealed.workspace(), brief, rung_budget, on_event=builder_on_event
+                        )
+                    finally:
+                        # whether the builder returned or raised: a container the daemon
+                        # never reported stopped is handed on, never dropped
+                        kills = report_unconfirmed(session, task)
+                    outcome = note_unconfirmed_kills(outcome, kills)
             except BaseException:
                 # best effort: whatever the builder left is the record of the attempt;
                 # the in-flight exception (SandboxUnavailable included) is what matters
@@ -544,6 +612,23 @@ def build_fn_for(
                 on_event, BUILDER_EVENT_PREFIX + "copy_back", task=task.task_id, **copied.to_dict()
             )
         return outcome
+
+    def report_unconfirmed(session: Any, task: TaskSpec) -> list[UnconfirmedKill]:
+        """The session's unconfirmed kills, each handed to ``on_kill_unconfirmed`` (and
+        logged); a session double without the method (a test fake) reports none."""
+        ask = getattr(session, "unconfirmed_kills", None)
+        kills: list[UnconfirmedKill] = list(ask()) if callable(ask) else []
+        for kill in kills:
+            _LOG.warning(
+                "task %s: %s — recorded on the attempt%s",
+                task.task_id,
+                unconfirmed_kill_error(kill),
+                "; handed to the reaper" if on_kill_unconfirmed is not None else "",
+            )
+            if on_kill_unconfirmed is not None:
+                with contextlib.suppress(Exception):  # never into the build
+                    on_kill_unconfirmed(task.task_id, kill)
+        return kills
 
     def build(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
         """The ``BuildFn``: one attempt of ``task`` on ``rung_label`` in ``mode``."""
@@ -607,6 +692,7 @@ def build_fn_for(
             error=attempt_error(outcome),
             transcript_ref=ref,
             labels=labels,
+            notes=attempt_notes(outcome),
         )
         return discard(ws, task, attempt)
 
@@ -745,22 +831,30 @@ def _merge_outcomes(first: BuildOutcome, second: BuildOutcome) -> BuildOutcome:
         stop_reason=second.stop_reason or first.stop_reason,
         done=second.done,
         transcript=tuple(first.transcript) + tuple(second.transcript),
+        # an unconfirmed kill on either call is on the merged attempt
+        extra={**first.extra, **attempt_notes(second)},
     )
 
 
 __all__ = [
     "BUILDER_EVENT_PREFIX",
+    "EXTRA_CONTAINER",
+    "EXTRA_KILL_CONFIRMED",
+    "KillUnconfirmedFn",
     "LedgerLike",
     "MessageFn",
     "Preflight",
     "as_run_ledger",
     "attempt_error",
+    "attempt_notes",
     "build_fn_for",
     "container_settings_from_env",
     "discard_source_edits",
     "ladder_from_spec",
     "ladder_labels",
+    "note_unconfirmed_kills",
     "parse_rung_label",
     "rung_index",
     "sighted_test_command",
+    "unconfirmed_kill_error",
 ]

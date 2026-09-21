@@ -75,6 +75,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            # The worker's own /metrics: the build / grade / cost / delivery series live in
+            # this process (the api's /metrics carries HTTP + ledger only). 0 = off. The
+            # worker binds loopback by default; in a pod it must listen on every interface
+            # for the headless Service (and only the NetworkPolicy's metricsIngress peers)
+            # to reach it.
+            - name: CRB_METRICS_HOST
+              value: "0.0.0.0"
+            - name: CRB_METRICS_PORT
+              value: {{ .Values.worker.metrics.port | quote }}
             {{- if eq $mode "dind" }}
             - name: DOCKER_HOST
               value: unix:///var/run/docker/docker.sock
@@ -82,6 +91,12 @@ spec:
             - name: DOCKER_HOST
               value: unix:///var/run/docker.sock
             {{- end }}
+          {{- if gt (int .Values.worker.metrics.port) 0 }}
+          ports:
+            - name: metrics
+              containerPort: {{ int .Values.worker.metrics.port }}
+              protocol: TCP
+          {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           volumeMounts:

@@ -10,8 +10,22 @@ store-level checks:
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
   semantics as :func:`crb.core.ledger.false_q1_total`; any false-Q1 row = ``down``.
   The same numbers refresh the ``crb_false_q1_total`` / ``crb_ledger_rows`` gauges.
-* ``worker``      — running runs whose ``heartbeat`` is older than
-  ``worker_heartbeat_stale_s`` are reported as stale (``degraded``).
+* ``worker``      — liveness from the ``workers`` table each worker upserts every
+  ``heartbeat_s`` even when idle (J-TEL-2): a worker seen within 3 × its own
+  ``heartbeat_s`` is alive. ``degraded`` (never ``down``) when runs are queued and no
+  worker is alive — nothing will start, and the sentence says so with the queue depth
+  and the last check-in; when no worker has checked in yet; when one stopped checking
+  in (named, with its age); when a running run's ``heartbeat`` is older than
+  ``worker_heartbeat_stale_s``; or when a worker's row says it is still reaping a
+  container whose ``docker kill`` the daemon never confirmed (``unconfirmed_containers``
+  > 0 — src/crb/server/reaper.py; the container may still be running on that host);
+  ``ok`` otherwise with the workers listed. The worker is
+  a dependency the API pod does not own: ``/health`` is the API's readiness probe, and a
+  503 for a crashed worker would take every API pod out of the Service — exactly when
+  the person needs to read "no worker has checked in" (the same rule as the sandbox
+  probe for the ``api`` role). Before the table existed the probe read running runs'
+  heartbeats only, so a crashed worker with three queued runs answered ``ok "idle, 3
+  queued"``.
 * ``sandbox``     — the docker daemon answers (``docker`` executor) — **role-aware**:
   the sandbox is the WORKER's instrument. A process whose role is ``api`` (the
   ``serve`` container: no docker socket, by design — see ``deploy/Dockerfile``)
@@ -35,7 +49,8 @@ Navigation
 What it is:   The ``/health``, ``/health/live``, ``/metrics`` and ``/version`` routes — the
               unauthenticated operational surface.
 What it does: Readiness aggregates the store probes (db, append-only triggers proven live,
-              ledger false-Q1 = 0, worker heartbeats) with the observability probes
+              ledger false-Q1 = 0, worker check-ins from the ``workers`` table) with the
+              observability probes
               (sandbox — skipped for the ``api`` role — toolchains, builders) and answers
               503 when any is ``down``; liveness checks the database only; ``/metrics``
               refreshes the ledger gauges then renders the shared registry.
@@ -48,9 +63,11 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate)
 Works with:   src/crb/observability/probes.py (the probe vocabulary and ``aggregate``),
               src/crb/store/ledger.py (``assert_append_only``), src/crb/observability/metrics.py
-              (the gauges and the registry), src/crb/server/routes/signoffs.py (the same
-              false-Q1 predicate, kept in step), deploy/entrypoint.sh + deploy/Dockerfile
-              (``CRB_ROLE`` per container and the ``HEALTHCHECK`` on ``/health/live``),
+              (the gauges and the registry — the API's series only; the worker serves its
+              own, docs/DEPLOYMENT.md#9-observability), src/crb/server/worker.py (upserts
+              the ``workers`` rows the worker probe reads), src/crb/server/routes/signoffs.py
+              (the same false-Q1 predicate, kept in step), deploy/Dockerfile (``CRB_ROLE``
+              per container and the ``HEALTHCHECK`` on ``/health/live``),
               docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface
 Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py
 Touch when:   never for a new repository; adding a probe means deciding which role owns it
@@ -80,7 +97,7 @@ from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.settings import Settings
 from crb.store.ledger import assert_append_only
-from crb.store.models import APPEND_ONLY_TABLES, Grade, Run, User
+from crb.store.models import APPEND_ONLY_TABLES, Grade, Run, User, WorkerRow
 
 try:  # pragma: no cover — extra installed in [server]
     from prometheus_client import CONTENT_TYPE_LATEST
@@ -224,9 +241,60 @@ def _parse_ts(value: str) -> _dt.datetime | None:
     return ts if ts.tzinfo else ts.replace(tzinfo=_dt.UTC)
 
 
+#: A worker is alive when its last check-in is within this many of ITS OWN ``heartbeat_s``.
+WORKER_ALIVE_HEARTBEATS = 3
+#: A stopped worker row older than this is history: dropped from the listing. A lapsed
+#: (not stopped) row is always listed — a crashed worker is a fact until it comes back.
+WORKER_FORGET_AFTER_S = 3600
+
+
+def _age_s(stamp: str, now: _dt.datetime) -> float | None:
+    ts = _parse_ts(stamp) if stamp else None
+    return None if ts is None else round((now - ts).total_seconds(), 1)
+
+
+def _worker_view(row: WorkerRow, now: _dt.datetime) -> dict[str, Any]:
+    """One worker for ``data.workers`` (and the UI): its check-in age against the
+    staleness it promised, whether it is alive, what it holds, and a clean stop."""
+    age = _age_s(row.heartbeat, now)
+    stale_after = float(row.heartbeat_s or 0) * WORKER_ALIVE_HEARTBEATS
+    alive = not row.stopped and age is not None and stale_after > 0 and age <= stale_after
+    return {
+        "worker_id": row.worker_id,
+        "hostname": row.hostname,
+        "executor": row.executor,
+        "kinds": list(row.kinds or []),
+        "started": row.started or None,
+        "heartbeat": row.heartbeat or None,
+        "heartbeat_age_s": age,
+        "stale_after_s": stale_after,
+        "current_run_id": row.current_run_id or None,
+        "version": row.version,
+        "stopped": row.stopped or None,
+        "alive": alive,
+        "unconfirmed_containers": int(row.unconfirmed_containers or 0),
+    }
+
+
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
-    """``worker``: ``degraded`` when a running run's heartbeat is older than ``stale_s``
-    (the queue will reclaim it; the probe is the early warning)."""
+    """``worker`` (J-TEL-2): liveness from the ``workers`` table (every worker checks in
+    every ``heartbeat_s``, idle or not), plus running runs' heartbeats.
+
+    ``degraded``: runs are queued and no worker is alive (nothing will start — said with
+    the queue depth and the last check-in, or the last clean stop); no worker has ever
+    checked in; a worker stopped checking in (named, with its age); a running run's
+    heartbeat is older than ``stale_s`` (the queue will reclaim it; the probe is the early
+    warning); or a worker is still reaping containers whose kill went unconfirmed
+    (``unconfirmed_containers`` summed over the listed workers — each may still be
+    running). ``ok`` otherwise, naming the workers. Never ``down``: the API pod's readiness
+    is not the worker's liveness (module docstring) — ``down`` is reserved for the store
+    not answering.
+    """
+    now = _dt.datetime.now(_dt.UTC)
     try:
         with factory() as s:
             running = list(
@@ -237,22 +305,91 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
             queued = int(
                 s.execute(select(func.count(Run.id)).where(Run.status == "queued")).scalar_one()
             )
+            rows = list(s.execute(select(WorkerRow).order_by(WorkerRow.worker_id)).scalars())
     except Exception as exc:
         return ProbeResult("worker", DOWN, f"{type(exc).__name__}: {exc}")
-    now = _dt.datetime.now(_dt.UTC)
-    stale: list[str] = []
+    workers = [
+        _worker_view(r, now)
+        for r in rows
+        if not r.stopped or (_age_s(r.heartbeat, now) or 0.0) <= WORKER_FORGET_AFTER_S
+    ]
+    alive = [w for w in workers if w["alive"]]
+    stale_runs: list[str] = []
     for run_id, _worker, heartbeat in running:
         ts = _parse_ts(heartbeat) if heartbeat else None
         if ts is None or (now - ts).total_seconds() > stale_s:
-            stale.append(str(run_id))
-    data = {"running": len(running), "queued": queued, "stale": stale, "stale_after_s": stale_s}
-    if stale:
+            stale_runs.append(str(run_id))
+    # the contract docs/API.md#health documents and ui/src/api/types.ts types (WorkerProbeData):
+    # the top-level ``stale_after_s`` is the RUN threshold behind ``stale``; each worker's own
+    # ``stale_after_s`` (3 × its heartbeat_s) is the bound behind its ``alive``
+    unconfirmed = sum(int(w["unconfirmed_containers"]) for w in workers)
+    data = {
+        "workers": workers,
+        "alive": len(alive),
+        "running": len(running),
+        "queued": queued,
+        "stale": stale_runs,
+        "stale_after_s": stale_s,
+        "unconfirmed_containers": unconfirmed,
+    }
+    # a worker that should be alive and is not: not stopped, last seen too long ago
+    lapsed = [w for w in workers if not w["alive"] and not w["stopped"]]
+    if queued and not alive:
+        stopped = [w for w in workers if w["stopped"]]
+        if lapsed:
+            recent = min(lapsed, key=lambda w: w["heartbeat_age_s"] or float("inf"))
+            since = f"no worker has checked in for {recent['heartbeat_age_s'] or 0:.0f} s"
+            since += f" ({recent['worker_id']})"
+        elif stopped:
+            last = min(stopped, key=lambda w: _age_s(w["stopped"], now) or float("inf"))
+            since = (
+                f"the last worker ({last['worker_id']}) stopped "
+                f"{_age_s(last['stopped'], now) or 0:.0f} s ago"
+            )
+        else:
+            since = "no worker has checked in yet"
         return ProbeResult(
-            "worker", DEGRADED, f"{len(stale)} running run(s) with a stale heartbeat", data
+            "worker",
+            DEGRADED,
+            f"{_plural(queued, 'run')} queued, {since} — queued runs will not start until "
+            "a worker does",
+            data,
         )
-    if not running:
-        return ProbeResult("worker", OK, "idle" if not queued else f"idle, {queued} queued", data)
-    return ProbeResult("worker", OK, f"{len(running)} running, heartbeats fresh", data)
+    if stale_runs:
+        return ProbeResult(
+            "worker", DEGRADED, f"{len(stale_runs)} running run(s) with a stale heartbeat", data
+        )
+    if lapsed:
+        w = lapsed[0]
+        return ProbeResult(
+            "worker",
+            DEGRADED,
+            f"worker {w['worker_id']} last checked in {w['heartbeat_age_s'] or 0:.0f} s ago "
+            f"(alive within {w['stale_after_s']:.0f} s)",
+            data,
+        )
+    if not alive:
+        return ProbeResult(
+            "worker", DEGRADED, "no worker has checked in yet — queued runs will not start", data
+        )
+    if unconfirmed:
+        reaping = [w for w in workers if w["unconfirmed_containers"]]
+        who = ", ".join(str(w["worker_id"]) for w in reaping)
+        return ProbeResult(
+            "worker",
+            DEGRADED,
+            f"{_plural(unconfirmed, 'container')} whose docker kill was not confirmed "
+            f"{'are' if unconfirmed != 1 else 'is'} being reaped by worker {who} — each may "
+            "still be running on its host; `docker ps` there names them and "
+            "`docker rm -f <name>` reaps one by hand",
+            data,
+        )
+    newest = min(alive, key=lambda w: w["heartbeat_age_s"] or 0.0)
+    detail = f"{_plural(len(alive), 'worker')}, last check-in {newest['heartbeat_age_s']:.0f} s ago"
+    if running:
+        detail += f" · {_plural(len(running), 'run')} running"
+    detail += f" · {_plural(queued, 'run')} queued"
+    return ProbeResult("worker", OK, detail, data)
 
 
 def probe_sandbox(settings: Settings, role: str = ROLE_ALL) -> ProbeResult:

@@ -89,6 +89,46 @@ export interface Probe {
   data: Record<string, unknown>
 }
 
+/** One worker in the `worker` probe's `data.workers[]` (docs/API.md#health): its check-in age against the staleness it promised. */
+export interface WorkerProbeWorker {
+  worker_id: string
+  hostname: string
+  executor: string
+  kinds: string[]
+  started: string | null
+  heartbeat: string | null
+  /** Seconds since `heartbeat`; `null` when it has never checked in. */
+  heartbeat_age_s: number | null
+  /** `3 × this worker's own heartbeat_s` — the bound `alive` is judged against. */
+  stale_after_s: number
+  current_run_id: string | null
+  version: string
+  stopped: string | null
+  alive: boolean
+  /** Containers whose `docker kill` the daemon never confirmed and this worker is still reaping (0 on an older server). */
+  unconfirmed_containers?: number
+}
+
+/**
+ * The `worker` probe's `data` (docs/API.md#health). `stale_after_s` here is the RUN threshold
+ * (`worker_heartbeat_stale_s`): a running run whose heartbeat is older is listed in `stale`.
+ * Each worker's own `stale_after_s` is a different number — `3 × its heartbeat_s`.
+ */
+export interface WorkerProbeData {
+  workers: WorkerProbeWorker[]
+  /** Workers alive now. */
+  alive: number
+  /** Running runs. */
+  running: number
+  /** Queued runs. */
+  queued: number
+  /** Ids of running runs whose heartbeat is older than `stale_after_s`. */
+  stale: string[]
+  stale_after_s: number
+  /** Sum over the listed workers of the containers still being reaped; the probe is `degraded` while > 0. Absent on an older server. */
+  unconfirmed_containers?: number
+}
+
 /** `GET /health` — overall status is the worst probe. */
 export interface Health {
   status: ProbeStatus
@@ -302,8 +342,10 @@ export interface RunCounts {
   first_pass_clean: number
   rows: number
   /** A non-build kind's own counters, verbatim (a mine run's examined / found /
-   *  gold_clean / gold_dirty / skipped / known / pool); `{}` for build kinds. */
-  detail?: Record<string, number | string>
+   *  gold_clean / gold_dirty / skipped / known / pool; an oracle, controls or label
+   *  run's raw counts object, which may nest); `{}` for build kinds, absent on an
+   *  older server. */
+  detail?: Record<string, unknown>
 }
 
 /** Tasks done of total, and the task in flight (the run page's progress bar). */
@@ -350,6 +392,18 @@ export function ladderEntryLabel(entry: LadderEntry): string {
   return `${entry.builder}:${entry.model}${entry.provider ? `@${entry.provider}` : ''}${caps.length ? ` [${caps.join(' ')}]` : ''}`
 }
 
+/**
+ * A factory run's delivery switch as the worker read it (`RunOut.factory`): whether
+ * delivery was on, who overrode the route gate (id and display name) and the frozen
+ * backlog's hash. `null` for every other kind; absent on an older server.
+ */
+export interface RunFactory {
+  deliver: boolean
+  deliver_override_by: string | null
+  deliver_override_by_name: string | null
+  backlog_hash: string | null
+}
+
 /** @contract API.md "GET /runs/{id}: run + counts + progress". */
 export interface Run {
   id: string
@@ -379,6 +433,15 @@ export interface Run {
   error: string
   cost_usd: number
   apparatus_version: string
+  /** The worker that claimed the run and its last heartbeat (`null` until claimed); absent on an older server. */
+  worker_id?: string
+  heartbeat?: string | null
+  /** 1-based place in the FIFO queue while `queued`; `null` once claimed; absent on an older server. */
+  queue_position?: number | null
+  /** The kinds of the runs ahead in the queue, in order; absent on an older server. */
+  queue_kinds_ahead?: string[]
+  /** The factory's delivery switch (kind `factory` only, else `null`); absent on an older server. */
+  factory?: RunFactory | null
   counts: RunCounts
   progress: RunProgress
 }
@@ -1065,6 +1128,23 @@ export interface FactoryBacklogItem {
   depends_on: string[]
   structural_facts: string[]
   has_authored_test: boolean
+  /** What and why, as the operator wrote it (J-FAC-15: a revised backlog starts from it). */
+  description: string
+}
+
+/**
+ * J-FAC-3 — whether a factory run could open a pull request for this repository, by the
+ * worker's own credentials rule, answered from the record BEFORE any build is paid for.
+ * `reason` is the sentence to show (with the next step) when it cannot.
+ */
+export interface FactoryDeliveryPreflight {
+  can_deliver: boolean
+  reason_code: 'ok' | 'not_linked' | 'app_not_configured' | 'host_mismatch' | 'installation_missing' | 'installation_suspended' | 'read_only'
+  reason: string
+  full_name: string
+  default_branch: string
+  installation_id: number | null
+  account_login: string
 }
 
 /** `GET /factory/{repo}/backlog` — the ACTIVE frozen backlog; 404 `not_found` when none is registered. */
@@ -1073,6 +1153,21 @@ export interface FactoryBacklog {
   hash: string
   frozen_at: string | null
   items: FactoryBacklogItem[]
+  /**
+   * The delivery pre-flight (J-FAC-3). The current server always sends it; an API older
+   * than J-FAC-3 does not, and `FactoryPage` then says so (delivery off, "update the API")
+   * rather than guess — the field is optional so that fallback stays type-checked.
+   */
+  delivery?: FactoryDeliveryPreflight
+}
+
+/** J-FAC-4 — why the loop stopped an item, as recorded on the chain; `step` names where. */
+export interface FactoryRefusal {
+  /** `review` = the rule-3 stop (DL-045): routed human AFTER a verdict, never a readiness refusal. */
+  step: 'readiness' | 'red' | 'delivery' | 'review' | 'dependency'
+  reason: string
+  reason_code: string
+  measured_route: string
 }
 
 /** `GET /factory/{repo}/tasks` — a bare list (not a `Page`): the latest state of every active item, folded from the evidence chain. */
@@ -1087,13 +1182,27 @@ export interface FactoryTask {
    * `delivery_failed`'s error, `oracle_needs_strengthening`'s finding and way forward
    * (DL-045 rule 3); `''` when accepted or not yet run. */
   outcome_reason: string
+  /** The unsigned STRUCTURAL slots: what blocks the build and what an approver can sign. */
   dor_gaps: string[]
+  /** The open VALUE slots: they route the item test-first and are never signable
+   * (optional so a mock built before the field still types; the server always sends it). */
+  value_gaps?: string[]
   route_hint: string
   red_proof: boolean | null
   build_status: string
   pr_url: string | null
   review_verdict: string | null
   last_event: string
+  /** The newest refusal since the item's last readiness pass; `null` = not refused. (The
+   * server always sends these five; optional so a mock built before J-FAC-4 still types.) */
+  refusal?: FactoryRefusal | null
+  /** The outcome's error (a harness failure, a refused push); `''` when none. */
+  error?: string
+  /** F15 — the newest build's ledger task (the oracle commit), run, pack and row; `''` before a build. */
+  task_id?: string
+  run_id?: string
+  pack_hash?: string
+  row_hash?: string
   /** F28 — the capability map's route for the item's (class × size) cell, from the same
    * signed map the delivery gate reads; `route: ''` = nobody has measured the cell. */
   cell_route: { route: string; reason_code: string; reason: string; n: number; point: number; ci_low: number; ci_high: number; apparatus_versions: string[]; deliverable: boolean }

@@ -8,11 +8,13 @@ What it does: Pins that a backlog registers frozen and hashed with the freeze in
               evidence chain, that the RBAC ladder holds (viewer/operator/approver), that
               invalid items and value-slot sign-offs are refused, that a structural gap
               sign-off lands in both the gap ledger and the evidence, that the task view
-              reads "pending" before any run and folds ``pr_url`` from a rework's
-              ``delivery.updated`` as from ``delivery.opened`` — whichever is newest on the
-              chain (DL-045), folds an ``oracle_needs_strengthening`` stop with its reason
-              (DL-045 rule 3) — and that
-              registration is refused while a factory run is queued or running.
+              reads "pending" before any run, folds every refusal's reason and the build's
+              ids (J-FAC-4 / F15), folds ``pr_url`` from a rework's ``delivery.updated``
+              as from ``delivery.opened`` — whichever is newest on the chain (DL-045) —
+              folds an ``oracle_needs_strengthening`` stop with its reason (DL-045 rule 3),
+              that the backlog carries the delivery pre-flight the worker's credentials
+              rule implies (J-FAC-3), and that registration is refused while a factory run
+              is queued or running.
 How:          FastAPI TestClient over the seeded SQLite app (``fixtures.server_seed``);
               the factory state is read back through ``FactoryHome`` to check the files.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -45,7 +47,8 @@ from crb.factory.loop import STATUS_ORACLE_NEEDS_STRENGTHENING
 from crb.factory.readiness import ROUTE_HUMAN
 from crb.server.app import API_PREFIX
 from crb.server.factory_state import FactoryHome
-from crb.store.models import Run
+from crb.server.settings import GitHubAppSettings
+from crb.store.models import GitHubInstallation, Repo, Run
 from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
 from fixtures.signoff_seed import clear_policy
 
@@ -269,6 +272,15 @@ def test_task_view_folds_an_oracle_needs_strengthening_stop_with_its_reason(env:
     (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
     assert t["status"] == STATUS_ORACLE_NEEDS_STRENGTHENING and t["outcome_reason"] == REASON
     assert t["route_hint"] == ROUTE_HUMAN and t["last_event"] == EV_ITEM_OUTCOME
+    # J-FAC-4 meets rule 3: the stop's `route.decided` to human carries `after_verdict`, so
+    # it folds as a REVIEW-step refusal — never as a refusal at readiness (the item was built)
+    assert t["refusal"] == {
+        "step": "review",
+        "reason": REASON,
+        "reason_code": "",
+        "measured_route": "",
+    }
+    assert t["error"] == REASON
     assert env.get(f"/factory/{ALPHA}/evidence").json()["verified"] is True
 
 
@@ -424,3 +436,177 @@ def test_factory_delivery_fields_and_the_approver_only_override(env: Env) -> Non
         r.status_code == 422
         and "['deliver', 'max_rework'] apply to factory runs only" in envelope(r)["message"]
     )
+
+
+def test_task_view_folds_the_refusal_reason_and_the_build_ids(env: Env) -> None:
+    """J-FAC-4 / F15: every refusal the loop records (readiness → route human, red.refused,
+    delivery.refused, a blocked outcome) reaches the task view as ``refusal {step, reason,
+    reason_code, measured_route}``; the outcome's ``error`` is served; the newest build's
+    ``task_id`` / ``pack_hash`` / ``row_hash`` and the ledger row's ``run_id`` let the row
+    open its evidence. A new readiness pass clears the previous pass's refusal."""
+    assert (
+        _register(env, [ITEM, ITEM2, {**ITEM, "id": "I-3", "title": "Modulo"}]).status_code == 201
+    )
+    home = FactoryHome(env.settings.home, ALPHA)
+    ev = home.evidence(actor="worker")
+    row = env.info.succeeded_rows[0]
+    # I-1: assessed, built (the row is a seeded ledger row so run_id resolves), withheld
+    ev.record_readiness({"item_id": "I-1", "ready": True, "gaps": [], "route_hint": "build"})
+    ev.record_route("I-1", "build", "ready")
+    ev.record_red_proof({"item_id": "I-1", "test_sha256": "t" * 64})
+    ev.record_build(
+        "I-1",
+        pack_hash="p" * 64,
+        row_id=row.row_id,
+        row_hash=row.row_hash,
+        clean=True,
+        belts={},
+        rung="fake:m0",
+        trial="r1",
+        oracle_commit="c" * 40,
+        test_sha256="t" * 64,
+    )
+    ev.record_delivery_refused(
+        "I-1",
+        "route gate: the cell routes calibrate (n_below_min)",
+        pack_hash="p" * 64,
+        measured_route="calibrate",
+        reason_code="n_below_min",
+        policy_version="routing.v1",
+    )
+    ev.record_verdict({"item_id": "I-1", "verdict": "accept", "pack_hash": "p" * 64})
+    ev.record_item_outcome("I-1", status="accepted", error="")
+    # I-2: an unsigned structural gap routes it to a person; the value gap beside it is
+    # NOT a gap a person signs (the DoR gate refuses value slots) — it only routes
+    ev.record_readiness(
+        {
+            "item_id": "I-2",
+            "ready": False,
+            "gaps": [
+                {"slot": "method_path", "kind": "structural", "question": "Which method and path?"},
+                {
+                    "slot": "example_payload",
+                    "kind": "value",
+                    "question": "A representative payload.",
+                },
+            ],
+            "route_hint": "human",
+        }
+    )
+    ev.record_route("I-2", "human", "structural gap method_path unsigned", blocking=["method_path"])
+    ev.record_item_outcome("I-2", status="not_ready", error="")
+    # I-3: no oracle, then an error on the outcome
+    ev.record_readiness({"item_id": "I-3", "ready": True, "gaps": [], "route_hint": "build"})
+    ev.record_route("I-3", "build", "ready")
+    ev.record_red_refused("I-3", "no authored test and no test author configured", route="build")
+    ev.record_item_outcome("I-3", status="error", error="RuntimeError: boom")
+    by_id = {t["id"]: t for t in env.get(f"/factory/{ALPHA}/tasks").json()}
+    assert by_id["I-1"]["refusal"] == {
+        "step": "delivery",
+        "reason": "route gate: the cell routes calibrate (n_below_min)",
+        "reason_code": "n_below_min",
+        "measured_route": "calibrate",
+    }
+    assert by_id["I-1"]["task_id"] == "c" * 40 and by_id["I-1"]["pack_hash"] == "p" * 64
+    assert by_id["I-1"]["row_hash"] == row.row_hash and by_id["I-1"]["run_id"] == row.run_id
+    assert by_id["I-1"]["error"] == ""
+    assert by_id["I-2"]["refusal"] == {
+        "step": "readiness",
+        "reason": "structural gap method_path unsigned",
+        "reason_code": "",
+        "measured_route": "",
+    }
+    assert by_id["I-2"]["task_id"] == "" and by_id["I-2"]["run_id"] == ""
+    # dor_gaps are the STRUCTURAL gaps (what blocks and what an approver can sign);
+    # value gaps are served apart, never offered for signing
+    assert by_id["I-2"]["dor_gaps"] == ["method_path"]
+    assert by_id["I-2"]["value_gaps"] == ["example_payload"]
+    assert by_id["I-3"]["refusal"]["step"] == "red"
+    assert by_id["I-3"]["refusal"]["reason"].startswith("no authored test")
+    assert by_id["I-3"]["error"] == "RuntimeError: boom"
+    # a second pass: I-2's gap was signed, readiness now passes and the old refusal goes;
+    # I-3 is blocked on a dependency this time, which is a refusal with its own step
+    ev.record_readiness({"item_id": "I-2", "ready": True, "gaps": [], "route_hint": "build"})
+    ev.record_route("I-2", "build", "ready")
+    ev.record_item_outcome("I-3", status="blocked_on_dependency", blocked_on=["I-2"])
+    by_id = {t["id"]: t for t in env.get(f"/factory/{ALPHA}/tasks").json()}
+    assert by_id["I-2"]["refusal"] is None and by_id["I-2"]["dor_gaps"] == []
+    assert by_id["I-3"]["refusal"] == {
+        "step": "dependency",
+        "reason": "waiting on I-2",
+        "reason_code": "",
+        "measured_route": "",
+    }
+
+
+def _link(
+    env: Env, *, installation_id: int = 77, url: str = "https://github.com/acme/alpha.git"
+) -> None:
+    with env.factory() as s:
+        repo = s.get(Repo, ALPHA)
+        assert repo is not None
+        repo.url = url
+        repo.config_json = {
+            **dict(repo.config_json or {}),
+            "url": url,
+            "github": {
+                "installation_id": installation_id,
+                "full_name": "acme/alpha",
+                "default_branch": "trunk",
+            },
+        }
+        s.commit()
+
+
+def _installation(env: Env, permissions: dict[str, str], *, suspended: bool = False) -> None:
+    with env.factory() as s:
+        row = s.get(GitHubInstallation, 77) or GitHubInstallation(installation_id=77)
+        row.account_login = "acme"
+        row.permissions_json = permissions
+        row.suspended = suspended
+        s.add(row)
+        s.commit()
+
+
+def test_backlog_carries_the_delivery_preflight(env: Env) -> None:
+    """J-FAC-3: the backlog says BEFORE a run whether delivery is possible, by the same
+    rule the worker's credentials follow (linked through the app, on the app's host,
+    installation on record, not suspended, Contents: write + Pull requests: write) — so
+    a paid build never ends ``delivery_failed`` for a reason known before the run."""
+    assert _register(env, [ITEM]).status_code == 201
+    d = env.get(f"/factory/{ALPHA}/backlog").json()["delivery"]
+    assert d["can_deliver"] is False and d["reason_code"] == "not_linked"
+    assert "not through the GitHub App" in d["reason"] and d["full_name"] == ""
+    # linked, but the app is not configured on this deployment
+    _link(env)
+    d = env.get(f"/factory/{ALPHA}/backlog").json()["delivery"]
+    assert (d["can_deliver"], d["reason_code"]) == (False, "app_not_configured")
+    env.settings.github = GitHubAppSettings(app_id="4242", app_slug="crb", private_key="pem")
+    d = env.get(f"/factory/{ALPHA}/backlog").json()["delivery"]
+    assert (d["can_deliver"], d["reason_code"]) == (False, "installation_missing")
+    _installation(env, {"contents": "read", "metadata": "read"})
+    d = env.get(f"/factory/{ALPHA}/backlog").json()["delivery"]
+    assert (d["can_deliver"], d["reason_code"]) == (False, "read_only")
+    assert "contents: read" in d["reason"] and "acme" in d["reason"]
+    _installation(env, {"contents": "write", "pull_requests": "write"}, suspended=True)
+    d = env.get(f"/factory/{ALPHA}/backlog").json()["delivery"]
+    assert (d["can_deliver"], d["reason_code"]) == (False, "installation_suspended")
+    _installation(env, {"contents": "write", "pull_requests": "write"})
+    d = env.get(f"/factory/{ALPHA}/backlog").json()["delivery"]
+    assert d == {
+        "can_deliver": True,
+        "reason_code": "ok",
+        "reason": "",
+        "full_name": "acme/alpha",
+        "default_branch": "trunk",
+        "installation_id": 77,
+        "account_login": "acme",
+    }
+    # a URL edited to another host gets no token (CWE-201) — the pre-flight says so too
+    _link(env, url="https://example.invalid/acme/alpha.git")
+    d = env.get(f"/factory/{ALPHA}/backlog").json()["delivery"]
+    assert (d["can_deliver"], d["reason_code"]) == (False, "host_mismatch")
+    # the POST answers the same shape
+    r = _register(env, [ITEM])
+    assert r.status_code == 201 and r.json()["delivery"]["reason_code"] == "host_mismatch"
+    assert r.json()["items"][0]["description"] == ITEM["description"]

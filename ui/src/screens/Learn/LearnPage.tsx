@@ -20,9 +20,12 @@
  * Works with:   docs/LEARNING-LOOP.md (what each report means and why it stops at a human),
  *               src/crb/core/learn.py (the three derivations), src/crb/server/routes/learn.py
  *               (the routes), ui/src/components/StatTile.tsx and ui/src/components/DataTable.tsx,
- *               ui/src/screens/Oracle/OraclePage.tsx (where the strengthen report sends you)
- * Tested by:    untested — read-only rendering over the three reports; the derivations are
- *               pinned in tests/test_learn.py and the routes in tests/test_server_routes_learn.py
+ *               ui/src/components/Help.tsx (`Term` — stale, oracle strength and apparatus open
+ *               their definitions inline), ui/src/screens/Oracle/OraclePage.tsx (where the
+ *               strengthen report sends you)
+ * Tested by:    ui/src/screens/Learn/LearnPage.test.tsx (plain eyebrows, the intro sentences,
+ *               the terms, no write affordance); the derivations are pinned in
+ *               tests/test_learn.py and the routes in tests/test_server_routes_learn.py
  * Touch when:   a report gains a field (src/crb/core/learn.py — mirror the interface here)
  *               or a fourth play is added to docs/LEARNING-LOOP.md; never for a new repository.
  */
@@ -34,6 +37,7 @@ import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
+import { Term } from '../../components/Help'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
@@ -223,6 +227,9 @@ function RefusalsSection({ repo }: { repo: string }) {
   const apparatus = single ? `apparatus ${single.apparatus_version} · failure_kind = protocol · Wilson 95%` : byApp.length > 1 ? `${byApp.length} apparatus versions — see each below · failure_kind = protocol` : 'no rows'
   return (
     <div className="space-y-4">
+      <p className="m-0 text-sm text-on-surface-muted">
+        Rows the builder’s guards refused, grouped into classes with the spend they cost, per <Term id="apparatus">apparatus</Term> version. A person judges each class honest or refused and writes the line into the guard corpus, the list of refusals the guards then recognise; until then every verdict here is unsure.
+      </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile
           label={byApp.length > 1 ? 'Instrument-caused rows (per apparatus)' : 'Instrument-caused rows'}
@@ -269,6 +276,9 @@ function StrengthenSection({ repo }: { repo: string }) {
   const s = q.data
   return (
     <div className="space-y-4">
+      <p className="m-0 text-sm text-on-surface-muted">
+        <Term id="cell">Cells</Term> withheld from deliver because their <Term id="oracle_strength">oracle strength</Term> is under the bar or their <Term id="negative_controls">negative controls</Term> escaped or were thin, each as a test-writing item a person can freeze on the Factory. More attempts will not move these cells; stronger tests will.
+      </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Oracle-held cells" value={s.cells_flagged.length ? fmtInt(s.cells_flagged.length) : '—'} n={s.cells_flagged.length} apparatus={`routing.v1 · oracle threshold ${s.threshold.toFixed(2)}`} tone={s.cells_flagged.length ? 'amber' : 'green'} />
         <StatTile label="Strengthening items" value={s.items.length ? fmtInt(s.items.length) : '—'} n={s.items.length} apparatus="test.add · structural slots only · DoR: build" />
@@ -280,7 +290,7 @@ function StrengthenSection({ repo }: { repo: string }) {
         rowKey={(i) => i.id}
         caption="Strengthening backlog — proposals in the frozen-backlog shape"
         dense
-        empty={<EmptyState compact title="No oracle-held cells" reason="No cell is withheld from deliver for oracle_weak, controls_escapes or controls_thin." />}
+        empty={<EmptyState compact title="No oracle-held cells" reason="No cell is withheld from deliver for a weak oracle, a controls escape or thin controls." />}
       />
       <p className="text-xs text-on-surface-muted">{s.note}</p>
     </div>
@@ -306,6 +316,9 @@ function RemeasureSection({ repo }: { repo: string }) {
   const p = q.data
   return (
     <div className="space-y-4">
+      <p className="m-0 text-sm text-on-surface-muted">
+        Cells whose rows predate the current <Term id="apparatus">apparatus</Term>. <Term id="stale">Stale</Term> evidence is kept as history and licenses nothing; the plan lists the runs to queue and what they would cost.
+      </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Stale rows" value={p.rows_total ? fmtInt(p.rows_stale) : '—'} n={p.rows_total} apparatus={`older than apparatus ${p.current_apparatus}`} tone={p.rows_stale ? 'amber' : 'green'} />
         <StatTile label="Rows still needed" value={p.cells.length ? fmtInt(p.summary.n_needed_total) : '—'} n={p.cells.length} apparatus={`rule n ≥ ${p.min_n} per cell · ${fmtInt(p.summary.cells_stale)} cell(s)`} />
@@ -340,7 +353,7 @@ export function LearnPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Learning loop"
+        eyebrow="Instrument · Learn"
         title="Learn"
         purpose="What the ledger teaches: refusals that should become guard tests, weak oracles that should become test work, stale evidence that should be re-measured. Nothing here acts; a person does."
         actions={<RepoPicker value={repo} onChange={setRepo} />}
@@ -349,13 +362,13 @@ export function LearnPage() {
         <EmptyState title="Pick a repository" reason="The three reports are derived from one repository's ledger rows." />
       ) : (
         <>
-          <Card eyebrow="play 04 — refusal triage" title="Refusals → guard corpus">
+          <Card eyebrow="Refusals" title="Refusals → guard corpus">
             <RefusalsSection repo={repo} />
           </Card>
-          <Card eyebrow="play 03 — oracle" title="Weak oracles → strengthening backlog">
+          <Card eyebrow="Weak oracles" title="Weak oracles → strengthening backlog">
             <StrengthenSection repo={repo} />
           </Card>
-          <Card eyebrow="evidence expires" title="Apparatus change → re-measurement plan">
+          <Card eyebrow="Stale evidence" title="Apparatus change → re-measurement plan">
             <RemeasureSection repo={repo} />
           </Card>
         </>

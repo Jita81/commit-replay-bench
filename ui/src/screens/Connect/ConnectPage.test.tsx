@@ -4,12 +4,16 @@
  * Navigation
  * ----------
  * What it is:   Tests for the Connect list and the per-repository task list.
- * What it does: Pins that the list shows each repository's next stage; that the per-repo
- *               page renders six stages with the API-derived statuses (a 404 oracle/controls
- *               = not started, not an error); that the operator's action on the next stage
+ * What it does: Pins that the list shows each repository's next stage and names the door
+ *               "Baseline" (J-ONR-14); that the per-repo page renders six stages with the
+ *               API-derived statuses (a 404 oracle/controls = not started, not an error)
+ *               under the journey eyebrow; that the operator's action on the next stage
  *               posts the right run kind (`POST /runs {kind: mine}`) and the probe posts to
- *               its own route; that a viewer sees the stage but no button; and that the
- *               header offers the results door.
+ *               its own route; that a viewer sees the stage and a sentence, not a bare
+ *               "operator" (J-ONR-15); that a running measurement renders the in-flight
+ *               panel from the polled run — attempts, spend, started, Cancel with a confirm
+ *               that posts the cancel (J-ONR-5) — and a queued run reads "Queued" with its
+ *               place in the line (J-TEL-6).
  * How:          `mockApi` + `renderApp` with `path` set so `useParams` resolves.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -18,7 +22,7 @@
  * Touch when:   a stage or its action changes.
  */
 
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
@@ -37,6 +41,34 @@ const REPO = {
   updated: '2026-09-17T00:00:00Z',
   config: {},
 }
+const MEASURED = { ...REPO, task_counts: { total: 12, standard: 9, hard: 3, gold_clean: 10, gold_failed: 1, unchecked: 1 } }
+const RUN = {
+  id: 'r9',
+  repo: 'alpha',
+  kind: 'replay',
+  status: 'running',
+  mode: 'sighted',
+  builder: 'fixture',
+  model: 'gold',
+  provider: '',
+  ladder: [],
+  executor: 'docker',
+  timeout: 600,
+  pool: '',
+  limit: 10,
+  task_ids: [],
+  builder_config: {},
+  actor: 'op',
+  created: '2026-09-19T10:00:00Z',
+  started: '2026-09-19T10:00:20Z',
+  finished: null,
+  cancel_requested: false,
+  error: '',
+  cost_usd: 0.42,
+  apparatus_version: '2.2',
+  counts: { tasks: 2, clean: 2, disqualified: 0, errors: 0, first_pass_clean: 2, rows: 2 },
+  progress: { done: 2, total: 10, current_task_id: 't3' },
+}
 const EMPTY_MAP = { repo: 'alpha', by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells: [], summary: { trusted_autonomy_coverage: 0, total_cells: 0, measured_cells: 0, deliver_cells: 0, n_total: 0, false_q1_total: 0, apparatus_versions: [] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' } }
 
 describe('ConnectPage', () => {
@@ -48,6 +80,26 @@ describe('ConnectPage', () => {
     await waitFor(() => expect(screen.getByRole('table', { name: 'Connected repositories' })).toBeInTheDocument())
     expect(screen.getByText('commits mined into tasks')).toBeInTheDocument() // the next stage after a good probe
     expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute('href', '/connect/alpha')
+    // gold-clean carries its definition one click away
+    expect(screen.getByRole('button', { name: /gold-clean/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('Journey · 1 of 4 · Connection')).toBeInTheDocument()
+  })
+
+  it('a measured repository\'s door is named Baseline, the same as the nav, and opens the baseline', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [MEASURED], total: 1, limit: 500, offset: 0 },
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 22 } },
+    })
+    renderApp(<ConnectPage />, { route: '/connect' })
+    // the button does what its name says: it lands on /results, not on the walk (a second Baseline away)
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Baseline' })).toHaveAttribute('href', '/results?repo=alpha'))
+    expect(screen.queryByRole('link', { name: 'Results' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Continue' })).not.toBeInTheDocument()
+    // the repository link is still the door to the walk
+    expect(screen.getByRole('link', { name: 'alpha' })).toHaveAttribute('href', '/connect/alpha')
   })
 
   it('the per-repository walk: six stages, statuses from the API, the operator runs the next one', async () => {
@@ -77,7 +129,8 @@ describe('ConnectPage', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
     const post = calls.find((c) => c.method === 'POST' && c.path === '/runs')!
     expect(JSON.parse(String(post.init?.body))).toEqual({ repo: 'alpha', kind: 'mine' })
-    expect(screen.getByRole('link', { name: 'Results' })).toHaveAttribute('href', '/results?repo=alpha')
+    expect(screen.getByRole('link', { name: 'Baseline' })).toHaveAttribute('href', '/results?repo=alpha')
+    expect(screen.getByText('Journey · 1 of 4 · Connection')).toBeInTheDocument()
   })
 
   it('a viewer sees the walk but no action', async () => {
@@ -91,6 +144,99 @@ describe('ConnectPage', () => {
     renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
     await waitFor(() => expect(screen.getByTestId('stage-probe')).toHaveTextContent('Not started'))
     expect(screen.queryByRole('button', { name: /^Run$/ })).not.toBeInTheDocument()
-    expect(screen.getByTestId('stage-probe')).toHaveTextContent('operator')
+    expect(screen.getByTestId('stage-probe')).toHaveTextContent('An operator runs this.')
+  })
+
+  it('a viewer on the measure stage is told it spends, in a sentence', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos/alpha': MEASURED,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('Not started'))
+    expect(screen.getByTestId('stage-measure')).toHaveTextContent('An operator starts this; it spends model budget.')
+    expect(screen.queryByRole('button', { name: /^Measure…$/ })).not.toBeInTheDocument()
+  })
+
+  it('a running measurement shows attempts, spend, started and a Cancel that confirms before posting (J-ONR-5)', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'running', finished: null } },
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 4 } },
+      'GET /runs/r9': RUN,
+      'POST /runs/r9/cancel': () => json({ ...RUN, cancel_requested: true }),
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('In progress'))
+    await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('Measuring — attempt 3 of 10 · $0.42 so far, builder-reported (4 rows already on the current apparatus)'))
+    const panel = screen.getByTestId('in-flight')
+    // the progress line is a polite live region (it changes every poll: attempt, spend) — the
+    // link and the Cancel button sit outside it, so they are never re-announced
+    const status = within(panel).getByRole('status')
+    expect(status).toHaveTextContent(/Attempt 3 of 10 · \$0\.42 spent so far · started \d{2}:\d{2}\./)
+    expect(status).toHaveTextContent('Rows land on the baseline as each attempt is graded; when the run finishes this stage turns Done and the Baseline button fills in.')
+    expect(within(status).queryByRole('link')).toBeNull()
+    expect(within(status).queryByRole('button')).toBeNull()
+    expect(within(panel).getByRole('link', { name: 'Open the run' })).toHaveAttribute('href', '/runs/r9')
+    // no second spend is offered while the run is in flight
+    expect(screen.queryByRole('button', { name: /^Measure…$/ })).not.toBeInTheDocument()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Cancel the run' }))
+    expect(globalThis.confirm).toHaveBeenCalledWith('Cancel this run? Attempts already made are still charged.')
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs/r9/cancel')).toBe(true))
+  })
+
+  it('a queued run reads Queued with the server’s queue_position (the worker’s own order), never a client recount (J-TEL-6)', async () => {
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'queued', finished: null } },
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+      'GET /runs/r9': { ...RUN, status: 'queued', started: null, progress: { done: 0, total: 0, current_task_id: null }, cost_usd: 0, queue_position: 3, queue_kinds_ahead: ['replay', 'mine'] },
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('Queued — 2 runs ahead of it'))
+    // the queued list is not read when the server states the position
+    expect(calls.some((c) => c.method === 'GET' && c.path === '/runs')).toBe(false)
+  })
+
+  it('an older server that sends no queue_position: the place in the line falls back to the queued list', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'queued', finished: null } },
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+      'GET /runs/r9': { ...RUN, status: 'queued', started: null, progress: { done: 0, total: 0, current_task_id: null }, cost_usd: 0 },
+      'GET /runs': { items: [{ ...RUN, id: 'r7', created: '2026-09-19T09:00:00Z', status: 'queued' }, { ...RUN, status: 'queued' }], total: 2, limit: 200, offset: 0 },
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('Queued — 1 run ahead of it'))
+    expect(within(screen.getByTestId('stage-measure')).getByText('Queued', { selector: 'span' })).toBeInTheDocument()
+    expect(screen.getByTestId('stage-measure')).not.toHaveTextContent('In progress')
+    expect(screen.getByTestId('in-flight')).toHaveTextContent('Waiting for a worker')
+  })
+
+  it('a queued run that still carries progress (reclaimed after a stale worker) reads Waiting, never an attempt in hand', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'queued', finished: null } },
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+      // the counts the run had before it was reclaimed are still on the row
+      'GET /runs/r9': { ...RUN, status: 'queued', started: null, progress: { done: 2, total: 10, current_task_id: null }, cost_usd: 0.42, queue_position: 1, queue_kinds_ahead: [] },
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('Queued'))
+    const status = within(screen.getByTestId('in-flight')).getByRole('status')
+    expect(status).toHaveTextContent('Waiting for a worker')
+    expect(status).not.toHaveTextContent(/Attempt \d/)
   })
 })

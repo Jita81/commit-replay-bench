@@ -68,6 +68,7 @@ from crb.server.github_app import (
     GitHubAppError,
     Installation,
     InstallationRepo,
+    permissions_allow_delivery,
     suggest_config,
 )
 from crb.server.routes.repos import (
@@ -237,7 +238,7 @@ def _out(row: GitHubInstallation) -> InstallationOut:
         html_url=row.html_url,
         suspended=row.suspended,
         permissions=perms,
-        can_deliver=perms.get("contents") == "write" and perms.get("pull_requests") == "write",
+        can_deliver=permissions_allow_delivery(perms),
         recorded_by=row.recorded_by,
         updated=row.updated,
     )

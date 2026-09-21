@@ -8,7 +8,8 @@
  *               and a controllable `FakeEventSource`.
  * What it does: Pins that the resume URL carries `?after=`, that malformed frames are
  *               rejected (counted, not buffered), that a dropped stream reconnects from
- *               `lastSeq` and stops on `done`, that the buffer is bounded; that the page opens
+ *               `lastSeq` and stops on `done`, that the buffer is bounded but never evicts a
+ *               `system/run.kill_*` event (the container line survives a busy run); that the page opens
  *               the stream and appends step events into the live log; and — after A2 — that
  *               the run's split tiles show the all-rows rate, the model rate, instrument and
  *               budget counts with cost-known, that a v5 task row shows five belt pills and a
@@ -26,13 +27,14 @@
  * Touch when:   the SSE wire shape or a run-detail tile changes (docs/API.md) — extend the
  *               fake frames or the tile assertions.
  */
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EventSourceLike } from '../../api/sse'
-import { RunEventStream, parseStepEvent, runEventsUrl } from '../../api/sse'
+import { RunEventStream, isPinned, parseStepEvent, runEventsUrl } from '../../api/sse'
 import type { Run } from '../../api/types'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import { RunDetailPage } from './RunDetailPage'
+import { containerLine } from './telemetry'
 
 /** A controllable EventSource double. */
 class FakeEventSource implements EventSourceLike {
@@ -143,6 +145,25 @@ describe('sse primitives', () => {
     const es = FakeEventSource.instances[FakeEventSource.instances.length - 1]!
     for (let i = 1; i <= 5; i++) es.emit('step', step(i))
     expect(s.getSnapshot().events.map((e) => e.seq)).toEqual([3, 4, 5])
+    s.close()
+  })
+  it('never evicts the run.kill_* events the container line is derived from', () => {
+    // docs/API.md: the run page says "may still be running (being reaped)" BETWEEN
+    // run.kill_unconfirmed and run.kill_reaped — however many events land in between.
+    const s = new RunEventStream('r', { factory: (u) => new FakeEventSource(u), maxEvents: 3 })
+    s.open()
+    const es = FakeEventSource.instances[FakeEventSource.instances.length - 1]!
+    es.emit('step', step(1))
+    es.emit('step', step(2, { stage: 'system', action: 'run.kill_unconfirmed', status: 'error', payload: { container: 'crb-build-x' } }))
+    for (let i = 3; i <= 20; i++) es.emit('step', step(i))
+    expect(s.getSnapshot().events.map((e) => e.seq)).toEqual([2, 19, 20])
+    expect(containerLine(s.getSnapshot().events)?.text).toMatch(/being reaped/)
+    es.emit('step', step(21, { stage: 'system', action: 'run.kill_reaped', status: 'ok', payload: { container: 'crb-build-x' } }))
+    for (let i = 22; i <= 30; i++) es.emit('step', step(i))
+    expect(s.getSnapshot().events.map((e) => e.seq)).toEqual([2, 21, 30])
+    expect(containerLine(s.getSnapshot().events)).toBeNull()
+    // a non-system run.kill_* look-alike is ordinary and evicted
+    expect(isPinned(step(1, { action: 'run.kill_unconfirmed' }) as never)).toBe(false)
     s.close()
   })
 })
@@ -301,5 +322,191 @@ describe('RunDetailPage — the failure split (A2)', () => {
     const status = await screen.findByTestId('split-unavailable')
     expect(status.textContent).toContain('Failure split unavailable')
     expect(screen.queryByTestId('tile-split-point')).toBeNull()
+  })
+})
+
+describe('RunDetailPage — telemetry on the Progress card and the live log (T2)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    FakeEventSource.instances = []
+  })
+
+  /** The page's clock, fixed 12 minutes after RUN.started so elapsed and ages are deterministic. */
+  const clock = () => Date.parse('2026-09-13T09:13:00Z')
+  const HEALTH = { status: 'ok', probes: [{ name: 'worker', status: 'ok', detail: '1 running', data: { running: 1, queued: 4, stale: [], stale_after_s: 120 } }] }
+  const tasksPage = (latencies: number[]) => ({
+    items: latencies.map((latency_s, i) => ({
+      task_id: `${i}`.repeat(40),
+      capability_class: 'bug.fix',
+      size: 'XS',
+      pool: 'standard',
+      language: 'python',
+      trials: 1,
+      clean: true,
+      first_pass_clean: true,
+      disqualified: false,
+      error: '',
+      cost_usd: 0.1,
+      latency_s,
+      belt_set: 'v5',
+      belts: { tests_unmodified: true, target_green: true, no_new_failures: true, source_changed: true, repo_lint_clean: null },
+      pack_hashes: [],
+      row_ids: [],
+    })),
+    total: latencies.length,
+    limit: 500,
+    offset: 0,
+  })
+
+  it('shows the Now line (elapsed, spend, estimate with its basis), the stage from the last event, the heartbeat and the Terms', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /health': HEALTH,
+      'GET /runs/run-1': { ...RUN, progress: { done: 3, total: 10, current_task_id: 'abc1234567890' }, cost_usd: 0.84, worker_id: 'worker-1', heartbeat: '2026-09-13T09:12:54Z' },
+      'GET /runs/run-1/tasks': tasksPage([200, 260, 260]),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const now = await screen.findByTestId('run-now')
+    await waitFor(() => expect(now.textContent).toContain('about 28 minutes left if the 7 remaining take the mean of the 3 done (4 min 0 s each)'))
+    expect(now.textContent).toContain('Started 12 min ago · 3 of 10 tasks done · $0.8400 so far')
+    expect(now.textContent).toContain('a planning estimate, not a measurement')
+
+    const hb = await screen.findByTestId('run-heartbeat')
+    await waitFor(() => expect(hb.textContent).toBe('Worker worker-1 last checked in 6 s ago.'))
+    expect(hb).not.toHaveAttribute('role', 'status')
+
+    // No event yet: the stage line waits for the stream rather than guessing.
+    expect(screen.queryByTestId('run-stage')).toBeNull()
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+    const es = FakeEventSource.instances[0]!
+    await act(async () => {
+      es.open()
+      es.emit('step', step(1, { stage: 'build', action: 'build.turn', payload: { turn: 7, tool_calls: 1 } }))
+    })
+    expect(screen.getByTestId('run-stage').textContent).toBe('Task 4 of 10 · build · turn 7')
+    await act(async () => {
+      es.emit('step', step(2, { payload: { belt: 'no_new_failures', value: false, new: ['test_divide_zero', 'test_divide_negative'] } }))
+    })
+    expect(screen.getByTestId('run-stage').textContent).toBe('Task 4 of 10 · grade · belt no_new_failures ✗')
+
+    // The Terms on the card are real buttons that open a definition inline.
+    const terms = screen.getByTestId('progress-terms')
+    const belt = within(terms).getByRole('button', { name: /belt/ })
+    expect(belt).toHaveAttribute('aria-expanded', 'false')
+    within(terms).getByRole('button', { name: /sighted/ })
+    within(terms).getByRole('button', { name: /evidence pack/ })
+  })
+
+  it('says a container may still be running from the unconfirmed-kill event until the reaper lands', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /health': HEALTH,
+      'GET /runs/run-1': { ...RUN, worker_id: 'worker-1', heartbeat: '2026-09-13T09:12:54Z' },
+      'GET /runs/run-1/tasks': tasksPage([]),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    await screen.findByTestId('run-now')
+    expect(screen.queryByTestId('run-container')).toBeNull()
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+    const es = FakeEventSource.instances[0]!
+    await act(async () => {
+      es.open()
+      es.emit('step', step(1, { stage: 'system', action: 'run.kill_unconfirmed', status: 'error', payload: { container: 'crb-build-a1', run_id: 'run-1', bound_s: 10 } }))
+    })
+    const line = screen.getByTestId('run-container')
+    expect(line.textContent).toBe('A container may still be running (being reaped by the worker).')
+    expect(line).toHaveAttribute('role', 'status')
+    await act(async () => {
+      es.emit('step', step(2, { stage: 'system', action: 'run.kill_reap_failed', status: 'error', payload: { container: 'crb-build-a1', attempts: 20 } }))
+    })
+    expect(screen.getByTestId('run-container').textContent).toContain('run `docker rm -f crb-build-a1` on the worker host')
+    await act(async () => {
+      es.emit('step', step(3, { stage: 'system', action: 'run.kill_reaped', payload: { container: 'crb-build-a1', attempts: 21 } }))
+    })
+    expect(screen.queryByTestId('run-container')).toBeNull()
+  })
+
+  it('reads a stale heartbeat as a status against the worker probe limit', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /health': HEALTH,
+      'GET /runs/run-1': { ...RUN, worker_id: 'worker-1', heartbeat: '2026-09-13T09:10:00Z' },
+      'GET /runs/run-1/tasks': tasksPage([]),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const hb = await screen.findByTestId('run-heartbeat')
+    await waitFor(() => expect(hb.textContent).toContain('over the 2 min 0 s limit'))
+    expect(hb).toHaveAttribute('role', 'status')
+    expect(hb.textContent).toContain('The queue will hand the run to another worker.')
+  })
+
+  it('a queued run says its position and what is ahead; an older server gets no invented position', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /health': HEALTH,
+      'GET /runs/run-1': { ...RUN, status: 'queued', started: null, queue_position: 3, queue_kinds_ahead: ['replay', 'mine', 'replay'] },
+      'GET /runs/run-1/tasks': tasksPage([]),
+    })
+    const { unmount } = renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const q = await screen.findByTestId('run-queue')
+    await waitFor(() => expect(q.textContent).toBe('Queued — position 3 of 4 · ahead of it: 2 replay, 1 mine.'))
+    expect(screen.getByTestId('run-now').textContent).toBe('Not started yet.')
+    unmount()
+    vi.unstubAllGlobals()
+
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': { ...RUN, status: 'queued', started: null },
+      'GET /runs/run-1/tasks': tasksPage([]),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const q2 = await screen.findByTestId('run-queue')
+    expect(q2.textContent).toBe('Queued — waiting for a worker; this server does not report the position.')
+  })
+
+  it('a factory run’s header names builder, model, ladder and the delivery switch with its override', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': { ...RUN, kind: 'factory', ladder: ['r1', 'r2'], factory: { deliver: true, deliver_override_by: 'u2', deliver_override_by_name: 'Grace', backlog_hash: 'f'.repeat(64) } },
+      'GET /runs/run-1/tasks': tasksPage([]),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const line = await screen.findByTestId('run-identity')
+    expect(line.textContent).toBe('factory · sighted · editblock · gpt-oss-120b · cerebras · ladder r1,r2 · delivery on (override by Grace)')
+  })
+
+  it('live log: a failed belt and an error row carry the red glyph, and every row explains its action', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': RUN,
+      'GET /runs/run-1/tasks': tasksPage([]),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+    const es = FakeEventSource.instances[0]!
+    await act(async () => {
+      es.open()
+      es.emit('step', step(1, { payload: { belt: 'tests_unmodified', value: true } }))
+      es.emit('step', step(2, { payload: { belt: 'no_new_failures', value: false, new: ['test_divide_zero', 'test_divide_negative'] } }))
+      es.emit('step', step(3, { stage: 'build', action: 'build.done', status: 'ok', error_message: 'builder: rate limited', payload: { builder: 'editblock' } }))
+    })
+    const rows = screen.getAllByTestId('log-row')
+    expect(rows).toHaveLength(3)
+    expect(rows[0]!.textContent).toContain('tests_unmodified ✓')
+    expect(within(rows[0]!).getByRole('img', { name: 'ok' })).toBeInTheDocument()
+    expect(rows[1]!.textContent).toContain('no_new_failures ✗ — 2 new failures')
+    expect(within(rows[1]!).getByRole('img', { name: 'belt failed' })).toBeInTheDocument()
+    expect(within(rows[2]!).getByRole('img', { name: 'error' })).toBeInTheDocument()
+    expect(rows[2]!.textContent).toContain('builder: rate limited')
+    // The explanation line: one plain sentence per action, muted, on every row.
+    expect(rows[0]!.textContent).toContain('One belt was evaluated; the value says whether it held.')
+    expect(rows[2]!.textContent).toContain('The attempt finished with its turns, tokens and builder-reported cost.')
+    // The explanations can be switched off; the rows stay.
+    const toggle = screen.getByRole('checkbox', { name: 'Explain each row' })
+    expect(toggle).toBeChecked()
+    await act(async () => {
+      toggle.click()
+    })
+    expect(screen.getAllByTestId('log-row')[0]!.textContent).not.toContain('One belt was evaluated')
   })
 })

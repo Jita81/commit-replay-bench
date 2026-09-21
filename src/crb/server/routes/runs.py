@@ -35,13 +35,17 @@ How:          FastAPI handlers over ``JobQueue`` (queue writes) and read-only SQ
               queries; ``run_out`` is the one place a ``Run`` row becomes a ``RunOut``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md
-Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut — mirrored by ui/src/api/types.ts),
-              src/crb/store/jobs.py (enqueue, cancel), src/crb/server/worker.py (what a
-              queued run becomes), src/crb/store/models.py (Run, Grade, Event),
+Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, RunFactoryOut —
+              mirrored by ui/src/api/types.ts), src/crb/store/jobs.py (enqueue; cancel with
+              the operator as actor), src/crb/server/worker.py (what a queued run becomes;
+              the counts shapes per kind), src/crb/store/models.py (Run, Grade, Event, User —
+              the override's display name resolved at read), docs/API.md#runs (the
+              ``counts`` shapes per kind, queue position, the factory posture),
               ui/src/screens/Runs/RunsPage.tsx and ui/src/screens/Runs/RunDetailPage.tsx (the screens)
 Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py
 Touch when:   a run parameter is added (schema field → ``params`` here → the worker reads it →
-              docs/API.md → the UI type); a field is added to ``RunOut`` (the UI type first).
+              docs/API.md → the UI type); a field is added to ``RunOut`` (the UI type first);
+              a run kind is added (decide in ``_counts`` whether it is a build kind).
 
 """
 
@@ -82,14 +86,15 @@ from crb.server.schemas import (
     PreflightIn,
     RunCounts,
     RunCreateRequest,
+    RunFactoryOut,
     RunOut,
     RunProgress,
     RunRetention,
     RunTaskRow,
     StepEventOut,
 )
-from crb.store.jobs import KIND_FACTORY
-from crb.store.models import Event, Grade, Repo, Run, Task
+from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
+from crb.store.models import Event, Grade, Repo, Run, Task, User
 
 log = logging.getLogger("crb.server.runs")
 
@@ -115,7 +120,8 @@ class JobsApi:
     """The three queue operations this module needs, resolved at call time."""
 
     enqueue: Callable[[sessionmaker[Session], Run], Run]
-    request_cancel: Callable[[sessionmaker[Session], str], bool]
+    #: ``(factory, run_id, actor)`` — the actor is the operator who asked (J-TEL-7).
+    request_cancel: Callable[[sessionmaker[Session], str, str], bool]
     list_runs: (
         Callable[..., tuple[list[Run], int]] | None
     )  # (factory, *, repo, kind, status, limit, offset)
@@ -141,7 +147,7 @@ def _jobs_api() -> JobsApi | None:
     if callable(enqueue) and callable(cancel):
         return JobsApi(
             enqueue=enqueue,
-            request_cancel=lambda f, rid: bool(cancel(f, rid)),
+            request_cancel=lambda f, rid, actor: bool(cancel(f, rid, actor=actor)),
             list_runs=lister if callable(lister) else None,
         )
     queue_cls = getattr(mod, "JobQueue", None)
@@ -152,8 +158,8 @@ def _jobs_api() -> JobsApi | None:
         out: Run = queue_cls(factory).enqueue(run)
         return out
 
-    def _cancel(factory: sessionmaker[Session], run_id: str) -> bool:
-        return queue_cls(factory).request_cancel(run_id) is not None
+    def _cancel(factory: sessionmaker[Session], run_id: str, actor: str) -> bool:
+        return queue_cls(factory).request_cancel(run_id, actor=actor) is not None
 
     def _list(factory: sessionmaker[Session], **kw: Any) -> tuple[list[Run], int]:
         out: tuple[list[Run], int] = queue_cls(factory).list_runs(**kw)
@@ -318,15 +324,62 @@ def derive_counts(session: Session, run_id: str) -> RunCounts:
 
 
 def _counts(session: Session, run: Run) -> RunCounts:
+    """``counts`` by KIND (J-TEL-5): a build kind (replay / blind / factory) is the
+    ``RunSummary`` mapping — the worker's, or re-derived from its ledger rows. Every other
+    kind serves its ``counts_json`` verbatim under ``detail``: an oracle run's ``tasks``
+    are scored tasks and its ``errors`` harness-errored mutants, a label run's cost is in
+    ``usage`` — read as a build summary they rendered ``Clean 0.0 %`` with the wrong n."""
     cj = dict(run.counts_json or {})
+    if run.kind not in BUILD_KINDS and run.kind != KIND_FACTORY:
+        return RunCounts(detail={k: v for k, v in cj.items() if k != "current_task_id"})
     if "tasks" in cj or "rows" in cj:
         known = {k: cj[k] for k in RunCounts.model_fields if k in cj and k != "detail"}
         return RunCounts(**known)
     derived = derive_counts(session, run.id)
-    # a mine / setup / label run keeps its own counters: serve them next to the derived
-    # RunSummary instead of dropping them (a mine run read as "tasks: 0", 2026-09-15)
+    # a factory run keeps its own counters (items, done, accepted, by_status, outcomes) next
+    # to the RunSummary derived from its graded attempts
     derived.detail = {k: v for k, v in cj.items() if k != "current_task_id"}
     return derived
+
+
+def _queue_position(session: Session, run: Run) -> tuple[int | None, list[str]]:
+    """J-TEL-3: the run's 1-based place in the FIFO queue and the kinds ahead of it —
+    the claim order is ``(created, id)`` (``JobQueue.claim_next``), so this is the order a
+    worker will take them in. ``(None, [])`` unless the run is queued."""
+    if run.status != STATUS_QUEUED:
+        return None, []
+    ahead = session.execute(
+        select(Run.kind)
+        .where(
+            Run.status == STATUS_QUEUED,
+            (Run.created < run.created) | ((Run.created == run.created) & (Run.id < run.id)),
+        )
+        .order_by(Run.created, Run.id)
+    ).all()
+    kinds = [str(k) for (k,) in ahead]
+    return len(kinds) + 1, kinds
+
+
+def _display_name(session: Session, user_id: str) -> str | None:
+    """The name a reader sees for a principal id, resolved at read time (the same rule as
+    sign-offs: the row keeps the id, a name may change); ``None`` when the account is gone."""
+    user = session.get(User, user_id)
+    if user is None:
+        return None
+    return user.display_name or user.subject.removeprefix("local:")
+
+
+def _factory_out(session: Session, run: Run, params: Mapping[str, Any]) -> RunFactoryOut | None:
+    """J-FAC-6: what a factory run was allowed to do, from its params; ``None`` otherwise."""
+    if run.kind != KIND_FACTORY:
+        return None
+    override = str(params.get("deliver_override_by", "") or "") or None
+    return RunFactoryOut(
+        deliver=bool(params.get("deliver", False)),
+        deliver_override_by=override,
+        deliver_override_by_name=_display_name(session, override) if override else None,
+        backlog_hash=str(params.get("backlog_hash", "") or ""),
+    )
 
 
 def _current_task(session: Session, run: Run) -> str | None:
@@ -348,14 +401,16 @@ def _current_task(session: Session, run: Run) -> str | None:
 def run_out(session: Session, run: Run) -> RunOut:
     """The API's view of a run: the row + ``counts`` + ``progress`` + the params it was
     created with (``executor``, ``timeout``, ``pool``, ``limit``, ``task_ids``,
-    ``builder_config``, ``budget``). ``ladder`` is ``ladder_json`` as declared — labels
-    and/or object rungs."""
+    ``builder_config``, ``budget``), its place in the queue while queued, and a factory
+    run's delivery posture. ``ladder`` is ``ladder_json`` as declared — labels and/or
+    object rungs."""
     params = dict(run.params_json or {})
     apparatus = dict(run.apparatus_json or {})
     cost = session.execute(
         select(func.coalesce(func.sum(Grade.cost_usd), 0.0)).where(Grade.run_id == run.id)
     ).scalar_one()
     limit = params.get("limit")
+    position, kinds_ahead = _queue_position(session, run)
     return RunOut(
         id=run.id,
         repo=run.repo,
@@ -391,6 +446,9 @@ def run_out(session: Session, run: Run) -> RunOut:
             total=run.progress_total,
             current_task_id=_current_task(session, run),
         ),
+        queue_position=position,
+        queue_kinds_ahead=kinds_ahead,
+        factory=_factory_out(session, run, params),
     )
 
 
@@ -595,14 +653,15 @@ def get_run(run_id: str, viewer: ViewerDep, db: DbDep) -> RunOut:
     summary="Request cancellation; the worker stops between tasks",
 )
 def cancel_run(run_id: str, operator: OperatorDep, db: DbDep, factory: SessionFactoryDep) -> RunOut:
-    del operator
+    """A queued run is cancelled outright, a running one is flagged; either way the
+    queue writes ``run.cancel_requested`` naming THIS operator (J-TEL-7)."""
     run = _get_run(db, run_id)
     if run.status in TERMINAL_STATUSES:
         raise ApiError(
             409, "run_terminal", f"run is already {run.status}", detail={"status": run.status}
         )
     api = require_jobs()
-    if not api.request_cancel(factory, run_id):
+    if not api.request_cancel(factory, run_id, operator.id):
         raise ApiError(404, "not_found", f"no run {run_id!r}")
     db.expire_all()
     return run_out(db, _get_run(db, run_id))

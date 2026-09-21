@@ -20,9 +20,11 @@ Guarantees
 * **A zombie cannot overwrite.** ``progress`` / ``finish`` may be scoped to the
   claiming ``worker_id``; a worker whose claim was reclaimed gets
   :class:`StaleClaim` instead of clobbering the new owner's state.
-* **Cancellation is cooperative.** :meth:`request_cancel` on a queued run
-  cancels it outright; on a running run it sets ``cancel_requested`` and the
-  worker stops between tasks (counts so far are kept).
+* **Cancellation is cooperative, and recorded.** :meth:`request_cancel` on a
+  queued run cancels it outright; on a running run it sets ``cancel_requested`` and
+  the worker stops between tasks (counts so far are kept). Both cases write a
+  ``system/run.cancel_requested`` event naming the ACTOR who asked (the operator,
+  not the run's creator) and the status the run was in (J-TEL-7).
 * **Counts survive.** ``counts_json`` is the run's summary; ``finish`` replaces it
   but keeps the ``reclaims`` counter the queue itself maintains.
 
@@ -366,13 +368,18 @@ class JobQueue:
             return run
 
     # --- cancellation ------------------------------------------------------------
-    def request_cancel(self, run_id: str) -> Run | None:
+    def request_cancel(self, run_id: str, *, actor: str) -> Run | None:
         """Queued → ``cancelled`` immediately; running → flag for the worker. A
-        terminal run is returned unchanged. ``None`` if the run does not exist."""
+        terminal run is returned unchanged (no event). ``None`` if the run does not
+        exist. ``actor`` is who asked — the route passes the operator's id, the CLI its
+        principal — and is what the audit event names; the run's creator is not."""
+        if not actor:
+            raise ValueError("request_cancel needs the actor who asked")
         with self._factory() as s:
             run = s.get(Run, run_id)
             if run is None:
                 return None
+            status_at_request = run.status
             if run.status == STATUS_QUEUED:
                 run.cancel_requested = True
                 _cancelled(run, utc_now_iso())
@@ -381,14 +388,15 @@ class JobQueue:
             s.commit()
         # The event is written after the commit: the flag is the mechanism, the event is the
         # record — a dropped event must not undo a cancel.
-        if run.status == STATUS_RUNNING:
+        if status_at_request in (STATUS_QUEUED, STATUS_RUNNING):
             append_event(
                 self._factory,
                 trace_id=run_id,
                 stage="system",
                 action="run.cancel_requested",
                 repo=run.repo,
-                actor=run.actor,
+                actor=actor,
+                payload={"status_at_request": status_at_request},
             )
         return run
 

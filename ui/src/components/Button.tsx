@@ -8,7 +8,8 @@
  * What it does: Four variants (filled / outlined / ghost / danger) and two sizes with a ≥40 px
  *               hit target at `md`, a visible focus ring from the global styles, and
  *               `type="button"` by default so a button inside a form never submits it by
- *               accident.
+ *               accident. Hover states keep AA contrast in every theme (a filled button
+ *               darkens; it never fades — WCAG 1.4.3 applies to the hovered state too).
  * How:          `buttonClasses(variant, size)` composes the Tailwind classes; each wrapper
  *               spreads the rest of its props onto the native element.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -36,7 +37,10 @@ export function buttonClasses(variant: ButtonVariant = 'outlined', size: ButtonS
     md: 'h-10 px-4 text-sm',
   }
   const variants: Record<ButtonVariant, string> = {
-    filled: 'bg-primary text-on-primary border border-primary hover:opacity-90',
+    // hover darkens the whole button (filter), never fades it: an opacity hover blends the
+    // text and the fill toward the page and a filled sm button drops under 4.5:1 on hover
+    // (axe color-contrast on /connect/:name when the pointer rests on Baseline)
+    filled: 'bg-primary text-on-primary border border-primary hover:brightness-95',
     outlined: 'bg-surface-container text-on-surface border border-border hover:bg-surface-high',
     ghost: 'bg-transparent text-primary border border-transparent hover:bg-primary-container',
     danger: 'bg-surface-container text-status-red border border-status-red/40 hover:bg-status-red-soft',

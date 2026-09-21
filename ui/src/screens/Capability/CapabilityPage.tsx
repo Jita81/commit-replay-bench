@@ -11,9 +11,13 @@
  *               with n = 0 — never zero-filled; a cell with false-Q1 > 0 is red and a page-wide
  *               alert says every number is untrusted until the ledger is audited. Every cell
  *               shows its route, n, point, Wilson interval with the policy ticks, the model
- *               point beside it, the failure split and fQ1; the detail card recomputes the
- *               interval in the browser and flags drift from the server's rather than hiding
- *               it.
+ *               point beside it, the failure split and fQ1; the five abbreviated numbers are
+ *               explained by one legend (visible under the grid and in the detail card, with
+ *               terms that open inline) that every tile is `aria-describedby` — never a hover
+ *               title inside the tile, and never a button inside the tile's button. The
+ *               detail card recomputes the interval in the browser and flags drift from the
+ *               server's rather than hiding it. The run action in the empty state is an
+ *               operator's; other roles read who acts.
  * How:          `useRepoParam` → `useCapabilityMapWithControls(repo, projection)` → index the
  *               cells by `class|size` → the full taxonomy × size order as the grid so 0-count
  *               classes render honestly → `CellBox` per cell, `CellDetail` on click.
@@ -21,12 +25,13 @@
  * ADRs:         docs/adr/0003-one-routing-rule.md,
  *               docs/adr/0001-four-belts-and-false-q1-at-write.md
  * Works with:   ui/src/screens/Capability/contract.ts (the extended map type and hook),
+ *               ui/src/screens/Capability/ReasonCode.tsx (a reason code's sentence, inline),
  *               ui/src/screens/Capability/FailureSplit.tsx (split, model point, controls pill),
- *               ui/src/api/types.ts (`CapabilityMap`, `CellField`, `NOT_YET_MEASURED`),
- *               ui/src/components/StatTile.tsx and ui/src/components/CiBar.tsx (the numbers
- *               with their method), src/crb/server/routes/capability.py (the route),
- *               src/crb/core/capability.py (the cell statistics), src/crb/core/taxonomy.py
- *               (`ALL_CLASSES` — the list `ALL_CLASSES` here must match)
+ *               ui/src/components/Help.tsx (`Term` in the legend), ui/src/api/types.ts
+ *               (`CapabilityMap`, `CellField`, `NOT_YET_MEASURED`), ui/src/components/StatTile.tsx
+ *               (the numbers with their method), src/crb/server/routes/capability.py (the
+ *               route and the cell statistics), src/crb/core/taxonomy.py (`ALL_CLASSES` —
+ *               the list `ALL_CLASSES` here must match)
  * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx,
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (a real cell with route `calibrate`),
@@ -46,6 +51,7 @@ import { Card } from '../../components/Card'
 import { CiBar } from '../../components/CiBar'
 import { EmptyState } from '../../components/EmptyState'
 import { InlineSelect } from '../../components/Field'
+import { Term } from '../../components/Help'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
@@ -54,10 +60,12 @@ import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { StatTile } from '../../components/StatTile'
 import { VerdictPill } from '../../components/VerdictPill'
 import { apiUrl } from '../../api/client'
+import { useAuth } from '../../lib/auth'
 import { fmtInt, fmtPct, fmtRatio, fmtSeconds, fmtUsd, wilson } from '../../lib/format'
 import { tierDisplay } from '../../lib/verdict'
-import { REASON_DISPLAY, controlsDisplay, useCapabilityMapWithControls, type CapabilityCellSplit as CapabilityCell, type ControlsVerdict } from './contract'
+import { controlsDisplay, useCapabilityMapWithControls, type CapabilityCellSplit as CapabilityCell, type ControlsVerdict } from './contract'
 import { ControlsPill, FailureSplitPills, ModelPointLine } from './FailureSplit'
+import { ReasonCode } from './ReasonCode'
 
 /** Column order of the grid — the size tiers as the apparatus defines them. */
 const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL']
@@ -98,6 +106,26 @@ function provenance(c: { apparatus_versions?: string[]; belt_sets?: string[]; be
   return `${app} · belts ${belts}`
 }
 
+/** The id of the one visually-hidden legend every tile is `aria-describedby`; it replaces per-number hover titles. */
+const CELL_LEGEND_ID = 'cell-legend'
+
+/**
+ * The tile's five numbers, in plain text, for assistive technology: read once from the
+ * legend under the grid instead of a hover title on each number (J-HEL-14).
+ */
+const CELL_LEGEND_TEXT =
+  'Each tile: the route, n, point = clean / n with its 95 % Wilson interval in brackets, then fQ1 = the false-Q1 count (must be 0), $ = mean cost per trial, mean latency per trial, or = mean oracle strength, and a glyph for the verification tier: ✓ human-verified or A/B-confirmed, ◐ automated pass, ✗ untrusted.'
+
+/** The same legend as one visible line whose words open their definitions inline; shown under the grid and in the open cell. */
+function CellLegend({ 'data-testid': testId }: { 'data-testid'?: string }) {
+  return (
+    <p className="m-0 text-[12px] leading-5 text-on-surface-muted" data-testid={testId}>
+      <span className="font-semibold text-on-surface">Legend</span> point [<Term id="wilson">Wilson 95 %</Term>] · <Term id="clean">clean</Term>/n · fQ1 = <Term id="false_q1">false-Q1</Term> count · $ mean cost · mean latency · or = mean{' '}
+      <Term id="oracle_strength">oracle strength</Term> · ✓ ◐ ✗ = verification tier
+    </p>
+  )
+}
+
 function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefined; policy: CapabilityMap['policy'] | undefined; onOpen: () => void; dim?: string }) {
   if (!isMeasured(cell)) {
     return (
@@ -118,6 +146,7 @@ function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefin
       onClick={onOpen}
       data-testid={bad ? 'cell-false-q1' : 'cell-measured'}
       aria-label={`${cell.capability_class} ${cell.size}${dim ? ` ${dim}` : ''}: ${cell.route}, n ${cell.n}, point ${fmtPct(cell.point)}, 95% CI ${fmtPct(cell.ci_low)} to ${fmtPct(cell.ci_high)}, false-Q1 ${cell.false_q1}, apparatus ${provenance(cell)}`}
+      aria-describedby={CELL_LEGEND_ID}
       className={`flex h-full min-h-[92px] w-full flex-col gap-1 rounded-[var(--radius-control)] border px-2 py-2 text-left hover:bg-surface-high ${
         bad ? 'border-status-red bg-status-red-soft' : 'border-border bg-surface-container'
       }`}
@@ -128,7 +157,7 @@ function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefin
       </div>
       {dim && <span className="truncate font-mono text-[10px] text-on-surface-muted" title={dim}>{dim}</span>}
       <div className="num flex items-baseline gap-1">
-        <span className="text-[15px] font-semibold text-on-surface" title={`clean ${fmtInt(cell.clean)} of ${fmtInt(cell.n)} eligible rows — the all-rows rate that routes`}>{fmtPct(cell.point)}</span>
+        <span className="text-[15px] font-semibold text-on-surface">{fmtPct(cell.point)}</span>
         <span className="text-[10px] text-on-surface-muted">
           [{fmtPct(cell.ci_low, 0)}, {fmtPct(cell.ci_high, 0)}]
         </span>
@@ -141,19 +170,15 @@ function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefin
           <FailureSplitPills split={cell.failure_split} />
         </div>
       )}
-      <div className="num flex flex-wrap items-center gap-x-2 text-[10px] text-on-surface-muted">
+      <div className="num flex flex-wrap items-center gap-x-2 text-[10px] text-on-surface-muted" data-testid="cell-numbers">
         <span className={bad ? 'font-semibold text-status-red' : ''} data-testid="cell-false-q1-value">
           fQ1 {cell.false_q1}
           {bad ? ' ✗' : ''}
         </span>
         <span>{fmtUsd(cell.cost_usd_mean)}</span>
         <span>{fmtSeconds(cell.latency_s_mean)}</span>
-        <span title="oracle strength (mean)">or {fmtRatio(cell.oracle_strength_mean)}</span>
-        {tier && (
-          <span className={`${tier.tone === 'green' ? 'text-status-green' : tier.tone === 'red' ? 'text-status-red' : 'text-status-amber'}`} title={tier.describe}>
-            {tier.glyph}
-          </span>
-        )}
+        <span>or {fmtRatio(cell.oracle_strength_mean)}</span>
+        {tier && <span className={`${tier.tone === 'green' ? 'text-status-green' : tier.tone === 'red' ? 'text-status-red' : 'text-status-amber'}`}>{tier.glyph}</span>}
       </div>
     </button>
   )
@@ -185,9 +210,9 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
         </div>
         <p className="text-sm" data-testid="cell-reason">
           {cell.reason_code && (
-            <code className="mr-2 rounded bg-surface-high px-1 py-0.5 font-mono text-[11px]" title={REASON_DISPLAY[cell.reason_code]}>
-              {cell.reason_code}
-            </code>
+            <span className="mr-2">
+              <ReasonCode code={cell.reason_code} />
+            </span>
           )}
           {cell.reason}
         </p>
@@ -218,6 +243,7 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
           <StatTile label="Latency / trial" value={fmtSeconds(cell.latency_s_mean)} n={cell.n} apparatus="mean wall-clock of the build" />
           <StatTile label="Oracle strength" value={fmtRatio(cell.oracle_strength_mean)} n={cell.n} apparatus="mean mutation kill-rate of the tasks' oracles" />
         </div>
+        <CellLegend data-testid="cell-legend-line" />
         {(Math.abs(ci.low - cell.ci_low) > 0.01 || Math.abs(ci.high - cell.ci_high) > 0.01) && (
           <p className="text-xs text-status-amber" role="status">
             The interval recomputed in the browser ({fmtPct(ci.low)}–{fmtPct(ci.high)}) differs from the server's — the server's is shown; the drift is flagged, not hidden.
@@ -266,6 +292,7 @@ function ControlsTile({ verdict, policy }: { verdict: ControlsVerdict | undefine
 /** The screen. `?repo=` from the URL; projection toggles (by language / by model) are local state. */
 export function CapabilityPage() {
   const [repo, setRepo] = useRepoParam()
+  const { can } = useAuth()
   const [byLanguage, setByLanguage] = useState(false)
   const [byModel, setByModel] = useState(false)
   const [language, setLanguage] = useState('')
@@ -291,7 +318,7 @@ export function CapabilityPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Capability"
+        eyebrow="Instrument · Map grid"
         title="Capability map"
         purpose="Per (class × size) cell: the measured pass rate with its n and Wilson interval, the false-Q1 count (must read 0), cost, latency and oracle strength — and the route that evidence licenses. Unmeasured cells say so."
         actions={
@@ -309,7 +336,7 @@ export function CapabilityPage() {
       <QueryBoundary
         query={map}
         loading="Computing cell statistics from the ledger…"
-        idle={<EmptyState title="Choose a repo to see its capability map" reason="The map is computed from the ledger's rows for one repository at a time." action={<LinkButton to="/repos">Go to repos</LinkButton>} />}
+        idle={<EmptyState title="Choose a repo to see its capability map" reason="The map is computed from the ledger's rows for one repository at a time." action={<LinkButton to="/connect">Connect a repository</LinkButton>} />}
       >
         {(m) => {
           const classes = m.classes.length ? m.classes : ALL_CLASSES
@@ -392,8 +419,8 @@ export function CapabilityPage() {
                 {visible.length === 0 && m.cells.length === 0 ? (
                   <EmptyState
                     title="Nothing measured for this repo yet"
-                    reason="Every cell below would read NOT_YET_MEASURED. Run a replay to produce ledger rows; each graded trial is one observation in its (class × size) cell."
-                    action={<LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=replay`}>Start a replay run</LinkButton>}
+                    reason={can('operator') ? 'Every cell below would read NOT_YET_MEASURED. Run a replay to produce ledger rows; each graded trial is one observation in its (class × size) cell.' : 'Every cell below would read NOT_YET_MEASURED; an operator starts a replay run to produce ledger rows. Each graded trial is one observation in its (class × size) cell.'}
+                    action={can('operator') ? <LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=replay`}>Start a replay run</LinkButton> : undefined}
                   />
                 ) : (
                   <div className="overflow-auto">
@@ -439,9 +466,17 @@ export function CapabilityPage() {
                     </table>
                   </div>
                 )}
-                <p className="mt-3 text-[11px] text-on-surface-muted">
-                  Each cell: route · n · pass rate [Wilson 95%] · clean n/N · interval bar with policy ticks (point ≥ {fmtPct(m.policy?.min_point, 0)}, lower ≥ {fmtPct(m.policy?.min_ci_low, 0)}) · model rate on fair attempts (clean / (clean + red)) · the split red · budget · protocol · harness · DQ · fQ1 (false-Q1, must be 0) · mean cost · mean latency · or (oracle strength). Every cell is routed under the repo's controls verdict shown above.
-                </p>
+                {!(visible.length === 0 && m.cells.length === 0) && (
+                  <div className="mt-3 space-y-1">
+                    <CellLegend />
+                    <p id={CELL_LEGEND_ID} className="sr-only">
+                      {CELL_LEGEND_TEXT}
+                    </p>
+                    <p className="m-0 text-[11px] text-on-surface-muted">
+                      The interval bar's ticks are the policy's (point ≥ {fmtPct(m.policy?.min_point, 0)}, lower ≥ {fmtPct(m.policy?.min_ci_low, 0)}); the model rate is clean / (clean + red) on fair attempts, and the split is red · budget · protocol · harness · DQ. Every cell is routed under the repo's controls verdict shown above.
+                    </p>
+                  </div>
+                )}
               </Card>
 
               {selected && <CellDetail cell={selected} repo={repo} onClose={() => setSelectedKey(null)} />}

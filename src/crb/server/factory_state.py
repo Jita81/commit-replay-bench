@@ -14,7 +14,10 @@ Nothing here decides anything: the loop, the grader and the reviewer do. This mo
 only places the records, and derives the task view (:func:`task_views`) a reader sees —
 the latest readiness, RED proof, build, delivery (opened, or updated by a rework) and
 verdict per item, plus the outcome's reason (why a governed stop stopped), straight from
-the evidence events, never from a cached status.
+the evidence events, never from a cached status. Every refusal the loop records (a route
+to a human at readiness, ``red.refused``, ``delivery.refused``, a dependency block) is
+folded with its reason so the page can say why, and the newest build's ids (task, pack,
+row) let a reader open the evidence the build produced.
 
 Navigation
 ----------
@@ -24,7 +27,8 @@ What it does: Registers and freezes a backlog (history kept), opens the evidence
               per-item task view from the evidence events for the API.
 How:          Plain JSON/JSONL under ``<home>/factory/<repo>/``; the backlog is hashed by
               ``crb.factory.backlog`` before it is written; the task view folds the events
-              newest-wins per kind per item.
+              newest-wins per kind per item, and the newest refusal per item since its
+              last readiness pass (:class:`Refusal`).
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md
 Works with:   src/crb/factory/backlog.py (Backlog/BacklogItem, the hash), src/crb/factory/evidence.py
@@ -32,8 +36,9 @@ Works with:   src/crb/factory/backlog.py (Backlog/BacklogItem, the hash), src/cr
               src/crb/factory/testfirst.py (AuthoredTest), src/crb/server/routes/factory.py
               (the API over this state), src/crb/server/worker.py (the ``factory`` run kind)
 Tested by:    tests/test_server_routes_factory.py
-Touch when:   a new factory record kind needs serving (add it to task_views), or the layout
-              under CRB_HOME changes (update docs/OPERATOR.md and the worker together).
+Touch when:   a new factory record kind needs serving (add it to task_views), a refusal is
+              recorded in a new shape (extend ``_refusal_of``), or the layout under
+              CRB_HOME changes (update docs/OPERATOR.md and the worker together).
 """
 
 from __future__ import annotations
@@ -61,10 +66,61 @@ from crb.factory.evidence import (
     FactoryEvidence,
     JsonlFactoryStore,
 )
-from crb.factory.readiness import JsonlGapSignoffLedger
+from crb.factory.readiness import SLOT_STRUCTURAL, SLOT_VALUE, JsonlGapSignoffLedger
 from crb.factory.testfirst import AuthoredTest
 
 FACTORY_DIR = "factory"
+
+#: The route word the loop records when readiness sends an item to a person.
+ROUTE_HUMAN_WORD = "human"
+#: The outcome status the loop records for an item whose dependency was not accepted.
+STATUS_BLOCKED_WORD = "blocked_on_dependency"
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """Why the loop stopped an item, as recorded on the chain: at which ``step``
+    (``readiness`` / ``red`` / ``delivery`` / ``review`` / ``dependency``), the ``reason``
+    sentence, and — for the route gate — the ``reason_code`` and the ``measured_route`` it
+    read. ``review`` is the rule-3 stop (DL-045): a ``route.decided`` to ``human`` recorded
+    AFTER a verdict (``after_verdict`` on the payload), so a built and delivered item is
+    never read as refused at readiness."""
+
+    step: str
+    reason: str
+    reason_code: str = ""
+    measured_route: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "step": self.step,
+            "reason": self.reason,
+            "reason_code": self.reason_code,
+            "measured_route": self.measured_route,
+        }
+
+
+def _refusal_of(ev: FactoryEvent) -> Refusal | None:
+    """The refusal an event records, or None when it is not one."""
+    p = ev.payload
+    if ev.kind == EV_ROUTE and str(p.get("route", "")) == ROUTE_HUMAN_WORD:
+        step = "review" if p.get("after_verdict") else "readiness"
+        return Refusal(step, str(p.get("reason", "")))
+    if ev.kind == EV_RED_REFUSED:
+        return Refusal("red", str(p.get("reason", "")))
+    if ev.kind == EV_DELIVERY_REFUSED:
+        return Refusal(
+            "delivery",
+            str(p.get("reason", "")),
+            reason_code=str(p.get("reason_code", "")),
+            measured_route=str(p.get("measured_route", "")),
+        )
+    if ev.kind == EV_ITEM_OUTCOME and str(p.get("status", "")) == STATUS_BLOCKED_WORD:
+        blocked = ", ".join(str(x) for x in (p.get("blocked_on") or ()))
+        return Refusal(
+            "dependency", f"waiting on {blocked}" if blocked else "waiting on a dependency"
+        )
+    return None
 
 
 @dataclass(frozen=True)
@@ -81,6 +137,7 @@ class TaskView:
     #: ``delivery_failed``'s error, ``oracle_needs_strengthening``'s finding and way
     #: forward); empty when accepted or not yet run.
     outcome_reason: str
+    #: The unsigned STRUCTURAL slots — what blocks the build and what an approver can sign.
     dor_gaps: tuple[str, ...]
     route_hint: str
     red_proof: bool | None
@@ -88,6 +145,17 @@ class TaskView:
     pr_url: str | None
     review_verdict: str | None
     last_event: str
+    #: The open VALUE slots — they route the item test-first and are never signed.
+    value_gaps: tuple[str, ...] = ()
+    #: The newest refusal since the item's last readiness pass (J-FAC-4); None = not refused.
+    refusal: Refusal | None = None
+    #: The outcome's ``error`` (a harness failure, a refused push), "" when none.
+    error: str = ""
+    #: The newest build's ids (F15): the ledger task (the oracle commit), its pack, its row.
+    task_id: str = ""
+    pack_hash: str = ""
+    row_hash: str = ""
+    row_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -99,12 +167,19 @@ class TaskView:
             "status": self.status,
             "outcome_reason": self.outcome_reason,
             "dor_gaps": list(self.dor_gaps),
+            "value_gaps": list(self.value_gaps),
             "route_hint": self.route_hint,
             "red_proof": self.red_proof,
             "build_status": self.build_status,
             "pr_url": self.pr_url,
             "review_verdict": self.review_verdict,
             "last_event": self.last_event,
+            "refusal": self.refusal.to_dict() if self.refusal else None,
+            "error": self.error,
+            "task_id": self.task_id,
+            "pack_hash": self.pack_hash,
+            "row_hash": self.row_hash,
+            "row_id": self.row_id,
         }
 
 
@@ -193,6 +268,7 @@ class FactoryHome:
             return []
         latest: dict[str, dict[str, FactoryEvent]] = {}
         last_kind: dict[str, str] = {}  # the kind of each item's newest event
+        refusals: dict[str, Refusal] = {}  # newest refusal since the item's last readiness
         # the newest delivery event of EITHER kind, in chain order: a rework's re-delivery
         # (`delivery.updated`) carries the SAME pull request the first delivery opened
         # (DL-045), but a later run may open a FRESH one (the branch deleted after the
@@ -202,16 +278,31 @@ class FactoryHome:
             if ev.item_id:
                 latest.setdefault(ev.item_id, {})[ev.kind] = ev  # newest wins per kind
                 last_kind[ev.item_id] = ev.kind
+                if ev.kind == EV_READINESS:
+                    # a new pass over the item: the last pass's refusal no longer stands
+                    refusals.pop(ev.item_id, None)
+                refusal = _refusal_of(ev)
+                if refusal is not None:
+                    refusals[ev.item_id] = refusal
                 if ev.kind in (EV_DELIVERY, EV_DELIVERY_UPDATED):
                     latest_delivery[ev.item_id] = ev
         views: list[TaskView] = []
         for item in backlog.ordered():
             by = latest.get(item.id, {})
             readiness = by.get(EV_READINESS)
-            gaps = tuple(
-                str(g.get("slot", g) if isinstance(g, Mapping) else g)
-                for g in (readiness.payload.get("gaps", ()) if readiness else ())
-            )
+            # structural gaps block the build and are what an approver signs; value gaps only
+            # route (test-first) and are never signable — serve them apart so the page never
+            # offers one for signing (readiness.Gap: ``kind``; a record without it is structural)
+            structural: list[str] = []
+            values: list[str] = []
+            for g in readiness.payload.get("gaps", ()) if readiness else ():
+                if isinstance(g, Mapping):
+                    slot = str(g.get("slot", ""))
+                    (
+                        values if str(g.get("kind", SLOT_STRUCTURAL)) == SLOT_VALUE else structural
+                    ).append(slot)
+                else:
+                    structural.append(str(g))
             route = by.get(EV_ROUTE)
             proof = by.get(EV_RED_PROOF)
             refused = by.get(EV_RED_REFUSED)
@@ -239,13 +330,20 @@ class FactoryHome:
                     kind=item.kind,
                     status=str(outcome.payload.get("status", "pending")) if outcome else "pending",
                     outcome_reason=str(outcome.payload.get("error", "")) if outcome else "",
-                    dor_gaps=gaps,
+                    dor_gaps=tuple(structural),
+                    value_gaps=tuple(values),
                     route_hint=str(route.payload.get("route", "")) if route else "",
                     red_proof=red,
                     build_status=build_status,
                     pr_url=pr or None,
                     review_verdict=str(verdict.payload.get("verdict", "")) if verdict else None,
                     last_event=last_kind.get(item.id, ""),
+                    refusal=refusals.get(item.id),
+                    error=str(outcome.payload.get("error", "") or "") if outcome else "",
+                    task_id=str(build.payload.get("oracle_commit", "")) if build else "",
+                    pack_hash=str(build.payload.get("pack_hash", "")) if build else "",
+                    row_hash=str(build.payload.get("row_hash", "")) if build else "",
+                    row_id=str(build.payload.get("row_id", "")) if build else "",
                 )
             )
         return views
@@ -258,4 +356,4 @@ class FactoryHome:
         ]
 
 
-__all__ = ["FACTORY_DIR", "BacklogError", "FactoryHome", "TaskView"]
+__all__ = ["FACTORY_DIR", "BacklogError", "FactoryHome", "Refusal", "TaskView"]
