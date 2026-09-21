@@ -42,7 +42,7 @@ describe('DecisionsPage', () => {
       'GET /capability-map': (url: string) => new Response(JSON.stringify(map(url.includes('repo=alpha') ? 'alpha' : 'beta', url.includes('repo=alpha') ? [CELL, HUMAN] : [])), { headers: { 'Content-Type': 'application/json' } }),
       'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
       'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
-      'GET /factory/beta/tasks': [{ id: 'I-1', title: 'Divide', capability_class: 'bug.fix', size: 'S', kind: 'code', status: 'blocked', dor_gaps: ['method_path'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked' }],
+      'GET /factory/beta/tasks': [{ id: 'I-1', title: 'Divide', capability_class: 'bug.fix', size: 'S', kind: 'code', status: 'blocked', outcome_reason: '', dor_gaps: ['method_path'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked' }],
     })
     renderApp(<DecisionsPage />, { route: '/decisions' })
     await waitFor(() => expect(screen.getByText('3 waiting across 2 repositories')).toBeInTheDocument())

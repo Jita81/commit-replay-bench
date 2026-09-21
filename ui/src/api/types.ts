@@ -1154,7 +1154,8 @@ export interface FactoryBacklog {
 
 /** J-FAC-4 — why the loop stopped an item, as recorded on the chain; `step` names where. */
 export interface FactoryRefusal {
-  step: 'readiness' | 'red' | 'delivery' | 'dependency'
+  /** `review` = the rule-3 stop (DL-045): routed human AFTER a verdict, never a readiness refusal. */
+  step: 'readiness' | 'red' | 'delivery' | 'review' | 'dependency'
   reason: string
   reason_code: string
   measured_route: string
@@ -1168,6 +1169,10 @@ export interface FactoryTask {
   size: string
   kind: string
   status: string
+  /** Why a governed stop stopped (the chain's `item.outcome.error`): `not_red`'s refusal,
+   * `delivery_failed`'s error, `oracle_needs_strengthening`'s finding and way forward
+   * (DL-045 rule 3); `''` when accepted or not yet run. */
+  outcome_reason: string
   /** The unsigned STRUCTURAL slots: what blocks the build and what an approver can sign. */
   dor_gaps: string[]
   /** The open VALUE slots: they route the item test-first and are never signable

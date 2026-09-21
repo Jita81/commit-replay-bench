@@ -46,10 +46,13 @@
  *               Baseline), ui/src/screens/Runs/EvidenceDrawer.tsx (the pack view an item
  *               row opens), src/crb/server/routes/factory.py (the shapes, documented under
  *               "Factory" in the API doc), src/crb/server/factory_state.py (`task_views`,
- *               the fold of the factory loop's chain this screen renders)
+ *               the fold of the factory loop's chain this screen renders),
+ *               src/crb/factory/loop.py (the process itself),
+ *               ui/src/screens/Decisions/decisions.ts (the inbox rows that link here)
  * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx, ui/e2e/walkthrough/10-factory.spec.ts
- * Touch when:   a step is added to the loop (add it to `stepsFor` and the loop's docstring);
- *               a field is added to `FactoryTaskOut`; a refusal is recorded in a new shape.
+ * Touch when:   a step or a stop status is added to the loop (add it to `stepsFor` and the
+ *               loop's docstring); a field is added to `FactoryTaskOut`; a refusal is
+ *               recorded in a new shape.
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
@@ -103,11 +106,18 @@ const STATUS_LABEL: Record<string, string> = {
   disqualified: 'Disqualified',
   delivery_failed: 'Delivery failed',
   rework_exhausted: 'Rework exhausted',
+  oracle_needs_strengthening: 'Test needs strengthening',
   blocked_on_dependency: 'Waiting on a dependency',
   error: 'Error',
 }
 
 const FAILED_STATUSES = ['rejected', 'rework_exhausted', 'disqualified', 'delivery_failed', 'error', 'not_clean']
+
+/** The way forward every `oracle_needs_strengthening` reason ends with (composed by the loop,
+ * `crb.factory.loop._refuse_rework`) — the outcome sentence gives it once, so the quoted
+ * reason is trimmed to the finding and why no stronger test could be had. */
+const WAY_FORWARD = 'strengthen the test and register a superseding item'
+const findingOf = (reason: string) => reason.replace(new RegExp(`:\\s*${WAY_FORWARD}\\s*$`), '')
 
 /** The reason a delivery refusal records when the opt-in was off (src/crb/factory/loop.py `_deliver`). */
 const OPT_IN_OFF = /^delivery is opt-in and OFF/
@@ -123,6 +133,9 @@ function valueGapNote(t: FactoryTask): string {
 export function stepsFor(t: FactoryTask): Step[] {
   const gaps = t.dor_gaps.length
   const r = t.refusal
+  // `route_hint` is the item's NEWEST route on the chain: after a rule-3 stop that is the
+  // `human` the stop routed it to, not the reading readiness made before the build
+  const stoppedAfterReview = t.status === 'oracle_needs_strengthening' && t.route_hint === 'human'
   const readiness: Step =
     gaps > 0
       ? {
@@ -153,12 +166,19 @@ export function stepsFor(t: FactoryTask): Step[] {
                 status: 'current',
                 detail: 'not assessed — a factory run assesses readiness first',
               }
-            : {
-                id: 'readiness',
-                title: 'Readiness',
-                status: 'done',
-                detail: `route ${t.route_hint}${valueGapNote(t)}`,
-              }
+            : stoppedAfterReview
+              ? {
+                  id: 'readiness',
+                  title: 'Readiness',
+                  status: 'done',
+                  detail: 'built, then routed human after the review — the readiness reading is on the chain',
+                }
+              : {
+                  id: 'readiness',
+                  title: 'Readiness',
+                  status: 'done',
+                  detail: `route ${t.route_hint}${valueGapNote(t)}`,
+                }
   const afterReadiness = readiness.status === 'done'
   const red: Step =
     t.red_proof === true
@@ -206,11 +226,12 @@ export function stepsFor(t: FactoryTask): Step[] {
           detail: t.build_status.replace(/_/g, ' '),
         }
   const delivery: Step = t.pr_url
-    ? {
+    ? // `delivery.updated` = a rework re-pointed the branch on the SAME pull request (DL-045)
+      {
         id: 'delivery',
         title: 'Delivery',
         status: 'done',
-        detail: 'branch + pull request opened',
+        detail: t.last_event === 'delivery.updated' ? 'pull request updated by a rework' : 'branch + pull request opened',
       }
     : r?.step === 'delivery'
       ? OPT_IN_OFF.test(r.reason)
@@ -244,7 +265,7 @@ export function stepsFor(t: FactoryTask): Step[] {
         id: 'review',
         title: 'Independent review',
         status: t.review_verdict === 'accept' ? 'done' : t.review_verdict === 'reject' ? 'failed' : 'current',
-        detail: t.review_verdict.replace(/_/g, ' '),
+        detail: `${t.review_verdict.replace(/_/g, ' ')}${r?.step === 'review' ? ' — the reviewer asked for a stronger test' : ''}`,
       }
     : {
         id: 'review',
@@ -255,19 +276,29 @@ export function stepsFor(t: FactoryTask): Step[] {
   const outcome: Step =
     t.status === 'accepted'
       ? { id: 'outcome', title: 'Outcome', status: 'done', detail: 'accepted' }
-      : FAILED_STATUSES.includes(t.status)
-        ? {
+      : t.status === 'oracle_needs_strengthening'
+        ? // DL-045 rule 3: the reviewer asked for a stronger TEST and no changed oracle could be
+          // had (no test author, or the same bytes back) — the loop refused to rebuild against
+          // the same oracle and routed the item to a human; the chain's reason says which
+          {
             id: 'outcome',
             title: 'Outcome',
             status: 'failed',
-            detail: `${t.status.replace(/_/g, ' ')}${t.error ? ` — ${t.error}` : ''}`,
+            detail: `the reviewer found the oracle weak and no stronger test could be had — the loop did not rebuild against the same one: ${WAY_FORWARD}${t.outcome_reason ? ` (${findingOf(t.outcome_reason)})` : ''}`,
           }
-        : {
-            id: 'outcome',
-            title: 'Outcome',
-            status: 'todo',
-            detail: t.status.replace(/_/g, ' '),
-          }
+        : FAILED_STATUSES.includes(t.status)
+          ? {
+              id: 'outcome',
+              title: 'Outcome',
+              status: 'failed',
+              detail: `${t.status.replace(/_/g, ' ')}${t.error ? ` — ${t.error}` : ''}`,
+            }
+          : {
+              id: 'outcome',
+              title: 'Outcome',
+              status: 'todo',
+              detail: t.status.replace(/_/g, ' '),
+            }
   return [readiness, red, build, delivery, review, outcome]
 }
 
@@ -280,6 +311,8 @@ export function refusalSentence(t: FactoryTask): string {
   const forward = 'To bring it back into the factory, add the fact and freeze a revised backlog (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.'
   if (r?.step === 'dependency') return `${r.reason.replace(/^waiting on /, 'Waiting on ')}, which has not been accepted yet.`
   if (r?.step === 'readiness') return `This item goes to a person: ${r.reason}. ${forward}`
+  if (t.status === 'oracle_needs_strengthening' || r?.step === 'review')
+    return `The review found the test too weak to rebuild against${t.outcome_reason || r?.reason ? `: ${findingOf(t.outcome_reason || r?.reason || '')}` : ''}. Strengthen the test and freeze a revised backlog with a superseding item (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.`
   if (r?.step === 'red') return `The factory could not prove the test: ${r.reason}. ${forward.replace('add the fact', 'author a test that fails today')}`
   if (t.status === 'rejected' || t.status === 'rework_exhausted')
     return `The review said ${t.review_verdict?.replace(/_/g, ' ') ?? t.status.replace(/_/g, ' ')}. Read the evidence, then either open the change by hand or freeze a revised backlog with the fact the review asked for (a new hash, the old chain stays).`
@@ -330,6 +363,7 @@ const EVENT_PHRASE: Record<string, string> = {
   'red.refused': 'RED proof refused',
   'build.graded': 'build graded under the belts',
   'delivery.opened': 'branch and pull request opened',
+  'delivery.updated': 'pull request updated by a rework',
   'delivery.refused': 'delivery withheld',
   'review.verdict': 'review recorded',
   'edit.permitted': 'rework permitted',

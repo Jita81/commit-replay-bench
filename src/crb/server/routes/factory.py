@@ -184,6 +184,8 @@ class FactoryTaskOut(BaseModel):
     size: str
     kind: str
     status: str
+    #: Why a governed stop stopped (the item.outcome's ``error``); ``""`` otherwise.
+    outcome_reason: str
     #: The unsigned STRUCTURAL slots: what blocks the build and what an approver can sign.
     dor_gaps: list[str]
     #: The open VALUE slots: they route the item test-first and are never signable.

@@ -12,11 +12,12 @@ hash-chained JSONL files, like evidence packs: the API and the worker share
 
 Nothing here decides anything: the loop, the grader and the reviewer do. This module
 only places the records, and derives the task view (:func:`task_views`) a reader sees —
-the latest readiness, RED proof, build, delivery and verdict per item, straight from the
-evidence events, never from a cached status. Every refusal the loop records (a route to a
-human at readiness, ``red.refused``, ``delivery.refused``, a dependency block) is folded
-with its reason so the page can say why, and the newest build's ids (task, pack, row)
-let a reader open the evidence the build produced.
+the latest readiness, RED proof, build, delivery (opened, or updated by a rework) and
+verdict per item, plus the outcome's reason (why a governed stop stopped), straight from
+the evidence events, never from a cached status. Every refusal the loop records (a route
+to a human at readiness, ``red.refused``, ``delivery.refused``, a dependency block) is
+folded with its reason so the page can say why, and the newest build's ids (task, pack,
+row) let a reader open the evidence the build produced.
 
 Navigation
 ----------
@@ -53,6 +54,7 @@ from crb.factory.evidence import (
     EV_BUILD,
     EV_DELIVERY,
     EV_DELIVERY_REFUSED,
+    EV_DELIVERY_UPDATED,
     EV_GAP_SIGNOFF,
     EV_ITEM_OUTCOME,
     EV_READINESS,
@@ -78,8 +80,11 @@ STATUS_BLOCKED_WORD = "blocked_on_dependency"
 @dataclass(frozen=True)
 class Refusal:
     """Why the loop stopped an item, as recorded on the chain: at which ``step``
-    (``readiness`` / ``red`` / ``delivery`` / ``dependency``), the ``reason`` sentence,
-    and — for the route gate — the ``reason_code`` and the ``measured_route`` it read."""
+    (``readiness`` / ``red`` / ``delivery`` / ``review`` / ``dependency``), the ``reason``
+    sentence, and — for the route gate — the ``reason_code`` and the ``measured_route`` it
+    read. ``review`` is the rule-3 stop (DL-045): a ``route.decided`` to ``human`` recorded
+    AFTER a verdict (``after_verdict`` on the payload), so a built and delivered item is
+    never read as refused at readiness."""
 
     step: str
     reason: str
@@ -99,7 +104,8 @@ def _refusal_of(ev: FactoryEvent) -> Refusal | None:
     """The refusal an event records, or None when it is not one."""
     p = ev.payload
     if ev.kind == EV_ROUTE and str(p.get("route", "")) == ROUTE_HUMAN_WORD:
-        return Refusal("readiness", str(p.get("reason", "")))
+        step = "review" if p.get("after_verdict") else "readiness"
+        return Refusal(step, str(p.get("reason", "")))
     if ev.kind == EV_RED_REFUSED:
         return Refusal("red", str(p.get("reason", "")))
     if ev.kind == EV_DELIVERY_REFUSED:
@@ -127,6 +133,10 @@ class TaskView:
     size: str
     kind: str
     status: str  # the latest item.outcome status, or "pending"
+    #: Why a governed stop stopped — the item.outcome's ``error`` (``not_red``'s refusal,
+    #: ``delivery_failed``'s error, ``oracle_needs_strengthening``'s finding and way
+    #: forward); empty when accepted or not yet run.
+    outcome_reason: str
     #: The unsigned STRUCTURAL slots — what blocks the build and what an approver can sign.
     dor_gaps: tuple[str, ...]
     route_hint: str
@@ -155,6 +165,7 @@ class TaskView:
             "size": self.size,
             "kind": self.kind,
             "status": self.status,
+            "outcome_reason": self.outcome_reason,
             "dor_gaps": list(self.dor_gaps),
             "value_gaps": list(self.value_gaps),
             "route_hint": self.route_hint,
@@ -258,6 +269,11 @@ class FactoryHome:
         latest: dict[str, dict[str, FactoryEvent]] = {}
         last_kind: dict[str, str] = {}  # the kind of each item's newest event
         refusals: dict[str, Refusal] = {}  # newest refusal since the item's last readiness
+        # the newest delivery event of EITHER kind, in chain order: a rework's re-delivery
+        # (`delivery.updated`) carries the SAME pull request the first delivery opened
+        # (DL-045), but a later run may open a FRESH one (the branch deleted after the
+        # first PR closed) — so recency decides, never a preference between the kinds
+        latest_delivery: dict[str, FactoryEvent] = {}
         for ev in self.events():
             if ev.item_id:
                 latest.setdefault(ev.item_id, {})[ev.kind] = ev  # newest wins per kind
@@ -268,6 +284,8 @@ class FactoryHome:
                 refusal = _refusal_of(ev)
                 if refusal is not None:
                     refusals[ev.item_id] = refusal
+                if ev.kind in (EV_DELIVERY, EV_DELIVERY_UPDATED):
+                    latest_delivery[ev.item_id] = ev
         views: list[TaskView] = []
         for item in backlog.ordered():
             by = latest.get(item.id, {})
@@ -297,7 +315,7 @@ class FactoryHome:
                     if build.payload.get("clean")
                     else ("disqualified" if build.payload.get("disqualified") else "not_clean")
                 )
-            delivery = by.get(EV_DELIVERY)
+            delivery = latest_delivery.get(item.id)
             pr = str(delivery.payload.get("pr_url", "")) if delivery else ""
             if not pr and by.get(EV_DELIVERY_REFUSED) is not None:
                 pr = ""
@@ -311,6 +329,7 @@ class FactoryHome:
                     size=item.size_estimate,
                     kind=item.kind,
                     status=str(outcome.payload.get("status", "pending")) if outcome else "pending",
+                    outcome_reason=str(outcome.payload.get("error", "")) if outcome else "",
                     dor_gaps=tuple(structural),
                     value_gaps=tuple(values),
                     route_hint=str(route.payload.get("route", "")) if route else "",

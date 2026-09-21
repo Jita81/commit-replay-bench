@@ -45,7 +45,7 @@ const DELIVER = { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40,
 const CALIBRATE = { route: 'calibrate', reason_code: 'ci_low_below_bar', reason: 'the lower bound sits under the bar', n: 24, point: 0.96, ci_low: 0.8, ci_high: 0.99, apparatus_versions: ['2.2'], deliverable: false }
 const NOT_LINKED = { can_deliver: false, reason_code: 'not_linked' as const, reason: 'Delivery is not possible for this repository: it is connected by URL, not through the GitHub App. Connect it through the GitHub App with Contents: write and Pull requests: write, then Sync installations in Settings.', full_name: '', default_branch: '', installation_id: null, account_login: '' }
 const LINKED = { can_deliver: true, reason_code: 'ok' as const, reason: '', full_name: 'acme/cobra', default_branch: 'main', installation_id: 77, account_login: 'acme' }
-const UNTOUCHED = { refusal: null, error: '', task_id: '', run_id: '', pack_hash: '', row_hash: '' }
+const UNTOUCHED = { outcome_reason: '', refusal: null, error: '', task_id: '', run_id: '', pack_hash: '', row_hash: '' }
 
 const BACKLOG: FactoryBacklog = {
   repo: 'alpha',
@@ -117,6 +117,59 @@ describe('stepsFor — an item the factory has not touched', () => {
     const routed = stepsFor(task({ status: 'pending', route_hint: 'test_first_authoring', value_gaps: ['example_payload'], last_event: 'route.decided' }))[0]!
     expect(routed.status).toBe('done')
     expect(routed.detail).toBe('route test_first_authoring · value gap example_payload routes test-first, never signed')
+  })
+
+  it('a delivery a rework updated says so, rather than reading as a first opening', () => {
+    // `delivery.updated` is the chain's event for a rework re-pointing the SAME pull request (DL-045)
+    const updated = task({ id: 'T-3', route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/calc/pull/7', review_verdict: 'accept_with_edit', last_event: 'delivery.updated', cell_route: DELIVER })
+    const delivery = stepsFor(updated)[3]!
+    expect(delivery.status).toBe('done')
+    expect(delivery.detail).toBe('pull request updated by a rework')
+    expect(stepsFor({ ...updated, last_event: 'delivery.opened' })[3]!.detail).toBe('branch + pull request opened')
+  })
+
+  it('an item stopped for a stronger oracle reads as a sentence with the way forward (DL-045 rule 3)', () => {
+    // the loop refused to rebuild against an unchanged oracle: one clean build, one PR, one
+    // `accept_with_edit` verdict with a `weak_oracle` finding, routed human — the outcome
+    // step must say what happened and what to do, not spell the status
+    const reason = 'the reviewer found the oracle weak (statement deleted) and this deployment has no test author: strengthen the test and register a superseding item'
+    const stopped = task({ id: 'T-4', status: 'oracle_needs_strengthening', outcome_reason: reason, route_hint: 'human', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/calc/pull/7', review_verdict: 'accept_with_edit', last_event: 'item.outcome', cell_route: DELIVER })
+    const steps = stepsFor(stopped)
+    expect(steps.map((x) => [x.id, x.status])).toEqual([
+      ['readiness', 'done'],
+      ['red', 'done'],
+      ['build', 'done'],
+      ['delivery', 'done'],
+      ['review', 'current'],
+      ['outcome', 'failed'],
+    ])
+    const outcome = steps[5]!
+    expect(outcome.detail).toMatch(/^the reviewer found the oracle weak and no stronger test could be had/)
+    expect(outcome.detail).toContain('did not rebuild against the same one')
+    expect(outcome.detail).toContain('strengthen the test and register a superseding item')
+    // the chain's reason ends with the same way forward the sentence already gives — the
+    // parentheses carry only the finding and why no stronger test could be had, once
+    expect(outcome.detail).toContain('(the reviewer found the oracle weak (statement deleted) and this deployment has no test author)')
+    expect(outcome.detail.split('strengthen the test and register a superseding item')).toHaveLength(2)
+    expect(outcome.detail).not.toContain('oracle_needs_strengthening')
+    // a reason without that suffix (a reviewer that words it differently) is quoted whole
+    expect(stepsFor({ ...stopped, outcome_reason: 'the oracle is weak' })[5]!.detail).toContain('(the oracle is weak)')
+    // without a reason on the view the sentence still stands on its own
+    expect(stepsFor({ ...stopped, outcome_reason: '' })[5]!.detail).not.toContain('(')
+    // the readiness step keeps the pre-build reading: the item was BUILT (a PR is open), and
+    // `route_hint` is `human` only because the stop routed it there after the review
+    expect(steps[0]!.detail).not.toBe('route human')
+    expect(steps[0]!.detail).toContain('after the review')
+    expect(steps[0]!.detail).toContain('human')
+    // the server folds that stop's `route.decided` as a REVIEW-step refusal (J-FAC-4): the
+    // readiness step must not read it as "Routed to a person", the review step names it, and
+    // the item's sentence gives the finding and the way forward
+    const served = { ...stopped, refusal: { step: 'review' as const, reason, reason_code: '', measured_route: '' }, error: reason }
+    const servedSteps = stepsFor(served)
+    expect(servedSteps.map((x) => [x.id, x.status])).toEqual(steps.map((x) => [x.id, x.status]))
+    expect(servedSteps[0]!.detail).toContain('after the review')
+    expect(servedSteps[4]!.detail).toBe('accept with edit — the reviewer asked for a stronger test')
+    expect(refusalSentence(served)).toBe('The review found the test too weak to rebuild against: the reviewer found the oracle weak (statement deleted) and this deployment has no test author. Strengthen the test and freeze a revised backlog with a superseding item (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.')
   })
 
   it('a build that ran and was not clean is the failure, spelled out', () => {

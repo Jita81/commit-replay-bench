@@ -94,6 +94,10 @@ SEVERITY_MAJOR = "major"
 SEVERITY_BLOCKING = "blocking"
 SEVERITIES: tuple[str, ...] = (SEVERITY_INFO, SEVERITY_MINOR, SEVERITY_MAJOR, SEVERITY_BLOCKING)
 
+#: The finding kind that asks for a stronger TEST, not a different change: the loop never
+#: rebuilds against an unchanged oracle on its account (DL-045 rule 3, B-1b finding 3).
+FINDING_WEAK_ORACLE = "weak_oracle"
+
 #: The ledger's own guard, re-exported under the name the loop speaks.
 EditBeforeVerdict = VerdictBeforeEditViolation
 
@@ -399,7 +403,7 @@ class MutationStrengthProbe:
                     required=False,
                     findings=(
                         ReviewFinding(
-                            "weak_oracle",
+                            FINDING_WEAK_ORACLE,
                             SEVERITY_MAJOR,
                             "the oracle misses fault classes in the delivered change — strengthen the test: "
                             + "; ".join(o.description for o in score.escaped[:5]),
@@ -649,6 +653,7 @@ def permit_edit(
 
 
 __all__ = [
+    "FINDING_WEAK_ORACLE",
     "SEVERITIES",
     "SEVERITY_BLOCKING",
     "SEVERITY_INFO",
