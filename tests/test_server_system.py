@@ -6,7 +6,9 @@ What it is:   ``/health``, ``/health/live``, ``/metrics``, ``/version`` and the 
               ``/settings`` view's test suite.
 What it does: Pins the health shape and its append-only probe (an UPDATE is proven refused), that
               a false-Q1 row bypassing the ledger is caught, that a stale worker heartbeat is
-              flagged, that health needs no auth; the role-aware sandbox probe (an ``api``
+              flagged, that the ``migrations`` probe is ok at head / degraded for an unstamped
+              ``create_all`` store / down (503, both revisions named) when the store is behind
+              or empty, that health needs no auth; the role-aware sandbox probe (an ``api``
               process reports it ``skipped`` and is not degraded by it; ``worker`` and ``all``
               probe it; the gate is at the function); liveness as a database-only probe that
               never touches the sandbox (the A11 container) and ignores a false-Q1 ledger but
@@ -17,9 +19,11 @@ How:          ``create_app`` over a temp SQLite factory with probes patched at t
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/server/routes/system.py (under test), src/crb/observability/probes.py
-              (the probe results), src/crb/observability/metrics.py (``crb_false_q1_total`` must
-              read 0), tests/test_deploy_health_probes.py (the deploy artefacts pointing at these
-              endpoints), docs/API.md (health / metrics), docs/DEPLOYMENT.md
+              (the probe results), src/crb/store/migrate.py (``head_status`` behind the
+              ``migrations`` probe), src/crb/observability/metrics.py (``crb_false_q1_total``
+              must read 0), tests/test_deploy_health_probes.py (the deploy artefacts pointing at
+              these endpoints), docs/API.md (health / metrics), docs/DEPLOYMENT.md (the go-live
+              checklist that points at the ``migrations`` probe)
 Tested by:    tests/test_server_system.py
 Touch when:   a probe is added (its role gating and its degraded / down case; the Helm probes in
               tests/test_deploy_health_probes.py if it changes liveness); a metric series is added.
@@ -35,6 +39,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from alembic import command
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy.orm import Session, sessionmaker
@@ -45,13 +50,28 @@ from crb.core.version import APPARATUS_VERSION, __version__
 from crb.observability import metrics
 from crb.observability.probes import ProbeResult
 from crb.server.app import API_PREFIX, create_app
-from crb.server.routes.system import ledger_counts, probe_sandbox, process_role
+from crb.server.routes.system import (
+    ledger_counts,
+    migrations_result,
+    probe_sandbox,
+    process_role,
+)
 from crb.server.settings import Settings
+from crb.store import migrate
 from crb.store.db import make_engine, make_session_factory
 from crb.store.models import Grade, Repo, Run
 
 ROOT_PW = "correct-horse-battery-staple"
-PROBE_NAMES = {"db", "append_only", "ledger", "sandbox", "toolchains", "builders", "worker"}
+PROBE_NAMES = {
+    "db",
+    "migrations",
+    "append_only",
+    "ledger",
+    "sandbox",
+    "toolchains",
+    "builders",
+    "worker",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -202,6 +222,71 @@ class TestHealth:
         assert worker["data"]["running"] == 3 and worker["data"]["queued"] == 1
         assert sorted(worker["data"]["stale"]) == ["run-noheart", "run-stale"]
         assert worker["data"]["stale_after_s"] == 120
+
+    def test_migrations_probe_is_degraded_for_an_unstamped_create_all_store(
+        self, client: TestClient
+    ) -> None:
+        """The lifespan's ``init_db`` builds a complete schema with no ``alembic_version``:
+        complete, so not 503 — but unstamped until ``crb migrate`` runs, and the detail says so."""
+        r = client.get(f"{API_PREFIX}/health")
+        assert r.status_code == 200
+        m = _probe(r.json(), "migrations")
+        head = migrate.head_revision()
+        assert m["status"] == "degraded"
+        assert m["detail"] == (
+            f"schema matches head {head} but carries no alembic_version (a create_all store) "
+            "— run `crb migrate` to stamp it"
+        )
+        assert m["data"] == {
+            "database": None,
+            "head": head,
+            "at_head": False,
+            "unversioned_at": head,
+            "matches_models": True,
+        }
+
+    def test_migrations_probe_is_ok_at_head_and_down_when_behind(
+        self, tmp_path: Path, factory: sessionmaker[Session]
+    ) -> None:
+        """A migrated store is ``ok`` (``database at <head> = code head``); one stamped behind
+        answers 503 with BOTH revisions and the fix in the detail — a half-migrated database
+        can no longer pass the go-live checklist."""
+        url = f"sqlite:///{tmp_path / 'sys.db'}"
+        migrate.upgrade(url)
+        head = migrate.head_revision()
+        with TestClient(create_app(make_settings(tmp_path), factory)) as c:
+            r = c.get(f"{API_PREFIX}/health")
+            assert r.status_code == 200
+            m = _probe(r.json(), "migrations")
+            assert m["status"] == "ok" and m["detail"] == f"database at {head} = code head"
+            assert m["data"]["database"] == head and m["data"]["at_head"] is True
+
+            command.stamp(migrate.alembic_config(url), migrate.INITIAL_REVISION)
+            r = c.get(f"{API_PREFIX}/health")
+            assert r.status_code == 503
+            body = r.json()
+            assert body["status"] == "down"
+            m = _probe(body, "migrations")
+            assert m["status"] == "down"
+            assert m["detail"] == (
+                f"database at {migrate.INITIAL_REVISION}, code head {head} — run `crb migrate` "
+                "(the migrate Job / `python -m crb.store.migrate upgrade`)"
+            )
+            assert m["data"]["database"] == migrate.INITIAL_REVISION
+            # liveness never reads the migration head: a pod behind stays up to be migrated
+            assert c.get(f"{API_PREFIX}/health/live").status_code == 200
+
+    def test_migrations_result_names_an_empty_and_an_older_store(self) -> None:
+        """The shared renderer (``crb doctor`` uses it too): an empty store and an older
+        release's unversioned schema are ``down`` and name what was found."""
+        empty = migrations_result(migrate.HeadStatus(None, "0006", False))
+        assert empty.status == "down"
+        assert empty.detail.startswith("database not migrated (empty), code head 0006 — run")
+        older = migrations_result(migrate.HeadStatus(None, "0006", False, unversioned_at="0001"))
+        assert older.status == "down"
+        assert "unversioned schema at 0001" in older.detail and "crb migrate" in older.detail
+        ahead = migrations_result(migrate.HeadStatus("0007", "0006", False))
+        assert ahead.status == "down" and "database at 0007, code head 0006" in ahead.detail
 
     def test_health_needs_no_auth(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/health").status_code == 200

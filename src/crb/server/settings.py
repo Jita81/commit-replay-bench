@@ -11,6 +11,11 @@ Invariants
   dialect because a PostgreSQL URL can embed a password.
 * Nested groups use ``__`` as the delimiter: ``CRB_OIDC__ISSUER``,
   ``CRB_OIDC__ROLE_MAP='{"crb-admins": "admin"}'``, ``CRB_SANDBOX__EXECUTOR=docker``.
+* **A deployment never lives in a temporary directory** (DL-045). ``CRB_HOME`` under
+  ``/tmp``, ``/private/tmp``, ``/var/folders`` or ``$TMPDIR`` is refused in ``prod`` and
+  warned about in ``dev`` (:func:`temp_dir_reason`); ``CRB_ALLOW_TEMP_HOME=true`` is the
+  explicit opt-out for a throwaway evaluation. macOS documents those paths as temporary
+  and removes files there that have not been used for about three days.
 
 Navigation
 ----------
@@ -18,20 +23,25 @@ What it is:   The server's configuration model — every ``CRB_*`` variable the 
               ``/settings`` view know about, with the fail-closed rules attached.
 What it does: Parses the environment into typed, nested settings (OIDC, bootstrap admin,
               retention, sandbox, builder container); refuses to start in ``prod`` without a
-              strong ``CRB_SECRET_KEY`` or with a short bootstrap password; keeps secret
+              strong ``CRB_SECRET_KEY``, with a short bootstrap password or with a ``CRB_HOME``
+              under an OS-managed temporary directory (``dev`` warns); keeps secret
               values as ``SecretStr`` and exposes only ``redacted_dict`` for display. Defines
               the role ladder and ``MIN_PASSWORD_LENGTH`` the auth module enforces.
 How:          ``pydantic-settings`` with ``CRB_`` prefix and ``__`` nesting; CSV-or-JSON
               list fields via ``NoDecode`` + a ``before`` validator; an ``after`` validator
-              generates a dev-only ephemeral key and logs the prod warnings.
+              generates a dev-only ephemeral key, applies the temporary-home guard
+              (``temp_dir_reason``) and logs the prod warnings.
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md
 Works with:   src/crb/server/app.py (reads ``resolved_database_url``, cookie security, CORS),
               src/crb/server/auth.py (``ROLE_RANK``, ``session_ttl``, ``secret_key_value``),
               src/crb/server/routes/system.py (serves ``redacted_dict``),
               src/crb/builders/container.py (the worker reads the same ``CRB_BUILDER__*``),
-              docs/DEPLOYMENT.md#21-environment-reference (the operator-facing list)
-Tested by:    tests/test_server_app.py, tests/test_server_system.py, tests/test_server_auth.py
+              src/crb/cli/commands/service.py (``crb doctor``'s ``home`` line reuses
+              ``temp_dir_reason``), docs/DEPLOYMENT.md#21-environment-reference (the
+              operator-facing list; §1.1 the temporary-directory rule)
+Tested by:    tests/test_server_app.py, tests/test_server_system.py, tests/test_server_auth.py,
+              tests/test_settings_home_guard.py
 Touch when:   never for a new repository (repositories are configured in the database, not
               the environment); adding a variable means adding it here, to ``redacted_dict``
               (never a secret value), to docs/DEPLOYMENT.md#21-environment-reference and to
@@ -42,7 +52,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -60,6 +72,50 @@ ROLE_RANK: dict[str, int] = {r: i for i, r in enumerate(ROLE_LADDER)}
 
 #: Minimum length for any locally-stored password (bootstrap admin included).
 MIN_PASSWORD_LENGTH = 12
+
+#: OS-managed temporary roots (``$TMPDIR`` is added at run time). On macOS ``/tmp`` and
+#: ``/var`` are symlinks into ``/private``, so both spellings are listed and both sides are
+#: resolved before the comparison.
+TEMP_DIR_ROOTS: tuple[str, ...] = ("/tmp", "/private/tmp", "/var/folders", "/private/var/folders")
+#: What the guard tells the person, once, in the refusal and in the warning.
+TEMP_HOME_ADVICE = (
+    "macOS removes files there that have not been used for about three days and a reboot "
+    "may empty it; put the deployment under a persistent path such as ~/crb-stack or "
+    "/srv/crb (docs/DEPLOYMENT.md#11-single-host-without-containers-evaluation)"
+)
+
+
+def temp_dir_reason(path: Path | str, environ: Mapping[str, str] | None = None) -> str | None:
+    """Why ``path`` is under an OS-managed temporary directory, or ``None`` when it is not.
+
+    ``path`` is expanded and resolved (non-strict: it need not exist); each root in
+    :data:`TEMP_DIR_ROOTS` plus ``$TMPDIR`` is compared both as written and resolved, so a
+    symlinked root (``/tmp`` to ``/private/tmp``) is recognised either way. The sentence
+    names the path and the root it fell under.
+    """
+    env = os.environ if environ is None else environ
+    target = Path(path).expanduser()
+    try:
+        resolved = target.resolve()
+    except OSError:  # pragma: no cover - a path the OS refuses to resolve
+        resolved = target.absolute()
+    shown = target if target.is_absolute() else resolved
+    tmpdir = (env.get("TMPDIR") or "").strip()
+    roots: list[tuple[str, Path]] = [("", Path(r)) for r in TEMP_DIR_ROOTS]
+    if tmpdir:
+        roots.append((f"$TMPDIR ({tmpdir})", Path(tmpdir).expanduser()))
+    for label, root in roots:
+        try:
+            candidates = {root, root.resolve()}
+        except OSError:  # pragma: no cover
+            candidates = {root}
+        for candidate in candidates:
+            if resolved == candidate or candidate in resolved.parents:
+                return (
+                    f"{shown} resolves under {label or candidate}, an OS-managed temporary "
+                    "directory"
+                )
+    return None
 
 
 class GitHubAppSettings(BaseModel):
@@ -257,6 +313,9 @@ class Settings(BaseSettings):
 
     env: Env = "prod"
     home: Path = Path(".crb")
+    #: ``CRB_ALLOW_TEMP_HOME=true`` admits a ``home`` under an OS temporary directory in
+    #: ``prod`` — for a throwaway evaluation only; the warning is still logged.
+    allow_temp_home: bool = False
     database_url: str | None = None
     secret_key: SecretStr | None = None
     #: Session lifetime in seconds (default 8 hours).
@@ -335,6 +394,14 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"CRB_BOOTSTRAP_ADMIN__PASSWORD must be at least {MIN_PASSWORD_LENGTH} characters"
             )
+        reason = temp_dir_reason(self.home)
+        if reason:
+            if self.env == "prod" and not self.allow_temp_home:
+                raise ValueError(
+                    f"CRB_HOME {reason}; {TEMP_HOME_ADVICE}; set CRB_ALLOW_TEMP_HOME=true only "
+                    "for a throwaway evaluation"
+                )
+            log.warning("CRB_HOME %s; %s", reason, TEMP_HOME_ADVICE)
         if self.env == "prod" and self.sandbox.executor == "local":
             log.warning("CRB_SANDBOX__EXECUTOR=local in prod: test runs are NOT isolated")
         if self.env == "prod" and self.builder.executor == "host":
@@ -426,6 +493,8 @@ __all__ = [
     "MIN_PASSWORD_LENGTH",
     "ROLE_LADDER",
     "ROLE_RANK",
+    "TEMP_DIR_ROOTS",
+    "TEMP_HOME_ADVICE",
     "BootstrapAdmin",
     "BuilderSettings",
     "OidcSettings",
@@ -433,4 +502,5 @@ __all__ = [
     "Role",
     "SandboxSettings",
     "Settings",
+    "temp_dir_reason",
 ]

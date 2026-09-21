@@ -24,7 +24,9 @@ What it does: Pins the load-bearing parity — the chain at head and ``create_al
               same schema (inspector-identical in order; on SQLite definition-for-definition,
               since revision 0002's ``ADD COLUMN`` is spliced into the stored ``CREATE TABLE``) —
               both carrying the triggers; that the migration files ship in the package; that
-              ``current`` / ``check`` answer on a fresh database; idempotent upgrade; that a
+              ``current`` / ``check`` answer on a fresh database; ``head_status`` — the one
+              head check ``/health`` and ``crb doctor`` read — on an empty, a ``create_all``,
+              an older release's, a migrated and a behind store; idempotent upgrade; that a
               migrated database is append-only and chains; adoption of an ``init_db`` database
               from this release (stamped at head) and from before belt 5 (stamped at 0001 and
               upgraded) while a schema matching no release or a partial one is refused; triggers
@@ -249,6 +251,47 @@ def test_migration_defines_every_model_table(backend: Backend) -> None:
 def test_current_and_check_on_a_fresh_database(backend: Backend) -> None:
     assert migrate.current(backend.url) is None
     assert migrate.check(backend.url) is False
+
+
+def test_head_status_reads_empty_created_migrated_and_behind_stores(backend: Backend) -> None:
+    """``head_status`` (the ``migrations`` probe's and ``crb doctor``'s reading): an empty
+    store is not at head and has no schema; a ``create_all`` store is unversioned at head and
+    matches the models (``upgrade`` would only stamp it); a migrated store is at head; a store
+    stamped behind names both revisions; an older release's ``create_all`` schema is
+    unversioned at ITS revision and does not match the models."""
+    head = migrate.head_revision()
+    empty = migrate.head_status(backend.url)
+    assert empty == migrate.HeadStatus(None, head, False)
+    assert empty.to_dict() == {
+        "database": None,
+        "head": head,
+        "at_head": False,
+        "unversioned_at": None,
+        "matches_models": False,
+    }
+
+    init_db(backend.engine)
+    created = migrate.head_status(backend.url)
+    assert created.database is None and created.at_head is False
+    assert created.unversioned_at == head and created.matches_models is True
+
+    migrate.upgrade(backend.url)
+    assert migrate.head_status(backend.url) == migrate.HeadStatus(head, head, True)
+    with backend.factory() as s:  # the connection form /health uses (a session's)
+        assert migrate.head_status_on(s.connection()).at_head is True
+
+    command.stamp(migrate.alembic_config(backend.url), migrate.INITIAL_REVISION)
+    behind = migrate.head_status(backend.url)
+    assert behind == migrate.HeadStatus(migrate.INITIAL_REVISION, head, False)
+    assert migrate.check(backend.url) is False  # ``check`` is ``head_status().at_head``
+
+
+def test_head_status_of_an_older_release_create_all_schema(backend: Backend) -> None:
+    init_db(backend.engine)
+    _drop_column(backend, "grades", "repo_lint_clean")  # a pre-belt-5 release's create_all
+    st = migrate.head_status(backend.url)
+    assert st.database is None and st.at_head is False
+    assert st.unversioned_at == migrate.INITIAL_REVISION and st.matches_models is False
 
 
 def test_upgrade_is_idempotent(backend: Backend) -> None:

@@ -30,7 +30,7 @@ in parallel, so changes here are changes to both.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/health` | `{"status": "ok|degraded|down", "probes": [...]}` — db (incl. append-only trigger check), sandbox, toolchains, builders, worker heartbeat |
+| GET | `/health` | `{"status": "ok|degraded|down", "probes": [...]}` — `db`, `migrations` (the store's Alembic revision is the code's head: `ok` at head; `degraded` for an unstamped `create_all` store whose schema equals the head; `down` → 503 when behind, ahead or empty, `data: {database, head, at_head, unversioned_at, matches_models}`), `append_only` (an UPDATE proven refused), `ledger` (false-Q1 = 0), `sandbox` (skipped for `CRB_ROLE=api`), `toolchains`, `builders`, `worker` (heartbeat) |
 | GET | `/health/live` | – | process up + database reachable; never probes the sandbox (container HEALTHCHECK / Helm liveness); 503 when the store is gone |
 | GET | `/metrics` | Prometheus text (`crb_false_q1_total` must be 0) |
 | GET | `/version` | `{"crb": "...", "apparatus": "2.2", "policy": "routing.v1", "uptime_s": 0, "oidc_enabled": false}` — `oidc_enabled` says whether an organisation (OpenID Connect) sign-in is configured, so the login page offers the button only when it works and the posture page can state the sign-in mode; it names no provider and no secret |
@@ -162,7 +162,7 @@ Not yet: a model-backed test author (an item without an authored oracle ends `no
 | GET/POST | `/users` | admin | list / create local user; each `{id, subject, username, issuer, email, display_name, role, active, created, last_login}` — `username` is what a local account types at login (`subject` without its `local:` namespace; an OIDC account's provider subject) |
 | PUT | `/users/{id}/role` | admin | change role |
 | GET | `/settings` | admin | non-secret settings (builders configured: yes/no, sandbox mode, retention) |
-| GET | `/settings/secrets` | viewer | `{items: [SecretStatus], secrets_dir}` — statuses of the operator-supplied secrets, never values; `secrets_dir` (the on-host path) is `""` unless the caller is an admin |
+| GET | `/settings/secrets` | viewer | `{items: [SecretStatus], secrets_dir}` — statuses of the operator-supplied secrets, never values. A **viewer** gets presence only: `{name, present}` with `fingerprint`, `set_at`, `set_by` empty; operators and above get the full status; `secrets_dir` (the on-host path) is `""` unless the caller is an admin |
 | PUT | `/settings/secrets/claude-code-token` | admin | body `{token}` (a `claude setup-token` value: `sk-ant-oat01-…`, 40–512 chars, `[A-Za-z0-9_-]`); stores it owner-only under `CRB_SECRETS_DIR` / `$CRB_HOME/secrets`; returns the `SecretStatus`; `422 invalid_token` on shape, `409 secrets_insecure` when the directory is group/world accessible |
 | DELETE | `/settings/secrets/claude-code-token` | admin | removes it; returns the (absent) `SecretStatus`; idempotent |
 | POST | `/settings/secrets/claude-code-token/login` | admin | **Sign in with a Claude account from the browser.** Starts a login session: the API host runs `claude setup-token` in a pseudo-terminal (a detached helper — an API restart or a request timeout does not lose a sign-in in progress) and answers **201** `{id, state: awaiting_code, url, detail, started_at, expires_at}` with the Anthropic sign-in URL to open in a new tab. One session per deployment at a time (**409 `login_in_progress`**); **503 `cli_missing`** / `cli_failed` / `cli_timeout` when the CLI is absent, not the CLI, or silent for 30 s. Sessions expire after 10 minutes |

@@ -8,7 +8,9 @@ Secrets (``/settings/secrets/*``) go through :mod:`crb.server.secrets`: a value 
 accepted on ``PUT`` and written owner-only to disk; every response — including the
 ``PUT`` itself — is a :class:`SecretStatusOut` (presence, ≤4-char fingerprint,
 who/when), never the value. ``PUT``/``DELETE``/``verify`` are admin-only; the status
-list is readable by any signed-in role (it is non-secret by construction). ``verify``
+list is readable by any signed-in role (it is non-secret by construction) — a **viewer**
+sees presence only (``{name, present}``; the fingerprint, who set it and when are the
+operating roles' business, F25). ``verify``
 runs the builder's own login probe and is rate-limited to one per 10 s so it cannot
 be used to burn quota.
 
@@ -20,7 +22,8 @@ What it does: Lists and creates local accounts, changes roles without ever orpha
               with the builders' configured flags, and stores / removes / verifies the
               Claude Code login token while answering only statuses (never a value).
 How:          Every handler takes ``AdminDep`` (the secrets status list takes ``ViewerDep``
-              because a status is non-secret); the secrets handlers delegate to
+              because a status is non-secret, and projects a viewer's copy down to presence);
+              the secrets handlers delegate to
               src/crb/server/secrets.py and translate its exceptions into 422 / 409 / 429.
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         none
@@ -294,9 +297,13 @@ def _status_out(status: Any) -> SecretStatusOut:
 def list_secrets(user: ViewerDep, secrets: SecretsDep) -> SecretsStatusList:
     """Readable by every role: a status is non-secret by construction (presence, at most
     four trailing characters, who set it when) and an operator needs it to know whether
-    an ``auth: cli`` run can authenticate. Only admins learn the directory path."""
+    an ``auth: cli`` run can authenticate. A viewer gets presence only — ``{name,
+    present}`` with the other fields empty — and only admins learn the directory path."""
+    items = [_status_out(s) for s in secrets.statuses()]
+    if user.role == "viewer":
+        items = [SecretStatusOut(name=i.name, present=i.present) for i in items]
     return SecretsStatusList(
-        items=[_status_out(s) for s in secrets.statuses()],
+        items=items,
         secrets_dir=str(secrets.path) if user.role == "admin" else "",
     )
 

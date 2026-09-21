@@ -124,12 +124,19 @@ class TestSettings:
 
     def test_cookie_secure_defaults_by_env(self, tmp_path: Path) -> None:
         assert make_settings(tmp_path).resolved_cookie_secure is False
-        prod = Settings(env="prod", home=tmp_path, secret_key=SecretStr("p" * 40))
+        # tmp_path is an OS temporary directory: prod admits it only with the explicit opt-out
+        prod = Settings(
+            env="prod", home=tmp_path, secret_key=SecretStr("p" * 40), allow_temp_home=True
+        )
         assert prod.resolved_cookie_secure is True
         assert make_settings(tmp_path, cookie_secure=True).resolved_cookie_secure is True
         assert (
             Settings(
-                env="prod", home=tmp_path, secret_key=SecretStr("p" * 40), cookie_secure=False
+                env="prod",
+                home=tmp_path,
+                secret_key=SecretStr("p" * 40),
+                cookie_secure=False,
+                allow_temp_home=True,
             ).resolved_cookie_secure
             is False
         )

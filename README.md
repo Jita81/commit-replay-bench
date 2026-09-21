@@ -28,6 +28,10 @@ abstract cells, never code.
 > can drive a deployment. `v2.0.0a1` is tagged; the release workflow builds, smokes and
 > signs the container image. See [Status by phase](#status-by-phase) and the
 > [Changelog](CHANGELOG.md). The June 2026 v1 contents are tagged `v1.0.0-legacy`.
+>
+> Releases: a release is a `vX.Y.Z` tag on `main` — one version in three files plus a dated
+> CHANGELOG section, then the pipeline builds, smokes, SBOMs and keyless-signs the image on
+> GHCR. How a release is cut and what to check: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Start here
 

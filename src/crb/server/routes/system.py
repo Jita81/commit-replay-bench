@@ -5,6 +5,12 @@ internal interface.
 store-level checks:
 
 * ``db``          — the database answers.
+* ``migrations``  — the database's Alembic revision IS the code's head
+  (:func:`crb.store.migrate.head_status_on`). ``down`` (503) when it is behind, ahead or
+  empty — a long-lived pod whose store drifted must leave the Service, and the go-live
+  checklist may point here truthfully; both revisions are in the detail. A ``create_all``
+  store whose schema equals the head (a ``crb serve`` without ``crb migrate``) is
+  ``degraded``, not down: complete, but unstamped until ``crb migrate`` runs.
 * ``append_only`` — the ledger triggers exist AND an ``UPDATE`` on ``grades`` is refused
   (:func:`crb.store.ledger.assert_append_only`). Missing triggers = ``down``.
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
@@ -34,12 +40,15 @@ Navigation
 ----------
 What it is:   The ``/health``, ``/health/live``, ``/metrics`` and ``/version`` routes — the
               unauthenticated operational surface.
-What it does: Readiness aggregates the store probes (db, append-only triggers proven live,
-              ledger false-Q1 = 0, worker heartbeats) with the observability probes
+What it does: Readiness aggregates the store probes (db, migrations at head, append-only
+              triggers proven live, ledger false-Q1 = 0, worker heartbeats) with the
+              observability probes
               (sandbox — skipped for the ``api`` role — toolchains, builders) and answers
               503 when any is ``down``; liveness checks the database only; ``/metrics``
               refreshes the ledger gauges then renders the shared registry.
 How:          ``collect_health`` = the probe list → ``probes.aggregate`` → stamp;
+              ``migrations_result`` turns a ``HeadStatus`` into the probe (``crb doctor``
+              renders the same function from a bare URL);
               ``ledger_counts`` is the SQL twin of ``false_q1_total`` over the stored
               belts; ``process_role`` reads ``CRB_ROLE`` so the API container never fails
               on the docker socket it is not meant to have.
@@ -47,6 +56,9 @@ Layer:        server — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate)
 Works with:   src/crb/observability/probes.py (the probe vocabulary and ``aggregate``),
+              src/crb/store/migrate.py (``head_status_on`` — the one head check),
+              src/crb/cli/commands/service.py (``crb doctor`` renders ``migrations_result``
+              and ``probe_worker``),
               src/crb/store/ledger.py (``assert_append_only``), src/crb/observability/metrics.py
               (the gauges and the registry), src/crb/server/routes/signoffs.py (the same
               false-Q1 predicate, kept in step), deploy/entrypoint.sh + deploy/Dockerfile
@@ -80,6 +92,7 @@ from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.settings import Settings
 from crb.store.ledger import assert_append_only
+from crb.store.migrate import HeadStatus, head_status_on
 from crb.store.models import APPEND_ONLY_TABLES, Grade, Run, User
 
 try:  # pragma: no cover — extra installed in [server]
@@ -134,6 +147,53 @@ def probe_db(factory: sessionmaker[Session]) -> ProbeResult:
             return {"dialect": s.get_bind().dialect.name, "users": users}
 
     return probes.probe_callable("db", _ping)
+
+
+#: The fix every not-at-head reading names (the entrypoint / Helm Job runs the same command).
+MIGRATE_FIX = "run `crb migrate` (the migrate Job / `python -m crb.store.migrate upgrade`)"
+
+
+def migrations_result(st: HeadStatus) -> ProbeResult:
+    """``migrations`` from a :class:`HeadStatus` — shared with ``crb doctor`` so the two
+    surfaces cannot disagree. ``ok`` at head; ``degraded`` for a ``create_all`` schema that
+    equals the head but carries no ``alembic_version`` (complete; ``crb migrate`` stamps it);
+    ``down`` otherwise, naming both revisions and the fix."""
+    data = st.to_dict()
+    if st.at_head:
+        return ProbeResult("migrations", OK, f"database at {st.head} = code head", data)
+    if st.database is not None:
+        return ProbeResult(
+            "migrations",
+            DOWN,
+            f"database at {st.database}, code head {st.head} — {MIGRATE_FIX}",
+            data,
+        )
+    if st.matches_models:
+        return ProbeResult(
+            "migrations",
+            DEGRADED,
+            f"schema matches head {st.head} but carries no alembic_version (a create_all "
+            "store) — run `crb migrate` to stamp it",
+            data,
+        )
+    where = "empty" if st.unversioned_at is None else f"unversioned schema at {st.unversioned_at}"
+    return ProbeResult(
+        "migrations",
+        DOWN,
+        f"database not migrated ({where}), code head {st.head} — {MIGRATE_FIX}",
+        data,
+    )
+
+
+def probe_migrations(factory: sessionmaker[Session]) -> ProbeResult:
+    """``migrations``: the store's Alembic revision against the packaged head, read on a
+    session's own connection (one ``SELECT`` on ``alembic_version`` for a versioned store)."""
+    try:
+        with factory() as s:
+            st = head_status_on(s.connection())
+    except Exception as exc:
+        return ProbeResult("migrations", DOWN, f"{type(exc).__name__}: {exc}")
+    return migrations_result(st)
 
 
 def _count_triggers(s: Session) -> int:
@@ -298,6 +358,7 @@ def collect_health(
     role = process_role() if role is None else role
     results = [
         probe_db(factory),
+        probe_migrations(factory),
         probe_append_only(factory),
         probe_ledger(factory),
         probe_sandbox(settings, role),
@@ -377,6 +438,7 @@ def version(request: Request) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_ROLE",
+    "MIGRATE_FIX",
     "ROLES",
     "ROLE_ALL",
     "ROLE_API",
@@ -386,6 +448,9 @@ __all__ = [
     "collect_health",
     "collect_liveness",
     "ledger_counts",
+    "migrations_result",
+    "probe_migrations",
+    "probe_worker",
     "process_role",
     "refresh_ledger_gauges",
     "router",

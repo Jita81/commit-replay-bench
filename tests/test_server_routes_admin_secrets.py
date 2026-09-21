@@ -8,7 +8,9 @@ Navigation
 ----------
 What it is:   ``/settings/secrets``'s test suite — the Claude Code login token through the admin
               API.
-What it does: Pins that every route is 401 anonymous and admin-only, that CSRF is required on
+What it does: Pins that every route is 401 anonymous and admin-only, that a viewer's copy of
+              the status list is presence only while an operator sees the full status (F25),
+              that CSRF is required on
               every mutating route, that PUT stores owner-only and answers with a status never
               the value (shape validated, never echoed), that DELETE is idempotent, that an
               insecure directory refuses the store with 409, that ``CRB_SECRETS_DIR`` relocates
@@ -184,6 +186,33 @@ class TestAccess:
         assert client.put(PATH_, json={"token": GOOD}).status_code == 200
         assert client.post(PATH_ + "/verify").status_code == 200
         assert client.delete(PATH_).status_code == 200
+
+    def test_viewer_sees_presence_only_operator_sees_the_status(
+        self, client: TestClient, fake_claude: Path
+    ) -> None:
+        """F25: a viewer's copy of the list is ``{name, present}`` — no fingerprint, no
+        ``set_by``, no ``set_at``; an operator (who decides whether an ``auth: cli`` run can
+        authenticate) sees the full status."""
+        login(client)
+        for name, role in (("viewer2", "viewer"), ("op2", "operator")):
+            r = client.post(
+                f"{API_PREFIX}/users", json={"username": name, "password": USER_PW, "role": role}
+            )
+            assert r.status_code == 201, r.text
+        assert client.put(PATH_, json={"token": GOOD}).status_code == 200
+        login(client, "viewer2", USER_PW)
+        item = client.get(f"{API_PREFIX}/settings/secrets").json()["items"][0]
+        assert item == {
+            "name": NAME,
+            "present": True,
+            "fingerprint": "",
+            "set_at": "",
+            "set_by": "",
+        }
+        login(client, "op2", USER_PW)
+        item = client.get(f"{API_PREFIX}/settings/secrets").json()["items"][0]
+        assert item["present"] is True and item["fingerprint"] == GOOD[-4:]
+        assert item["set_by"] == "root" and item["set_at"]
 
     def test_csrf_required_on_every_mutating_route(self, client: TestClient) -> None:
         login(client)

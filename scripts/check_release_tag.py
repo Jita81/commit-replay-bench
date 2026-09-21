@@ -20,7 +20,7 @@ Layer:        tooling — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   .github/workflows/release.yml (the caller), pyproject.toml (the version),
               src/crb/core/version.py (the same number, pinned equal by
-              tests/test_version_consistency.py), docs/OPERATOR.md (the release procedure)
+              tests/test_version_consistency.py), docs/RELEASING.md (the release procedure)
 Tested by:    tests/test_version_consistency.py
 Touch when:   the tag convention changes (it must change here, in ``release.yml``'s ``on.push.tags``
               and in the cosign identity regexp together).
