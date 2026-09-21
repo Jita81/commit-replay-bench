@@ -54,11 +54,12 @@ crb worker --home "$CRB_HOME" --executor local  # the queue consumer
 ```
 
 **Never put `CRB_HOME`, the database or the secrets directory under `/tmp`, `/private/tmp`,
-`/var/folders` or `$TMPDIR`** (DL-045). macOS treats those paths as temporary storage: its
-documented daily maintenance removes files there that have not been accessed for three
-days, and it may empty them on reboot. A deployment that lives there loses its builder
-token, its clones' `HEAD` and its restart script with no error message — the development
-stack did exactly that in September 2026 and was moved to `~/crb-stack`. The product now
+`/var/folders` or `$TMPDIR`** (DL-045). macOS treats those paths as temporary storage: the
+OS's periodic clean-up removes untouched files there (see Apple's `periodic` / `daily`
+documentation for `/tmp` on your macOS version), and it may empty them on reboot. A
+deployment that lives there loses its builder token, its clones' `HEAD` and its restart
+script with no error message — the development stack did exactly that in September 2026
+and was moved to `~/crb-stack`. The product now
 enforces the rule rather than relying on this paragraph: `Settings` **refuses to start**
 when `CRB_HOME` resolves under one of those roots and `CRB_ENV=prod` (the default), and
 **warns** in `CRB_ENV=dev`; `crb doctor`'s `home` line says the same. `CRB_ALLOW_TEMP_HOME=true`
@@ -444,8 +445,10 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
       sha256:<pinned>` passes (§2.2) and the digest is what `image.digest` / `CRB_IMAGE` says.
 - [ ] `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
       `database at <rev> = code head` (the probe is `down`, and the endpoint 503, when the
-      store is behind, ahead or unstamped — a half-migrated database cannot pass this
-      line), `append_only` proves an UPDATE refused, `ledger` reads `false_q1=0`, `builders`
+      store is behind, ahead, empty or cannot be inspected — a half-migrated database
+      cannot pass this line; an unstamped `create_all` schema that matches the head is
+      `degraded`, still served, until `crb migrate` stamps it), `append_only` proves an
+      UPDATE refused, `ledger` reads `false_q1=0`, `builders`
       configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
       worker owns it; prove it with `crb doctor` on the worker host).
 - [ ] `crb doctor` on the API host and on the worker host: every line `ok`, or `warn` for a

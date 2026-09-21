@@ -15,7 +15,7 @@ Invariants
   ``/tmp``, ``/private/tmp``, ``/var/folders`` or ``$TMPDIR`` is refused in ``prod`` and
   warned about in ``dev`` (:func:`temp_dir_reason`); ``CRB_ALLOW_TEMP_HOME=true`` is the
   explicit opt-out for a throwaway evaluation. macOS documents those paths as temporary
-  and removes files there that have not been used for about three days.
+  and its periodic clean-up removes untouched files there.
 
 Navigation
 ----------
@@ -79,8 +79,8 @@ MIN_PASSWORD_LENGTH = 12
 TEMP_DIR_ROOTS: tuple[str, ...] = ("/tmp", "/private/tmp", "/var/folders", "/private/var/folders")
 #: What the guard tells the person, once, in the refusal and in the warning.
 TEMP_HOME_ADVICE = (
-    "macOS removes files there that have not been used for about three days and a reboot "
-    "may empty it; put the deployment under a persistent path such as ~/crb-stack or "
+    "macOS's periodic clean-up removes untouched files there and a reboot may empty it; "
+    "put the deployment under a persistent path such as ~/crb-stack or "
     "/srv/crb (docs/DEPLOYMENT.md#11-single-host-without-containers-evaluation)"
 )
 

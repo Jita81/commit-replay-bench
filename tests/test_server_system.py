@@ -8,7 +8,8 @@ What it does: Pins the health shape and its append-only probe (an UPDATE is prov
               a false-Q1 row bypassing the ledger is caught, that a stale worker heartbeat is
               flagged, that the ``migrations`` probe is ok at head / degraded for an unstamped
               ``create_all`` store / down (503, both revisions named) when the store is behind
-              or empty, that health needs no auth; the role-aware sandbox probe (an ``api``
+              or empty / down with a FIXED detail (the exception logged, never served) when
+              the head cannot be read, that health needs no auth; the role-aware sandbox probe (an ``api``
               process reports it ``skipped`` and is not degraded by it; ``worker`` and ``all``
               probe it; the gate is at the function); liveness as a database-only probe that
               never touches the sandbox (the A11 container) and ignores a false-Q1 ledger but
@@ -33,6 +34,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -51,8 +53,10 @@ from crb.observability import metrics
 from crb.observability.probes import ProbeResult
 from crb.server.app import API_PREFIX, create_app
 from crb.server.routes.system import (
+    MIGRATIONS_INSPECT_FAILED,
     ledger_counts,
     migrations_result,
+    probe_migrations,
     probe_sandbox,
     process_role,
 )
@@ -287,6 +291,27 @@ class TestHealth:
         assert "unversioned schema at 0001" in older.detail and "crb migrate" in older.detail
         ahead = migrations_result(migrate.HeadStatus("0007", "0006", False))
         assert ahead.status == "down" and "database at 0007, code head 0006" in ahead.detail
+
+    def test_migrations_probe_hides_the_exception_from_the_unauthenticated_route(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """CWE-209: when the head cannot be read the detail is a fixed sentence — never the
+        exception's type or message (a driver error can carry a path, a DSN or SQL) — and
+        the exception goes to the server log instead."""
+        secret = "postgresql://crb:hunter2@db.internal/crb — relation alembic_version"
+
+        def _factory() -> Session:
+            raise RuntimeError(secret)
+
+        with caplog.at_level(logging.ERROR, logger="crb.server.system"):
+            r = probe_migrations(_factory)  # type: ignore[arg-type]
+        assert r.status == "down"
+        assert r.detail == MIGRATIONS_INSPECT_FAILED
+        assert "RuntimeError" not in r.detail and "hunter2" not in r.detail
+        assert r.data == {}
+        assert any(
+            "migration inspection failed" in rec.message and rec.exc_info for rec in caplog.records
+        )
 
     def test_health_needs_no_auth(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/health").status_code == 200

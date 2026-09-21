@@ -6,8 +6,9 @@
  * ----------
  * What it is:   Screen tests for the Claude Code login card against a mocked API.
  * What it does: Pins the operator instruction and the absent status; presence with the
- *               ≤ 4-char fingerprint and provenance and never a value; a viewer sees status
- *               only (no form, no buttons, no host path); the paste field is a password input
+ *               ≤ 4-char fingerprint and provenance and never a value; a viewer sees presence
+ *               only (the `{name, present}` item: no fingerprint, no provenance, no form, no
+ *               buttons, no host path); the paste field is a password input
  *               that is never echoed and is cleared after a save; a shape rejection renders
  *               without the token; Verify shows ok / invalid and the 429 when rate-limited;
  *               Remove returns the status to absent.
@@ -30,7 +31,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Principal } from '../../api/types'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { ClaudeCodeLoginCard } from './ClaudeCodeLoginCard'
-import type { LoginCheck, LoginSession, SecretStatus, SecretsStatusList } from './claudeCodeLogin'
+import type { LoginCheck, LoginSession, SecretPresence, SecretStatus, SecretsStatusList } from './claudeCodeLogin'
 
 const ADMIN: Principal = { ...PRINCIPAL, role: 'admin' }
 const VIEWER: Principal = { ...PRINCIPAL, role: 'viewer' }
@@ -43,6 +44,10 @@ const PRESENT: SecretStatus = { name: 'claude_code_oauth_token', present: true, 
 function list(status: SecretStatus, dir = '/srv/crb/secrets'): SecretsStatusList {
   return { items: [status], secrets_dir: dir }
 }
+
+/** What a viewer is served (docs/API.md): exactly `{name, present}` per item, no host path. */
+const VIEWER_PRESENT: SecretPresence = { name: 'claude_code_oauth_token', present: true }
+const VIEWER_LIST: SecretsStatusList = { items: [VIEWER_PRESENT], secrets_dir: '' }
 
 const OK: LoginCheck = { status: 'ok', detail: 'pong', source: 'explicit', fingerprint: 'GOOD', model: 'claude-haiku-4-5', cli_version: '2.1.132 (Claude Code)', duration_s: 2.4, cost_usd: 0 }
 const INVALID: LoginCheck = { ...OK, status: 'invalid', detail: 'authentication failed (HTTP 401)' }
@@ -80,9 +85,13 @@ describe('ClaudeCodeLoginCard', () => {
     expect(screen.getByTestId('claude-login-remove')).toBeEnabled()
   })
 
-  it('viewer sees status only — no form, no buttons, no host path', async () => {
-    setup(VIEWER, { 'GET /settings/secrets': list(PRESENT, '') })
-    await screen.findByTestId('claude-login-status')
+  it('viewer sees presence only — no fingerprint, no provenance, no form, no buttons, no host path', async () => {
+    setup(VIEWER, { 'GET /settings/secrets': VIEWER_LIST })
+    const status = await screen.findByTestId('claude-login-status')
+    expect(status).toHaveAttribute('data-present', 'true')
+    expect(status).toHaveTextContent('token stored')
+    expect(status.textContent).not.toContain('…')
+    expect(screen.queryByTestId('claude-login-provenance')).not.toBeInTheDocument()
     expect(screen.getByTestId('claude-login-readonly')).toBeInTheDocument()
     expect(screen.queryByTestId('claude-login-token')).not.toBeInTheDocument()
     expect(screen.queryByTestId('claude-login-save')).not.toBeInTheDocument()

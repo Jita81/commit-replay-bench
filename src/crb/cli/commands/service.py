@@ -14,13 +14,15 @@ What it does: ``serve`` hands off to uvicorn; ``worker`` forwards its flags to t
               not apply) and the fix in the sentence: toolchains, sandbox, builders, the Claude
               Code token store (its no-tool Haiku turn ONLY with ``--live``), the GitHub App
               (configured, key parses, one installation reachable), the server settings, the
-              ``CRB_HOME`` location and the secrets directory mode, the database, the
+              ``CRB_HOME`` location and the secrets directory mode and owner, the database
+              (initialised, every append-only trigger present, an UPDATE refused), the
               migration head, the worker heartbeat and the built UI with its help bundle
               (exit 1 only on a fail). ``probe_claude_code`` never prints a token — a
               fingerprint of at most four characters.
 How:          Each ``cmd_*`` imports inside the function and turns ``ImportError`` into a
               ``CliError`` naming the extra; ``doctor`` = ``probes.aggregate`` over the
-              observability probes plus the store's ``assert_append_only``, the store's
+              observability probes plus the server's ``probe_append_only`` (the trigger
+              count AND the refused UPDATE, as ``/health`` reads it), the store's
               ``head_status`` rendered by the SAME ``migrations_result`` as ``/health``, the
               server's ``probe_worker``, ``temp_dir_reason`` and ``resolve_ui_dist``; the
               settings are read from the environment as ``crb serve`` would, or (when they
@@ -29,9 +31,9 @@ How:          Each ``cmd_*`` imports inside the function and turns ``ImportError
               ``ok / warn / fail / skip``; ``--json`` keeps the vocabulary ``/health`` uses.
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
-Works with:   src/crb/server/routes/system.py (``migrations_result`` and ``probe_worker`` —
-              the same readings as ``/health``), src/crb/store/migrate.py (``upgrade``;
-              ``head_status`` for the doctor line), src/crb/server/settings.py (``Settings``,
+Works with:   src/crb/server/routes/system.py (``migrations_result``, ``probe_append_only``
+              and ``probe_worker`` — the same readings as ``/health``),
+              src/crb/store/migrate.py (``upgrade``; ``head_status`` for the doctor line), src/crb/server/settings.py (``Settings``,
               ``temp_dir_reason``), src/crb/server/github_app.py (``GitHubApp`` — the
               installation listing), src/crb/server/app.py (``resolve_ui_dist``; ``serve``
               and ``worker`` hand off to src/crb/server/main.py and worker_main.py),
@@ -59,6 +61,8 @@ from crb.cli.commands import EXIT_OK, CliError
 
 if TYPE_CHECKING:
     import httpx
+    from sqlalchemy.engine import Engine
+    from sqlalchemy.orm import Session, sessionmaker
 
     from crb.observability.probes import ProbeResult
     from crb.server.settings import GitHubAppSettings, Settings
@@ -299,7 +303,8 @@ def probe_settings(settings: Settings | None, refusal: str) -> ProbeResult:
 def probe_home() -> ProbeResult:
     """``home``: where ``CRB_HOME`` resolves and whether the OS may delete it (DL-045 —
     ``fail`` in prod, ``warn`` in dev or with ``CRB_ALLOW_TEMP_HOME``), plus the secrets
-    directory's mode (``fail`` when group/world accessible — the store refuses it)."""
+    directory's mode and owner (``fail`` when group/world accessible or owned by another
+    uid — ``SecretsStore._check_dir_for_write`` refuses both; mode alone is not enough)."""
     from crb.core.secrets_file import resolve_secrets_dir
     from crb.observability import probes
     from crb.server.settings import TEMP_HOME_ADVICE, temp_dir_reason
@@ -330,13 +335,22 @@ def probe_home() -> ProbeResult:
     else:
         parts.append(f"CRB_HOME {home}" + ("" if home.is_dir() else " (not created yet)"))
     if secrets_dir.is_dir():
-        mode = stat.S_IMODE(secrets_dir.stat().st_mode)
+        st = secrets_dir.stat()
+        mode = stat.S_IMODE(st.st_mode)
+        me = os.geteuid()
         data["secrets_dir_mode"] = f"{mode:04o}"
+        data["secrets_dir_uid"] = st.st_uid
         if mode & 0o077:
             status = probes.DOWN
             parts.append(
                 f"secrets dir {secrets_dir} is mode {mode:04o} (group/world accessible) — "
                 f"`chmod 0700 {secrets_dir}`"
+            )
+        elif st.st_uid != me:
+            status = probes.DOWN
+            parts.append(
+                f"secrets dir {secrets_dir} is owned by uid {st.st_uid}, not the current user "
+                f"(uid {me}) — the store refuses it; `chown {me} {secrets_dir}`"
             )
         else:
             parts.append(f"secrets dir {secrets_dir} mode {mode:04o}")
@@ -451,7 +465,8 @@ def probe_github_app(
 def probe_ui(settings: Settings | None) -> ProbeResult:
     """``ui``: the built UI the API would serve (``CRB_UI_DIST``, else ``ui/dist`` /
     ``/app/ui/dist``) and whether the help bundle is in it — one lazy chunk per guide
-    (``assets/<NAME>-<hash>.js``); without them ``/help/docs/<NAME>`` is empty."""
+    (``assets/<NAME>-<hash>.js``, a non-empty regular file: a zero-byte chunk serves an
+    empty page); without them ``/help/docs/<NAME>`` is empty."""
     from crb.observability import probes
 
     if settings is None:
@@ -469,7 +484,9 @@ def probe_ui(settings: Settings | None) -> ProbeResult:
             "/help is empty — `npm --prefix ui run build`, or set CRB_UI_DIST",
             {"dist": None, "ui_dist_setting": settings.ui_dist},
         )
-    missing = [g for g in HELP_GUIDES if not list((dist / "assets").glob(f"{g}-*.js"))]
+    missing = [
+        g for g in HELP_GUIDES if not any(map(_is_chunk, (dist / "assets").glob(f"{g}-*.js")))
+    ]
     data = {"dist": str(dist), "guides": len(HELP_GUIDES), "missing_guides": missing}
     if missing:
         return probes.ProbeResult(
@@ -488,6 +505,42 @@ def probe_ui(settings: Settings | None) -> ProbeResult:
     )
 
 
+def _is_chunk(path: Path) -> bool:
+    """A built chunk: a regular file with bytes in it (not a directory, not zero-byte)."""
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    return stat.S_ISREG(st.st_mode) and st.st_size > 0
+
+
+def probe_database(engine: Engine, factory: sessionmaker[Session], url: str) -> ProbeResult:
+    """``database``: the store answers and is initialised (``grades`` exists), and the
+    append-only guarantee holds the way ``/health`` proves it — ``probe_append_only``:
+    every trigger present (counted against ``APPEND_ONLY_TABLES``) AND an UPDATE on
+    ``grades`` refused. ``assert_append_only`` alone returns on an empty ``grades`` table,
+    which would pass a store whose triggers were never installed."""
+    from sqlalchemy import inspect
+
+    from crb.observability import probes
+    from crb.server.routes.system import probe_append_only
+
+    data: dict[str, Any] = {"url": _redact_url(url)}
+    try:
+        initialised = "grades" in inspect(engine).get_table_names()
+    except Exception as exc:
+        return probes.ProbeResult("database", probes.DOWN, f"{type(exc).__name__}: {exc}", data)
+    if not initialised:
+        return probes.ProbeResult(
+            "database", probes.DOWN, "database not initialised — run `crb migrate`", data
+        )
+    ao = probe_append_only(factory)
+    data.update(ao.data)
+    if ao.status != probes.OK:
+        return probes.ProbeResult("database", probes.DOWN, f"{ao.detail} — run `crb migrate`", data)
+    return probes.ProbeResult("database", probes.OK, f"answers · {ao.detail}", data)
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """One report over every readiness probe; exit 1 only when something is ``down``
     (``fail`` in the text form)."""
@@ -500,12 +553,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         probe_claude_code(verify=bool(getattr(args, "live", False))),
     ]
     try:
-        from sqlalchemy import inspect
-
         from crb.server.routes.system import migrations_result, probe_worker
         from crb.store import migrate as migrate_mod
         from crb.store.db import database_url, make_engine, make_session_factory
-        from crb.store.ledger import assert_append_only
     except ImportError:
         results.append(probes.ProbeResult("database", probes.DEGRADED, _SERVER_HINT))
         return _finish_doctor(results, as_json=bool(args.json))
@@ -519,14 +569,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     engine = make_engine(url)
     factory = make_session_factory(engine)
     try:
-
-        def _db() -> dict[str, str]:
-            if "grades" not in inspect(engine).get_table_names():
-                raise RuntimeError("database not initialised — run `crb migrate`")
-            assert_append_only(factory)
-            return {"url": _redact_url(url), "append_only": "verified"}
-
-        db = probes.probe_callable("database", _db)
+        db = probe_database(engine, factory, url)
         results.append(db)
 
         def _head() -> probes.ProbeResult:
@@ -545,7 +588,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         else:
             results.append(
                 probes.ProbeResult(
-                    "worker", probes.DEGRADED, "not checked: the database is not initialised"
+                    "worker", probes.DEGRADED, "not checked: the database line failed"
                 )
             )
     finally:

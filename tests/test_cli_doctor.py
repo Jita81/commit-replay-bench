@@ -14,17 +14,19 @@ What it does: Pins that a keychain login is ok, that no login and no key is degr
               that ``--live`` (and its old name ``--verify``) runs the probe (ok and invalid)
               and nothing else does; that ``home`` fails on a temporary ``CRB_HOME`` in prod,
               warns in dev, fails on a group-readable secrets directory and passes a
-              persistent path; that ``settings`` names the server's refusal; that
+              persistent path, fails on a secrets directory another uid owns; that
+              ``settings`` names the server's refusal; that
               ``github_app`` skips when unconfigured, fails on a half configuration, an
               unreadable key file, a key that does not parse and a refusing GitHub, warns
               with no installation and is ok with installations (naming how many can
               deliver); that ``ui`` warns without a build and with an incomplete help bundle
-              and is ok with the eight chunks; and that ``crb doctor`` on a migrated store
-              renders every line with ``ok / warn / fail / skip`` in text and the ``/health``
-              vocabulary in JSON, failing on a store stamped behind head.
+              (an empty chunk counts as missing) and is ok with the eight chunks; and that
+              ``crb doctor`` on a migrated store renders every line with ``ok / warn / fail /
+              skip`` in text and the ``/health`` vocabulary in JSON, failing on a store
+              stamped behind head and on one whose append-only triggers are missing.
 How:          A fake ``claude`` on PATH and a throwaway ``CRB_HOME``; an RSA key pair from
               ``cryptography`` and an ``httpx.MockTransport`` standing in for GitHub; a
-              ``ui/dist`` made of empty chunk files.
+              ``ui/dist`` made of one-line chunk files.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   src/crb/cli/commands/service.py (under test), src/crb/builders/claude_code.py
@@ -264,7 +266,7 @@ class TestSettingsAndHomeLines:
         h = probe_home()
         assert h.status == "down"
         assert "CRB_HOME" in h.detail and "OS-managed temporary directory" in h.detail
-        assert "three days" in h.detail and "~/crb-stack" in h.detail
+        assert "periodic clean-up" in h.detail and "~/crb-stack" in h.detail
         assert "secrets dir" in h.detail and "(not created yet)" in h.detail
         assert h.data["temporary"] and h.data["env"] == "prod"
 
@@ -305,6 +307,24 @@ class TestSettingsAndHomeLines:
         os.chmod(home / "secrets", 0o700)
         h = probe_home()
         assert h.status == "degraded" and "mode 0700" in h.detail  # degraded: still under tmp
+
+    def test_home_fails_on_a_secrets_dir_owned_by_another_user(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mode 0700 is not enough: ``SecretsStore._check_dir_for_write`` refuses a directory
+        another uid owns (a root-created mount), so the doctor must too — with the fix."""
+        monkeypatch.setenv("CRB_ENV", "dev")
+        (home / "secrets").mkdir(parents=True)
+        os.chmod(home / "secrets", 0o700)
+        me = os.geteuid()
+        monkeypatch.setattr(os, "geteuid", lambda: me + 1)
+        h = probe_home()
+        assert h.status == "down"
+        assert (
+            f"secrets dir {home / 'secrets'} is owned by uid {me}, not the current user" in h.detail
+        )
+        assert f"(uid {me + 1})" in h.detail and f"`chown {me + 1} {home / 'secrets'}`" in h.detail
+        assert h.data["secrets_dir_uid"] == me
 
 
 @pytest.fixture(scope="module")
@@ -415,6 +435,10 @@ def _dev_settings(home: Path, **over: Any) -> Settings:
     return Settings(env="dev", home=home, **over)
 
 
+#: What a built help chunk contains — never empty (an empty chunk is a missing guide).
+CHUNK = "export default 'guide'\n"
+
+
 class TestUiLine:
     def test_no_build_warns_with_the_fix(self, home: Path, tmp_path: Path) -> None:
         r = probe_ui(_dev_settings(home, ui_dist=str(tmp_path / "nowhere")))
@@ -429,16 +453,34 @@ class TestUiLine:
         (dist / "assets").mkdir(parents=True)
         (dist / "index.html").write_text("<html></html>")
         for name in HELP_GUIDES[:-2]:
-            (dist / "assets" / f"{name}-Ab12cD3.js").write_text("")
+            (dist / "assets" / f"{name}-Ab12cD3.js").write_text(CHUNK)
         r = probe_ui(_dev_settings(home, ui_dist=str(dist)))
         assert r.status == "degraded"
         assert "6/8 guides, missing LEARNING-LOOP, DEPLOYMENT" in r.detail
         assert r.data["missing_guides"] == ["LEARNING-LOOP", "DEPLOYMENT"]
         # a hash may start with "-" (vite emitted OPERATOR--HQku2aS.js): still the guide's chunk
-        (dist / "assets" / "LEARNING-LOOP--x1.js").write_text("")
-        (dist / "assets" / "DEPLOYMENT-DMf1bMdE.js").write_text("")
+        (dist / "assets" / "LEARNING-LOOP--x1.js").write_text(CHUNK)
+        (dist / "assets" / "DEPLOYMENT-DMf1bMdE.js").write_text(CHUNK)
         r = probe_ui(_dev_settings(home, ui_dist=str(dist)))
         assert r.status == "ok" and r.detail == f"UI at {dist} · 8/8 help guides bundled"
+
+    def test_an_empty_or_non_file_chunk_is_a_missing_guide(
+        self, home: Path, tmp_path: Path
+    ) -> None:
+        """A zero-byte asset (a truncated copy, an interrupted build) or a directory that
+        happens to match the glob would serve an empty ``/help/docs/<guide>`` — not ``ok``."""
+        dist = tmp_path / "dist"
+        (dist / "assets").mkdir(parents=True)
+        (dist / "index.html").write_text("<html></html>")
+        for name in HELP_GUIDES:
+            (dist / "assets" / f"{name}-Ab12cD3.js").write_text(CHUNK)
+        (dist / "assets" / "SECURITY-Ab12cD3.js").write_text("")
+        (dist / "assets" / "DEPLOYMENT-Ab12cD3.js").unlink()
+        (dist / "assets" / "DEPLOYMENT-Ab12cD3.js").mkdir()
+        r = probe_ui(_dev_settings(home, ui_dist=str(dist)))
+        assert r.status == "degraded"
+        assert r.data["missing_guides"] == ["SECURITY", "DEPLOYMENT"]
+        assert "6/8 guides, missing SECURITY, DEPLOYMENT" in r.detail
 
 
 class TestDoctorReport:
@@ -460,7 +502,7 @@ class TestDoctorReport:
         assert list(rows) == list(DOCTOR_LINES)
         assert rows["settings"][0] == "ok" and rows["home"][0] == "warn"  # dev, under tmp
         assert rows["github_app"][0] == "skip"
-        assert rows["database"] == ("ok", "ok")
+        assert rows["database"] == ("ok", "answers · triggers present; UPDATE on grades refused")
         assert rows["migrations"] == ("ok", f"database at {migrate.head_revision()} = code head")
         assert rows["worker"] == ("ok", "idle")
         assert rows["ui"][0] == "warn" and "no built UI" in rows["ui"][1]
@@ -487,12 +529,46 @@ class TestDoctorReport:
         fake_cli(True)
         assert main(["doctor"]) == 1
         rows = _lines(capsys.readouterr().out)
-        assert rows["database"] == (
-            "fail",
-            "RuntimeError: database not initialised — run `crb migrate`",
-        )
+        assert rows["database"] == ("fail", "database not initialised — run `crb migrate`")
         assert (
             rows["migrations"][0] == "fail"
             and "database not migrated (empty)" in rows["migrations"][1]
         )
-        assert rows["worker"] == ("warn", "not checked: the database is not initialised")
+        assert rows["worker"] == ("warn", "not checked: the database line failed")
+
+    def test_a_store_with_tables_but_no_triggers_fails_the_database_line(
+        self,
+        home: Path,
+        fake_cli: Callable[[bool], None],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``assert_append_only`` returns on an empty ``grades`` table, so a store whose
+        triggers were dropped (or never installed) looked ``ok``; the line now counts the
+        triggers the way ``/health`` does and names how many are missing."""
+        from sqlalchemy import text
+
+        from crb.store.db import make_engine
+        from crb.store.models import APPEND_ONLY_TABLES
+
+        fake_cli(True)
+        monkeypatch.setenv("CRB_ENV", "dev")
+        url = f"sqlite:///{home / 'crb.db'}"
+        home.mkdir()
+        migrate.upgrade(url)
+        engine = make_engine(url)
+        with engine.begin() as c:
+            c.execute(text("DROP TRIGGER grades_no_update"))
+            c.execute(text("DROP TRIGGER grades_no_delete"))
+        engine.dispose()
+        code = main(["doctor", "--json"])
+        body = json.loads(capsys.readouterr().out)
+        expected = 2 * len(APPEND_ONLY_TABLES)
+        db = next(p for p in body["probes"] if p["name"] == "database")
+        assert code == 1 and db["status"] == "down"
+        assert db["detail"] == (
+            f"{expected - 2}/{expected} append-only triggers present — run `crb migrate`"
+        )
+        assert db["data"]["triggers"] == expected - 2 and db["data"]["url"].startswith("sqlite")
+        # the worker line is not guessed from a store that failed
+        assert next(p for p in body["probes"] if p["name"] == "worker")["status"] == "degraded"

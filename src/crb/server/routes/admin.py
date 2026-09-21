@@ -9,8 +9,8 @@ accepted on ``PUT`` and written owner-only to disk; every response — including
 ``PUT`` itself — is a :class:`SecretStatusOut` (presence, ≤4-char fingerprint,
 who/when), never the value. ``PUT``/``DELETE``/``verify`` are admin-only; the status
 list is readable by any signed-in role (it is non-secret by construction) — a **viewer**
-sees presence only (``{name, present}``; the fingerprint, who set it and when are the
-operating roles' business, F25). ``verify``
+sees presence only (:class:`SecretPresenceOut`, exactly ``{name, present}``; the
+fingerprint, who set it and when are the operating roles' business, F25). ``verify``
 runs the builder's own login probe and is rate-limited to one per 10 s so it cannot
 be used to burn quota.
 
@@ -142,10 +142,19 @@ class SecretStatusOut(BaseModel):
     set_by: str = ""
 
 
-class SecretsStatusList(BaseModel):
-    """``GET /settings/secrets`` body."""
+class SecretPresenceOut(BaseModel):
+    """A viewer's copy of a status: presence only. A distinct model, not a blanked
+    :class:`SecretStatusOut`, so the wire shape is exactly ``{name, present}`` (F25)."""
 
-    items: list[SecretStatusOut]
+    name: str
+    present: bool
+
+
+class SecretsStatusList(BaseModel):
+    """``GET /settings/secrets`` body. ``items`` are :class:`SecretStatusOut` for operators
+    and above, :class:`SecretPresenceOut` for a viewer — one list, never mixed."""
+
+    items: list[SecretStatusOut] | list[SecretPresenceOut]
     #: Where the files live on the API host (admins only — so they can find / mount /
     #: rotate); ``""`` for every other role.
     secrets_dir: str = ""
@@ -297,11 +306,14 @@ def _status_out(status: Any) -> SecretStatusOut:
 def list_secrets(user: ViewerDep, secrets: SecretsDep) -> SecretsStatusList:
     """Readable by every role: a status is non-secret by construction (presence, at most
     four trailing characters, who set it when) and an operator needs it to know whether
-    an ``auth: cli`` run can authenticate. A viewer gets presence only — ``{name,
-    present}`` with the other fields empty — and only admins learn the directory path."""
-    items = [_status_out(s) for s in secrets.statuses()]
+    an ``auth: cli`` run can authenticate. A viewer gets presence only — exactly ``{name,
+    present}`` per item — and only admins learn the directory path."""
+    statuses = secrets.statuses()
+    items: list[SecretStatusOut] | list[SecretPresenceOut]
     if user.role == "viewer":
-        items = [SecretStatusOut(name=i.name, present=i.present) for i in items]
+        items = [SecretPresenceOut(name=st.name, present=st.present) for st in statuses]
+    else:
+        items = [_status_out(st) for st in statuses]
     return SecretsStatusList(
         items=items,
         secrets_dir=str(secrets.path) if user.role == "admin" else "",

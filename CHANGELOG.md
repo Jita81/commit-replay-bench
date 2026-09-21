@@ -10,13 +10,20 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ### 2026-09-21 — the operating envelope: what the platform team is told is true (F36–F41, F44, F47, F25)
 
-- **`/health` gains a `migrations` probe** — ok when the database's alembic head equals the
-  code's, degraded with both revisions otherwise; the go-live checklist now points at a check
-  that proves what it says (F36).
+- **`/health` gains a `migrations` probe** (docs/API.md) — `ok` when the database's Alembic
+  revision is the code's head; `down` (the endpoint answers 503) when the store is behind,
+  ahead, empty or cannot be inspected, naming both revisions and the fix; `degraded` only
+  for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps
+  it). When the head cannot be read the detail is a fixed sentence and the exception is
+  logged server-side, never served on the unauthenticated route. The go-live checklist now
+  points at a check that proves what it says (F36).
 - **`crb doctor`** checks the GitHub App (configured, key readable, an installation reachable
   when configured), the Claude Code token store (a live turn only with `--live`), the
-  migration head, the worker heartbeat, the docs bundle in `ui/dist` and where `CRB_HOME`
-  lives — each a labelled ok/warn/fail/skip line with the fix (F38).
+  database (initialised, every append-only trigger present, an UPDATE refused — the same
+  reading as `/health`), the migration head, the worker heartbeat, the docs bundle in
+  `ui/dist` (one non-empty chunk per guide) and where `CRB_HOME` and the secrets directory
+  live (mode 0700 and owned by the current user) — each a labelled ok/warn/fail/skip line
+  with the fix (F38).
 - **A deployment never lives under an OS temp directory**: settings refuse in prod and warn in
   dev when `CRB_HOME` resolves under `/tmp`, `/private/tmp`, `/var/folders` or `$TMPDIR`
   (`CRB_ALLOW_TEMP_HOME` overrides for a knowing trial); DEPLOYMENT.md says why (F37).
@@ -27,7 +34,9 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   release.yml builds and signs, the chart); `pyproject` and the Helm chart move to
   `2.0.0b1` (F40). OPERATOR.md's front matter describes the product as it is, with the
   phase markers gone (F41); dangling cross-references resolved (F47).
-- **`GET /settings/secrets` serves viewers `{name, present}` only** (F25).
+- **`GET /settings/secrets` serves viewers `{name, present}` only** — a distinct
+  `SecretPresenceOut` item model, so no empty `fingerprint` / `set_at` / `set_by` keys reach a
+  viewer (F25).
 - Tests: `tests/test_settings_home_guard.py`, `tests/test_cli_doctor.py`,
   `tests/test_server_system.py` (migrations probe), `tests/test_store_migrate.py`.
 

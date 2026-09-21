@@ -10,7 +10,9 @@ store-level checks:
   empty — a long-lived pod whose store drifted must leave the Service, and the go-live
   checklist may point here truthfully; both revisions are in the detail. A ``create_all``
   store whose schema equals the head (a ``crb serve`` without ``crb migrate``) is
-  ``degraded``, not down: complete, but unstamped until ``crb migrate`` runs.
+  ``degraded``, not down: complete, but unstamped until ``crb migrate`` runs. When the
+  head cannot be read at all the detail is the fixed :data:`MIGRATIONS_INSPECT_FAILED`
+  (CWE-209 — the route is unauthenticated) and the exception is logged.
 * ``append_only`` — the ledger triggers exist AND an ``UPDATE`` on ``grades`` is refused
   (:func:`crb.store.ledger.assert_append_only`). Missing triggers = ``down``.
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
@@ -74,6 +76,7 @@ Touch when:   never for a new repository; adding a probe means deciding which ro
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 import os
 import time
 from collections.abc import Mapping
@@ -100,6 +103,7 @@ try:  # pragma: no cover — extra installed in [server]
 except ImportError:  # pragma: no cover
     CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 
+log = logging.getLogger("crb.server.system")
 router = APIRouter(tags=["system"])
 _ERR = {"model": ErrorEnvelope}
 
@@ -185,14 +189,23 @@ def migrations_result(st: HeadStatus) -> ProbeResult:
     )
 
 
+#: The ``migrations`` detail when the head cannot be read at all. Fixed on purpose
+#: (CWE-209): ``/health`` is unauthenticated and a driver's or Alembic's message can carry a
+#: DSN, a path or SQL — the exception goes to the server log, never into the response.
+MIGRATIONS_INSPECT_FAILED = "migration inspection failed — see the server log"
+
+
 def probe_migrations(factory: sessionmaker[Session]) -> ProbeResult:
     """``migrations``: the store's Alembic revision against the packaged head, read on a
-    session's own connection (one ``SELECT`` on ``alembic_version`` for a versioned store)."""
+    session's own connection (one ``SELECT`` on ``alembic_version`` for a versioned store).
+    A failure to read it is ``down`` with :data:`MIGRATIONS_INSPECT_FAILED` — the exception
+    is logged at ERROR with its traceback, not served."""
     try:
         with factory() as s:
             st = head_status_on(s.connection())
-    except Exception as exc:
-        return ProbeResult("migrations", DOWN, f"{type(exc).__name__}: {exc}")
+    except Exception:
+        log.exception("migration inspection failed")
+        return ProbeResult("migrations", DOWN, MIGRATIONS_INSPECT_FAILED)
     return migrations_result(st)
 
 
@@ -439,6 +452,7 @@ def version(request: Request) -> dict[str, Any]:
 __all__ = [
     "DEFAULT_ROLE",
     "MIGRATE_FIX",
+    "MIGRATIONS_INSPECT_FAILED",
     "ROLES",
     "ROLE_ALL",
     "ROLE_API",

@@ -5,7 +5,9 @@ does on its own, and what to check before telling anyone the release exists.* De
 what a release produces is the [Deployment guide](DEPLOYMENT.md); the branch and pull
 request rules are [CONTRIBUTING](../CONTRIBUTING.md).
 
-A release is **a tag `vX.Y.Z` on `main`**. Pushing the tag runs
+A release is **a tag `v<package-version>` on `main`** — `v` + the exact PEP 440 version in
+`pyproject.toml`, pre-release suffix included (`v2.0.0b1`, `v2.0.0`); `X.Y.Z` below stands
+for that version. Pushing the tag runs
 [`.github/workflows/release.yml`](../.github/workflows/release.yml), which builds the
 package and the container image, smokes both, writes an SBOM, pushes the image to GHCR and
 signs it keyless. Nothing is published to PyPI; the Helm chart is installed from the git

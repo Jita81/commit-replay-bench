@@ -7,7 +7,8 @@
  * What it is:   The Settings card for the `claude setup-token` value the `auth: cli` builder
  *               mode uses.
  * What it does: Shows presence, the ≤ 4-character fingerprint and provenance (who set it,
- *               when) to any signed-in role; admins can paste a token (a `type="password"`
+ *               when) to operators and above — a viewer is served, and shown, presence
+ *               only (`{name, present}`); admins can paste a token (a `type="password"`
  *               field, cleared the moment the server accepts it — the value is not kept in
  *               state), verify it (the probe's status, model, CLI version and duration) and
  *               remove it. A shape rejection or a rate limit renders as the envelope without
@@ -39,6 +40,7 @@ import type { Tone } from '../../lib/verdict'
 import {
   LOGIN_TERMINAL,
   claudeCodeStatus,
+  isSecretStatus,
   useCancelClaudeLogin,
   useClaudeLoginSession,
   useRemoveClaudeCodeToken,
@@ -50,7 +52,7 @@ import {
   type LoginCheck,
   type LoginCheckStatus,
   type LoginSession,
-  type SecretStatus,
+  type SecretListItem,
 } from './claudeCodeLogin'
 
 /** Tone / glyph / wording per verify outcome; only `ok` is green. */
@@ -62,8 +64,8 @@ const CHECK_DISPLAY: Record<LoginCheckStatus, { tone: Tone; glyph: string; label
   error: { tone: 'amber', glyph: '!', label: 'error' },
 }
 
-/** Presence pill with the fingerprint and provenance, or "no token stored" with what `auth: cli` falls back to. */
-function StatusLine({ status }: { status: SecretStatus | undefined }) {
+/** Presence pill with the fingerprint and provenance (presence alone for a viewer), or "no token stored" with what `auth: cli` falls back to. */
+function StatusLine({ status }: { status: SecretListItem | undefined }) {
   if (!status?.present) {
     return (
       <div className="flex flex-wrap items-center gap-2" data-testid="claude-login-status" data-present="false">
@@ -73,6 +75,16 @@ function StatusLine({ status }: { status: SecretStatus | undefined }) {
         <span className="text-xs text-on-surface-muted">
           <code>auth: cli</code> runs fall back to the worker&rsquo;s own <code>claude login</code>.
         </span>
+      </div>
+    )
+  }
+  if (!isSecretStatus(status)) {
+    // a viewer's copy: `{name, present}` — the API sends no fingerprint and no provenance
+    return (
+      <div className="flex flex-wrap items-center gap-2" data-testid="claude-login-status" data-present="true">
+        <Pill tone="green" glyph="✓" label="Claude Code token stored">
+          token stored
+        </Pill>
       </div>
     )
   }

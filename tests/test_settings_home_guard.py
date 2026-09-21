@@ -1,8 +1,8 @@
 """The ``CRB_HOME`` temporary-directory guard (DL-045, F37).
 
 A deployment under ``/tmp``, ``/private/tmp``, ``/var/folders`` or ``$TMPDIR`` loses its
-files to the operating system — macOS documents those paths as temporary and removes
-untouched files after about three days — so ``Settings`` refuses to construct in ``prod``
+files to the operating system — macOS documents those paths as temporary and its periodic
+clean-up removes untouched files there — so ``Settings`` refuses to construct in ``prod``
 and warns loudly in ``dev``. ``CRB_ALLOW_TEMP_HOME=true`` is the explicit opt-out for a
 throwaway evaluation (the walkthrough harness runs ``dev``, so it only warns).
 
@@ -87,7 +87,7 @@ class TestSettingsGuard:
             Settings(env="prod", home=tmp_path, secret_key=KEY)
         msg = str(ei.value)
         assert "CRB_HOME" in msg and "OS-managed temporary directory" in msg
-        assert "three days" in msg and "~/crb-stack" in msg and "docs/DEPLOYMENT.md" in msg
+        assert "periodic clean-up" in msg and "~/crb-stack" in msg and "docs/DEPLOYMENT.md" in msg
         assert "CRB_ALLOW_TEMP_HOME" in msg
 
     def test_dev_warns_with_the_same_reason(
@@ -98,7 +98,9 @@ class TestSettingsGuard:
         assert s.home == tmp_path
         warning = next(r for r in caplog.records if "CRB_HOME" in r.message)
         assert "OS-managed temporary directory" in warning.message
-        assert "three days" in warning.message and "CRB_ALLOW_TEMP_HOME" not in warning.message
+        assert (
+            "periodic clean-up" in warning.message and "CRB_ALLOW_TEMP_HOME" not in warning.message
+        )
 
     def test_opt_out_admits_it_in_prod_and_still_warns(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture

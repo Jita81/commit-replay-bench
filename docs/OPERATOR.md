@@ -49,7 +49,7 @@ is [DEPLOYMENT §1](DEPLOYMENT.md#1-deployment-shapes).
 
 ```bash
 crb doctor            # one line per check: ok / warn / fail (skip = does not apply), and the fix
-crb doctor --live     # also one no-tool Haiku turn on the stored Claude Code token (~2 s); never otherwise
+crb doctor --live     # also one no-tool Haiku turn on the stored Claude Code token; never otherwise
 crb doctor --json     # the same report in the /health vocabulary (ok / degraded / down / skipped)
 ```
 
@@ -63,12 +63,12 @@ Run it on the API host and on the worker host after installing, after changing a
 | `builders` | which builder credentials / CLIs are configured (names, never values) | — (`warn` when none) |
 | `claude_code` | where an `auth: cli` login would come from (env, secrets file `…xxxx`, keychain, none), the CLI's version; with `--live`, the real probe | the secrets file is group/world readable |
 | `settings` | the server would start with this environment (`CRB_SECRET_KEY`, bootstrap password, `CRB_HOME`, …) | the first refusal, in the server's own words |
-| `home` | `CRB_HOME` is a persistent path, and the secrets directory is mode `0700` | a temporary `CRB_HOME` in `prod` (`warn` in `dev`); a group-readable secrets directory |
+| `home` | `CRB_HOME` is a persistent path, and the secrets directory is mode `0700` and owned by the user running `crb` | a temporary `CRB_HOME` in `prod` (`warn` in `dev`); a group-readable secrets directory, or one another user owns (the store refuses both) |
 | `github_app` | the app is configured, the key file is readable and parses, GitHub answers `/app/installations`, how many installations can deliver | half configured, an unreadable or malformed key, GitHub refusing (`skip` when not configured; `warn` with no installation yet) |
-| `database` | the store answers, the append-only triggers fire (an UPDATE on `grades` is refused) | not initialised — `crb migrate` |
-| `migrations` | the store's Alembic revision is the code's head — the same reading as `/health` | behind, ahead or unstamped: both revisions named — `crb migrate` |
+| `database` | the store answers and is initialised, every append-only trigger is present and they fire (an UPDATE on `grades` is refused) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
+| `migrations` | the store's Alembic revision is the code's head — the same reading as `/health` | behind, ahead or empty (both revisions named) or not inspectable — `crb migrate`. `warn` only for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps it) |
 | `worker` | the worker heartbeat and queue depth, as `/health` reads them | `warn` when a running run's heartbeat is stale or absent (an idle queue is `ok`) |
-| `ui` | the built UI the API serves and the help bundle in it (one chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
+| `ui` | the built UI the API serves and the help bundle in it (one non-empty chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
 
 `/health` on the running API answers the same questions from inside the process
 ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)); `crb doctor` is for the host, before

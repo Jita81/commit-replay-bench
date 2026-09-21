@@ -29,8 +29,9 @@ abstract cells, never code.
 > signs the container image. See [Status by phase](#status-by-phase) and the
 > [Changelog](CHANGELOG.md). The June 2026 v1 contents are tagged `v1.0.0-legacy`.
 >
-> Releases: a release is a `vX.Y.Z` tag on `main` — one version in three files plus a dated
-> CHANGELOG section, then the pipeline builds, smokes, SBOMs and keyless-signs the image on
+> Releases: a release is a `v<package-version>` tag on `main` (`v` + the PEP 440 version
+> in `pyproject.toml`, pre-release suffix included: `v2.0.0b1`) — one version in three
+> files plus a dated CHANGELOG section, then the pipeline builds, smokes, SBOMs and keyless-signs the image on
 > GHCR. How a release is cut and what to check: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Start here
