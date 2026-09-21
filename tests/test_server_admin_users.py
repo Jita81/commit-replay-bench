@@ -322,6 +322,18 @@ class TestActive:
         assert r.status_code == 401 and err(r)["code"] == "session_revoked"
         login(target, "carol", NEW_PW)
 
+    def test_api_md_states_that_reactivation_resumes_sessions(self) -> None:
+        """docs/API.md must describe what the route above proves: deactivation suspends
+        (401 ``unauthenticated``) and re-activation within the TTL resumes the session; a
+        password change is what ends it (``session_revoked``). It must not tell a
+        re-activated user to sign in again (CodeRabbit on PR #42)."""
+        api_md = (Path(__file__).parents[1] / "docs" / "API.md").read_text()
+        roles = api_md[api_md.index("- **Roles**") : api_md.index("- **Errors**")]
+        assert "sign in\n  again once an admin re-activates" not in roles
+        assert "sign in again once an admin re-activates" not in roles
+        assert "resume" in roles and "re-activate" in roles
+        assert "password changed" in roles and "session_revoked" in roles
+
     def test_last_admin_guard_and_second_admin(self, client: TestClient) -> None:
         login(client)
         root = client.get(f"{API_PREFIX}/auth/me").json()["id"]
