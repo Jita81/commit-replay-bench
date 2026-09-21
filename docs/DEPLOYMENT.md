@@ -9,7 +9,8 @@ Contents: [1 Shapes](#1-deployment-shapes) · [2 The image](#2-the-image-and-its
 [2.2 Released image, signature, SBOM](#22-the-released-image-name-signature-sbom) ·
 [3 Kubernetes (Helm)](#3-kubernetes-helm) · [4 Azure](#4-azure) ·
 [5 Backup & restore](#5-backup-and-restore) · [6 Upgrade](#6-upgrade) ·
-[7 Air-gap](#7-air-gap-posture) · [8 Go-live checklist](#8-go-live-checklist)
+[7 Air-gap](#7-air-gap-posture) · [8 Go-live checklist](#8-go-live-checklist) ·
+[9 Observability](#9-observability)
 
 ---
 
@@ -63,6 +64,11 @@ server and never appear in logs or `/settings`.
 | `CRB_OIDC__ISSUER`, `__CLIENT_ID`, `__CLIENT_SECRET`, `__REDIRECT_URL`, `__SCOPES`, `__ROLE_CLAIM`, `__ROLE_MAP`, `__ADMIN_GROUPS` | for SSO | see §4.1 for the Entra ID mapping |
 | `CRB_GITHUB__APP_ID`, `__APP_SLUG`, `__PRIVATE_KEY` or `__PRIVATE_KEY_FILE`, `__API_URL`, `__WEB_URL` | for *Connect from GitHub* | the deployment's GitHub App (docs/GITHUB-APP.md); set on the **API and the worker**; the key from the secret store, never inline in a values file |
 | `CRB_SANDBOX__EXECUTOR` | | `docker` (default, fail-closed) or `local` (development) |
+| `CRB_METRICS_ENABLED` | api, worker | `true` (default). `false` → the api's `/metrics` answers 404 and the worker starts no exposition |
+| `CRB_METRICS_HOST` | worker | the address the worker's exposition binds (default `127.0.0.1`, like `CRB_BIND_HOST`: the series name repositories, builders and installations, so a bare `crb worker` on a host offers them to nobody else). Compose and Helm set `0.0.0.0` inside the container, where only the compose network / the NetworkPolicy's scraper can reach the port (§9.1) |
+| `CRB_METRICS_PORT` | worker | the worker's own Prometheus exposition port (default `9464`; `0` = off) — the build / grade / cost / delivery series live here, not on the api (§9) |
+| `CRB_LOG_FORMAT` / `CRB_LOG_LEVEL` | api, worker | `json` (default, one object per line) or `text`; `INFO` — every record is redacted before a handler sees it (§9) |
+| `CRB_WORKER_HEARTBEAT_STALE_S` | api | seconds after which a *running* run's heartbeat is reported stale by `/health` (default 120). Worker liveness itself is judged against each worker's own `heartbeat_s` (§9) |
 | `CRB_SANDBOX__IMAGE` | | default sandbox image when a repository config has none |
 | `CRB_RETENTION__TRANSCRIPTS_DAYS` | | 0 = keep no builder transcripts (default) |
 | `CRB_OPENAI_BASE_URL`, `CRB_OPENAI_KEY_ENV` + the named key var | builder | OpenAI-compatible endpoint (vLLM, Cerebras, …) |
@@ -356,3 +362,101 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
 - [ ] Backups: PITR enabled; a restore has been rehearsed and verified against the chain.
 - [ ] `false_q1 == 0` and `crb_false_q1_total == 0` on the dashboards, with an alert on any
       non-zero value ([OPERATOR.md §8](OPERATOR.md#8-stop-conditions)).
+
+## 9. Observability
+
+Three surfaces: **metrics** (Prometheus, two expositions), **health** (`/health`, seven
+probes), **events** (the run's audit trail, streamed as SSE and stored in the `events`
+table). Logs are JSON and redacted. Nothing here leaves the tenant.
+
+### 9.1 Metrics — which process carries which series
+
+The Prometheus registry is process-wide, so a series lives in the process that records it.
+The api records the HTTP series and the ledger gauges; **the worker records everything
+else and serves its own exposition** on `CRB_METRICS_PORT` (default 9464). A deployment
+that scrapes the api alone sees `crb_false_q1_total`, `crb_ledger_rows` and the HTTP
+series — every cost, run, belt and delivery counter reads as absent. Scrape both:
+
+| Shape | api | worker |
+|---|---|---|
+| compose | `http://api:8000/api/v1/metrics` (published on `127.0.0.1:8000`) | `http://worker:9464/metrics` — the container sets `CRB_METRICS_HOST=0.0.0.0` and the port is `expose`d on the compose network only, never published; `CRB_METRICS_PORT=0` switches it off |
+| Helm | Service `crb-api`, port `http`, path `/api/v1/metrics`; `serviceMonitor.enabled` | headless Service `crb-worker`, port `metrics` (one target per worker pod; the pod sets `CRB_METRICS_HOST=0.0.0.0`); `serviceMonitor.worker.enabled`; `worker.metrics.port` (0 = off); the NetworkPolicy admits `networkPolicy.metricsIngress` peers to that port only |
+| one process (`crb serve` + `crb worker` on a host) | `/api/v1/metrics` | `127.0.0.1:9464/metrics` — loopback by default; a Prometheus on another host needs `CRB_METRICS_HOST=<the interface it may reach>` (or `0.0.0.0` behind a host firewall) — the series name repositories, builders, per-repository cost and installation ids |
+
+The table is checked against the code by `tests/test_observability_metrics.py`: a metric
+the module defines that is not here, or is here under other labels, fails the suite.
+
+| name | type | labels | process | meaning |
+|---|---|---|---|---|
+| `crb_runs_total` | counter | `kind, status` | worker | runs finished, by kind and terminal status (`succeeded`, `failed`, `cancelled`) |
+| `crb_tasks_total` | counter | `repo, outcome` | worker | graded trials by outcome: `clean`, `not_clean`, `disqualified`, `error` |
+| `crb_belt_failures_total` | counter | `belt` | worker | a belt that read `false` (`null` — not evaluated — is not a failure) |
+| `crb_builder_tokens_total` | counter | `repo, builder, model, kind` | worker | builder tokens by direction (`kind ∈ in, out`) — per repository, the charge-back number |
+| `crb_builder_cost_usd_total` | counter | `repo, builder, model` | worker | metered builder cost in USD. A floor, not a bill: an unpriced model adds 0 |
+| `crb_grade_latency_seconds` | histogram | `runner` | worker | wall-clock seconds to grade one trial |
+| `crb_build_latency_seconds` | histogram | `builder` | worker | wall-clock seconds for one builder attempt |
+| `crb_sandbox_unavailable_total` | counter | — | worker | runs that stopped because the sandbox failed closed (ADR-0005) |
+| `crb_deliveries_total` | counter | `repo, outcome` | worker | factory deliveries: `opened` (branch pushed, PR opened), `withheld` (the route gate refused), `failed` (the push or the PR call errored). Metered from the run's own `delivery.*` events |
+| `crb_github_tokens_minted_total` | counter | `installation` | worker | GitHub App installation tokens actually minted (a cache hit does not count). The label is the installation id; the token is never a label, never logged |
+| `crb_queue_depth` | gauge | — | worker | queued runs, as the worker last saw them on check-in (every `heartbeat_s`) |
+| `crb_false_q1_total` | gauge | — | api (recounted on every scrape and every `/health`) and worker (after every run) | clean ledger rows with a failed belt. **Must be 0** — a stop condition ([OPERATOR §8](OPERATOR.md#8-stop-conditions)) |
+| `crb_ledger_rows` | gauge | — | api, worker | rows in the grade ledger |
+| `crb_http_requests_total` | counter | `method, route, status` | api | requests by route template (never a raw id) |
+| `crb_http_request_duration_seconds` | histogram | `method, route` | api | request latency |
+
+Histogram buckets: 1, 5, 15, 30, 60, 120, 300, 600, 1200, 1800 seconds.
+
+### 9.2 Alert rules
+
+Four rules cover the operating posture. Expressions assume both targets are scraped.
+
+| Alert | Expression | Meaning and action |
+|---|---|---|
+| **False-Q1** | `max(crb_false_q1_total) > 0` | the honesty floor is breached — stop delivery, [OPERATOR §8](OPERATOR.md#8-stop-conditions). `/health` is also `down` |
+| **No worker** | `/health` probe `worker` is not `ok` (`crb_http_*` cannot see it; probe `/api/v1/health` with a blackbox exporter, or alert on `crb_queue_depth > 0` with no fresh worker scrape for 3 × `heartbeat_s`) | queued runs will not start: no worker has checked in, one stopped checking in (the probe names it and its age), or a running run's heartbeat is stale |
+| **Sandbox failing closed** | `increase(crb_sandbox_unavailable_total[15m]) > 0` | the docker daemon, image or mounts are wrong on the worker host ([OPERATOR §7](OPERATOR.md#7-when-the-sandbox-is-unavailable)); no test ran on the host as a fallback |
+| **Deliveries failing** | `increase(crb_deliveries_total{outcome="failed"}[1h]) > 0` | the push or the pull-request call errored — the GitHub App's installation, permissions or the repository's default branch |
+
+Useful, not alerts: `sum by (repo) (increase(crb_builder_cost_usd_total[24h]))` (spend per
+repository, a floor), `sum by (repo, outcome) (increase(crb_deliveries_total[7d]))`,
+`increase(crb_github_tokens_minted_total[1h])` (a mint rate far above the clone + deliver
+rate is worth a look), `histogram_quantile(0.9, rate(crb_grade_latency_seconds_bucket[1h]))`.
+
+### 9.3 Health
+
+`GET /api/v1/health` (readiness, 503 on `down`) runs seven probes — `db`, `append_only`,
+`ledger`, `sandbox` (skipped for `CRB_ROLE=api`), `toolchains`, `builders`, `worker` —
+documented in [API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface).
+`GET /api/v1/health/live` is the liveness probe: the process and its database, nothing else.
+
+The `worker` probe reads the `workers` table: every worker upserts its row every
+`heartbeat_s` (default 10 s) whether or not it holds a run, with the interval it promised,
+so the probe judges a worker alive when it checked in within 3 × its own `heartbeat_s`. The
+UI reads the same probe: the Home screen shows a banner when it is not `ok` and the
+Deployment page lists the workers with their last check-in.
+
+### 9.4 Logs
+
+Both processes log one JSON object per line (`CRB_LOG_FORMAT=json`, the default): `ts`,
+`level`, `logger`, `msg`, any structured extras, and `exc` for a traceback. Every record —
+message, `%`-arguments, extras and the traceback — passes the same redaction as evidence
+packs before a handler sees it (`src/crb/core/redact.py`; the commitment is
+[SECURITY.md](SECURITY.md)). Ship stderr with the collector you already run (Fluent Bit,
+the Azure Monitor agent, `docker compose logs`); nothing else is written to disk except the
+per-run JSONL event copy under `<CRB_HOME>/events/<run_id>.jsonl` and the worker's reaper
+queue `<CRB_HOME>/unconfirmed-containers.json` — the names of builder containers whose
+`docker kill` the daemon never confirmed, retried every poll until reaped or given up on
+after 20 passes ([API.md](API.md#runs), `POST /runs/{id}/cancel`); while it is non-empty the
+`/health` worker probe reads `degraded`.
+
+### 9.5 Events
+
+Every step of a run is a `StepEvent` in the `events` table (append-only, hash-ordered by
+`seq`), streamed live as SSE from `GET /runs/{id}/events` and paged from
+`GET /runs/{id}/events/log`. The complete vocabulary — stage, action, status, payload keys,
+emitter, consumer — is [API.md § Event vocabulary](API.md#event-vocabulary), kept in step
+with the code by `tests/test_event_vocabulary.py`. Retention: the table is append-only and
+is never pruned by crb; size it with the ledger (a replay writes roughly 10–30 events per
+task). The JSONL copy under `<CRB_HOME>/events/` is the operator's local mirror and may be
+rotated freely.
+

@@ -7,7 +7,10 @@
  * What it is:   The screen at /signoff: the gate (criteria derived from the server's preview),
  *               the evidence panel (what you would be signing), the attestation form (name an
  *               accepted row, affirm you read it, a statement) and the table of recorded
- *               attestations with their snapshots.
+ *               attestations with their snapshots. The header says in two sentences what the
+ *               screen is for; the refusal clauses sit behind a Details ("Why a sign-off can
+ *               be refused") with each term defined, because the gate and the refusal list
+ *               below already explain every clause with observed vs threshold.
  * What it does: Shows the bar before the approver tries: the preview's refusals become the
  *               gate's check-rows with observed vs threshold, and non-overridable clauses
  *               (false-Q1, oracle unmeasured, attestation missing) are marked so; the action
@@ -15,7 +18,11 @@
  *               row, ticked "I have read this accepted diff" and written a statement. A 409
  *               from the POST renders as a REFUSED gate with the clauses (the false-Q1 floor
  *               points at the ledger); a pre-policy record is listed honestly without a
- *               fabricated snapshot; an approver can revoke.
+ *               fabricated snapshot; an approver can revoke. A reader without the approver
+ *               role gets the gate, the evidence and the attestations and never the form —
+ *               an inset says who can sign and that reading changes nothing. Reached without
+ *               `?repo=`, the screen chooses the most recently updated repository itself;
+ *               with no repository at all the exit is Connect.
  * How:          `useCapabilityMapWithControls` lists the measured cells → `useSignoffPreview`
  *               re-fetches as cell / row change (the named row and affirmation reset when the
  *               cell changes) → `criteriaFor(preview)` → `GateBanner`;
@@ -26,11 +33,13 @@
  *               docs/adr/0001-four-belts-and-false-q1-at-write.md
  * Works with:   ui/src/screens/Signoff/contract.ts (preview, policy, refusal vocabulary,
  *               the 409 shape), ui/src/components/GateBanner.tsx (the gate),
- *               ui/src/screens/Capability/contract.ts and
- *               ui/src/screens/Capability/FailureSplit.tsx
- *               (the cells, the controls pill and the split), ui/src/api/hooks.ts
- *               (`useSignoffs`, `useRevokeSignoff`), src/crb/server/routes/signoffs.py (the
- *               server's decision this screen previews and submits), src/crb/core/signoff.py
+ *               ui/src/components/RepoPicker.tsx (`defaultToLatest`),
+ *               ui/src/components/Help.tsx (`Term` in the refusal clauses),
+ *               ui/src/screens/Decisions/DecisionsPage.tsx (Attest → `?cell=` here),
+ *               ui/src/screens/Capability/FailureSplit.tsx (the controls pill and the split),
+ *               ui/src/api/hooks.ts (`useSignoffs`, `useRevokeSignoff`),
+ *               src/crb/server/routes/signoffs.py (the server's decision this screen
+ *               previews and submits; the core rule it applies is the policy module it names)
  * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx, ui/e2e/walkthrough/08-signoff.spec.ts
  *               (a thin cell refused with observed vs threshold; a policy-clearing cell
  *               signed with an attestation), ui/e2e/walkthrough/05-replay-fake.spec.ts
@@ -56,7 +65,8 @@ import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextArea } from '../../components/Field'
 import { GateBanner, type GateCriterion } from '../../components/GateBanner'
-import { ConfirmationPanel, SecondaryButton, SummaryList, WarningButton, WarningCallout } from '../../components/govuk'
+import { ConfirmationPanel, Details, InsetText, SecondaryButton, SummaryList, WarningButton, WarningCallout } from '../../components/govuk'
+import { Term } from '../../components/Help'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
@@ -200,8 +210,9 @@ function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { mi
 
 /** The screen; `?repo=` from the URL, the chosen cell and the attestation draft are local. */
 export function SignoffPage() {
-  const [repo, setRepo] = useRepoParam()
+  const [repo, setRepo] = useRepoParam({ defaultToLatest: true })
   const { can, me } = useAuth()
+  const approver = can('approver')
   const signoffs = useSignoffs(repo, { includeRevoked: true })
   const map = useCapabilityMapWithControls(repo, ['capability_class', 'size'])
   const create = useCreateSignoffWithAttestation()
@@ -365,13 +376,36 @@ export function SignoffPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Sign-off"
         title="Sign-off"
-        purpose="A human attestation that a cell's evidence has been reviewed and is trusted. A sign-off is a policy decision, refused at write: false-Q1 > 0, a thin cell, a negative-controls gate that failed / never ran / let a control escape, an oracle never measured on the cell's tasks or too weak, a route other than deliver, or no attestation that you read an accepted diff — the refusal is a gate, not an error."
+        purpose="Record that you reviewed this cell’s evidence and read one accepted change. The server refuses a sign-off that does not meet the published policy; a refusal is the gate working, not an error."
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
+      <Details summary="Why a sign-off can be refused" className="mt-4">
+        <p className="mt-0">A sign-off is a policy decision, refused at write. The server refuses when any of these holds:</p>
+        <ul className="mb-0 pl-6">
+          <li>
+            <Term id="false_q1">false-Q1</Term> above zero in the cell — this clause cannot be relaxed;
+          </li>
+          <li>
+            a thin <Term id="cell">cell</Term> — fewer attempts than the policy’s minimum n;
+          </li>
+          <li>
+            a <Term id="negative_controls">negative controls</Term> gate that failed, never ran, or let a <Term id="controls_escape">control escape</Term>;
+          </li>
+          <li>
+            an <Term id="oracle_strength">oracle strength</Term> never measured on the cell’s tasks, or below the bar;
+          </li>
+          <li>
+            a route other than <Term id="deliver">deliver</Term>;
+          </li>
+          <li>no attestation that you read an accepted diff — this clause cannot be relaxed.</li>
+        </ul>
+        <p className="mb-0">
+          The gate below shows every clause with the observed value against the threshold, before you try. A <Term id="signoff">sign-off</Term> lifts the verification tier and never the route.
+        </p>
+      </Details>
 
-      {!repo && <EmptyState title="Choose a repo to review attestations" action={<LinkButton to="/repos">Go to repos</LinkButton>} />}
+      {!repo && <EmptyState title="Choose a repository" reason="A sign-off is per repository and per cell." action={<LinkButton to="/connect">Connect a repository</LinkButton>} />}
 
       {repo && (
         <>
@@ -382,7 +416,7 @@ export function SignoffPage() {
             refused={refusal}
             data-testid="signoff-gate"
             action={
-              can('approver') ? (
+              approver ? (
                 <Button type="submit" form="signoff-form" variant="filled" disabled={!signable || !cell || create.isPending || previewFailed}>
                   {create.isPending ? 'Recording…' : 'Sign off'}
                 </Button>
@@ -405,106 +439,127 @@ export function SignoffPage() {
 
           {previewData && <EvidencePanel preview={previewData} bars={map.data?.policy ? { min_point: map.data.policy.min_point, min_ci_low: map.data.policy.min_ci_low } : undefined} />}
 
-          <Card title="Approver form">
-            <WarningCallout title="What your signature does not mean">
-              <ul className="m-0 pl-6">
-                <li className="mb-2">It does not change the cell's route, its point estimate or its interval.</li>
-                <li className="mb-2">It does not vouch for any other class, size or repository.</li>
-                <li>It is invalidated at read if a false-Q1 row later appears in this cell, or when the apparatus changes.</li>
-              </ul>
-            </WarningCallout>
-            <form id="signoff-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
-              <SelectField label="Cell" required value={cellKey} onChange={(e) => setCellKey(e.target.value)} hint={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
-                <option value="">Choose a measured cell…</option>
-                {measured.map((c) => (
-                  <option key={`${c.capability_class}|${c.size}`} value={`${c.capability_class}|${c.size}`}>
-                    {c.capability_class} · {c.size} — {c.route}, n={c.n}, {fmtPct(c.point, 0)}
-                  </option>
-                ))}
-              </SelectField>
-              <div className="flex items-end">
-                {cell && (
-                  <div className="space-y-1 text-xs">
-                    <VerdictPill route={cell.route} reason={cell.reason} />
-                    <p className="text-on-surface-muted">{cell.reason}</p>
-                    <Provenance apparatus={cell.apparatus_versions} beltSet={cell.belt_set ?? null} />
+          {/* a reader who cannot sign is shown no form: who acts, and a cell to read (the preview changes nothing on the server) */}
+          {!approver && (
+            <InsetText>
+              <p className="m-0" data-testid="signoff-read-only">
+                Only an approver can sign. You are signed in as {me?.role ?? 'a viewer'}: you can read the gate, the evidence and the attestations on this page, and nothing here changes because you read it.
+              </p>
+              <div className="mt-4 max-w-[28em]">
+                <SelectField label="Cell to read" value={cellKey} onChange={(e) => setCellKey(e.target.value)} hint={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
+                  <option value="">Choose a measured cell…</option>
+                  {measured.map((c) => (
+                    <option key={`${c.capability_class}|${c.size}`} value={`${c.capability_class}|${c.size}`}>
+                      {c.capability_class} · {c.size} — {c.route}, n={c.n}, {fmtPct(c.point, 0)}
+                    </option>
+                  ))}
+                </SelectField>
+              </div>
+            </InsetText>
+          )}
+
+          {approver && (
+            <Card title="Approver form">
+              <WarningCallout title="What your signature does not mean">
+                <ul className="m-0 pl-6">
+                  <li className="mb-2">It does not change the cell's route, its point estimate or its interval.</li>
+                  <li className="mb-2">It does not vouch for any other class, size or repository.</li>
+                  <li>It is invalidated at read if a false-Q1 row later appears in this cell, or when the apparatus changes.</li>
+                </ul>
+              </WarningCallout>
+              <form id="signoff-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
+                <SelectField label="Cell" required value={cellKey} onChange={(e) => setCellKey(e.target.value)} hint={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
+                  <option value="">Choose a measured cell…</option>
+                  {measured.map((c) => (
+                    <option key={`${c.capability_class}|${c.size}`} value={`${c.capability_class}|${c.size}`}>
+                      {c.capability_class} · {c.size} — {c.route}, n={c.n}, {fmtPct(c.point, 0)}
+                    </option>
+                  ))}
+                </SelectField>
+                <div className="flex items-end">
+                  {cell && (
+                    <div className="space-y-1 text-xs">
+                      <VerdictPill route={cell.route} reason={cell.reason} />
+                      <p className="text-on-surface-muted">{cell.reason}</p>
+                      <Provenance apparatus={cell.apparatus_versions} beltSet={cell.belt_set ?? null} />
+                    </div>
+                  )}
+                </div>
+                <SelectField
+                  label="Accepted row"
+                  required
+                  value={rowHash}
+                  onChange={(e) => {
+                    setRowHash(e.target.value)
+                    setRead(false)
+                  }}
+                  disabled={!previewData}
+                  hint={previewData ? `${previewData.accepted_rows.length} accepted (clean) row(s) in this cell — name the one whose diff you read` : 'choose a cell first'}
+                  data-testid="attest-row"
+                >
+                  <option value="">Choose the accepted row you read…</option>
+                  {(previewData?.accepted_rows ?? []).map((r) => (
+                    <option key={r.row_hash} value={r.row_hash}>
+                      {r.subject || shortId(r.task_id)} · {shortId(r.row_hash)} · {fmtDate(r.created)}
+                    </option>
+                  ))}
+                </SelectField>
+                <div className="flex items-end">
+                  <label htmlFor={readId} className="flex items-start gap-2 text-sm text-on-surface">
+                    <input id={readId} type="checkbox" className="mt-0.5" checked={read} disabled={!rowHash} onChange={(e) => setRead(e.target.checked)} data-testid="attest-read" />
+                    <span>
+                      I have read this accepted diff
+                      <span className="block text-xs text-on-surface-muted">
+                        {rowHash ? (
+                          <>
+                            row <span className="font-mono">{shortId(rowHash)}</span> — the attestation names this row and is hash-chained with the sign-off
+                          </>
+                        ) : (
+                          'pick a row first'
+                        )}
+                      </span>
+                    </span>
+                  </label>
+                </div>
+                {rowHash && previewData && (
+                  <div className="sm:col-span-2">
+                    <ReadTheDiff repo={repo} row={previewData.accepted_rows.find((r) => r.row_hash === rowHash)} />
                   </div>
                 )}
-              </div>
-              <SelectField
-                label="Accepted row"
-                required
-                value={rowHash}
-                onChange={(e) => {
-                  setRowHash(e.target.value)
-                  setRead(false)
-                }}
-                disabled={!previewData}
-                hint={previewData ? `${previewData.accepted_rows.length} accepted (clean) row(s) in this cell — name the one whose diff you read` : 'choose a cell first'}
-                data-testid="attest-row"
-              >
-                <option value="">Choose the accepted row you read…</option>
-                {(previewData?.accepted_rows ?? []).map((r) => (
-                  <option key={r.row_hash} value={r.row_hash}>
-                    {r.subject || shortId(r.task_id)} · {shortId(r.row_hash)} · {fmtDate(r.created)}
-                  </option>
-                ))}
-              </SelectField>
-              <div className="flex items-end">
-                <label htmlFor={readId} className="flex items-start gap-2 text-sm text-on-surface">
-                  <input id={readId} type="checkbox" className="mt-0.5" checked={read} disabled={!rowHash} onChange={(e) => setRead(e.target.checked)} data-testid="attest-read" />
-                  <span>
-                    I have read this accepted diff
-                    <span className="block text-xs text-on-surface-muted">
-                      {rowHash ? (
-                        <>
-                          row <span className="font-mono">{shortId(rowHash)}</span> — the attestation names this row and is hash-chained with the sign-off
-                        </>
-                      ) : (
-                        'pick a row first'
-                      )}
-                    </span>
-                  </span>
-                </label>
-              </div>
-              {rowHash && previewData && (
                 <div className="sm:col-span-2">
-                  <ReadTheDiff repo={repo} row={previewData.accepted_rows.find((r) => r.row_hash === rowHash)} />
+                  <TextArea label="Attestation statement" required rows={2} value={statement} onChange={(e) => setStatement(e.target.value)} hint="What you read in that diff and why it is acceptable. Recorded verbatim, append-only, redacted." data-testid="attest-statement" />
                 </div>
-              )}
-              <div className="sm:col-span-2">
-                <TextArea label="Attestation statement" required rows={2} value={statement} onChange={(e) => setStatement(e.target.value)} hint="What you read in that diff and why it is acceptable. Recorded verbatim, append-only, redacted." data-testid="attest-statement" />
-              </div>
-              <div className="sm:col-span-2">
-                <TextArea label="Note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} hint="Optional: what else you reviewed (packs, refusals, the oracle). Recorded verbatim." />
-              </div>
-              {create.isError && !refusal && (
                 <div className="sm:col-span-2">
-                  <ErrorState compact error={create.error} />
+                  <TextArea label="Note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} hint="Optional: what else you reviewed (packs, refusals, the oracle). Recorded verbatim." />
                 </div>
-              )}
-              {create.isSuccess && (
-                <div className="sm:col-span-2" role="status" data-testid="signoff-recorded">
-                  <ConfirmationPanel title="Sign-off recorded" reference={`sgn_${shortId(create.data.row_hash)}`} />
-                  <SummaryList
-                    label="What was recorded"
-                    rows={[
-                      { key: 'Cell', value: <><code>{cellLabel(create.data.cell)}</code> on {create.data.repo}, route {create.data.route.route || '—'}</> },
-                      { key: 'Row hash', value: <code className="break-all">{create.data.row_hash}</code> },
-                      { key: 'Attested by', value: `${approverName(create.data)} at ${create.data.created}` },
-                      { key: 'Policy', value: <><code>{create.data.policy_version}</code> · apparatus {create.data.evidence.apparatus_versions.join(', ') || '—'}</> },
-                    ]}
-                  />
-                  <h3 className="mb-3 mt-6 text-[24px] font-bold leading-[1.3]">What happens next</h3>
-                  <ul className="m-0 max-w-[44em] pl-6 text-[19px] leading-[1.47]">
-                    <li className="mb-2">The factory may now open pull requests for items in this cell, on branches prefixed <code>crb/</code>, for review under the repository's own rules.</li>
-                    <li className="mb-2">The cell's verification tier is lifted on the map. Its route, point and interval are unchanged.</li>
-                    <li>If a false-Q1 row appears in this cell, or the apparatus changes, this sign-off stops counting at read and the cell returns to your decisions.</li>
-                  </ul>
-                </div>
-              )}
-            </form>
-          </Card>
+                {create.isError && !refusal && (
+                  <div className="sm:col-span-2">
+                    <ErrorState compact error={create.error} />
+                  </div>
+                )}
+                {create.isSuccess && (
+                  <div className="sm:col-span-2" role="status" data-testid="signoff-recorded">
+                    <ConfirmationPanel title="Sign-off recorded" reference={`sgn_${shortId(create.data.row_hash)}`} />
+                    <SummaryList
+                      label="What was recorded"
+                      rows={[
+                        { key: 'Cell', value: <><code>{cellLabel(create.data.cell)}</code> on {create.data.repo}, route {create.data.route.route || '—'}</> },
+                        { key: 'Row hash', value: <code className="break-all">{create.data.row_hash}</code> },
+                        { key: 'Attested by', value: `${approverName(create.data)} at ${create.data.created}` },
+                        { key: 'Policy', value: <><code>{create.data.policy_version}</code> · apparatus {create.data.evidence.apparatus_versions.join(', ') || '—'}</> },
+                      ]}
+                    />
+                    <h3 className="mb-3 mt-6 text-[24px] font-bold leading-[1.3]">What happens next</h3>
+                    <ul className="m-0 max-w-[44em] pl-6 text-[19px] leading-[1.47]">
+                      <li className="mb-2">The factory may now open pull requests for items in this cell, on branches prefixed <code>crb/</code>, for review under the repository's own rules.</li>
+                      <li className="mb-2">The cell's verification tier is lifted on the map. Its route, point and interval are unchanged.</li>
+                      <li>If a false-Q1 row appears in this cell, or the apparatus changes, this sign-off stops counting at read and the cell returns to your decisions.</li>
+                    </ul>
+                  </div>
+                )}
+              </form>
+            </Card>
+          )}
 
           <Card padded={false} title="Attestations">
             <QueryBoundary query={signoffs} loading="Loading attestations…">

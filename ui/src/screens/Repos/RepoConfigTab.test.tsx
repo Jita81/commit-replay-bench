@@ -18,7 +18,7 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/screens/Repos/RepoConfigTab.tsx (the code under test),
- *               ui/src/screens/Repos/repoConfigModel.test.ts (`REPO`), ui/src/test/utils.tsx
+ *               ui/src/screens/Repos/repoFixtures.ts (`REPO`), ui/src/test/utils.tsx
  *               (`mockApi`, `renderApp`, `envelope`, `json`)
  * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx
  * Touch when:   a field, a validation message or the audit payload changes — extend the
@@ -30,7 +30,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Principal, RepoDetail, Run, StepEvent } from '../../api/types'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { RepoConfigTab } from './RepoConfigTab'
-import { REPO } from './repoConfigModel.test'
+import { REPO } from './repoFixtures'
 
 const OPERATOR: Principal = { ...PRINCIPAL, role: 'operator' }
 const VIEWER: Principal = { ...PRINCIPAL, role: 'viewer' }

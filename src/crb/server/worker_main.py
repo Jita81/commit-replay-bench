@@ -3,6 +3,7 @@
     crb worker [--database-url URL] [--home DIR] [--executor local|docker]
                [--image IMAGE] [--worker-id ID] [--poll SECONDS] [--once]
                [--heartbeat SECONDS] [--stale-after SECONDS] [--kinds replay,blind]
+               [--metrics-host ADDR] [--metrics-port PORT]
                [--log-format json|text] [--log-level LEVEL]
 
 ``--once`` processes at most one queued run and exits (``0`` if a run was
@@ -11,7 +12,16 @@ Without it the worker polls until ``SIGINT``/``SIGTERM``.
 
 Environment fallbacks: ``CRB_DATABASE_URL`` (see :func:`crb.store.db.database_url`),
 ``CRB_HOME`` (default ``./.crb``), ``CRB_EXECUTOR``, ``CRB_SANDBOX_IMAGE``,
-``CRB_WORKER_ID``. Flags win over the environment.
+``CRB_WORKER_ID``, ``CRB_METRICS_HOST`` (default ``127.0.0.1``), ``CRB_METRICS_PORT``
+(default 9464; ``0`` = off) and ``CRB_METRICS_ENABLED``. Flags win over the environment.
+
+The worker serves its own Prometheus exposition on ``CRB_METRICS_HOST:CRB_METRICS_PORT``
+before it starts polling (not with ``--once``): the build / grade / cost series are
+recorded in this process and the API's ``/metrics`` never carries them (J-TEL-1). The
+bind is loopback unless the deployment says otherwise — the series name repositories,
+builders and installations, and a bare ``crb worker`` on a host must not offer them to
+every interface; compose and Helm set ``0.0.0.0`` inside the container, where the port
+is reachable only by the scraper.
 
 The CLI package wires ``crb worker`` to :func:`main`; this module does not
 import :mod:`crb.cli`.
@@ -25,13 +35,17 @@ What it does: Turns flags and ``CRB_*`` fallbacks into ``WorkerSettings``, refus
               either processes one run (``--once``; exit 3 when idle) or polls until a stop
               signal arrives.
 How:          ``build_parser`` → ``settings_from_args`` (sets ``CRB_HOME`` for the builders'
-              secrets lookup) → ``Worker`` → ``run_once`` | ``run_forever(stop)``.
+              secrets lookup; reads ``CRB_GITHUB__*`` / ``CRB_METRICS_*`` through a
+              pydantic-settings view of the same environment the API reads) → ``Worker`` →
+              ``metrics.start_worker_exposition`` → ``run_once`` | ``run_forever(stop)``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/server/worker.py (``Worker`` / ``WorkerSettings`` — everything this
               file configures), src/crb/store/jobs.py (``RUN_KINDS`` for ``--kinds``),
+              src/crb/observability/metrics.py (the worker's exposition server),
               src/crb/cli/commands/service.py (``crb worker`` forwards its argv here),
-              deploy/entrypoint.sh (the container's ``worker`` role),
+              deploy/entrypoint.sh (the container's ``worker`` role), deploy/docker-compose.yml
+              and deploy/helm/crb/templates/worker-deployment.yaml (expose the metrics port),
               src/crb/core/execution.py (``DockerSettings`` for ``--image``)
 Tested by:    tests/test_worker.py
 Touch when:   never for a new repository (the sandbox image is per repository, set in its
@@ -55,6 +69,7 @@ from typing import Any
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from crb.core.execution import DockerSettings, SandboxUnavailable
+from crb.observability import metrics
 from crb.observability.logging import configure_logging
 from crb.server.settings import GitHubAppSettings
 from crb.server.worker import Worker, WorkerSettings
@@ -68,6 +83,11 @@ HOME_ENV = "CRB_HOME"
 EXECUTOR_ENV = "CRB_EXECUTOR"
 IMAGE_ENV = "CRB_SANDBOX_IMAGE"
 WORKER_ID_ENV = "CRB_WORKER_ID"
+METRICS_PORT_ENV = "CRB_METRICS_PORT"
+METRICS_HOST_ENV = "CRB_METRICS_HOST"
+METRICS_ENABLED_ENV = "CRB_METRICS_ENABLED"
+DEFAULT_METRICS_PORT = 9464
+DEFAULT_METRICS_HOST = "127.0.0.1"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -107,6 +127,19 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help=f"comma-separated run kinds to accept (default: all of {', '.join(RUN_KINDS)})",
     )
+    p.add_argument(
+        "--metrics-host",
+        default="",
+        help=f"bind this worker's Prometheus /metrics to this address (default: ${METRICS_HOST_ENV} "
+        f"or {DEFAULT_METRICS_HOST} — loopback; a container sets 0.0.0.0)",
+    )
+    p.add_argument(
+        "--metrics-port",
+        type=int,
+        default=None,
+        help=f"serve this worker's Prometheus /metrics on this port (default: ${METRICS_PORT_ENV} "
+        f"or {DEFAULT_METRICS_PORT}; 0 = off)",
+    )
     p.add_argument("--once", action="store_true", help="process at most one run, then exit")
     p.add_argument("--keep-worktrees", action="store_true", help="do not remove trial worktrees")
     p.add_argument("--log-format", choices=("json", "text"), default="json")
@@ -132,6 +165,13 @@ def settings_from_args(
     unknown = [k for k in kinds if k not in RUN_KINDS]
     if unknown:
         raise ValueError(f"unknown run kind(s) {unknown!r}; expected {RUN_KINDS}")
+    shared = _shared_settings(e)
+    port = args.metrics_port if args.metrics_port is not None else shared.metrics_port
+    if not 0 <= int(port) <= 65535:
+        raise ValueError(f"{METRICS_PORT_ENV} must be 0 (off) or a port 1-65535, got {port}")
+    host = (args.metrics_host or shared.metrics_host).strip()
+    if not host:
+        raise ValueError(f"{METRICS_HOST_ENV} must name an address to bind (127.0.0.1, 0.0.0.0)")
     return WorkerSettings(
         database_url=args.database_url or "",
         home=home,
@@ -143,29 +183,63 @@ def settings_from_args(
         stale_after_s=float(args.stale_after),
         kinds=kinds,
         keep_worktrees=bool(args.keep_worktrees),
-        # the same CRB_GITHUB__* the API reads (pydantic-settings parses the nested keys)
-        github=_github_settings(),
+        # the same CRB_GITHUB__* / CRB_METRICS_* the API reads (pydantic-settings parses them)
+        github=shared.github,
+        metrics_enabled=shared.metrics_enabled,
+        metrics_host=host,
+        metrics_port=int(port),
     )
 
 
-class _GitHubOnly(BaseSettings):
-    """Just the ``CRB_GITHUB__*`` keys, read the way :class:`Settings` reads them (same
-    prefix, same nested delimiter) and nothing else: the worker must not fail on an
-    unrelated server setting it does not use, and must not START on a malformed GitHub
-    one — a bad ``CRB_GITHUB__API_URL`` is a configuration error the operator fixes, not a
-    worker that quietly runs without the enterprise connection."""
+class _SharedWithApi(BaseSettings):
+    """Just the keys the worker shares with the API — ``CRB_GITHUB__*``, ``CRB_METRICS_ENABLED``,
+    ``CRB_METRICS_HOST`` and ``CRB_METRICS_PORT`` — read the way :class:`Settings` reads them (same prefix, same
+    nested delimiter) and nothing else: the worker must not fail on an unrelated server
+    setting it does not use, and must not START on a malformed GitHub one — a bad
+    ``CRB_GITHUB__API_URL`` is a configuration error the operator fixes, not a worker that
+    quietly runs without the enterprise connection."""
 
     model_config = SettingsConfigDict(
         env_prefix="CRB_", env_nested_delimiter="__", extra="ignore", case_sensitive=False
     )
     github: GitHubAppSettings = GitHubAppSettings()
+    metrics_enabled: bool = True
+    #: The worker's own exposition bind address (loopback by default, like the API's
+    #: ``CRB_BIND_HOST``; a container sets ``0.0.0.0``) and port (the API keeps ``/metrics``
+    #: on its HTTP port).
+    metrics_host: str = DEFAULT_METRICS_HOST
+    metrics_port: int = DEFAULT_METRICS_PORT
 
 
-def _github_settings() -> GitHubAppSettings:
+def _shared_settings(env: dict[str, str] | None = None) -> _SharedWithApi:
     """``CRB_GITHUB__APP_ID`` / ``__PRIVATE_KEY`` / ``__PRIVATE_KEY_FILE`` / ``__API_URL`` …
-    read the way the API reads them, so one environment configures both processes. A
-    malformed value raises (``pydantic.ValidationError``) and the worker does not start."""
-    return _GitHubOnly().github
+    and ``CRB_METRICS_ENABLED`` / ``CRB_METRICS_HOST`` / ``CRB_METRICS_PORT``, read the way the API reads them, so
+    one environment configures both processes. A malformed value raises
+    (``pydantic.ValidationError``) and the worker does not start. ``env`` (tests) stands
+    in for ``os.environ``."""
+    if env is None:
+        return _SharedWithApi()
+    return _SharedWithApi(**_keys_for(env))
+
+
+def _keys_for(env: dict[str, str]) -> dict[str, Any]:
+    """The subset of an explicit ``env`` mapping that ``_SharedWithApi`` reads, as its
+    field values (pydantic-settings only reads ``os.environ`` on its own)."""
+    out: dict[str, Any] = {}
+    if METRICS_ENABLED_ENV in env:
+        out["metrics_enabled"] = env[METRICS_ENABLED_ENV]
+    if METRICS_HOST_ENV in env:
+        out["metrics_host"] = env[METRICS_HOST_ENV]
+    if METRICS_PORT_ENV in env:
+        out["metrics_port"] = env[METRICS_PORT_ENV]
+    github = {
+        k.removeprefix("CRB_GITHUB__").lower(): v
+        for k, v in env.items()
+        if k.upper().startswith("CRB_GITHUB__")
+    }
+    if github:
+        out["github"] = github
+    return out
 
 
 def _run_summary(run: Any) -> dict[str, Any]:
@@ -197,6 +271,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.once:
         run = worker.run_once()
+        # a one-shot worker leaves: stamp its row stopped so the health probe does not
+        # read the exiting process as a worker that stopped checking in
+        worker.checkin(stopped=True)
         if run is None:
             print(json.dumps({"status": "idle", "worker_id": worker.worker_id}))
             return EXIT_IDLE
@@ -211,6 +288,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(ValueError, OSError):  # not the main thread / unsupported
             signal.signal(sig, _stop)
+    metrics.start_worker_exposition(
+        settings.metrics_port, enabled=settings.metrics_enabled, addr=settings.metrics_host
+    )
     worker.run_forever(stop)
     return EXIT_OK
 

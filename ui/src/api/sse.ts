@@ -11,7 +11,9 @@
  *     connection never replays or loses an event;
  *   - reconnects with capped exponential backoff until `done` or `close()`;
  *   - keeps a bounded buffer (ring, newest wins) so an all-night run cannot
- *     exhaust the tab;
+ *     exhaust the tab — except the worker's `system/run.kill_*` events, which are
+ *     PINNED: the run page's container line is derived from them, and a busy run
+ *     must not page "a container may still be running" out of the ring;
  *   - never parses a malformed frame into the buffer — it is counted and
  *     surfaced as `dropped` (fail closed, honestly).
  *
@@ -22,19 +24,22 @@
  * What it is:   The SSE client: `RunEventStream` (a subscribable, reconnecting `EventSource`
  *               wrapper), `parseStepEvent` and `runEventsUrl`.
  * What it does: Streams a run's `StepEvent`s into a bounded ring buffer (5,000, oldest
- *               dropped), resumes with `?after=<last seq>` on every reconnect so a drop never
- *               replays or loses an event, backs off exponentially (1 s → 15 s) until the
- *               server's `done` or `close()`, and counts a malformed frame as `dropped`
- *               rather than parsing it into the buffer.
+ *               dropped — never a pinned `system/run.kill_*` event, `isPinned`), resumes with
+ *               `?after=<last seq>` on every reconnect so a drop never replays or loses an
+ *               event, backs off exponentially (1 s → 15 s) until the server's `done` or
+ *               `close()`, and counts a malformed frame as `dropped` rather than parsing it
+ *               into the buffer.
  * How:          `open()` → the injected factory builds the source at the resume URL →
  *               `step` frames go through `parseStepEvent` (seq / action / stage required,
- *               duplicates below `lastSeq` skipped) → each change replaces the snapshot object
- *               and notifies subscribers → `onerror` tears the source down and schedules a
+ *               duplicates below `lastSeq` skipped) → `trimRing` drops the oldest unpinned
+ *               events past `maxEvents` → each change replaces the snapshot object and
+ *               notifies subscribers → `onerror` tears the source down and schedules a
  *               reconnect; `done` finishes.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useRunEvents` owns one stream per run and adapts it
  *               with `useSyncExternalStore`), ui/src/api/types.ts (`StepEvent`),
+ *               ui/src/screens/Runs/telemetry.ts (`containerLine` reads the pinned events),
  *               ui/src/components/LiveLog.tsx (renders the snapshot), src/crb/server/routes/runs.py
  *               (the `text/event-stream` route and its `event: done`),
  *               src/crb/observability/events.py (the envelope the frames carry)
@@ -48,6 +53,34 @@
 
 import type { StepEvent } from './types'
 import { API_BASE } from './client'
+
+/**
+ * Events the ring never evicts: the worker's `system/run.kill_*` trio (`run.kill_unconfirmed`,
+ * `run.kill_reaped`, `run.kill_reap_failed` — docs/API.md `POST /runs/{id}/cancel`). The run
+ * page's container line is a fold over them, so they must survive any number of later events.
+ */
+export function isPinned(ev: StepEvent): boolean {
+  return ev.stage === 'system' && ev.action.startsWith('run.kill_')
+}
+
+/**
+ * The ring's eviction: drop the OLDEST unpinned events until at most `max` remain, keeping
+ * order. Pinned events are never dropped, so the result can exceed `max` only by their count
+ * (a handful per run, by construction).
+ */
+export function trimRing(events: readonly StepEvent[], max: number): StepEvent[] {
+  let excess = events.length - max
+  if (excess <= 0) return [...events]
+  const out: StepEvent[] = []
+  for (const ev of events) {
+    if (excess > 0 && !isPinned(ev)) {
+      excess -= 1
+      continue
+    }
+    out.push(ev)
+  }
+  return out
+}
 
 /** The stream's lifecycle; `done` is the server's verdict (run terminal), `closed` is ours (unmount). */
 export type SseStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'done' | 'closed'
@@ -230,7 +263,7 @@ export class RunEventStream {
     }
     if (ev.seq <= this.snapshot.lastSeq && this.snapshot.events.length > 0) return // duplicate on resume
     let events = this.snapshot.events.concat(ev)
-    if (events.length > this.maxEvents) events = events.slice(events.length - this.maxEvents)
+    if (events.length > this.maxEvents) events = trimRing(events, this.maxEvents)
     this.set({ events, lastSeq: Math.max(this.snapshot.lastSeq, ev.seq) })
   }
 

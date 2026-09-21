@@ -1,15 +1,17 @@
 /**
- * Runs — every mine, replay, blind, oracle and controls run: status, progress, counts (/runs).
+ * Runs — every mine, replay, blind, oracle, controls and factory run: status, progress, counts (/runs).
  *
  * Navigation
  * ----------
- * What it is:   The screen at /runs (the list with repo / kind / status filters in the URL)
- *               and the `Progress` bar the run page reuses.
+ * What it is:   The screen at /runs (the list with repo / kind / status filters in the URL —
+ *               the kind filter offers every kind a run can have, the dialog only the kinds
+ *               it starts) and the `Progress` bar the run page reuses.
  * What it does: Lists `GET /runs` newest first with status, progress (done / total), clean /
  *               tasks, DQ / errors, builder, cost; polls only while a listed run is
  *               non-terminal; rows open the run page. `?new=<kind>` opens the run dialog
  *               pre-set to that kind (how "Start a replay run" links from empty states
- *               arrive here); operators get "Start run".
+ *               arrive here) only for a role that can start one; a viewer or approver
+ *               reads who acts instead (J-FAC-12); operators get "Start run".
  * How:          `useRepoParam` + `useSearchParams` for the filters → `useRuns` → `DataTable`;
  *               `RunNewDialog` navigates to the new run on success.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -18,8 +20,9 @@
  *               (`Run`, `RUN_KINDS`), ui/src/screens/Runs/RunNewDialog.tsx,
  *               ui/src/screens/Runs/RunDetailPage.tsx (where a row leads; imports `Progress`),
  *               src/crb/server/routes/runs.py
- * Tested by:    ui/e2e/walkthrough/03-mine.spec.ts (the Runs list shows the run, the progress
- *               bar reports the run's own counts), ui/e2e/walkthrough/06-cancel.spec.ts,
+ * Tested by:    ui/src/screens/Runs/RunsPage.test.tsx (the kind filter and the copy name every
+ *               kind; ?new= opens the dialog for an operator only), ui/e2e/walkthrough/03-mine.spec.ts (the Runs list shows the run, the
+ *               progress bar reports the run's own counts), ui/e2e/walkthrough/06-cancel.spec.ts,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   a run kind is added (src/crb/core/run.py, docs/API.md "Runs") — extend
  *               `RunKind` in ui/src/api/types.ts; never for a new repository.
@@ -44,6 +47,8 @@ import { RunNewDialog } from './RunNewDialog'
 
 /** The status filter's options. */
 const STATUSES: RunStatus[] = ['queued', 'running', 'succeeded', 'failed', 'cancelled']
+/** The kind filter's options: every kind a run can have, not only the kinds the dialog starts (a probe comes from the repo page, a label from the CLI, a factory run from /factory). */
+const KIND_FILTERS: readonly RunKind[] = [...RUN_KINDS, 'probe', 'label', 'factory']
 
 /** Done / total as a bar with `role="progressbar"`; red when failed, green when succeeded. */
 export function Progress({ done, total, status }: { done: number; total: number; status: RunStatus }) {
@@ -110,15 +115,15 @@ export function RunsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Runs"
+        eyebrow="Instrument · Runs"
         title="Runs"
-        purpose="Every mine, replay, blind, oracle and controls run: its status, progress and counts. A run's rows are what the ledger and the capability map are made of."
+        purpose="Every mine, replay, blind, oracle, controls and factory run: its status, progress and counts. A run's rows are what the ledger, the capability map and the factory's evidence are made of."
         actions={
           <>
             <RepoPicker value={repo} onChange={setRepo} />
             <InlineSelect label="Kind" value={kind} onChange={(e) => setFilter('kind', e.target.value)}>
               <option value="">all</option>
-              {RUN_KINDS.map((k) => (
+              {KIND_FILTERS.map((k) => (
                 <option key={k} value={k}>
                   {k}
                 </option>
@@ -153,7 +158,13 @@ export function RunsPage() {
               empty={
                 <EmptyState
                   title="No runs match"
-                  reason={repo || kind || status ? 'Nothing matches these filters yet.' : 'A run is a mine, replay, blind, oracle or controls job over one repo. Start one to produce ledger rows.'}
+                  reason={
+                    repo || kind || status
+                      ? 'Nothing matches these filters yet.'
+                      : can('operator')
+                        ? 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. Start one here to produce ledger rows; the factory is started from Factory.'
+                        : 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. An operator starts a run; it spends model budget. The factory is started from Factory.'
+                  }
                   action={can('operator') ? <Button variant="filled" onClick={() => setStarting(true)}>Start a run</Button> : undefined}
                 />
               }
@@ -162,7 +173,7 @@ export function RunsPage() {
         </QueryBoundary>
       </Card>
       <RunNewDialog
-        open={starting}
+        open={starting && can('operator')}
         onClose={() => {
           setStarting(false)
           if (initialNew !== null) setFilter('new', '')

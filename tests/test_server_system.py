@@ -48,7 +48,7 @@ from crb.server.app import API_PREFIX, create_app
 from crb.server.routes.system import ledger_counts, probe_sandbox, process_role
 from crb.server.settings import Settings
 from crb.store.db import make_engine, make_session_factory
-from crb.store.models import Grade, Repo, Run
+from crb.store.models import Grade, Repo, Run, WorkerRow
 
 ROOT_PW = "correct-horse-battery-staple"
 PROBE_NAMES = {"db", "append_only", "ledger", "sandbox", "toolchains", "builders", "worker"}
@@ -146,7 +146,10 @@ class TestHealth:
         }
         sandbox = _probe(body, "sandbox")
         assert sandbox["status"] == "degraded" and sandbox["data"] == {"executor": "local"}
-        assert _probe(body, "worker")["status"] == "ok"
+        # a fresh store: no worker has checked in yet — honest, not ok (J-TEL-2)
+        worker = _probe(body, "worker")
+        assert worker["status"] == "degraded" and "no worker has checked in yet" in worker["detail"]
+        assert worker["data"]["workers"] == [] and worker["data"]["queued"] == 0
         assert "no-store" in r.headers["Cache-Control"]
 
     def test_append_only_probe_proves_update_refused(
@@ -194,6 +197,18 @@ class TestHealth:
             s.add(Run(id="run-stale", repo="demo", status="running", heartbeat=stale))
             s.add(Run(id="run-noheart", repo="demo", status="running"))
             s.add(Run(id="run-q", repo="demo", status="queued"))
+            s.add(
+                WorkerRow(
+                    worker_id="w-1",
+                    hostname="h",
+                    executor="local",
+                    kinds=[],
+                    started=fresh,
+                    heartbeat=fresh,
+                    heartbeat_s=10.0,
+                    current_run_id="run-fresh",
+                )
+            )
             s.commit()
         r = client.get(f"{API_PREFIX}/health")
         assert r.status_code == 200
@@ -202,6 +217,143 @@ class TestHealth:
         assert worker["data"]["running"] == 3 and worker["data"]["queued"] == 1
         assert sorted(worker["data"]["stale"]) == ["run-noheart", "run-stale"]
         assert worker["data"]["stale_after_s"] == 120
+        assert worker["data"]["workers"][0]["current_run_id"] == "run-fresh"
+
+    def test_worker_probe_reads_the_workers_table(
+        self, client: TestClient, factory: sessionmaker[Session]
+    ) -> None:
+        """J-TEL-2: liveness comes from the ``workers`` table the loop upserts even when
+        idle — not from running runs' heartbeats. Queued work with no live worker is
+        ``degraded`` with the queue depth and the last check-in (nothing will start) —
+        never ``down``: ``/health`` is the API pod's readiness probe and the worker is a
+        dependency the API does not own, so a crashed worker must not take the API (and
+        the sentence) out of the Service. A worker that stopped checking in is named."""
+        now = _dt.datetime.now(_dt.UTC)
+        fresh = (now - _dt.timedelta(seconds=4)).isoformat(timespec="seconds")
+        with factory() as s:
+            s.add(Repo(name="demo", language="python", runner="pytest", config_json={}))
+            s.add(Run(id="run-q1", repo="demo", status="queued"))
+            s.add(Run(id="run-q2", repo="demo", status="queued"))
+            s.add(
+                WorkerRow(
+                    worker_id="w-1",
+                    hostname="node-a",
+                    executor="docker",
+                    kinds=["replay", "blind"],
+                    started=fresh,
+                    heartbeat=fresh,
+                    heartbeat_s=10.0,
+                    current_run_id="",
+                    version="x",
+                )
+            )
+            s.commit()
+        worker = _probe(client.get(f"{API_PREFIX}/health").json(), "worker")
+        assert worker["status"] == "ok"
+        assert worker["detail"].startswith("1 worker, last check-in ")
+        assert worker["detail"].endswith(" s ago · 2 runs queued")
+        w = worker["data"]["workers"][0]
+        assert w["worker_id"] == "w-1" and w["alive"] is True and w["hostname"] == "node-a"
+        assert w["kinds"] == ["replay", "blind"] and w["current_run_id"] is None
+        assert 3 <= w["heartbeat_age_s"] <= 10 and w["stale_after_s"] == 30.0
+        assert worker["data"]["queued"] == 2 and worker["data"]["alive"] == 1
+
+        # the worker stops checking in (> 3 × its own heartbeat_s): queued work → degraded,
+        # and readiness stays 200 (the API pod is up; the worker is not its liveness)
+        stale = (now - _dt.timedelta(seconds=360)).isoformat(timespec="seconds")
+        with factory() as s:
+            row = s.get(WorkerRow, "w-1")
+            assert row is not None
+            row.heartbeat = stale
+            s.commit()
+        r = client.get(f"{API_PREFIX}/health")
+        assert r.status_code == 200
+        assert r.json()["status"] == "degraded"
+        worker = _probe(r.json(), "worker")
+        assert worker["status"] == "degraded"
+        assert worker["detail"].startswith("2 runs queued, no worker has checked in for ")
+        assert (
+            "(w-1)" in worker["detail"] and "will not start until a worker does" in worker["detail"]
+        )
+        assert worker["data"]["workers"][0]["alive"] is False
+        assert worker["data"]["alive"] == 0
+
+        # nothing queued: a stale worker is degraded, named, with its age
+        with factory() as s:
+            for rid in ("run-q1", "run-q2"):
+                run = s.get(Run, rid)
+                assert run is not None
+                run.status = "cancelled"
+            s.commit()
+        worker = _probe(client.get(f"{API_PREFIX}/health").json(), "worker")
+        assert worker["status"] == "degraded"
+        assert worker["detail"].startswith("worker w-1 last checked in ")
+
+        # a clean stop is not a stale worker: it is listed as stopped and not alive
+        with factory() as s:
+            row = s.get(WorkerRow, "w-1")
+            assert row is not None
+            row.stopped = stale
+            s.commit()
+        worker = _probe(client.get(f"{API_PREFIX}/health").json(), "worker")
+        assert worker["status"] == "degraded"
+        assert "no worker has checked in yet" in worker["detail"]
+        assert worker["data"]["workers"][0]["stopped"] == stale
+
+        # queued work behind a cleanly stopped worker names the stop, never "for ever"
+        with factory() as s:
+            s.add(Run(id="run-q3", repo="demo", status="queued"))
+            s.commit()
+        r = client.get(f"{API_PREFIX}/health")
+        assert r.status_code == 200
+        worker = _probe(r.json(), "worker")
+        assert worker["status"] == "degraded"
+        assert worker["detail"].startswith("1 run queued, the last worker (w-1) stopped ")
+        assert " s ago — queued runs will not start until a worker does" in worker["detail"]
+        assert "ever" not in worker["detail"].replace("never", "")
+
+    def test_worker_probe_reports_unconfirmed_containers_as_degraded(
+        self, client: TestClient, factory: sessionmaker[Session]
+    ) -> None:
+        """A live, idle worker whose check-in row says it is still reaping a container whose
+        ``docker kill`` was never confirmed (revision 0008) is ``degraded`` with the count and
+        what to do — the container may still be running on the worker host; ``ok`` again
+        once the reaper has emptied its queue."""
+        now = _dt.datetime.now(_dt.UTC)
+        fresh = (now - _dt.timedelta(seconds=2)).isoformat(timespec="seconds")
+        with factory() as s:
+            s.add(
+                WorkerRow(
+                    worker_id="w-1",
+                    hostname="node-a",
+                    executor="docker",
+                    kinds=[],
+                    started=fresh,
+                    heartbeat=fresh,
+                    heartbeat_s=10.0,
+                    version="x",
+                    unconfirmed_containers=2,
+                )
+            )
+            s.commit()
+        r = client.get(f"{API_PREFIX}/health")
+        assert r.status_code == 200 and r.json()["status"] == "degraded"
+        worker = _probe(r.json(), "worker")
+        assert worker["status"] == "degraded"
+        assert worker["detail"] == (
+            "2 containers whose docker kill was not confirmed are being reaped by worker w-1 "
+            "— each may still be running on its host; `docker ps` there names them and "
+            "`docker rm -f <name>` reaps one by hand"
+        )
+        assert worker["data"]["unconfirmed_containers"] == 2
+        assert worker["data"]["workers"][0]["unconfirmed_containers"] == 2
+        with factory() as s:
+            row = s.get(WorkerRow, "w-1")
+            assert row is not None
+            row.unconfirmed_containers = 0
+            s.commit()
+        worker = _probe(client.get(f"{API_PREFIX}/health").json(), "worker")
+        assert worker["status"] == "ok" and worker["data"]["unconfirmed_containers"] == 0
 
     def test_health_needs_no_auth(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/health").status_code == 200

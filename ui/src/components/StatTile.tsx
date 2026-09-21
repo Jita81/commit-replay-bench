@@ -8,13 +8,18 @@
  *               without `n` and an apparatus line, and the value arrives already formatted so
  *               a bare number can never reach the page. An unmeasured value (`—`, or `n` of 0 /
  *               null) renders muted as an honest empty tile, never as a zero rate; a
- *               non-finite `n` renders as a dash.
+ *               non-finite `n` renders as a dash. The apparatus line wraps: the honest
+ *               sentence ("no interval yet: the API serves the mean only") is read in full,
+ *               never cut to one line behind a hover title. The label may be a node so a
+ *               route name can be a `Term` with its definition one click away.
  * How:          A `<dl>` of n / 95 % CI / apparatus under the value; `fmtInt` and `fmtCi` do
  *               the guarding.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/lib/format.ts (`fmtInt`, `fmtCi`, `wilson` for a client-side interval),
  *               ui/src/lib/verdict.ts (`TONE_TEXT` for a toned value),
+ *               ui/src/screens/Results/ResultsPage.tsx (the Baseline's tiles: a `Term` as the
+ *               route label, `ci={null}` for a mean that has no interval),
  *               ui/src/screens/Runs/RunDetailPage.tsx (a run's tiles),
  *               ui/src/screens/Capability/CapabilityPage.tsx
  *               (coverage and false-Q1 tiles), ui/src/screens/Signoff/SignoffPage.tsx
@@ -31,12 +36,13 @@ import { fmtCi, fmtInt } from '../lib/format'
 import { TONE_TEXT, type Tone } from '../lib/verdict'
 
 interface StatTileProps {
-  label: string
+  /** The tile's name; a node when the word needs a definition (`<Term id="deliver" />`). */
+  label: ReactNode
   /** The headline value, already formatted (never a bare number — see below). */
   value: string
   /** The sample size behind the value. Required: a rate without its n is a rumour. */
   n: number | null | undefined
-  /** Wilson 95% interval when the value is a rate. */
+  /** Wilson 95% interval when the value is a rate; `null` prints "95% CI —" (say why in `hint`). */
   ci?: { low: number; high: number } | null
   /** Apparatus/method line, e.g. "apparatus 2.0 · belt set v4 · Wilson 95%". */
   apparatus: string
@@ -76,9 +82,7 @@ export function StatTile({ label, value, n, ci, apparatus, tone, hint, ...rest }
         )}
         <div className="flex gap-1">
           <dt className="sr-only">apparatus</dt>
-          <dd className="truncate" title={apparatus}>
-            {apparatus}
-          </dd>
+          <dd className="break-words">{apparatus}</dd>
         </div>
       </dl>
       {hint && <div className="mt-1 text-[11px] text-on-surface-muted">{hint}</div>}

@@ -8,7 +8,9 @@
  *               cell shows its route as a solid tag, `n=… on … tasks`, the point and the
  *               Wilson interval, the apparatus version(s) the rows carry, and one more line
  *               — the reason code, or the sign-off state ("signed 15 Sep" / "sign-off due" /
- *               "sign-off stale"). The five size tiers are the taxonomy (`SizeTier` in
+ *               "sign-off stale"); "sign-off due" is a link to the form only for a reader
+ *               who can sign (`canSign`), plain text for everyone else — a viewer is never
+ *               shown an action they cannot take. The five size tiers are the taxonomy (`SizeTier` in
  *               core), not the API's `sizes` (which lists only measured tiers): a tier with
  *               no row says "not measured · no attempt sighted" on a pale ground and never
  *               a number — the honest state, not a fabricated cell.
@@ -21,8 +23,9 @@
  *               sizes are the map's `sizes`, the classes its `classes`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/src/screens/Results/ResultsPage.tsx (mounts it), ui/src/components/govuk.tsx
- *               (Tag), ui/src/screens/Decisions/decisions.ts (the same sign-off state rules),
+ * Works with:   ui/src/screens/Results/ResultsPage.tsx (mounts it, passes `can('approver')`),
+ *               ui/src/components/govuk.tsx (Tag), ui/src/screens/Decisions/decisions.ts (the
+ *               same sign-off state rules), ui/src/lib/auth.tsx (`can` — the role rule),
  *               docs/EVIDENCE-AND-CLAIMS.md §6 (the permitted claim shape)
  * Tested by:    ui/src/screens/Results/MapTable.test.tsx
  * Touch when:   a cell field is added that a reader needs on the grid.
@@ -58,7 +61,8 @@ function shortDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-export function MapTable({ map, signoffs, repo }: { map: CapabilityMap; signoffs: Signoff[]; repo: string }) {
+/** `canSign`: the reader holds the approver role, so "sign-off due" may link to the form. Default off: a viewer-safe grid. */
+export function MapTable({ map, signoffs, repo, canSign = false }: { map: CapabilityMap; signoffs: Signoff[]; repo: string; canSign?: boolean }) {
   // every size tier, always — an absent column would hide the honest "not measured"
   const sizes = ['XS', 'S', 'M', 'L', 'XL']
   const classes = map.classes.length ? map.classes : Array.from(new Set(map.cells.map((c) => c.capability_class)))
@@ -124,7 +128,7 @@ export function MapTable({ map, signoffs, repo }: { map: CapabilityMap; signoffs
                     {/* every rendered number carries its apparatus — the reader can tell which instrument produced it */}
                     <div className="font-mono text-[12px] leading-[1.4] text-on-surface-muted">app {c.apparatus_versions.join(', ') || '—'}</div>
                     <div className="text-[14px] leading-[1.4] text-on-surface-muted">
-                      {sign.state === 'due' ? (
+                      {sign.state === 'due' && canSign ? (
                         <Link to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${c.capability_class}|${c.size}`)}`}>{last}</Link>
                       ) : (
                         last
@@ -163,5 +167,17 @@ export function licenseSentence(repo: string, map: CapabilityMap & { controls?: 
   const belts = c.belt_sets?.join(', ') || '—'
   const gate = map.controls?.state ? `a ${map.controls.state} controls gate` : 'the controls gate'
   const moved = c.n !== ev.n ? ` The cell has since grown to n=${c.n} (${pct(c.point)}); that is not what was signed.` : ''
-  return `On ${repo} at apparatus ${apparatus}, under belt set ${belts} and ${gate}, ${ev.n} sighted attempts at ${c.capability_class} × ${c.size} were graded clean at ${pct(ev.point)} (95% Wilson ${pct(ev.ci_low)}–${pct(ev.ci_high)}) with false-Q1 ${ev.false_q1}, as signed by ${approverName(so)} on ${new Date(so.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.${moved} It says nothing about any other repository, class or size.`
+  return `On ${repo} at apparatus ${apparatus}, under belt set ${belts} and ${gate}, ${ev.n} sighted attempts at ${c.capability_class} × ${c.size} ${builderClause(map)} were graded clean at ${pct(ev.point)} (95% Wilson ${pct(ev.ci_low)}–${pct(ev.ci_high)}) with false-Q1 ${ev.false_q1}, as signed by ${approverName(so)} on ${new Date(so.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.${moved} It says nothing about any other repository, class, size, builder or model.`
+}
+
+/**
+ * The builder and model the rate is about — EVIDENCE-AND-CLAIMS §7 forbids any rate without
+ * them. This table is the class × size projection, so a sign-off here spans every builder
+ * (a sign-off scoped to one builder never covers a class × size cell —
+ * `signoffScopeMatches`); the sentence says so and names the models the map's rows hold,
+ * never a builder it invented. With no model on the map it points at the signed rows.
+ */
+function builderClause(map: CapabilityMap): string {
+  const models = map.models.filter((m) => m && m !== '*')
+  return models.length > 0 ? `across every builder on the map (${models.length === 1 ? 'model' : 'models'} ${models.join(', ')} — the signed rows name their builder; open the cell)` : 'by the builders and models recorded on the signed rows (open the cell)'
 }

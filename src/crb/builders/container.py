@@ -50,13 +50,20 @@ How:          ``SealedCheckout.create``: ``git archive <parent>`` → ``git init
               → overlay tests (a dangling oracle commit for byte-identity checks) → replicate
               harness fix-ups. ``ContainerSession.__enter__``: verify images → per-attempt
               ``--internal`` network → sidecar on the egress network → wait for ``READY``.
-              ``spawn``/``tools_executor`` hand the builder a container-bound transport.
+              ``spawn``/``tools_executor`` hand the builder a container-bound transport;
+              ``unconfirmed_kills`` names the containers this session spawned — the build
+              streams AND the tool-loop executors' commands — whose enforced kill the
+              daemon never confirmed (``DockerStream.kill_confirmed`` is False;
+              ``DockerExecutor.unconfirmed_kills``) so the adapter can hand them to the
+              worker's reaper instead of losing them.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/builders/egress_proxy.py (the sidecar's script, mounted read-only),
               src/crb/builders/adapter.py (the caller: ``sealed_build``),
-              src/crb/core/execution.py (``DockerExecutor``/``DockerStream``/``DockerSettings``),
+              src/crb/core/execution.py (``DockerExecutor``/``DockerStream``/``DockerSettings``;
+              the bounded kill confirmation ``unconfirmed_kills`` reads),
+              src/crb/server/reaper.py (reaps what ``unconfirmed_kills`` names),
               src/crb/core/workspace.py (the source worktree and ``touched_files``),
               src/crb/builders/claude_code.py and src/crb/builders/openai_agent.py (receive
               ``overrides_for``), src/crb/server/settings.py (mirrors ``CRB_BUILDER__*``),
@@ -97,6 +104,7 @@ from crb.core.execution import (
     DockerSettings,
     DockerStream,
     SandboxUnavailable,
+    UnconfirmedKill,
 )
 from crb.core.git import GitError, GitRepo
 from crb.core.workspace import HARNESS_SYMLINK, Workspace
@@ -782,6 +790,11 @@ class ContainerSession:
         self._network_created = False
         self._proxy_started = False
         self.proxy_log = ""
+        #: Every stream :meth:`spawn` returned, for :meth:`unconfirmed_kills`.
+        self.streams: list[DockerStream] = []
+        #: Every executor :meth:`tools_executor` handed out (the ``openai_agent`` tool
+        #: loop's commands run through it), for :meth:`unconfirmed_kills`.
+        self.tools_executors: list[DockerExecutor] = []
 
     # --- docker plumbing ---------------------------------------------------------
     def _docker(self, *args: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
@@ -955,19 +968,40 @@ class ContainerSession:
         secrets = {k: v for k, v in inside.items() if is_secret_env_name(k)}
         host = str(cwd)
         rewritten = [a.replace(host, WORKDIR) for a in argv]
-        return self.executor.stream(
+        stream = self.executor.stream(
             self.run_args(inside, timeout_s=timeout_s),
             argv=rewritten,
             client_env=client_env(secrets),
             timeout_s=timeout_s,
             name=self.build_name,
         )
+        self.streams.append(stream)
+        return stream
+
+    def unconfirmed_kills(self) -> list[UnconfirmedKill]:
+        """The containers this session spawned whose enforced kill (cancel or the wall
+        clock) the daemon did NOT confirm within the confirmation bound: the build
+        streams with ``kill_confirmed is False`` (``DockerStream.KILL_CONFIRM_S``) and
+        every kill the tool-loop executors recorded (``DockerExecutor.unconfirmed_kills``,
+        the ``openai_agent`` model's commands). Each may still be running: the caller
+        must record it and hand it to the reaper (src/crb/server/reaper.py); an empty
+        list means every kill this session issued was confirmed, or none was issued."""
+        kills = [
+            UnconfirmedKill(container=s.name, bound_s=float(s.KILL_CONFIRM_S))
+            for s in self.streams
+            if s.kill_confirmed is False
+        ]
+        for ex in self.tools_executors:
+            kills.extend(ex.unconfirmed_kills)
+        return kills
 
     def tools_executor(self) -> DockerExecutor:
         """For the in-process tool loop (``openai_agent``): its commands run in the
         builder image over the sealed checkout with ``--network=none`` — the loop
-        itself (trusted worker code) talks to the model; the model's commands do not."""
-        return DockerExecutor(
+        itself (trusted worker code) talks to the model; the model's commands do not.
+        The executor is remembered so :meth:`unconfirmed_kills` reports a command
+        container its kill could not confirm, exactly as it reports a build stream."""
+        ex = DockerExecutor(
             DockerSettings(
                 image=self.settings.image,
                 memory=self.settings.memory,
@@ -981,6 +1015,8 @@ class ContainerSession:
             cancel=self.cancel,
             verify_daemon=False,
         )
+        self.tools_executors.append(ex)
+        return ex
 
     def overrides_for(self, builder: str) -> dict[str, Any]:
         """Constructor overrides that point a builder at this session."""
@@ -1039,6 +1075,7 @@ __all__ = [
     "CopyBack",
     "SealedCheckout",
     "SessionFactory",
+    "UnconfirmedKill",
     "builder_run_args",
     "client_env",
     "container_env",

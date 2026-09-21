@@ -22,8 +22,8 @@
  * ----------
  * What it is:   The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract),
  *               `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`,
- *               `signIn`, `startRun`, `waitForRun`, `runStatus`, `expectLogAction`,
- *               `stackHealth`.
+ *               `signIn`, `personaPassword`, `startRun`, `waitForRun`, `runStatus`,
+ *               `expectLogAction`, `stackHealth`.
  * What it does: Makes every spec drive a REAL stack through the UI only — sign-in through the
  *               form (never cookie injection), runs queued through the dialog, completion
  *               awaited by watching the status pill the page itself polls (never a fixed
@@ -46,6 +46,7 @@
  */
 
 import { expect, test as base, type Locator, type Page } from '@playwright/test'
+import { createHmac } from 'node:crypto'
 
 export type BeltPolicy = 'TARGET_ONLY' | 'AFFECTED_DIRS' | 'BARE'
 
@@ -191,6 +192,18 @@ export async function signIn(page: Page, user = env.user, pass = env.pass): Prom
   await field(page, 'Password').fill(pass)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page.getByTestId('user-chip')).toBeVisible()
+}
+
+/**
+ * The password of a walkthrough persona account (`walk-viewer`, `walk-operator`, `walk-approver`):
+ * STABLE across runs and processes against one stack, so a rerun signs into the account an
+ * earlier run created instead of failing on a password it never knew. Derived, never stored:
+ * HMAC-SHA256 of the username keyed by the stack's own bootstrap admin password (`CRB_E2E_PASS`),
+ * so it is test-only, no easier to guess than the admin secret, never printed, and different on
+ * every stack. 24 base64url characters + prefix satisfies `MIN_PASSWORD_LENGTH` (12).
+ */
+export function personaPassword(username: string): string {
+  return `Walk-${createHmac('sha256', env.pass).update(username).digest('base64url').slice(0, 24)}`
 }
 
 /** `test` with a signed-in page: every spec but the login one uses it. */

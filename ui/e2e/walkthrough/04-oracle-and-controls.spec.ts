@@ -55,7 +55,7 @@ test.describe('04 oracle + controls', () => {
     // strength is a ratio (or "—" for an unscoreable oracle), killed / mutants are integers
     await expect(first).toContainText(/\d+ \/ \d+/)
     await expect(first.getByRole('img', { name: /^Oracle strength: (strong|adequate|weak|unscoreable)/ })).toBeVisible()
-    await expect(first.getByRole('img', { name: /^Gate: (auto-ship|human review|needs human)/i })).toBeVisible()
+    await expect(first.getByRole('img', { name: /^Gate: (clears the oracle bar|review-gated|needs a human)/i })).toBeVisible()
 
     const perCell = page.getByRole('table', { name: 'Oracle strength per cell' })
     await expect(perCell.locator('tbody tr').first()).toBeVisible()

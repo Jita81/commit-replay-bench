@@ -30,6 +30,7 @@ Touch when:   a run parameter is added (a create case, a 422 bound and the worke
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import sys
 import types
@@ -80,6 +81,7 @@ class FakeJobs:
     def __init__(self) -> None:
         self.enqueued: list[Run] = []
         self.cancelled: list[str] = []
+        self.cancel_actors: list[str] = []
         self.listed: list[dict[str, Any]] = []
         self.cancel_result = True
 
@@ -96,8 +98,9 @@ class FakeJobs:
                 s.commit()
             return run
 
-        def request_cancel(factory: Any, run_id: str) -> bool:
+        def request_cancel(factory: Any, run_id: str, *, actor: str = "") -> bool:
             self.cancelled.append(run_id)
+            self.cancel_actors.append(actor)
             if self.cancel_result:
                 with factory() as s:
                     run = s.get(Run, run_id)
@@ -252,6 +255,153 @@ class TestList:
         r = env.get("/runs/nope")
         assert r.status_code == 404 and envelope(r)["code"] == "not_found"
 
+    def test_queue_position_is_served_while_queued(self, env: Env) -> None:
+        """J-TEL-3: the queue is FIFO by ``created`` (claim order), so a queued run's place
+        in the line is a fact — 1-based among queued runs created before it, with the kinds
+        ahead of it — and ``null`` for anything not queued."""
+        first = env.info.run_ids["queued"]  # seeded: kind mine, created 10:00
+        with env.factory() as s:
+            s.add(
+                Run(
+                    id="q1" * 16,
+                    repo=ALPHA,
+                    kind="oracle",
+                    status="queued",
+                    params_json={},
+                    counts_json={},
+                    actor="op1",
+                    created="2026-09-01T10:00:30+00:00",
+                )
+            )
+            s.add(
+                Run(
+                    id="r1" * 16,
+                    repo=ALPHA,
+                    kind="replay",
+                    status="queued",
+                    params_json={},
+                    counts_json={},
+                    actor="op1",
+                    created="2026-09-01T10:00:45+00:00",
+                )
+            )
+            s.commit()
+        head = env.get(f"/runs/{first}").json()
+        assert head["queue_position"] == 1 and head["queue_kinds_ahead"] == []
+        third = env.get(f"/runs/{'r1' * 16}").json()
+        assert third["queue_position"] == 3 and third["queue_kinds_ahead"] == ["mine", "oracle"]
+        for key in ("running", "succeeded", "failed", "cancelled"):
+            got = env.get(f"/runs/{env.info.run_ids[key]}").json()
+            assert got["queue_position"] is None and got["queue_kinds_ahead"] == []
+
+    def test_counts_branch_on_kind(self, env: Env) -> None:
+        """J-TEL-5: replay / blind / factory serve the RunSummary mapping; every other kind
+        serves its own counters VERBATIM under ``counts.detail`` — an oracle run's
+        ``oracle_strength`` / ``mutants`` / ``killed``, a label run's ``usage.cost_usd`` —
+        instead of being read as a build summary (``Clean 0.0 %`` over n labelled tasks)."""
+        oracle_counts = {
+            "tasks": 3,
+            "total": 3,
+            "scoreable": 2,
+            "unscoreable": 1,
+            "mutants": 20,
+            "killed": 17,
+            "escaped": 3,
+            "errors": 1,
+            "oracle_strength": 0.85,
+            "oracle_strength_mean": 0.8,
+            "cells": {},
+        }
+        label_counts = {
+            "tasks": 4,
+            "total": 4,
+            "labelled": 4,
+            "labels": {"bug.fix": 3, "feature.add": 1},
+            "usage": {"calls": 4, "cost_usd": 0.0421, "cost_known": True, "errors": 0},
+            "errors": 0,
+        }
+        controls_counts = {"tasks": 2, "rows": 8, "violations": 0, "escapes": 1, "passed": True}
+        with env.factory() as s:
+            for rid, kind, counts in (
+                ("o1" * 16, "oracle", oracle_counts),
+                ("l1" * 16, "label", label_counts),
+                ("c1" * 16, "controls", controls_counts),
+            ):
+                s.add(
+                    Run(
+                        id=rid,
+                        repo=ALPHA,
+                        kind=kind,
+                        status="succeeded",
+                        params_json={},
+                        counts_json={**counts, "current_task_id": "t9"},
+                        actor="worker",
+                    )
+                )
+            s.commit()
+        for rid, counts in (("o1" * 16, oracle_counts), ("l1" * 16, label_counts)):
+            c = env.get(f"/runs/{rid}").json()["counts"]
+            assert c["detail"] == counts  # verbatim, current_task_id excluded
+            assert c["tasks"] == 0 and c["clean"] == 0 and c["rows"] == 0 and c["errors"] == 0
+        c = env.get(f"/runs/{'c1' * 16}").json()["counts"]
+        assert c["detail"] == controls_counts and c["rows"] == 0
+        # build kinds keep the RunSummary mapping (the seeded replay)
+        ok = env.get(f"/runs/{env.info.run_ids['succeeded']}").json()["counts"]
+        assert ok["tasks"] == 4 and ok["detail"] == {}
+
+    def test_factory_run_serves_its_delivery_posture(self, env: Env) -> None:
+        """J-FAC-6: a factory run says what it was allowed to do — delivery on/off, who
+        overrode the route gate (id and the name resolved at read, as sign-offs do) and
+        the backlog hash it worked; ``null`` for every other kind."""
+        appr = hashlib.sha256(b"appr1").hexdigest()[:32]
+        with env.factory() as s:
+            s.add(
+                Run(
+                    id="f1" * 16,
+                    repo=ALPHA,
+                    kind="factory",
+                    status="succeeded",
+                    builder="claude_code",
+                    model="claude-sonnet-5",
+                    ladder_json=["r1"],
+                    params_json={
+                        "backlog_hash": "1644eba4" + "0" * 56,
+                        "deliver": True,
+                        "deliver_override_by": appr,
+                    },
+                    counts_json={"items": 1, "done": 1, "accepted": 1, "by_status": {}},
+                    actor="op1",
+                )
+            )
+            s.add(
+                Run(
+                    id="g1" * 16,
+                    repo=ALPHA,
+                    kind="factory",
+                    status="queued",
+                    params_json={"backlog_hash": "abc"},
+                    counts_json={},
+                    actor="op1",
+                    created="2026-09-01T10:00:30+00:00",
+                )
+            )
+            s.commit()
+        f = env.get(f"/runs/{'f1' * 16}").json()
+        assert f["factory"] == {
+            "deliver": True,
+            "deliver_override_by": appr,
+            "deliver_override_by_name": "appr1",
+            "backlog_hash": "1644eba4" + "0" * 56,
+        }
+        g = env.get(f"/runs/{'g1' * 16}").json()
+        assert g["factory"] == {
+            "deliver": False,
+            "deliver_override_by": None,
+            "deliver_override_by_name": None,
+            "backlog_hash": "abc",
+        }
+        assert env.get(f"/runs/{env.info.run_ids['succeeded']}").json()["factory"] is None
+
 
 # --- create ---------------------------------------------------------------------------
 
@@ -359,7 +509,8 @@ class TestCreate:
                     s.commit()
                 return run
 
-            def request_cancel(self, run_id: str) -> Run | None:
+            def request_cancel(self, run_id: str, *, actor: str = "") -> Run | None:
+                assert actor  # the route names the operator (J-TEL-7)
                 with self.factory() as s:
                     run = s.get(Run, run_id)
                     if run is None:
@@ -629,6 +780,9 @@ class TestCancel:
         r = env.post(f"/runs/{running}/cancel")
         assert r.status_code == 200, r.text
         assert jobs.cancelled == [running]
+        # J-TEL-7: the queue seam receives the OPERATOR who clicked Cancel (the seeded run's
+        # creator is op1; the env is logged in as admin root)
+        assert jobs.cancel_actors == [hashlib.sha256(b"root").hexdigest()[:32]]
         assert r.json()["cancel_requested"] is True and r.json()["status"] == "running"
         queued = env.info.run_ids["queued"]
         r = env.post(f"/runs/{queued}/cancel")

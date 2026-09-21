@@ -67,6 +67,29 @@ spec:
           port: 8000
     {{- end }}
 ---
+# 3b. Worker metrics ingress: only the metrics scraper, only the worker's own /metrics port.
+{{- if and .Values.worker.enabled (gt (int .Values.worker.metrics.port) 0) $np.metricsIngress }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "crb.fullname" . }}-worker-metrics-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "crb.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- toYaml $np.metricsIngress | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ int .Values.worker.metrics.port }}
+---
+{{- end }}
 # 4. Database egress for api, worker and migrate.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
