@@ -48,19 +48,24 @@ Honesty properties
 * **Cancellation is cooperative and recorded.** ``stop`` is polled between
   tasks; a cancelled run ends ``cancelled`` with its partial counts.
 * **An unconfirmed container kill is visible and reaped, never a silent terminal
-  state.** A sealed attempt's ``docker kill`` (cancel or wall clock) that the daemon
-  did not confirm within ``DockerStream.KILL_CONFIRM_S`` reaches the worker as
-  ``on_kill_unconfirmed``: it writes a system ``run.kill_unconfirmed`` (status error)
-  on the run's trace, appends "container <name> may still be running — it will be
-  reaped by the worker; ``docker rm -f <name>`` reaps it by hand" to the run's error,
-  and queues the name in the reaper's durable file ``<home>/unconfirmed-containers.json``
-  (:mod:`crb.server.reaper`). The run still ends ``cancelled`` / timed out (it did stop
-  building) and the attempt's pack notes carry ``kill_confirmed: false``. Every poll of
+  state.** A ``docker kill`` (cancel or wall clock) that the daemon did not confirm
+  within ``KILL_CONFIRM_S`` reaches the worker as ``on_kill_unconfirmed`` — from a
+  sealed attempt (its build stream or its tool-loop executor, via the session's
+  ``unconfirmed_kills`` and the adapter) or from the run's own docker executor (the
+  grade stage's belt / oracle test run, via ``DockerExecutor.on_kill_unconfirmed``): it
+  writes a system ``run.kill_unconfirmed`` (status error) on the run's trace, appends
+  "container <name> may still be running — it will be reaped by the worker; ``docker
+  rm -f <name>`` reaps it by hand" to the run's error, and queues the name in the
+  reaper's durable file ``<home>/unconfirmed-containers.json`` (:mod:`crb.server.reaper`).
+  The run still ends ``cancelled`` / timed out (it did stop building) and a sealed
+  attempt's pack notes carry ``kill_confirmed: false``. Every poll of
   :meth:`Worker.run_forever` makes one reap pass — ``docker inspect``, ``docker rm -f``,
-  ``inspect`` — writing ``run.kill_reaped`` or, at the bound (20 passes),
-  ``run.kill_reap_failed`` (status error) on that run's trace; the check-in row carries
-  the pending count (``unconfirmed_containers``) so ``/health`` reads ``degraded`` until
-  the queue is empty.
+  ``inspect`` — under a TIME BUDGET of ``heartbeat_s / 2`` (each docker call capped to
+  the remainder; entries the budget did not reach wait for the next poll) so the pass
+  can never hold the loop past the worker's own liveness bound; it writes
+  ``run.kill_reaped`` or, at the bound (20 passes), ``run.kill_reap_failed`` (status
+  error) on that run's trace; the check-in row carries the pending count
+  (``unconfirmed_containers``) so ``/health`` reads ``degraded`` until the queue is empty.
 * **Resumable event cursors.** A reclaimed run's emitter resumes ``seq`` after
   the last stored event so ``?after=<seq>`` never replays or skips.
 * **Liveness is a fact, not an inference.** The worker upserts its ``workers`` row
@@ -446,6 +451,9 @@ class RunContext:
     #: Sentences appended to the run's ``error`` whatever its final status (an
     #: unconfirmed container kill) — a cancelled run is still cancelled, but never quietly.
     notes: list[str] = field(default_factory=list)
+    #: The task the run is on (set by each kind's task loop) — the ``task_id`` an
+    #: executor-level report (``run.kill_unconfirmed`` from the grade stage) is filed under.
+    task_id: str = ""
     _runner: BaseRunner | None = None
     _executor: Executor | None = None
 
@@ -667,12 +675,20 @@ class Worker:
         _LOG.info("worker %s stopped", self.worker_id)
 
     # --- the reaper ---------------------------------------------------------------
+    @property
+    def reap_budget_s(self) -> float:
+        """The time one reap pass may hold the idle loop: half the heartbeat, so the
+        check-in that follows the pass is never later than the worker's own liveness
+        bound (``3 × heartbeat_s``) — even when the daemon answers nothing."""
+        return float(self.settings.heartbeat_s) / 2
+
     def reap(self) -> int:
-        """One bounded pass of the container reaper (every poll): each container that ended
-        this pass gets ``run.kill_reaped`` (ok) or ``run.kill_reap_failed`` (error, with the
-        by-hand command) on its run's trace. Returns how many ended. Never raises."""
+        """One bounded pass of the container reaper (every poll), under
+        :attr:`reap_budget_s`: each container that ended this pass gets ``run.kill_reaped``
+        (ok) or ``run.kill_reap_failed`` (error, with the by-hand command) on its run's
+        trace. Returns how many ended. Never raises."""
         try:
-            ended = self.reaper.reap_once()
+            ended = self.reaper.reap_once(budget_s=self.reap_budget_s)
         except Exception:  # the loop must survive the reaper too
             _LOG.exception("container reaper pass failed")
             return 0
@@ -714,8 +730,9 @@ class Worker:
             _LOG.exception("reaper: could not record %s on run %s", res.entry.container, run.id[:8])
 
     def _kill_unconfirmed(self, ctx: RunContext, task_id: str, kill: UnconfirmedKill) -> None:
-        """``on_kill_unconfirmed`` for the run's build function (module docstring): the
-        event, the note on the run's error, the reaper's queue. Never raises."""
+        """``on_kill_unconfirmed`` for the run's build function AND its docker executor
+        (module docstring): the event, the note on the run's error, the reaper's queue.
+        Never raises."""
         note = unconfirmed_note(kill.container)
         try:
             ctx.emit(
@@ -1016,8 +1033,14 @@ class Worker:
         if kind == "docker":
             docker = docker_settings_for(ctx.config, self.settings.docker, ctx.params)
         # The cancel token: a requested cancel kills the running test process (local) or
-        # container (docker) instead of waiting for the wall-clock timeout.
-        ctx._executor = make_executor(kind, docker=docker, cancel=lambda: self._cancelled(ctx))
+        # container (docker) instead of waiting for the wall-clock timeout. A docker kill
+        # the daemon never confirms is reported the same way a sealed attempt's is.
+        ctx._executor = make_executor(
+            kind,
+            docker=docker,
+            cancel=lambda: self._cancelled(ctx),
+            on_kill_unconfirmed=lambda kill: self._kill_unconfirmed(ctx, ctx.task_id, kill),
+        )
         ctx.emit("system", "run.executor", **ctx._executor.describe())
         return ctx._executor
 
@@ -1467,6 +1490,7 @@ class Worker:
         def tracked() -> Iterator[TaskSpec]:
             for i, t in enumerate(tasks):
                 ctx.counts["tasks"] = i
+                ctx.task_id = t.task_id
                 self._progress(ctx, i, total)
                 yield t
 
@@ -1547,6 +1571,7 @@ class Worker:
             if self._cancelled(ctx):
                 cancelled = True
                 break
+            ctx.task_id = task.task_id
             dest = self.scratch_dir / f"oracle-{ctx.config.name}-{task.short_id}-{run.id[:8]}"
             with Workspace.create(ctx.git, task.task_id, dest, config=ctx.config) as ws:
                 ws.overlay_tests(task.test_files)
@@ -1763,6 +1788,7 @@ class Worker:
             if self._cancelled(ctx):
                 cancelled = True
                 break
+            ctx.task_id = task.task_id
             rows.extend(
                 controls_for_task(
                     ctx.git,

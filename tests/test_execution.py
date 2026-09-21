@@ -21,10 +21,17 @@ What it does: Pins ``Command`` validation, that the local executor filters the e
               call, so it can end WITHOUT confirming (``kill_confirmed`` is False and a warning
               names the container); ``inspect`` output is accepted only as the exact strings
               ``true`` / ``false`` (anything else is unknown, never a stop); a removed (``--rm``)
-              container counts as stopped; a natural exit asks the daemon nothing.
+              container counts as stopped; a natural exit asks the daemon nothing. The same
+              contract on the NON-stream path (``DockerExecutor.run`` under a cancel token —
+              the belt / test runner's path): the cancel and the wall clock both end in a
+              confirmed ``docker kill`` (``ExecResult.kill_confirmed`` True, ``container``
+              named, the client's process group killed), an unconfirmed kill is recorded on
+              ``unconfirmed_kills`` and handed to ``on_kill_unconfirmed`` (a raising callback
+              is logged, never the result), and a removed container is confirmed.
 How:          Real ``subprocess`` for the local half; ``FakeRunner`` records argv and scripts the
-              daemon's answers for the docker half — no daemon is needed. ``DockerStream`` runs
-              against a fake ``docker`` script whose ``inspect`` answers are scripted.
+              daemon's answers for the docker half — no daemon is needed. ``DockerStream`` and
+              the cancellable ``run`` path go against a fake ``docker`` script whose ``inspect``
+              answers are scripted.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/core/execution.py (under test), tests/test_sandbox_docker.py (the same
@@ -42,6 +49,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -668,3 +676,122 @@ def test_wait_container_stopped_caps_each_inspect_to_the_remaining_time(
     assert ex.wait_container_stopped("docker", "x", timeout_s=0.2, step_s=0.01) is False
     assert budgets and all(0 < b <= 0.2 for b in budgets)
     assert budgets == sorted(budgets, reverse=True)  # strictly less time each round
+
+
+# ---------------------------------------------------------------------------
+# DockerExecutor.run under a cancel token — the non-stream kill is confirmed the same way
+# ---------------------------------------------------------------------------
+
+
+def _cancellable(docker: str, *, cancel: Any, on_kill: Any = None) -> DockerExecutor:
+    return DockerExecutor(
+        DockerSettings(image="img", docker_binary=docker),
+        verify_daemon=False,
+        cancel=cancel,
+        on_kill_unconfirmed=on_kill,
+    )
+
+
+def test_docker_run_cancel_confirms_the_kill_and_names_the_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancel mid-command → ``docker kill`` → ``docker inspect`` polled until Running=false:
+    rc 130, ``cancelled``, ``kill_confirmed`` True, the container named on the result, no
+    report (nothing was unconfirmed) — and the client is gone, well inside the wall clock."""
+    monkeypatch.setattr(ex, "_CANCEL_POLL_S", 0.05)
+    monkeypatch.setattr(DockerExecutor, "KILL_CONFIRM_STEP_S", 0.02)
+    docker, calls = _fake_docker_stream(tmp_path, inspect="true:1")
+    flag = {"cancel": False}
+    reports: list[ex.UnconfirmedKill] = []
+    e = _cancellable(docker, cancel=lambda: flag["cancel"], on_kill=reports.append)
+    threading.Timer(0.3, lambda: flag.__setitem__("cancel", True)).start()
+    t0 = time.monotonic()
+    r = e.run(Command(("sleep", "60"), tmp_path, timeout=60))
+    assert time.monotonic() - t0 < 10
+    assert r.cancelled and r.returncode == 130 and not r.timed_out and not r.ok
+    assert r.kill_confirmed is True and r.container.startswith("crb-")
+    assert "hello" in r.stdout  # what the container wrote before the kill is kept
+    log = calls.read_text().split()
+    assert log.count("kill") == 1 and log.count("inspect") == 2  # true, then false
+    assert e.unconfirmed_kills == [] and reports == []
+
+
+def test_docker_run_cancel_unconfirmed_kill_is_reported_and_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A daemon that never reports the container stopped: the attempt ends at
+    ``KILL_CONFIRM_S``, ``kill_confirmed`` is False on the result, the kill is on
+    ``unconfirmed_kills`` and handed to ``on_kill_unconfirmed`` BEFORE ``run`` returns
+    (the worker records and reaps it), a warning names the container — and a callback
+    that raises is logged, never the command's result."""
+    monkeypatch.setattr(ex, "_CANCEL_POLL_S", 0.05)
+    monkeypatch.setattr(DockerExecutor, "KILL_CONFIRM_S", 0.3)
+    monkeypatch.setattr(DockerExecutor, "KILL_CONFIRM_STEP_S", 0.05)
+    docker, calls = _fake_docker_stream(tmp_path, inspect="always-true")
+    flag = {"cancel": False}
+    reports: list[ex.UnconfirmedKill] = []
+
+    def report(kill: ex.UnconfirmedKill) -> None:
+        reports.append(kill)
+        raise RuntimeError("the worker's sink is down")
+
+    e = _cancellable(docker, cancel=lambda: flag["cancel"], on_kill=report)
+    threading.Timer(0.2, lambda: flag.__setitem__("cancel", True)).start()
+    t0 = time.monotonic()
+    with caplog.at_level("WARNING", logger="crb.core.execution"):
+        r = e.run(Command(("sleep", "60"), tmp_path, timeout=60))
+    elapsed = time.monotonic() - t0
+    assert 0.5 <= elapsed < 5  # the cancel, then the whole bound — and no longer
+    assert r.cancelled and r.returncode == 130 and r.kill_confirmed is False
+    assert r.container.startswith("crb-")
+    assert reports == [ex.UnconfirmedKill(container=r.container, bound_s=0.3)]
+    assert e.unconfirmed_kills == reports
+    assert calls.read_text().split().count("inspect") >= 3
+    messages = [rec.message for rec in caplog.records]
+    assert any(r.container in m and "not confirmed stopped" in m for m in messages)
+    assert any("on_kill_unconfirmed failed" in m for m in messages)
+
+
+def test_docker_run_wall_clock_kill_treats_a_removed_container_as_confirmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wall clock ends in the same kill: ``--rm`` reaps asynchronously, so an
+    ``inspect`` answering "No such container" is confirmation after one question — rc 124,
+    ``timed_out``, ``kill_confirmed`` True, nothing reported."""
+    monkeypatch.setattr(ex, "_CANCEL_POLL_S", 0.05)
+    docker, calls = _fake_docker_stream(tmp_path, inspect="no-such")
+    reports: list[ex.UnconfirmedKill] = []
+    e = _cancellable(docker, cancel=lambda: False, on_kill=reports.append)
+    r = e.run(Command(("sleep", "60"), tmp_path, timeout=1))
+    assert r.timed_out and not r.cancelled and r.returncode == 124
+    assert r.kill_confirmed is True and r.container.startswith("crb-")
+    log = calls.read_text().split()
+    assert log.count("kill") == 1 and log.count("inspect") == 1
+    assert reports == [] and e.unconfirmed_kills == []
+
+
+def test_docker_run_natural_exit_confirms_nothing(tmp_path: Path) -> None:
+    """No kill was issued → ``kill_confirmed`` stays None (the container is still named)
+    and the daemon is asked nothing."""
+    docker, calls = _fake_docker_stream(tmp_path, inspect="always-true")
+    script = Path(docker)
+    script.write_text(script.read_text().replace("echo hello; sleep 60", "echo hello"))
+    e = _cancellable(docker, cancel=lambda: False)
+    r = e.run(Command(("true",), tmp_path, timeout=10))
+    assert r.ok and r.stdout.strip() == "hello"
+    assert r.kill_confirmed is None and r.container.startswith("crb-")
+    assert calls.read_text() == ""
+
+
+def test_make_executor_hands_the_report_to_the_docker_executor_only(tmp_path: Path) -> None:
+    reports: list[ex.UnconfirmedKill] = []
+    local = make_executor("local", cancel=lambda: False, on_kill_unconfirmed=reports.append)
+    assert isinstance(local, LocalExecutor)
+    good = DockerSettings(image="img", docker_binary=_fake_docker(tmp_path / "good", 0))
+    d = make_executor(
+        "docker", docker=good, cancel=lambda: False, on_kill_unconfirmed=reports.append
+    )
+    assert isinstance(d, DockerExecutor)
+    kill = ex.UnconfirmedKill(container="crb-x", bound_s=1.0)
+    d._report_unconfirmed(kill)
+    assert reports == [kill] and d.unconfirmed_kills == [kill]

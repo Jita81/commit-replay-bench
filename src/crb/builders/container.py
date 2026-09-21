@@ -51,9 +51,11 @@ How:          ``SealedCheckout.create``: ``git archive <parent>`` → ``git init
               harness fix-ups. ``ContainerSession.__enter__``: verify images → per-attempt
               ``--internal`` network → sidecar on the egress network → wait for ``READY``.
               ``spawn``/``tools_executor`` hand the builder a container-bound transport;
-              ``unconfirmed_kills`` names the spawned containers whose enforced kill the
-              daemon never confirmed (``DockerStream.kill_confirmed`` is False) so the
-              adapter can hand them to the worker's reaper instead of losing them.
+              ``unconfirmed_kills`` names the containers this session spawned — the build
+              streams AND the tool-loop executors' commands — whose enforced kill the
+              daemon never confirmed (``DockerStream.kill_confirmed`` is False;
+              ``DockerExecutor.unconfirmed_kills``) so the adapter can hand them to the
+              worker's reaper instead of losing them.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
@@ -102,6 +104,7 @@ from crb.core.execution import (
     DockerSettings,
     DockerStream,
     SandboxUnavailable,
+    UnconfirmedKill,
 )
 from crb.core.git import GitError, GitRepo
 from crb.core.workspace import HARNESS_SYMLINK, Workspace
@@ -789,6 +792,9 @@ class ContainerSession:
         self.proxy_log = ""
         #: Every stream :meth:`spawn` returned, for :meth:`unconfirmed_kills`.
         self.streams: list[DockerStream] = []
+        #: Every executor :meth:`tools_executor` handed out (the ``openai_agent`` tool
+        #: loop's commands run through it), for :meth:`unconfirmed_kills`.
+        self.tools_executors: list[DockerExecutor] = []
 
     # --- docker plumbing ---------------------------------------------------------
     def _docker(self, *args: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
@@ -974,21 +980,28 @@ class ContainerSession:
 
     def unconfirmed_kills(self) -> list[UnconfirmedKill]:
         """The containers this session spawned whose enforced kill (cancel or the wall
-        clock) the daemon did NOT confirm within ``DockerStream.KILL_CONFIRM_S`` —
-        ``kill_confirmed is False``. Each may still be running: the caller must record
-        it and hand it to the reaper (src/crb/server/reaper.py); an empty list means
-        every kill this session issued was confirmed, or none was issued."""
-        return [
+        clock) the daemon did NOT confirm within the confirmation bound: the build
+        streams with ``kill_confirmed is False`` (``DockerStream.KILL_CONFIRM_S``) and
+        every kill the tool-loop executors recorded (``DockerExecutor.unconfirmed_kills``,
+        the ``openai_agent`` model's commands). Each may still be running: the caller
+        must record it and hand it to the reaper (src/crb/server/reaper.py); an empty
+        list means every kill this session issued was confirmed, or none was issued."""
+        kills = [
             UnconfirmedKill(container=s.name, bound_s=float(s.KILL_CONFIRM_S))
             for s in self.streams
             if s.kill_confirmed is False
         ]
+        for ex in self.tools_executors:
+            kills.extend(ex.unconfirmed_kills)
+        return kills
 
     def tools_executor(self) -> DockerExecutor:
         """For the in-process tool loop (``openai_agent``): its commands run in the
         builder image over the sealed checkout with ``--network=none`` — the loop
-        itself (trusted worker code) talks to the model; the model's commands do not."""
-        return DockerExecutor(
+        itself (trusted worker code) talks to the model; the model's commands do not.
+        The executor is remembered so :meth:`unconfirmed_kills` reports a command
+        container its kill could not confirm, exactly as it reports a build stream."""
+        ex = DockerExecutor(
             DockerSettings(
                 image=self.settings.image,
                 memory=self.settings.memory,
@@ -1002,6 +1015,8 @@ class ContainerSession:
             cancel=self.cancel,
             verify_daemon=False,
         )
+        self.tools_executors.append(ex)
+        return ex
 
     def overrides_for(self, builder: str) -> dict[str, Any]:
         """Constructor overrides that point a builder at this session."""
@@ -1013,15 +1028,6 @@ class ContainerSession:
 
 
 SessionFactory = Callable[..., ContainerSession]
-
-
-@dataclass(frozen=True)
-class UnconfirmedKill:
-    """A container whose ``docker kill`` was issued but never confirmed within
-    ``bound_s`` seconds — it may still be running (:meth:`ContainerSession.unconfirmed_kills`)."""
-
-    container: str
-    bound_s: float
 
 
 # ---------------------------------------------------------------------------

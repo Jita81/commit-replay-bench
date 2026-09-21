@@ -30,8 +30,9 @@ What it does: Pins that a ``SealedCheckout`` holds exactly one reachable commit 
               tunnels, anything else 403, non-CONNECT 405); and the adapter's sealed path with a
               fake session — the builder never sees the real worktree, the result is graded
               clean on it, a sandbox failure propagates, an unsealable builder keeps the real
-              worktree; and that a session names exactly the spawned streams whose kill went
-              unconfirmed (``unconfirmed_kills``) for the worker's reaper.
+              worktree; and that a session names exactly the spawned streams — and the
+              tool-loop executors' commands — whose kill went unconfirmed
+              (``unconfirmed_kills``) for the worker's reaper.
 How:          ``SealedCheckout`` on a ``pyrepo`` trial; a local HTTP upstream + the proxy on
               ephemeral ports; ``FakeSession`` stands in for ``ContainerSession``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -829,6 +830,33 @@ def test_session_reports_the_spawned_containers_whose_kill_went_unconfirmed(
         UnconfirmedKill(container=session.build_name, bound_s=10.0)
     ]
     assert all(c["name"] == session.build_name for c in executor.calls)
+
+
+def test_session_reports_the_tools_executors_unconfirmed_kills_too(
+    sealed: SealedCheckout, tmp_path: Path
+) -> None:
+    """The ``openai_agent`` model's commands run through ``tools_executor()`` — a
+    ``DockerExecutor`` whose cancel path kills its own containers. A kill it could not
+    confirm is on ``unconfirmed_kills`` next to the streams', with the executor's bound,
+    so the adapter hands it to the reaper exactly as it hands a build stream."""
+    fake = tmp_path / "docker"
+    fake.write_text("#!/bin/sh\nexit 0\n")
+    fake.chmod(0o755)
+    session = ContainerSession(
+        BuilderContainerSettings(image="crb-builder:test", docker_binary=str(fake)),
+        sealed,
+        executor=_ExecutorStub([False]),  # type: ignore[arg-type]
+        label="tools",
+    )
+    tools = session.overrides_for("openai_agent")["executor"]
+    assert session.tools_executors == [tools] and tools.cancel_fn is None
+    assert session.unconfirmed_kills() == []
+    session.spawn(["true"], {}, sealed.root, 10)  # one stream, unconfirmed
+    tools._report_unconfirmed(UnconfirmedKill(container="crb-cmd-1", bound_s=10.0))
+    assert session.unconfirmed_kills() == [
+        UnconfirmedKill(container=session.build_name, bound_s=10.0),
+        UnconfirmedKill(container="crb-cmd-1", bound_s=10.0),
+    ]
 
 
 def test_container_settings_from_env_is_the_worker_hook(monkeypatch: pytest.MonkeyPatch) -> None:

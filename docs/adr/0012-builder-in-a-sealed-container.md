@@ -97,35 +97,58 @@ Behind `CRB_BUILDER__EXECUTOR=docker` (`crb.builders.container`, wired through
    or the budget's wall clock — killing the client alone would leave the container running.
    `docker kill` returns when the signal is sent, not when the daemon stops listing the
    container, so `DockerStream.kill()` makes a **bounded confirmation attempt**
-   (2026-09-21): it polls `docker inspect -f {{.State.Running}}` for at most 10 s in total
-   after the kill (100 ms steps; every inspect call is given only the time left, so a slow
-   daemon cannot stretch the wait; only the exact strings `true` / `false` are read — an
-   empty or otherwise malformed exit-0 answer is unknown, never a stop; a removed `--rm`
-   container is gone) and `lines()` waits for that attempt to end. The attempt can end
-   without confirming, and a reader must read `kill_confirmed`. **The reaper contract**
-   (2026-09-21) governs that case: the run still ends `cancelled` / timed out — it did stop
-   building — but the sealed build reports the session's unconfirmed kills
-   (`ContainerSession.unconfirmed_kills` → `build_fn_for(on_kill_unconfirmed=…)`) and the
+   (2026-09-21): it polls `docker inspect -f {{.State.Running}}` for at most
+   `KILL_CONFIRM_S` = 10 s in total after the kill (`KILL_CONFIRM_STEP_S` = 100 ms steps;
+   every inspect call is given only the time left, so a slow daemon cannot stretch the
+   wait; only the exact strings `true` / `false` are read — an empty or otherwise malformed
+   exit-0 answer is unknown, never a stop; a removed `--rm` container is gone) and
+   `lines()` waits for that attempt to end. The attempt can end without confirming, and a
+   reader must read `kill_confirmed`. **The non-stream path holds the same contract**
+   (2026-09-21): `DockerExecutor.run()` under the run's cancel token — the belt / oracle
+   test run of the grade stage, and the `openai_agent` model's commands through
+   `ContainerSession.tools_executor()` — ends a cancel or the wall clock in `docker kill`,
+   then the client's process group, then the same bounded confirmation; the result carries
+   `ExecResult.kill_confirmed` and `container`, and an unconfirmed kill is recorded on
+   `DockerExecutor.unconfirmed_kills` and handed to the executor's `on_kill_unconfirmed`
+   before `run()` returns. **The reaper contract** (2026-09-21) governs the unconfirmed
+   case on every path: the run still ends `cancelled` / timed out — it did stop building —
+   but the kill is reported to the worker (a sealed attempt's, build stream or tool-loop
+   executor alike, via `ContainerSession.unconfirmed_kills` →
+   `build_fn_for(on_kill_unconfirmed=…)`; the grade stage's via
+   `make_executor(on_kill_unconfirmed=…)`) and the
    worker (1) writes a system `run.kill_unconfirmed` event (status error; `container`,
    `run_id`, `bound_s`, `task_id`) on the run's trace and appends "container `<name>` may
    still be running — it will be reaped by the worker; `docker rm -f <name>` reaps it by
-   hand" to the run's error, the attempt's evidence pack carrying `notes.kill_confirmed:
-   false` and `notes.container`; (2) queues the name durably in
+   hand" to the run's error, a sealed attempt's evidence pack carrying
+   `notes.kill_confirmed: false` and `notes.container`; (2) queues the name durably in
    `<CRB_HOME>/unconfirmed-containers.json` (`crb.server.reaper`) and, on every poll of its
-   loop, makes one pass — `docker inspect`, `docker rm -f`, `inspect` — writing
-   `run.kill_reaped` when the daemon reports the container gone or not running, or after
-   20 passes `run.kill_reap_failed` (status error, with the by-hand command) and dropping
-   it; the check-in row carries the pending count (`workers.unconfirmed_containers`,
-   revision 0008) so the `/health` worker probe reports `unconfirmed_containers` and reads
-   `degraded` until the queue is empty; (3) the run page's Progress card says "a container
-   may still be running (being reaped by the worker)" from `run.kill_unconfirmed` until
-   `run.kill_reaped` lands (or names the by-hand command after `run.kill_reap_failed`).
-   The wait after a cancel is bounded by the command's timeout plus 10 s.
+   loop, makes one pass — `docker inspect`, `docker rm -f`, `inspect` — under a **time
+   budget** of `heartbeat_s / 2` (`Worker.reap_budget_s`; every docker call is capped to
+   the time left in the pass, the entry the budget runs out on counts one attempt with the
+   reason `pass budget exhausted`, and the entries the pass never reached wait for the next
+   poll), so a daemon that answers nothing can hold the idle loop for at most the budget
+   and the check-in that follows is never later than the worker's own liveness bound
+   (`3 × heartbeat_s`); the pass writes `run.kill_reaped` when the daemon reports the
+   container gone or not running, or after 20 passes `run.kill_reap_failed` (status error,
+   with the by-hand command) and drops it; the check-in row carries the pending count
+   (`workers.unconfirmed_containers`, revision 0008) so the `/health` worker probe reports
+   `unconfirmed_containers` and reads `degraded` until the queue is empty; (3) the run
+   page's Progress card says "a container may still be running (being reaped by the
+   worker)" from `run.kill_unconfirmed` until `run.kill_reaped` lands (or names the by-hand
+   command after `run.kill_reap_failed`) — the UI's SSE ring buffer pins the
+   `system/run.kill_*` events so a busy run cannot evict them before the line is read.
+   **The bound on the wait after a cancel** (both paths; constants in
+   `src/crb/core/execution.py`): the command's own timeout + `_CANCEL_POLL_S` (1 s, the
+   token poll) + `DOCKER_KILL_TIMEOUT_S` (30 s, the subprocess timeout on the `docker kill`
+   call itself — a hung daemon can hold the client that long) + `KILL_CONFIRM_S` (10 s,
+   the confirmation attempt) — i.e. timeout + 41 s in the worst case, and timeout + ≈1 s
+   against a daemon that answers.
 
    Evidence, by apparatus:
-   - [measured] **Scripted-docker unit tests** (no daemon; `tests/test_execution.py`, n = 16
-     cases; method: `DockerStream` and the helpers against a `docker` shell script whose
-     `inspect` answers are scripted): the kill is confirmed by polling (`true, true, false`
+   - [measured] **Scripted-docker unit tests** (no daemon; `tests/test_execution.py`, n = 21
+     cases; method: `DockerStream`, the cancellable `DockerExecutor.run` path and the helpers
+     against a `docker` shell script whose `inspect` answers are scripted): the kill is
+     confirmed by polling (`true, true, false`
      → three inspects, `kill_confirmed` True before `lines()` returns); the bound is held and
      warned (`always-true` → False, 1.3 s ≤ elapsed < 5 s); a removed container is gone
      (`No such container` → True after one inspect); a natural exit asks nothing; the strict
@@ -133,14 +156,33 @@ Behind `CRB_BUILDER__EXECUTOR=docker` (`crb.builders.container`, wired through
      `FALSE`, `false extra`, `<no value>`, `null` are unknown; a non-zero exit without
      "no such" is unknown); the budget across inspect calls (an inspect that sleeps 5 s under
      a 0.5 s bound ends in 0.5–2 s, never 5.5 s; each call's budget is the time remaining,
-     strictly decreasing). The worker side (`tests/test_worker.py`, n = 4 cases; method: the
-     worker over SQLite with a session double that reports one unconfirmed kill): the event,
-     the run's error note, `notes.kill_confirmed: false` in the pack, the durable queue and
-     the check-in count; the reap pass writing `run.kill_reaped`; giving up at the bound with
-     `run.kill_reap_failed`; the polling loop reaping without a run claimed. The reaper alone
-     (`tests/test_server_reaper.py`, n = 6 cases). The session's report
-     (`tests/test_builders_container.py`, n = 1 case). The probe
-     (`tests/test_server_system.py`, n = 1 case).
+     strictly decreasing). The non-stream path (5 cases): a cancel mid-command is confirmed
+     (`true` then `false` → two inspects, rc 130, `kill_confirmed` True, the container named,
+     nothing reported, done well inside the wall clock); an `always-true` daemon ends the
+     attempt at the bound with `kill_confirmed` False, the kill on `unconfirmed_kills` and
+     handed to `on_kill_unconfirmed` before `run()` returns, a callback that raises logged
+     and never the result; the wall clock against a removed container is confirmed after
+     one inspect (rc 124); a natural exit asks nothing; `make_executor` hands the report to
+     the docker executor only. The worker side (`tests/test_worker.py`, n = 6 cases; method:
+     the worker over SQLite with a session double that reports one unconfirmed kill, and an
+     executor double that reports one from the grade stage): the event, the run's error
+     note, `notes.kill_confirmed: false` in the pack, the durable queue and the check-in
+     count; the grade stage's kill filed under the task being graded with the same note and
+     queue entry; the reap pass writing `run.kill_reaped`; giving up at the bound with
+     `run.kill_reap_failed`; the polling loop reaping without a run claimed; and the pass
+     budget — a daemon sleeping 3 s per answer with two entries queued: the pass ends in
+     under `heartbeat_s` (budget `heartbeat_s / 2`), the first entry carries one attempt with
+     `pass budget exhausted`, the second is untouched, and the check-in row sampled every
+     200 ms while the loop runs is never older than `3 × heartbeat_s`. The reaper alone
+     (`tests/test_server_reaper.py`, n = 8 cases, two on the budget: three entries against a
+     2 s-per-answer daemon under 0.5 s end in under 1 s with no answer counted as a stop; a
+     0.2 s daemon under 1 s gets its first entry's three calls in full and the third entry
+     is never reached until the next pass). The session's report
+     (`tests/test_builders_container.py`, n = 2 cases: the streams' and the tool-loop
+     executors' kills). The probe (`tests/test_server_system.py`, n = 1 case). The UI ring
+     (`ui/src/screens/Runs/RunDetailPage.test.tsx`, n = 1 case: a `run.kill_unconfirmed`
+     survives 18 later events in a 3-event ring and the container line still reads
+     "being reaped"; `run.kill_reaped` clears it).
    - [measured] **Colima integration runs** (`tests/test_builders_container_docker.py`,
      `test_cancel_kills_the_container` and `test_wall_clock_kills_the_container`, unchanged;
      n = 4 runs × 2 tests = 8 passes, 0 failures, and `docker ps -a --filter name=crb-build`
@@ -149,7 +191,9 @@ Behind `CRB_BUILDER__EXECUTOR=docker` (`crb.builders.container`, wired through
      `docker ps` not listing the container; apparatus: docker server 29.5.2 (client 29.6.1)
      via colima 0.10.3, macOS 26.6.2 arm64, Python 3.12.13, commit f538cfe). These runs
      exercise the confirmed path only — the daemon confirmed every kill; the unconfirmed
-     path is provable only against a scripted daemon (above).
+     path is provable only against a scripted daemon (above). The non-stream path's
+     confirmed kill against a real daemon: `tests/test_sandbox_docker.py`, see the docker
+     suite report in the change that introduced it.
 8. **The post-hoc guards stay on as belt-and-braces**, not as the wall: the shell guard,
    the CLI deny rules and the tamper check still run (container paths are translated to
    the host copy so path verification keeps working); a violation is still recorded

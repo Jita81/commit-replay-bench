@@ -8,7 +8,8 @@
  *               and a controllable `FakeEventSource`.
  * What it does: Pins that the resume URL carries `?after=`, that malformed frames are
  *               rejected (counted, not buffered), that a dropped stream reconnects from
- *               `lastSeq` and stops on `done`, that the buffer is bounded; that the page opens
+ *               `lastSeq` and stops on `done`, that the buffer is bounded but never evicts a
+ *               `system/run.kill_*` event (the container line survives a busy run); that the page opens
  *               the stream and appends step events into the live log; and — after A2 — that
  *               the run's split tiles show the all-rows rate, the model rate, instrument and
  *               budget counts with cost-known, that a v5 task row shows five belt pills and a
@@ -29,10 +30,11 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EventSourceLike } from '../../api/sse'
-import { RunEventStream, parseStepEvent, runEventsUrl } from '../../api/sse'
+import { RunEventStream, isPinned, parseStepEvent, runEventsUrl } from '../../api/sse'
 import type { Run } from '../../api/types'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import { RunDetailPage } from './RunDetailPage'
+import { containerLine } from './telemetry'
 
 /** A controllable EventSource double. */
 class FakeEventSource implements EventSourceLike {
@@ -143,6 +145,25 @@ describe('sse primitives', () => {
     const es = FakeEventSource.instances[FakeEventSource.instances.length - 1]!
     for (let i = 1; i <= 5; i++) es.emit('step', step(i))
     expect(s.getSnapshot().events.map((e) => e.seq)).toEqual([3, 4, 5])
+    s.close()
+  })
+  it('never evicts the run.kill_* events the container line is derived from', () => {
+    // docs/API.md: the run page says "may still be running (being reaped)" BETWEEN
+    // run.kill_unconfirmed and run.kill_reaped — however many events land in between.
+    const s = new RunEventStream('r', { factory: (u) => new FakeEventSource(u), maxEvents: 3 })
+    s.open()
+    const es = FakeEventSource.instances[FakeEventSource.instances.length - 1]!
+    es.emit('step', step(1))
+    es.emit('step', step(2, { stage: 'system', action: 'run.kill_unconfirmed', status: 'error', payload: { container: 'crb-build-x' } }))
+    for (let i = 3; i <= 20; i++) es.emit('step', step(i))
+    expect(s.getSnapshot().events.map((e) => e.seq)).toEqual([2, 19, 20])
+    expect(containerLine(s.getSnapshot().events)?.text).toMatch(/being reaped/)
+    es.emit('step', step(21, { stage: 'system', action: 'run.kill_reaped', status: 'ok', payload: { container: 'crb-build-x' } }))
+    for (let i = 22; i <= 30; i++) es.emit('step', step(i))
+    expect(s.getSnapshot().events.map((e) => e.seq)).toEqual([2, 21, 30])
+    expect(containerLine(s.getSnapshot().events)).toBeNull()
+    // a non-system run.kill_* look-alike is ordinary and evicted
+    expect(isPinned(step(1, { action: 'run.kill_unconfirmed' }) as never)).toBe(false)
     s.close()
   })
 })

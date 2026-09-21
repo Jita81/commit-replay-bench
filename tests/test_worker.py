@@ -23,7 +23,11 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               attempt whose container kill went UNCONFIRMED is visible (``run.kill_unconfirmed``
               on the trace, the note on the run's error, ``kill_confirmed: false`` in the pack)
               and reaped (the loop's pass writes ``run.kill_reaped`` / ``run.kill_reap_failed``;
-              the check-in row counts what is pending).
+              the check-in row counts what is pending); that the run's own docker executor
+              (the grade stage's test run) reports an unconfirmed kill through the same seam
+              (event under the task, note, reaper queue); and that a reap pass is budgeted to
+              ``heartbeat_s / 2`` so a daemon that answers nothing cannot hold the loop past
+              the worker's liveness bound — the check-in still lands.
 How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
               / ``noop`` builder around ``Worker.run_one``; no docker, no network, no model.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -48,6 +52,7 @@ import stat
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -67,7 +72,7 @@ from crb.builders.base import (
 )
 from crb.builders.container import BuilderContainerSettings, SealedCheckout, UnconfirmedKill
 from crb.core.evidence import verify_pack
-from crb.core.execution import SandboxUnavailable
+from crb.core.execution import ExecResult, LocalExecutor, SandboxUnavailable
 from crb.core.ledger import verify_chain
 from crb.core.oracle import controls as nc
 from crb.core.runners.base import SetupResult, SetupStep
@@ -495,16 +500,26 @@ class UnconfirmedSession:
         return [UnconfirmedKill(container=self.container, bound_s=10.0)]
 
 
-def _scripted_docker(dir_: Path, *, gone: bool) -> str:
+def _scripted_docker(dir_: Path, *, gone: bool, delay_s: float = 0.0) -> str:
     """A ``docker`` for the reaper: ``inspect`` answers "No such container" (gone) or
-    Running=true (never lets go); ``rm -f`` succeeds or fails with it."""
+    Running=true (never lets go); ``rm -f`` succeeds or fails with it. ``delay_s`` makes
+    every call sleep first — a daemon that is slow to answer."""
     dir_.mkdir(parents=True, exist_ok=True)
     script = dir_ / "docker"
     inspect = 'echo "Error: No such container: $4" >&2; exit 1' if gone else "echo true"
     rm = ":" if gone else "exit 1"
-    script.write_text(f'#!/bin/sh\ncase "$1" in\n  inspect) {inspect} ;;\n  rm) {rm} ;;\nesac\n')
+    delay = f"sleep {delay_s:g}; " if delay_s else ""
+    script.write_text(
+        f'#!/bin/sh\n{delay}case "$1" in\n  inspect) {inspect} ;;\n  rm) {rm} ;;\nesac\n'
+    )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     return str(script)
+
+
+def _realistic_heartbeat(h: Harness, heartbeat_s: float = 2.0) -> None:
+    """The harness polls at 50 ms; a reap pass is budgeted to ``heartbeat_s / 2``, so a
+    test that expects a scripted ``docker`` to be reached in one pass needs a real one."""
+    h.worker.settings = replace(h.worker.settings, heartbeat_s=heartbeat_s)
 
 
 @pytest.fixture
@@ -586,6 +601,7 @@ def test_reaper_pass_reaps_and_records_on_the_run_trace(
     h.run_one()
     name = UnconfirmedSession.container
     h.worker.reaper.docker = _scripted_docker(tmp_path / "gone", gone=True)
+    _realistic_heartbeat(h)
     assert h.worker.reap() == 1
     (ev,) = [e for e in h.events(run.id) if e.action == "run.kill_reaped"]
     assert ev.stage == "system" and ev.status == StepStatus.OK
@@ -605,6 +621,7 @@ def test_reaper_gives_up_at_the_bound_and_says_so_on_the_trace(
     name = UnconfirmedSession.container
     h.worker.reaper.docker = _scripted_docker(tmp_path / "stuck", gone=False)
     h.worker.reaper.max_attempts = 2
+    _realistic_heartbeat(h)
     assert h.worker.reap() == 0  # attempt 1: still pending
     assert h.worker.reaper.pending()[0].attempts == 1
     assert h.worker.reap() == 1  # attempt 2: the bound
@@ -625,6 +642,7 @@ def test_reaper_runs_from_the_polling_loop(
     FakeBuilder.hook = lambda _ws, _brief: h.queue.request_cancel(run.id, actor="tester")
     h.run_one()
     h.worker.reaper.docker = _scripted_docker(tmp_path / "gone", gone=True)
+    _realistic_heartbeat(h)
     stop = threading.Event()
     t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
     t.start()
@@ -638,6 +656,116 @@ def test_reaper_runs_from_the_polling_loop(
         "run.kill_unconfirmed",
         "run.kill_reaped",
     ]
+
+
+def test_reap_pass_is_budgeted_so_the_check_in_still_lands(h: Harness, tmp_path: Path) -> None:
+    """A daemon that answers nothing (every call sleeps past the budget) with two
+    containers queued: a pass ends within ``heartbeat_s / 2`` — the entry it ran out on
+    counts one attempt with the reason, the entry it never reached is untouched — and the
+    polling loop's check-in row is never older than the worker's liveness bound
+    (``3 × heartbeat_s``) while passes are running."""
+    heartbeat_s = 1.0
+    _realistic_heartbeat(h, heartbeat_s)
+    assert h.worker.reap_budget_s == heartbeat_s / 2
+    h.worker.reaper.docker = _scripted_docker(tmp_path / "slow", gone=False, delay_s=3.0)
+    h.worker.reaper.add("crb-build-slow-1", run_id="r1", task_id="t1")
+    h.worker.reaper.add("crb-build-slow-2", run_id="r2", task_id="t2")
+    t0 = time.monotonic()
+    assert h.worker.reap() == 0
+    elapsed = time.monotonic() - t0
+    assert elapsed < heartbeat_s, elapsed  # the budget, not 3 s × (inspect + rm + inspect)
+    first, second = h.worker.reaper.pending()
+    assert first.attempts == 1 and "pass budget exhausted" in first.last_error
+    assert second.attempts == 0 and second.last_error == ""
+    # the loop: passes every poll, the check-in every heartbeat — sampled while it runs
+    stop = threading.Event()
+    t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
+    t.start()
+    ages: list[float] = []
+    deadline = time.monotonic() + 3 * heartbeat_s
+    while time.monotonic() < deadline:
+        time.sleep(0.2)
+        row = _worker_row(h)
+        ages.append(time.monotonic() - h.worker._last_checkin)
+        assert row.unconfirmed_containers == 2
+    stop.set()
+    t.join(timeout=10)
+    assert ages and max(ages) < 3 * heartbeat_s, ages
+
+
+class _UnconfirmedGradeExecutor(LocalExecutor):
+    """The run's executor with a docker executor's cancel path scripted: the first
+    command it is asked to run is "cancelled" and its container kill goes unconfirmed —
+    reported through ``on_kill_unconfirmed`` exactly as ``DockerExecutor`` does."""
+
+    container: ClassVar[str] = "crb-grade-0badc0de"
+    instances: ClassVar[list[_UnconfirmedGradeExecutor]] = []
+
+    def __init__(self, *, cancel: Any, on_kill_unconfirmed: Any, request_cancel: Any) -> None:
+        super().__init__(cancel=cancel)
+        self.report = on_kill_unconfirmed
+        self.request_cancel = request_cancel
+        self.commands: list[tuple[str, ...]] = []
+        _UnconfirmedGradeExecutor.instances.append(self)
+
+    def run(self, cmd: Any) -> ExecResult:
+        self.commands.append(tuple(cmd.argv))
+        self.request_cancel()
+        self.report(UnconfirmedKill(container=self.container, bound_s=10.0))
+        return ExecResult(
+            130, "", "", False, 0.1, True, kill_confirmed=False, container=self.container
+        )
+
+
+def test_grade_stage_unconfirmed_kill_is_recorded_under_the_task_and_queued(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The non-stream path: a cancel that lands while the grade stage's test run is
+    in flight, whose ``docker kill`` the daemon never confirmed, reaches the worker through
+    the executor's ``on_kill_unconfirmed`` — ``run.kill_unconfirmed`` on the trace under
+    the task being graded, the by-hand note on the run's error, the container in the
+    reaper's queue and on the check-in row. The run still ends ``cancelled``."""
+    _UnconfirmedGradeExecutor.instances.clear()
+    green_sha = h.pyrepo.add_green_commit()
+    h.add_task(
+        h.pyrepo.feat_task(
+            task_id=green_sha,
+            subject="second",
+            test_files=[pr.TEST_CALC],
+            target_tests=[pr.TEST_CALC],
+            baseline_failing=[],
+            authored=h.pyrepo.repo.author_date(green_sha),
+        )
+    )
+    run = h.enqueue("replay")
+    real = worker_mod.make_executor
+
+    def scripted(kind: str, **kw: Any) -> Any:
+        assert kw.get("on_kill_unconfirmed") is not None  # the worker wires the seam
+        return _UnconfirmedGradeExecutor(
+            cancel=kw["cancel"],
+            on_kill_unconfirmed=kw["on_kill_unconfirmed"],
+            request_cancel=lambda: h.queue.request_cancel(run.id, actor="tester"),
+        )
+
+    monkeypatch.setattr(worker_mod, "make_executor", scripted)
+    done = h.run_one()
+    monkeypatch.setattr(worker_mod, "make_executor", real)
+    name = _UnconfirmedGradeExecutor.container
+    assert done.status == STATUS_CANCELLED  # cancel is honoured between tasks: one of two ran
+    assert done.error == (
+        f"container {name} may still be running — it will be reaped by the worker; "
+        f"`docker rm -f {name}` reaps it by hand"
+    )
+    (ev,) = [e for e in h.events(run.id) if e.action == "run.kill_unconfirmed"]
+    assert ev.stage == "system" and ev.status == StepStatus.ERROR
+    (row,) = list(h.worker.ledger.rows(run_id=run.id))  # the one task graded before the cancel
+    assert ev.task_id == row.task_id  # filed under the task whose tests were running
+    assert ev.payload == {"container": name, "run_id": run.id, "bound_s": 10.0}
+    (executor,) = _UnconfirmedGradeExecutor.instances
+    assert executor.commands and any("pytest" in " ".join(c) for c in executor.commands)
+    assert [e.container for e in h.worker.reaper.pending()] == [name]
+    assert _worker_row(h).unconfirmed_containers == 1
 
 
 # --- mine --------------------------------------------------------------------------------------

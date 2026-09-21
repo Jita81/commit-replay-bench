@@ -163,7 +163,9 @@ export function heartbeatLine(run: Run, staleAfterS: number | null, nowMs: numbe
  * (docs/API.md — `POST /runs/{id}/cancel`): `run.kill_unconfirmed` puts a container on the
  * line, `run.kill_reaped` takes it off, `run.kill_reap_failed` turns it into the by-hand
  * instruction. `null` when no container is outstanding — the line never guesses from the
- * run's status, and a server that emits none of these events shows nothing.
+ * run's status, and a server that emits none of these events shows nothing. The SSE ring
+ * (ui/src/api/sse.ts) PINS these events, so a run that emits thousands of events after
+ * `run.kill_unconfirmed` cannot page the line out before `run.kill_reaped` lands.
  */
 export function containerLine(events: readonly StepEvent[]): { text: string; failed: boolean } | null {
   const reaping = new Map<string, true>()

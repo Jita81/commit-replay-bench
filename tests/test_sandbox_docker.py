@@ -6,7 +6,10 @@ pytest) once per session and, on :mod:`tests.fixtures.langs.pyrepo_min`:
 * ``qualify`` + ``grade`` run and parse under ``--network=none`` (gold → clean);
 * a test that opens ``https://example.com`` FAILS (the network is truly off);
 * a test that writes ``/work/hacked.txt`` FAILS (the worktree is read-only);
-* the worktree on the host is byte-identical after a sandboxed run.
+* the worktree on the host is byte-identical after a sandboxed run;
+* a cancel and the wall clock on ``DockerExecutor.run`` (the non-stream path the grade
+  stage uses) kill the CONTAINER, confirmed by the daemon, and ``docker ps`` no longer
+  lists it.
 
 Skipped — with the probe's reason — when no daemon answers ``docker info`` or
 the image cannot be built (no network). Never falls back to running in-process:
@@ -22,9 +25,11 @@ What it is:   The sandbox suite — the instrument inside ``DockerExecutor`` aga
               and proof that the walls hold.
 What it does: Pins that the executor is hardened, that ``qualify`` and ``grade`` run and parse
               under ``--network=none`` (gold → clean), that a test opening ``https://example.com``
-              FAILS, that a test writing ``/work/hacked.txt`` FAILS (read-only worktree), and that
-              the host worktree is byte-identical after a sandboxed run. Never falls back to
-              in-process execution — that is ``SandboxUnavailable``'s job.
+              FAILS, that a test writing ``/work/hacked.txt`` FAILS (read-only worktree), that
+              the host worktree is byte-identical after a sandboxed run, and that a cancel /
+              the wall clock on ``run()`` ends in a daemon-confirmed ``docker kill`` of the
+              container (``kill_confirmed`` True, nothing reported, ``docker ps`` empty).
+              Never falls back to in-process execution — that is ``SandboxUnavailable``'s job.
 How:          ``crb-test-py:local`` built once per session from an inline Dockerfile
               (``python:3.12-slim`` + pytest); worktrees under the tests cache because the VM
               behind colima / Docker Desktop cannot bind-mount pytest's ``tmp_path``; skipped
@@ -45,13 +50,16 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import subprocess
+import threading
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from crb.core.execution import DockerExecutor, DockerSettings
+from crb.core.execution import Command, DockerExecutor, DockerSettings, UnconfirmedKill
 from crb.core.git import GitRepo
 from crb.core.grade import grade
 from crb.core.mine import Candidate, qualify
@@ -240,3 +248,57 @@ def test_host_worktree_unchanged_after_sandboxed_run(trial, task, config, runner
     assert trial.touched_files() == sorted({*task.src_files, *task.test_files})
     stray = {p.name for p in trial.root.iterdir()} - top_before - _ALLOWED_HOST_WRITES
     assert not stray, f"sandboxed run left {sorted(stray)} on the host"
+
+
+# ---------------------------------------------------------------------------
+# The non-stream kill path — a cancel or the wall clock ends in a CONFIRMED docker kill
+# ---------------------------------------------------------------------------
+
+
+def _ps(name: str) -> str:
+    return subprocess.run(
+        ["docker", "ps", "-aq", "--filter", f"name={name}"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    ).stdout.strip()
+
+
+def test_cancel_kills_the_container_and_the_daemon_confirms_it(trial):
+    """``run()`` under a cancel token flipped mid-command: rc 130, ``cancelled``,
+    ``kill_confirmed`` True (the daemon reported the container not running), the container
+    named on the result and no longer listed, nothing handed to ``on_kill_unconfirmed`` —
+    all well inside the command's 60 s wall clock."""
+    flag = {"cancel": False}
+    reports: list[UnconfirmedKill] = []
+    ex = DockerExecutor(
+        DockerSettings(image=IMAGE),
+        cancel=lambda: flag["cancel"],
+        on_kill_unconfirmed=reports.append,
+    )
+    threading.Timer(2.0, lambda: flag.__setitem__("cancel", True)).start()
+    started = time.monotonic()
+    r = ex.run(Command(("sleep", "60"), trial.root, timeout=60))
+    elapsed = time.monotonic() - started
+    assert elapsed < 30, elapsed
+    assert r.cancelled and r.returncode == 130 and not r.timed_out and not r.ok
+    assert r.kill_confirmed is True and r.container.startswith("crb-")
+    assert reports == [] and ex.unconfirmed_kills == []
+    assert _ps(r.container) == ""
+
+
+def test_wall_clock_kills_the_container_and_the_daemon_confirms_it(trial):
+    """The wall clock on ``run()``: rc 124, ``timed_out``, the same confirmed kill."""
+    reports: list[UnconfirmedKill] = []
+    ex = DockerExecutor(
+        DockerSettings(image=IMAGE), cancel=lambda: False, on_kill_unconfirmed=reports.append
+    )
+    started = time.monotonic()
+    r = ex.run(Command(("sleep", "60"), trial.root, timeout=3))
+    elapsed = time.monotonic() - started
+    assert elapsed < 30, elapsed
+    assert r.timed_out and not r.cancelled and r.returncode == 124
+    assert r.kill_confirmed is True and r.container.startswith("crb-")
+    assert reports == [] and ex.unconfirmed_kills == []
+    assert _ps(r.container) == ""
