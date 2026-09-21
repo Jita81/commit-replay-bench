@@ -52,6 +52,7 @@ from crb.server.auth import (
     OidcState,
     authenticate_local,
     clear_auth_cookies,
+    credential_version,
     map_role,
     read_oidc_cookie,
     set_csrf_cookie,
@@ -123,7 +124,7 @@ def login(
     user.last_login = _now()
     db.commit()
     request.state.user_id = user.id
-    set_session_cookie(response, settings, user.id)
+    set_session_cookie(response, settings, user.id, credential_version(user))
     set_csrf_cookie(response, settings)
     return Principal.model_validate(user)
 
@@ -256,7 +257,7 @@ def oidc_callback(
     db.commit()
     request.state.user_id = user.id
     response = RedirectResponse(pending.next_path, status_code=status.HTTP_302_FOUND)
-    set_session_cookie(response, settings, user.id)
+    set_session_cookie(response, settings, user.id, credential_version(user))
     set_csrf_cookie(response, settings)
     response.delete_cookie(
         OIDC_COOKIE, path="/", secure=settings.resolved_cookie_secure, samesite="lax"
