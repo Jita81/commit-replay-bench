@@ -12,8 +12,10 @@
       ▼   gated on the route read at readiness (DL-038, DL-045)
     review (independent identity, probes) → verdict RECORDED before any edit
       ▼ accept_with_edit ──▶ rework: edit permitted → RED proof → build → grade
-      │                       → re-deliver (the SAME pull request, updated; a failed
-      │                         rework comment is a warning, never a stop) → fresh verdict
+      │     │                 → re-deliver (the SAME pull request, updated; a failed
+      │     │                   rework comment is a warning, never a stop) → fresh verdict
+      │     └─ a weak_oracle finding with no test author, or one that returns the
+      │        same oracle ──▶ oracle_needs_strengthening (routed human; NO rebuild)
     accepted | rejected | rework_exhausted
 
 Every arrow above appends to :class:`~crb.factory.evidence.FactoryEvidence`;
@@ -30,7 +32,8 @@ What it does: Sequences readiness (where the capability map's route for the item
               build ladder → optional delivery (default OFF, fails closed, gated on that
               route) → independent review → rework (edit permitted only after a recorded
               verdict; bounded by ``max_rework``; its re-delivery updates the pull request
-              the first delivery opened), turning every governed refusal into an
+              the first delivery opened; a ``weak_oracle`` verdict never rebuilds against
+              an unchanged oracle — DL-045 rule 3), turning every governed refusal into an
               ``ItemOutcome`` status
               rather than an exception; ``run_backlog`` requires a frozen, verifying
               backlog and records a blocked item explicitly when a dependency was not
@@ -41,7 +44,9 @@ How:          ``FactorySpec`` carries every collaborator; ``FactoryLoop.run_item
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0004-builder-registry-sighted-and-blind.md,
-              docs/adr/0003-one-routing-rule.md (the route gate; amended 2026-09-19)
+              docs/adr/0003-one-routing-rule.md (the route gate; amended 2026-09-19),
+              docs/adr/0013-external-review-is-advisory-and-recorded.md (amended
+              2026-09-21: a weak_oracle verdict never rebuilds against an unchanged oracle)
 Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory/readiness.py
               + src/crb/factory/testfirst.py + src/crb/factory/build.py +
               src/crb/factory/delivery.py + src/crb/factory/review.py (the steps, in order),
@@ -60,7 +65,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from crb.builders.base import Budget, Builder, Rung
 from crb.core.execution import Executor, SandboxUnavailable
@@ -91,6 +96,7 @@ from crb.factory.readiness import (
     assess,
 )
 from crb.factory.review import (
+    FINDING_WEAK_ORACLE,
     MechanicalReviewer,
     Probe,
     Reviewer,
@@ -122,6 +128,10 @@ STATUS_DELIVERY_FAILED = "delivery_failed"
 STATUS_ACCEPTED = "accepted"
 STATUS_REJECTED = "rejected"
 STATUS_REWORK_EXHAUSTED = "rework_exhausted"
+#: The reviewer asked for a stronger TEST (a ``weak_oracle`` finding) and no changed oracle
+#: can be had — no test author, or the author returned the same bytes: a rebuild would only
+#: let the builder find another way to pass the same test (B-1b finding 3, DL-045 rule 3).
+STATUS_ORACLE_NEEDS_STRENGTHENING = "oracle_needs_strengthening"
 STATUS_BLOCKED = "blocked_on_dependency"
 STATUS_ERROR = "error"
 STATUSES: tuple[str, ...] = (
@@ -135,6 +145,7 @@ STATUSES: tuple[str, ...] = (
     STATUS_ACCEPTED,
     STATUS_REJECTED,
     STATUS_REWORK_EXHAUSTED,
+    STATUS_ORACLE_NEEDS_STRENGTHENING,
     STATUS_BLOCKED,
     STATUS_ERROR,
 )
@@ -598,6 +609,40 @@ class FactoryLoop:
         self._emit("review.recorded", item.id, verdict=v.verdict, event=v.event_id)
         return v
 
+    # --- the oracle rule on rework (DL-045 rule 3) --------------------------------
+    @staticmethod
+    def _weak_oracle_finding(verdict: ReviewVerdict) -> str | None:
+        """The detail of the verdict's ``weak_oracle`` finding, or ``None`` when the rework
+        was asked for another reason (that rework keeps the ordinary path)."""
+        for f in verdict.findings:
+            if f.kind == FINDING_WEAK_ORACLE:
+                return f.detail
+        return None
+
+    def _refuse_rework(
+        self, item: BacklogItem, verdict: ReviewVerdict, oracle: AuthoredTest, why: str
+    ) -> NoReturn:
+        """Stop the item ``oracle_needs_strengthening``: the reviewer asked for a stronger
+        test and none can be had here. Routed human on the chain (the finding and the way
+        forward in the reason), ``rework.refused`` on the trace — and NO build."""
+        finding = self._weak_oracle_finding(verdict) or ""
+        reason = (
+            f"the reviewer found the oracle weak ({finding}) and {why}: "
+            "strengthen the test and register a superseding item"
+        )
+        self.spec.evidence.record_route(
+            item.id,
+            ROUTE_HUMAN,
+            reason,
+            after_verdict=verdict.verdict,
+            finding=FINDING_WEAK_ORACLE,
+            verdict_event=verdict.event_id,
+            oracle_sha256=oracle.sha256,
+        )
+        self._emit("route.decided", item.id, route=ROUTE_HUMAN, reason=reason)
+        self._emit("rework.refused", item.id, status=StepStatus.SKIPPED, reason=reason)
+        raise _Stop(STATUS_ORACLE_NEEDS_STRENGTHENING, error=reason)
+
     # --- one item ----------------------------------------------------------------
     def run_item(self, item: BacklogItem, *, authored: AuthoredTest | None = None) -> ItemOutcome:
         """Run one item end to end. Never raises for a governed refusal (the outcome
@@ -630,6 +675,13 @@ class FactoryLoop:
             verdict = self._review(item, final, proof, pr_ref)
             verdicts.append(verdict)
             while verdict.rework_required and reworks < s.max_rework:
+                # DL-045 rule 3: a `weak_oracle` finding asks for a stronger TEST; rebuilding
+                # against the same one only lets the builder find another way to pass it
+                # (B-1b finding 3). With no test author there is nobody here to strengthen
+                # it — the item stops before any edit is permitted.
+                wants_stronger_test = self._weak_oracle_finding(verdict) is not None
+                if wants_stronger_test and s.rework_test is None:
+                    self._refuse_rework(item, verdict, oracle, "this deployment has no test author")
                 reworks += 1
                 # the human/agent edit is PERMITTED only now — the verdict is on the record
                 permit_edit(
@@ -644,6 +696,11 @@ class FactoryLoop:
                 # worktree so the rework can re-point the delivery branch
                 final.close()
                 edited = s.rework_test(item, verdict, oracle) if s.rework_test is not None else None
+                if wants_stronger_test and (edited is None or edited.sha256 == oracle.sha256):
+                    # the author answered with the same bytes: still the same oracle
+                    self._refuse_rework(
+                        item, verdict, oracle, "the test author returned the same oracle"
+                    )
                 oracle = edited or oracle
                 proof = self._prove(item, readiness, oracle)
                 results = self._build(item, readiness, oracle, proof, trial_prefix=f"w{reworks}r")
@@ -791,6 +848,7 @@ __all__ = [
     "STATUS_NOT_READY",
     "STATUS_NOT_RED",
     "STATUS_NO_ORACLE",
+    "STATUS_ORACLE_NEEDS_STRENGTHENING",
     "STATUS_REJECTED",
     "STATUS_REWORK_EXHAUSTED",
     "STATUS_ROUTED_HUMAN",

@@ -63,6 +63,22 @@ two product defects. Both are fixed here, with the tests that would have caught 
   `route.decided` event as `cell_route` (`n`, `point`, `ci_low`, `false_q1`, `policy_version`,
   `apparatus_versions`) so the chain quotes the pre-run map. ADR-0003 amended (2026-09-19);
   docs/API.md updated.
+- **A `weak_oracle` verdict never triggers a rebuild against an unchanged oracle** (finding 3,
+  DL-045 rule 3). The rework of `cobra-2154` re-proved RED with the same test the reviewer had
+  just found weak and rebuilt — and the builder found another way to pass it (a guard dropped,
+  untested). Now, in the loop's rework path, an `accept_with_edit` whose findings carry
+  `kind: weak_oracle` rebuilds only against an oracle whose sha256 differs: with no test author
+  (`rework_test is None`) the item stops **`oracle_needs_strengthening`** before any edit is
+  permitted; with one, the author is asked and the same bytes back (or `None`) is the same
+  stop. The stop is a `route.decided` event routing the item `human` — reason: the finding and
+  the way forward ("strengthen the test and register a superseding item"; `after_verdict`,
+  `finding`, `verdict_event`, `oracle_sha256`) — a `rework.refused` step on the trace, the
+  reason on the `ItemOutcome` and on `item.outcome`; no second RED proof, build or push, and
+  the pull request keeps the one reviewed build. A rework asked for any other reason keeps
+  its path. The task view carries `outcome_reason` (the `item.outcome`'s `error`) and the
+  Factory screen's outcome step renders the stop as a sentence with the way forward.
+  `crb.factory.review.FINDING_WEAK_ORACLE` names the finding kind. ADR-0013 amended
+  (2026-09-21); docs/API.md updated.
 
 ### 2026-09-18 — link a repository you already measured to the GitHub App
 

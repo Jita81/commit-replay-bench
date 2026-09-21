@@ -12,7 +12,10 @@ What it does: Pins that a spec refuses a test author that is also a rung, that a
               on fails closed without credentials and otherwise opens a branch + PR then reviews,
               that accept-with-edit forces rework (RED → build → grade → a re-delivery that
               UPDATES the first pull request → fresh verdict; a failed rework comment is a
-              warning on the record, never a stop) until the budget is exhausted, that
+              warning on the record, never a stop) until the budget is exhausted, that a
+              ``weak_oracle`` verdict never rebuilds against an unchanged oracle (no test
+              author, or one that returns the same bytes → ``oracle_needs_strengthening``,
+              routed human; DL-045 rule 3), that
               the route gate reads the capability map ONCE per item at readiness — before any
               build — and the PR body quotes that reading (DL-045), the full loop on a frozen
               backlog, and the ledgered horizon checkpoint.
@@ -74,6 +77,14 @@ TEST_POWER = "tests/test_power.py"
 TEST_POWER_SRC = "from calc import power\n\n\ndef test_power():\n    assert power(2, 3) == 8\n"
 
 EDITS = {"multiply": MULTIPLY_DEF, "divide": DIVIDE_DEF, "power": POWER_DEF}
+
+#: The operator's multiply oracle with one more case — a CHANGED oracle (a different
+#: sha256), which is what lets a rework after a ``weak_oracle`` verdict proceed (DL-045 rule 3).
+STRONGER_MULTIPLY = AuthoredTest(
+    "tests/test_multiply.py",
+    TEST_MULTIPLY_SRC + "\n\ndef test_multiply_other():\n    assert multiply(5, 6) == 30\n",
+    OPERATOR,
+)
 
 
 @dataclass
@@ -534,6 +545,7 @@ def test_route_is_read_once_per_item_at_readiness_before_any_build(
         pyrepo,
         tmp_path,
         builder=MultiBuilder(first_edit=MULTIPLY_HARDCODED),  # forces one rework
+        rework_test=lambda item, verdict, previous: STRONGER_MULTIPLY,  # a CHANGED oracle
         deliver=True,
         creds=_creds(),
         route_decision_for=route_for,
@@ -733,6 +745,144 @@ def test_rework_whose_pull_request_comment_fails_is_still_updated_and_reviewed(
     assert kinds.count(fe.EV_VERDICT) == 2 and kinds[-2] == fe.EV_VERDICT
     assert kinds.index(fe.EV_DELIVERY_UPDATED) < len(kinds) - 2  # the fresh verdict follows it
     assert rig.evidence.verify() == len(kinds)
+
+
+def _assert_stopped_for_a_stronger_oracle(rig: Rig, out: fl.ItemOutcome) -> None:
+    """DL-045 rule 3, both halves: the item ends ``oracle_needs_strengthening`` with ONE
+    build, ONE push, ONE pull request and ONE verdict; the chain routes it human with the
+    reviewer's finding in the reason; the trace carries ``rework.refused``."""
+    assert out.status == fl.STATUS_ORACLE_NEEDS_STRENGTHENING and not out.accepted
+    assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT_WITH_EDIT]
+    assert rig.builder.calls == 1 and [b["trial"] for b in out.builds] == ["r1"]
+    assert len(rig.pushes) == 1 and len(rig.prs) == 1 and rig.comments == []
+    assert out.delivery is not None and not out.delivery.updated
+    # the reason names the finding and the way forward, on the outcome and the chain
+    assert out.error.startswith("the reviewer found the oracle weak (")
+    assert "strengthen the test and register a superseding item" in out.error
+    (finding,) = [f for f in out.verdicts[0].findings if f.kind == rv.FINDING_WEAK_ORACLE]
+    assert finding.detail[:60] in out.error
+    routes = rig.evidence.events_for("I-1", fe.EV_ROUTE)
+    assert [r.payload["route"] for r in routes] == [rd.ROUTE_BUILD, rd.ROUTE_HUMAN]
+    assert routes[-1].payload["reason"] == out.error
+    assert routes[-1].payload["after_verdict"] == rv.VERDICT_ACCEPT_WITH_EDIT
+    assert routes[-1].payload["finding"] == rv.FINDING_WEAK_ORACLE
+    kinds = rig.kinds("I-1")
+    assert kinds.count(fe.EV_BUILD) == 1 and kinds.count(fe.EV_VERDICT) == 1
+    assert fe.EV_DELIVERY_UPDATED not in kinds and kinds.count(fe.EV_RED_PROOF) == 1
+    assert kinds.index(fe.EV_VERDICT) < len(kinds) - 1 and kinds[-1] == fe.EV_ITEM_OUTCOME
+    (outcome,) = rig.evidence.events_for("I-1", fe.EV_ITEM_OUTCOME)
+    assert outcome.payload["status"] == fl.STATUS_ORACLE_NEEDS_STRENGTHENING
+    assert outcome.payload["error"] == out.error and outcome.payload["builds"] == 1
+    assert rig.evidence.verify() == len(kinds)
+    decided = [e for e in rig.sink.events if e.action == "route.decided"]
+    assert [e.payload["route"] for e in decided] == [rd.ROUTE_BUILD, rd.ROUTE_HUMAN]
+    assert decided[-1].payload["reason"] == out.error
+    (refused,) = [e for e in rig.sink.events if e.action == "rework.refused"]
+    assert refused.status == StepStatus.SKIPPED and refused.payload["reason"] == out.error
+    assert [e.action for e in rig.sink.events if e.action.startswith("delivery.")] == [
+        "delivery.opened"
+    ]
+    assert [e.action for e in rig.sink.events].count("build.start") == 1
+    assert [e.action for e in rig.sink.events][-1] == "item.done"
+
+
+def test_weak_oracle_without_a_test_author_stops_before_any_rebuild(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """DL-045 rule 3 (B-1b finding 3): the reviewer's ``weak_oracle`` finding asks for a
+    stronger TEST, and this deployment has no test author to write one — a rebuild against
+    the same oracle would only let the builder find another way to pass it. The item stops:
+    no edit permitted, no second RED proof, no second build, no second push; routed human
+    with the finding and the way forward."""
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        builder=MultiBuilder(first_edit=MULTIPLY_HARDCODED),  # weak_oracle → accept_with_edit
+        deliver=True,
+        creds=_creds(),
+    )
+    assert rig.spec.rework_test is None and rig.spec.max_rework == 1
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    _assert_stopped_for_a_stronger_oracle(rig, out)
+    assert out.reworks == 0 and not rig.evidence.edits_for("I-1")
+    assert not [e for e in rig.sink.events if e.action == "rework.start"]
+    # the branch still carries the one delivered build, not a rework
+    assert out.delivery is not None
+    assert out.delivery.commit_sha == pyrepo.repo.rev_parse("crb/I-1-add-multiply-to-calc")
+
+
+@pytest.mark.parametrize("returns", ["same_bytes", "none"])
+def test_weak_oracle_with_a_test_author_returning_the_same_oracle_stops(
+    pyrepo: pr.PyRepo, tmp_path: Path, returns: str
+) -> None:
+    """With a test author, the rework is allowed to ASK for a stronger test — but the
+    oracle's sha256 must differ before any build: the same bytes back (or ``None`` = keep
+    the previous test) is the same stop."""
+    previous = authored_multiply()
+    asked: list[str] = []
+
+    def rework_test(
+        item: BacklogItem, verdict: rv.ReviewVerdict, prev: AuthoredTest
+    ) -> AuthoredTest | None:
+        asked.append(verdict.verdict)
+        assert prev.sha256 == previous.sha256
+        if returns == "none":
+            return None
+        return AuthoredTest(prev.path, prev.content, "author-rung")  # same bytes, new author
+
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        builder=MultiBuilder(first_edit=MULTIPLY_HARDCODED),
+        rework_test=rework_test,
+        deliver=True,
+        creds=_creds(),
+    )
+    out = rig.loop().run_item(multiply_item(), authored=previous)
+    _assert_stopped_for_a_stronger_oracle(rig, out)
+    # the author WAS asked (the edit was permitted, the rework started) and answered with
+    # the same oracle — so the rework is refused before its RED proof and build
+    assert asked == [rv.VERDICT_ACCEPT_WITH_EDIT] and out.reworks == 1
+    assert len(rig.evidence.edits_for("I-1")) == 1
+    (start,) = [e for e in rig.sink.events if e.action == "rework.start"]
+    assert start.payload["n"] == 1
+    routes = rig.evidence.events_for("I-1", fe.EV_ROUTE)
+    assert routes[-1].payload["oracle_sha256"] == previous.sha256
+    assert "the test author returned the same oracle" in out.error
+
+
+def test_rework_asked_for_a_reason_other_than_the_oracle_keeps_the_rework_path(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """Rule 3 is about the ORACLE: an ``accept_with_edit`` whose findings carry no
+    ``weak_oracle`` (a reviewer's own major finding on the change) reworks as before — the
+    same oracle, a fresh RED proof, a second build, the pull request updated."""
+
+    class OpinionatedReviewer(rv.MechanicalReviewer):
+        name = "opinionated"
+
+        def assess(self, ctx: Any, probes: Any) -> rv.ReviewOpinion:
+            base = super().assess(ctx, probes)
+            if any(f.kind == rv.FINDING_WEAK_ORACLE for p in probes for f in p.findings):
+                return base
+            return rv.ReviewOpinion(
+                rv.VERDICT_ACCEPT_WITH_EDIT,
+                findings=(rv.ReviewFinding("naming", rv.SEVERITY_MAJOR, "rename the helper"),),
+                summary="rename the helper",
+            )
+
+    rig = _rig(pyrepo, tmp_path, reviewer=OpinionatedReviewer(), deliver=True, creds=_creds())
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    # the loop reworked once (same oracle: a clean build, the map's probes pass) and the
+    # reviewer asked again: the budget ends it, never rule 3
+    assert out.status == fl.STATUS_REWORK_EXHAUSTED and out.reworks == 1
+    assert rig.builder.calls == 2 and len(rig.pushes) == 2 and len(rig.prs) == 1
+    assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT_WITH_EDIT] * 2
+    assert all(f.kind != rv.FINDING_WEAK_ORACLE for v in out.verdicts for f in v.findings)
+    assert not [e for e in rig.sink.events if e.action == "rework.refused"]
+    assert [r.payload["route"] for r in rig.evidence.events_for("I-1", fe.EV_ROUTE)] == [
+        rd.ROUTE_BUILD
+    ]
 
 
 def test_rework_exhausted_when_no_budget(pyrepo: pr.PyRepo, tmp_path: Path) -> None:

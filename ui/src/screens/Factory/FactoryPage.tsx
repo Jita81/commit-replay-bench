@@ -28,8 +28,8 @@
  *               ui/src/screens/Decisions/decisions.ts (the inbox rows that link here),
  *               docs/API.md "Factory"
  * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx
- * Touch when:   a step is added to the loop (add it to `stepsFor` and the loop's docstring);
- *               a field is added to `FactoryTaskOut`.
+ * Touch when:   a step or a stop status is added to the loop (add it to `stepsFor` and the
+ *               loop's docstring); a field is added to `FactoryTaskOut`.
  */
 
 import { useEffect, useState } from 'react'
@@ -110,9 +110,14 @@ export function stepsFor(t: FactoryTask): Step[] {
   const outcome: Step =
     t.status === 'accepted'
       ? { id: 'outcome', title: 'Outcome', status: 'done', detail: 'accepted' }
-      : ['rejected', 'rework_exhausted', 'disqualified', 'delivery_failed', 'error', 'not_clean'].includes(t.status)
-        ? { id: 'outcome', title: 'Outcome', status: 'failed', detail: t.status.replace(/_/g, ' ') }
-        : { id: 'outcome', title: 'Outcome', status: 'todo', detail: t.status.replace(/_/g, ' ') }
+      : t.status === 'oracle_needs_strengthening'
+        ? // DL-045 rule 3: the reviewer asked for a stronger TEST and no changed oracle could be
+          // had (no test author, or the same bytes back) — the loop refused to rebuild against
+          // the same oracle and routed the item to a human; the chain's reason says which
+          { id: 'outcome', title: 'Outcome', status: 'failed', detail: `the reviewer found the oracle weak and no stronger test could be had — the loop did not rebuild against the same one: strengthen the test and register a superseding item${t.outcome_reason ? ` (${t.outcome_reason})` : ''}` }
+        : ['rejected', 'rework_exhausted', 'disqualified', 'delivery_failed', 'error', 'not_clean'].includes(t.status)
+          ? { id: 'outcome', title: 'Outcome', status: 'failed', detail: t.status.replace(/_/g, ' ') }
+          : { id: 'outcome', title: 'Outcome', status: 'todo', detail: t.status.replace(/_/g, ' ') }
   return [readiness, red, build, delivery, review, outcome]
 }
 

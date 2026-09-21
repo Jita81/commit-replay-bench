@@ -13,7 +13,8 @@ hash-chained JSONL files, like evidence packs: the API and the worker share
 Nothing here decides anything: the loop, the grader and the reviewer do. This module
 only places the records, and derives the task view (:func:`task_views`) a reader sees —
 the latest readiness, RED proof, build, delivery (opened, or updated by a rework) and
-verdict per item, straight from the evidence events, never from a cached status.
+verdict per item, plus the outcome's reason (why a governed stop stopped), straight from
+the evidence events, never from a cached status.
 
 Navigation
 ----------
@@ -76,6 +77,10 @@ class TaskView:
     size: str
     kind: str
     status: str  # the latest item.outcome status, or "pending"
+    #: Why a governed stop stopped — the item.outcome's ``error`` (``not_red``'s refusal,
+    #: ``delivery_failed``'s error, ``oracle_needs_strengthening``'s finding and way
+    #: forward); empty when accepted or not yet run.
+    outcome_reason: str
     dor_gaps: tuple[str, ...]
     route_hint: str
     red_proof: bool | None
@@ -92,6 +97,7 @@ class TaskView:
             "size": self.size,
             "kind": self.kind,
             "status": self.status,
+            "outcome_reason": self.outcome_reason,
             "dor_gaps": list(self.dor_gaps),
             "route_hint": self.route_hint,
             "red_proof": self.red_proof,
@@ -232,6 +238,7 @@ class FactoryHome:
                     size=item.size_estimate,
                     kind=item.kind,
                     status=str(outcome.payload.get("status", "pending")) if outcome else "pending",
+                    outcome_reason=str(outcome.payload.get("error", "")) if outcome else "",
                     dor_gaps=gaps,
                     route_hint=str(route.payload.get("route", "")) if route else "",
                     red_proof=red,

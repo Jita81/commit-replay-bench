@@ -10,7 +10,8 @@ What it does: Pins that a backlog registers frozen and hashed with the freeze in
               sign-off lands in both the gap ledger and the evidence, that the task view
               reads "pending" before any run and folds ``pr_url`` from a rework's
               ``delivery.updated`` as from ``delivery.opened`` — whichever is newest on the
-              chain (DL-045) — and that
+              chain (DL-045), folds an ``oracle_needs_strengthening`` stop with its reason
+              (DL-045 rule 3) — and that
               registration is refused while a factory run is queued or running.
 How:          FastAPI TestClient over the seeded SQLite app (``fixtures.server_seed``);
               the factory state is read back through ``FactoryHome`` to check the files.
@@ -38,7 +39,10 @@ from crb.factory.evidence import (
     EV_DELIVERY,
     EV_DELIVERY_UPDATED,
     EV_GAP_SIGNOFF,
+    EV_ITEM_OUTCOME,
 )
+from crb.factory.loop import STATUS_ORACLE_NEEDS_STRENGTHENING
+from crb.factory.readiness import ROUTE_HUMAN
 from crb.server.app import API_PREFIX
 from crb.server.factory_state import FactoryHome
 from crb.store.models import Run
@@ -52,6 +56,12 @@ PATHS: list[tuple[str, str, str]] = [
     ("POST", f"/factory/{ALPHA}/tasks/I-1/signoff-gap", "approver"),
     ("GET", f"/factory/{ALPHA}/evidence", "viewer"),
 ]
+
+#: What the loop writes when it refuses a rebuild against an unchanged oracle (DL-045 rule 3).
+REASON = (
+    "the reviewer found the oracle weak (statement deleted) and this deployment has no test "
+    "author: strengthen the test and register a superseding item"
+)
 
 ITEM: dict[str, Any] = {
     "id": "I-1",
@@ -135,6 +145,7 @@ def test_register_freezes_hashes_and_records(env: Env) -> None:
         ("I-1", "pending", "not_built", None),
         ("I-2", "pending", "not_built", None),
     ]
+    assert [t["outcome_reason"] for t in tasks] == ["", ""]
     # F28 — the cell's route BEFORE any run: bug.fix × XS is not measured on ALPHA, so the
     # gate would withhold delivery, and the task says so now rather than after a paid build
     assert tasks[0]["cell_route"] == {
@@ -227,6 +238,37 @@ def test_task_view_shows_the_newest_delivery_when_a_fresh_pull_request_follows_a
     ev.record_delivery(fresh)
     (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
     assert t["pr_url"] == fresh["pr_url"] and t["last_event"] == EV_DELIVERY
+    assert env.get(f"/factory/{ALPHA}/evidence").json()["verified"] is True
+
+
+def test_task_view_folds_an_oracle_needs_strengthening_stop_with_its_reason(env: Env) -> None:
+    """DL-045 rule 3: the loop stops an item ``oracle_needs_strengthening`` (routed human,
+    no rebuild) when the reviewer found the oracle weak and no changed oracle can be had.
+    The task view folds it like every other stop — the status from ``item.outcome`` — and
+    carries the reason (the finding and the way forward) as ``outcome_reason``."""
+    assert _register(env, [ITEM]).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    ev = home.evidence(actor="worker")
+    ev.record_route(
+        "I-1",
+        ROUTE_HUMAN,
+        REASON,
+        after_verdict="accept_with_edit",
+        finding="weak_oracle",
+        oracle_sha256="o" * 64,
+    )
+    ev.record_item_outcome(
+        "I-1",
+        status=STATUS_ORACLE_NEEDS_STRENGTHENING,
+        builds=1,
+        verdict="accept_with_edit",
+        delivered=True,
+        reworks=0,
+        error=REASON,
+    )
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["status"] == STATUS_ORACLE_NEEDS_STRENGTHENING and t["outcome_reason"] == REASON
+    assert t["route_hint"] == ROUTE_HUMAN and t["last_event"] == EV_ITEM_OUTCOME
     assert env.get(f"/factory/{ALPHA}/evidence").json()["verified"] is True
 
 
