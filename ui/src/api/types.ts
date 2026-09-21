@@ -89,8 +89,8 @@ export interface Probe {
   data: Record<string, unknown>
 }
 
-/** `crb.store.migrate.HeadStatus.to_dict()` — the `migrations` probe's `data` (docs/API.md#health): where the store stands against the packaged revision chain. */
-export interface MigrationsHeadStatus {
+/** `crb.store.migrate.HeadStatus.to_dict()` — the `migrations` probe's `data` (a type alias, not an interface: only a type literal is assignable to `Probe.data`'s `Record<string, unknown>`) (docs/API.md#health): where the store stands against the packaged revision chain. */
+export type MigrationsHeadStatus = {
   /** The applied Alembic revision (comma-joined when the store reports several heads); `null` = no `alembic_version` row (empty or `create_all` store). */
   database: string | null
   /** The code's single head revision. */
