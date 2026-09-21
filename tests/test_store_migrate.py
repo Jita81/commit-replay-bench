@@ -318,7 +318,7 @@ def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
 
     migrate.upgrade(backend.url)  # stamps 0001, applies 0002 (and every later revision)
 
-    assert migrate.current(backend.url) == migrate.head_revision() == "0007"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0008"
     assert migrate.check(backend.url) is True
     assert _autogen_diff(backend.engine) == []
     assert "repo_lint_clean" in {c["name"] for c in inspect(backend.engine).get_columns("grades")}
@@ -407,10 +407,10 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0001")
-    # the refusal rolls the whole downgrade back — 0007's and 0005's tables, 0006's column, 0004's
-    # index swap and 0003's drop of the (empty) reviews table included — so the database stays
+    # the refusal rolls the whole downgrade back — 0008's column, 0007's and 0005's tables, 0006's
+    # column, 0004's index swap and 0003's drop of the (empty) reviews table included — so the database stays
     # exactly where it was
-    assert migrate.current(backend.url) == "0007"
+    assert migrate.current(backend.url) == "0008"
 
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -425,7 +425,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     with pytest.raises(DBAPIError, match="append-only"), fresh.begin() as c:
         c.execute(text("DELETE FROM grades"))
     migrate.upgrade(backend.url)  # and back up again
-    assert migrate.current(backend.url) == "0007" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0008" and _autogen_diff(fresh) == []
 
 
 def test_downgrade_of_an_empty_database_drops_the_schema(backend: Backend) -> None:
@@ -475,6 +475,9 @@ def test_offline_sql_includes_tables_and_triggers(backend: Backend) -> None:
     workers = sql.find("CREATE TABLE workers")
     assert workers > index, sql[-2000:]
     assert "heartbeat_s FLOAT NOT NULL" in sql and "current_run_id VARCHAR(32) NOT NULL" in sql
+    # 0008 offline adds the reaper count to that table after it exists
+    count = sql.find("ADD COLUMN unconfirmed_containers INTEGER DEFAULT '0' NOT NULL")
+    assert count > workers, sql[-2000:]
     assert migrate.current(backend.url) is None  # offline mode touched nothing
 
 
@@ -563,7 +566,7 @@ def test_0004_refuses_a_database_holding_duplicate_trace_seq_pairs(backend: Back
     fresh = _reset(backend)
     migrate.upgrade(backend.url, revision="0003")
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0007" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0008" and _autogen_diff(fresh) == []
     assert "uq_events_trace_seq" in {ix["name"] for ix in inspect(fresh).get_indexes("events")}
 
 
@@ -586,7 +589,7 @@ def test_0006_backfills_the_github_identity_and_refuses_duplicate_legacy_links(
         c.execute(text(row), {"name": "calc", "cfg": linked})
         c.execute(text(row), {"name": "by-url", "cfg": '{"language": "go"}'})
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0007"
+    assert migrate.current(backend.url) == "0008"
     with backend.engine.connect() as c:
         got = dict(c.execute(text("SELECT name, github_full_name FROM repos")).all())
     assert got == {"calc": "acme/calc", "by-url": None}
@@ -616,7 +619,7 @@ def test_0007_adds_the_workers_table_and_adoption_tolerates_its_absence(backend:
     adoption stamps it at 0006 and 0007 creates the table."""
     migrate.upgrade(backend.url, revision="0006")
     assert "workers" not in set(inspect(backend.engine).get_table_names())
-    migrate.upgrade(backend.url)
+    migrate.upgrade(backend.url, revision="0007")
     assert migrate.current(backend.url) == "0007"
     cols = {c["name"] for c in inspect(backend.engine).get_columns("workers")}
     assert cols == {
@@ -639,5 +642,50 @@ def test_0007_adds_the_workers_table_and_adoption_tolerates_its_absence(backend:
         c.execute(text("DROP TABLE workers"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0007" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0008" and _autogen_diff(fresh) == []
     assert "workers" in set(inspect(fresh).get_table_names())
+
+
+def test_0008_adds_the_unconfirmed_containers_count_and_adoption_reads_its_absence(
+    backend: Backend,
+) -> None:
+    """Revision 0008 adds ``workers.unconfirmed_containers`` — the reaper queue's size the
+    worker stamps on check-in so ``/health`` can report a killed-but-unconfirmed container.
+    ``NOT NULL DEFAULT 0``: every existing row reads 0. A ``create_all`` schema from the
+    release before it (``workers`` without the column) adopts at 0007 and 0008 adds it; a
+    downgrade drops the column and the table stays."""
+    migrate.upgrade(backend.url, revision="0007")
+    with backend.engine.begin() as c:
+        c.execute(
+            text(
+                "INSERT INTO workers (worker_id, hostname, executor, kinds, started, heartbeat, "
+                "heartbeat_s, current_run_id, version, stopped) VALUES "
+                "('w-old', 'h', 'docker', '[]', '', '', 10.0, '', '0', '')"
+            )
+        )
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == "0008"
+    cols = {c["name"] for c in inspect(backend.engine).get_columns("workers")}
+    assert "unconfirmed_containers" in cols
+    with backend.engine.connect() as c:
+        got = c.execute(text("SELECT unconfirmed_containers FROM workers")).scalar_one()
+    assert got == 0
+    assert not {t for t in backend.trigger_names() if t.startswith("workers_")}
+    # downgrade drops the column only
+    cfg = migrate.alembic_config(backend.url)
+    with backend.engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0007")
+    assert migrate.current(backend.url) == "0007"
+    assert "unconfirmed_containers" not in {
+        c["name"] for c in inspect(backend.engine).get_columns("workers")
+    }
+    assert "workers" in set(inspect(backend.engine).get_table_names())
+    # a pre-0008 create_all database (workers without the column) adopts at 0007
+    fresh = _reset(backend)
+    init_db(fresh)
+    with fresh.begin() as c:
+        c.execute(text("ALTER TABLE workers DROP COLUMN unconfirmed_containers"))
+    assert migrate.current(backend.url) is None
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == "0008" and _autogen_diff(fresh) == []

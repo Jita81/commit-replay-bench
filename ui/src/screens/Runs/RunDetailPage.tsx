@@ -4,7 +4,8 @@
  * Navigation
  * ----------
  * What it is:   The run-detail screen: header with status and cancel, the Progress card (bar,
- *               the "Now" line, the queue position, the current stage, the worker heartbeat,
+ *               the "Now" line, the queue position, the current stage, the worker heartbeat, a
+ *               container whose kill the worker could not confirm — until it is reaped,
  *               the terms), headline tiles, the failure split, the live StepEvent log (SSE)
  *               and the per-task outcome table with the evidence drawer.
  * What it does: Renders GET /runs/{id}, /runs/{id}/tasks and the SSE stream; every number
@@ -65,7 +66,7 @@ import { useFailureSplit } from '../Capability/contract'
 import { FailureSplitPills } from '../Capability/FailureSplit'
 import { EvidenceDrawer } from './EvidenceDrawer'
 import { Progress } from './RunsPage'
-import { factoryLine, heartbeatLine, nowLine, queueLine, stageLine } from './telemetry'
+import { containerLine, factoryLine, heartbeatLine, nowLine, queueLine, stageLine } from './telemetry'
 
 const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL']
 
@@ -311,13 +312,15 @@ function TaskTable({ runId, poll, onOpenPack }: { runId: string; poll: boolean; 
  * running: started when, spent what, how long left and on what basis, which stage the
  * last event puts the task in, is the worker alive; and the terms the card uses.
  */
-function ProgressCard({ run, lastEvent, latencies, clock }: { run: Run; lastEvent: StepEvent | undefined; latencies: readonly number[]; clock: () => number }) {
+function ProgressCard({ run, events, latencies, clock }: { run: Run; events: readonly StepEvent[]; latencies: readonly number[]; clock: () => number }) {
   const terminal = isRunTerminal(run.status)
   const now = useNow(clock, !terminal)
   const health = useHealth()
   const probe = workerProbe(health.data)
+  const lastEvent = events[events.length - 1]
   const stage = stageLine(lastEvent, run)
   const hb = heartbeatLine(run, probe.staleAfterS, now)
+  const container = containerLine(events)
   const build = BUILD_KINDS.has(run.kind)
   return (
     <Card title="Progress">
@@ -348,6 +351,11 @@ function ProgressCard({ run, lastEvent, latencies, clock }: { run: Run; lastEven
             {hb.text}
           </p>
         ))}
+      {container && (
+        <p className={`num mt-1 text-xs ${container.failed ? 'text-status-red' : 'text-status-amber'}`} role="status" data-testid="run-container">
+          {container.text}
+        </p>
+      )}
       {run.error && (
         <p className="mt-2 text-sm text-status-red" role="alert">
           {run.error}
@@ -397,7 +405,7 @@ export function RunDetailPage({ eventSourceFactory, clock = systemClock }: RunDe
       {run.isError && <ErrorState error={run.error} onRetry={() => void run.refetch()} />}
       {run.data && (
         <>
-          <ProgressCard run={run.data} lastEvent={events.events[events.events.length - 1]} latencies={latencies} clock={clock} />
+          <ProgressCard run={run.data} events={events.events} latencies={latencies} clock={clock} />
           <Tiles run={run.data} />
           <SplitTiles repo={run.data.repo} runId={run.data.id} poll={!terminal} />
         </>

@@ -105,6 +105,8 @@ export interface WorkerProbeWorker {
   version: string
   stopped: string | null
   alive: boolean
+  /** Containers whose `docker kill` the daemon never confirmed and this worker is still reaping (0 on an older server). */
+  unconfirmed_containers?: number
 }
 
 /**
@@ -123,6 +125,8 @@ export interface WorkerProbeData {
   /** Ids of running runs whose heartbeat is older than `stale_after_s`. */
   stale: string[]
   stale_after_s: number
+  /** Sum over the listed workers of the containers still being reaped; the probe is `degraded` while > 0. Absent on an older server. */
+  unconfirmed_containers?: number
 }
 
 /** `GET /health` — overall status is the worst probe. */

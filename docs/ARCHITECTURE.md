@@ -415,7 +415,7 @@ DB triggers forbidding `UPDATE` and `DELETE`, and rows carry `prev_hash` / `row_
 | `signoffs` **(append-only)** | `cell`, `route`, `actor`, `reason`, `revoked_by` | 409 on any false-Q1 in the cell; revocation is a new row. |
 | `factory_backlog` / `factory_tasks` / `factory_evidence` | frozen backlog hash; per-item DoR gaps, RED proof, PR ref, review verdict | P6. |
 | `users` / `roles` | `sub` (OIDC) or local id, `role ∈ viewer\|operator\|approver\|admin` | Argon2 for the bootstrap admin only. |
-| `workers` | `worker_id`, `hostname`, `executor`, `kinds`, `started`, `heartbeat`, `heartbeat_s`, `current_run_id`, `version`, `stopped` | One row per worker process, upserted every `heartbeat_s` even when idle (revision 0007). The `/health` worker probe's liveness source; a clean stop is stamped, a crash leaves the row to go stale. Mutable, no triggers. |
+| `workers` | `worker_id`, `hostname`, `executor`, `kinds`, `started`, `heartbeat`, `heartbeat_s`, `current_run_id`, `version`, `stopped`, `unconfirmed_containers` | One row per worker process, upserted every `heartbeat_s` even when idle (revision 0007). The `/health` worker probe's liveness source; a clean stop is stamped, a crash leaves the row to go stale; `unconfirmed_containers` (revision 0008) is the size of the worker's reaper queue — containers whose `docker kill` the daemon never confirmed (`crb.server.reaper`), which the probe reports as `degraded` while above 0. Mutable, no triggers. |
 
 ### 7.4 Versioning
 

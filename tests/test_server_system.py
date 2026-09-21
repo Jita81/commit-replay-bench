@@ -312,6 +312,49 @@ class TestHealth:
         assert " s ago — queued runs will not start until a worker does" in worker["detail"]
         assert "ever" not in worker["detail"].replace("never", "")
 
+    def test_worker_probe_reports_unconfirmed_containers_as_degraded(
+        self, client: TestClient, factory: sessionmaker[Session]
+    ) -> None:
+        """A live, idle worker whose check-in row says it is still reaping a container whose
+        ``docker kill`` was never confirmed (revision 0008) is ``degraded`` with the count and
+        what to do — the container may still be running on the worker host; ``ok`` again
+        once the reaper has emptied its queue."""
+        now = _dt.datetime.now(_dt.UTC)
+        fresh = (now - _dt.timedelta(seconds=2)).isoformat(timespec="seconds")
+        with factory() as s:
+            s.add(
+                WorkerRow(
+                    worker_id="w-1",
+                    hostname="node-a",
+                    executor="docker",
+                    kinds=[],
+                    started=fresh,
+                    heartbeat=fresh,
+                    heartbeat_s=10.0,
+                    version="x",
+                    unconfirmed_containers=2,
+                )
+            )
+            s.commit()
+        r = client.get(f"{API_PREFIX}/health")
+        assert r.status_code == 200 and r.json()["status"] == "degraded"
+        worker = _probe(r.json(), "worker")
+        assert worker["status"] == "degraded"
+        assert worker["detail"] == (
+            "2 containers whose docker kill was not confirmed are being reaped by worker w-1 "
+            "— each may still be running on its host; `docker ps` there names them and "
+            "`docker rm -f <name>` reaps one by hand"
+        )
+        assert worker["data"]["unconfirmed_containers"] == 2
+        assert worker["data"]["workers"][0]["unconfirmed_containers"] == 2
+        with factory() as s:
+            row = s.get(WorkerRow, "w-1")
+            assert row is not None
+            row.unconfirmed_containers = 0
+            s.commit()
+        worker = _probe(client.get(f"{API_PREFIX}/health").json(), "worker")
+        assert worker["status"] == "ok" and worker["data"]["unconfirmed_containers"] == 0
+
     def test_health_needs_no_auth(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/health").status_code == 200
         assert client.get(f"{API_PREFIX}/health/live").status_code == 200

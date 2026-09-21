@@ -443,7 +443,11 @@ message, `%`-arguments, extras and the traceback — passes the same redaction a
 packs before a handler sees it (`src/crb/core/redact.py`; the commitment is
 [SECURITY.md](SECURITY.md)). Ship stderr with the collector you already run (Fluent Bit,
 the Azure Monitor agent, `docker compose logs`); nothing else is written to disk except the
-per-run JSONL event copy under `<CRB_HOME>/events/<run_id>.jsonl`.
+per-run JSONL event copy under `<CRB_HOME>/events/<run_id>.jsonl` and the worker's reaper
+queue `<CRB_HOME>/unconfirmed-containers.json` — the names of builder containers whose
+`docker kill` the daemon never confirmed, retried every poll until reaped or given up on
+after 20 passes ([API.md](API.md#runs), `POST /runs/{id}/cancel`); while it is non-empty the
+`/health` worker probe reads `degraded`.
 
 ### 9.5 Events
 

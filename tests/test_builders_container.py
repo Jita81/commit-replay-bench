@@ -30,7 +30,8 @@ What it does: Pins that a ``SealedCheckout`` holds exactly one reachable commit 
               tunnels, anything else 403, non-CONNECT 405); and the adapter's sealed path with a
               fake session — the builder never sees the real worktree, the result is graded
               clean on it, a sandbox failure propagates, an unsealable builder keeps the real
-              worktree.
+              worktree; and that a session names exactly the spawned streams whose kill went
+              unconfirmed (``unconfirmed_kills``) for the worker's reaper.
 How:          ``SealedCheckout`` on a ``pyrepo`` trial; a local HTTP upstream + the proxy on
               ephemeral ports; ``FakeSession`` stands in for ``ContainerSession``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -76,7 +77,9 @@ from crb.builders.claude_code import StreamStats
 from crb.builders.container import (
     WORKDIR,
     BuilderContainerSettings,
+    ContainerSession,
     SealedCheckout,
+    UnconfirmedKill,
     builder_run_args,
     client_env,
     container_env,
@@ -781,6 +784,51 @@ def test_adapter_unsealable_builder_keeps_the_real_worktree(
     run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
     (seen,) = SealedFakeBuilder.seen
     assert seen["gold_reachable"] is True and FakeSession.calls == []
+
+
+class _StreamStub:
+    """What ``DockerExecutor.stream`` returns, as the session sees it."""
+
+    KILL_CONFIRM_S = 10.0
+
+    def __init__(self, name: str, kill_confirmed: bool | None) -> None:
+        self.name = name
+        self.kill_confirmed = kill_confirmed
+
+
+class _ExecutorStub:
+    docker = "docker"
+
+    def __init__(self, answers: list[bool | None]) -> None:
+        self.answers = answers
+        self.calls: list[dict[str, Any]] = []
+
+    def stream(self, run_args: list[str], **kw: Any) -> _StreamStub:
+        self.calls.append(kw)
+        return _StreamStub(kw["name"], self.answers[len(self.calls) - 1])
+
+
+def test_session_reports_the_spawned_containers_whose_kill_went_unconfirmed(
+    sealed: SealedCheckout,
+) -> None:
+    """``unconfirmed_kills`` names exactly the streams that ended with
+    ``kill_confirmed is False`` — not a confirmed kill, not a natural exit — with the
+    stream's own bound, so the adapter can hand them to the worker's reaper."""
+    executor = _ExecutorStub([None, True, False])
+    session = ContainerSession(
+        BuilderContainerSettings(image="crb-builder:test"),
+        sealed,
+        executor=executor,  # type: ignore[arg-type]
+        label="kills",
+    )
+    assert session.unconfirmed_kills() == []
+    for _ in range(3):
+        session.spawn(["true"], {}, sealed.root, 10)
+    assert len(session.streams) == 3
+    assert session.unconfirmed_kills() == [
+        UnconfirmedKill(container=session.build_name, bound_s=10.0)
+    ]
+    assert all(c["name"] == session.build_name for c in executor.calls)
 
 
 def test_container_settings_from_env_is_the_worker_hook(monkeypatch: pytest.MonkeyPatch) -> None:

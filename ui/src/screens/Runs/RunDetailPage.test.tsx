@@ -376,6 +376,35 @@ describe('RunDetailPage — telemetry on the Progress card and the live log (T2)
     within(terms).getByRole('button', { name: /evidence pack/ })
   })
 
+  it('says a container may still be running from the unconfirmed-kill event until the reaper lands', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /health': HEALTH,
+      'GET /runs/run-1': { ...RUN, worker_id: 'worker-1', heartbeat: '2026-09-13T09:12:54Z' },
+      'GET /runs/run-1/tasks': tasksPage([]),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    await screen.findByTestId('run-now')
+    expect(screen.queryByTestId('run-container')).toBeNull()
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+    const es = FakeEventSource.instances[0]!
+    await act(async () => {
+      es.open()
+      es.emit('step', step(1, { stage: 'system', action: 'run.kill_unconfirmed', status: 'error', payload: { container: 'crb-build-a1', run_id: 'run-1', bound_s: 10 } }))
+    })
+    const line = screen.getByTestId('run-container')
+    expect(line.textContent).toBe('A container may still be running (being reaped by the worker).')
+    expect(line).toHaveAttribute('role', 'status')
+    await act(async () => {
+      es.emit('step', step(2, { stage: 'system', action: 'run.kill_reap_failed', status: 'error', payload: { container: 'crb-build-a1', attempts: 20 } }))
+    })
+    expect(screen.getByTestId('run-container').textContent).toContain('run `docker rm -f crb-build-a1` on the worker host')
+    await act(async () => {
+      es.emit('step', step(3, { stage: 'system', action: 'run.kill_reaped', payload: { container: 'crb-build-a1', attempts: 21 } }))
+    })
+    expect(screen.queryByTestId('run-container')).toBeNull()
+  })
+
   it('reads a stale heartbeat as a status against the worker probe limit', async () => {
     mockApi({
       'GET /auth/me': PRINCIPAL,

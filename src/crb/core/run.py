@@ -89,6 +89,9 @@ class BuildAttempt:
     transcript_ref: str = ""
     #: attempt-level facts for the row's ``labels`` (a pre-flight record); never a verdict
     labels: Mapping[str, str] = field(default_factory=dict)
+    #: attempt-level provenance merged into the pack's ``notes`` (an unconfirmed container
+    #: kill: ``{kill_confirmed: False, container}``); never a verdict
+    notes: Mapping[str, Any] = field(default_factory=dict)
 
 
 #: ``build_fn(workspace, task, mode, rung) -> BuildAttempt``. The whole contract between
@@ -300,9 +303,13 @@ def run_task(
                 run_id=spec.run_id,
                 trial=trial,
                 actor=spec.actor,
-                notes={"rung": rung, "transcript_ref": attempt.transcript_ref}
-                if attempt.transcript_ref
-                else {"rung": rung},
+                notes={
+                    "rung": rung,
+                    **(
+                        {"transcript_ref": attempt.transcript_ref} if attempt.transcript_ref else {}
+                    ),
+                    **dict(attempt.notes),
+                },
             )
             # pack first, row second: a row exists only for a pack that is on disk
             write_pack(pack, spec.evidence_dir)

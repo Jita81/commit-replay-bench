@@ -22,7 +22,7 @@
 import { describe, expect, it } from 'vitest'
 import type { GradeResult, Run, StepEvent } from '../../api/types'
 import { fmtAgo } from '../../lib/format'
-import { factoryLine, fmtDurationWords, heartbeatLine, nowLine, packHeadline, queueLine, stageLine } from './telemetry'
+import { containerLine, factoryLine, fmtDurationWords, heartbeatLine, nowLine, packHeadline, queueLine, stageLine } from './telemetry'
 
 const T0 = Date.parse('2026-09-13T09:00:00Z')
 
@@ -163,6 +163,28 @@ describe('heartbeatLine', () => {
     expect(heartbeatLine({ ...RUN, heartbeat: null }, 120, T0)).toEqual({ text: 'Worker worker-1 has not checked in yet.', stale: false })
     expect(heartbeatLine({ ...RUN, worker_id: undefined, heartbeat: undefined }, 120, T0)).toBeNull()
     expect(heartbeatLine({ ...RUN, status: 'succeeded' }, 120, T0)).toBeNull()
+  })
+})
+
+describe('containerLine', () => {
+  const kill = (seq: number, action: string, container = 'crb-build-a1') => ev({ seq, stage: 'system', action, payload: { container } })
+  it('stands between the unconfirmed kill and its reap, and names the by-hand command when the worker gave up', () => {
+    expect(containerLine([])).toBeNull()
+    expect(containerLine([ev({ stage: 'system', action: 'run.cancel_requested', payload: {} })])).toBeNull()
+    expect(containerLine([kill(1, 'run.kill_unconfirmed')])).toEqual({ text: 'A container may still be running (being reaped by the worker).', failed: false })
+    expect(containerLine([kill(1, 'run.kill_unconfirmed'), kill(2, 'run.kill_reaped')])).toBeNull()
+    expect(containerLine([kill(1, 'run.kill_unconfirmed'), kill(2, 'run.kill_unconfirmed', 'crb-build-b2')])).toEqual({
+      text: '2 containers may still be running (being reaped by the worker).',
+      failed: false,
+    })
+    expect(containerLine([kill(1, 'run.kill_unconfirmed'), kill(2, 'run.kill_reap_failed')])).toEqual({
+      text: 'A container may still be running — the worker gave up reaping: run `docker rm -f crb-build-a1` on the worker host.',
+      failed: true,
+    })
+    // a later reap of the same name clears even a failure (an operator ran the command)
+    expect(containerLine([kill(1, 'run.kill_unconfirmed'), kill(2, 'run.kill_reap_failed'), kill(3, 'run.kill_reaped')])).toBeNull()
+    // an event without a container name is not a container
+    expect(containerLine([ev({ stage: 'system', action: 'run.kill_unconfirmed', payload: {} })])).toBeNull()
   })
 })
 

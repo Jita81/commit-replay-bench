@@ -15,8 +15,11 @@ store-level checks:
   ``heartbeat_s`` is alive. ``degraded`` (never ``down``) when runs are queued and no
   worker is alive — nothing will start, and the sentence says so with the queue depth
   and the last check-in; when no worker has checked in yet; when one stopped checking
-  in (named, with its age); or when a running run's ``heartbeat`` is older than
-  ``worker_heartbeat_stale_s``; ``ok`` otherwise with the workers listed. The worker is
+  in (named, with its age); when a running run's ``heartbeat`` is older than
+  ``worker_heartbeat_stale_s``; or when a worker's row says it is still reaping a
+  container whose ``docker kill`` the daemon never confirmed (``unconfirmed_containers``
+  > 0 — src/crb/server/reaper.py; the container may still be running on that host);
+  ``ok`` otherwise with the workers listed. The worker is
   a dependency the API pod does not own: ``/health`` is the API's readiness probe, and a
   503 for a crashed worker would take every API pod out of the Service — exactly when
   the person needs to read "no worker has checked in" (the same rule as the sandbox
@@ -269,6 +272,7 @@ def _worker_view(row: WorkerRow, now: _dt.datetime) -> dict[str, Any]:
         "version": row.version,
         "stopped": row.stopped or None,
         "alive": alive,
+        "unconfirmed_containers": int(row.unconfirmed_containers or 0),
     }
 
 
@@ -282,9 +286,11 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
 
     ``degraded``: runs are queued and no worker is alive (nothing will start — said with
     the queue depth and the last check-in, or the last clean stop); no worker has ever
-    checked in; a worker stopped checking in (named, with its age); or a running run's
+    checked in; a worker stopped checking in (named, with its age); a running run's
     heartbeat is older than ``stale_s`` (the queue will reclaim it; the probe is the early
-    warning). ``ok`` otherwise, naming the workers. Never ``down``: the API pod's readiness
+    warning); or a worker is still reaping containers whose kill went unconfirmed
+    (``unconfirmed_containers`` summed over the listed workers — each may still be
+    running). ``ok`` otherwise, naming the workers. Never ``down``: the API pod's readiness
     is not the worker's liveness (module docstring) — ``down`` is reserved for the store
     not answering.
     """
@@ -316,6 +322,7 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
     # the contract docs/API.md#health documents and ui/src/api/types.ts types (WorkerProbeData):
     # the top-level ``stale_after_s`` is the RUN threshold behind ``stale``; each worker's own
     # ``stale_after_s`` (3 × its heartbeat_s) is the bound behind its ``alive``
+    unconfirmed = sum(int(w["unconfirmed_containers"]) for w in workers)
     data = {
         "workers": workers,
         "alive": len(alive),
@@ -323,6 +330,7 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
         "queued": queued,
         "stale": stale_runs,
         "stale_after_s": stale_s,
+        "unconfirmed_containers": unconfirmed,
     }
     # a worker that should be alive and is not: not stopped, last seen too long ago
     lapsed = [w for w in workers if not w["alive"] and not w["stopped"]]
@@ -363,6 +371,18 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
     if not alive:
         return ProbeResult(
             "worker", DEGRADED, "no worker has checked in yet — queued runs will not start", data
+        )
+    if unconfirmed:
+        reaping = [w for w in workers if w["unconfirmed_containers"]]
+        who = ", ".join(str(w["worker_id"]) for w in reaping)
+        return ProbeResult(
+            "worker",
+            DEGRADED,
+            f"{_plural(unconfirmed, 'container')} whose docker kill was not confirmed "
+            f"{'are' if unconfirmed != 1 else 'is'} being reaped by worker {who} — each may "
+            "still be running on its host; `docker ps` there names them and "
+            "`docker rm -f <name>` reaps one by hand",
+            data,
         )
     newest = min(alive, key=lambda w: w["heartbeat_age_s"] or 0.0)
     detail = f"{_plural(len(alive), 'worker')}, last check-in {newest['heartbeat_age_s']:.0f} s ago"

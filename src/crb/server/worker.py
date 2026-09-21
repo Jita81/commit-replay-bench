@@ -47,6 +47,20 @@ Honesty properties
   the DB always has its pack in the DB ("no pack ⇒ no Q1").
 * **Cancellation is cooperative and recorded.** ``stop`` is polled between
   tasks; a cancelled run ends ``cancelled`` with its partial counts.
+* **An unconfirmed container kill is visible and reaped, never a silent terminal
+  state.** A sealed attempt's ``docker kill`` (cancel or wall clock) that the daemon
+  did not confirm within ``DockerStream.KILL_CONFIRM_S`` reaches the worker as
+  ``on_kill_unconfirmed``: it writes a system ``run.kill_unconfirmed`` (status error)
+  on the run's trace, appends "container <name> may still be running — it will be
+  reaped by the worker; ``docker rm -f <name>`` reaps it by hand" to the run's error,
+  and queues the name in the reaper's durable file ``<home>/unconfirmed-containers.json``
+  (:mod:`crb.server.reaper`). The run still ends ``cancelled`` / timed out (it did stop
+  building) and the attempt's pack notes carry ``kill_confirmed: false``. Every poll of
+  :meth:`Worker.run_forever` makes one reap pass — ``docker inspect``, ``docker rm -f``,
+  ``inspect`` — writing ``run.kill_reaped`` or, at the bound (20 passes),
+  ``run.kill_reap_failed`` (status error) on that run's trace; the check-in row carries
+  the pending count (``unconfirmed_containers``) so ``/health`` reads ``degraded`` until
+  the queue is empty.
 * **Resumable event cursors.** A reclaimed run's emitter resumes ``seq`` after
   the last stored event so ``?after=<seq>`` never replays or skips.
 * **Liveness is a fact, not an inference.** The worker upserts its ``workers`` row
@@ -80,9 +94,10 @@ What it does: Polls the job queue, claims one run, dispatches by kind (setup, pr
               records the apparatus, and marks the run succeeded / failed / cancelled
               honestly (all-attempts-errored is a failure; a provider outage streak stops
               the run; a harness error on one mined candidate skips it). Checks in to the
-              ``workers`` table every ``heartbeat_s`` (idle or not) and records every
-              worker-side metric, including deliveries by outcome and real installation-
-              token mints.
+              ``workers`` table every ``heartbeat_s`` (idle or not, with the reaper's
+              pending count) and records every worker-side metric, including deliveries
+              by outcome and real installation-token mints. Reaps a container whose kill
+              went unconfirmed on every poll and puts the outcome on the run's trace.
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
               emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
               ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
@@ -98,7 +113,8 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               build function, ladder, pre-flight), src/crb/core/mine.py (mining; the oracle
               and controls kinds call their core modules the same way),
               src/crb/factory/loop.py (forward mode — its files live in
-              src/crb/server/factory_state.py)
+              src/crb/server/factory_state.py), src/crb/server/reaper.py (the durable
+              queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
               tests/test_worker_clone.py, tests/test_store_jobs.py,
               tests/test_observability_metrics.py
@@ -140,6 +156,7 @@ from crb.builders.adapter import (
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.budget import budget_for_rung
+from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
@@ -192,6 +209,7 @@ from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.server.factory_state import FactoryHome
 from crb.server.github_app import GitHubApp, GitHubAppError
+from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.settings import GitHubAppSettings
@@ -246,6 +264,26 @@ _STAGE_FOR_PREFIX: dict[str, str] = {
 def stage_for(action: str) -> str:
     """``grade.belt`` → ``grade``; unknown prefixes land in ``system``."""
     return _STAGE_FOR_PREFIX.get(action.split(".", 1)[0], "system")
+
+
+def unconfirmed_note(container: str) -> str:
+    """The sentence a run's ``error`` carries for a container whose kill went unconfirmed —
+    what the reaper will do and what the operator can do now."""
+    return (
+        f"container {container} may still be running — it will be reaped by the worker; "
+        f"`{by_hand(container)}` reaps it by hand"
+    )
+
+
+def _reaper_docker() -> str:
+    """The docker binary the reaper calls: the builder posture's (``CRB_BUILDER__DOCKER_BINARY``)
+    when one is set, else ``docker`` on PATH. A posture that fails closed is not this
+    function's concern (the run reports it); the reaper still gets a binary name."""
+    try:
+        settings = container_settings_from_env()
+    except SandboxUnavailable:
+        return "docker"
+    return (settings.docker_binary if settings is not None else "") or "docker"
 
 
 #: Row labels the worker stamps per rung (``_RunLedger``). Hashed like every label.
@@ -405,6 +443,9 @@ class RunContext:
     config: RepoConfig
     git: GitRepo
     counts: dict[str, Any] = field(default_factory=dict)
+    #: Sentences appended to the run's ``error`` whatever its final status (an
+    #: unconfirmed container kill) — a cancelled run is still cancelled, but never quietly.
+    notes: list[str] = field(default_factory=list)
     _runner: BaseRunner | None = None
     _executor: Executor | None = None
 
@@ -559,6 +600,7 @@ class Worker:
         self.worker_id = settings.worker_id
         self._checkin_lock = threading.Lock()
         self._last_checkin = 0.0
+        self.reaper = ContainerReaper(self.home / STATE_FILENAME, docker=_reaper_docker())
         self._handlers: dict[str, Handler] = {
             KIND_SETUP: self._run_setup,
             KIND_PROBE: self._run_probe,
@@ -613,6 +655,7 @@ class Worker:
         _LOG.info("worker %s started (executor=%s)", self.worker_id, self.settings.executor)
         while not stop.is_set():
             self._checkin_if_due()
+            self.reap()
             try:
                 run = self.run_once()
             except Exception:  # the loop must survive anything a run throws
@@ -622,6 +665,77 @@ class Worker:
                 stop.wait(self.settings.poll_s)
         self.checkin(stopped=True)
         _LOG.info("worker %s stopped", self.worker_id)
+
+    # --- the reaper ---------------------------------------------------------------
+    def reap(self) -> int:
+        """One bounded pass of the container reaper (every poll): each container that ended
+        this pass gets ``run.kill_reaped`` (ok) or ``run.kill_reap_failed`` (error, with the
+        by-hand command) on its run's trace. Returns how many ended. Never raises."""
+        try:
+            ended = self.reaper.reap_once()
+        except Exception:  # the loop must survive the reaper too
+            _LOG.exception("container reaper pass failed")
+            return 0
+        for res in ended:
+            self._record_reap(res)
+        return len(ended)
+
+    def _record_reap(self, res: ReapResult) -> None:
+        run = self.queue.get(res.entry.run_id)
+        if run is None:  # the run row is gone; the log is all that is left
+            _LOG.warning(
+                "reaper: run %s not found for container %s (%s)",
+                res.entry.run_id[:8],
+                res.entry.container,
+                "reaped" if res.reaped else res.detail,
+            )
+            return
+        try:
+            emitter = self._emitter(run)
+            if res.reaped:
+                emitter.emit(
+                    "system",
+                    "run.kill_reaped",
+                    task_id=res.entry.task_id,
+                    container=res.entry.container,
+                    attempts=res.attempts,
+                )
+            else:
+                emitter.emit(
+                    "system",
+                    "run.kill_reap_failed",
+                    status=StepStatus.ERROR,
+                    task_id=res.entry.task_id,
+                    error=f"container {res.entry.container} not reaped: {res.detail}",
+                    container=res.entry.container,
+                    attempts=res.attempts,
+                )
+        except Exception:
+            _LOG.exception("reaper: could not record %s on run %s", res.entry.container, run.id[:8])
+
+    def _kill_unconfirmed(self, ctx: RunContext, task_id: str, kill: UnconfirmedKill) -> None:
+        """``on_kill_unconfirmed`` for the run's build function (module docstring): the
+        event, the note on the run's error, the reaper's queue. Never raises."""
+        note = unconfirmed_note(kill.container)
+        try:
+            ctx.emit(
+                "system",
+                "run.kill_unconfirmed",
+                status=StepStatus.ERROR,
+                task_id=task_id,
+                error=note,
+                container=kill.container,
+                run_id=ctx.run.id,
+                bound_s=float(kill.bound_s),
+            )
+        except Exception:
+            _LOG.exception("could not record run.kill_unconfirmed for %s", kill.container)
+        if note not in ctx.notes:
+            ctx.notes.append(note)
+        try:
+            self.reaper.add(kill.container, run_id=ctx.run.id, task_id=task_id)
+        except Exception:
+            _LOG.exception("could not queue %s for the reaper", kill.container)
 
     # --- liveness ---------------------------------------------------------------
     def _checkin_if_due(self) -> None:
@@ -651,6 +765,7 @@ class Worker:
                     row.current_run_id = current_run_id
                     row.version = __version__
                     row.stopped = now if stopped else ""
+                    row.unconfirmed_containers = self.reaper.pending_count()
                     queued = int(
                         s.execute(
                             select(func.count(Run.id)).where(Run.status == STATUS_QUEUED)
@@ -732,6 +847,8 @@ class Worker:
             hb_stop.set()
             hb.join(timeout=5)
             self.checkin()
+        if ctx is not None and ctx.notes:  # whatever the status: never a quiet unconfirmed kill
+            error = "; ".join([error, *ctx.notes] if error else ctx.notes)[:2000]
         try:
             self.queue.finish(run.id, status, counts=counts, error=error, worker_id=self.worker_id)
         except StaleClaim as exc:  # reclaimed underneath us: the new owner's record stands
@@ -1343,6 +1460,7 @@ class Worker:
             builder_overrides=dict(p.get("builder_config") or {}),
             container=container_settings_from_env(),  # CRB_BUILDER__EXECUTOR=docker (ADR-0012)
             preflight=preflight,
+            on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
         )
         self._progress(ctx, 0, total)
 

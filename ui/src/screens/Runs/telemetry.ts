@@ -6,7 +6,9 @@
  * ----------
  * What it is:   `nowLine` (elapsed · done · spend · a remaining estimate with its basis),
  *               `stageLine` (the last StepEvent as task · stage · detail), `heartbeatLine`
- *               (worker liveness against the worker probe's limit), `queueLine` (position and
+ *               (worker liveness against the worker probe's limit), `containerLine` (a container
+ *               whose kill the daemon never confirmed — being reaped, or given up on, read from
+ *               the run's `run.kill_*` events), `queueLine` (position and
  *               what is ahead), `factoryLine` (a factory run's identity and delivery switch),
  *               `packHeadline` (one sentence for an evidence pack) and `fmtDurationWords`;
  *               the age formatter is ui/src/lib/format.ts's `fmtAgo`, shared with the
@@ -15,7 +17,9 @@
  *               estimate names its basis and its n ("the mean of the 3 done") and calls
  *               itself a planning estimate; a field an older server does not send reads as
  *               absent ("this server does not report the position"), never as a zero; a
- *               heartbeat is only "stale" against a limit the /health worker probe stated.
+ *               heartbeat is only "stale" against a limit the /health worker probe stated; a
+ *               "container may still be running" line stands only between the worker's
+ *               `run.kill_unconfirmed` and its `run.kill_reaped` (or `run.kill_reap_failed`).
  * How:          String builders over `Run`, `StepEvent` and `GradeResult`; the caller passes
  *               `nowMs` so elapsed and ages are deterministic in tests. Belt order for the
  *               headline is `beltNamesFor` (belt 5 only when the pack recorded it).
@@ -152,6 +156,43 @@ export function heartbeatLine(run: Run, staleAfterS: number | null, nowMs: numbe
     return { text: `Worker ${worker} last checked in ${ago} — over the ${fmtSeconds(staleAfterS)} limit. The queue will hand the run to another worker.`, stale: true }
   }
   return { text: `Worker ${worker} last checked in ${ago}.`, stale: false }
+}
+
+/**
+ * A container the worker could not confirm killed, read from the run's own system events
+ * (docs/API.md — `POST /runs/{id}/cancel`): `run.kill_unconfirmed` puts a container on the
+ * line, `run.kill_reaped` takes it off, `run.kill_reap_failed` turns it into the by-hand
+ * instruction. `null` when no container is outstanding — the line never guesses from the
+ * run's status, and a server that emits none of these events shows nothing.
+ */
+export function containerLine(events: readonly StepEvent[]): { text: string; failed: boolean } | null {
+  const reaping = new Map<string, true>()
+  const failed = new Map<string, true>()
+  for (const ev of events) {
+    const name = typeof ev.payload.container === 'string' ? ev.payload.container : ''
+    if (!name) continue
+    if (ev.action === 'run.kill_unconfirmed') reaping.set(name, true)
+    else if (ev.action === 'run.kill_reaped') {
+      reaping.delete(name)
+      failed.delete(name)
+    } else if (ev.action === 'run.kill_reap_failed') {
+      reaping.delete(name)
+      failed.set(name, true)
+    }
+  }
+  if (failed.size) {
+    const names = [...failed.keys()]
+    const n = names.length
+    return {
+      text: `${n === 1 ? 'A container' : `${fmtInt(n)} containers`} may still be running — the worker gave up reaping: run \`docker rm -f ${names.join(' ')}\` on the worker host.`,
+      failed: true,
+    }
+  }
+  if (reaping.size) {
+    const n = reaping.size
+    return { text: `${n === 1 ? 'A container' : `${fmtInt(n)} containers`} may still be running (being reaped by the worker).`, failed: false }
+  }
+  return null
 }
 
 /**

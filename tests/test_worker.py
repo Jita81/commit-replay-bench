@@ -18,15 +18,20 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               controls runs recording their events (a violation failing the gate), unknown repo
               / kind failing cleanly, stale-claim reclaim with event seq resuming, the heartbeat
               thread, ``run_forever`` processing then stopping and surviving a broken iteration,
-              stage routing, the ``--once`` entrypoint and settings from args / env, and that a
-              run where every attempt errors is ``failed`` not ``succeeded``.
+              stage routing, the ``--once`` entrypoint and settings from args / env, that a
+              run where every attempt errors is ``failed`` not ``succeeded``, and that a sealed
+              attempt whose container kill went UNCONFIRMED is visible (``run.kill_unconfirmed``
+              on the trace, the note on the run's error, ``kill_confirmed: false`` in the pack)
+              and reaped (the loop's pass writes ``run.kill_reaped`` / ``run.kill_reap_failed``;
+              the check-in row counts what is pending).
 How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
               / ``noop`` builder around ``Worker.run_one``; no docker, no network, no model.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/server/worker.py (under test), src/crb/store/jobs.py (the queue),
-              src/crb/builders/adapter.py (the build path), src/crb/core/oracle/controls.py
+              src/crb/builders/adapter.py (the build path), src/crb/server/reaper.py (the
+              reaper the loop drives), src/crb/core/oracle/controls.py
               (the controls run kind), tests/fixtures/pyrepo.py, tests/test_worker_label.py,
               tests/test_worker_clone.py and tests/test_worker_budget_ladder.py (the same
               harness for one kind or seam each)
@@ -39,6 +44,7 @@ Touch when:   a run kind is added (``stage_for``, a run case here and the queue'
 from __future__ import annotations
 
 import json
+import stat
 import threading
 import time
 from collections.abc import Callable
@@ -50,6 +56,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 import crb.builders as builders_pkg
+from crb.builders import adapter as adapter_mod
 from crb.builders.base import (
     STOP_DONE,
     STOP_MAX_TURNS,
@@ -58,6 +65,7 @@ from crb.builders.base import (
     BuildBrief,
     BuildOutcome,
 )
+from crb.builders.container import BuilderContainerSettings, SealedCheckout, UnconfirmedKill
 from crb.core.evidence import verify_pack
 from crb.core.execution import SandboxUnavailable
 from crb.core.ledger import verify_chain
@@ -457,6 +465,179 @@ def test_cancel_requested_before_start_is_honoured(h: Harness) -> None:
     assert h.worker.run_once() is None  # the claim finalises the cancel; nothing to execute
     assert h.queue.get(run.id).status == STATUS_CANCELLED  # type: ignore[union-attr]
     assert FakeBuilder.briefs == []
+
+
+# --- an unconfirmed container kill is visible and reaped ----------------------------------------
+
+
+class UnconfirmedSession:
+    """Stands in for ``ContainerSession`` (no daemon): the builder runs on the sealed
+    checkout host-side, and the session reports ONE container whose kill went unconfirmed."""
+
+    container: ClassVar[str] = "crb-build-fake-0badc0de"
+
+    def __init__(
+        self, settings: BuilderContainerSettings, checkout: SealedCheckout, **kw: Any
+    ) -> None:
+        self.settings = settings
+        self.checkout = checkout
+
+    def __enter__(self) -> UnconfirmedSession:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def overrides_for(self, builder: str) -> dict[str, Any]:
+        return {}
+
+    def unconfirmed_kills(self) -> list[UnconfirmedKill]:
+        return [UnconfirmedKill(container=self.container, bound_s=10.0)]
+
+
+def _scripted_docker(dir_: Path, *, gone: bool) -> str:
+    """A ``docker`` for the reaper: ``inspect`` answers "No such container" (gone) or
+    Running=true (never lets go); ``rm -f`` succeeds or fails with it."""
+    dir_.mkdir(parents=True, exist_ok=True)
+    script = dir_ / "docker"
+    inspect = 'echo "Error: No such container: $4" >&2; exit 1' if gone else "echo true"
+    rm = ":" if gone else "exit 1"
+    script.write_text(f'#!/bin/sh\ncase "$1" in\n  inspect) {inspect} ;;\n  rm) {rm} ;;\nesac\n')
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return str(script)
+
+
+@pytest.fixture
+def sealed_unconfirmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The worker's docker builder posture with the session doubled: every sealed attempt
+    reports an unconfirmed kill."""
+    monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
+    monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
+    monkeypatch.setattr(adapter_mod, "SEALABLE_BUILDERS", frozenset({"fake"}))
+    real = worker_mod.build_fn_for
+
+    def with_double(*a: Any, **kw: Any) -> Any:
+        return real(*a, **{**kw, "session_factory": UnconfirmedSession})
+
+    monkeypatch.setattr(worker_mod, "build_fn_for", with_double)
+
+
+def _worker_row(h: Harness) -> WorkerRow:
+    with h.factory() as s:
+        row = s.get(WorkerRow, "w-test")
+        assert row is not None
+        return row
+
+
+def test_unconfirmed_kill_is_recorded_on_the_run_and_queued_for_the_reaper(
+    h: Harness, sealed_unconfirmed: None
+) -> None:
+    """A cancelled sealed attempt whose container the daemon never reported stopped: the
+    run still ends ``cancelled`` (it did stop building) but never silently — a system
+    ``run.kill_unconfirmed`` (status error) on its trace, the by-hand note on its error,
+    ``kill_confirmed: false`` in the attempt's evidence pack, the container in the reaper's
+    durable queue, and the check-in row counting it for the health probe."""
+    green_sha = h.pyrepo.add_green_commit()
+    h.add_task(
+        h.pyrepo.feat_task(
+            task_id=green_sha,
+            subject="second",
+            test_files=[pr.TEST_CALC],
+            target_tests=[pr.TEST_CALC],
+            baseline_failing=[],
+            authored=h.pyrepo.repo.author_date(green_sha),
+        )
+    )
+    run = h.enqueue("replay")
+
+    def cancel_during_build(_ws: Workspace, _brief: BuildBrief) -> None:
+        h.queue.request_cancel(run.id, actor="tester")
+
+    FakeBuilder.hook = cancel_during_build
+    done = h.run_one()
+    name = UnconfirmedSession.container
+    assert done.status == STATUS_CANCELLED  # still cancelled: it did stop building
+    assert done.error == (
+        f"container {name} may still be running — it will be reaped by the worker; "
+        f"`docker rm -f {name}` reaps it by hand"
+    )
+    events = h.events(run.id)
+    (ev,) = [e for e in events if e.action == "run.kill_unconfirmed"]
+    assert ev.stage == "system" and ev.status == StepStatus.ERROR
+    assert ev.payload == {"container": name, "run_id": run.id, "bound_s": 10.0}
+    assert name in ev.error_message and "may still be running" in ev.error_message
+    # the pack says so — a reader of the row's evidence sees the unconfirmed kill
+    (row,) = list(h.worker.ledger.rows(run_id=run.id))  # the one task built before the cancel
+    assert ev.task_id == row.task_id
+    pack = h.worker.ledger.get_pack(row.evidence_pack_hash)
+    assert pack is not None and verify_pack(pack)
+    assert pack["notes"]["kill_confirmed"] is False and pack["notes"]["container"] == name
+    # queued durably, and counted on the worker's row
+    assert [e.container for e in h.worker.reaper.pending()] == [name]
+    assert (h.home / "unconfirmed-containers.json").exists()
+    assert _worker_row(h).unconfirmed_containers == 1
+
+
+def test_reaper_pass_reaps_and_records_on_the_run_trace(
+    h: Harness, sealed_unconfirmed: None, tmp_path: Path
+) -> None:
+    run = h.enqueue("replay")
+    FakeBuilder.hook = lambda _ws, _brief: h.queue.request_cancel(run.id, actor="tester")
+    h.run_one()
+    name = UnconfirmedSession.container
+    h.worker.reaper.docker = _scripted_docker(tmp_path / "gone", gone=True)
+    assert h.worker.reap() == 1
+    (ev,) = [e for e in h.events(run.id) if e.action == "run.kill_reaped"]
+    assert ev.stage == "system" and ev.status == StepStatus.OK
+    assert ev.payload == {"container": name, "attempts": 1}
+    assert ev.task_id == h.pyrepo.feat_task().task_id  # the queued entry remembers its task
+    assert h.worker.reaper.pending() == [] and h.worker.reap() == 0
+    h.worker.checkin()
+    assert _worker_row(h).unconfirmed_containers == 0
+
+
+def test_reaper_gives_up_at_the_bound_and_says_so_on_the_trace(
+    h: Harness, sealed_unconfirmed: None, tmp_path: Path
+) -> None:
+    run = h.enqueue("replay")
+    FakeBuilder.hook = lambda _ws, _brief: h.queue.request_cancel(run.id, actor="tester")
+    h.run_one()
+    name = UnconfirmedSession.container
+    h.worker.reaper.docker = _scripted_docker(tmp_path / "stuck", gone=False)
+    h.worker.reaper.max_attempts = 2
+    assert h.worker.reap() == 0  # attempt 1: still pending
+    assert h.worker.reaper.pending()[0].attempts == 1
+    assert h.worker.reap() == 1  # attempt 2: the bound
+    (ev,) = [e for e in h.events(run.id) if e.action == "run.kill_reap_failed"]
+    assert ev.stage == "system" and ev.status == StepStatus.ERROR
+    assert ev.payload["container"] == name and ev.payload["attempts"] == 2
+    assert f"docker rm -f {name}" in ev.error_message
+    assert h.worker.reaper.pending() == []
+    assert not [e for e in h.events(run.id) if e.action == "run.kill_reaped"]
+
+
+def test_reaper_runs_from_the_polling_loop(
+    h: Harness, sealed_unconfirmed: None, tmp_path: Path
+) -> None:
+    """The loop reaps every poll: a queued container is gone from the file, and the run's
+    trace carries ``run.kill_reaped``, without any run being claimed."""
+    run = h.enqueue("replay")
+    FakeBuilder.hook = lambda _ws, _brief: h.queue.request_cancel(run.id, actor="tester")
+    h.run_one()
+    h.worker.reaper.docker = _scripted_docker(tmp_path / "gone", gone=True)
+    stop = threading.Event()
+    t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
+    t.start()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and h.worker.reaper.pending_count():
+        time.sleep(0.05)
+    stop.set()
+    t.join(timeout=5)
+    assert h.worker.reaper.pending() == []
+    assert [e.action for e in h.events(run.id) if e.action.startswith("run.kill_")] == [
+        "run.kill_unconfirmed",
+        "run.kill_reaped",
+    ]
 
 
 # --- mine --------------------------------------------------------------------------------------

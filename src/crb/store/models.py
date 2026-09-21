@@ -379,6 +379,12 @@ class WorkerRow(Base):
     version: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     #: Stamped on a clean stop (``""`` while the process lives).
     stopped: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    #: Containers whose ``docker kill`` the daemon never confirmed and the worker's reaper is
+    #: still retrying (revision 0008; src/crb/server/reaper.py). The health probe reads
+    #: ``degraded`` while any worker reports more than 0.
+    unconfirmed_containers: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
 
 #: Every append-only table of the CURRENT schema. A revision script pins the tuple that

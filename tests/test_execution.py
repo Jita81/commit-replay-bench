@@ -15,10 +15,13 @@ What it does: Pins ``Command`` validation, that the local executor filters the e
               probes the daemon, refuses root, dangerous mounts and a missing image, builds every
               hardening flag into ``docker run``, and raises ``SandboxUnavailable`` on a missing
               binary, a failed probe, exit 125 or a vanishing binary — a timeout is rc 124, never
-              a pass. For ``DockerStream``: an enforced kill (cancel, wall clock) is CONFIRMED
-              through ``docker inspect`` before ``lines()`` returns, the poll is bounded and
-              warns, a removed (``--rm``) container counts as stopped, and a natural exit asks
-              the daemon nothing.
+              a pass. For ``DockerStream``: after an enforced kill (cancel, wall clock)
+              ``lines()`` does not return before a BOUNDED confirmation attempt through
+              ``docker inspect`` has ended — bounded by ``KILL_CONFIRM_S`` across every inspect
+              call, so it can end WITHOUT confirming (``kill_confirmed`` is False and a warning
+              names the container); ``inspect`` output is accepted only as the exact strings
+              ``true`` / ``false`` (anything else is unknown, never a stop); a removed (``--rm``)
+              container counts as stopped; a natural exit asks the daemon nothing.
 How:          Real ``subprocess`` for the local half; ``FakeRunner`` records argv and scripts the
               daemon's answers for the docker half — no daemon is needed. ``DockerStream`` runs
               against a fake ``docker`` script whose ``inspect`` answers are scripted.
@@ -584,15 +587,84 @@ def test_wait_container_stopped_reads_the_daemon_honestly(tmp_path: Path) -> Non
     a missing container is gone, an unaskable daemon is unknown (and keeps polling to
     the bound rather than claiming a stop)."""
     docker, _ = _fake_docker_stream(tmp_path / "a", inspect="true:0")
-    assert ex._container_stopped(docker, "x") is True
+    assert ex.container_stopped(docker, "x") is True
     docker, _ = _fake_docker_stream(tmp_path / "b", inspect="always-true")
-    assert ex._container_stopped(docker, "x") is False
+    assert ex.container_stopped(docker, "x") is False
     docker, _ = _fake_docker_stream(tmp_path / "c", inspect="no-such")
-    assert ex._container_stopped(docker, "x") is True
-    assert ex._container_stopped(str(tmp_path / "missing" / "docker"), "x") is None
+    assert ex.container_stopped(docker, "x") is True
+    assert ex.container_stopped(str(tmp_path / "missing" / "docker"), "x") is None
     assert (
         ex.wait_container_stopped(
             str(tmp_path / "missing" / "docker"), "x", timeout_s=0.1, step_s=0.02
         )
         is False
     )
+
+
+def _scripted_inspect(dir_: Path, body: str) -> str:
+    """A ``docker`` whose ``inspect`` runs ``body`` (a shell fragment) — for the parse and
+    budget cases; ``kill`` is a no-op."""
+    dir_.mkdir(parents=True, exist_ok=True)
+    script = dir_ / "docker"
+    script.write_text('#!/bin/sh\ncase "$1" in\n  kill) : ;;\n  inspect) ' + body + " ;;\nesac\n")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return str(script)
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("true", False),
+        ("false", True),
+        ("", None),  # exit 0 with nothing said is NOT a stop
+        ("True", None),  # exact strings only — no case folding
+        ("FALSE", None),
+        ("false extra", None),
+        ("<no value>", None),  # the template did not resolve
+        ("null", None),
+    ],
+)
+def test_container_stopped_accepts_only_the_exact_true_and_false(
+    tmp_path: Path, output: str, expected: bool | None
+) -> None:
+    """Exit 0 + anything but the exact ``true`` / ``false`` is UNKNOWN — the poll keeps
+    asking to the bound rather than reading a malformed answer as a confirmed stop."""
+    docker = _scripted_inspect(tmp_path, f"printf '%s\\n' '{output}'")
+    assert ex.container_stopped(docker, "x") is expected
+
+
+def test_container_stopped_non_zero_without_no_such_is_unknown(tmp_path: Path) -> None:
+    docker = _scripted_inspect(tmp_path, 'echo "Cannot connect to the Docker daemon" >&2; exit 1')
+    assert ex.container_stopped(docker, "x") is None
+
+
+def test_wait_container_stopped_never_exceeds_its_budget_across_inspect_calls(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Each ``inspect`` gets only the REMAINING budget: a daemon that answers slowly (here:
+    never — every call sleeps past the bound) cannot stretch the wait to ``timeout_s`` plus a
+    whole inspect timeout, and an answer that arrives after the bound is not waited for."""
+    docker = _scripted_inspect(tmp_path, "sleep 5; echo false")
+    t0 = time.monotonic()
+    with caplog.at_level("WARNING", logger="crb.core.execution"):
+        assert ex.wait_container_stopped(docker, "slow", timeout_s=0.5, step_s=0.02) is False
+    elapsed = time.monotonic() - t0
+    assert 0.5 <= elapsed < 2.0, elapsed  # the bound, not the bound + 5 s
+    assert any("slow" in r.message and "not confirmed" in r.message for r in caplog.records)
+
+
+def test_wait_container_stopped_caps_each_inspect_to_the_remaining_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The budget handed to every ``inspect`` call is the time left, never more."""
+    budgets: list[float] = []
+
+    def fake_stopped(docker: str, name: str, *, timeout_s: float = 10.0) -> bool | None:
+        budgets.append(timeout_s)
+        time.sleep(0.03)
+        return None
+
+    monkeypatch.setattr(ex, "container_stopped", fake_stopped)
+    assert ex.wait_container_stopped("docker", "x", timeout_s=0.2, step_s=0.01) is False
+    assert budgets and all(0 < b <= 0.2 for b in budgets)
+    assert budgets == sorted(budgets, reverse=True)  # strictly less time each round
