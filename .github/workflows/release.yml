@@ -103,7 +103,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Image tags and OCI labels
         id: meta
@@ -123,7 +123,7 @@ jobs:
             org.opencontainers.image.documentation=https://github.com/Jita81/commit-replay-bench/blob/main/docs/DEPLOYMENT.md
 
       - name: Build deploy/Dockerfile (load locally; nothing is pushed yet)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/Dockerfile
@@ -178,7 +178,7 @@ jobs:
       - name: Push to GHCR (a cache hit — the bytes are the smoked candidate)
         if: env.PUSH == 'true'
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/Dockerfile
