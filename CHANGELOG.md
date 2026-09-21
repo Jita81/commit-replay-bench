@@ -11,7 +11,7 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 ### 2026-09-21 — the operating envelope: what the platform team is told is true (F36–F41, F44, F47, F25)
 
 - **`/health` gains a `migrations` probe** — the contract is stated once, in
-  [API.md — The `migrations` probe](docs/API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead or empty — both revisions named, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. The go-live checklist now
+  [API.md — The `migrations` probe](docs/API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. The go-live checklist now
   points at a check that proves what it says (F36).
 - **No probe on `/health` serves an exception** (CWE-209 — the route is unauthenticated): every
   read — `db`, `migrations`, `append_only`, `ledger`, `worker`, and the `sandbox`, `toolchains`

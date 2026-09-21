@@ -7,8 +7,8 @@ What it is:   ``/health``, ``/health/live``, ``/metrics``, ``/version`` and the 
 What it does: Pins the health shape and its append-only probe (an UPDATE is proven refused), that
               a false-Q1 row bypassing the ledger is caught, that a stale worker heartbeat is
               flagged, that the ``migrations`` probe is ok at head / degraded for an unstamped
-              ``create_all`` store / down (503, both revisions named) when the store is behind
-              or empty, that EVERY probe whose read raises serves one FIXED detail naming the
+              ``create_all`` store / down (503, revisions named where applicable) when the
+              store is behind, ahead, empty or an older unversioned schema, that EVERY probe whose read raises serves one FIXED detail naming the
               request id (the exception logged under that id, never served — CWE-209 on an
               unauthenticated route), that health needs no auth; the role-aware sandbox probe (an ``api``
               process reports it ``skipped`` and is not degraded by it; ``worker`` and ``all``

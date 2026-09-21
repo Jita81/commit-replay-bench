@@ -6,11 +6,12 @@ store-level checks:
 
 * ``db``          — the database answers.
 * ``migrations``  — the database's Alembic revision IS the code's head
-  (:func:`crb.store.migrate.head_status_on`). ``down`` (503) when it is behind, ahead or
-  empty — a long-lived pod whose store drifted must leave the Service, and the go-live
-  checklist may point here truthfully; both revisions are in the detail. A ``create_all``
-  store whose schema equals the head (a ``crb serve`` without ``crb migrate``) is
-  ``degraded``, not down: complete, but unstamped until ``crb migrate`` runs.
+  (:func:`crb.store.migrate.head_status_on`). ``down`` (503) when it is behind, ahead,
+  empty or an older unversioned schema — a long-lived pod whose store drifted must leave
+  the Service, and the go-live checklist may point here truthfully; the revisions are in
+  the detail where applicable (an empty store has none). A ``create_all`` store whose
+  schema equals the head (a ``crb serve`` without ``crb migrate``) is ``degraded``, not
+  down: complete, but unstamped until ``crb migrate`` runs.
 * ``append_only`` — the ledger triggers exist AND an ``UPDATE`` on ``grades`` is refused
   (:func:`crb.store.ledger.assert_append_only`). Missing triggers = ``down``.
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
@@ -190,7 +191,8 @@ def migrations_result(st: HeadStatus) -> ProbeResult:
     """``migrations`` from a :class:`HeadStatus` — shared with ``crb doctor`` so the two
     surfaces cannot disagree. ``ok`` at head; ``degraded`` for a ``create_all`` schema that
     equals the head but carries no ``alembic_version`` (complete; ``crb migrate`` stamps it);
-    ``down`` otherwise, naming both revisions and the fix."""
+    ``down`` otherwise — behind, ahead, empty or an older unversioned schema — naming the
+    revisions where applicable and the fix."""
     data = st.to_dict()
     if st.at_head:
         return ProbeResult("migrations", OK, f"database at {st.head} = code head", data)

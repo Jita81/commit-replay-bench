@@ -34,7 +34,10 @@ abstract cells, never code.
 > Releases: a release is a `v<package-version>` tag on `main` (`v` + the PEP 440 version
 > in `pyproject.toml`, pre-release suffix included: `v2.0.0b1`) — one version in three
 > files plus a dated CHANGELOG section, then the pipeline builds, smokes, SBOMs and keyless-signs the image on
-> GHCR. How a release is cut and what to check: [docs/RELEASING.md](docs/RELEASING.md).
+> GHCR. Both halves of "on `main`" are enforced by the release workflow before anything
+> is built: `scripts/check_release_tag.py` refuses a tag whose name is not `v<version>` and
+> a tag whose commit is not reachable from `origin/main`, so an unmerged commit can be tagged
+> but never published or signed. How a release is cut and what to check: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Start here
 

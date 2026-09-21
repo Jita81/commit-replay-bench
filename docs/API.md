@@ -40,7 +40,7 @@ in parallel, so changes here are changes to both.
 The one statement of the contract. [DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist),
 [OPERATOR §1.1](OPERATOR.md#11-check-the-installation-crb-doctor) and the CHANGELOG repeat
 its sentence and link here; `crb doctor`'s `migrations` line renders the same
-`migrations_result`, so the two surfaces cannot disagree. In one sentence: `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead or empty — both revisions named, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id.
+`migrations_result`, so the two surfaces cannot disagree. In one sentence: `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id.
 
 | State | HTTP | `detail` | `data` |
 |---|---|---|---|

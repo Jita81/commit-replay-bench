@@ -1,6 +1,9 @@
 # Release: on a `v*` tag —
 #
-#   build   sdist + wheel with `uv build`, tag == pyproject version, smoke-import, SHA256SUMS
+#   build   tag == pyproject version AND the tagged commit is reachable from main (a release is
+#           a tag on a merged commit — never an unmerged branch commit; scripts/check_release_tag.py
+#           stops the job before anything is built), then sdist + wheel with `uv build`,
+#           smoke-import, SHA256SUMS
 #   image   build deploy/Dockerfile (UI + wheel, linux/amd64), smoke it, generate an SPDX
 #           SBOM (syft), then push to GHCR — ONLY on a tag of the canonical repository:
 #             ghcr.io/jita81/commit-replay-bench:<version>      (tag v2.0.0a1 → 2.0.0a1)
@@ -60,8 +63,18 @@ jobs:
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
-      - name: Check the tag matches pyproject version (scripts/check_release_tag.py — the rule the tests pin)
-        run: uv run --no-project --python 3.12 python scripts/check_release_tag.py
+      - name: Check the tag is v<pyproject version> AND its commit is on main (scripts/check_release_tag.py — the rules the tests pin)
+        # Fail fast, before anything is built: a `v*` tag on a commit main does not contain
+        # must never reach GHCR or a signature (the release contract, docs/RELEASING.md §2).
+        # The checkout above has full history (fetch-depth 0); the fetch makes this step
+        # stand on its own and sees a main that moved since the checkout. The script runs
+        # `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` and stops the job with a
+        # `::error::` naming the tag, the commit and the ref. On a workflow_dispatch (a branch,
+        # a dry run) both rules are a no-op.
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          uv run --no-project --python 3.12 python scripts/check_release_tag.py --require-on origin/main
       - name: uv build
         run: uv build --sdist --wheel --out-dir dist
       - name: Smoke-install the wheel and import the core

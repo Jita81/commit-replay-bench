@@ -24,7 +24,8 @@ What it does: Pins that a keychain login is ok, that no login and no key is degr
               ``crb doctor`` on a migrated store renders every line with ``ok / warn / fail /
               skip`` in text and the ``/health`` vocabulary in JSON, failing on a store
               stamped behind head and on one whose append-only triggers are missing.
-How:          A fake ``claude`` on PATH and a throwaway ``CRB_HOME``; an RSA key pair from
+How:          A fake ``claude`` on PATH and a throwaway ``CRB_HOME`` (the persistent case is a
+              unique, never-created path under ``/srv`` — host state cannot reach it); an RSA key pair from
               ``cryptography`` and an ``httpx.MockTransport`` standing in for GitHub; a
               ``ui/dist`` made of one-line chunk files.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -44,6 +45,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -240,7 +242,20 @@ DOCTOR_LINES = (
     "worker",
     "ui",
 )
-PERSISTENT = Path("/srv/crb")  # the image's CRB_HOME: never a temporary root, never created
+
+
+@pytest.fixture
+def persistent_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """A test-owned, unique path under ``/srv`` (the image's ``CRB_HOME`` root) that is
+    outside every ``TEMP_DIR_ROOTS`` entry and ``$TMPDIR`` — pinned to ``tmp_path`` so the
+    host's own ``TMPDIR`` cannot classify it. Never created, so the ``home`` line's
+    ``(not created yet)`` branch is what is exercised whatever exists on the host (the
+    fixed ``/srv/crb`` once depended on host state: a host that had run the image made
+    the probe report an existing directory)."""
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    path = Path("/srv") / f"crb-doctor-test-{uuid.uuid4().hex}"
+    assert not path.exists()
+    return path
 
 
 def _lines(out: str) -> dict[str, tuple[str, str]]:
@@ -280,20 +295,22 @@ class TestSettingsAndHomeLines:
         assert probe_home().status == "degraded"
 
     def test_home_is_ok_on_a_persistent_path_and_settings_ok_when_they_construct(
-        self, home: Path, monkeypatch: pytest.MonkeyPatch
+        self, home: Path, persistent_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("CRB_HOME", str(PERSISTENT))
+        monkeypatch.setenv("CRB_HOME", str(persistent_home))
         monkeypatch.setenv("CRB_SECRET_KEY", "k" * 40)
         settings, refusal = load_settings()
         assert settings is not None and refusal == "" and settings.env == "prod"
         r = probe_settings(settings, refusal)
-        assert r.status == "ok" and r.detail == "CRB_ENV=prod · home /srv/crb · database sqlite"
+        assert r.status == "ok"
+        assert r.detail == f"CRB_ENV=prod · home {persistent_home} · database sqlite"
         h = probe_home()
         assert h.status == "ok"
-        assert (
-            h.detail
-            == "CRB_HOME /srv/crb (not created yet) · secrets dir /srv/crb/secrets (not created yet)"
+        assert h.detail == (
+            f"CRB_HOME {persistent_home} (not created yet) · "
+            f"secrets dir {persistent_home / 'secrets'} (not created yet)"
         )
+        assert "temporary" not in h.data and h.data["exists"] is False
 
     def test_home_fails_on_a_group_readable_secrets_dir(
         self, home: Path, monkeypatch: pytest.MonkeyPatch

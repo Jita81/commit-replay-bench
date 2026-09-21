@@ -58,9 +58,8 @@ crb worker --home "$CRB_HOME" --executor local  # the queue consumer
 OS's periodic clean-up removes untouched files there (see Apple's `periodic` / `daily`
 documentation for `/tmp` on your macOS version), and it may empty them on reboot. A
 deployment that lives there loses its builder token, its clones' `HEAD` and its restart
-script with no error message — the development stack did exactly that in September 2026
-and was moved to `~/crb-stack`. The product now
-enforces the rule rather than relying on this paragraph: `Settings` **refuses to start**
+script with no error message. The product enforces the rule rather than relying on this
+paragraph: `Settings` **refuses to start**
 when `CRB_HOME` resolves under one of those roots and `CRB_ENV=prod` (the default), and
 **warns** in `CRB_ENV=dev`; `crb doctor`'s `home` line says the same. `CRB_ALLOW_TEMP_HOME=true`
 admits a temporary home for a throwaway evaluation only (the walkthrough harness runs
@@ -450,7 +449,7 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
       sha256:<pinned>` passes (§2.2) and the digest is what `image.digest` / `CRB_IMAGE` says.
 - [ ] `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
       `database at <rev> = code head` — its contract is
-      [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead or empty — both revisions named, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
+      [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
       line. `append_only` proves an
       UPDATE refused, `ledger` reads `false_q1=0`, `builders`
       configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the

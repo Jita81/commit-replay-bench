@@ -34,9 +34,23 @@ Contents: [1 Numbers](#1-the-numbers-and-where-they-live) ·
 | CHANGELOG header | `## [X.Y.Z] — YYYY-MM-DD …` plus the compare link `[X.Y.Z]: https://github.com/Jita81/commit-replay-bench/compare/v<previous>...vX.Y.Z` | `## [2.0.0b1] — 2026-09-2x` |
 | Apparatus version | `crb.core.version.APPARATUS_VERSION` — **not** a release number; it moves only when the meaning of a verdict changes, with an ADR | stays `2.2` |
 
-`scripts/check_release_tag.py` is the rule `release.yml` runs first: on a tag push the tag
-must be exactly `v` + the `pyproject.toml` version, or the workflow stops with an
-annotation and nothing is built.
+`scripts/check_release_tag.py` is the rule `release.yml` runs first, before anything is
+built: on a tag push the tag must be exactly `v` + the `pyproject.toml` version, **and the
+tagged commit must be reachable from `main`** (the workflow fetches `origin/main` on its
+full-history checkout and runs `git merge-base --is-ancestor` through the script's
+`--require-on origin/main`), or the job stops with an `::error::` annotation naming the
+tag, the commit and the ref, and nothing is built, pushed or signed. The `main` half is
+the release contract enforced, not described: without it a `v*` tag on an unmerged
+branch commit would have built, pushed to GHCR and keylessly signed an image nobody
+reviewed (CodeRabbit on PR #43, 2026-09-21). `tests/test_release_tag.py` proves both
+outcomes on a throwaway repository and that the workflow runs the step before `uv build`.
+
+The workflow check is the floor; **who may create a `v*` tag** is the repository's setting,
+not the pipeline's — [aspiration] add a **tag-protection ruleset** (*Settings → Rules →
+Rulesets → New tag ruleset*, target `v*`, *Restrict creations* with maintainers as the
+bypass list, and *Restrict deletions* / *Block force pushes* so a tag never moves) so an
+unmerged commit cannot even be tagged. CodeRabbit's ruleset query on PR #43 (2026-09-21) found none;
+until one exists the workflow refuses the release — the same outcome, one step later.
 
 ## 2. Cut a release
 
@@ -69,7 +83,9 @@ change; the tag is pushed **after** the merge, on the merge commit.
    as the tag will, and **never pushes or signs**; read its summary.
 7. **Merge the pull request**, then run the adversarial verify pass CONTRIBUTING asks for
    before a release tag: the full suite on the merged tree, fresh checkout.
-8. **Tag the merge commit and push the tag**:
+8. **Tag the merge commit and push the tag** — the merge commit, on `main`: the workflow
+   refuses a tag whose commit `main` does not contain (§1), so a tag pushed from the
+   branch before the merge is a red `build` job, not a release:
 
    ```bash
    git switch main && git pull --ff-only
@@ -83,7 +99,7 @@ change; the tag is pushed **after** the merge, on the merge commit.
 
 | Job | Does | Stops when |
 |---|---|---|
-| `build` | `scripts/check_release_tag.py`; `uv build` (sdist + wheel); installs the wheel into a clean venv and imports `crb.core`; records `SHA256SUMS`; uploads `crb-dist-<tag>` | the tag is not `v<pyproject version>`; the wheel does not import |
+| `build` | `git fetch --no-tags origin main` then `scripts/check_release_tag.py --require-on origin/main` (the tag is `v<pyproject version>` and its commit is reachable from `main` — nothing is built otherwise); `uv build` (sdist + wheel); installs the wheel into a clean venv and imports `crb.core`; records `SHA256SUMS`; uploads `crb-dist-<tag>` | the tag is not `v<pyproject version>`; the tagged commit is not on `main`; the wheel does not import |
 | `image` | builds `deploy/Dockerfile` for `linux/amd64` (UI bundle + the wheel, installed non-editable); smokes the candidate — non-root uid 10001, read-only root, `migrate upgrade` on SQLite, UI and tools present; writes an SPDX 2.3 SBOM with syft and uploads it as `crb-image-sbom-<tag>` (365-day retention); **pushes to GHCR only for a tag of `Jita81/commit-replay-bench`** (a fork or a dispatch builds and smokes but never publishes); smokes the **pushed** digest again | any smoke fails |
 | `sign` | `cosign sign` the pushed digest **keyless** (the workflow's GitHub OIDC token → a Fulcio certificate, recorded in Rekor) and `cosign attest --type spdxjson` the SBOM; then verifies its own signature | the signature does not verify |
 
@@ -141,7 +157,8 @@ Copy into the release pull request.
 - [ ] decision-log line; README status line; DEPLOYMENT §2.2 examples
 - [ ] every local gate green; `workflow_dispatch` dry run green (built and smoked, not pushed)
 - [ ] pull request merged; adversarial verify pass on the merged tree
-- [ ] `git tag -a vX.Y.Z` on the merge commit; `git push origin vX.Y.Z`
+- [ ] `git tag -a vX.Y.Z` on the merge commit (`git merge-base --is-ancestor vX.Y.Z origin/main`
+      answers 0 — the check the workflow repeats); `git push origin vX.Y.Z`
 - [ ] release workflow: `build`, `image`, `sign` green; artifacts present
 - [ ] GHCR: tags `X.Y.Z` + `sha-…`, no `latest`; `deploy/verify-image.sh X.Y.Z --sbom` passes;
       digest recorded
