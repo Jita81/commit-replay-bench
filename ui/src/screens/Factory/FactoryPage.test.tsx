@@ -11,7 +11,9 @@
  *               status, route hint, DoR gaps, RED proof, build status and review verdict;
  *               that a 404 `not_found` is the "no backlog registered" instruction, never
  *               an error state or fabricated rows (the old screen matched a phase-P6 501
- *               that the shipped server never answers — CodeRabbit on PR #6); that "Run the
+ *               that the shipped server never answers — CodeRabbit on PR #6), and that its
+ *               sentence is role-aware (a viewer reads "An operator freezes one", no
+ *               Freeze button); that "Run the
  *               factory" posts the builder `builderChoice` picks (J-FAC-1 — the 422 a run
  *               without one met), names the estimate and never a cap (F5b), says what it
  *               will spend and where it delivers first, that reached without `?repo=` the
@@ -438,6 +440,22 @@ describe('FactoryPage — the shipped contract', () => {
     expect(screen.getByText(/Freeze one: the items are validated, hashed/)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByText('No factory items yet')).toBeInTheDocument()
+    expect(within(screen.getByTestId('factory-no-backlog')).getByRole('button', { name: 'Freeze a backlog…' })).toBeInTheDocument()
+  })
+
+  it('a viewer is told an operator freezes the backlog, and is not shown the Freeze button', async () => {
+    mockApi(
+      base({
+        'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+        'GET /factory/alpha/backlog': () => envelope(404, 'not_found', "no backlog registered for 'alpha'"),
+        'GET /factory/alpha/tasks': [],
+      }),
+    )
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('factory-no-backlog')).toBeInTheDocument())
+    expect(screen.getByText(/An operator freezes one: the items are validated, hashed/)).toBeInTheDocument()
+    expect(screen.queryByText(/^Freeze one:/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Freeze a backlog/ })).not.toBeInTheDocument()
   })
 
   it('deliverableCount counts the items whose cell routes deliver', () => {

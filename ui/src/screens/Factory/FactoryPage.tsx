@@ -440,7 +440,11 @@ export function FactoryPage() {
                 <EmptyState
                   glyph="⚙"
                   title="No backlog registered for this repository"
-                  reason="Freeze one: the items are validated, hashed and recorded as the first event of the evidence chain; a factory run then works them in dependency order."
+                  reason={
+                    can('operator')
+                      ? 'Freeze one: the items are validated, hashed and recorded as the first event of the evidence chain; a factory run then works them in dependency order.'
+                      : 'An operator freezes one: the items are validated, hashed and recorded as the first event of the evidence chain; a factory run then works them in dependency order.'
+                  }
                   action={
                     can('operator') ? (
                       <Button variant="filled" onClick={() => openFreeze(null)}>

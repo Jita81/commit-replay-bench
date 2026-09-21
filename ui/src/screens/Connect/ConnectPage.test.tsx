@@ -85,7 +85,7 @@ describe('ConnectPage', () => {
     expect(screen.getByText('Journey · 1 of 4 · Connection')).toBeInTheDocument()
   })
 
-  it('a measured repository\'s door is named Baseline, the same as the nav', async () => {
+  it('a measured repository\'s door is named Baseline, the same as the nav, and opens the baseline', async () => {
     mockApi({
       'GET /auth/me': PRINCIPAL,
       'GET /repos': { items: [MEASURED], total: 1, limit: 500, offset: 0 },
@@ -94,8 +94,12 @@ describe('ConnectPage', () => {
       'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 22 } },
     })
     renderApp(<ConnectPage />, { route: '/connect' })
-    await waitFor(() => expect(screen.getByRole('link', { name: 'Baseline' })).toHaveAttribute('href', '/connect/alpha'))
+    // the button does what its name says: it lands on /results, not on the walk (a second Baseline away)
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Baseline' })).toHaveAttribute('href', '/results?repo=alpha'))
     expect(screen.queryByRole('link', { name: 'Results' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Continue' })).not.toBeInTheDocument()
+    // the repository link is still the door to the walk
+    expect(screen.getByRole('link', { name: 'alpha' })).toHaveAttribute('href', '/connect/alpha')
   })
 
   it('the per-repository walk: six stages, statuses from the API, the operator runs the next one', async () => {

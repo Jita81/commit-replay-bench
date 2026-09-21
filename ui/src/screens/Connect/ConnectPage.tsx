@@ -21,7 +21,9 @@
  *               and a passed controls report that still carries a finding (an escape, a
  *               thin set) reads "Done, with a finding" in amber — deliver is withheld until
  *               it is answered. Every door to /results is named "Baseline", as the nav
- *               names it; at phone width the repository link is the row's door.
+ *               names it, and opens /results (a measured row's button; an unmeasured row's
+ *               reads "Continue" and opens the walk); at phone width the repository link
+ *               is the row's door to the walk.
  * How:          `useAllRepos` → the table; `useRepo` + `useOracle` + `useOracleControls` +
  *               `useCapabilityMap` (+ the polled `useRun` while a stage runs, and
  *               `useQueuedRuns` only for an older server that sends no `queue_position`)
@@ -251,9 +253,15 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
       </td>
       {/* below sm the column is off-canvas in the scrolling table: the repository link in column one is the row's action there */}
       <td className="hidden py-2 text-right sm:table-cell">
-        <LinkButton size="sm" to={`/connect/${encodeURIComponent(repo.name)}`}>
-          {stageComplete(s.status) ? 'Baseline' : 'Continue'}
-        </LinkButton>
+        {stageComplete(s.status) ? (
+          <LinkButton size="sm" to={`/results?repo=${encodeURIComponent(repo.name)}`}>
+            Baseline
+          </LinkButton>
+        ) : (
+          <LinkButton size="sm" to={`/connect/${encodeURIComponent(repo.name)}`}>
+            Continue
+          </LinkButton>
+        )}
       </td>
     </tr>
   )
