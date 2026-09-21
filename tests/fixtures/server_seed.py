@@ -234,6 +234,12 @@ def _user_hash(password: str) -> str:
     return hash_password(password)
 
 
+def user_id(name: str) -> str:
+    """The id :func:`add_users` gives the account ``name`` — what a run's ``actor`` and a
+    sign-off's ``approver`` carry (the chain keeps ids, never names)."""
+    return hashlib.sha256(name.encode()).hexdigest()[:32]
+
+
 def add_users(factory: sessionmaker[Session]) -> None:
     """root (admin) / viewer1 / op1 / appr1, inserted directly with a cached argon2 hash.
 
@@ -243,7 +249,7 @@ def add_users(factory: sessionmaker[Session]) -> None:
         for role, name in USERS.items():
             s.add(
                 User(
-                    id=hashlib.sha256(name.encode()).hexdigest()[:32],
+                    id=user_id(name),
                     subject=f"local:{name}",
                     issuer="local",
                     email=f"{name}@example.invalid",
@@ -830,4 +836,5 @@ __all__ = [
     "make_settings",
     "seed",
     "task_id",
+    "user_id",
 ]

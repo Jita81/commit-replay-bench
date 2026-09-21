@@ -944,6 +944,8 @@ export interface Signoff {
   approver: string
   /** Resolved from the users table at read; empty when the account is gone. */
   approver_name?: string
+  /** The kind of account that signed (F34, hash-covered): `oidc` | `local` | `service` (reserved — a delegated signature, never a person's); `""` on a row written before the field existed. */
+  verifier_kind?: '' | 'oidc' | 'local' | 'service'
   created: string
   revoked: boolean
   /** Live: not revoked, not superseded, the cell still false-Q1-free and the apparatus unchanged. */

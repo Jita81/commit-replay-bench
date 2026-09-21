@@ -8,6 +8,42 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-21 — the two-person rule is enforced at write; every sign-off says who signed (F7b, F34)
+
+- **`same_actor` — the fourth non-overridable clause** (`signoff-policy.v3`, DL-047). `POST
+  /signoffs` and `GET /signoffs/preview` resolve the actors behind the evidence from the
+  ledger (`Grade.actor` of the attested row and `Run.actor` of the run that produced it; the
+  same for every accepted row of the measured cell) and refuse — `409 signoff_refused`,
+  `detail.code: same_actor`, `observed` the approver's id, the message naming the run and
+  the row — when the approver produced the attested row or is the only person behind the
+  cell. The preview judges it for the signed-in viewer, so "you queued run X, which produced
+  the attested row — a second approver must sign" shows before they try; the gate gains a
+  *Signed by a second person* row. Non-person actors never count (`is_person_actor`: the
+  worker, `system…`, `cli:<os user>`, `service:…`, `import`, the empty actor) — a cell the
+  worker graded from one operator's runs is that operator's alone, and a second approver
+  CAN sign it. No `CRB_SIGNOFF__*` knob: `require_independent_verifier` may only be `true`
+  (else `503 signoff_policy_invalid`) and is stamped into `policy_thresholds`, so an audit
+  reads from the record that the rule was in force. The core stays stdlib-only: the
+  actors are inputs (`attested_actors`, `cell_actors`); a caller that resolves none leaves
+  the clause silent.
+- **`verifier_kind`** on every sign-off (F34): `local` | `oidc`, stamped at write from the
+  approver's issuer into `cell_json` under the hash (`crb.signoff.v3`; the v2 body's field
+  tuple is frozen, so every earlier chain still verifies); `service` is reserved for a
+  delegated, non-person signature and no write path mints it. Served on `POST /signoffs`,
+  `GET /signoffs` and `GET /signoffs/{id}`, in `would_record`, on the `signoff.created`
+  event and in the JSONL ledger's records; rows written before the field read `""`
+  (`schema: crb.signoff.v2`), never a guessed kind. No migration.
+- The posture page's *Separation of duties* row and Home's *Why two people* now state the
+  enforced rule; `docs/API.md` (`/signoffs`), `SECURITY.md` §3.4, `EVIDENCE-AND-CLAIMS` §6a
+  (the claim sentence names the second person and the account kind; four clauses have no
+  knob), DL-047. The browser walkthrough (`08-signoff`) is now a two-person walkthrough: the
+  admin who queued every run is refused `same_actor`, and a `walk-approver` persona signs.
+  Tests: `tests/test_signoff.py` (the clause on the attested row's actor, on the run's, on
+  every-person-is-the-verifier, non-person actors, the relaxed-policy floor, v2 records
+  verifying), `tests/test_server_routes_signoffs.py::TestTwoPersonRule` (409 at write, the
+  preview, a second approver signing, `verifier_kind` `local` / `oidc` served and
+  hash-covered).
+
 ### 2026-09-21 — a locked-out administrator has a way back in (F23)
 
 - **`PUT /users/{id}/password`** (admin), **`PUT /users/me/password`** (any local account,

@@ -1,4 +1,4 @@
-"""Sign-off helpers on top of :mod:`fixtures.server_seed` for ``signoff-policy.v2``.
+"""Sign-off helpers on top of :mod:`fixtures.server_seed` for ``signoff-policy.v3``.
 
 The seed's controls report carries ONE escape by design, so its deliver cell
 (``bug.fix|S``, n = 40, point 0.95) is REFUSED at write — ``controls_escapes`` — and
@@ -9,12 +9,16 @@ that needs a signable cell first appends a NEWER, clean controls report for ``al
 (:func:`pass_controls`) and NEWER, strong ``oracle.score`` events for the cell's tasks
 (:func:`score_oracle`) — both the worker's own event shapes, through the ORM, never by
 editing the seed; :func:`clear_policy` does both — then posts a body that names an
-accepted row of the cell (:func:`attested_body`). Nothing here bypasses the write
-path of the grade ledger.
+accepted row of the cell (:func:`attested_body`). The two-person rule
+(``signoff-policy.v3``, ``same_actor``) is clear in the seed as shipped: ``op1`` queued
+the ``succeeded`` run and the worker graded every row, so the approver ``appr1`` is
+nobody's same actor — a test that wants the refusal re-stamps a run's actor to the
+approver's id (``tests/test_server_routes_signoffs.py::TestTwoPersonRule``). Nothing here
+bypasses the write path of the grade ledger.
 
 Navigation
 ----------
-What it is:   Sign-off helpers on top of ``fixtures.server_seed`` for ``signoff-policy.v2``.
+What it is:   Sign-off helpers on top of ``fixtures.server_seed`` for ``signoff-policy.v3``.
 What it does: Makes the seed's deliver cell signable the honest way: appends a NEWER, clean
               ``controls.report`` (``pass_controls``) and NEWER strong ``oracle.score`` events per
               task (``score_oracle``) — the worker's own event shapes, through the ORM, never by
@@ -161,8 +165,9 @@ def score_oracle(
 
 
 def clear_policy(env: Env, *, repo: str = ALPHA) -> None:
-    """Make the seed's deliver cell signable under ``signoff-policy.v2``: a clean
-    controls gate AND a measured, strong oracle on every task of the cell."""
+    """Make the seed's deliver cell signable under ``signoff-policy.v3``: a clean
+    controls gate AND a measured, strong oracle on every task of the cell (the
+    two-person rule holds in the seed as shipped — see the module docstring)."""
     pass_controls(env, repo=repo)
     score_oracle(env, repo=repo)
 

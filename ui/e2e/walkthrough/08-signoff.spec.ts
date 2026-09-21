@@ -1,5 +1,5 @@
 /**
- * 08 — a sign-off is a policy decision, refused at write (`signoff-policy.v2`).
+ * 08 — a sign-off is a policy decision, refused at write (`signoff-policy.v3`).
  *
  *  - The primary repo's only measured cell (n = 2 from 05) is REFUSED, and the reason is
  *    visible before the approver tries: the Sign-off page's preview lists every failing
@@ -18,10 +18,13 @@
  *    a refusal no deployment knob can waive; the parametrised tests kill every
  *    arithmetic/return mutant, so the cell scores ≥ 0.80) and replayed with
  *    `fixture_gold` — 18 clean rows in one cell → point 100 %, Wilson lower 80.6 % ≥
- *    80 % → route `deliver`. The approver picks the cell, names an accepted row, ticks
- *    "I have read this accepted diff", writes the statement, signs — and the record
- *    lists the snapshot (n, point, lower, false-Q1, oracle, policy, route, controls k of
- *    N / escapes / run, the attested row).
+ *    80 % → route `deliver`. The admin who queued every run is REFUSED by the two-person
+ *    rule (`same_actor`, `signoff-policy.v3`: they queued the run that produced the attested
+ *    row; no other person is behind the cell) — shown before they try, never overridable.
+ *    A second person (`walk-approver`, created through `POST /users`) picks the cell, names
+ *    an accepted row, ticks "I have read this accepted diff", writes the statement, signs —
+ *    and the record lists the snapshot (n, point, lower, false-Q1, oracle, policy, route,
+ *    controls k of N / escapes / run, the attested row, `verifier_kind: local`).
  *
  * Navigation
  * ----------
@@ -35,11 +38,14 @@
  *               constructible → 0 escapes; its oracle scores ≥ 0.80 once measured), built
  *               and served as a bare file:// clone, onboarded, probed, mined, put through
  *               controls, an oracle run and 18 clean `fixture_gold` replays, routes
- *               `deliver` — and the approver signs it through the UI, the record carrying
- *               the whole snapshot.
+ *               `deliver` — that the admin who queued those runs is refused `same_actor`
+ *               (the two-person rule, before they try) — and that a second person signs it
+ *               through the UI, the record carrying the whole snapshot and who signed.
  * How:          Seeding goes through `POST /repos` / `POST /runs` with the CSRF header (the
- *               pytest seed fixture is not touched); the sign-off itself is driven through
- *               the form (`attest-row`, `attest-read`, `attest-statement`, `signoff-recorded`).
+ *               pytest seed fixture is not touched); the approver persona is created with
+ *               `POST /users` (idempotent, the stable `personaPassword`, as 11-screens does);
+ *               the sign-off itself is driven through the form (`attest-row`, `attest-read`,
+ *               `attest-statement`, `signoff-recorded`).
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Signoff/SignoffPage.tsx and
@@ -57,13 +63,27 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { APIRequestContext, Locator, Page } from '@playwright/test'
-import { env, expect, field, primary, test } from './support'
+import { env, expect, field, personaPassword, primary, signIn, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
 const SIGNABLE_NAME = 'walk-signable'
 const N_TASKS = 18 // 16 clean rows already clear Wilson lower ≥ 0.80; two spare
 const MIN = 60_000
+/** The second person: the same persona account 11-screens uses, so a rerun reuses it. */
+const APPROVER = 'walk-approver'
+const APPROVER_PASS = personaPassword(APPROVER)
+
+/** Create the approver persona unless an earlier run did (its stable password must then open it). */
+async function ensureApprover(page: Page): Promise<void> {
+  const users = (await apiGet(page.request, '/users')) as { items: Array<{ username: string }> }
+  if (users.items.some((u) => u.username === APPROVER)) {
+    const login = await page.context().request.post(`${env.baseUrl}/api/v1/auth/login`, { data: { username: APPROVER, password: APPROVER_PASS } })
+    expect(login.status(), `POST /auth/login as existing ${APPROVER} with the stable password → ${login.status()}`).toBe(200)
+    return
+  }
+  await apiPost(page, '/users', { username: APPROVER, password: APPROVER_PASS, role: 'approver', display_name: 'Walk approver' })
+}
 
 /** The CSRF header the API requires on writes (double-submit cookie `crb_csrf`). */
 async function csrf(page: Page): Promise<Record<string, string>> {
@@ -144,7 +164,7 @@ test.describe('08 sign-off policy', () => {
     await page.goto(`/signoff?repo=${encodeURIComponent(t.name)}`)
     const gate = page.getByTestId('signoff-gate')
     await expect(gate).toBeVisible()
-    await expect(gate).toContainText('policy signoff-policy.v2')
+    await expect(gate).toContainText('policy signoff-policy.v3')
     const select = field(page, 'Cell')
     await expect.poll(async () => (await select.locator('option').count()) - 1).toBeGreaterThanOrEqual(1)
     const value = await select.locator('option').nth(1).getAttribute('value')
@@ -187,6 +207,11 @@ test.describe('08 sign-off policy', () => {
     }
     await expect(refusals.getByTestId('refusal-route_not_deliver:n_below_min')).toContainText('observed calibrate')
     await expect(refusals.getByTestId('refusal-attestation_missing')).toContainText('non-overridable')
+    // the two-person rule: the admin signed in here queued 05's replay, so every person
+    // behind the cell is the would-be approver — refused before they try, non-overridable
+    await expect(refusals.getByTestId('refusal-same_actor')).toContainText('a second approver must sign')
+    await expect(refusals.getByTestId('refusal-same_actor')).toContainText('non-overridable')
+    await expect(gateRow(gate, 'Signed by a second person')).toContainText(/✗\s*not satisfied:/)
 
     // the gate is CLOSED on exactly those criteria; the action is disabled; nothing is sent
     await expect(gate).toHaveAttribute('data-state', 'CLOSED')
@@ -253,9 +278,59 @@ test.describe('08 sign-off policy', () => {
     const oracleCell = (oracle.cells as Array<Record<string, unknown>>).find((c) => c.capability_class === signableClass && c.size === signableSize)!
     expect(oracleCell, JSON.stringify(oracle.cells)).toBeTruthy()
     expect(Number(oracleCell.strength_mean), JSON.stringify(oracleCell)).toBeGreaterThanOrEqual(0.8)
+    // the second person the sign-off will need (the admin queued every run above)
+    await ensureApprover(page)
   })
 
-  test('the approver signs the deliver cell with an attestation; the record shows the snapshot', async ({ page }) => {
+  test('the admin who queued the runs is refused by the two-person rule (same_actor) before trying', async ({ page }) => {
+    await page.goto(`/signoff?repo=${SIGNABLE_NAME}`)
+    const gate = page.getByTestId('signoff-gate')
+    await expect(gate).toBeVisible()
+    const select = field(page, 'Cell')
+    await expect.poll(async () => (await select.locator('option').count()) - 1).toBeGreaterThanOrEqual(1)
+    await select.selectOption({ value: `${signableClass}|${signableSize}` })
+    await expect(gate).toContainText(`Attest ${signableClass} × ${signableSize}`)
+    // every other clause holds (controls passed, oracle measured, route deliver): the only
+    // refusals are the attestation and the person — and naming a row does not lift the person
+    const refusals = page.getByTestId('signoff-refusals')
+    await expect(refusals.getByTestId('refusal-same_actor')).toContainText('non-overridable')
+    await expect(refusals.getByTestId('refusal-same_actor')).toContainText('only person behind every accepted row')
+    await expect(refusals.locator('li')).toHaveCount(2)
+    await expect(gateRow(gate, 'Signed by a second person')).toContainText(/✗\s*not satisfied:/)
+    const picker = field(page, 'Accepted row')
+    await expect.poll(async () => (await picker.locator('option').count()) - 1).toBeGreaterThanOrEqual(16)
+    const rowHash = await picker.locator('option').nth(1).getAttribute('value')
+    await picker.selectOption({ value: rowHash! })
+    // the sentence names the run the admin queued, which produced the row they named
+    const same = refusals.getByTestId('refusal-same_actor')
+    await expect(same).toContainText(/queued run [0-9a-f]{8}, which produced the attested row/)
+    await expect(same).toContainText('a second approver must sign')
+    await expect(refusals.locator('li')).toHaveCount(1)
+    await page.getByTestId('attest-read').check()
+    await field(page, 'Attestation statement').fill('walkthrough: the admin who queued the replay trying to sign its result')
+    await expect(page.getByRole('button', { name: 'Sign off' })).toBeDisabled()
+    await expect(gate).toHaveAttribute('data-state', 'CLOSED')
+    await expect(page.getByTestId('signoff-recorded')).toHaveCount(0)
+    // the API says the same, without writing: 409 same_actor, nothing recorded
+    const res = await page.request.post(`${env.baseUrl}/api/v1/signoffs`, {
+      headers: await csrf(page),
+      data: { repo: SIGNABLE_NAME, cell: { capability_class: signableClass, size: signableSize }, note: 'walkthrough', attestation: { reviewed_row_hash: rowHash, statement: 'walkthrough: same actor' } },
+    })
+    expect(res.status(), await res.text()).toBe(409)
+    const body = (await res.json()) as { error: { code: string; detail: { code: string; refusals: Array<{ code: string; overridable: boolean }> } } }
+    expect(body.error.code).toBe('signoff_refused')
+    expect(body.error.detail.code).toBe('same_actor')
+    expect(body.error.detail.refusals.map((r) => r.code)).toEqual(['same_actor'])
+    expect(body.error.detail.refusals[0]!.overridable).toBe(false)
+    expect(((await apiGet(page.request, `/signoffs?repo=${SIGNABLE_NAME}`)).items as unknown[]).length).toBe(0)
+  })
+
+  test('a second person (the approver) signs the deliver cell with an attestation; the record shows the snapshot and who signed', async ({ page }) => {
+    // the page fixture signed in as the admin who queued the runs: end that session first
+    await page.goto('/home')
+    await page.getByRole('button', { name: 'Sign out' }).click()
+    await expect(page).toHaveURL(/\/login/)
+    await signIn(page, APPROVER, APPROVER_PASS)
     await page.goto(`/signoff?repo=${SIGNABLE_NAME}`)
     const gate = page.getByTestId('signoff-gate')
     await expect(gate).toBeVisible()
@@ -301,16 +376,17 @@ test.describe('08 sign-off policy', () => {
     await field(page, 'Note').fill('walkthrough: 18 fixture_gold rows, controls passed with 0 escapes')
     await expect(gate).toHaveAttribute('data-state', 'OPEN')
     await expect(gateRow(gate, 'Accepted row read and affirmed')).toContainText(/✓\s*satisfied:/)
+    await expect(gateRow(gate, 'Signed by a second person')).toContainText(/✓\s*satisfied:/)
     await expect(submit).toBeEnabled()
 
     await submit.click()
-    await expect(page.getByTestId('signoff-recorded')).toContainText('signoff-policy.v2')
+    await expect(page.getByTestId('signoff-recorded')).toContainText('signoff-policy.v3')
     // the record: evidence at signing, policy · route · controls, the attested row
     const table = page.getByRole('table', { name: `Sign-offs for ${SIGNABLE_NAME}` })
     await expect(table.getByTestId('signoff-row-evidence')).toContainText(`n=${signableN} · 100.0% · lower `)
     await expect(table.getByTestId('signoff-row-evidence')).toContainText('fQ1 0')
     await expect(table.getByTestId('signoff-row-evidence')).toContainText(/oracle (0\.[89]\d|1\.00)/)
-    await expect(table.getByTestId('signoff-row-policy')).toContainText('signoff-policy.v2 · deliver (deliver) · controls passed')
+    await expect(table.getByTestId('signoff-row-policy')).toContainText('signoff-policy.v3 · deliver (deliver) · controls passed')
     await expect(table.getByTestId('signoff-row-policy')).toContainText('esc 0')
     await expect(table.getByTestId('signoff-row-attestation')).toContainText(rowHash!.slice(0, 10))
     await expect(table.getByRole('img', { name: 'Active attestation' })).toBeVisible()
@@ -318,8 +394,11 @@ test.describe('08 sign-off policy', () => {
     // and the API serves the same snapshot, hash-chained
     const list = await apiGet(page.request, `/signoffs?repo=${SIGNABLE_NAME}`)
     const [rec] = list.items as Array<Record<string, unknown>>
-    expect(rec.policy_version).toBe('signoff-policy.v2')
+    expect(rec.policy_version).toBe('signoff-policy.v3')
     expect((rec.policy_thresholds as Record<string, unknown>).require_oracle_measured).toBe(true)
+    expect((rec.policy_thresholds as Record<string, unknown>).require_independent_verifier).toBe(true)
+    expect(rec.verifier_kind).toBe('local') // the persona is a local account; the admin's id is not the signer's
+    expect(rec.approver_name).toBe('Walk approver')
     expect(Number((rec.evidence as Record<string, unknown>).oracle_strength)).toBeGreaterThanOrEqual(0.8)
     expect((rec.route as Record<string, unknown>).reason_code).toBe('deliver')
     expect((rec.controls as Record<string, unknown>).escapes).toBe(0)

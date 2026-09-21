@@ -104,6 +104,7 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
       { label: 'Negative controls passed', ok: null },
       { label: 'Route = deliver', ok: null },
       { label: 'Accepted row read and affirmed', ok: null },
+      { label: 'Signed by a second person', ok: null },
     ]
   }
   const fam = new Set(preview.refusals.map((r) => refusalFamily(r.code)))
@@ -129,6 +130,7 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
     },
     { label: 'Route = deliver', ok: !fam.has('route_not_deliver'), detail: `${preview.route.route}${preview.route.reason_code ? ` (${preview.route.reason_code})` : ''}` },
     { label: 'Accepted row read and affirmed', ok: !fam.has('attestation_missing') && attested, detail: preview.attestation ? `${shortId(preview.attestation.reviewed_row_hash)} · ${preview.attestation.subject || preview.attestation.reviewed_task_id}` : 'pick a row below and tick “I have read this accepted diff”' },
+    { label: 'Signed by a second person', ok: !fam.has('same_actor'), detail: fam.has('same_actor') ? 'you produced this evidence — a second approver must sign; non-overridable' : 'you did not queue the run behind the attested row, and someone else is behind the cell' },
   ]
 }
 

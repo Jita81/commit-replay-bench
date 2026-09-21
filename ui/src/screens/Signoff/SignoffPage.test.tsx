@@ -4,7 +4,7 @@
  *
  * Navigation
  * ----------
- * What it is:   Screen tests for the sign-off page under `signoff-policy.v2`, against a
+ * What it is:   Screen tests for the sign-off page under `signoff-policy.v3`, against a
  *               mocked map, preview, POST and list.
  * What it does: Pins that a seeded deliver cell is refused on a controls escape with
  *               observed vs threshold shown before any attempt; that an unmeasured oracle is
@@ -45,9 +45,9 @@ const ESCAPED: ControlsVerdict = { measured: true, passed: true, complete: true,
 const PASSED: ControlsVerdict = { ...ESCAPED, escapes: 0, run_id: '5'.repeat(32), created: '2026-09-10T09:00:00+00:00', state: 'passed' }
 
 const POLICY = {
-  policy_version: 'signoff-policy.v2',
+  policy_version: 'signoff-policy.v3',
   relaxed: false,
-  non_overridable: ['false_q1', 'oracle_unmeasured', 'attestation_missing'],
+  non_overridable: ['false_q1', 'oracle_unmeasured', 'attestation_missing', 'same_actor'],
   bounds: { n_min: [1, 10000] as [number, number] },
   n_min: 10,
   require_route_deliver: true,
@@ -57,6 +57,7 @@ const POLICY = {
   min_oracle_strength: 0.8,
   require_oracle_measured: true,
   require_attestation: true,
+  require_independent_verifier: true,
 }
 /** The seed's measured oracle on the cell: 3 of its 4 tasks scored, mean 0.58 (< 0.80). */
 const ORACLE_WEAK = { strength: 0.5778, scored: 3, tasks: 4 }
@@ -113,6 +114,8 @@ const ESCAPE_REFUSALS: SignoffRefusal[] = [
 ]
 const ATTESTATION_MISSING = ESCAPE_REFUSALS[3]!
 const ORACLE_UNMEASURED: SignoffRefusal = { code: 'oracle_unmeasured', message: "no task of cell 'bug.fix|S' has a mutation score — the oracle's strength is unknown, so a green here is not evidence; run an 'oracle' run on this repo before signing (cannot be relaxed)", threshold: 'measured', observed: null, overridable: false }
+/** signoff-policy.v3 (F7b): the viewer queued the run that produced the row they named. */
+const SAME_ACTOR: SignoffRefusal = { code: 'same_actor', message: "approver 'u1' queued run cccccccc, which produced the attested row cccccccccccc… (task aaaaaaaaaaaaaaaa): the person who produced the evidence cannot sign it — a second approver must sign (cannot be relaxed)", threshold: 'a second person', observed: 'u1', overridable: false }
 
 function preview(over: Partial<SignoffPreview> = {}): SignoffPreview {
   return {
@@ -150,9 +153,9 @@ const SIGNED: SignoffWithPolicy = {
   current_false_q1: 0,
   prev_hash: '0'.repeat(64),
   row_hash: 'a'.repeat(64),
-  schema: 'crb.signoff.v2',
+  schema: 'crb.signoff.v3',
   evidence: { n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, apparatus_versions: ['2.1'], oracle_strength: 0.9 },
-  policy_version: 'signoff-policy.v2',
+  policy_version: 'signoff-policy.v3',
   policy_thresholds: POLICY,
   route: { route: 'deliver', reason: 'n=40 point=0.950 ci_low=0.835 false_q1=0', reason_code: 'deliver' },
   controls: { verdict: 'passed', run_id: '5'.repeat(32), k: 12, total: 14, escapes: 0, created: '2026-09-10T09:00:00+00:00' },
@@ -181,7 +184,7 @@ function signablePreview(over: Partial<SignoffPreview> = {}): SignoffPreview {
   })
 }
 
-describe('SignoffPage (signoff-policy.v2)', () => {
+describe('SignoffPage (signoff-policy.v3)', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('says what the screen is for in two sentences, keeps the refusal clauses behind a Details, and takes the journey eyebrow', async () => {
@@ -335,7 +338,7 @@ describe('SignoffPage (signoff-policy.v2)', () => {
     await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
     const gate = screen.getByTestId('signoff-gate')
     await waitFor(() => expect(screen.getByTestId('refusal-oracle_unmeasured')).toBeInTheDocument())
-    expect(gate.textContent).toContain('policy signoff-policy.v2')
+    expect(gate.textContent).toContain('policy signoff-policy.v3')
     expect(gate).toHaveAttribute('data-state', 'CLOSED')
     // the tile says "—" (never 0) and how many tasks carry a score
     const tile = screen.getByTestId('signoff-tile-oracle')
@@ -405,7 +408,7 @@ describe('SignoffPage (signoff-policy.v2)', () => {
 
     await user.click(submit)
     await screen.findByTestId('signoff-recorded')
-    expect(screen.getByTestId('signoff-recorded').textContent).toContain('signoff-policy.v2')
+    expect(screen.getByTestId('signoff-recorded').textContent).toContain('signoff-policy.v3')
     expect(gateRow(gate, /Oracle strength measured and ≥ 0\.80/).textContent).toMatch(/✓\s*satisfied:/)
     const post = calls.find((c) => c.method === 'POST' && c.path === '/signoffs')!
     expect((post.init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('t')
@@ -419,7 +422,7 @@ describe('SignoffPage (signoff-policy.v2)', () => {
     const table = await screen.findByRole('table', { name: 'Sign-offs for r' })
     await waitFor(() => expect(within(table).getByTestId('signoff-row-evidence')).toBeInTheDocument())
     expect(within(table).getByTestId('signoff-row-evidence').textContent).toContain('n=40 · 95.0% · lower 83.5% · fQ1 0 · oracle 0.90')
-    expect(within(table).getByTestId('signoff-row-policy').textContent).toContain('signoff-policy.v2 · deliver (deliver) · controls passed 12/14 esc 0')
+    expect(within(table).getByTestId('signoff-row-policy').textContent).toContain('signoff-policy.v3 · deliver (deliver) · controls passed 12/14 esc 0')
     expect(within(table).getByTestId('signoff-row-attestation').textContent).toContain('cccccccccc · fix: task 4')
     expect(within(table).getByRole('img', { name: 'Active attestation' })).toBeInTheDocument()
   })
@@ -533,6 +536,31 @@ describe('SignoffPage (signoff-policy.v2)', () => {
     expect(err.textContent).toContain('approver role required')
     expect(err.textContent).toContain('HTTP 403')
     expect(screen.getByTestId('signoff-gate')).toHaveAttribute('data-state', 'OPEN')
+  })
+
+  it('shows the two-person rule as a non-overridable refusal (signoff-policy.v3): the gate row, the clause and the sentence naming the run', async () => {
+    const same = signablePreview({ refusals: [SAME_ACTOR] })
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, controls: PASSED, cells: [{ ...MAP.cells[0]!, route: 'deliver', reason: 'ok', reason_code: 'deliver' }] },
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /signoffs/preview': same,
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const gate = screen.getByTestId('signoff-gate')
+    const clause = await screen.findByTestId('refusal-same_actor')
+    expect(clause.textContent).toContain('you produced this evidence')
+    expect(clause.textContent).toContain('queued run cccccccc, which produced the attested row')
+    expect(clause.textContent).toContain('non-overridable')
+    expect(gate).toHaveAttribute('data-state', 'CLOSED')
+    const row = gateRow(gate, 'Signed by a second person')
+    expect(row.textContent).toMatch(/✗\s*not satisfied:/)
+    expect(row.textContent).toContain('a second approver must sign')
+    expect(gateRow(gate, 'Route = deliver').textContent).toMatch(/✓\s*satisfied:/)
   })
 
   it('lists a pre-policy record honestly (no snapshot) next to a policy record', async () => {

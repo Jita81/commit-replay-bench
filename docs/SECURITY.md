@@ -270,6 +270,23 @@ a ticket or a shell history again (review 2026-09-13, action #9).
 - Roles are an ascending ladder `viewer < operator < approver < admin`; every mutating route
   names its minimum role; `/health` and `/metrics` are unauthenticated and must be bound to
   an internal interface. [measured] RBAC matrix in `tests/test_server_app.py`
+- **Two-person rule, enforced at write** (`signoff-policy.v3`, F7b, DL-047): the API refuses
+  a sign-off (`409 signoff_refused` / `same_actor`) when the approver is the actor of the
+  attested row or of the run that produced it, or the only person behind every accepted row
+  of the cell — the person who produced the evidence can never be the person who signs it.
+  Non-person actors (the worker, `cli:<os user>`, `service:…`, the census importer, the empty
+  actor) never count as a second person. The clause has no `CRB_SIGNOFF__*` knob and cannot
+  be relaxed (`require_independent_verifier` may only be `true`; anything else is `503
+  signoff_policy_invalid`), the preview shows it to the would-be approver before they try,
+  and the record stamps `require_independent_verifier: true` so an audit reads that the rule
+  was in force. A separate operator and approver account is therefore not a deployment
+  convention but a precondition for any sign-off. [measured]
+  `tests/test_server_routes_signoffs.py::TestTwoPersonRule`, `tests/test_signoff.py`
+- **Who signed is on the record** (F34): every sign-off carries `verifier_kind` — `local`
+  or `oidc`, stamped from the signing account's issuer under the hash; `service` is reserved
+  for a delegated, non-person signature and no write path of this API mints it, so a
+  delegated signature can never read as a person's. Rows written before the field carry
+  `""`, never a guessed kind. [measured] `tests/test_server_routes_signoffs.py`
 
 ### 3.5 Evidence integrity — `crb.core.ledger`, `crb.store`
 

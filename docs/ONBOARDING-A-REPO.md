@@ -121,12 +121,16 @@ you cannot change it per repository, only read it.
 
 ## Step 7 — Sign off (approver)
 
-Sign-off is a **policy decision refused at write** (signoff-policy v2,
+Sign-off is a **policy decision refused at write** (signoff-policy v3,
 [EVIDENCE-AND-CLAIMS §6a](EVIDENCE-AND-CLAIMS.md)): the cell must have `n ≥ 10`, the rule
 must say `deliver`, the controls must have passed with 0 escapes, the oracle must be
-measured and ≥ 0.80, and the approver must **attest to one accepted row they read**.
-Anything else is a 409 with every failing clause listed. A sign-off is a hash-chained
-row; it is revoked by a newer row, never deleted.
+measured and ≥ 0.80, the approver must **attest to one accepted row they read**, and the
+approver must be a **second person** — not the account that queued the run behind that
+row, and not the only person behind the cell (`same_actor`; the operator who ran steps
+4–6 cannot sign their own result, whatever their role). Anything else is a 409 with every
+failing clause listed, shown on the Sign-off page before you try. A sign-off is a
+hash-chained row that records who signed and what kind of account it was; it is revoked
+by a newer row, never deleted.
 
 ## Step 8 — Forward mode (when a cell is trusted)
 

@@ -159,25 +159,35 @@ published bar"**; until prospective and audited evidence exists it does not mean
 
 ### 6a. What a signed cell may be claimed to mean (`signoff-policy.v2`)
 
+(The heading keeps its `v2` anchor — nine files and the in-app help link to it; the bar in
+force is `signoff-policy.v3`, below.)
+
 A human sign-off lifts a cell's **verification tier** (`automated-pass` →
 `human-verified` / `ab-confirmed`); it never lifts its route, its point or its interval.
 Since `signoff-policy.v1` (DL-014) a sign-off is a *policy decision refused at write*
 (`crb.core.signoff`); `signoff-policy.v2` (2026-09-14, the independent decider's
 `signoff-policy: adjust`, DL-016) keeps every number and adds one clause: **the cell's oracle
-strength must be measured**, not merely "≥ 0.80 when measured". A signed cell therefore
+strength must be measured**, not merely "≥ 0.80 when measured"; `signoff-policy.v3`
+(2026-09-21, DL-047, F7b) keeps every number and adds the **two-person rule**: the approver
+is not the actor of the attested row or of the run that produced it, and is not the only
+person behind the cell's accepted rows — enforced by the write boundary on the actors the
+ledger records (`Grade.actor`, `Run.actor`), never by convention. A signed cell therefore
 licenses exactly this claim shape:
 
 > "Under apparatus V, cell C of repo R (n, point, Wilson lower — all ≥ the published
 > bar: n ≥ 10, point ≥ 0.90, lower ≥ 0.80, false-Q1 = 0, route `deliver`) was signed off
-> by a named approver on date D under `signoff-policy.v2`, with the repository's
-> negative-controls gate **passed, k of N constructible, 0 escapes** (controls run X),
-> the cell's oracle **measured at strength S ≥ 0.80 over k of its N tasks** (task-level
-> mutation scores), and the approver's attestation that they read accepted row H
-> (task T)."
+> by a named approver on date D under `signoff-policy.v3` — an approver who did not
+> produce the attested row or the run that graded it, and who is not the only person
+> behind the cell's evidence, signing from a `local` or `oidc` account — with the
+> repository's negative-controls gate **passed, k of N constructible, 0 escapes**
+> (controls run X), the cell's oracle **measured at strength S ≥ 0.80 over k of its N
+> tasks** (task-level mutation scores), and the approver's attestation that they read
+> accepted row H (task T)."
 
 Every word of that sentence is a field of the record (`policy_version`,
-`policy_thresholds`, `route_reason_code`, `controls_*`, `oracle_strength_at_signoff`,
-`attestation`), hash-chained with the sign-off and served back verbatim by
+`policy_thresholds` — `require_independent_verifier: true` says the rule was in force —
+`route_reason_code`, `controls_*`, `oracle_strength_at_signoff`, `attestation`,
+`verifier_kind`), hash-chained with the sign-off and served back verbatim by
 `GET /signoffs/{id}`. Why the oracle clause has no knob: a human signing a cell whose
 oracle was never scored would be attesting to a number whose *meaning* was never
 measured — precisely the "a green suite proves correctness" claim §7 forbids, dressed as
@@ -197,14 +207,21 @@ sign-off is most likely to be wrong. What the sentence does **not** mean:
 A deployment may relax the numeric thresholds and the route / controls switches within
 the published bounds (`docs/API.md`, `/signoffs/policy`); a record then says so
 (`policy_thresholds` differs from the defaults, `relaxed: true` on the policy) and any
-quote of it must name the relaxed bar. Three clauses have no knob and never will: a
+quote of it must name the relaxed bar. Four clauses have no knob and never will: a
 false-Q1 cell cannot be signed, a cell whose oracle was never measured cannot be signed
-(`oracle_unmeasured`, since v2), and a sign-off without an attestation cannot be made.
+(`oracle_unmeasured`, since v2), a sign-off without an attestation cannot be made, and
+the person who produced the evidence cannot sign it (`same_actor`, since v3 — a
+non-person actor such as the worker, `cli:…` or the census importer is nobody's second
+person, so a cell graded by the worker from one operator's runs is that operator's alone).
 A record signed before the policy (`schema: crb.signoff.v1`) carries no policy snapshot
 and may only be quoted as "signed before `signoff-policy.v1`"; a record signed under
 `signoff-policy.v1` keeps that version stamp (its thresholds carry no
 `require_oracle_measured`) and may only be quoted as "signed under `signoff-policy.v1`
-— oracle not required to be measured".
+— oracle not required to be measured"; a record signed under `signoff-policy.v2` (no
+`require_independent_verifier`, `verifier_kind: ""`) may only be quoted as "signed under
+`signoff-policy.v2` — two-person rule not enforced at write". A `verifier_kind` of
+`service` (reserved; never minted by this API) may never be quoted as a person's
+sign-off.
 
 ### 6b. Domain of validity — what the corpus can and cannot say
 

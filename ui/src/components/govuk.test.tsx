@@ -83,7 +83,7 @@ describe('PosturePage', () => {
     expect(screen.getByText('Append-only, hash-chained · 592 rows · chain intact · false-Q1 0')).toBeInTheDocument()
     expect(screen.getByText(/GitHub App not configured — repositories connect by URL/)).toHaveTextContent('register the app once for this deployment')
     expect(screen.getAllByText('shown to admins').length).toBeGreaterThan(0)
-    expect(screen.getByText(/not enforced at write yet/)).toBeInTheDocument()
+    expect(screen.getByText(/Enforced at write: the API refuses a sign-off \(409 same_actor\)/)).toBeInTheDocument()
   })
 
   it('every row that is not the production posture says what to do next, and the Delivery group reads from the API (J-FAC-10)', async () => {

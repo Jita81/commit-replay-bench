@@ -578,9 +578,17 @@ The server re-derives the cell's statistics and applies the routing rule:
 - any false-Q1 row in the cell → **409 Conflict**, nothing written, event logged;
 - requested route stricter than or equal to the rule's decision → **201**, an append-only
   `signoffs` row with actor and timestamp;
-- requested route more permissive than the rule → **409** with the rule's reason.
+- requested route more permissive than the rule → **409** with the rule's reason;
+- the approver queued the run that produced the attested row, or is the only person
+  behind the cell's accepted rows → **409** `same_actor` (`signoff-policy.v3`, the
+  two-person rule): the account that queues the runs can never sign their result, whatever
+  its role, and no `CRB_SIGNOFF__*` setting relaxes it — a deployment needs a second
+  account (the approver) before any cell can be signed. The Sign-off page shows the
+  refusal before the approver tries.
 
-Sign-offs are revoked by a new row, never by deleting one.
+Sign-offs are revoked by a new row, never by deleting one. Every row records the kind of
+account that signed or revoked (`verifier_kind`: `local` or `oidc`; `service` is reserved
+and never minted).
 
 ## 6. Export and verify the ledger
 
