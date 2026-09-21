@@ -9,11 +9,14 @@ What it does: Pins the RBAC matrix (viewer and operator are 403), that an admin-
               ends the target's existing session (the old cookie is 401 ``session_revoked``)
               while the new password logs in and the old does not, that a self-change needs
               the current password (five wrong ones trip the login limiter: 429) and keeps
-              the changing browser signed in while another session ends, that an OIDC account is refused (409 ``not_local``), that
-              deactivation ends sessions at once and the last active admin cannot be
-              deactivated (409 ``last_admin``), that ``GET /users`` rows carry ``active`` and
-              ``last_login``, and that every change lands as one event with actor and target
-              and never a password.
+              the changing browser signed in while another session ends, that an OIDC
+              account is refused (409 ``not_local``), that deactivation SUSPENDS sessions
+              (blocked while the account is inactive, never ended: the same cookie works
+              again after reactivation) and the last active admin cannot be deactivated
+              (409 ``last_admin``), that ``GET /users`` rows carry ``active`` and
+              ``last_login``, that every change lands as one event with actor and target
+              and never a password, and that those events are ordinary ``events`` rows —
+              trigger-protected, not hash-chained (the chain is the ledger's).
 How:          ``create_app`` over a temp SQLite file with the bootstrap admin; a second
               ``TestClient`` on the started app (no second lifespan) where two sessions
               must be told apart; events read straight from the ``events`` table on the
@@ -53,7 +56,7 @@ from crb.server.deps import ApiError
 from crb.server.routes import admin as admin_routes
 from crb.server.routes.admin import user_trace_id
 from crb.server.settings import Settings
-from crb.store.models import Event, User
+from crb.store.models import Event, Grade, Signoff, User
 
 ROOT_PW = "correct-horse-battery-staple"
 USER_PW = "another-long-password"
@@ -485,3 +488,19 @@ def test_every_change_is_one_event_with_actor_and_target(client: TestClient, app
     r = client.put(f"{API_PREFIX}/users/{root}/active", json={"active": False})
     assert r.status_code == 409
     assert events_for(app, root) == []
+
+
+def test_account_events_use_the_unchained_events_table(client: TestClient, app: Any) -> None:
+    """The ``user.*`` events are the same mechanism as every other system event
+    (``repo.created``, ``run.cancel_requested``…): an ``events`` row, append-only by DB
+    trigger, with NO ``prev_hash`` / ``row_hash`` — the hash chain is the ledger's
+    (grades / sign-offs / reviews / factory evidence), ADR-0002 §5, ARCHITECTURE §7.3.
+    Chaining ``events`` is a repo-wide change (backlog F51), not an account-route one."""
+    login(client, "root", ROOT_PW)
+    uid = create(client, "frank", "operator")
+    (ev,) = events_for(app, uid)
+    assert ev.action == "user.created"
+    for col in ("prev_hash", "row_hash"):
+        assert col not in Event.__table__.columns, f"events.{col} exists: update F51 + docs"
+        assert not hasattr(ev, col)
+        assert col in Grade.__table__.columns and col in Signoff.__table__.columns
