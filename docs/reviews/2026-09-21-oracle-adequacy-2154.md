@@ -7,7 +7,7 @@ what is left over when you stop?
 
 **Claims in this record.** Every count below — failing ids, attack outcomes, churn — is
 **[measured — pristine clones of `Jita81/cobra` at `9c0edca` (the fork's `main` after PR #2
-merged), Go 1.26.4, `go test -json -count=1 ./` from the root package, `gofmt -l`, `go vet ./`;
+merged), Go 1.26.4, `go test -json -count=1 ./...` (the root package, where the authored file lives, plus `./doc`, which only adds its own passing tests — `./` alone yields the same authored ids), `gofmt -l`, `go vet ./`;
 each attack applied on a reset tree; n = 1 item, 5 revisions, 10 wrong builds; the proof notes
 and the attack patches' failing ids are in [2026-09-21-oracle-2154-v2/proof-notes.md](2026-09-21-oracle-2154-v2/proof-notes.md)]**.
 The statements about *why* a family of wrong builds survives are **[hypothesis]** — reasoning
@@ -66,7 +66,7 @@ does not say, and the size gate says no.
 
 ## What this means for the product
 
-The three points below are **[hypothesis]** — conclusions drawn from one item's record, not a census — and each names a backlog row that is **[aspiration]** until built.
+The four points below are **[hypothesis]** — conclusions drawn from one item's record, not a census; the last three each name a backlog row that is **[aspiration]** until built.
 
 - **An adequate oracle for one XS/S bug cost ~45 test rows and five author–adversary rounds.**
   That is the price of "false-Q1 = 0" on a forward-mode item, and it is the reason the loop's
