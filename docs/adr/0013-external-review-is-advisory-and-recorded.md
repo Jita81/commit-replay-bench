@@ -1,7 +1,9 @@
 # ADR-0013 — An external reviewer's verdict is recorded, advisory, and never an input to a verdict
 
 **Status:** Proposed (operator decision DL-032 attached CodeRabbit; the factory integration
-described here is not built)
+of an external reviewer described here is not built) · **Amended 2026-09-21** (a `weak_oracle`
+verdict never rebuilds against an unchanged oracle) — §"Amendment" below; the amendment's rule
+IS implemented, in `src/crb/factory/loop.py`, for every `Reviewer` including the mechanical one
 **Date:** 2026-09-15
 **Apparatus impact:** none. Nothing in this ADR touches a belt, the routing rule, the sign-off
 policy or a ledger row. It adds a *review* source.
@@ -58,6 +60,46 @@ An AI reviewer fits the second and third of these exactly and the first not at a
 - The claims policy is unchanged: "reviewed by CodeRabbit" is a process fact, not evidence of
   correctness. The reviews ledger will say `reviewer: coderabbit` where that is the truth.
 - Cost: none to the ledger; CodeRabbit's own subscription on the operator's account.
+
+## Amendment (2026-09-21) — a `weak_oracle` verdict never rebuilds against an unchanged oracle
+
+**Context.** The first real factory run (B-1b, docs/reviews/2026-09-19-b1b-first-factory-pull-request.md,
+finding 3; DL-045 rule 3) showed what decision 3's "same rework path" does when the
+reviewer's finding is about the *test* rather than the change. The mechanical reviewer's
+mutation probe found the oracle of `cobra-2154` weak against the delivered code (deleting
+the `DisableFlagParsing` guard still passed) and returned `accept_with_edit` with a
+`weak_oracle` finding. The deployment had no test-author rung, so the rework re-proved RED
+with the *same* oracle and rebuilt — and the builder found another way to pass the same
+test: a six-line change that dropped the guard, a regression nothing tested. The verdict
+asked for a stronger test; the loop answered with a different patch.
+
+**Decision.** A `weak_oracle` finding on an `accept_with_edit` verdict asks for a stronger
+**oracle**, and the loop never rebuilds against an unchanged one on its account:
+
+1. **No test author** (`FactorySpec.rework_test is None`): the item stops
+   `oracle_needs_strengthening` *before* any edit is permitted. The chain records a
+   `route.decided` event routing it `human` with the reason — the reviewer's finding and
+   the way forward ("strengthen the test and register a superseding item"), plus
+   `after_verdict`, `finding: weak_oracle`, the verdict's event id and the oracle's sha256 —
+   the trace carries `rework.refused`, the `ItemOutcome` carries the reason, and the pull
+   request keeps the one build the verdict was recorded against.
+2. **A test author exists**: the rework is permitted to ask it (the edit is permitted, the
+   rework starts), and the answer's sha256 is compared with the previous oracle's. The same
+   bytes (or `None` = keep the previous test) is the same stop; only a **changed** oracle
+   goes on to the RED proof and the build.
+3. A rework asked for any other reason (a major finding that is not `weak_oracle`) keeps
+   decision 3's path unchanged: the same oracle, a fresh RED proof, a build, the pull
+   request updated, a fresh verdict, bounded by `max_rework`.
+
+The rule holds for every `Reviewer` — the mechanical one and the external one this ADR
+describes — because it reads the recorded verdict's findings, not the reviewer's identity.
+
+**Consequences.** A weak oracle is now a stop with a named owner, not a wasted build: the
+Factory screen says what happened and what to do; the superseding item carries the
+strengthened test and the factory delivers the build that passes it. `tests/test_factory_loop.py`
+pins the no-author stop (one build, one push, one pull request, one verdict, no edit), the
+same-bytes stop, the other-reason rework, and the changed-oracle rework;
+`tests/test_server_routes_factory.py` pins the task view's fold with its reason.
 
 ## Alternatives considered
 

@@ -24,6 +24,66 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   26); the UI's *Run the factory* posts no builder (fix on the journeys branch); a deployment
   under `/private/tmp` loses files to the OS after ~3 days (stack relocated to `~/crb-stack`).
 
+### 2026-09-19 — what the first factory run taught the loop
+
+The first real factory run (B-1b: two pull requests on `Jita81/cobra`, $0.69 **[measured —
+run `e9acd89c…`, apparatus 2.2, local executor: a development reading; n = 2 items]**,
+record: docs/reviews/2026-09-19-b1b-first-factory-pull-request.md, decision DL-045) found
+two product defects. Both are fixed here, with the tests that would have caught them.
+
+- **A re-delivery after `accept_with_edit` updates the pull request it already opened**
+  (finding 1). The rework's push used a bare `--force-with-lease`; delivery pushes to a URL,
+  so git had no remote-tracking ref to lease against and answered `[rejected] … (stale
+  info)` — and had the push gone through, a second pull request would have been opened for
+  the same branch (GitHub 422). Now `git_push_fn(expected=…)` leases against the commit the
+  first delivery pushed (`--force-with-lease=<branch>:<sha>`; a first push keeps the bare
+  lease, which is what refuses a branch that already exists), `deliver(previous=…)` refuses
+  a different branch or base, opens no second PR (url and number carried over) and posts a
+  comment naming the rework (n, the verdict it answers, the new pack hash, the new commit)
+  through the new `comment_pr_fn` seam (`github_comment_pr_fn`, the installation token, wired
+  by the worker beside `open_pr_fn`). `DeliveryResult` gains `previous_commit_sha` and
+  `updated`; the chain records the re-delivery as **`delivery.updated`**; the task view's
+  `pr_url` folds from `delivery.opened` or `delivery.updated`. The bare-repository test in
+  `tests/test_factory_delivery.py` reproduces the `stale info` refusal under real git, then
+  proves the fix (correct lease moves the branch, a wrong lease is rejected and the remote
+  does not move). The rework comment is the optional step and runs after the push has
+  moved the remote branch, so its failure (a rate limit, a 5xx, a timeout) is not a delivery
+  failure: `DeliveryResult.comment_error` carries the redacted failure, the chain still
+  records `delivery.updated`, the trace gets a `delivery.comment_failed` warning and the
+  item is reviewed on the branch the pull request now carries — the record agrees with the
+  remote (verifier finding on this fix). The task view's `pr_url` follows whichever delivery
+  event is newest on the chain, so a fresh pull request opened by a later run is never
+  hidden behind an earlier run's update; the Factory screen's delivery step says
+  "pull request updated by a rework" when that is the item's newest event.
+- **The route gate reads the map as it stood before the run** (finding 2). The gate was
+  evaluated at delivery, after the item's own `build.graded` row had landed: both PR bodies
+  said `n=27` where the freeze saw 26. The decision is now taken ONCE per item at readiness,
+  before any build — the worker's `_route_lookup(repo, run_id)` excludes the run's own rows —
+  cached on the item, used by the gate and the PR body, and recorded on the item's
+  `route.decided` event as `cell_route` (`n`, `point`, `ci_low`, `false_q1`, `policy_version`,
+  `apparatus_versions`) so the chain quotes the pre-run map. ADR-0003 amended (2026-09-19);
+  docs/API.md updated.
+- **A `weak_oracle` verdict never triggers a rebuild against an unchanged oracle** (finding 3,
+  DL-045 rule 3). The rework of `cobra-2154` re-proved RED with the same test the reviewer had
+  just found weak and rebuilt — and the builder found another way to pass it (a guard dropped,
+  untested). Now, in the loop's rework path, an `accept_with_edit` whose findings carry
+  `kind: weak_oracle` rebuilds only against an oracle whose sha256 differs: with no test author
+  (`rework_test is None`) the item stops **`oracle_needs_strengthening`** before any edit is
+  permitted; with one, the author is asked and the same bytes back (or `None`) is the same
+  stop. The stop is a `route.decided` event routing the item `human` — reason: the finding and
+  the way forward ("strengthen the test and register a superseding item"; `after_verdict`,
+  `finding`, `verdict_event`, `oracle_sha256`) — a `rework.refused` step on the trace, the
+  reason on the `ItemOutcome` and on `item.outcome`; no second RED proof, build or push, and
+  the pull request keeps the one reviewed build. A rework asked for any other reason keeps
+  its path. The task view carries `outcome_reason` (the `item.outcome`'s `error`) and the
+  Factory screen's outcome step renders the stop as a sentence with the way forward.
+  `crb.factory.review.FINDING_WEAK_ORACLE` names the finding kind. ADR-0013 amended
+  (2026-09-21); docs/API.md updated. Review follow-ups: the reason quotes the HEAD of the
+  finding's detail (300 chars), so its prefix and way forward survive `ItemOutcome.error`'s
+  tail cap whatever the detail's length; the outcome step gives the way forward once (the
+  quoted reason is trimmed to the finding and why); the readiness step of a stopped item says
+  it was built, then routed human after the review — `route_hint` is the item's newest route.
+
 ### 2026-09-18 — link a repository you already measured to the GitHub App
 
 - **`POST /repos/{name}/github-link`** `{installation_id, full_name}` (operator) attaches an

@@ -146,6 +146,8 @@ class FactoryTaskOut(BaseModel):
     size: str
     kind: str
     status: str
+    #: Why a governed stop stopped (the item.outcome's ``error``); ``""`` otherwise.
+    outcome_reason: str
     dor_gaps: list[str]
     route_hint: str
     red_proof: bool | None

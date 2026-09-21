@@ -20,6 +20,18 @@ The PR body is the evidence summary — belts, pack hash, apparatus, route
 decision, RED proof — and a link to the pack. It carries no secrets: every
 string passes through :mod:`crb.core.redact`.
 
+A **re-delivery** (a rework after ``accept_with_edit``) updates the pull request
+the first delivery opened instead of opening a second one: ``deliver`` is given
+the earlier :class:`DeliveryResult` as ``previous``, the push leases against the
+commit that delivery pushed (``--force-with-lease=<branch>:<sha>`` — a bare lease
+has nothing to hold when the push goes to a URL, and git answers ``stale info``;
+B-1b, 2026-09-19), the PR url and number are carried over, and a short comment
+names the rework so the human reviewer sees why the branch moved. The comment is
+the OPTIONAL step and it runs AFTER the push has moved the remote branch: when it
+fails (a rate limit, a 5xx, a timeout) the result is still ``updated`` and carries
+the redacted failure as ``comment_error`` — the record must agree with the remote,
+never say "refused" of a branch the pull request already carries.
+
 Navigation
 ----------
 What it is:   Delivery — a clean build becomes a branch + pull request in the customer's
@@ -31,18 +43,23 @@ What it does: Enforces the hard invariant first (``assert_not_default_branch``, 
               touches ``.git/config``), and opens the PR whose body is the redacted evidence
               summary. Push and PR are injectable seams.
 How:          ``deliver`` = invariant → credentials → deliverability → ``commit_on_branch``
-              → ``push_fn`` → ``open_pr_fn`` → ``DeliveryResult``.
+              → ``push_fn`` → ``open_pr_fn`` → ``DeliveryResult``; with ``previous`` the
+              push leases against ``previous.commit_sha``, no PR is opened and
+              ``comment_pr_fn`` posts the rework note (``updated=True``; a failed note is
+              ``comment_error`` on the result, never a refusal of the moved branch).
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md (the PR body is a
               summary, never raw output)
 Works with:   src/crb/factory/build.py (``BuildResult`` and its kept workspace),
               src/crb/core/git.py (``GitRepo.run`` for checkout / commit / push),
               src/crb/core/redact.py (every string in the PR body), src/crb/factory/loop.py
-              (``_deliver`` — opt-in, default off), src/crb/factory/evidence.py
-              (``record_delivery`` / ``record_delivery_refused``), docs/SECURITY.md#33-credentials
+              (``_deliver`` — opt-in, default off; hands the rework its ``previous``),
+              src/crb/factory/evidence.py (``record_delivery`` / ``record_delivery_updated`` /
+              ``record_delivery_refused``), docs/SECURITY.md#33-credentials
 Tested by:    tests/test_factory_delivery.py, tests/test_factory_loop.py
 Touch when:   onboarding a repository hosted somewhere other than GitHub — add an
-              ``open_pr_fn`` seam (Azure DevOps, GitLab) and a credentials provider; NEVER
+              ``open_pr_fn`` + ``comment_pr_fn`` seam (Azure DevOps, GitLab) and a
+              credentials provider; NEVER
               relax ``ALWAYS_PROTECTED_BRANCHES`` or the invariant's order (its test is a
               ratchet — docs/CONTRIBUTING.md#the-never-weaken-a-gate-rule).
 """
@@ -285,19 +302,77 @@ def pr_body(
     return redact("\n".join(lines))
 
 
+def rework_comment(
+    item: BacklogItem,
+    build: BuildResult,
+    *,
+    previous: DeliveryResult,
+    commit_sha: str,
+    rework_n: int,
+    after_verdict: str,
+    pack_link: str = "",
+) -> str:
+    """The comment a re-delivery posts on the pull request it updates: why the branch
+    moved (the rework number and the verdict it answers), from which commit to which, and
+    the new build's evidence. Every string redacted."""
+    belts = build.grade.belts.to_dict()
+    lines = [
+        f"### Rework {rework_n} — after `{after_verdict or 'review'}`",
+        "",
+        f"The factory rebuilt `{item.id}` after the review verdict "
+        f"`{after_verdict or 'review'}` and moved `{previous.branch}` from "
+        f"`{previous.commit_sha[:12]}` to `{commit_sha[:12]}` (force-with-lease against the "
+        "previous commit; the pull request is the same).",
+        "",
+        f"- evidence pack: `{build.pack_hash}`" + (f" — {pack_link}" if pack_link else ""),
+        f"- commit: `{commit_sha}` (previous `{previous.commit_sha}`)",
+        f"- grade: **{'clean' if build.clean else 'not clean'}**",
+        "- belts: " + ", ".join(f"{k}={v}" for k, v in belts.items()),
+        f"- oracle: `{build.oracle.test_path}` sha256 `{build.oracle.test_sha256}`",
+        f"- builder: `{build.rung}` trial `{build.trial}`",
+        f"- ledger row: `{build.row.row_hash if build.row else '(not ledgered)'}`",
+    ]
+    return redact("\n".join(lines))
+
+
 # ---------------------------------------------------------------------------
 # Seams
 # ---------------------------------------------------------------------------
 
-#: ``push_fn(repo, *, branch, refspec, credentials)``
+#: ``push_fn(repo, *, branch, refspec, credentials, expected=None)`` — ``expected`` is the
+#: commit the remote branch must still point at (a re-delivery); ``None`` is a first push.
 PushFn = Callable[..., None]
 #: ``open_pr_fn(*, remote, branch, base, title, body, credentials) -> (url, number)``
 OpenPrFn = Callable[..., tuple[str, int]]
+#: ``comment_pr_fn(*, remote, pr_number, body, credentials) -> None``
+CommentPrFn = Callable[..., None]
 
 
-def git_push_fn(repo: GitRepo, *, branch: str, refspec: str, credentials: GitCredentials) -> None:
+def force_with_lease_arg(branch: str, expected: str | None) -> str:
+    """The lease git is asked to hold. With ``expected`` the remote ``branch`` must still
+    point at that commit (``--force-with-lease=<branch>:<sha>``) — the only form that works
+    when the push goes to a URL, where no remote-tracking ref exists to lease against.
+    Without it the bare lease is what makes a FIRST push refuse a branch that already
+    exists on the remote (git: ``stale info``)."""
+    if expected is None:
+        return "--force-with-lease"
+    sha = expected.strip()
+    if not sha:
+        raise DeliveryError("a re-delivery needs the commit the previous delivery pushed")
+    return f"--force-with-lease={branch}:{sha}"
+
+
+def git_push_fn(
+    repo: GitRepo,
+    *,
+    branch: str,
+    refspec: str,
+    credentials: GitCredentials,
+    expected: str | None = None,
+) -> None:
     """Push ``refspec`` (``branch:branch``, never ``HEAD``) with a one-shot auth
-    header. The token is never written to ``.git/config``."""
+    header. The token is never written to ``.git/config``. ``expected`` (a re-delivery)
+    is the commit the remote branch must still point at — see :func:`force_with_lease_arg`."""
     src, _, dst = refspec.partition(":")
     if src != branch or dst != branch:
         raise DefaultBranchProtectionError(f"refspec {refspec!r} must be {branch}:{branch}")
@@ -305,7 +380,7 @@ def git_push_fn(repo: GitRepo, *, branch: str, refspec: str, credentials: GitCre
         "-c",
         f"http.{credentials.remote}.extraheader={credentials.basic_auth_header()}",
         "push",
-        "--force-with-lease",
+        force_with_lease_arg(branch, expected),
         credentials.remote,
         refspec,
     )
@@ -330,26 +405,14 @@ def owner_repo_from_remote(remote: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def github_open_pr_fn(
-    *,
-    remote: str,
-    branch: str,
-    base: str,
-    title: str,
-    body: str,
-    credentials: GitCredentials,
-    api_base: str = "https://api.github.com",
-    timeout: int = 30,
-) -> tuple[str, int]:
-    """Open ``branch -> base`` via the GitHub pulls API (stdlib urllib)."""
-    owner, name = owner_repo_from_remote(remote)
-    url = f"{api_base}/repos/{owner}/{name}/pulls"
-    payload = json.dumps(
-        {"title": title, "head": branch, "base": base, "body": body, "maintainer_can_modify": True}
-    ).encode("utf-8")
+def _github_post(
+    url: str, payload: Mapping[str, Any], credentials: GitCredentials, *, what: str, timeout: int
+) -> dict[str, Any]:
+    """One authenticated POST to the GitHub REST API (stdlib urllib); the decoded JSON
+    body, or a :class:`DeliveryError` naming ``what`` and the (redacted) refusal."""
     req = urllib.request.Request(  # noqa: S310 — https API URL built from a parsed remote
         url,
-        data=payload,
+        data=json.dumps(dict(payload)).encode("utf-8"),
         method="POST",
         headers={
             "Accept": "application/vnd.github+json",
@@ -363,15 +426,62 @@ def github_open_pr_fn(
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         raise DeliveryError(
-            f"GitHub pulls API returned {e.code}: {redact(e.read().decode('utf-8', 'replace'))[:500]}"
+            f"GitHub {what} API returned {e.code}: {redact(e.read().decode('utf-8', 'replace'))[:500]}"
         ) from e
     except urllib.error.URLError as e:
-        raise DeliveryError(f"GitHub pulls API unreachable: {e.reason}") from e
+        raise DeliveryError(f"GitHub {what} API unreachable: {e.reason}") from e
+    return dict(data) if isinstance(data, Mapping) else {}
+
+
+def github_open_pr_fn(
+    *,
+    remote: str,
+    branch: str,
+    base: str,
+    title: str,
+    body: str,
+    credentials: GitCredentials,
+    api_base: str = "https://api.github.com",
+    timeout: int = 30,
+) -> tuple[str, int]:
+    """Open ``branch -> base`` via the GitHub pulls API (stdlib urllib)."""
+    owner, name = owner_repo_from_remote(remote)
+    data = _github_post(
+        f"{api_base}/repos/{owner}/{name}/pulls",
+        {"title": title, "head": branch, "base": base, "body": body, "maintainer_can_modify": True},
+        credentials,
+        what="pulls",
+        timeout=timeout,
+    )
     pr_url = str(data.get("html_url") or data.get("url") or "")
     number = data.get("number")
     if not pr_url or not isinstance(number, int):
         raise DeliveryError("GitHub pulls response missing html_url/number")
     return pr_url, number
+
+
+def github_comment_pr_fn(
+    *,
+    remote: str,
+    pr_number: int,
+    body: str,
+    credentials: GitCredentials,
+    api_base: str = "https://api.github.com",
+    timeout: int = 30,
+) -> None:
+    """Post ``body`` as a comment on pull request ``pr_number`` (GitHub's issues comments
+    API — a pull request is an issue for comments; the installation token that opened the
+    PR may comment on it)."""
+    owner, name = owner_repo_from_remote(remote)
+    if pr_number <= 0:
+        raise DeliveryError(f"cannot comment on pull request number {pr_number!r}")
+    _github_post(
+        f"{api_base}/repos/{owner}/{name}/issues/{pr_number}/comments",
+        {"body": body},
+        credentials,
+        what="comments",
+        timeout=timeout,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -382,7 +492,12 @@ def github_open_pr_fn(
 @dataclass(frozen=True)
 class DeliveryResult:
     """What a delivery produced: the branch, its commit, the PR (url + number) and the
-    hash of the body that was posted."""
+    hash of the body that was posted (the PR description; for a re-delivery, the rework
+    comment). ``updated`` marks a re-delivery: the branch moved from
+    ``previous_commit_sha`` to ``commit_sha`` on the pull request the first delivery opened.
+    ``comment_error`` (a re-delivery) is the redacted failure of the rework comment — the
+    branch HAD moved, so the delivery stands and the reviewer was not told why; empty when
+    the comment posted (``body_sha256`` is its hash) or none was asked for."""
 
     item_id: str
     branch: str
@@ -393,6 +508,9 @@ class DeliveryResult:
     pack_hash: str
     body_sha256: str
     created: str = field(default_factory=utc_now_iso)
+    previous_commit_sha: str = ""
+    updated: bool = False
+    comment_error: str = ""
 
     @property
     def pr_ref(self) -> str:
@@ -410,6 +528,9 @@ class DeliveryResult:
             "pack_hash": self.pack_hash,
             "body_sha256": self.body_sha256,
             "created": self.created,
+            "previous_commit_sha": self.previous_commit_sha,
+            "updated": self.updated,
+            "comment_error": self.comment_error,
         }
 
 
@@ -445,19 +566,43 @@ def deliver(
     creds: GitCredentialsProvider | None = None,
     open_pr_fn: OpenPrFn | None = None,
     push_fn: PushFn | None = None,
+    comment_pr_fn: CommentPrFn | None = None,
     target_default_branch: str,
     pack_link: str = "",
     route_decision: Mapping[str, Any] | None = None,
     title: str = "",
     repo_id: str = "",
+    previous: DeliveryResult | None = None,
+    rework_n: int = 0,
+    after_verdict: str = "",
 ) -> DeliveryResult:
     """Deliver a CLEAN build as a new branch + PR. Order of refusals is deliberate:
     invariant first (before any credential is read), then credentials (fail
-    closed), then deliverability, then git, then the remote."""
+    closed), then deliverability, then git, then the remote.
+
+    With ``previous`` (the item's earlier delivery) this is a RE-delivery: the branch and
+    base must be the previous ones, the push leases against ``previous.commit_sha``, no
+    second pull request is opened (url and number are carried over) and, when a
+    ``comment_pr_fn`` is given, a comment naming the rework (``rework_n``, the
+    ``after_verdict`` it answers, the new pack hash and commit) is posted on it. The
+    comment runs after the push has moved the remote branch, so its failure is NOT a
+    delivery failure: the result is returned ``updated`` with ``comment_error`` set."""
     branch = assert_not_default_branch(delivery_branch_name(item), target_default_branch)
     base = _norm_branch(target_default_branch)
     if not base:
         raise DeliveryError("target_default_branch is required (it is the PR base)")
+    if previous is not None:
+        if previous.item_id != item.id:
+            raise DeliveryError(
+                f"previous delivery is for item {previous.item_id!r}, not {item.id!r}"
+            )
+        if previous.branch != branch or previous.base != base:
+            raise DeliveryError(
+                f"re-delivery must update {previous.branch!r} -> {previous.base!r}; "
+                f"this build would deliver {branch!r} -> {base!r}"
+            )
+        if not previous.commit_sha.strip():
+            raise DeliveryError("previous delivery carries no commit to lease against")
     provider = creds if creds is not None else NullProvider()
     credentials = provider.resolve(repo_id or str(repo.path))
     if not build.clean:
@@ -469,7 +614,6 @@ def deliver(
     push = push_fn if push_fn is not None else git_push_fn
     open_pr = open_pr_fn if open_pr_fn is not None else github_open_pr_fn
 
-    body = pr_body(item, build, pack_link=pack_link, route_decision=route_decision)
     pr_title = title or f"{item.title} [{item.id}]"
     sha = commit_on_branch(
         build,
@@ -479,7 +623,59 @@ def deliver(
     )
     # belt-and-braces: the refspec is branch:branch — never HEAD, never the base.
     assert_not_default_branch(branch, base)
-    push(repo, branch=branch, refspec=f"{branch}:{branch}", credentials=credentials)
+    if previous is not None:
+        # the rework re-points the SAME branch: lease against the commit the first delivery
+        # pushed (a bare lease has no remote-tracking ref to hold when pushing to a URL),
+        # keep the pull request, and tell its reviewer why the branch moved
+        push(
+            repo,
+            branch=branch,
+            refspec=f"{branch}:{branch}",
+            credentials=credentials,
+            expected=previous.commit_sha,
+        )
+        note = rework_comment(
+            item,
+            build,
+            previous=previous,
+            commit_sha=sha,
+            rework_n=rework_n,
+            after_verdict=after_verdict,
+            pack_link=pack_link,
+        )
+        posted = ""
+        comment_error = ""
+        if comment_pr_fn is not None and previous.pr_number > 0:
+            try:
+                comment_pr_fn(
+                    remote=credentials.remote,
+                    pr_number=previous.pr_number,
+                    body=note,
+                    credentials=credentials,
+                )
+            except Exception as exc:
+                # the push above already moved the remote branch: a failed comment (an API
+                # refusal, a timeout, an undecodable reply) must not turn a delivery that
+                # happened into a refusal on the record. It is carried on the result; the
+                # loop warns and reviews the branch the pull request now carries.
+                comment_error = redact(f"{type(exc).__name__}: {exc}")[:400]
+            else:
+                posted = sha256_text(note)
+        return DeliveryResult(
+            item_id=item.id,
+            branch=branch,
+            base=base,
+            commit_sha=sha,
+            pr_url=previous.pr_url,
+            pr_number=previous.pr_number,
+            pack_hash=build.pack_hash,
+            body_sha256=posted,
+            previous_commit_sha=previous.commit_sha,
+            updated=True,
+            comment_error=comment_error,
+        )
+    body = pr_body(item, build, pack_link=pack_link, route_decision=route_decision)
+    push(repo, branch=branch, refspec=f"{branch}:{branch}", credentials=credentials, expected=None)
     pr_url, pr_number = open_pr(
         remote=credentials.remote,
         branch=branch,
@@ -503,6 +699,7 @@ def deliver(
 __all__ = [
     "ALWAYS_PROTECTED_BRANCHES",
     "DELIVERY_BRANCH_PREFIX",
+    "CommentPrFn",
     "DefaultBranchProtectionError",
     "DeliveryError",
     "DeliveryRefused",
@@ -519,9 +716,12 @@ __all__ = [
     "commit_on_branch",
     "deliver",
     "delivery_branch_name",
+    "force_with_lease_arg",
     "git_push_fn",
+    "github_comment_pr_fn",
     "github_open_pr_fn",
     "owner_repo_from_remote",
     "pr_body",
+    "rework_comment",
     "slugify",
 ]

@@ -1083,6 +1083,10 @@ export interface FactoryTask {
   size: string
   kind: string
   status: string
+  /** Why a governed stop stopped (the chain's `item.outcome.error`): `not_red`'s refusal,
+   * `delivery_failed`'s error, `oracle_needs_strengthening`'s finding and way forward
+   * (DL-045 rule 3); `''` when accepted or not yet run. */
+  outcome_reason: string
   dor_gaps: string[]
   route_hint: string
   red_proof: boolean | null
