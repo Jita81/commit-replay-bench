@@ -259,12 +259,19 @@ mirrors in the tools' own files under the worker's `HOME`, never in `runner_opts
 Registry credentials likewise live in those files; every step tail is passed through
 `crb.core.redact` before it is stored, but keep secrets out of the repository itself.
 
-**Sandbox images** are yours to build: one image per repository (or per toolchain) with
-the language runtime, the test runner and the repository's dependencies pre-installed,
-runnable as user `65534` with a read-only root. Under docker, setup does not run — the
-image must already contain what setup would have installed (the `node_modules` a host
-setup installed in the clone is visible to the container through the read-only worktree
-mount; a host venv, module cache or `~/.m2` is not). P7 ships reference images.
+**Sandbox images**: start from the shipped reference set —
+[`deploy/sandbox/`](../deploy/sandbox/README.md): `crb-sandbox-python` (pytest),
+`crb-sandbox-node` (`node --test`), `crb-sandbox-go`, each digest-pinned, running as user
+`65534` with a read-only root and proven from inside by CI — and extend one per repository
+(or per toolchain) with the repository's dependencies when its tests need more than the
+runner. Under docker, setup does not run — the image must already contain what setup would
+have installed (the `node_modules` a host setup installed in the clone is visible to the
+container through the read-only worktree mount; a host venv, module cache or `~/.m2` is
+not). Name the image in the repository's `sandbox_image` (it wins) or the deployment's
+`CRB_SANDBOX__IMAGE` (the default for repositories that name none); the worker never pulls,
+so it must be in the daemon's store. A JVM reference image is not shipped — the Maven
+runner cannot resolve plugins offline under docker yet (README §6); JVM repositories run
+under the local executor for now, visibly on the apparatus stamp.
 
 ### 2.1a Packaging-metadata tests (`dist_info_stubs`)
 The harness imports the repository's code from the worktree on `PYTHONPATH` and uninstalls

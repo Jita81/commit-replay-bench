@@ -67,15 +67,26 @@ process — the egress sidecar — and only for the hosts on the allowlist.
 | Control | Implementation | Status |
 |---|---|---|
 | No network | `--network=none` on every test run; only an explicit dependency-install phase may request `--network=bridge`, and it still carries every other cap | [measured] `tests/test_execution.py` asserts the argv flag-by-flag |
-| Immutable root + worktree | `--read-only`, worktree bind-mounted `readonly`; writable scratch only at declared paths (`target/`, `.pytest_scratch`) and tmpfs `/tmp` with `nosuid,nodev` | [measured] |
+| Immutable root + worktree | `--read-only`, worktree bind-mounted `readonly`; writable scratch only at declared paths (`target/`, `.pytest_scratch`) and tmpfs `/tmp` with `nosuid,nodev` (`noexec` — Docker's implicit default on a tmpfs — except for a command whose toolchain runs the binaries it builds there: the Go runner declares `Command.exec_tmp`, so `go test` can exec its test binaries; `nosuid,nodev` and every other flag hold, and the tmpfs dies with the container) | [measured] `tests/test_execution.py` asserts both tmpfs shapes; `tests/test_sandbox_images_docker.py` proves read-only root, read-only worktree and writable `/tmp` from inside each shipped image |
 | Least privilege | `--cap-drop=ALL`, `--security-opt no-new-privileges`, non-root `--user=65534:65534` (root refused at construction) | [measured] |
 | Resource caps | `--memory`, `--cpus`, `--pids-limit`, `--stop-timeout`; wall-clock timeout returns `rc=124` and is graded as a failure, never a pass | [measured] |
-| Fail closed | No docker binary, unreachable daemon, root user, docker-socket or `$HOME` mount request, or a launch failure (exit 125) raise `SandboxUnavailable`; the **run stops** and is recorded `failed`. The product never degrades to in-process execution when the sandbox was requested | [measured] `tests/test_execution.py`, `tests/test_sandbox_docker.py` (skipped without a daemon) |
+| Fail closed | No docker binary, unreachable daemon, root user, docker-socket or `$HOME` mount request, or a launch failure (exit 125) raise `SandboxUnavailable`; the **run stops** and is recorded `failed`. The product never degrades to in-process execution when the sandbox was requested. `--pull=never`: an image absent from the daemon's store is a launch failure, never a registry pull at run time | [measured] `tests/test_execution.py`, `tests/test_sandbox_docker.py` (skipped without a daemon), `tests/test_sandbox_images_docker.py` (an absent image is `SandboxUnavailable` against a real daemon) |
 | Host environment isolation | `LocalExecutor` (development only) passes through an explicit allowlist of variables (`PATH`, toolchain caches); operator secrets are proven absent inside the child | [measured] `test_execution.py::…env…` |
 
 **Residual risk:** container escape via the kernel. Mitigation is the standard one — keep the
 container runtime patched; run the worker on a dedicated node; consider gVisor/Kata for
 hostile repositories. This is documented, not implemented.
+
+**The images.** `deploy/sandbox/Dockerfile.{python,node,go}` are the reference sandbox
+images: each `FROM` pinned by the multi-arch index digest, the toolchain and the test runner
+only (pytest hash-pinned; Go copied onto a slim base without gcc or git), `USER 65534:65534`,
+OCI labels, hadolint-clean; CI's `sandbox-images` job builds each on every pull request and
+proves the controls above from inside it through the real runner of that language
+(`tests/test_sandbox_images_docker.py`). The worker reads the same `CRB_SANDBOX__EXECUTOR` /
+`CRB_SANDBOX__IMAGE` the API reports — until 2026-09-21 it read only its short forms, so a
+compose / Helm worker ran `local` while `/settings` said `docker` — and a repository's own
+`sandbox_image` wins over the deployment default. Selection, extension and the re-pin
+cadence: `deploy/sandbox/README.md`.
 
 ### 3.2 Builder containment — `crb.builders.base`
 
@@ -334,6 +345,10 @@ subject to a retention window.
   through the sidecar with a live credential has not yet been run in CI (it needs a
   credential and spend). Host mode remains the default until an operator sets
   `CRB_BUILDER__EXECUTOR=docker`. [gap — measured on the fake-model path only]
+- Reference sandbox images ship and are proven in CI (3.1), but every measurement to date
+  is on the host executor posture: no ledger row has yet been produced under the docker
+  posture. A live re-measurement, rows stamped `executor: docker`, is pending. [gap — the
+  images are measured, the posture's verdicts are not]
 - Container escape is out of scope for the application layer.
 
 Report a vulnerability to the repository owner privately; do not open a public issue.

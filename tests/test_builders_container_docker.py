@@ -1,7 +1,9 @@
 """The builder in a sealed container, against a real daemon (ADR-0012).
 
 With a reachable daemon and ``crb-test-py:local`` (``python:3.12-slim`` + pytest,
-shared with ``test_sandbox_docker``), on :mod:`tests.fixtures.langs.pyrepo_min`:
+shared with ``test_sandbox_docker``; ``CRB_TEST_SANDBOX_IMAGE`` names a present image to
+use instead — CI passes the shipped python reference image), on
+:mod:`tests.fixtures.langs.pyrepo_min`:
 
 * a scripted "builder" (a shell script standing in for ``claude -p``, mounted
   read-only at ``/opt/fake/claude``) runs through the **same spawn contract** the
@@ -37,7 +39,8 @@ What it does: Pins that a scripted builder (a shell script mounted read-only as 
               TLS handshake with the real endpoint costs no tokens; and that a missing image or
               a sidecar that cannot start is ``SandboxUnavailable`` while cancel and the wall
               clock end in ``docker kill``.
-How:          ``crb-test-py:local`` built once per session; checkouts under the tests cache
+How:          ``crb-test-py:local`` built once per session (or the image
+              ``CRB_TEST_SANDBOX_IMAGE`` names); checkouts under the tests cache
               (bind-mountable on colima / Docker Desktop); a mock endpoint container on its own
               egress network; skipped with the probe's reason without a daemon.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -96,8 +99,8 @@ pyrepo_min = langs.fixture_module("pyrepo_min")
 
 pytestmark = [pytest.mark.docker, pytest.mark.slow]
 
-IMAGE = "crb-test-py:local"
-DOCKERFILE = "FROM python:3.12-slim\nRUN pip install --no-cache-dir 'pytest>=8.3,<9'\n"
+#: ``CRB_TEST_SANDBOX_IMAGE`` when set, else the session-built ``crb-test-py:local``.
+IMAGE = langs.sandbox_test_image()
 #: An image without python3 — a sidecar started from it cannot come up.
 NO_PYTHON_IMAGE = "alpine:latest"
 
@@ -136,7 +139,7 @@ def _sandbox_ready() -> None:
     reason = langs.docker_unavailable_reason()
     if reason:
         pytest.skip(reason)
-    langs.ensure_docker_image(IMAGE, DOCKERFILE)
+    langs.ensure_sandbox_test_image()
 
 
 @pytest.fixture(scope="module")

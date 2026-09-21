@@ -2010,10 +2010,13 @@ def trial_labels_for(ladder: EscalationLadder, base: Budget) -> dict[str, dict[s
 def docker_settings_for(
     config: RepoConfig, base: DockerSettings | None, params: Mapping[str, Any]
 ) -> DockerSettings:
-    """The sandbox settings for one run: ``params.image`` > the worker's configured
-    image > the repo's ``sandbox_image``; caps come from the worker's settings.
-    No image anywhere → :class:`SandboxUnavailable` (raised by ``DockerSettings``)."""
-    image = str(params.get("image") or "") or (base.image if base else "") or config.sandbox_image
+    """The sandbox settings for one run: ``params.image`` > the repo's ``sandbox_image``
+    > the worker's configured image (``CRB_SANDBOX__IMAGE`` — the DEFAULT for a repository
+    that names none, as docs/DEPLOYMENT.md §2.1 says; until 2026-09-21 it silently overrode
+    every repository's own image, which is wrong the moment two toolchains share a worker);
+    caps come from the worker's settings. No image anywhere → :class:`SandboxUnavailable`
+    (raised by ``DockerSettings``)."""
+    image = str(params.get("image") or "") or config.sandbox_image or (base.image if base else "")
     if base is not None and image == base.image:
         return base
     if base is None:

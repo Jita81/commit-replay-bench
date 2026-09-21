@@ -6,10 +6,13 @@ test modules import this explicitly. It owns three things:
 * **availability probes** — :func:`has_tool`, :func:`docker_available`;
 * **once-per-session warm-ups** — the npm dev-dependency caches under
   ``tests/.cache/node_modules_<tool>``, the Maven local-repository warm-up, and
-  the sandbox image build. Each is memoised in-process and, where it makes
-  sense, on disk, and each turns "cannot warm up" into a *pytest skip with the
-  reason* by default (a missing network is not a defect) — and into a FAILURE
-  under ``CRB_TEST_STRICT_WARMUP=1`` (CI), where a broken pin or fixture is one;
+  the sandbox image builds (the inline python test image, and the shipped
+  reference images under ``deploy/sandbox`` — either may instead be named by an
+  environment variable when CI has already built it). Each is memoised
+  in-process and, where it makes sense, on disk, and each turns "cannot warm up"
+  into a *pytest skip with the reason* by default (a missing network is not a
+  defect) — and into a FAILURE under ``CRB_TEST_STRICT_WARMUP=1`` (CI), where a
+  broken pin or fixture is one;
 * **the shared instrument steps** the per-language modules repeat — find the
   feat candidate, open a fresh trial worktree at the parent with the commit's
   tests overlaid.
@@ -21,13 +24,17 @@ Navigation
 What it is:   Shared helpers for the toolchain and sandbox integration suites (imported
               explicitly; not a conftest).
 What it does: Answers "is go/node/mvn/cargo/docker available", warms the npm dev-dependency
-              caches, the Maven local repository and the sandbox image once per session, and
-              performs the two instrument steps every language module repeats — mine the feat
-              candidate, open a trial worktree at the parent with the tests overlaid. A warm-up
-              that cannot complete is a skip with the reason offline and a failure in CI
-              (``CRB_TEST_STRICT_WARMUP``); a missing tool or daemon is always a skip.
-How:          Memoised probes → on-disk caches under ``tests/.cache`` → ``iter_candidates`` +
-              ``Workspace.create`` + ``overlay_tests`` through the real runner and executor.
+              caches, the Maven local repository and the sandbox images once per session — the
+              inline python test image (``CRB_TEST_SANDBOX_IMAGE`` names a present one instead)
+              and the shipped reference images built from ``deploy/sandbox/Dockerfile.<lang>``
+              (``CRB_TEST_SANDBOX_IMAGE_<LANG>`` likewise) — and performs the two instrument
+              steps every language module repeats — mine the feat candidate, open a trial
+              worktree at the parent with the tests overlaid. A warm-up that cannot complete is
+              a skip with the reason offline and a failure in CI (``CRB_TEST_STRICT_WARMUP``); a
+              missing tool or daemon is always a skip.
+How:          Memoised probes → on-disk caches under ``tests/.cache`` → ``docker build`` from
+              stdin or from a Dockerfile + context → ``iter_candidates`` + ``Workspace.create``
+              + ``overlay_tests`` through the real runner and executor.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/langs/__init__.py (the two-commit fixture shape these steps rely
@@ -35,10 +42,13 @@ Works with:   tests/fixtures/langs/__init__.py (the two-commit fixture shape the
               trial), src/crb/core/runners/__init__.py (``get_runner``), tests/test_runners_node.py
               and tests/test_runners_jvm.py (typical callers)
 Tested by:    tests/test_runners_go.py, tests/test_runners_node.py, tests/test_runners_jvm.py,
-              tests/test_runners_cargo.py, tests/test_sandbox_docker.py (every consumer)
+              tests/test_runners_cargo.py, tests/test_sandbox_docker.py,
+              tests/test_sandbox_images_docker.py (every consumer)
 Touch when:   adding a runner for a new language (add its availability probe and any per-session
               warm-up here, the fixture under tests/fixtures/langs/, and a ``test_runners_<lang>``
-              module); the per-session cache directory (``.cache`` under the tests tree) moves.
+              module); a reference sandbox image is added under deploy/sandbox (extend
+              ``SHIPPED_SANDBOX_LANGS`` and tests/test_sandbox_images_docker.py together); the
+              per-session cache directory (``.cache`` under the tests tree) moves.
 """
 
 from __future__ import annotations
@@ -240,9 +250,90 @@ def maven_warmup(scratch: Path) -> None:
 
 _IMAGES: dict[str, str] = {}
 
+#: The python image the sandbox and sealed-builder suites run on: ``CRB_TEST_SANDBOX_IMAGE``
+#: names one that is already present (CI passes the reference image it just built, so the
+#: shipped bytes are what the walls are proven on); unset, the inline Dockerfile below is
+#: built once per session as ``crb-test-py:local`` — the default is unchanged.
+TEST_IMAGE_ENV = "CRB_TEST_SANDBOX_IMAGE"
+TEST_IMAGE_DEFAULT = "crb-test-py:local"
+TEST_IMAGE_DOCKERFILE = "FROM python:3.12-slim\nRUN pip install --no-cache-dir 'pytest>=8.3,<9'\n"
 
-def ensure_docker_image(tag: str, dockerfile: str) -> None:
-    """Build ``tag`` from an inline Dockerfile once per session (reused if present)."""
+#: The reference sandbox images deploy/sandbox ships, by language: the Dockerfile each is
+#: built from, the tag a local build gets, and the variable CI sets to the tag it built.
+SANDBOX_DIR = TESTS_DIR.parent / "deploy" / "sandbox"
+SHIPPED_SANDBOX_LANGS: tuple[str, ...] = ("python", "node", "go")
+
+
+def shipped_sandbox_env(lang: str) -> str:
+    """``CRB_TEST_SANDBOX_IMAGE_<LANG>`` — set to a present tag to test THAT image."""
+    return f"CRB_TEST_SANDBOX_IMAGE_{lang.upper()}"
+
+
+def shipped_sandbox_dockerfile(lang: str) -> Path:
+    """``deploy/sandbox/Dockerfile.<lang>``."""
+    return SANDBOX_DIR / f"Dockerfile.{lang}"
+
+
+def sandbox_test_image() -> str:
+    """The tag the python sandbox suites use (env override, else the session-built default)."""
+    return os.environ.get(TEST_IMAGE_ENV) or TEST_IMAGE_DEFAULT
+
+
+def ensure_sandbox_test_image() -> str:
+    """:func:`sandbox_test_image`, ready in the daemon: an env-named image must already be
+    present (never built here — the point is to test the bytes CI built); the default is
+    built once per session from the inline Dockerfile. Returns the tag."""
+    tag = sandbox_test_image()
+    if os.environ.get(TEST_IMAGE_ENV):
+        require_docker_image(tag, f"{TEST_IMAGE_ENV}={tag}")
+    else:
+        ensure_docker_image(tag, TEST_IMAGE_DOCKERFILE)
+    return tag
+
+
+def ensure_shipped_sandbox_image(lang: str) -> str:
+    """The shipped reference image for ``lang``, ready in the daemon: the tag
+    :func:`shipped_sandbox_env` names when set (must be present; never built here), else
+    ``crb-sandbox-<lang>:local`` built once per session from its Dockerfile. Returns the tag."""
+    if lang not in SHIPPED_SANDBOX_LANGS:
+        raise ValueError(f"no shipped sandbox image for {lang!r}")
+    var = shipped_sandbox_env(lang)
+    tag = os.environ.get(var)
+    if tag:
+        require_docker_image(tag, f"{var}={tag}")
+        return tag
+    tag = f"crb-sandbox-{lang}:local"
+    ensure_docker_image(tag, shipped_sandbox_dockerfile(lang), context=SANDBOX_DIR)
+    return tag
+
+
+def require_docker_image(tag: str, named_by: str) -> None:
+    """Skip (fail under strict warm-up) unless ``tag`` is present in the daemon's store —
+    ``named_by`` says which setting named it, so the reason is actionable."""
+    if tag in _IMAGES:
+        if _IMAGES[tag]:
+            warmup_unavailable(_IMAGES[tag])
+        return
+    reason = docker_unavailable_reason()
+    if reason:
+        _IMAGES[tag] = reason
+        pytest.skip(reason)
+    docker = shutil.which("docker") or "docker"
+    have = subprocess.run(
+        [docker, "image", "inspect", tag], capture_output=True, text=True, timeout=60, check=False
+    )
+    if have.returncode != 0:
+        _IMAGES[tag] = reason = (
+            f"docker image {tag!r} ({named_by}) is not present; build or load it"
+        )
+        warmup_unavailable(reason)
+    _IMAGES[tag] = ""
+
+
+def ensure_docker_image(tag: str, dockerfile: str | Path, *, context: Path | None = None) -> None:
+    """Build ``tag`` once per session (reused if present): from an inline Dockerfile
+    string (stdin, no context), or — with ``context`` — from the Dockerfile at ``dockerfile``
+    with that build context, exactly as an operator builds it."""
     if tag in _IMAGES:
         if _IMAGES[tag]:
             warmup_unavailable(_IMAGES[tag])
@@ -256,10 +347,16 @@ def ensure_docker_image(tag: str, dockerfile: str) -> None:
         [docker, "image", "inspect", tag], capture_output=True, text=True, timeout=60, check=False
     )
     if have.returncode != 0:
+        if context is None:
+            argv = [docker, "build", "-t", tag, "-"]
+            stdin: str | None = str(dockerfile)
+        else:
+            argv = [docker, "build", "-f", str(dockerfile), "-t", tag, str(context)]
+            stdin = None
         try:
             p = subprocess.run(
-                [docker, "build", "-t", tag, "-"],
-                input=dockerfile,
+                argv,
+                input=stdin,
                 capture_output=True,
                 text=True,
                 timeout=DOCKER_BUILD_TIMEOUT_S,

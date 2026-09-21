@@ -1,7 +1,10 @@
 """Sandbox: the instrument inside :class:`DockerExecutor` — and the walls hold.
 
 With a reachable daemon, builds ``crb-test-py:local`` (``python:3.12-slim`` +
-pytest) once per session and, on :mod:`tests.fixtures.langs.pyrepo_min`:
+pytest) once per session — or, when ``CRB_TEST_SANDBOX_IMAGE`` names an image that is
+already present (CI: the reference image it just built from
+``deploy/sandbox/Dockerfile.python``), runs on that instead — and, on
+:mod:`tests.fixtures.langs.pyrepo_min`:
 
 * ``qualify`` + ``grade`` run and parse under ``--network=none`` (gold → clean);
 * a test that opens ``https://example.com`` FAILS (the network is truly off);
@@ -31,15 +34,19 @@ What it does: Pins that the executor is hardened, that ``qualify`` and ``grade``
               container (``kill_confirmed`` True, nothing reported, ``docker ps`` empty).
               Never falls back to in-process execution — that is ``SandboxUnavailable``'s job.
 How:          ``crb-test-py:local`` built once per session from an inline Dockerfile
-              (``python:3.12-slim`` + pytest); worktrees under the tests cache because the VM
-              behind colima / Docker Desktop cannot bind-mount pytest's ``tmp_path``; skipped
-              with the probe's reason when no daemon answers.
+              (``python:3.12-slim`` + pytest), or the present image ``CRB_TEST_SANDBOX_IMAGE``
+              names (CI runs this module on the shipped python reference image); worktrees
+              under the tests cache because the VM behind colima / Docker Desktop cannot
+              bind-mount pytest's ``tmp_path``; skipped with the probe's reason when no daemon
+              answers.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/core/execution.py (``DockerExecutor`` under test),
               tests/fixtures/langs/pyrepo_min.py (the fixture), tests/conftest_langs.py
-              (``ensure_docker_image`` and the probes), tests/test_execution.py (the same
-              executor without a daemon), docs/SECURITY.md (sandboxed test execution, §3.1)
+              (``ensure_sandbox_test_image`` and the probes), tests/test_execution.py (the
+              same executor without a daemon), tests/test_sandbox_images_docker.py (the same
+              walls on every shipped reference image), docs/SECURITY.md (sandboxed test
+              execution, §3.1)
 Tested by:    tests/test_sandbox_docker.py
 Touch when:   a hardening flag is added (a wall test that proves it holds from INSIDE the
               container, not only that the flag is on argv); the sandbox image changes.
@@ -77,8 +84,8 @@ pyrepo_min = langs.fixture_module("pyrepo_min")
 
 pytestmark = [pytest.mark.docker, pytest.mark.slow]
 
-IMAGE = "crb-test-py:local"
-DOCKERFILE = "FROM python:3.12-slim\nRUN pip install --no-cache-dir 'pytest>=8.3,<9'\n"
+#: ``CRB_TEST_SANDBOX_IMAGE`` when set, else the session-built ``crb-test-py:local``.
+IMAGE = langs.sandbox_test_image()
 
 #: Host-side artefacts a sandboxed run is allowed to leave: the runner's declared
 #: writable path (bind-mounted rw) and git's own bookkeeping.
@@ -95,7 +102,7 @@ def _sandbox_ready() -> None:
     reason = langs.docker_unavailable_reason()
     if reason:
         pytest.skip(reason)
-    langs.ensure_docker_image(IMAGE, DOCKERFILE)
+    langs.ensure_sandbox_test_image()
 
 
 @pytest.fixture(scope="module")

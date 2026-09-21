@@ -8,6 +8,46 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-21 — reference sandbox images, built and proven by CI (F42 part 1)
+
+- **`deploy/sandbox/Dockerfile.{python,node,go}`** — the images the fail-closed sandbox
+  runs a repository's tests in, so "what do I run?" no longer answers "build one yourself":
+  each `FROM` pinned by the multi-arch index digest, the toolchain and the test runner only
+  (pytest 9.1.1 hash-pinned via `python-requirements.txt`; Node 22.19.0 with `node --test`;
+  Go 1.26.8 copied onto a slim base of the same Debian release — 477 MB on disk against the
+  official image's 1.2 GB), `USER 65534:65534`, OCI labels, `HOME` and every cache under the
+  executor's tmpfs, hadolint-clean. `deploy/sandbox/README.md`: build / tag / push, the keys
+  that select an image, extending one for a repository's dependencies, the re-pin cadence.
+  A JVM image is deliberately not shipped — the Maven runner's docker branch cannot resolve
+  plugins offline yet (README §6).
+- **CI `sandbox-images` job** — hadolint + `docker buildx build` (GHA layer cache, no push)
+  of each image, then the smoke that matters: `tests/test_sandbox_images_docker.py` runs
+  each language's fixture repository through `DockerExecutor` on the image just built (uid
+  65534 by default and under the executor, `/usr` and `/work` read-only from inside while
+  `/tmp` is writable, a network probe FAILS through the language's runner, an absent image is
+  `SandboxUnavailable`, qualify + grade clean with the host worktree untouched, labels), and
+  the sandbox + sealed-builder suites on the python image. `CRB_TEST_SANDBOX_IMAGE` /
+  `CRB_TEST_SANDBOX_IMAGE_<LANG>` name a present image to test; the `test` job deselects the
+  `sandbox_images` marker (the images are built once, there).
+- **Found by the first smoke, fixed:** Docker mounts a `--tmpfs` `noexec` unless told
+  otherwise, so `go test` could not exec the test binaries it builds under `/tmp` — the Go
+  runner had never run against a daemon. `Command.exec_tmp` (the Go runner declares it)
+  mounts the sandbox's tmpfs `rw,exec,nosuid,nodev` for that toolchain alone; every other
+  flag holds (ADR-0005 amendment, SECURITY.md §3.1). `--pull=never` on every sandbox
+  `docker run`: the documentation always said the worker never pulls, and now it cannot.
+- **Fixed: the worker ignored the deployment's sandbox keys.** compose, Helm and
+  DEPLOYMENT.md set `CRB_SANDBOX__EXECUTOR` / `CRB_SANDBOX__IMAGE`; the API read them, the
+  worker read only `CRB_EXECUTOR` / `CRB_SANDBOX_IMAGE` and defaulted to `local` — a
+  compose / Helm worker ran untrusted tests on the host while `/settings` reported
+  `docker`. The worker now reads the deployment keys (short forms still honoured when they
+  are absent), and a repository's own `sandbox_image` wins over the deployment default
+  (`docker_settings_for`), as DEPLOYMENT.md §2.1 always said — the default silently
+  overrode it, which is wrong the moment two toolchains share a worker.
+- Docs: DEPLOYMENT.md §2.1 / §3.1 / §3.4, deploy/README.md §3 and §8, OPERATOR.md §2.1,
+  SECURITY.md §3.1 and §5 (the images are measured; verdicts under the docker posture are
+  still pending — the measurement gap stays open), ARCHITECTURE.md §9.3,
+  docs/reviews/2026-09-17-enterprise-front-end.md §9 (F42 part 1 shipped, part 2 pending).
+
 ### 2026-09-21 — a locked-out administrator has a way back in (F23)
 
 - **`PUT /users/{id}/password`** (admin), **`PUT /users/me/password`** (any local account,

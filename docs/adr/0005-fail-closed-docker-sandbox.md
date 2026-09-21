@@ -26,12 +26,13 @@ inspection of AthenaClaude `origin/main`, 2026-09-13]`.
 
    ```
    docker run --rm
+     --pull=never                        (an image absent from the daemon's store is exit 125 → SandboxUnavailable; never a registry pull)
      --network=none                      (--network=bridge only when Command.network=True — the dep-install phase)
      --memory=<2g> --cpus=<2> --pids-limit=<512>
      --user=65534:65534
      --cap-drop=ALL --security-opt no-new-privileges
      --read-only
-     --tmpfs /tmp:rw,nosuid,nodev,size=<512m>
+     --tmpfs /tmp:rw,nosuid,nodev,size=<512m>   (rw,exec,nosuid,nodev,… only when Command.exec_tmp — see amendment 2026-09-21)
      --mount type=bind,src=<worktree>,dst=/work,readonly
      [--mount type=bind,src=<worktree>/<writable_path>,dst=/work/<writable_path>]   per declared writable path
      [--mount type=bind,src=<host>,dst=<inside>,readonly]                            per extra_ro_mount
@@ -73,6 +74,32 @@ inspection of AthenaClaude `origin/main`, 2026-09-13]`.
   disposable worktree so that works. Worktrees are never reused across trials.
 - Dependency installation with network is a separate phase (`Command.network=True`) that
   still runs with every other cap; P1/P2 add a pinned index date to it.
+
+## Amendment 2026-09-21 — the tmpfs is `exec` for a toolchain that declares it; never a pull
+
+Docker mounts a `--tmpfs` with `noexec` unless `exec` is named, so `/tmp` — the only
+scratch every sandbox has — could not run a binary. `go test` compiles each package's test
+binary into its temp directory and execs it: under the sandbox that is `/tmp`, and the Go
+runner had never been run against a daemon (`fork/exec /tmp/go-build…/calc.test: permission
+denied`, found by the first reference-image smoke, `tests/test_sandbox_images_docker.py`).
+
+Decision: `Command.exec_tmp` (default `False`) — a runner declares that its toolchain runs
+what it builds under `/tmp`; the executor then mounts `/tmp:rw,exec,nosuid,nodev,size=…`.
+The Go runner declares it. Python and Node keep the implicit `noexec`. `nosuid` and `nodev`
+hold in both shapes, as do every other flag; a test process is arbitrary code under every
+one of these executors already, so `noexec` on scratch was defence-in-depth against nothing
+the image's own interpreter could not do — but it stays where it costs nothing. The
+documented control (SECURITY.md §3.1) was always `nosuid,nodev`; the argv now says exactly
+what it does. The builder container (ADR-0012, `crb.builders.container`) has the same
+implicit `noexec` on its tmpfs and will need the same declaration before a Go builder image
+can run its own tests inside the cell — a follow-up, not changed here.
+
+Also added: `--pull=never`. The documentation always said the worker never pulls; `docker
+run` pulls a missing image by default. An absent image is now a launch failure (exit 125,
+`No such image`) → `SandboxUnavailable`, proven against a daemon in the same suite.
+
+The reference images this argv runs are `deploy/sandbox/Dockerfile.{python,node,go}`
+(`deploy/sandbox/README.md`), built and proven from inside by CI on every pull request.
 
 ## Alternatives considered
 

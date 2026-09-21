@@ -529,7 +529,9 @@ vocabulary changes the instrument (§7.4).
   P1 deliverables in flight; until they land, CI coverage of `crb.core` is thin.
 - `pyproject.toml` layers contract marks not-yet-existing packages optional (parenthesised);
   each package's landing PR must remove its parentheses.
-- Per-language sandbox images are operator-supplied; a reference image set lands in P7.
+- Reference sandbox images ship for python, node and go (`deploy/sandbox/`, proven from
+  inside by CI); a repository's dependencies are still the operator's extension of one, and a
+  JVM image waits on the Maven runner's docker branch (`deploy/sandbox/README.md` §6).
 
 ---
 

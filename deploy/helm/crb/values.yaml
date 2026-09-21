@@ -62,6 +62,9 @@ config:
   CRB_AZURE_KEY_ENV: "AZURE_OPENAI_API_KEY"
   # Sandbox: docker (fail-closed unless worker.sandbox.mode provides a daemon) | local (dev)
   CRB_SANDBOX__EXECUTOR: "docker"
+  # The default image for repositories that name no sandbox_image of their own: one of the
+  # shipped reference images (deploy/sandbox/README.md) pushed to your registry, pinned by
+  # digest, and pre-pulled into the daemon the worker talks to (the worker never pulls).
   CRB_SANDBOX__IMAGE: ""
 
 # Extra env entries (list of core/v1 EnvVar) appended to every crb container.
