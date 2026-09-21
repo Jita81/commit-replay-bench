@@ -17,8 +17,9 @@ in parallel, so changes here are changes to both.
 - **Roles** (ascending): `viewer` (read everything), `operator` (+ create/cancel runs,
   add/probe repos, mine), `approver` (+ sign-offs), `admin` (+ users, settings).
   A route lists its minimum role. 401 = not logged in (`unauthenticated`, `session_expired`,
-  or `session_revoked` — the account's password changed or it was deactivated after the
-  cookie was issued: sign in again), 403 = insufficient role.
+  `session_revoked` — the account's password changed after the cookie was issued, or
+  `unauthenticated` with "account unknown or disabled" — the account was deactivated: sign in
+  again once an admin re-activates it), 403 = insufficient role.
 - **Errors**: `{"error": {"code": "<snake_case>", "message": "...", "detail": {...}}}`.
   `409 false_q1_refused` is reserved for sign-off refusals and ledger invariant
   violations; `503 sandbox_unavailable` for fail-closed sandbox stops.
