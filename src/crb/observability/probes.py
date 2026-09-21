@@ -82,9 +82,11 @@ class ProbeResult:
 
 def failure_detail(name: str, request_id: str = "") -> str:
     """The ONE ``detail`` a probe serves when its read raised: ``<name> could not be read —
-    see the API log, request id <id>`` (without the id clause when there is no request —
-    ``crb doctor``). Fixed on purpose (CWE-209): the exception is in the log, not here."""
-    where = f"see the API log, request id {request_id}" if request_id else "see the API log"
+    see the API log, request id <id>`` (``see the log`` when there is no request: the
+    probes ``crb doctor`` shares — sandbox, worker — render this form; doctor's own
+    ``migrations`` and ``database`` lines print the exception, since a local terminal has
+    no unauthenticated reader). Fixed on purpose (CWE-209): the exception is in the log."""
+    where = f"see the API log, request id {request_id}" if request_id else "see the log"
     return f"{name} could not be read — {where}"
 
 

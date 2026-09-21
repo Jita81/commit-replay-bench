@@ -8,8 +8,6 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
-## [2.0.0b1] — 2026-09-21 — the front end has a purpose, the GitHub App is the connection, the factory is the point, the operating envelope
-
 ### 2026-09-21 — the operating envelope: what the platform team is told is true (F36–F41, F44, F47, F25)
 
 - **`/health` gains a `migrations` probe** — the contract is stated once, in
@@ -37,12 +35,11 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   `home/events`, `home/factory`, `home/secrets`, `home/transcripts`; the proof reads the copy
   with sqlite3 and `crb ledger verify` (F44).
 - **docs/RELEASING.md** — how a release is cut (version, CHANGELOG section, tag, the image
-  release.yml builds and signs, the chart). **This is the `2.0.0b1` cut** (F40):
-  `pyproject.toml`, `crb.core.version.__version__` and the chart's `appVersion` are
-  `2.0.0b1`, the chart's own `version` is its SemVer form `2.0.0-b1`, and
-  `tests/test_version_consistency.py` pins all four (the chart-version rule is
-  `test_chart_version_is_the_semver_form_of_the_package_version`). The `v2.0.0b1` tag is
-  pushed on the merge commit, per RELEASING §2. OPERATOR.md's front matter describes the
+  release.yml builds and signs, the chart) (F40). The version moves in the release commit
+  itself (RELEASING §2), not here: the tree stays `2.0.0a1` until `2.0.0b1` is cut; the
+  chart's own `version` is now the SemVer form of the package version (`2.0.0-a1`) and
+  `tests/test_version_consistency.py` pins all four numbers plus that rule
+  (`test_chart_version_is_the_semver_form_of_the_package_version`). OPERATOR.md's front matter describes the
   product as it is, with the phase markers gone (F41); dangling cross-references resolved
   (F47).
 - **`GET /settings/secrets` serves viewers `{name, present}` only** — a distinct
@@ -984,7 +981,6 @@ Apparatus version **2.0**.
 - The v1 (June 2026) implementation (`src/commit_replay_bench/*`, SEARCH/REPLACE-only
   generator, host-only pytest harness). Its last commit is tagged `v1.0.0-legacy`.
 
-[Unreleased]: https://github.com/Jita81/commit-replay-bench/compare/v2.0.0b1...main
-[2.0.0b1]: https://github.com/Jita81/commit-replay-bench/compare/v2.0.0a1...v2.0.0b1
+[Unreleased]: https://github.com/Jita81/commit-replay-bench/compare/v2.0.0a1...main
 [2.0.0a1]: https://github.com/Jita81/commit-replay-bench/compare/v1.0.0-legacy...2.0.0a1-rc1
 [2.0.0a0]: https://github.com/Jita81/commit-replay-bench/compare/v1.0.0-legacy...v2.0.0a0
