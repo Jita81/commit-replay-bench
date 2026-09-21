@@ -78,7 +78,11 @@ two product defects. Both are fixed here, with the tests that would have caught 
   its path. The task view carries `outcome_reason` (the `item.outcome`'s `error`) and the
   Factory screen's outcome step renders the stop as a sentence with the way forward.
   `crb.factory.review.FINDING_WEAK_ORACLE` names the finding kind. ADR-0013 amended
-  (2026-09-21); docs/API.md updated.
+  (2026-09-21); docs/API.md updated. Review follow-ups: the reason quotes the HEAD of the
+  finding's detail (300 chars), so its prefix and way forward survive `ItemOutcome.error`'s
+  tail cap whatever the detail's length; the outcome step gives the way forward once (the
+  quoted reason is trimmed to the finding and why); the readiness step of a stopped item says
+  it was built, then routed human after the review — `route_hint` is the item's newest route.
 
 ### 2026-09-18 — link a repository you already measured to the GitHub App
 

@@ -71,7 +71,7 @@ from crb.builders.base import Budget, Builder, Rung
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.ledger import JsonlLedger
-from crb.core.redact import redact_and_cap
+from crb.core.redact import redact_and_cap, redact_and_cap_head
 from crb.core.routing import ROUTE_DELIVER as ROUTE_DELIVER_WORD
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig
@@ -149,6 +149,9 @@ STATUSES: tuple[str, ...] = (
     STATUS_BLOCKED,
     STATUS_ERROR,
 )
+#: How much of a ``weak_oracle`` finding's detail the ``oracle_needs_strengthening`` reason
+#: quotes — its head, so the reason's prefix and way forward fit ``ItemOutcome.error``.
+_FINDING_HEAD_CHARS = 300
 
 #: ``rework_test(item, verdict, previous) -> AuthoredTest | None`` — how a rework
 #: obtains its (possibly strengthened) oracle. ``None`` keeps the previous test.
@@ -625,7 +628,13 @@ class FactoryLoop:
         """Stop the item ``oracle_needs_strengthening``: the reviewer asked for a stronger
         test and none can be had here. Routed human on the chain (the finding and the way
         forward in the reason), ``rework.refused`` on the trace — and NO build."""
-        finding = self._weak_oracle_finding(verdict) or ""
+        # the finding's detail may run to the 2000 chars a ReviewFinding allows, and
+        # ItemOutcome.error is tail-capped at 2000: composed from the detail's HEAD, the
+        # reason keeps its prefix (the reader's key) and the way forward on the outcome
+        # exactly as the chain and the trace carry it
+        finding = redact_and_cap_head(
+            self._weak_oracle_finding(verdict) or "", max_chars=_FINDING_HEAD_CHARS
+        )
         reason = (
             f"the reviewer found the oracle weak ({finding}) and {why}: "
             "strengthen the test and register a superseding item"

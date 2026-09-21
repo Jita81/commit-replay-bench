@@ -66,9 +66,18 @@ const STEP_DISPLAY: Record<StepStatus, { tone: Tone; glyph: string; label: strin
   skipped: { tone: 'muted', glyph: '–', label: 'skipped' },
 }
 
+/** The way forward every `oracle_needs_strengthening` reason ends with (composed by the loop,
+ * `crb.factory.loop._refuse_rework`) — the outcome sentence gives it once, so the quoted
+ * reason is trimmed to the finding and why no stronger test could be had. */
+const WAY_FORWARD = 'strengthen the test and register a superseding item'
+const findingOf = (reason: string) => reason.replace(new RegExp(`:\\s*${WAY_FORWARD}\\s*$`), '')
+
 /** The six steps of the loop for one item, from the folded task view. */
 export function stepsFor(t: FactoryTask): Step[] {
   const gaps = t.dor_gaps.length
+  // `route_hint` is the item's NEWEST route on the chain: after a rule-3 stop that is the
+  // `human` the stop routed it to, not the reading readiness made before the build
+  const stoppedAfterReview = t.status === 'oracle_needs_strengthening' && t.route_hint === 'human'
   const readiness: Step =
     gaps > 0
       ? { id: 'readiness', title: 'Readiness', status: 'current', detail: `${gaps} structural gap${gaps === 1 ? '' : 's'} unsigned: ${t.dor_gaps.join(', ')}` }
@@ -77,7 +86,9 @@ export function stepsFor(t: FactoryTask): Step[] {
         : t.route_hint === ''
           ? // no route event yet: the factory run has not assessed this item
             { id: 'readiness', title: 'Readiness', status: 'current', detail: 'not assessed — a factory run assesses readiness first' }
-          : { id: 'readiness', title: 'Readiness', status: 'done', detail: `route ${t.route_hint}` }
+          : stoppedAfterReview
+            ? { id: 'readiness', title: 'Readiness', status: 'done', detail: 'built, then routed human after the review — the readiness reading is on the chain' }
+            : { id: 'readiness', title: 'Readiness', status: 'done', detail: `route ${t.route_hint}` }
   const afterReadiness = readiness.status === 'done'
   const red: Step =
     t.red_proof === true
@@ -114,7 +125,7 @@ export function stepsFor(t: FactoryTask): Step[] {
         ? // DL-045 rule 3: the reviewer asked for a stronger TEST and no changed oracle could be
           // had (no test author, or the same bytes back) — the loop refused to rebuild against
           // the same oracle and routed the item to a human; the chain's reason says which
-          { id: 'outcome', title: 'Outcome', status: 'failed', detail: `the reviewer found the oracle weak and no stronger test could be had — the loop did not rebuild against the same one: strengthen the test and register a superseding item${t.outcome_reason ? ` (${t.outcome_reason})` : ''}` }
+          { id: 'outcome', title: 'Outcome', status: 'failed', detail: `the reviewer found the oracle weak and no stronger test could be had — the loop did not rebuild against the same one: ${WAY_FORWARD}${t.outcome_reason ? ` (${findingOf(t.outcome_reason)})` : ''}` }
         : ['rejected', 'rework_exhausted', 'disqualified', 'delivery_failed', 'error', 'not_clean'].includes(t.status)
           ? { id: 'outcome', title: 'Outcome', status: 'failed', detail: t.status.replace(/_/g, ' ') }
           : { id: 'outcome', title: 'Outcome', status: 'todo', detail: t.status.replace(/_/g, ' ') }

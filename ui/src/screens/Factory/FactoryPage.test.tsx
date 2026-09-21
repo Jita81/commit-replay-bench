@@ -87,10 +87,20 @@ describe('stepsFor — an item the factory has not touched', () => {
     expect(outcome.detail).toMatch(/^the reviewer found the oracle weak and no stronger test could be had/)
     expect(outcome.detail).toContain('did not rebuild against the same one')
     expect(outcome.detail).toContain('strengthen the test and register a superseding item')
-    expect(outcome.detail).toContain(`(${reason})`)
+    // the chain's reason ends with the same way forward the sentence already gives — the
+    // parentheses carry only the finding and why no stronger test could be had, once
+    expect(outcome.detail).toContain('(the reviewer found the oracle weak (statement deleted) and this deployment has no test author)')
+    expect(outcome.detail.split('strengthen the test and register a superseding item')).toHaveLength(2)
     expect(outcome.detail).not.toContain('oracle_needs_strengthening')
+    // a reason without that suffix (a reviewer that words it differently) is quoted whole
+    expect(stepsFor({ ...stopped, outcome_reason: 'the oracle is weak' })[5]!.detail).toContain('(the oracle is weak)')
     // without a reason on the view the sentence still stands on its own
     expect(stepsFor({ ...stopped, outcome_reason: '' })[5]!.detail).not.toContain('(')
+    // the readiness step keeps the pre-build reading: the item was BUILT (a PR is open), and
+    // `route_hint` is `human` only because the stop routed it there after the review
+    expect(steps[0]!.detail).not.toBe('route human')
+    expect(steps[0]!.detail).toContain('after the review')
+    expect(steps[0]!.detail).toContain('human')
   })
 
   it('a build that ran and was not clean is the failure, spelled out', () => {

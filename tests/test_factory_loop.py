@@ -15,7 +15,8 @@ What it does: Pins that a spec refuses a test author that is also a rung, that a
               warning on the record, never a stop) until the budget is exhausted, that a
               ``weak_oracle`` verdict never rebuilds against an unchanged oracle (no test
               author, or one that returns the same bytes → ``oracle_needs_strengthening``,
-              routed human; DL-045 rule 3), that
+              routed human with a reason whose prefix survives a 2000-char finding;
+              DL-045 rule 3), that
               the route gate reads the capability map ONCE per item at readiness — before any
               build — and the PR body quotes that reading (DL-045), the full loop on a frozen
               backlog, and the ledgered horizon checkpoint.
@@ -849,6 +850,42 @@ def test_weak_oracle_with_a_test_author_returning_the_same_oracle_stops(
     routes = rig.evidence.events_for("I-1", fe.EV_ROUTE)
     assert routes[-1].payload["oracle_sha256"] == previous.sha256
     assert "the test author returned the same oracle" in out.error
+
+
+def test_a_long_weak_oracle_finding_keeps_the_reasons_prefix_and_way_forward(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The stop's reason is composed from the finding's detail — which may be the full 2000
+    chars a ``ReviewFinding`` allows — and ``ItemOutcome.error`` is tail-capped at 2000. The
+    loop caps the detail's HEAD when it composes the reason, so the prefix ("the reviewer
+    found the oracle weak (") and the way forward survive on the outcome exactly as the
+    chain and the trace carry them, whatever the detail's length."""
+    long_detail = "operator " + "x" * 1991  # exactly the 2000 a ReviewFinding allows
+
+    class VerboseReviewer(rv.MechanicalReviewer):
+        name = "verbose"
+
+        def assess(self, ctx: Any, probes: Any) -> rv.ReviewOpinion:
+            return rv.ReviewOpinion(
+                rv.VERDICT_ACCEPT_WITH_EDIT,
+                findings=(
+                    rv.ReviewFinding(rv.FINDING_WEAK_ORACLE, rv.SEVERITY_MAJOR, long_detail),
+                ),
+                summary="the oracle is weak",
+            )
+
+    rig = _rig(pyrepo, tmp_path, reviewer=VerboseReviewer(), deliver=True, creds=_creds())
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    _assert_stopped_for_a_stronger_oracle(rig, out)
+    (finding,) = [f for f in out.verdicts[0].findings if f.kind == rv.FINDING_WEAK_ORACLE]
+    assert len(finding.detail) == 2000
+    assert len(out.error) < 2000  # never tail-capped: the prefix is the reader's key
+    assert out.error.startswith("the reviewer found the oracle weak (operator xxx")
+    assert out.error.endswith(
+        " …) and this deployment has no test author: "
+        "strengthen the test and register a superseding item"
+    )
+    assert finding.detail not in out.error  # the head of the detail, not all of it
 
 
 def test_rework_asked_for_a_reason_other_than_the_oracle_keeps_the_rework_path(

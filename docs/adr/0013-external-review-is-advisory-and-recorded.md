@@ -1,8 +1,9 @@
 # ADR-0013 — An external reviewer's verdict is recorded, advisory, and never an input to a verdict
 
 **Status:** Proposed (operator decision DL-032 attached CodeRabbit; the factory integration
-described here is not built) · **Amended 2026-09-21** (a `weak_oracle` verdict never
-rebuilds against an unchanged oracle) — §"Amendment" below
+of an external reviewer described here is not built) · **Amended 2026-09-21** (a `weak_oracle`
+verdict never rebuilds against an unchanged oracle) — §"Amendment" below; the amendment's rule
+IS implemented, in `src/crb/factory/loop.py`, for every `Reviewer` including the mechanical one
 **Date:** 2026-09-15
 **Apparatus impact:** none. Nothing in this ADR touches a belt, the routing rule, the sign-off
 policy or a ledger row. It adds a *review* source.
