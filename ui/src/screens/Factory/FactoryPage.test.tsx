@@ -349,6 +349,20 @@ describe('FactoryPage — the shipped contract', () => {
     expect(within(banner).queryByRole('button', { name: 'Cancel the run' })).not.toBeInTheDocument()
   })
 
+  it('a queued run with no progress and no tasks yet reads without a number — never "item 1 of 0"', async () => {
+    mockApi(
+      base({
+        'GET /factory/alpha/tasks': [],
+        'GET /runs': { items: [{ id: 'b'.repeat(32), repo: 'alpha', kind: 'factory', status: 'queued', progress: null, started: null, cost_usd: 0, counts: {}, finished: null }], total: 1, limit: 10, offset: 0 },
+      }),
+    )
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const banner = await screen.findByTestId('factory-active-run')
+    expect(banner).toHaveTextContent('is working the backlog (waiting for a worker).')
+    expect(banner).not.toHaveTextContent(/\bof 0\b/)
+    expect(banner).not.toHaveTextContent(/item \d/)
+  })
+
   it('at phone width the item reads as one line — the current step and "step n of 6" — with the six cards behind a Details (J-FAC-14)', async () => {
     // jsdom has no matchMedia: stand one in that says the viewport is narrow
     const listeners = new Set<() => void>()

@@ -7,7 +7,7 @@
  *               with the stage each is at, and — for one repository (/connect/:name) — the six
  *               stages as a task list (register → probe → mine → oracle → controls → first
  *               measurement) with the action for the next one and, while a stage runs, an
- *               in-flight panel (attempts done of total, spend so far, started, Cancel).
+ *               in-flight panel (the attempt in hand of total (`kOfN`), spend so far, started, Cancel).
  * What it does: Lets an enterprise tech lead connect a repository and get to the baseline
  *               without knowing the product's vocabulary: every stage says what it proves and
  *               what it costs ("no model involved" / "spends model budget"), gold-clean, oracle

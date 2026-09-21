@@ -512,10 +512,12 @@ function ActiveRunBanner({ run, tasks, canCancel }: { run: Run; tasks: FactoryTa
   // the item in hand: the first one the chain has touched that has no outcome yet
   const current = tasks.find((t) => t.status === 'pending' && t.last_event !== '')
   const phrase = current ? `${current.id}: ${EVENT_PHRASE[current.last_event] ?? current.last_event.replace(/[._]/g, ' ')}` : run.status === 'queued' ? 'waiting for a worker' : 'starting the next item'
+  // the item in hand of total (`kOfN`: done + 1); null while the total is unknown (no progress, no tasks yet), and then no number at all — never "item 1 of 0"
+  const item = kOfN(done, total)
   return (
     <NotificationBanner title="Factory run in progress" className="mb-0">
       <p className="m-0" data-testid="factory-active-run">
-        Factory run {shortId(run.id)} is working the backlog — item {kOfN(done, total) ?? `${fmtInt(done + 1)} of ${fmtInt(total)}`} ({phrase}).
+        Factory run {shortId(run.id)} is working the backlog{item ? ` — item ${item}` : ''} ({phrase}).
         {run.cost_usd > 0 ? ` ${usd(run.cost_usd)} so far.` : ''}
         {run.started ? ` Started ${fmtDate(run.started)}.` : ''}{' '}
         <LinkButton size="sm" to={`/runs/${run.id}`}>
