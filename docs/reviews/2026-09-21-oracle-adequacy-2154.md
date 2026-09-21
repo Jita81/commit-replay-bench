@@ -46,9 +46,10 @@ Build 1's fix was 7+3 lines; the rework's 4+3; the wrong builds that survived lo
 Revision 5's residue, written into the proof notes before stopping:
 
 1. A faithful hand-rolled re-implementation of `pflag` on the help command. Walker D at 35
-   lines was rejected on four `pflag` corner cases; the next iteration that handles them is
-   ≥ 45 source lines — **M** under `SIZE_TIERS` — and the route gate for an S item does not
-   license it. Every row added only pushes this family's line count up; the size gate, not
+   lines was rejected on four `pflag` corner cases **[measured — one build, 4 ids]**; that
+   the next iteration which handles them lands at ≥ 45 source lines — **M** under
+   `SIZE_TIERS`, which the route gate for an S item does not license — is **[hypothesis]**
+   (no such build was written). Every row added only pushes this family's line count up; the size gate, not
    the oracle, is the instrument that catches it.
 2. Builds correct on the fixture's int / bool / string flags but wrong on kinds the fixture
    does not declare (slice, count, `-c=3`, values that look like flags). Also a parser; also
@@ -65,6 +66,8 @@ does not say, and the size gate says no.
 
 ## What this means for the product
 
+The three points below are **[hypothesis]** — conclusions drawn from one item's record, not a census — and each names a backlog row that is **[aspiration]** until built.
+
 - **An adequate oracle for one XS/S bug cost ~45 test rows and five author–adversary rounds.**
   That is the price of "false-Q1 = 0" on a forward-mode item, and it is the reason the loop's
   rule (3) refuses to rebuild against an unchanged oracle: the builder will find the gap
@@ -77,8 +80,9 @@ does not say, and the size gate says no.
   this record shows why the delivered change's measured churn must be compared to the item's
   estimate at the gate, not only recorded (backlog: F49 — refuse delivery when measured size
   exceeds the licensed cell).
-- **Process exits and panics hide ids.** Several wrong builds `os.Exit` or panic inside the
-  test binary, so a whole-package run reports only the failures before the exit. The RED
+- **Process exits and panics hide ids.** Four of the ten wrong builds (the rework, attack 1,
+  attack B and walker D) `os.Exit` or panic inside the test binary **[measured — the
+  proof notes' per-build runs, same method and apparatus as above]**, so a whole-package run reports only the failures before the exit. The RED
   proof and the reviewer read attributable ids from one run; a build that exits should be
   classified as *harness error → not clean*, never as "fewer failures" (backlog: F50 — the
   grader treats a test-binary exit as a failed belt with the exit recorded).
@@ -86,9 +90,9 @@ does not say, and the size gate says no.
 ## The artefacts
 
 - [2026-09-21-oracle-2154-v2/item.json](2026-09-21-oracle-2154-v2/item.json) — the
-  superseding item `cobra-2154-v2` (labels carry `supersedes: cobra-2154`; the API gains an
-  evolutions route in the next wave so supersession is recorded on the chain, not only in a
-  label), API-valid against `BacklogRegisterIn`.
+  superseding item `cobra-2154-v2` (labels carry `supersedes: cobra-2154`; recording
+  supersession on the chain needs an evolutions route the API does not have yet —
+  **[aspiration]**, backlog F32), API-valid against `BacklogRegisterIn`.
 - [2026-09-21-oracle-2154-v2/help_func_args_issue2154_test.go](2026-09-21-oracle-2154-v2/help_func_args_issue2154_test.go)
   — sha256 `e3821bc1213ded3ace50b88dc260db53c0015970b7c8f238922be81542139f71`, 44 tests
   (39 RED at `9c0edca`, 5 guards green at base).
@@ -100,5 +104,8 @@ does not say, and the size gate says no.
 
 ```bash
 git clone https://github.com/Jita81/cobra.git && cd cobra && git checkout 9c0edca
-cp <this dir>/help_func_args_issue2154_test.go . && gofmt -l . && go vet ./ && go test -json -count=1 ./ | grep '"Action":"fail"' | wc -l   # 39 leaf+parent ids
+cp <this dir>/help_func_args_issue2154_test.go . && gofmt -l . && go vet ./
+go test -json -count=1 ./... > red.json; status=$?          # exit 1 is the expected RED
+python3 -c 'import json;print(sum(1 for l in open("red.json") for e in [json.loads(l)] if e.get("Action")=="fail" and e.get("Test")))'   # 39 (leaf + parent ids; the package-level fail event has no Test field and is not counted)
+exit $status
 ```
