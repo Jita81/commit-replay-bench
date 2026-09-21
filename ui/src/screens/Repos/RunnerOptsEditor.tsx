@@ -160,7 +160,7 @@ export function RunnerOptsEditor({ runner, value, onChange, errors = {}, onJsonE
           className="font-mono text-xs"
           placeholder={jsonPlaceholder}
           error={jsonError}
-          hint="The whole runner_opts object, as stored. Edits apply as you type once the JSON parses; switch back to Form to see them key by key."
+          description="The whole runner_opts object, as stored. Edits apply as you type once the JSON parses; switch back to Form to see them key by key."
           data-testid="runner-opts-json"
         />
       ) : (
@@ -207,7 +207,7 @@ function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec;
           label={spec.label}
           value={asText(value)}
           placeholder={spec.placeholder}
-          hint={hint}
+          description={hint}
           error={error}
           disabled={disabled}
           spellCheck={false}
@@ -222,7 +222,7 @@ function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec;
           label={spec.label}
           value={asText(value)}
           placeholder={spec.placeholder}
-          hint={hint}
+          description={hint}
           error={error}
           disabled={disabled}
           inputMode="numeric"
@@ -236,7 +236,7 @@ function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec;
       )
     case 'bool':
       return (
-        <SelectField label={spec.label} value={asBool(value)} hint={hint} error={error} disabled={disabled} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value === 'true')} data-testid={testid}>
+        <SelectField label={spec.label} value={asBool(value)} description={hint} error={error} disabled={disabled} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value === 'true')} data-testid={testid}>
           <option value="">(default: {spec.defaultBool ? 'true' : 'false'})</option>
           <option value="true">true</option>
           <option value="false">false</option>
@@ -244,7 +244,7 @@ function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec;
       )
     case 'choice':
       return (
-        <SelectField label={spec.label} value={asText(value)} hint={hint} error={error} disabled={disabled} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} data-testid={testid}>
+        <SelectField label={spec.label} value={asText(value)} description={hint} error={error} disabled={disabled} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} data-testid={testid}>
           <option value="">(default)</option>
           {(spec.options ?? []).map((o) => (
             <option key={o} value={o}>

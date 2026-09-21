@@ -70,7 +70,10 @@ export function HelpPage() {
                   {t.readMore && (
                     <>
                       {' '}
-                      <Link to={docHref(t.readMore)}>Read more</Link>
+                      {/* underlined: it sits inside a sentence, so colour alone may not mark it (WCAG 1.4.1; axe link-in-text-block) */}
+                      <Link to={docHref(t.readMore)} className="underline underline-offset-4">
+                        Read more
+                      </Link>
                     </>
                   )}
                 </dd>

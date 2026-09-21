@@ -11,20 +11,26 @@
  *               non-finite `n` renders as a dash. The apparatus line wraps: the honest
  *               sentence ("no interval yet: the API serves the mean only") is read in full,
  *               never cut to one line behind a hover title. The label may be a node so a
- *               route name can be a `Term` with its definition one click away.
+ *               route name can be a `Term` with its definition one click away. With `hint`
+ *               (a registry id — the ratchet requires one on every tile) the whole tile is
+ *               the hover / focus / tap trigger for what the number IS and what its value
+ *               means; `footer` is the visible 11 px line under the evidence (the old
+ *               free-text `hint`).
  * How:          A `<dl>` of n / 95 % CI / apparatus under the value; `fmtInt` and `fmtCi` do
- *               the guarding.
+ *               the guarding; the root is a `<Hint as="div">` when `hint` is given, so
+ *               `data-hint` sits on the tile itself (`data-component="stat-tile"`).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/lib/format.ts (`fmtInt`, `fmtCi`, `wilson` for a client-side interval),
  *               ui/src/lib/verdict.ts (`TONE_TEXT` for a toned value),
+ *               ui/src/components/Hint.tsx (the trigger), ui/src/help/hints.ts (`HintId`),
  *               ui/src/screens/Results/ResultsPage.tsx (the Baseline's tiles: a `Term` as the
  *               route label, `ci={null}` for a mean that has no interval),
  *               ui/src/screens/Runs/RunDetailPage.tsx (a run's tiles),
  *               ui/src/screens/Capability/CapabilityPage.tsx
  *               (coverage and false-Q1 tiles), ui/src/screens/Signoff/SignoffPage.tsx
  *               (the evidence tiles an approver reads)
- * Tested by:    ui/src/components/StatTile.test.tsx, ui/src/screens/Runs/RunDetailPage.test.tsx
+ * Tested by:    ui/src/components/StatTile.test.tsx, ui/src/help/hints-ratchet.test.tsx (the hint contract), ui/src/screens/Runs/RunDetailPage.test.tsx
  *               (`tile-*` test ids), ui/e2e/walkthrough/05-replay-fake.spec.ts
  * Touch when:   never for a new repository; the tile's anatomy changes only with
  *               docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method.
@@ -32,8 +38,10 @@
  *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
  */
 import type { ReactNode } from 'react'
+import type { HintId } from '../help/hints'
 import { fmtCi, fmtInt } from '../lib/format'
 import { TONE_TEXT, type Tone } from '../lib/verdict'
+import { Hint } from './Hint'
 
 interface StatTileProps {
   /** The tile's name; a node when the word needs a definition (`<Term id="deliver" />`). */
@@ -42,12 +50,15 @@ interface StatTileProps {
   value: string
   /** The sample size behind the value. Required: a rate without its n is a rumour. */
   n: number | null | undefined
-  /** Wilson 95% interval when the value is a rate; `null` prints "95% CI —" (say why in `hint`). */
+  /** Wilson 95% interval when the value is a rate; `null` prints "95% CI —" (say why in `footer`). */
   ci?: { low: number; high: number } | null
   /** Apparatus/method line, e.g. "apparatus 2.0 · belt set v4 · Wilson 95%". */
   apparatus: string
   tone?: Tone
-  hint?: ReactNode
+  /** What this number is and what its value means — a registry id; the ratchet requires one on every tile. */
+  hint?: HintId
+  /** A visible 11 px line under the evidence (was the free-text `hint`). */
+  footer?: ReactNode
   'data-testid'?: string
 }
 
@@ -57,14 +68,16 @@ interface StatTileProps {
  * the n and the apparatus line; when the value is unmeasured pass "—" and
  * n = 0 and it renders as an honest empty tile, never a zero.
  */
-export function StatTile({ label, value, n, ci, apparatus, tone, hint, ...rest }: StatTileProps) {
+export function StatTile({ label, value, n, ci, apparatus, tone, hint, footer, ...rest }: StatTileProps) {
   const nText = typeof n === 'number' && Number.isFinite(n) ? fmtInt(n) : '—'
   const unmeasured = value === '—' || n === 0 || n === null || n === undefined
-  return (
-    <div
-      data-testid={rest['data-testid']}
-      className="min-w-[150px] flex-[1_1_150px] rounded-[var(--radius-card)] border border-border bg-surface-container px-4 py-3 shadow-[var(--shadow-card)]"
-    >
+  const root = {
+    'data-testid': rest['data-testid'],
+    'data-component': 'stat-tile',
+    className: 'min-w-[150px] flex-[1_1_150px] rounded-[var(--radius-card)] border border-border bg-surface-container px-4 py-3 shadow-[var(--shadow-card)]',
+  }
+  const inner = (
+    <>
       <div className="label">{label}</div>
       <div className={`num mt-1 text-[24px] font-semibold leading-8 ${unmeasured ? 'text-on-surface-muted' : tone ? TONE_TEXT[tone] : 'text-on-surface'}`}>
         {value}
@@ -85,7 +98,15 @@ export function StatTile({ label, value, n, ci, apparatus, tone, hint, ...rest }
           <dd className="break-words">{apparatus}</dd>
         </div>
       </dl>
-      {hint && <div className="mt-1 text-[11px] text-on-surface-muted">{hint}</div>}
-    </div>
+      {footer && <div className="mt-1 text-[11px] text-on-surface-muted">{footer}</div>}
+    </>
   )
+  if (hint) {
+    return (
+      <Hint as="div" id={hint} {...root}>
+        {inner}
+      </Hint>
+    )
+  }
+  return <div {...root}>{inner}</div>
 }

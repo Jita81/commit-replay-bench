@@ -9,11 +9,13 @@
  *               apparatus never had is not rendered at all, so a missing belt can never read
  *               as failed; belt 5 on a repository with no linter reads "not evaluated".
  * How:          `beltNamesFor(beltSet, belts)` picks the belt list → `beltDisplay` gives each
- *               value its tone / glyph / sentence → a `Pill` per belt inside a labelled list.
+ *               value its tone / glyph / sentence / hint (`belt.<name>`) → a `Pill` per belt
+ *               inside a labelled list.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
  * Works with:   ui/src/api/types.ts (`Belts`, `beltNamesFor`), ui/src/lib/verdict.ts
- *               (`beltDisplay`, `BELT_LABELS`), ui/src/components/Pill.tsx (the primitive),
+ *               (`beltDisplay` — with each belt's hint, `BELT_LABELS`), ui/src/components/Pill.tsx
+ *               (the primitive), ui/src/help/hints.ts (`belt.*` — one hint per belt),
  *               ui/src/screens/Runs/RunDetailPage.tsx and ui/src/screens/Runs/EvidenceDrawer.tsx
  *               (the task table and the pack view), ui/src/screens/Ledger/LedgerPage.tsx (rows)
  * Tested by:    ui/src/components/BeltPills.test.tsx, ui/e2e/walkthrough/05-replay-fake.spec.ts
@@ -63,6 +65,7 @@ export function BeltPills({ belts, beltSet, showNames = true, size = 'xs' }: Bel
               glyph={d.glyph}
               size={size}
               label={`${labels.long}: ${d.describe}`}
+              hint={d.hint}
               data-testid={`belt-${name}`}
             >
               {showNames ? labels.short : d.label}

@@ -67,8 +67,9 @@ function ProfileTable({ cells, classes, sizes, total }: { cells: ProfileCell[]; 
   const colTotals = new Map<string, number>()
   for (const c of cells) colTotals.set(c.size, (colTotals.get(c.size) ?? 0) + c.count)
   const max = Math.max(1, ...cells.map((c) => c.count))
+  // focusable: the profile table scrolls sideways at phone width (WCAG 2.1.1, axe scrollable-region-focusable at 375 px)
   return (
-    <div className="overflow-auto rounded-[var(--radius-control)] border border-border">
+    <div className="overflow-auto rounded-[var(--radius-control)] border border-border" tabIndex={0} role="region" aria-label="Change profile, scrollable">
       <table className="num w-full border-collapse text-[13px]">
         <caption className="sr-only">
           Change profile: commits per capability class and size tier over {fmtInt(total)} classified commits. This is a census of the examined history, not a sample: a cell with no commits reads 0 (measured), and shares are exact fractions of the census, so they carry no confidence interval.

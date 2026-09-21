@@ -171,7 +171,7 @@ export function ConnectPage() {
           />
         )}
         {repos.data && repos.data.items.length > 0 && (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Connected repositories, scrollable">
             <table className="w-full text-sm" aria-label="Connected repositories">
               <thead>
                 <tr className="text-left text-xs text-on-surface-muted">

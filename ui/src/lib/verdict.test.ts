@@ -24,7 +24,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import apiDoc from '../../../docs/API.md?raw'
-import { ACTION_HELP, actionHelp, bandDisplay, gateDisplay, routeDisplay } from './verdict'
+import { HINTS } from '../help/hints'
+import { ACTION_HELP, actionHelp, bandDisplay, beltDisplay, beltHint, gateDisplay, probeDisplay, routeDisplay, runStatusDisplay, tierDisplay } from './verdict'
 
 /**
  * The vocabulary is docs/API.md#event-vocabulary — the table tests/test_event_vocabulary.py
@@ -74,6 +75,24 @@ describe('route, band and gate copy', () => {
     expect(gateDisplay('auto_ship').describe).toBe('Gate: clears the oracle bar for deliver — a branch and pull request under review, never a merge')
     expect(gateDisplay('human_review').label).toBe('Review-gated')
     expect(gateDisplay('needs_human').label).toBe('Needs a human')
+  })
+
+  it('every display a screen renders as a pill carries its hint id, and an unknown value falls back to a registry id, never to nothing', () => {
+    for (const r of ['deliver', 'calibrate', 'granularize', 'human', 'do_not_ship']) expect(routeDisplay(r).hint).toBe(`route.${r}`)
+    expect(routeDisplay(null).hint).toBe('route.not_yet_measured')
+    expect(routeDisplay('new-route').hint).toBe('route.not_yet_measured')
+    expect(runStatusDisplay('queued').hint).toBe('run.status')
+    expect(runStatusDisplay('odd').hint).toBe('run.status')
+    expect(probeDisplay('degraded').hint).toBe('probe.status')
+    expect(bandDisplay('weak').hint).toBe('oracle.band')
+    expect(gateDisplay('auto_ship').hint).toBe('oracle.gate')
+    expect(tierDisplay('untrusted')?.hint).toBe('tier.verification')
+    expect(beltDisplay(true, 'target_green').hint).toBe('belt.target_green')
+    expect(beltDisplay(null, 'repo_lint_clean').hint).toBe('belt.repo_lint_clean')
+    expect(beltHint('belt_from_the_future')).toBe('belt.tests_unmodified')
+    for (const d of [routeDisplay('deliver'), runStatusDisplay('failed'), probeDisplay('ok'), bandDisplay('strong'), gateDisplay('needs_human'), tierDisplay('ab-confirmed')!]) {
+      expect(d.hint && d.hint in HINTS, d.label).toBe(true)
+    }
   })
 
   it('describe sentences carry no trailing full stop (VerdictPill appends the reason after one)', () => {

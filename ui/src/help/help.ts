@@ -55,7 +55,7 @@ export const HELP: ScreenHelp[] = [
       admin: 'Task 1 (the GitHub App) and task 7 (an approver account) are yours; both are in Settings.',
     },
     numbers: '“n of 8 tasks” counts tasks marked Completed. It is progress, not a quality figure; the quality figures live on the Baseline with their n and interval.',
-    terms: ['cell', 'apparatus', 'signoff'],
+    terms: ['cell', 'apparatus', 'signoff', 'oracle_strength'],
     readMore: [
       { to: 'ONBOARDING-A-REPO', label: 'Using Commit Replay Bench on a repository, step by step' },
       { to: 'GITHUB-APP#1-why-an-app-not-a-token', label: 'Why the GitHub App, not a token' },
@@ -85,7 +85,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'Pick a number of attempts, decide whether to keep worktrees for failed attempts, then confirm. You can cancel the run from Runs while it is in flight and you pay only for attempts made.',
     },
     numbers: 'The estimate is a planning band, not a measurement: with no measured mean for this repository it uses the per-attempt range from earlier repositories and carries no apparatus. Once this repository has measured attempts the estimate uses their mean (n shown) with ±20 % around it.',
-    terms: ['sighted', 'apparatus', 'evidence_pack'],
+    terms: ['sighted', 'apparatus', 'evidence_pack', 'cell'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-4--measure-operator-the-money-step', label: 'Measure: the money step' },
       { to: 'DATA-RETENTION#2-retention-defaults-zero-raw-retention', label: 'What is kept, and for how long' },
@@ -99,7 +99,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'Press Run on the next stage that reads Not started. A Failed stage says so; open run gives the log and the error, fix the cause, then Retry. Measure… is the only stage that spends.',
     },
     numbers: 'Stage detail lines carry counts (tasks mined, controls constructed, mutants killed). They are counts, not rates: the rates, with n and a Wilson interval, appear on the Baseline.',
-    terms: ['negative_controls', 'oracle_strength', 'sighted', 'wilson', 'apparatus'],
+    terms: ['negative_controls', 'oracle_strength', 'sighted', 'wilson', 'apparatus', 'belt', 'cell'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-3--prove-the-instrument-on-this-repository-operator-0', label: 'Prove the instrument for £0' },
       { to: 'OPERATOR#7-when-the-sandbox-is-unavailable', label: 'When the sandbox is unavailable' },
@@ -114,7 +114,7 @@ export const HELP: ScreenHelp[] = [
       approver: 'A cell that routes deliver and is not yet signed appears under Waiting on a person; Attest takes you to the sign-off form.',
     },
     numbers: 'Every rate carries n (attempts), a 95 % Wilson interval and the apparatus version that produced it. The interval is the claim, not the point. Economics tiles are means only: the API does not yet serve an interval for cost or latency.',
-    terms: ['cell', 'wilson', 'apparatus', 'false_q1', 'oracle_strength', 'negative_controls', 'deliver', 'calibrate', 'human', 'granularize'],
+    terms: ['cell', 'wilson', 'apparatus', 'false_q1', 'oracle_strength', 'negative_controls', 'deliver', 'calibrate', 'human', 'granularize', 'belt'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-5--read-the-map-everyone', label: 'Read the map' },
       { to: 'EVIDENCE-AND-CLAIMS#3-every-number-carries-its-method', label: 'Every number carries its method' },
@@ -130,7 +130,7 @@ export const HELP: ScreenHelp[] = [
       approver: 'Attest opens the sign-off form with the cell chosen; Sign a gap opens the item on the Factory. Decline by doing nothing: an unsigned cell keeps its route.',
     },
     numbers: 'n on a row is the attempts in that cell; the bracket is its 95 % Wilson interval; the code after it is the routing reason. A stale row was signed under an earlier apparatus and licenses nothing until re-signed.',
-    terms: ['cell', 'wilson', 'reason_code', 'signoff', 'stale', 'apparatus'],
+    terms: ['cell', 'wilson', 'reason_code', 'signoff', 'stale', 'apparatus', 'false_q1'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-6--before-anyone-signs-anything', label: 'Before anyone signs anything' },
       { to: 'EVIDENCE-AND-CLAIMS#4-the-apparatus-stamp--evidence-expires', label: 'Why a sign-off expires' },
@@ -144,7 +144,7 @@ export const HELP: ScreenHelp[] = [
       approver: 'Choose the cell, choose the accepted row you read, read the diff shown, tick the affirmation, write what you read and why it is acceptable, then Sign off. The green panel gives you a reference.',
     },
     numbers: 'Each gate row shows the observed value against the policy threshold (n, point, Wilson lower bound, oracle strength, controls constructed and escaped). The policy version and apparatus are stamped on the record and served back verbatim.',
-    terms: ['signoff', 'cell', 'wilson', 'false_q1', 'oracle_strength', 'negative_controls', 'deliver', 'controls_escape', 'apparatus'],
+    terms: ['signoff', 'cell', 'wilson', 'false_q1', 'oracle_strength', 'negative_controls', 'deliver', 'controls_escape', 'apparatus', 'belt'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-7--sign-off-approver', label: 'Sign off' },
       { to: 'EVIDENCE-AND-CLAIMS#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2', label: 'What a signed cell may be claimed to mean' },
@@ -160,7 +160,7 @@ export const HELP: ScreenHelp[] = [
       approver: 'Items blocked on a structural gap wait for your signature. Overriding the route gate is recorded on the chain under your name.',
     },
     numbers: '“k of m items sit in a cell that routes deliver” is read from the map at this moment; it changes as measurement changes. Build and review statuses are the server’s words, shown verbatim.',
-    terms: ['red_proof', 'route_gate', 'cell', 'deliver', 'evidence_pack'],
+    terms: ['red_proof', 'route_gate', 'cell', 'deliver', 'evidence_pack', 'apparatus', 'belt', 'wilson'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted', label: 'Forward mode' },
       { to: 'GITHUB-APP#5-what-happens-at-clone-and-at-delivery', label: 'What happens at delivery' },
@@ -174,7 +174,7 @@ export const HELP: ScreenHelp[] = [
       admin: 'If Sign-in reads Local accounts only, configure OpenID Connect; if Test executor is not docker, nothing measured is evidence.',
     },
     numbers: 'Ledger rows, chain state and false-Q1 total come from the live verification; the belt set and policy names are the versions in force.',
-    terms: ['apparatus', 'belt', 'false_q1'],
+    terms: ['apparatus', 'belt', 'false_q1', 'cell'],
     readMore: [
       { to: 'SECURITY#2-trust-boundaries', label: 'Trust boundaries' },
       { to: 'DATA-RETENTION#2-retention-defaults-zero-raw-retention', label: 'Retention defaults' },
@@ -189,7 +189,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'Watch the log; open a row’s pack to see every belt and the diff; cancel if the spend is wrong.',
     },
     numbers: 'A row is clean only when every evaluated belt holds; the “why not clean” split is red, budget, protocol and harness. Instrument rows (protocol, harness) count against the builder until the instrument is fixed.',
-    terms: ['belt', 'clean', 'evidence_pack', 'false_q1'],
+    terms: ['belt', 'clean', 'evidence_pack', 'false_q1', 'wilson', 'apparatus', 'oracle_strength', 'cell'],
     readMore: [
       { to: 'EVIDENCE-AND-CLAIMS#2-clean-semantic-q1-and-false-q1', label: 'Clean and false-Q1' },
       { to: 'DATA-RETENTION#2-retention-defaults-zero-raw-retention', label: 'What an evidence pack keeps' },
@@ -203,7 +203,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'Press Start a run, or open one to watch its live log and cancel it. The kind’s hint says what it produces and whether it spends.',
     },
     numbers: 'Progress counts are tasks attempted of tasks planned. Cost is builder-reported and summed; it is not an estimate.',
-    terms: ['sighted', 'blind', 'negative_controls', 'oracle_strength', 'evidence_pack'],
+    terms: ['sighted', 'blind', 'negative_controls', 'oracle_strength', 'evidence_pack', 'apparatus'],
     readMore: [
       { to: 'OPERATOR#3-run-a-sweep', label: 'Run a sweep' },
       { to: 'OPERATOR#8-stop-conditions', label: 'Stop conditions' },
@@ -217,7 +217,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'Open a cell for every number with its method and links to its rows and its route decision. Export CSV gives the rows behind the map.',
     },
     numbers: 'point = clean / n; the bracket is the 95 % Wilson interval; fQ1 is the false-Q1 count and must be 0; “or” is the mean oracle strength; the glyph is the verification tier. Cells with more than one apparatus version are flagged mixed, never averaged.',
-    terms: ['cell', 'wilson', 'false_q1', 'oracle_strength', 'apparatus', 'deliver', 'calibrate', 'human', 'granularize', 'reason_code'],
+    terms: ['cell', 'wilson', 'false_q1', 'oracle_strength', 'apparatus', 'deliver', 'calibrate', 'human', 'granularize', 'reason_code', 'belt'],
     readMore: [
       { to: 'OPERATOR#4-read-the-capability-map', label: 'Read the capability map' },
       { to: 'EVIDENCE-AND-CLAIMS#6-permitted-claim-shapes-by-maturity', label: 'What a cell’s route licenses' },
@@ -231,7 +231,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'A calibrate reason names what is missing (n, point, lower bound, controls). A human reason will not change with more attempts: strengthen the tests or run the controls.',
     },
     numbers: 'Route counts are cells, not attempts. Thresholds are the policy’s: n ≥ 10, point ≥ 0.90, Wilson lower ≥ 0.80, oracle ≥ 0.80, controls passed with 0 escapes and a majority constructed.',
-    terms: ['cell', 'route_gate', 'reason_code', 'deliver', 'calibrate', 'human', 'granularize', 'wilson', 'oracle_strength', 'controls_escape'],
+    terms: ['cell', 'route_gate', 'reason_code', 'deliver', 'calibrate', 'human', 'granularize', 'wilson', 'oracle_strength', 'controls_escape', 'belt'],
     readMore: [
       { to: 'EVIDENCE-AND-CLAIMS#6-permitted-claim-shapes-by-maturity', label: 'What a route licenses' },
       { to: 'ONBOARDING-A-REPO#step-3--prove-the-instrument-on-this-repository-operator-0', label: 'The controls gate' },
@@ -245,7 +245,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'If the controls gate is not open, run the controls. If a task is weak, the strengthen report on Learn turns it into test work.',
     },
     numbers: 'Strength = mutants killed / mutants planted on the changed lines, per task, with a 95 % Wilson interval; unscoreable tasks are counted and never averaged. Bands: strong ≥ 0.80, adequate, weak.',
-    terms: ['oracle_strength', 'negative_controls', 'controls_escape', 'wilson', 'human', 'cell'],
+    terms: ['oracle_strength', 'negative_controls', 'controls_escape', 'wilson', 'human', 'cell', 'apparatus'],
     readMore: [
       { to: 'OPERATOR#31-oracle-adequacy--mutation-scoring', label: 'Oracle adequacy: mutation scoring' },
       { to: 'ONBOARDING-A-REPO#step-2--make-the-oracle-reproducible-developer-the-real-work', label: 'Make the oracle reproducible' },
@@ -273,7 +273,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'A broken chain or a false-Q1 above 0 halts delivery; investigate the named row before anything else.',
     },
     numbers: 'Rows is the whole ledger across repositories; Matching rows is the current filter. false-Q1 is enforced when a row is written and re-derived when it is read.',
-    terms: ['false_q1', 'clean', 'belt', 'evidence_pack', 'sighted', 'blind', 'cell'],
+    terms: ['false_q1', 'clean', 'belt', 'evidence_pack', 'sighted', 'blind', 'cell', 'apparatus', 'oracle_strength'],
     readMore: [
       { to: 'EVIDENCE-AND-CLAIMS#6c-the-evidence-ladder--the-chain-proves-integrity-not-truth', label: 'What the chain proves' },
       { to: 'OPERATOR#6-export-and-verify-the-ledger', label: 'Export and verify' },
@@ -288,7 +288,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'Edit the configuration when the walk’s probe or mine stage fails; the runner, test prefixes and services are what the belts depend on.',
     },
     numbers: 'The change profile counts commits by class and size; it weights the coverage figure on the map. Gold-clean is tasks whose own test passes at the recorded commit.',
-    terms: ['gold_clean', 'belt', 'cell'],
+    terms: ['gold_clean', 'belt', 'cell', 'oracle_strength', 'wilson', 'apparatus'],
     readMore: [
       { to: 'OPERATOR#2-configure-a-repository', label: 'Configure a repository' },
       { to: 'OPERATOR#22-services-the-oracle-needs', label: 'Services the oracle needs' },
@@ -315,7 +315,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'Open a trial’s pack to see the diff and each belt’s result.',
     },
     numbers: 'Trials are single attempts; the cell’s rate is on the map, not here.',
-    terms: ['belt', 'evidence_pack', 'clean', 'gold_clean', 'cell'],
+    terms: ['belt', 'evidence_pack', 'clean', 'gold_clean', 'cell', 'apparatus'],
     readMore: [{ to: 'EVIDENCE-AND-CLAIMS#2-clean-semantic-q1-and-false-q1', label: 'The belts and clean' }],
   },
   {

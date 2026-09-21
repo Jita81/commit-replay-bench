@@ -163,7 +163,7 @@ export function ResultsPage() {
                 n={controls.data?.n_rows ?? null}
                 apparatus={controls.data ? controlsApparatus(controls.data.apparatus) : 'seven deliberate cheats the grader must catch'}
                 tone={verdict ? CONTROLS_TONE[verdict.state] : 'muted'}
-                hint={controls.data ? `${controls.data.violations} violations · ${controls.data.escapes} escapes · ${controls.data.not_constructible} not constructible` : verdict ? undefined : 'run the controls from Connect'}
+                footer={controls.data ? `${controls.data.violations} violations · ${controls.data.escapes} escapes · ${controls.data.not_constructible} not constructible` : verdict ? undefined : 'run the controls from Connect'}
                 data-testid="tile-negative-controls"
               />
               <StatTile
@@ -173,10 +173,10 @@ export function ResultsPage() {
                 ci={null}
                 apparatus={oracleApparatus}
                 tone={oracleMean === null ? 'muted' : oracleBar !== null && oracleMean >= oracleBar ? 'green' : 'amber'}
-                hint="no interval: a mean of per-task scores, not a rate"
+                footer="no interval: a mean of per-task scores, not a rate"
                 data-testid="tile-oracle-strength"
               />
-              <StatTile label="False-Q1" value={String(map.data.summary.false_q1_total)} n={map.data.summary.n_total} apparatus={apparatus} tone={map.data.summary.false_q1_total === 0 ? 'green' : 'red'} hint="must be zero; refused at write" />
+              <StatTile label="False-Q1" value={String(map.data.summary.false_q1_total)} n={map.data.summary.n_total} apparatus={apparatus} tone={map.data.summary.false_q1_total === 0 ? 'green' : 'red'} footer="must be zero; refused at write" />
             </div>
           </Card>
 

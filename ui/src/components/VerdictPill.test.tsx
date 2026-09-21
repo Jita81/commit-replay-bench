@@ -51,6 +51,13 @@ describe('VerdictPill', () => {
     expect(screen.getByTestId('verdict-NOT_YET_MEASURED')).toBeInTheDocument()
   })
 
+  it('carries the route’s hint on the pill itself, so a screen never writes a route hint by hand', () => {
+    render(<VerdictPill route="human" />)
+    const pill = screen.getByTestId('verdict-human')
+    expect(pill).toHaveAttribute('data-hint', 'route.human')
+    expect(pill).not.toHaveAttribute('title')
+  })
+
   it('appends the reason to the accessible label', () => {
     render(<VerdictPill route="calibrate" reason="n=3 < 10" />)
     expect(screen.getByTestId('verdict-calibrate')).toHaveAttribute('aria-label', expect.stringContaining('n=3 < 10'))

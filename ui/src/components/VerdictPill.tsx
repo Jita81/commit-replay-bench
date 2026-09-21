@@ -9,11 +9,14 @@
  *               tech (plus the routing reason when given); `null` / `undefined` renders as
  *               NOT_YET_MEASURED in a muted dashed outline — the UI never fabricates a
  *               verdict for a cell without rows, and never gives absence a status colour.
- * How:          `routeDisplay(route)` → `Pill`, with `data-testid="verdict-<route>"`.
+ * How:          `routeDisplay(route)` → `Pill`, with `data-testid="verdict-<route>"` and the
+ *               display's own `hint` (`route.<route>`; `route.not_yet_measured` for the
+ *               absence or an unknown value), so no screen writes a route hint by hand.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/src/lib/verdict.ts (`routeDisplay` — the one table), ui/src/components/Pill.tsx
- *               (the primitive), ui/src/api/types.ts (`CellVerdict`, `NOT_YET_MEASURED`),
+ * Works with:   ui/src/lib/verdict.ts (`routeDisplay` — the one table, each row with its hint),
+ *               ui/src/components/Pill.tsx (the primitive), ui/src/help/hints.ts (`route.*`),
+ *               ui/src/api/types.ts (`CellVerdict`, `NOT_YET_MEASURED`),
  *               ui/src/screens/Capability/CapabilityPage.tsx and
  *               ui/src/screens/Routing/RoutingPage.tsx
  *               (a pill per cell)
@@ -44,7 +47,7 @@ export function VerdictPill({ route, size = 'sm', reason }: VerdictPillProps) {
   const d = routeDisplay(route)
   const key = route ?? 'NOT_YET_MEASURED'
   return (
-    <Pill tone={d.tone} glyph={d.glyph} size={size} label={reason ? `${d.describe}. ${reason}` : d.describe} data-testid={`verdict-${key}`}>
+    <Pill tone={d.tone} glyph={d.glyph} size={size} label={reason ? `${d.describe}. ${reason}` : d.describe} hint={d.hint} data-testid={`verdict-${key}`}>
       {d.label}
     </Pill>
   )

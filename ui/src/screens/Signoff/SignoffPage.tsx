@@ -446,7 +446,7 @@ export function SignoffPage() {
                 Only an approver can sign. You are signed in as {me?.role ?? 'a viewer'}: you can read the gate, the evidence and the attestations on this page, and nothing here changes because you read it.
               </p>
               <div className="mt-4 max-w-[28em]">
-                <SelectField label="Cell to read" value={cellKey} onChange={(e) => setCellKey(e.target.value)} hint={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
+                <SelectField label="Cell to read" value={cellKey} onChange={(e) => setCellKey(e.target.value)} description={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
                   <option value="">Choose a measured cell…</option>
                   {measured.map((c) => (
                     <option key={`${c.capability_class}|${c.size}`} value={`${c.capability_class}|${c.size}`}>
@@ -468,7 +468,7 @@ export function SignoffPage() {
                 </ul>
               </WarningCallout>
               <form id="signoff-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
-                <SelectField label="Cell" required value={cellKey} onChange={(e) => setCellKey(e.target.value)} hint={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
+                <SelectField label="Cell" required value={cellKey} onChange={(e) => setCellKey(e.target.value)} description={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
                   <option value="">Choose a measured cell…</option>
                   {measured.map((c) => (
                     <option key={`${c.capability_class}|${c.size}`} value={`${c.capability_class}|${c.size}`}>
@@ -494,7 +494,7 @@ export function SignoffPage() {
                     setRead(false)
                   }}
                   disabled={!previewData}
-                  hint={previewData ? `${previewData.accepted_rows.length} accepted (clean) row(s) in this cell — name the one whose diff you read` : 'choose a cell first'}
+                  description={previewData ? `${previewData.accepted_rows.length} accepted (clean) row(s) in this cell — name the one whose diff you read` : 'choose a cell first'}
                   data-testid="attest-row"
                 >
                   <option value="">Choose the accepted row you read…</option>
@@ -527,10 +527,10 @@ export function SignoffPage() {
                   </div>
                 )}
                 <div className="sm:col-span-2">
-                  <TextArea label="Attestation statement" required rows={2} value={statement} onChange={(e) => setStatement(e.target.value)} hint="What you read in that diff and why it is acceptable. Recorded verbatim, append-only, redacted." data-testid="attest-statement" />
+                  <TextArea label="Attestation statement" required rows={2} value={statement} onChange={(e) => setStatement(e.target.value)} description="What you read in that diff and why it is acceptable. Recorded verbatim, append-only, redacted." data-testid="attest-statement" />
                 </div>
                 <div className="sm:col-span-2">
-                  <TextArea label="Note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} hint="Optional: what else you reviewed (packs, refusals, the oracle). Recorded verbatim." />
+                  <TextArea label="Note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} description="Optional: what else you reviewed (packs, refusals, the oracle). Recorded verbatim." />
                 </div>
                 {create.isError && !refusal && (
                   <div className="sm:col-span-2">
@@ -582,7 +582,7 @@ export function SignoffPage() {
                   </p>
                 </WarningCallout>
                 <div className="max-w-[44em]">
-                  <TextArea label="Why are you revoking it?" required rows={2} value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)} hint="Recorded verbatim on the revocation row, append-only. An auditor reads this next to the attestation it withdraws." data-testid="revoke-reason" />
+                  <TextArea label="Why are you revoking it?" required rows={2} value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)} description="Recorded verbatim on the revocation row, append-only. An auditor reads this next to the attestation it withdraws." data-testid="revoke-reason" />
                 </div>
                 {revoke.isError && (
                   <div className="mt-3">

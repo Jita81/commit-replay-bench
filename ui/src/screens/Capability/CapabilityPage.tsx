@@ -363,7 +363,7 @@ export function CapabilityPage() {
           return (
             <div className="space-y-6">
               <div className="flex flex-wrap gap-3">
-                <StatTile label="Trusted autonomy coverage" value={fmtPct(s.trusted_autonomy_coverage)} n={s.n_total ?? nTotal} apparatus={covApp} tone="primary" data-testid="tile-coverage" hint="Share of the repo's change volume (its change profile, weighted by commit count) whose cell routes to deliver — a coverage of the profile, not a sampled rate, so it carries no Wilson interval; each cell's rate carries its own." />
+                <StatTile label="Trusted autonomy coverage" value={fmtPct(s.trusted_autonomy_coverage)} n={s.n_total ?? nTotal} apparatus={covApp} tone="primary" data-testid="tile-coverage" footer="Share of the repo's change volume (its change profile, weighted by commit count) whose cell routes to deliver — a coverage of the profile, not a sampled rate, so it carries no Wilson interval; each cell's rate carries its own." />
                 <StatTile label="Measured cells" value={`${fmtInt(s.measured_cells)} / ${fmtInt(s.total_cells || grid)}`} n={s.n_total ?? nTotal} apparatus={`apparatus ${s.apparatus_versions?.join('/') || '—'}`} />
                 <StatTile
                   label="false-Q1 total"
@@ -423,7 +423,7 @@ export function CapabilityPage() {
                     action={can('operator') ? <LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=replay`}>Start a replay run</LinkButton> : undefined}
                   />
                 ) : (
-                  <div className="overflow-auto">
+                  <div className="overflow-auto" tabIndex={0} role="region" aria-label={`Capability map for ${repo}, scrollable`}>
                     <table className="w-full border-separate border-spacing-1">
                       <caption className="sr-only">Capability map for {repo}: rows are capability classes, columns are size tiers</caption>
                       <thead>

@@ -225,6 +225,43 @@ h3 { font-size: 16px; line-height: 24px; }
   }
 }
 
+/* The hint bubble (ui/src/components/Hint.tsx): one `role="tooltip"` per hinted element,
+   portalled to <body>, ALWAYS in the DOM so `aria-describedby` resolves — hidden by
+   `visibility`, never `display: none`. Both themes through the tokens above; no fade under
+   reduced motion. The trigger carries `data-hint="<id>"` and `data-open`. */
+.hint-bubble {
+  position: fixed;
+  z-index: 60;
+  max-width: 36ch;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-highest);
+  color: var(--ink);
+  box-shadow: var(--shadow-card);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  text-align: left;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.hint-bubble[data-open="true"] {
+  visibility: visible;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hint-bubble { transition: none; }
+}
+/* A hinted element that is a tab stop only because of its hint shows the same ring as a control. */
+[data-hint]:focus-visible { outline: 2px solid var(--trust); outline-offset: 2px; }
+
 /* Live pulse for a running run — the only animation on governance surfaces. */
 @keyframes crb-pulse {
   0%, 100% { opacity: 1; }

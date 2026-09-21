@@ -192,7 +192,7 @@ function SignInPanel({ onDone }: { onDone: () => void }) {
             spellCheck={false}
             placeholder="paste the code the page shows after you approve"
             data-testid="claude-signin-code"
-            hint={
+            description={
               s.state === 'exchanging'
                 ? 'Exchanging the code for a token…'
                 : s.url
@@ -285,7 +285,7 @@ export function ClaudeCodeLoginCard() {
                 spellCheck={false}
                 placeholder="sk-ant-oat01-…"
                 data-testid="claude-login-token"
-                hint="Never shown again after saving; only the last four characters are reported."
+                description="Never shown again after saving; only the last four characters are reported."
               />
               <div className="flex items-end">
                 <Button type="submit" variant="filled" disabled={save.isPending || !token.trim()} data-testid="claude-login-save">

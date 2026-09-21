@@ -272,7 +272,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
           ))}
           {presetRepo && !repos.data?.items.some((r) => r.name === presetRepo) && <option value={presetRepo}>{presetRepo}</option>}
         </SelectField>
-        <SelectField label="Kind" required value={kind} onChange={(e) => setKind(e.target.value as RunKind)} hint={KIND_HELP[kind]}>
+        <SelectField label="Kind" required value={kind} onChange={(e) => setKind(e.target.value as RunKind)} description={KIND_HELP[kind]}>
           {RUN_KINDS.map((k) => (
             <option key={k} value={k}>
               {k}
@@ -281,7 +281,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
         </SelectField>
         {needsBuilder && (
           <>
-            <TextField label="Mode" value={mode} readOnly hint="Derived from kind: replay = sighted, blind = blind" />
+            <TextField label="Mode" value={mode} readOnly description="Derived from kind: replay = sighted, blind = blind" />
             <TextField
               label="Builder"
               required
@@ -289,7 +289,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
               onChange={(e) => setBuilder(e.target.value)}
               list="crb-builders"
               placeholder="editblock · openai_agent · claude_code"
-              hint={
+              description={
                 builders.length
                   ? `Credentials on the server: ${builders.filter((b) => b.configured).map((b) => b.name).join(', ') || 'none'}`
                   : 'A builder registered on the server (see Settings)'
@@ -306,7 +306,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
               onChange={(e) => setModel(e.target.value)}
               list={isClaudeCode ? 'crb-claude-models' : undefined}
               placeholder={isClaudeCode ? CLAUDE_CODE_DEFAULT_MODEL : 'e.g. gpt-oss-120b'}
-              hint={isClaudeCode ? `Default ${CLAUDE_CODE_DEFAULT_MODEL} (the census’s measured path); claude-opus-5 is selectable` : undefined}
+              description={isClaudeCode ? `Default ${CLAUDE_CODE_DEFAULT_MODEL} (the census’s measured path); claude-opus-5 is selectable` : undefined}
             />
             {isClaudeCode && (
               <datalist id="crb-claude-models">
@@ -321,7 +321,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
               value={ladder}
               onChange={(e) => setLadder(e.target.value)}
               error={ladderEmpty ? 'A run needs at least one rung: a label here or a rung below' : undefined}
-              hint="Comma-separated rung labels; each rung is one attempt (r1 = this builder + model, or builder:model[:provider]). Object rungs below are appended in order."
+              description="Comma-separated rung labels; each rung is one attempt (r1 = this builder + model, or builder:model[:provider]). Object rungs below are appended in order."
             />
             {isClaudeCode && (
               <div className="flex items-start gap-2 rounded-[var(--radius-control)] border border-border bg-surface-container px-3 py-2 sm:col-span-2">
@@ -349,7 +349,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                     value={budget[key]}
                     onChange={(e) => setBudget((b) => ({ ...b, [key]: e.target.value }))}
                     placeholder={String(BUDGET_DEFAULTS[key])}
-                    hint={`default ${BUDGET_DEFAULTS[key]}${key === 'max_tokens' || key === 'max_cost_usd' ? ' (no cap)' : ''}`}
+                    description={`default ${BUDGET_DEFAULTS[key]}${key === 'max_tokens' || key === 'max_cost_usd' ? ' (no cap)' : ''}`}
                   />
                 ))}
               </div>
@@ -411,23 +411,23 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                 className="font-mono text-xs"
                 placeholder={'{\n  "auth": "cli",\n  "effort": "high"\n}'}
                 error={cfgError}
-                hint={`Constructor overrides applied to every rung and stamped into the run’s apparatus. ${BUILDER_CONFIG_HELP[builder] ?? 'model / provider and credential keys are refused — identity comes from the ladder, secrets from the worker’s environment.'}`}
+                description={`Constructor overrides applied to every rung and stamped into the run’s apparatus. ${BUILDER_CONFIG_HELP[builder] ?? 'model / provider and credential keys are refused — identity comes from the ladder, secrets from the worker’s environment.'}`}
               />
             </div>
           </>
         )}
-        <TextField label="Task limit" type="number" min={1} value={limit} onChange={(e) => setLimit(e.target.value)} hint="Leave blank for all tasks" />
+        <TextField label="Task limit" type="number" min={1} value={limit} onChange={(e) => setLimit(e.target.value)} description="Leave blank for all tasks" />
         <SelectField label="Pool" value={pool} onChange={(e) => setPool(e.target.value)}>
           <option value="">all</option>
           <option value="standard">standard</option>
           <option value="hard">hard</option>
         </SelectField>
-        <SelectField label="Executor" value={executor} onChange={(e) => setExecutor(e.target.value)} hint="Docker fails closed when unavailable; there is no local fallback">
+        <SelectField label="Executor" value={executor} onChange={(e) => setExecutor(e.target.value)} description="Docker fails closed when unavailable; there is no local fallback">
           <option value="">{serverExecutor ? `server default (${serverExecutor})` : 'server default'}</option>
           <option value="docker">docker (sandboxed)</option>
           <option value="local">local</option>
         </SelectField>
-        <TextField label="Timeout (s)" type="number" min={1} value={timeout} onChange={(e) => setTimeoutS(e.target.value)} hint="Per test run; a timeout is a failure, never a pass" />
+        <TextField label="Timeout (s)" type="number" min={1} value={timeout} onChange={(e) => setTimeoutS(e.target.value)} description="Per test run; a timeout is a failure, never a pass" />
         {create.isError && (
           <div className="sm:col-span-2">
             <ErrorState compact error={create.error} />

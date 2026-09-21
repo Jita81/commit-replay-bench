@@ -287,7 +287,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
           )}
           {picked && mode === 'link' && (
             <div className="space-y-2 rounded-[var(--radius-control)] border border-border p-3" data-testid="github-link-existing">
-              <SelectField label="Existing repository" value={existing} onChange={(e) => setExisting(e.target.value)} hint={allRepos.isPending ? 'Loading repositories…' : unlinked.length === 0 && allRepos.data ? 'Every repository already has a GitHub link.' : 'Only repositories with no GitHub link are listed.'}>
+              <SelectField label="Existing repository" value={existing} onChange={(e) => setExisting(e.target.value)} description={allRepos.isPending ? 'Loading repositories…' : unlinked.length === 0 && allRepos.data ? 'Every repository already has a GitHub link.' : 'Only repositories with no GitHub link are listed.'}>
                 <option value="">— choose —</option>
                 {unlinked.map((r) => (
                   <option key={r.name} value={r.name}>
@@ -303,7 +303,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
           )}
           {picked && mode === 'new' && (
             <div className="grid gap-3 rounded-[var(--radius-control)] border border-border p-3 sm:grid-cols-3" data-testid="github-connect-confirm">
-              <TextField label="Name in crb" value={name} onChange={(e) => setName(e.target.value)} hint="lowercase; the ledger key" />
+              <TextField label="Name in crb" value={name} onChange={(e) => setName(e.target.value)} description="lowercase; the ledger key" />
               <SelectField label="Language" value={language} onChange={(e) => setLanguage(e.target.value as Language | '')} error={language ? undefined : 'GitHub reports no language — choose one'}>
                 <option value="">— choose —</option>
                 {LANGUAGES.map((l) => (
@@ -312,7 +312,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
                   </option>
                 ))}
               </SelectField>
-              <SelectField label="Test runner" value={runner} onChange={(e) => setRunner(e.target.value as Runner | '')} hint="the probe verifies it">
+              <SelectField label="Test runner" value={runner} onChange={(e) => setRunner(e.target.value as Runner | '')} description="the probe verifies it">
                 <option value="">— default —</option>
                 {RUNNERS.map((r) => (
                   <option key={r} value={r}>

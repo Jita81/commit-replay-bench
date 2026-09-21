@@ -4,12 +4,17 @@
  *
  * Navigation
  * ----------
- * What it is:   `AboutThisScreen`, `InlineDisclosure`, `Term` and `DocLink`.
+ * What it is:   `AboutThisScreen`, `collectHints`, `InlineDisclosure`, `Term` and `DocLink`.
  * What it does: `AboutThisScreen` is mounted once in the shell after the page content and
  *               reads the route and the signed-in role: a collapsed GOV.UK details with what
  *               this screen is for, what to do next for this role (falling down the ladder to
- *               the viewer's step), what the numbers mean, the terms on the screen and where
- *               to read more; it renders nothing where the registry has no entry.
+ *               the viewer's step), what the numbers mean, the terms on the screen, the
+ *               elements on the screen and where to read more; it renders nothing where the
+ *               registry has no entry. "Elements on this screen" is generated when the block
+ *               opens: every `data-hint` on the page (deduplicated, in DOM order) with the
+ *               trigger's visible text and the registry sentence — the printable, touch-safe,
+ *               screen-reader-safe copy of every tooltip, from the same registry the bubbles
+ *               read, so it cannot drift.
  *               `InlineDisclosure` is the one disclosure primitive: a real button
  *               (`aria-expanded` / `aria-controls`) that toggles a `role="note"` inline under
  *               its label — click, Enter or Space; Escape closes; never a hover tooltip, so it
@@ -18,10 +23,13 @@
  *               reason code's sentence through it. `DocLink` links into a guide section at
  *               /help/docs.
  * How:          `useLocation` + `useAuth` + `helpFor`; `useId` for the controls id; state
- *               local to each disclosure. A disclosure must never sit inside another button.
+ *               local to each disclosure; `collectHints(document)` on the details' toggle.
+ *               A disclosure must never sit inside another button.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/help/help.ts (the registry the About block renders),
+ *               ui/src/help/hints.ts (`hintText` — the elements part), ui/src/components/Hint.tsx
+ *               (the `data-hint` triggers it collects),
  *               ui/src/help/glossary.ts (`TERMS`), ui/src/help/docs.ts (`docHref`),
  *               ui/src/components/govuk.tsx (`Details`), ui/src/components/Layout.tsx (mounts
  *               the About block once, after `<Outlet/>`), ui/src/screens/Help/HelpPage.tsx
@@ -38,8 +46,35 @@ import { ROLE_ORDER, type Role } from '../api/types'
 import { docHref, type DocAnchor } from '../help/docs'
 import { TERMS, type TermId } from '../help/glossary'
 import { helpFor } from '../help/help'
+import { HINTS, hintText, type HintId } from '../help/hints'
 import { useAuth } from '../lib/auth'
 import { Details } from './govuk'
+
+/** One hinted element as the About block lists it: the trigger's visible text and the registry sentence. */
+export interface HintedElement {
+  id: HintId
+  /** The trigger's visible text (or its `aria-label`), cut to one line; the id's last segment when it has none. */
+  label: string
+  text: string
+}
+
+/**
+ * Every `data-hint` on the page, deduplicated by id, in DOM order — the source of "Elements
+ * on this screen". Ids the registry does not know are skipped, never rendered blank.
+ */
+export function collectHints(root: ParentNode): HintedElement[] {
+  const seen = new Set<string>()
+  const out: HintedElement[] = []
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-hint]'))) {
+    const id = el.getAttribute('data-hint') ?? ''
+    if (seen.has(id) || !(id in HINTS)) continue
+    seen.add(id)
+    const raw = (el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim()
+    const label = raw.length > 60 ? `${raw.slice(0, 57)}…` : raw || id.split('.').pop()!.replace(/_/g, ' ')
+    out.push({ id: id as HintId, label, text: hintText(id as HintId) })
+  }
+  return out
+}
 
 /** The next step for `role`: its own, else the nearest lower role's (a higher role can do what a lower one can). */
 function nextFor(next: Partial<Record<Role, string>> & { viewer: string }, role: Role | undefined): string {
@@ -59,10 +94,13 @@ export function AboutThisScreen() {
   const { pathname } = useLocation()
   const { me } = useAuth()
   const help = helpFor(pathname)
+  const [elements, setElements] = useState<HintedElement[] | null>(null)
   if (!help) return null
+  // collected when the block opens, so the list is what the reader sees on the page now
+  const onToggle = (open: boolean) => setElements(open ? collectHints(document) : null)
   return (
     <section aria-labelledby="about-screen-summary" data-testid="about-this-screen" className="border-t border-border pt-6">
-      <Details summary="About this screen" id="about-screen">
+      <Details summary="About this screen" id="about-screen" onToggle={onToggle}>
         <h3 className="mb-1 mt-0 text-[16px]">What this screen is for</h3>
         <p className="mb-4 mt-0">{help.purpose}</p>
         <h3 className="mb-1 mt-0 text-[16px]">What to do next</h3>
@@ -87,6 +125,23 @@ export function AboutThisScreen() {
                   <dd className="ml-0 inline">
                     {' '}
                     — {TERMS[id].short}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </>
+        )}
+        {elements && elements.length > 0 && (
+          <>
+            <h3 className="mb-1 mt-0 text-[16px]">Elements on this screen</h3>
+            <p className="mb-2 mt-0 text-on-surface-muted">What each element shows, as its hover or focus hint says. Hover, focus or tap the element itself for the same text.</p>
+            <dl className="mb-4 mt-0" data-testid="about-elements">
+              {elements.map((e) => (
+                <div key={e.id} className="mb-2" data-hint-id={e.id}>
+                  <dt className="inline font-bold">{e.label}</dt>
+                  <dd className="ml-0 inline">
+                    {' '}
+                    — {e.text}
                   </dd>
                 </div>
               ))}

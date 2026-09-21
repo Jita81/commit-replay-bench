@@ -722,8 +722,8 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
             The factory has no full run form: name a registered builder here (as the run form's Builder field) when the deployment's default is not the one you mean. Blank = the builder above.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <TextField label="Builder" value={ownBuilder} onChange={(e) => setOwnBuilder(e.target.value)} hint="a registered builder name" />
-            <TextField label="Model" value={ownModel} onChange={(e) => setOwnModel(e.target.value)} hint="optional — the builder's default when blank" />
+            <TextField label="Builder" value={ownBuilder} onChange={(e) => setOwnBuilder(e.target.value)} description="a registered builder name" />
+            <TextField label="Model" value={ownModel} onChange={(e) => setOwnModel(e.target.value)} description="optional — the builder's default when blank" />
           </div>
         </Details>
       </div>
@@ -886,7 +886,7 @@ function GapForm({ repo, task: t }: { repo: string; task: FactoryTask }) {
         onChange={(e) => setAnswer(e.target.value)}
         className="min-w-[24ch] flex-1"
         required
-        hint={question ? `${question} As a reviewer could check it, for example “GET /v1/orders/{id}”.` : 'The structural fact, as a reviewer could check it.'}
+        description={question ? `${question} As a reviewer could check it, for example “GET /v1/orders/{id}”.` : 'The structural fact, as a reviewer could check it.'}
       />
       <Button type="submit" size="sm" variant="filled" disabled={sign.isPending || !answer.trim()}>
         Sign the gap
@@ -917,7 +917,7 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
   const r = t.cell_route
   if (!r || !r.route) {
     return (
-      <Pill tone="muted" glyph="○" size="xs" label={`Cell ${t.capability_class} × ${t.size} is not measured on this repository: delivery would be withheld`} data-testid={`cell-route-${t.id}`}>
+      <Pill tone="muted" glyph="○" size="xs" label={`Cell ${t.capability_class} × ${t.size} is not measured on this repository: delivery would be withheld`} hint="factory.cell_route.unmeasured" data-testid={`cell-route-${t.id}`}>
         not measured · withheld
       </Pill>
     )
@@ -927,11 +927,11 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
   return (
     <>
       {r.deliverable ? (
-        <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver — ${prov}: a clean build may open a pull request`} data-testid={`cell-route-${t.id}`}>
+        <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver — ${prov}: a clean build may open a pull request`} hint="factory.cell_route.deliverable" data-testid={`cell-route-${t.id}`}>
           routes deliver
         </Pill>
       ) : (
-        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: delivery would be withheld — ${r.reason}`} data-testid={`cell-route-${t.id}`}>
+        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: delivery would be withheld — ${r.reason}`} hint="factory.cell_route.withheld" data-testid={`cell-route-${t.id}`}>
           routes {r.route} · withheld
         </Pill>
       )}
@@ -1091,7 +1091,7 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
             rows={12}
             className="font-mono text-xs"
             error={parseError || undefined}
-            hint={
+            description={
               <>
                 Shape as the API's Factory section: items[] with id, title, capability_class, size_estimate, structural_facts; optional authored tests. See{' '}
                 <DocLink to="ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted">Forward mode</DocLink>.
@@ -1109,7 +1109,7 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
               <fieldset key={i} className="m-0 rounded-[var(--radius-control)] border border-border p-3" data-testid={`backlog-item-${i}`}>
                 <legend className="px-1 text-xs font-semibold text-on-surface-muted">Item {i + 1}</legend>
                 <div className="grid gap-3 sm:grid-cols-[10ch_1fr]">
-                  <TextField label="Id" required value={d.id} onChange={(e) => update(i, { id: e.target.value })} hint="letters, digits, . _ -" />
+                  <TextField label="Id" required value={d.id} onChange={(e) => update(i, { id: e.target.value })} description="letters, digits, . _ -" />
                   <TextField label="Title" required value={d.title} onChange={(e) => update(i, { title: e.target.value })} />
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-4">
@@ -1143,7 +1143,7 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
                   </SelectField>
                 </div>
                 <div className="mt-3">
-                  <TextArea label="Description" rows={2} value={d.description} onChange={(e) => update(i, { description: e.target.value })} hint="What and why, as the issue would say it. Never a diff." />
+                  <TextArea label="Description" rows={2} value={d.description} onChange={(e) => update(i, { description: e.target.value })} description="What and why, as the issue would say it. Never a diff." />
                 </div>
                 {slots.length > 0 && (
                   <div className="mt-3 space-y-2" data-testid={`backlog-item-${i}-facts`}>
@@ -1154,14 +1154,14 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
                         label={`${sl.question}${sl.kind === 'structural' ? '' : ' (value — optional)'}`}
                         value={d.facts[sl.name] ?? ''}
                         onChange={(e) => setFact(i, sl.name, e.target.value)}
-                        hint={sl.kind === 'structural' ? `structural · ${sl.name} — empty = a gap the run stops on` : `value · ${sl.name} — routes, never blocks`}
+                        description={sl.kind === 'structural' ? `structural · ${sl.name} — empty = a gap the run stops on` : `value · ${sl.name} — routes, never blocks`}
                       />
                     ))}
                   </div>
                 )}
                 {slots.length === 0 && cat && <p className="mt-3 text-xs text-on-surface-muted">{d.capability_class} declares no structural facts: the run assesses readiness from the description alone.</p>}
                 <div className="mt-3 flex flex-wrap items-end gap-3">
-                  <TextField label="Depends on" value={d.depends_on} onChange={(e) => update(i, { depends_on: e.target.value })} hint="item ids, comma-separated" className="min-w-[20ch]" />
+                  <TextField label="Depends on" value={d.depends_on} onChange={(e) => update(i, { depends_on: e.target.value })} description="item ids, comma-separated" className="min-w-[20ch]" />
                   {items.length > 1 && (
                     <Button size="sm" variant="ghost" onClick={() => setItems((xs) => xs.filter((_, j) => j !== i))}>
                       Remove item

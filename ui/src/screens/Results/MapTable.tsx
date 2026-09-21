@@ -67,8 +67,9 @@ export function MapTable({ map, signoffs, repo, canSign = false }: { map: Capabi
   const sizes = ['XS', 'S', 'M', 'L', 'XL']
   const classes = map.classes.length ? map.classes : Array.from(new Set(map.cells.map((c) => c.capability_class)))
   const byKey = new Map(map.cells.map((c) => [`${c.capability_class}|${c.size}`, c]))
+  // focusable: the 820 px table scrolls sideways at phone width (WCAG 2.1.1, axe scrollable-region-focusable at 375 px)
   return (
-    <div className="mb-6 overflow-x-auto">
+    <div className="mb-6 overflow-x-auto" tabIndex={0} role="region" aria-label={`Capability map for ${repo}, scrollable`}>
       <table className="w-full min-w-[820px] border-collapse" aria-label={`Capability map for ${repo}`}>
         <thead>
           <tr>

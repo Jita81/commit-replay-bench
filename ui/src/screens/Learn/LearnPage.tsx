@@ -238,7 +238,7 @@ function RefusalsSection({ repo }: { repo: string }) {
           ci={byApp.length === 1 && headline.rows_total ? { low: headline.ci_low, high: headline.ci_high } : null}
           apparatus={byApp.length > 1 ? `${byApp.map((a) => `${a.apparatus_version}: ${a.rows_protocol}/${a.rows_total} [${fmtPct(a.ci_low, 0)}–${fmtPct(a.ci_high, 0)}]`).join(' · ')} · Wilson 95%` : apparatus}
           tone={byApp.some((a) => a.share > 0.05) ? 'amber' : 'green'}
-          hint="review §7.5: read every one until this is < 5%"
+          footer="review §7.5: read every one until this is < 5%"
         />
         <StatTile label="Refusal classes" value={r.groups.length ? fmtInt(r.groups.length) : '—'} n={r.rows_protocol} apparatus="grouped by (guard, reason, command shape)" />
         <StatTile label="Spent on refusals" value={r.rows_protocol ? fmtUsd(r.cost_usd) : '—'} n={r.rows_protocol} apparatus={`${fmtInt(Math.round(r.minutes))} builder-minutes`} />
@@ -282,7 +282,7 @@ function StrengthenSection({ repo }: { repo: string }) {
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Oracle-held cells" value={s.cells_flagged.length ? fmtInt(s.cells_flagged.length) : '—'} n={s.cells_flagged.length} apparatus={`routing.v1 · oracle threshold ${s.threshold.toFixed(2)}`} tone={s.cells_flagged.length ? 'amber' : 'green'} />
         <StatTile label="Strengthening items" value={s.items.length ? fmtInt(s.items.length) : '—'} n={s.items.length} apparatus="test.add · structural slots only · DoR: build" />
-        <StatTile label="Cells without per-task scores" value={s.cells_without_scores.length ? fmtInt(s.cells_without_scores.length) : '—'} n={s.cells_without_scores.length} apparatus="run an oracle run to list the escaped mutants" hint={<Link to={`/oracle?repo=${enc(repo)}`}>Oracle</Link>} />
+        <StatTile label="Cells without per-task scores" value={s.cells_without_scores.length ? fmtInt(s.cells_without_scores.length) : '—'} n={s.cells_without_scores.length} apparatus="run an oracle run to list the escaped mutants" footer={<Link to={`/oracle?repo=${enc(repo)}`}>Oracle</Link>} />
       </div>
       <DataTable
         rows={s.items}
@@ -322,7 +322,7 @@ function RemeasureSection({ repo }: { repo: string }) {
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Stale rows" value={p.rows_total ? fmtInt(p.rows_stale) : '—'} n={p.rows_total} apparatus={`older than apparatus ${p.current_apparatus}`} tone={p.rows_stale ? 'amber' : 'green'} />
         <StatTile label="Rows still needed" value={p.cells.length ? fmtInt(p.summary.n_needed_total) : '—'} n={p.cells.length} apparatus={`rule n ≥ ${p.min_n} per cell · ${fmtInt(p.summary.cells_stale)} cell(s)`} />
-        <StatTile label="Estimated spend" value={p.summary.cost_known_cells ? fmtUsd(p.summary.est_cost_usd_total) : '—'} n={p.summary.cost_known_cells} apparatus="each cell's own mean row cost × n needed" hint={<Link to={`/runs?repo=${enc(repo)}`}>Queue runs</Link>} />
+        <StatTile label="Estimated spend" value={p.summary.cost_known_cells ? fmtUsd(p.summary.est_cost_usd_total) : '—'} n={p.summary.cost_known_cells} apparatus="each cell's own mean row cost × n needed" footer={<Link to={`/runs?repo=${enc(repo)}`}>Queue runs</Link>} />
       </div>
       <DataTable
         rows={p.cells}

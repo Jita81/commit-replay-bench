@@ -12,7 +12,9 @@ This guide is also bundled into the UI: open **Help** in the top bar (`/help`) f
 glossary and the guide index, or `/help/docs/OPERATOR` for this page, so an operator on a
 deployment with no egress reads the same text the build was made from (DL-046). Every
 screen ends with an *About this screen* block: its purpose, the next step for your role,
-what the numbers mean and where the terms are defined.
+what the numbers mean, where the terms are defined and, once opened, every element on the
+screen with its explanation. Hover over, focus or tap any number, pill, column heading,
+button or field for what it shows and what its value means; Escape closes the explanation.
 
 Contents: [1 Install](#1-install) · [2 Configure a repository](#2-configure-a-repository) ·
 [3 Run a sweep](#3-run-a-sweep) · [4 Read the capability map](#4-read-the-capability-map) ·
