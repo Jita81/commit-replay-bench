@@ -332,9 +332,9 @@ jobs:
         uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: deploy/Dockerfile
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build deploy/Dockerfile (no push; GHA layer cache)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/Dockerfile
