@@ -8,6 +8,25 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-21 — a locked-out administrator has a way back in (F23)
+
+- **`PUT /users/{id}/password`** (admin), **`PUT /users/me/password`** (any local account,
+  current password required), **`PUT /users/{id}/active`** with a last-active-admin guard
+  (409 `last_admin`, decided under lock); `GET /users` rows carry `active` and `last_login`.
+  A changed password ends every session issued under the old one at its next request
+  (401 `session_revoked`): the signed cookie carries a fingerprint of the credential, so no
+  session table and no migration; deactivation suspends sessions (re-activation within the
+  TTL revives them — set a password as well, the docs say so).
+- **`crb users list | create | set-password | activate | deactivate`** — break-glass on the
+  API host against the same database `crb serve` uses; the password comes from a prompt or
+  `CRB_USERS_PASSWORD_FILE`, never argv; actor `cli:<os user>`; the CLI names the database
+  it resolved and never creates a stray one in the working directory.
+- Every change is a `system` event on the account's trace (`user.password_set` with
+  `by: admin|self|cli`, `user.activated`, `user.deactivated`, `user.role_set`) carrying actor
+  and target and never a password. docs/API.md, SECURITY.md §3.3–3.4, OPERATOR.md §9 *Users*,
+  DEPLOYMENT.md §8 (the go-live line is now achievable). Tests:
+  `tests/test_server_admin_users.py`, `tests/test_cli_users.py`.
+
 ### 2026-09-19 — B-1b: the first real factory pull requests
 
 - **Two pull requests opened by the factory on a real repository** — `Jita81/cobra` (a fork
