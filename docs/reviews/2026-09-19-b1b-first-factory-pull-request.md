@@ -10,7 +10,7 @@ the token counts, the durations, the route line, the ledger count — is **[meas
 `e9acd89c…`, apparatus 2.2, `routing.v1`, `claude_code / claude-sonnet-5`, sighted, local
 executor; n = 2 items, 3 builds; read from `/runs/{id}`, `/factory/cobra/evidence` and the
 three evidence packs named below]**. Two items is a demonstration, not a rate: no interval is
-quoted for the factory itself, and none should be read into "2 of 2". The two rules that
+quoted for the factory itself, and none should be read into "2 of 2". The three rules that
 follow from the findings are **[hypothesis]** until the fix PRs land with their tests; the
 backlog file and the two Go tests beside this record are the *registered inputs* the ledger's
 hashes name — they are kept byte-for-byte and carry no claim tags because they are not claims.
@@ -18,7 +18,7 @@ hashes name — they are kept byte-for-byte and carry no claim tags because they
 **Answer:** yes, twice, for $0.69 in total, on a development posture. Two pull requests were
 opened on the fork [Jita81/cobra](https://github.com/Jita81/cobra) (`main` = `adbc881`,
 byte-identical to `spf13/cobra` that day) — nothing was pushed to `main`, nothing to
-`spf13/cobra`. The run also found two product defects and one thing the reviewer was right
+`spf13/cobra`. The run also found two product defects, a third rule the rework exposed, and one thing the reviewer was right
 about; they are the second half of this record.
 
 ## Method
