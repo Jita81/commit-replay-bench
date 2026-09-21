@@ -8,6 +8,29 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-21 — the operating envelope: what the platform team is told is true (F36–F41, F44, F47, F25)
+
+- **`/health` gains a `migrations` probe** — ok when the database's alembic head equals the
+  code's, degraded with both revisions otherwise; the go-live checklist now points at a check
+  that proves what it says (F36).
+- **`crb doctor`** checks the GitHub App (configured, key readable, an installation reachable
+  when configured), the Claude Code token store (a live turn only with `--live`), the
+  migration head, the worker heartbeat, the docs bundle in `ui/dist` and where `CRB_HOME`
+  lives — each a labelled ok/warn/fail/skip line with the fix (F38).
+- **A deployment never lives under an OS temp directory**: settings refuse in prod and warn in
+  dev when `CRB_HOME` resolves under `/tmp`, `/private/tmp`, `/var/folders` or `$TMPDIR`
+  (`CRB_ALLOW_TEMP_HOME` overrides for a knowing trial); DEPLOYMENT.md says why (F37).
+- **Backup and restore (SQLite)** — quiesce, `sqlite3 .backup`, the tar of `home/evidence`,
+  `home/events`, `home/factory`, `home/secrets`, `home/transcripts`; the proof reads the copy
+  with sqlite3 and `crb ledger verify` (F44).
+- **docs/RELEASING.md** — how a release is cut (version, CHANGELOG section, tag, the image
+  release.yml builds and signs, the chart); `pyproject` and the Helm chart move to
+  `2.0.0b1` (F40). OPERATOR.md's front matter describes the product as it is, with the
+  phase markers gone (F41); dangling cross-references resolved (F47).
+- **`GET /settings/secrets` serves viewers `{name, present}` only** (F25).
+- Tests: `tests/test_settings_home_guard.py`, `tests/test_cli_doctor.py`,
+  `tests/test_server_system.py` (migrations probe), `tests/test_store_migrate.py`.
+
 ### 2026-09-19 — B-1b: the first real factory pull requests
 
 - **Two pull requests opened by the factory on a real repository** — `Jita81/cobra` (a fork
