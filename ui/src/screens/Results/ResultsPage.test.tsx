@@ -132,6 +132,23 @@ describe('ResultsPage', () => {
     expect(within(banner).getByRole('link', { name: 'Open the run' })).toHaveAttribute('href', '/runs/run1')
   })
 
+  it('a queued replay is announced as waiting, with no attempt number even when the row still carries progress', async () => {
+    mockApi({
+      ...ROUTES,
+      'GET /repos/alpha': { ...REPO, last_run: { id: 'run1', kind: 'replay', status: 'queued', finished: null } },
+      // reclaimed after a stale worker: the counts it had are still on the row while it waits
+      'GET /runs/run1': { id: 'run1', repo: 'alpha', kind: 'replay', status: 'queued', cost_usd: 0.42, progress: { done: 3, total: 8, current_task_id: null }, counts: {} },
+    })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByRole('region', { name: 'A measurement is queued' })).toBeInTheDocument())
+    const banner = screen.getByRole('region', { name: 'A measurement is queued' })
+    expect(banner).toHaveTextContent('A measurement is waiting for a worker; nothing has been graded yet.')
+    expect(banner).not.toHaveTextContent(/attempt \d/)
+    expect(banner).not.toHaveTextContent('spent so far')
+    expect(within(banner).getByRole('link', { name: 'Open the run' })).toHaveAttribute('href', '/runs/run1')
+    expect(screen.queryByRole('region', { name: 'A measurement is running' })).toBeNull()
+  })
+
   it('a finished replay shows no banner, even when the repository still reads it as running', async () => {
     mockApi({ ...ROUTES, 'GET /repos/alpha': { ...REPO, last_run: { id: 'run1', kind: 'replay', status: 'succeeded', finished: 'x' } } })
     const first = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })

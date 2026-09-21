@@ -541,13 +541,15 @@ export function FactoryPage() {
 /** J-FAC-5 / J-TEL-9 — the run working this backlog, its progress, the item in hand, and Cancel for an operator. */
 function ActiveRunBanner({ run, tasks, canCancel }: { run: Run; tasks: FactoryTask[]; canCancel: boolean }) {
   const cancel = useCancelRun()
+  const queued = run.status === 'queued'
   const total = run.progress?.total || tasks.length
   const done = run.progress?.done ?? 0
   // the item in hand: the first one the chain has touched that has no outcome yet
   const current = tasks.find((t) => t.status === 'pending' && t.last_event !== '')
-  const phrase = current ? `${current.id}: ${EVENT_PHRASE[current.last_event] ?? current.last_event.replace(/[._]/g, ' ')}` : run.status === 'queued' ? 'waiting for a worker' : 'starting the next item'
-  // the item in hand of total (`kOfN`: done + 1); null while the total is unknown (no progress, no tasks yet), and then no number at all — never "item 1 of 0"
-  const item = kOfN(done, total)
+  // a queued run has no item in hand, whatever the chain or a reclaimed run's `progress` still say
+  const phrase = queued ? 'waiting for a worker' : current ? `${current.id}: ${EVENT_PHRASE[current.last_event] ?? current.last_event.replace(/[._]/g, ' ')}` : 'starting the next item'
+  // the item in hand of total (`kOfN`: done + 1); null while queued or while the total is unknown (no progress, no tasks yet), and then no number at all — never "item 1 of 0"
+  const item = queued ? null : kOfN(done, total)
   return (
     <NotificationBanner title="Factory run in progress" className="mb-0">
       <p className="m-0" data-testid="factory-active-run">

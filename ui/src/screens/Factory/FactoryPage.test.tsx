@@ -321,6 +321,19 @@ describe('FactoryPage — the shipped contract', () => {
     expect(box).toHaveTextContent('not linked — no pull request')
   })
 
+  it('an API older than J-FAC-3 that sends no `delivery` reads as not possible with "update the API" — never a white screen or a guess', async () => {
+    const { delivery: _omitted, ...older } = BACKLOG
+    const olderBacklog: FactoryBacklog = older // `delivery` is optional in the type for exactly this response
+    mockApi(base({ 'GET /factory/alpha/backlog': olderBacklog }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const box = await screen.findByTestId('before-you-start')
+    const deliver = within(box).getByRole('checkbox', { name: /Open pull requests/ })
+    expect(deliver).toBeDisabled()
+    expect(deliver).not.toBeChecked()
+    expect(box).toHaveTextContent('this API did not report the delivery pre-flight. Update the API, then reload.')
+    expect(box).toHaveTextContent('not linked — no pull request')
+  })
+
   it('when the repository can deliver, the opt-in says where the pull request goes and the approver’s override is explained in visible text', async () => {
     const { calls } = mockApi(
       base({
@@ -414,6 +427,21 @@ describe('FactoryPage — the shipped contract', () => {
     expect(banner).toHaveTextContent('is working the backlog (waiting for a worker).')
     expect(banner).not.toHaveTextContent(/\bof 0\b/)
     expect(banner).not.toHaveTextContent(/item \d/)
+  })
+
+  it('a queued run that still carries progress and a touched item (reclaimed after a stale worker) reads waiting — no item number, no item in hand', async () => {
+    const touched: FactoryTask = { ...TASKS[1]!, status: 'pending', dor_gaps: [], route_hint: 'build', red_proof: true, last_event: 'red.proved', cell_route: CALIBRATE }
+    mockApi(
+      base({
+        'GET /factory/alpha/tasks': [TASKS[0], touched],
+        'GET /runs': { items: [{ id: 'b'.repeat(32), repo: 'alpha', kind: 'factory', status: 'queued', progress: { done: 1, total: 2, current_task_id: null }, started: null, cost_usd: 0.31, counts: {}, finished: null }], total: 1, limit: 10, offset: 0 },
+      }),
+    )
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const banner = await screen.findByTestId('factory-active-run')
+    expect(banner).toHaveTextContent('is working the backlog (waiting for a worker).')
+    expect(banner).not.toHaveTextContent(/item \d/)
+    expect(banner).not.toHaveTextContent('I-2:')
   })
 
   it('at phone width the item reads as one line — the current step and "step n of 6" — with the six cards behind a Details (J-FAC-14)', async () => {

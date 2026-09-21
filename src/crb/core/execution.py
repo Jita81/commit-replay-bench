@@ -33,6 +33,11 @@ How:          ``Command`` (argv, root, writable paths, network flag) → ``build
               drain thread polled against the deadline and the cancel token → ``docker
               kill <name>`` / process-group kill → ``ExecResult``; ``make_executor`` picks
               the kind from configuration and fails closed on ``docker`` without settings.
+              A ``DockerStream`` kill is CONFIRMED: after ``docker kill`` it polls ``docker
+              inspect -f {{.State.Running}}`` (≤ 10 s, 100 ms steps; "no such container"
+              is gone) and ``lines()`` does not return until that poll ends, so a reader
+              that sees the stream end after cancel or the wall clock can rely on the
+              container not running (``kill_confirmed``; a warning when the bound is hit).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0012-builder-in-a-sealed-container.md
@@ -54,6 +59,7 @@ Touch when:   never for a new repository (its image, memory and cpu limits are
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import shutil
 import signal
@@ -66,6 +72,8 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
+
+_LOG = logging.getLogger(__name__)
 
 #: Environment variables passed through from the host to a local command. Everything
 #: else (tokens, cloud creds, proxies) is dropped: repository test suites must never
@@ -566,6 +574,47 @@ class DockerExecutor:
         )
 
 
+def _container_stopped(docker: str, name: str) -> bool | None:
+    """One ``docker inspect`` question: ``True`` when the container is not running
+    (stopped, or already removed — ``--rm`` reaps asynchronously), ``False`` while
+    it still runs, ``None`` when the daemon could not be asked."""
+    try:
+        r = subprocess.run(
+            [docker, "inspect", "-f", "{{.State.Running}}", name],
+            capture_output=True,
+            check=False,
+            timeout=10,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode == 0:
+        return (r.stdout or "").strip().lower() != "true"
+    if "no such" in (r.stderr or "").lower():
+        return True
+    return None
+
+
+def wait_container_stopped(
+    docker: str, name: str, *, timeout_s: float = 10.0, step_s: float = 0.1
+) -> bool:
+    """Poll :func:`_container_stopped` until the daemon reports the container not
+    running, bounded by ``timeout_s``. ``docker kill`` returns when the signal is
+    delivered, not when ``docker ps`` stops listing the container — a reader that
+    needs "cancelled means not running" waits here. ``True`` = confirmed; ``False``
+    = the bound was hit (logged as a warning — the container may still be running)."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        if _container_stopped(docker, name) is True:
+            return True
+        if time.monotonic() >= deadline:
+            _LOG.warning(
+                "container %s not confirmed stopped within %.1fs after docker kill", name, timeout_s
+            )
+            return False
+        time.sleep(step_s)
+
+
 class DockerStream:
     """A running ``docker run`` whose stdout is consumed line by line.
 
@@ -574,6 +623,12 @@ class DockerStream:
     * **The container dies with the deadline or the cancel token** — via ``docker kill
       <name>``, then the client process group. A `docker run` client killed on its own
       leaves the container running; that is the failure this class exists to prevent.
+    * **An enforced kill is confirmed before the stream ends**: ``docker kill`` returns
+      when the signal is sent, not when the daemon stops listing the container, so
+      :meth:`kill` polls ``docker inspect -f {{.State.Running}}`` (bounded — see
+      :attr:`KILL_CONFIRM_S`) and :meth:`lines` waits for that poll. When it returns
+      after a cancel or the wall clock, the container is not running, or
+      :attr:`kill_confirmed` is ``False`` and a warning was logged.
     * **stderr never deadlocks stdout**: it goes to a temporary file, of which the last
       4000 characters are kept as :attr:`stderr_tail` (the caller redacts).
     * **Exit 125 with no output is a launch failure** (bad option, missing image,
@@ -582,6 +637,11 @@ class DockerStream:
     * ``timed_out`` / ``cancelled`` are set before the kill, so a reader that sees the
       stream end can tell an honest exit from an enforced one.
     """
+
+    #: How long :meth:`kill` waits for the daemon to report the container stopped,
+    #: and how often it asks. Class attributes so a test can shorten the bound.
+    KILL_CONFIRM_S: float = 10.0
+    KILL_CONFIRM_STEP_S: float = 0.1
 
     def __init__(
         self,
@@ -600,6 +660,8 @@ class DockerStream:
         self._cancel = cancel
         self._timed_out = False
         self._cancelled = False
+        self._kill_confirmed: bool | None = None
+        self._kill_lock = threading.Lock()
         self._stderr = ""
         self._stderr_file = tempfile.TemporaryFile(  # noqa: SIM115 — closed in lines()
             mode="w+", encoding="utf-8", errors="replace"
@@ -643,6 +705,8 @@ class DockerStream:
             except subprocess.TimeoutExpired:
                 self.kill()
                 self._proc.wait()
+            if self._enforced:  # the promise: after an enforced kill, the container is down
+                self._confirm_stopped()
             try:
                 self._stderr_file.seek(0)
                 self._stderr = self._stderr_file.read()[-4000:]
@@ -674,16 +738,37 @@ class DockerStream:
 
     def kill(self) -> None:
         """``docker kill <name>`` first (the container is the process that matters),
-        then the client's process group. Idempotent; never raises."""
-        with contextlib.suppress(OSError, subprocess.SubprocessError):
-            subprocess.run(
-                [self._docker, "kill", self.name], capture_output=True, check=False, timeout=30
-            )
-        try:
-            os.killpg(self._proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            with contextlib.suppress(OSError):
-                self._proc.kill()
+        then the client's process group, then wait — bounded — until the daemon
+        reports the container not running (:attr:`kill_confirmed`). Idempotent;
+        never raises. Serialised with :meth:`lines`'s reap, so the stream does not
+        end before the confirmation does."""
+        with self._kill_lock:
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                subprocess.run(
+                    [self._docker, "kill", self.name], capture_output=True, check=False, timeout=30
+                )
+            try:
+                os.killpg(self._proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                with contextlib.suppress(OSError):
+                    self._proc.kill()
+            self._kill_confirmed = self._wait_stopped()
+
+    def _confirm_stopped(self) -> None:
+        """Block until any in-flight :meth:`kill` has finished its confirmation, and
+        confirm ourselves if none recorded one (the reader saw EOF from ``docker
+        kill`` alone before the killer took the lock)."""
+        with self._kill_lock:
+            if self._kill_confirmed is None:
+                self._kill_confirmed = self._wait_stopped()
+
+    def _wait_stopped(self) -> bool:
+        return wait_container_stopped(
+            self._docker,
+            self.name,
+            timeout_s=self.KILL_CONFIRM_S,
+            step_s=self.KILL_CONFIRM_STEP_S,
+        )
 
     # --- state ---------------------------------------------------------------------
     @property
@@ -697,6 +782,13 @@ class DockerStream:
     @property
     def cancelled(self) -> bool:
         return self._cancelled
+
+    @property
+    def kill_confirmed(self) -> bool | None:
+        """``None`` — no kill was issued; ``True`` — after the kill the daemon reported
+        the container not running (or gone); ``False`` — the confirmation bound
+        (:attr:`KILL_CONFIRM_S`) was hit and a warning was logged."""
+        return self._kill_confirmed
 
     @property
     def stderr_tail(self) -> str:

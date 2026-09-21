@@ -437,9 +437,11 @@ export function ConnectRepoPage() {
 function InFlight({ run, stage, canCancel, cancelling, onCancel }: { run: Run; stage: Stage; canCancel: boolean; cancelling: boolean; onCancel: () => void }) {
   const { done, total } = run.progress
   const unit = stage.id === 'measure' ? 'Attempt' : 'Task'
-  // "Attempt 4 of 8" = the fourth is running now (`kOfN`: done + 1) — the Baseline banner says the same number
-  const progress = kOfN(done, total)
-  const head = progress ? `${unit} ${progress}` : run.status === 'queued' ? 'Waiting for a worker' : stage.id === 'measure' ? 'First attempt starting' : 'Running'
+  // "Attempt 4 of 8" = the fourth is running now (`kOfN`: done + 1) — the Baseline banner says the same number.
+  // A queued run has nothing in hand, whatever `progress` still carries (a reclaimed run keeps its
+  // old counts while it waits): the status is checked before the number is read
+  const progress = run.status === 'queued' ? null : kOfN(done, total)
+  const head = run.status === 'queued' ? 'Waiting for a worker' : progress ? `${unit} ${progress}` : stage.id === 'measure' ? 'First attempt starting' : 'Running'
   const spend = stage.spends ? ` · $${run.cost_usd.toFixed(2)} spent so far` : ''
   const started = run.started ? ` · started ${clock(run.started)}` : ''
   const next =

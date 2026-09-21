@@ -61,6 +61,7 @@ from crb.factory.testfirst import AuthoredTest
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
+from crb.server.github_app import permissions_allow_delivery
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
@@ -344,7 +345,7 @@ def _delivery_preflight(db: Any, settings: Any, repo: Repo) -> DeliveryPreflight
         )
         return out
     perms = dict(inst.permissions_json or {})
-    if perms.get("contents") != "write" or perms.get("pull_requests") != "write":
+    if not permissions_allow_delivery(perms):
         held = ", ".join(f"{k}: {v}" for k, v in sorted(perms.items())) or "none"
         out.reason_code = "read_only"
         out.reason = (

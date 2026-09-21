@@ -94,6 +94,11 @@ Behind `CRB_BUILDER__EXECUTOR=docker` (`crb.builders.container`, wired through
    `DockerStream` (core, additive) stream the container's stdout to the unchanged
    stream-json parser and kill the *container* (then the client) on the run's cancel token
    or the budget's wall clock — killing the client alone would leave the container running.
+   `docker kill` returns when the signal is sent, not when the daemon stops listing the
+   container, so the kill is **confirmed** (2026-09-21): `DockerStream.kill()` polls
+   `docker inspect -f {{.State.Running}}` (≤ 10 s, 100 ms steps; a removed `--rm`
+   container is gone) and `lines()` waits for that poll, recording `kill_confirmed` and
+   warning when the bound is hit — "cancelled" means the container is not running.
    [measured]
 8. **The post-hoc guards stay on as belt-and-braces**, not as the wall: the shell guard,
    the CLI deny rules and the tamper check still run (container paths are translated to

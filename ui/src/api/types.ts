@@ -1149,7 +1149,12 @@ export interface FactoryBacklog {
   hash: string
   frozen_at: string | null
   items: FactoryBacklogItem[]
-  delivery: FactoryDeliveryPreflight
+  /**
+   * The delivery pre-flight (J-FAC-3). The current server always sends it; an API older
+   * than J-FAC-3 does not, and `FactoryPage` then says so (delivery off, "update the API")
+   * rather than guess — the field is optional so that fallback stays type-checked.
+   */
+  delivery?: FactoryDeliveryPreflight
 }
 
 /** J-FAC-4 — why the loop stopped an item, as recorded on the chain; `step` names where. */

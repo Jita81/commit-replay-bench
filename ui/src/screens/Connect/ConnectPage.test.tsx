@@ -222,4 +222,21 @@ describe('ConnectPage', () => {
     expect(screen.getByTestId('stage-measure')).not.toHaveTextContent('In progress')
     expect(screen.getByTestId('in-flight')).toHaveTextContent('Waiting for a worker')
   })
+
+  it('a queued run that still carries progress (reclaimed after a stale worker) reads Waiting, never an attempt in hand', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'queued', finished: null } },
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+      // the counts the run had before it was reclaimed are still on the row
+      'GET /runs/r9': { ...RUN, status: 'queued', started: null, progress: { done: 2, total: 10, current_task_id: null }, cost_usd: 0.42, queue_position: 1, queue_kinds_ahead: [] },
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('Queued'))
+    const status = within(screen.getByTestId('in-flight')).getByRole('status')
+    expect(status).toHaveTextContent('Waiting for a worker')
+    expect(status).not.toHaveTextContent(/Attempt \d/)
+  })
 })

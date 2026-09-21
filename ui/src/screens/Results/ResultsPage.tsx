@@ -15,7 +15,8 @@
  *               UI constant); the bar in a tile is the policy in force; the route names are
  *               terms with a definition one click away; the page says in words what
  *               "deliver" means and does not mean. A replay in flight is announced above the
- *               numbers with its progress, because a baseline that is moving must say so. A
+ *               numbers with its progress, because a baseline that is moving must say so —
+ *               and a queued replay says it is waiting, with no attempt number. A
  *               reader is offered only the acts their role can take (Decisions' rule): a
  *               viewer reads, and sees who acts. Reached without `?repo=`, the screen chooses
  *               the most recently updated repository itself.
@@ -89,6 +90,10 @@ export function ResultsPage() {
   const run = useRun(activeReplayId)
   // the poll sees the run finish before the repo's `last_run` is re-read: the banner goes with it
   const replayRunning = Boolean(activeReplayId) && !(run.data && isRunTerminal(run.data.status))
+  // queued wording until the poll says `running`: a queued run has graded nothing, whatever
+  // `progress` still carries (a reclaimed run keeps its old counts while it waits)
+  const replayQueued = replayRunning && (run.data ? run.data.status === 'queued' : lastRun?.status === 'queued')
+  const replayProgress = run.data && run.data.status === 'running' ? kOfN(run.data.progress.done, run.data.progress.total) : null
   const q = `repo=${encodeURIComponent(repo)}`
 
   const measured: CapabilityCell[] = useMemo(() => (map.data?.cells ?? []).filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0), [map.data])
@@ -140,9 +145,12 @@ export function ResultsPage() {
       {repo && map.data && (
         <>
           {replayRunning && (
-            <NotificationBanner title="A measurement is running">
+            <NotificationBanner title={replayQueued ? 'A measurement is queued' : 'A measurement is running'}>
               <p className="m-0">
-                A measurement is running{run.data && kOfN(run.data.progress.done, run.data.progress.total) ? `: attempt ${kOfN(run.data.progress.done, run.data.progress.total)}, $${run.data.cost_usd.toFixed(2)} spent so far` : ''}. The numbers on this page change as each attempt is graded.{' '}
+                {replayQueued
+                  ? 'A measurement is waiting for a worker; nothing has been graded yet.'
+                  : `A measurement is running${replayProgress ? `: attempt ${replayProgress}, $${(run.data?.cost_usd ?? 0).toFixed(2)} spent so far` : ''}.`}{' '}
+                The numbers on this page change as each attempt is graded.{' '}
                 <Link to={`/runs/${encodeURIComponent(activeReplayId)}`}>Open the run</Link>
               </p>
             </NotificationBanner>
