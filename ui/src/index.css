@@ -249,7 +249,9 @@ h3 { font-size: 16px; line-height: 24px; }
 .prose-doc pre { background: var(--surface-high); padding: 12px 16px; overflow-x: auto; }
 .prose-doc pre code { background: transparent; padding: 0; }
 .prose-doc blockquote { border-left: 8px solid var(--line); padding: 4px 0 4px 16px; color: var(--muted); }
-.prose-doc table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }
+/* the scroll lives on the wrapper markdown.ts emits (focusable — the global ring applies); the table stays a table */
+.prose-doc .table-scroll { overflow-x: auto; margin: 0 0 16px; }
+.prose-doc table { border-collapse: collapse; width: 100%; margin: 0; }
 .prose-doc th, .prose-doc td { border-bottom: 1px solid var(--line); padding: 8px 12px 8px 0; text-align: left; vertical-align: top; }
 .prose-doc th { font-weight: 700; }
 .prose-doc hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }

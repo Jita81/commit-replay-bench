@@ -11,11 +11,14 @@
  *
  * Navigation
  * ----------
- * What it is:   `renderMarkdown(src)` — the guides' renderer — and `parseMarkdown(src)`, its block parser.
+ * What it is:   `renderMarkdown(src)` — the guides' renderer — and `parseMarkdown(src)`, its block parser
+ *               (`plainText` strips inline markup for an accessible name).
  * What it does: Turns a guide's markdown into React elements through `createElement`, so
  *               nothing in a document can inject markup; gives every heading the id
  *               `slugify()` produces (with GitHub's `-1`, `-2` suffixes for repeats) so the
- *               docs' own `#anchors` and the screens' `readMore` links resolve.
+ *               docs' own `#anchors` and the screens' `readMore` links resolve; wraps every
+ *               table in a focusable, labelled scroll region (`div.table-scroll`, WCAG 2.1.1)
+ *               so a wide table scrolls without losing its row/column semantics.
  * How:          A line-based block parser (`parseMarkdown`) then a small inline tokeniser for
  *               code / strong / em / links, both pure; no dependency (the UI has no kit by
  *               design).
@@ -232,6 +235,27 @@ export function renderInline(text: string, keyPrefix = ''): ReactNode[] {
   return out
 }
 
+/** The text of an inline run with its markup removed — for an accessible name, never for rendering. */
+export function plainText(text: string): string {
+  let out = ''
+  let rest = text
+  while (rest.length > 0) {
+    const m = INLINE_RE.exec(rest)
+    if (!m || m.index === undefined) {
+      out += rest
+      break
+    }
+    out += rest.slice(0, m.index)
+    const tok = m[0]
+    if (m[1]) out += tok.slice(1, -1)
+    else if (m[2]) out += plainText(tok.slice(2, -2))
+    else if (m[3] || m[4]) out += plainText(tok.slice(1, -1))
+    else if (m[5]) out += /^\[([^\]]*)\]/.exec(tok)![1]!
+    rest = rest.slice(m.index + tok.length)
+  }
+  return out.trim()
+}
+
 function renderLink(label: string, href: string, key: string): ReactNode {
   const children = renderInline(label, `${key}.`)
   if (/^https?:\/\//i.test(href)) return createElement('a', { key, href, rel: 'noopener noreferrer' }, ...children)
@@ -277,14 +301,20 @@ function renderBlocks(blocks: Block[], slugs: Slugs, keyPrefix: string): ReactNo
       case 'rule':
         return createElement('hr', { key })
       case 'table':
+        // the overflow lives on a focusable wrapper (WCAG 2.1.1; axe scrollable-region-focusable),
+        // never on the table: `display: block` on a table drops its row/column semantics
         return createElement(
-          'table',
-          { key },
-          createElement('thead', {}, createElement('tr', {}, ...b.header.map((h, j) => createElement('th', { key: j, scope: 'col' }, ...renderInline(h, `${key}.h${j}.`))))),
+          'div',
+          { key, className: 'table-scroll', role: 'region', tabIndex: 0, 'aria-label': `Table: ${b.header.map(plainText).join(', ')}` },
           createElement(
-            'tbody',
+            'table',
             {},
-            ...b.rows.map((r, ri) => createElement('tr', { key: ri }, ...r.map((c, ci) => createElement('td', { key: ci }, ...renderInline(c, `${key}.${ri}.${ci}.`))))),
+            createElement('thead', {}, createElement('tr', {}, ...b.header.map((h, j) => createElement('th', { key: j, scope: 'col' }, ...renderInline(h, `${key}.h${j}.`))))),
+            createElement(
+              'tbody',
+              {},
+              ...b.rows.map((r, ri) => createElement('tr', { key: ri }, ...r.map((c, ci) => createElement('td', { key: ci }, ...renderInline(c, `${key}.${ri}.${ci}.`))))),
+            ),
           ),
         )
       case 'list':

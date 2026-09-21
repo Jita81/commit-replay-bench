@@ -45,7 +45,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
 import { useCancelRun, useHealth, useRun, useRunEvents, useRunTasks } from '../../api/hooks'
 import type { EventSourceFactory } from '../../api/sse'
-import { isRunTerminal, ladderEntryLabel, type Health, type Run, type RunTaskRow, type StepEvent } from '../../api/types'
+import { isRunTerminal, ladderEntryLabel, type Health, type Run, type RunTaskRow, type StepEvent, type WorkerProbeData } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -87,9 +87,10 @@ function useNow(clock: () => number, live: boolean): number {
   return now
 }
 
-/** The /health worker probe's data: how long a heartbeat may be silent, and the queue depth. `null` = not read. */
+/** The /health worker probe's data (`WorkerProbeData`): how long a RUN's heartbeat may be silent, and the queue depth. `null` = not read. */
 function workerProbe(health: Health | undefined): { staleAfterS: number | null; queued: number | null } {
-  const data = health?.probes.find((p) => p.name === 'worker')?.data
+  // the probe boundary is untyped on the wire (`Probe.data`), so each field is still checked
+  const data = health?.probes.find((p) => p.name === 'worker')?.data as Partial<WorkerProbeData> | undefined
   const stale = data?.stale_after_s
   const queued = data?.queued
   return {

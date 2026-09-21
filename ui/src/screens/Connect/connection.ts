@@ -37,7 +37,7 @@
  */
 
 import type { ControlsReport, OracleReport, RepoSummary, Run, RunKind, RunStatus } from '../../api/types'
-import { count, fmtAgo } from '../../lib/format'
+import { count, fmtAgo, kOfN } from '../../lib/format'
 
 export type StageId = 'register' | 'probe' | 'mine' | 'oracle' | 'controls' | 'measure'
 /**
@@ -125,7 +125,7 @@ export function runningDetail(id: StageId, run: Run | undefined, opts: { queuedA
   const ago = fmtAgo(run.started, now)
   const since = ago ? ` (started ${ago})` : ''
   const { done, total } = run.progress
-  const kOfN = total > 0 ? `${Math.min(done + 1, total)} of ${total}` : null
+  const progress = kOfN(done, total)
   switch (id) {
     case 'probe':
       return `Probing — running the repository's own suite${since}`
@@ -139,11 +139,11 @@ export function runningDetail(id: StageId, run: Run | undefined, opts: { queuedA
       return `Mining — ${parts.join(' · ')}`
     }
     case 'oracle':
-      return kOfN ? `Scoring oracles — task ${kOfN}` : `Scoring oracles${since}`
+      return progress ? `Scoring oracles — task ${progress}` : `Scoring oracles${since}`
     case 'controls':
-      return kOfN ? `Running the controls — task ${kOfN}` : `Running the controls${since}`
+      return progress ? `Running the controls — task ${progress}` : `Running the controls${since}`
     case 'measure':
-      return `Measuring — ${kOfN ? `attempt ${kOfN}` : 'first attempt starting'} · $${run.cost_usd.toFixed(2)} so far, builder-reported`
+      return `Measuring — ${progress ? `attempt ${progress}` : 'first attempt starting'} · $${run.cost_usd.toFixed(2)} so far, builder-reported`
     default:
       return fallback[id]
   }

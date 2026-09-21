@@ -37,7 +37,7 @@
  *               a measurement of the builder (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
  */
 import { beltNamesFor, isRunTerminal, ladderEntryLabel, type BeltName, type GradeResult, type Run, type StepEvent } from '../../api/types'
-import { DASH, fmtAge, fmtAgo, fmtInt, fmtSeconds, fmtUsd } from '../../lib/format'
+import { DASH, fmtAge, fmtAgo, fmtInt, fmtSeconds, fmtUsd, kOfN } from '../../lib/format'
 
 /** Parse an ISO timestamp to ms, or `null` when absent or unreadable. */
 function ms(iso: string | null | undefined): number | null {
@@ -130,7 +130,8 @@ function stageDetail(ev: StepEvent, run: Run): string {
 export function stageLine(ev: StepEvent | undefined, run: Run): string | null {
   if (!ev || isRunTerminal(run.status)) return null
   const { done, total } = run.progress
-  const who = run.kind === 'factory' ? `Item ${ev.task_id || DASH}` : total > 0 ? `Task ${fmtInt(Math.min(done + 1, total))} of ${fmtInt(total)}` : 'Task'
+  const progress = kOfN(done, total)
+  const who = run.kind === 'factory' ? `Item ${ev.task_id || DASH}` : progress ? `Task ${progress}` : 'Task'
   return `${who} · ${ev.stage} · ${stageDetail(ev, run)}`
 }
 

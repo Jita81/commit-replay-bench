@@ -10,14 +10,18 @@
  * the one help mechanism, mounted once in the shell, must reach every screen for every role.
  *
  * Accounts: the viewer / operator / approver are created through the API as the admin
- * (POST /users, CSRF double-submit) if missing. Passwords are generated per run and never
- * printed. Nothing here calls a model or spends.
+ * (POST /users, CSRF double-submit) if missing. Their passwords are STABLE per stack
+ * (`personaPassword`: derived from the bootstrap admin password, test-only, never printed), so
+ * a rerun against a stack that already has the accounts signs into them; when an account
+ * already exists the setup proves that by signing into it through the API before any persona
+ * test runs. Nothing here calls a model or spends.
  *
  * Navigation
  * ----------
  * What it is:   Walkthrough spec 11 (screens) — the visual record of every route for every
  *               role at two widths, and the About-block ratchet on the live stack.
- * What it does: Creates the three non-admin accounts if missing, finds a finished run and a
+ * What it does: Creates the three non-admin accounts if missing (and, for one that exists,
+ *               asserts the stable password signs into it), finds a finished run and a
  *               task to anchor the detail routes, then for each persona × width signs in
  *               through the form, visits every route, saves a full-page screenshot under
  *               `<CRB_E2E_OUTPUT_DIR>/screens/`, asserts the About block is present on
@@ -38,7 +42,7 @@
 import { test as base, expect, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { env, primary, signIn } from './support'
+import { env, personaPassword, primary, signIn } from './support'
 
 const OUT = join(process.env.CRB_E2E_OUTPUT_DIR ?? 'test-results-walkthrough', 'screens')
 mkdirSync(OUT, { recursive: true })
@@ -53,18 +57,18 @@ const VIEWPORTS = [
 const test = base
 test.describe.configure({ mode: 'serial' })
 
-// per-run passwords for the created accounts (never logged)
-const PASSWORDS: Record<Persona, string> = {
-  viewer: `Wv-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`,
-  operator: `Wo-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`,
-  approver: `Wa-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`,
-  admin: env.pass,
-}
 const USERNAMES: Record<Persona, string> = {
   viewer: 'walk-viewer',
   operator: 'walk-operator',
   approver: 'walk-approver',
   admin: env.user,
+}
+// stable per stack (never per run — a rerun must sign into the accounts an earlier run created); never logged
+const PASSWORDS: Record<Persona, string> = {
+  viewer: personaPassword(USERNAMES.viewer),
+  operator: personaPassword(USERNAMES.operator),
+  approver: personaPassword(USERNAMES.approver),
+  admin: env.pass,
 }
 
 async function csrfHeaders(page: Page): Promise<Record<string, string>> {
@@ -130,14 +134,23 @@ async function shot(page: Page, persona: string, slug: string, width: number): P
 }
 
 test.describe('11-screens: every route × persona × width, with the About block', () => {
-  test('accounts exist and the run / task anchors are known (admin, via the API)', async ({ page }) => {
+  test('accounts exist and the run / task anchors are known (admin, via the API)', async ({ page, request }) => {
     await signIn(page)
     const headers = await csrfHeaders(page)
     const existing = await page.request.get(`${env.baseUrl}/api/v1/users`)
     expect(existing.ok(), `GET /users → ${existing.status()}`).toBeTruthy()
     const items = ((await existing.json()) as { items: Array<{ username: string; role: string }> }).items
+    let reused = 0
     for (const p of ['viewer', 'operator', 'approver'] as const) {
-      if (items.some((u) => u.username === USERNAMES[p])) continue
+      if (items.some((u) => u.username === USERNAMES[p])) {
+        // an earlier run (another process) created it: the stable password must open it, or
+        // every persona test below fails on a hash the stack never held. `request` is its own
+        // cookie jar, so the admin session on `page` is untouched.
+        const login = await request.post(`${env.baseUrl}/api/v1/auth/login`, { data: { username: USERNAMES[p], password: PASSWORDS[p] } })
+        expect(login.status(), `POST /auth/login as existing ${USERNAMES[p]} with the stable password → ${login.status()}`).toBe(200)
+        reused += 1
+        continue
+      }
       const res = await page.request.post(`${env.baseUrl}/api/v1/users`, {
         headers,
         data: { username: USERNAMES[p], password: PASSWORDS[p], role: p, display_name: `Walk ${p}` },
@@ -156,7 +169,7 @@ test.describe('11-screens: every route × persona × width, with the About block
       const tj = (await tasks.json()) as { items: Array<{ task_id?: string; id?: string }> }
       ctx.taskId = (tj.items[0]?.task_id ?? tj.items[0]?.id ?? '') as string
     }
-    test.info().annotations.push({ type: 'note', description: `repo=${ctx.repo} run=${ctx.runId || '(none)'} task=${ctx.taskId || '(none)'} out=${OUT}` })
+    test.info().annotations.push({ type: 'note', description: `repo=${ctx.repo} run=${ctx.runId || '(none)'} task=${ctx.taskId || '(none)'} accounts_reused=${reused} out=${OUT}` })
   })
 
   for (const persona of PERSONAS) {

@@ -317,8 +317,12 @@ export const ACTION_HELP: Record<string, string> = {
  * event names its family; anything else gets a generic sentence naming the action.
  */
 export function actionHelp(action: string): string {
-  const s = ACTION_HELP[action]
-  if (s) return s
-  if (action.startsWith('builder.')) return ACTION_HELP[action.slice('builder.'.length)] ?? 'A builder-level event, passed through from the builder.'
+  // own-property lookups: an event is unvalidated at this boundary, and an inherited key
+  // (`constructor`, `__proto__`, `toString`) must not hand Object.prototype to JSX
+  if (Object.hasOwn(ACTION_HELP, action)) return ACTION_HELP[action]!
+  if (action.startsWith('builder.')) {
+    const bare = action.slice('builder.'.length)
+    return Object.hasOwn(ACTION_HELP, bare) ? ACTION_HELP[bare]! : 'A builder-level event, passed through from the builder.'
+  }
   return `An event the loop emitted as “${action}”; this version of the UI has no sentence for it.`
 }

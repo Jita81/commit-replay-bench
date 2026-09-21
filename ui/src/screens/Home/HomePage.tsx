@@ -14,7 +14,8 @@
  *               what to do next and what it costs; nothing here spends money without a
  *               queued run they can see and cancel (tasks 1–4 cost nothing). Statuses are
  *               never kept locally: the GitHub App info, the repositories, the chosen
- *               repository's stages (`stagesFor`), its active sign-offs (task 6), the users
+ *               repository's stages (`stagesFor`), a sign-off the API flags `active` and not
+ *               `stale` (task 6 — a stale one lifts nothing, so completes nothing), the users
  *               list (task 7) and the active factory run (task 8: "Backlog frozen — run the
  *               factory" until a run exists, then "In progress — item k of n") decide them.
  *               Continue points at the first task that is neither Completed nor Cannot
@@ -44,6 +45,7 @@ import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFact
 import { isApiError } from '../../api/client'
 import { InsetText, Kicker, Lede, NotificationBanner, PageTitle, StartButton, type TagTone, TaskList, type TaskItem } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
+import { kOfN } from '../../lib/format'
 import { type StageStatus, stageComplete, stagesFor } from '../Connect/connection'
 
 const TONE: Record<StageStatus, TagTone> = { done: 'pale', warn: 'pale', running: 'blue', todo: 'blue', failed: 'red', blocked: 'grey' }
@@ -136,9 +138,10 @@ export function HomePage() {
   const measured = measureStage === 'done'
   const measuring = measureStage === 'running'
   // the baseline is readable from the first row, whether or not a run is still adding to it;
-  // it counts as read once someone has acted on it — any active sign-off on the repository
+  // it counts as read once someone has acted on it — a sign-off the API itself calls active:
+  // a stale one (the apparatus moved on, ADR-0015) lifts nothing, so it completes nothing
   const anyRows = (map.data?.summary.n_total ?? 0) > 0
-  const baselineActed = (signoffs.data?.items.length ?? 0) > 0
+  const baselineActed = (signoffs.data?.items ?? []).some((s) => s.active && !s.stale)
   const operator = can('operator')
   const approverKnown = users.data ? users.data.items.some((u) => u.role === 'approver' || u.role === 'admin') : me?.role === 'approver' || me?.role === 'admin' ? true : undefined
 
@@ -153,7 +156,8 @@ export function HomePage() {
   })
   // "item k of n" from the run's own progress: k is the item in flight, never past n
   const progress = factoryRun.data?.progress
-  const factoryLabel = factoryStatus === 'running' && progress && progress.total > 0 ? `In progress — item ${Math.min(progress.done + 1, progress.total)} of ${progress.total}` : FACTORY_LABEL[factoryStatus]
+  const item = progress ? kOfN(progress.done, progress.total) : null
+  const factoryLabel = factoryStatus === 'running' && item ? `In progress — item ${item}` : FACTORY_LABEL[factoryStatus]
   const tasks: TaskItem[] = [
     { num: 1, name: 'Connect GitHub', status: ghStatus.status, tone: ghStatus.tone, to: '/connect' },
     { num: 2, name: 'Choose a repository', status: hasRepo ? 'Completed' : 'Incomplete', tone: hasRepo ? 'pale' : 'blue', to: '/connect' },

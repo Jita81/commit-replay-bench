@@ -69,7 +69,7 @@ import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { Details, NotificationBanner, SummaryList, WarningButton } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
 import { builderChoice } from '../../lib/builder'
-import { fmtDate, fmtInt, shortId } from '../../lib/format'
+import { fmtDate, fmtInt, kOfN, shortId } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
 import { EvidenceDrawer } from '../Runs/EvidenceDrawer'
 
@@ -515,7 +515,7 @@ function ActiveRunBanner({ run, tasks, canCancel }: { run: Run; tasks: FactoryTa
   return (
     <NotificationBanner title="Factory run in progress" className="mb-0">
       <p className="m-0" data-testid="factory-active-run">
-        Factory run {shortId(run.id)} is working the backlog — item {Math.min(done + 1, Math.max(total, 1))} of {total} ({phrase}).
+        Factory run {shortId(run.id)} is working the backlog — item {kOfN(done, total) ?? `${fmtInt(done + 1)} of ${fmtInt(total)}`} ({phrase}).
         {run.cost_usd > 0 ? ` ${usd(run.cost_usd)} so far.` : ''}
         {run.started ? ` Started ${fmtDate(run.started)}.` : ''}{' '}
         <LinkButton size="sm" to={`/runs/${run.id}`}>

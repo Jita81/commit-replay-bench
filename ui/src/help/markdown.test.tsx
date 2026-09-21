@@ -19,7 +19,7 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
-import { renderMarkdown } from './markdown'
+import { plainText, renderMarkdown } from './markdown'
 
 function mount(src: string) {
   return render(<MemoryRouter>{renderMarkdown(src)}</MemoryRouter>)
@@ -62,11 +62,24 @@ describe('renderMarkdown', () => {
     expect(container.querySelector('strong')).toBeNull()
   })
 
-  it('tables render a header row and body rows', () => {
+  it('tables render a header row and body rows inside a keyboard-reachable scroll region, and stay tables', () => {
     mount('| Belt | Meaning |\n|---|---|\n| B1 | tests unmodified |\n| B2 | target green |')
-    expect(screen.getByRole('table')).toBeInTheDocument()
+    const table = screen.getByRole('table')
     expect(screen.getAllByRole('columnheader').map((c) => c.textContent)).toEqual(['Belt', 'Meaning'])
     expect(screen.getAllByRole('row')).toHaveLength(3)
+    // the overflow lives on a wrapper (WCAG 2.1.1, axe scrollable-region-focusable) — never on
+    // the table itself, whose `display` must stay `table` for the row/column semantics
+    const region = table.parentElement!
+    expect(region).toHaveClass('table-scroll')
+    expect(region).toHaveAttribute('tabindex', '0')
+    expect(region).toHaveAttribute('aria-label', 'Table: Belt, Meaning')
+    expect(region).toHaveAttribute('role', 'region')
+  })
+
+  it('a table whose header carries inline markup is named by its plain text', () => {
+    mount('| `belt` | **What** it [checks](OPERATOR.md) |\n|---|---|\n| B1 | x |')
+    expect(screen.getByRole('region', { name: 'Table: belt, What it checks' })).toBeInTheDocument()
+    expect(plainText('a `b` **c** *d* [e](x.md) f')).toBe('a b c d e f')
   })
 
   it('links: a bundled doc becomes /help/docs/…, an in-page anchor stays, external gets rel, other relatives become text', () => {

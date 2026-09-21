@@ -13,7 +13,7 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/screens/Repos/RepoDetail.tsx (the code under test),
- *               ui/src/screens/Repos/repoConfigModel.test.ts (`REPO`), ui/src/test/utils.tsx
+ *               ui/src/screens/Repos/repoFixtures.ts (`REPO`), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Repos/RepoDetail.test.tsx
  * Touch when:   a Next step is added or the tab set changes.
  */
@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Principal } from '../../api/types'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import { RepoDetail } from './RepoDetail'
-import { REPO } from './repoConfigModel.test'
+import { REPO } from './repoFixtures'
 
 const VIEWER: Principal = { ...PRINCIPAL, role: 'viewer' }
 

@@ -13,7 +13,8 @@
  *               report, a run in flight is "In progress", the baseline opens from the first
  *               row, a frozen backlog with no factory run reads "Backlog frozen — run the
  *               factory" and a non-admin is told whom to ask about task 7 (J-TEL-10,
- *               J-ONR-19); that an active sign-off completes task 6 and an active factory
+ *               J-ONR-19); that an active sign-off completes task 6, a STALE one does not
+ *               (the API's `active`/`stale` flags, never the row count) and an active factory
  *               run reads "item k of n" (J-ONR-2); that an App with no installation is
  *               "Incomplete" and no App with a URL repository "Optional"; that the degraded
  *               sandbox is an "Important" banner linking to Deployment (J-HEL-5), and that
@@ -162,7 +163,7 @@ describe('HomePage', () => {
       'GET /users': () => envelope(403, 'forbidden', 'x'),
       'GET /factory/alpha/backlog': { repo: 'alpha', hash: 'b'.repeat(64), frozen_at: '2026-09-17T10:00:00Z', items: [] },
       'GET /factory/alpha/tasks': [FACTORY_TASK],
-      'GET /signoffs': { items: [{ id: 'sgn_1', repo: 'alpha', revoked: false }], total: 1, limit: 50, offset: 0 },
+      'GET /signoffs': { items: [{ id: 'sgn_1', repo: 'alpha', revoked: false, active: true, stale: false }], total: 1, limit: 50, offset: 0 },
       'GET /runs': { items: [{ id: 'run-f', repo: 'alpha', kind: 'factory', status: 'running', created: '2026-09-19T10:00:00Z', started: '2026-09-19T10:00:10Z', finished: null, cancel_requested: false, cost_usd: 0.5, counts: { tasks: 0, clean: 0, disqualified: 0, errors: 0, first_pass_clean: 0, rows: 0 }, progress: { done: 1, total: 5, current_task_id: 'T-2' } }], total: 1, limit: 20, offset: 0 },
     })
     renderApp(<HomePage />, { route: '/home' })
@@ -173,6 +174,31 @@ describe('HomePage', () => {
     expect(rows[6]).toHaveTextContent('Not known yet')
     await waitFor(() => expect(rows[7]).toHaveTextContent('In progress — item 2 of 5'))
     expect(screen.getByRole('link', { name: 'Continue to task 8: Deliver your first change' })).toHaveAttribute('href', '/factory?repo=alpha')
+  })
+
+  it('a stale sign-off (the apparatus moved on) completes nothing: task 6 stays Incomplete and Continue lands on it', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': { configured: true, app_slug: 'crb', install_url: 'x', api_url: 'y', installations: [{ id: 1, account_login: 'acme', account_type: 'Organization', repository_selection: 'selected', html_url: '', suspended: false, permissions: {}, can_deliver: true, recorded_by: '', updated: '' }] },
+      'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': REPO,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 30, deliver_cells: 1 } },
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /users': () => envelope(403, 'forbidden', 'x'),
+      'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /factory/alpha/tasks': [],
+      // the API's own verdict on the row: kept, not revoked, but stale — it lifts nothing
+      'GET /signoffs': { items: [{ id: 'sgn_1', repo: 'alpha', revoked: false, active: false, stale: true }], total: 1, limit: 50, offset: 0 },
+      'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    await waitFor(() => expect(screen.getByText('You have completed 5 of 8 tasks.')).toBeInTheDocument())
+    const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    expect(rows[5]).toHaveTextContent('Read the baseline')
+    expect(rows[5]).toHaveTextContent('Incomplete')
+    expect(screen.getByRole('link', { name: 'Continue to task 6: Read the baseline' })).toHaveAttribute('href', '/results?repo=alpha')
   })
 
   it('an App that is configured with no installation on record is "Incomplete", never "Completed" because a repository exists', async () => {

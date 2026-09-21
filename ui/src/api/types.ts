@@ -89,6 +89,42 @@ export interface Probe {
   data: Record<string, unknown>
 }
 
+/** One worker in the `worker` probe's `data.workers[]` (docs/API.md#health): its check-in age against the staleness it promised. */
+export interface WorkerProbeWorker {
+  worker_id: string
+  hostname: string
+  executor: string
+  kinds: string[]
+  started: string | null
+  heartbeat: string | null
+  /** Seconds since `heartbeat`; `null` when it has never checked in. */
+  heartbeat_age_s: number | null
+  /** `3 × this worker's own heartbeat_s` — the bound `alive` is judged against. */
+  stale_after_s: number
+  current_run_id: string | null
+  version: string
+  stopped: string | null
+  alive: boolean
+}
+
+/**
+ * The `worker` probe's `data` (docs/API.md#health). `stale_after_s` here is the RUN threshold
+ * (`worker_heartbeat_stale_s`): a running run whose heartbeat is older is listed in `stale`.
+ * Each worker's own `stale_after_s` is a different number — `3 × its heartbeat_s`.
+ */
+export interface WorkerProbeData {
+  workers: WorkerProbeWorker[]
+  /** Workers alive now. */
+  alive: number
+  /** Running runs. */
+  running: number
+  /** Queued runs. */
+  queued: number
+  /** Ids of running runs whose heartbeat is older than `stale_after_s`. */
+  stale: string[]
+  stale_after_s: number
+}
+
 /** `GET /health` — overall status is the worst probe. */
 export interface Health {
   status: ProbeStatus

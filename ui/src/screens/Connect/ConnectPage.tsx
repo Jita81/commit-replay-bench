@@ -68,6 +68,7 @@ import { Term } from '../../components/Help'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { useAuth } from '../../lib/auth'
+import { kOfN } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
 import { RepoNewDialog } from '../Repos/RepoNewDialog'
 import { RunNewDialog } from '../Runs/RunNewDialog'
@@ -427,7 +428,8 @@ export function ConnectRepoPage() {
 
 /**
  * What the run the person just started is doing, from the run the page already polls:
- * attempts done of total, the builder-reported spend so far, when it started, the run link,
+ * the attempt in hand of total (`kOfN`, the Baseline's number), the builder-reported spend so
+ * far, when it started (that line is a `role="status"` region, announced politely), the run link,
  * a Cancel (operator only, behind a confirm — attempts already made are still charged) and
  * the one sentence that says what happens when it finishes. A queued run says it is waiting
  * for a worker and has spent nothing.
@@ -435,7 +437,9 @@ export function ConnectRepoPage() {
 function InFlight({ run, stage, canCancel, cancelling, onCancel }: { run: Run; stage: Stage; canCancel: boolean; cancelling: boolean; onCancel: () => void }) {
   const { done, total } = run.progress
   const unit = stage.id === 'measure' ? 'Attempt' : 'Task'
-  const kOfN = total > 0 ? `${unit} ${Math.min(done + 1, total)} of ${total}` : run.status === 'queued' ? 'Waiting for a worker' : stage.id === 'measure' ? 'First attempt starting' : 'Running'
+  // "Attempt 4 of 8" = the fourth is running now (`kOfN`: done + 1) — the Baseline banner says the same number
+  const progress = kOfN(done, total)
+  const head = progress ? `${unit} ${progress}` : run.status === 'queued' ? 'Waiting for a worker' : stage.id === 'measure' ? 'First attempt starting' : 'Running'
   const spend = stage.spends ? ` · $${run.cost_usd.toFixed(2)} spent so far` : ''
   const started = run.started ? ` · started ${clock(run.started)}` : ''
   const next =
@@ -444,9 +448,10 @@ function InFlight({ run, stage, canCancel, cancelling, onCancel }: { run: Run; s
       : 'When the run finishes this stage turns Done and the next stage unlocks.'
   return (
     <div className="mt-2 max-w-[70ch] border-l-4 border-primary pl-3 text-sm" data-testid="in-flight">
-      <p className="m-0">
+      {/* the line that changes every poll is a polite live region; the link and Cancel stay outside it */}
+      <p className="m-0" role="status">
         <span className="num font-mono">
-          {kOfN}
+          {head}
           {spend}
           {started}.
         </span>{' '}

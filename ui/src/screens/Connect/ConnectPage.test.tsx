@@ -176,8 +176,13 @@ describe('ConnectPage', () => {
     await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('In progress'))
     await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('Measuring — attempt 3 of 10 · $0.42 so far, builder-reported (4 rows already on the current apparatus)'))
     const panel = screen.getByTestId('in-flight')
-    expect(panel).toHaveTextContent(/Attempt 3 of 10 · \$0\.42 spent so far · started \d{2}:\d{2}\./)
-    expect(panel).toHaveTextContent('Rows land on the baseline as each attempt is graded; when the run finishes this stage turns Done and the Baseline button fills in.')
+    // the progress line is a polite live region (it changes every poll: attempt, spend) — the
+    // link and the Cancel button sit outside it, so they are never re-announced
+    const status = within(panel).getByRole('status')
+    expect(status).toHaveTextContent(/Attempt 3 of 10 · \$0\.42 spent so far · started \d{2}:\d{2}\./)
+    expect(status).toHaveTextContent('Rows land on the baseline as each attempt is graded; when the run finishes this stage turns Done and the Baseline button fills in.')
+    expect(within(status).queryByRole('link')).toBeNull()
+    expect(within(status).queryByRole('button')).toBeNull()
     expect(within(panel).getByRole('link', { name: 'Open the run' })).toHaveAttribute('href', '/runs/r9')
     // no second spend is offered while the run is in flight
     expect(screen.queryByRole('button', { name: /^Measure…$/ })).not.toBeInTheDocument()

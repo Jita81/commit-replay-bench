@@ -53,6 +53,7 @@ import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { StatTile } from '../../components/StatTile'
 import { Term } from '../../components/Help'
 import { useAuth } from '../../lib/auth'
+import { kOfN } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
 import { KIND_LABEL, decisionsFor } from '../Decisions/decisions'
 import { InsetText, NotificationBanner, WarningCallout } from '../../components/govuk'
@@ -141,7 +142,7 @@ export function ResultsPage() {
           {replayRunning && (
             <NotificationBanner title="A measurement is running">
               <p className="m-0">
-                A measurement is running{run.data ? `: attempt ${run.data.progress.done} of ${run.data.progress.total}, $${run.data.cost_usd.toFixed(2)} spent so far` : ''}. The numbers on this page change as each attempt is graded.{' '}
+                A measurement is running{run.data && kOfN(run.data.progress.done, run.data.progress.total) ? `: attempt ${kOfN(run.data.progress.done, run.data.progress.total)}, $${run.data.cost_usd.toFixed(2)} spent so far` : ''}. The numbers on this page change as each attempt is graded.{' '}
                 <Link to={`/runs/${encodeURIComponent(activeReplayId)}`}>Open the run</Link>
               </p>
             </NotificationBanner>

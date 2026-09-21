@@ -11,8 +11,9 @@
  *               cost, latency, provenance, the STANDING review verdict per row (the latest
  *               review wins) and the evidence link that opens the drawer on that row. A task
  *               the factory built (`labels.process === 'factory'`) is introduced as one
- *               factory item with its backlog id, and its id explained (the authored test's
- *               sha), so it is not read as a commit (J-FAC-18).
+ *               factory item — in the header's purpose sentence and the card alike — with its
+ *               backlog id, and its id explained (the authored test's sha), so it is not read
+ *               as a commit (J-FAC-18).
  * How:          `useTask` + `useReviews({repo, task_id})` → a `Map` of row hash → latest review
  *               → `DataTable`; the drawer is opened with both the pack hash and the row hash
  *               so the Patch / Review tabs need no resolution.
@@ -115,9 +116,14 @@ export function TaskDetailPage() {
     [standing],
   )
 
+  // the header is the first sentence read: it must agree with the card below on what this is
+  const factory = q.data ? isFactory(q.data.spec) : false
+  const purpose = factory
+    ? 'One factory item the loop built: its authored test (the RED proof), the spec it was built to and every graded trial against it.'
+    : 'One replayable commit: its spec (the oracle, the source files, the belt scope) and every graded trial against it.'
   return (
     <>
-      <PageHeader eyebrow={`Tasks · ${repo}`} title={`Task ${shortId(taskId)}`} purpose="One replayable commit: its spec (the oracle, the source files, the belt scope) and every graded trial against it." />
+      <PageHeader eyebrow={`Tasks · ${repo}`} title={`Task ${shortId(taskId)}`} purpose={purpose} />
       <QueryBoundary query={q} loading="Loading the task…">
         {(t) => (
           <div className="space-y-6">

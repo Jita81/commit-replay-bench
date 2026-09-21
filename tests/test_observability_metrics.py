@@ -153,9 +153,7 @@ def test_record_event_meters_deliveries_by_outcome_and_nothing_else(registry: An
     assert sample(registry, d, repo="demo", outcome="opened") == 1
     assert sample(registry, d, repo="demo", outcome="withheld") == 1
     assert sample(registry, d, repo="demo", outcome="failed") == 1
-    assert {o for (o,) in [(k,) for k in ("skipped", "override")]} and all(
-        sample(registry, d, repo="demo", outcome=o) is None for o in ("skipped", "override")
-    )
+    assert all(sample(registry, d, repo="demo", outcome=o) is None for o in ("skipped", "override"))
     assert metrics.DELIVERY_OUTCOMES == {
         "delivery.opened": "opened",
         "delivery.withheld": "withheld",

@@ -353,7 +353,9 @@ class RunCounts(BaseModel):
     #: setup run's steps, an oracle run's ``{scoreable, mutants, killed, escaped, errors,
     #: oracle_strength, …}``, a controls run's ``{rows, violations, escapes, …}``, a label
     #: run's ``{labelled, labels, usage: {calls, cost_usd, cost_known, …}}``
-    #: (docs/API.md#runs). ``{}`` for build kinds.
+    #: (docs/API.md#runs). ``{}`` for a replay / blind run; a FACTORY run is the one build
+    #: kind that fills it — its own ``{items, done, accepted, by_status, outcomes}`` sit
+    #: here next to the RunSummary derived from its graded attempts (``_counts``).
     detail: dict[str, Any] = Field(default_factory=dict)
 
 

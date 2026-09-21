@@ -107,6 +107,16 @@ describe('actionHelp', () => {
     expect(actionHelp('builder.build.turn')).toBe('One builder turn (a model call and its tool calls).')
   })
 
+  it('an inherited key on an unvalidated event is not a sentence: the generic line, never Object.prototype', () => {
+    // a malformed or pre-existing event could name `constructor` / `toString` / `__proto__` as its action;
+    // `ACTION_HELP[action]` would then be a function or an object and LiveLog would hand it to JSX
+    for (const a of ['constructor', 'toString', 'hasOwnProperty', '__proto__', 'builder.constructor', 'builder.__proto__']) {
+      const s = actionHelp(a)
+      expect(typeof s, a).toBe('string')
+      expect(s, a).toMatch(a.startsWith('builder.') ? /^A builder-level event/ : /^An event the loop emitted as/)
+    }
+  })
+
   it('the three sentences the audit wrote are used verbatim', () => {
     expect(actionHelp('delivery.withheld')).toBe('Built clean, but the map does not route deliver for this cell: no branch, no pull request; the measured route is on the chain.')
     expect(actionHelp('build.turn')).toBe('One builder turn (a model call and its tool calls).')

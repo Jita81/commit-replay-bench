@@ -52,6 +52,8 @@ describe('OraclePage', () => {
     setup(OPERATOR, SCORED)
     await waitFor(() => expect(screen.getByText('Oracle strength per cell')).toBeInTheDocument())
     expect(screen.getByText(/How much a green is worth for this repository: whether the tests on the changed lines notice a wrong patch/)).toBeInTheDocument()
+    // the fixture's raw gate value is `auto_ship`: every spelling of it is banned, the wire form first
+    expect(document.body.textContent).not.toMatch(/auto_ship/i)
     expect(document.body.textContent).not.toMatch(/auto-ship/i)
     expect(document.body.textContent).not.toMatch(/autoship/i)
     // the gate column's meaning opens inline from a term

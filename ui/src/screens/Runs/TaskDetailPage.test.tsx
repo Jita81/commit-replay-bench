@@ -71,6 +71,9 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText(/the id is the authored test's sha/)).toBeInTheDocument()
     expect(screen.getByText('Factory item')).toBeInTheDocument()
     expect(screen.queryByText('Commit')).toBeNull()
+    // the header's purpose — the first sentence read — agrees with the card: no "replayable commit"
+    expect(screen.getByText(/^One factory item the loop built: its authored test/)).toBeInTheDocument()
+    expect(screen.queryByText(/replayable commit/)).toBeNull()
   })
 
   it('a replayed commit keeps the commit wording', async () => {
@@ -84,5 +87,6 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByText('Add a divide helper')).toBeInTheDocument()
     expect(screen.getByText('Commit')).toBeInTheDocument()
     expect(screen.queryByText(/factory item/i)).toBeNull()
+    expect(screen.getByText(/^One replayable commit: its spec/)).toBeInTheDocument()
   })
 })

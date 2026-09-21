@@ -7,7 +7,7 @@
  * ----------
  * What it is:   The formatters every screen renders numbers through (`fmtPct`, `fmtInt`,
  *               `fmtUsd`, `fmtSeconds`, `fmtMs`, `fmtRatio`, `fmtCi`, `fmtDate`, `fmtTime`,
- *               `fmtAge`, `fmtAgo`, `count`, `shortId`) and the client-side Wilson interval.
+ *               `fmtAge`, `fmtAgo`, `count`, `kOfN`, `shortId`) and the client-side Wilson interval.
  * What it does: Guarantees `NaN`, `Infinity` and `undefined` cannot reach the page: an absent
  *               or non-finite value renders as the em-dash, never as a fabricated `0` or
  *               `0.0%`. `wilson` reproduces `crb.core.stats.wilson_interval` (95 %, same z) so
@@ -24,9 +24,10 @@
  *               ui/src/screens/Runs/RunDetailPage.tsx (a heavy user of every formatter),
  *               ui/src/screens/Runs/telemetry.ts and ui/src/screens/Connect/connection.ts
  *               (the two live lines that share `fmtAgo` and `count`)
- * Tested by:    ui/src/components/StatTile.test.tsx (the dash for an absent value and the
- *               interval text), ui/src/screens/Capability/CapabilityPage.test.tsx (percentages
- *               and intervals as rendered)
+ * Tested by:    ui/src/lib/format.test.ts (`kOfN`), ui/src/components/StatTile.test.tsx (the
+ *               dash for an absent value and the interval text),
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx (percentages and intervals as
+ *               rendered)
  * Touch when:   the Wilson z or method changes in src/crb/core/stats.py (an apparatus change —
  *               docs/EVIDENCE-AND-CLAIMS.md#4-the-apparatus-stamp--evidence-expires); never for a
  *               new repository.
@@ -136,6 +137,16 @@ export function fmtAgo(iso: string | null | undefined, nowMs: number): string | 
 /** "1 task" / "2 tasks" — a count with its noun pluralised (a regular plural, or `plural` when given). */
 export function count(n: number, noun: string, plural = `${noun}s`): string {
   return `${fmtInt(n)} ${n === 1 ? noun : plural}`
+}
+
+/**
+ * "k of n" for a run in flight — ONE meaning on every screen: k is the attempt / task / item
+ * being worked NOW, the (done + 1)-th, never past n (the last one finishing reads "n of n").
+ * `null` when the total is unknown (`0` or not a number), so no screen says "1 of 0".
+ */
+export function kOfN(done: number, total: number): string | null {
+  if (!finite(done) || !finite(total) || total <= 0) return null
+  return `${fmtInt(Math.min(Math.max(done, 0) + 1, total))} of ${fmtInt(total)}`
 }
 
 /** A git sha or hash, shortened for display; the full value goes in `title`. */

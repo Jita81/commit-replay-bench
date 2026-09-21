@@ -313,6 +313,9 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
         ts = _parse_ts(heartbeat) if heartbeat else None
         if ts is None or (now - ts).total_seconds() > stale_s:
             stale_runs.append(str(run_id))
+    # the contract docs/API.md#health documents and ui/src/api/types.ts types (WorkerProbeData):
+    # the top-level ``stale_after_s`` is the RUN threshold behind ``stale``; each worker's own
+    # ``stale_after_s`` (3 × its heartbeat_s) is the bound behind its ``alive``
     data = {
         "workers": workers,
         "alive": len(alive),
