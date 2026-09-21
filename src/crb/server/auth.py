@@ -9,8 +9,10 @@
   ``session_ttl``. ``cv`` is the :func:`credential_version` the session was issued under —
   a fingerprint of the account's password hash — so a password change (which re-salts the
   hash) ends every session of that account on its next request, without a table of
-  sessions. A deactivated account is refused on every request; there is no revival
-  window while it is inactive.
+  sessions. A deactivated account is refused on every request while it is inactive;
+  ``active`` is not part of the version, so re-activating within ``session_ttl`` restores
+  the sessions issued before the deactivation — set a new password as well to end them
+  for good (a per-account revocation nonce would need a ``users`` column; follow-up).
 * **Lifecycle** — :func:`set_password` and :func:`set_user_active` are the one
   implementation the admin routes and the ``crb users`` break-glass CLI share: a password
   is hashed here and never logged; the last active admin can never be deactivated
@@ -316,17 +318,23 @@ def set_password(user: User, password: str) -> None:
         raise ApiError(422, "validation_error", str(exc), detail={"field": "password"}) from exc
 
 
-def set_user_active(db: Session, user: User, active: bool) -> None:
-    """Activate or deactivate ``user``; the caller commits.
+def set_user_active(db: Session, user: User, active: bool) -> bool:
+    """Activate or deactivate ``user``; the caller commits. Returns whether the flag changed.
 
     Deactivating the last active admin is refused with 409 ``last_admin`` — a deployment
-    can never reach a state nobody can administer. Count and update are one serialised
-    transaction (:func:`lock_users_table`), so two concurrent deactivations cannot both
-    see "2 admins". Idempotent: setting the flag it already holds changes nothing.
+    can never reach a state nobody can administer. The lock is taken FIRST and ``user`` is
+    re-read under it (:func:`lock_users_table`, then ``Session.refresh``): the caller loaded
+    ``user`` before the lock, and a role change committed in between (promote this account,
+    demote the other admin) would otherwise let a guard that trusted the stale snapshot
+    deactivate the last admin (verifier, 2026-09-21 — the ``set_role`` route already locked
+    before its read; this is the same ordering). Read, count and update are one serialised
+    transaction, so two concurrent deactivations cannot both see "2 admins". Idempotent:
+    setting the flag it already holds changes nothing and returns ``False``.
     """
-    if user.active == active:
-        return
     lock_users_table(db)
+    db.refresh(user)
+    if user.active == active:
+        return False
     if not active and user.role == "admin" and count_active_admins(db) <= 1:
         raise ApiError(
             409,
@@ -335,6 +343,7 @@ def set_user_active(db: Session, user: User, active: bool) -> None:
             detail={"allowed": list(ROLE_LADDER)},
         )
     user.active = active
+    return True
 
 
 def bootstrap_admin_if_empty(factory: sessionmaker[Session], settings: Settings) -> bool:

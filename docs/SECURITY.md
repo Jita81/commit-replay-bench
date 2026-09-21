@@ -171,7 +171,10 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   credential version it was issued under (a fingerprint of the account's argon2 hash);
   setting a password re-salts the hash, so every session of that account answers
   `401 session_revoked` on its next request — no server-side session table to keep or
-  leak. A deactivated account is refused on its very next request. A self-service change
+  leak. A deactivated account is refused on its very next request and for as long as it
+  is inactive; the active flag is not part of the version, so re-activating within
+  `session_ttl` restores the sessions issued before — containing a compromised account
+  means deactivating **and** setting a new password. A self-service change
   (`PUT /users/me/password`) requires the current password — a borrowed session cannot
   change it — and re-issues the cookie only to the browser that made the change. The
   break-glass path (`crb users set-password | deactivate` on the host, where database

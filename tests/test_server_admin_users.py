@@ -41,7 +41,16 @@ from pydantic import SecretStr
 from sqlalchemy import select
 
 from crb.server.app import API_PREFIX, create_app
-from crb.server.auth import CSRF_COOKIE, SESSION_COOKIE, new_user_id
+from crb.server.auth import (
+    CSRF_COOKIE,
+    SESSION_COOKIE,
+    count_active_admins,
+    create_local_user,
+    new_user_id,
+    set_user_active,
+)
+from crb.server.deps import ApiError
+from crb.server.routes import admin as admin_routes
 from crb.server.routes.admin import user_trace_id
 from crb.server.settings import Settings
 from crb.store.models import Event, User
@@ -302,7 +311,16 @@ class TestActive:
         assert r.status_code == 200 and r.json()["active"] is False
         r = admin.put(f"{API_PREFIX}/users/{uid}/active", json={"active": True})
         assert r.status_code == 200 and r.json()["active"] is True
-        login(target, "carol", USER_PW)
+        # The documented contract (API.md, OPERATOR.md §9): deactivation suspends, it does
+        # not revoke — the cookie issued before it works again once the account is active,
+        # because ``active`` is not part of the credential version. A password set is what
+        # ends it for good. Flip this assertion when a revocation nonce lands.
+        assert target.get(f"{API_PREFIX}/auth/me").status_code == 200
+        r = admin.put(f"{API_PREFIX}/users/{uid}/password", json={"password": NEW_PW})
+        assert r.status_code == 200
+        r = target.get(f"{API_PREFIX}/auth/me")
+        assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+        login(target, "carol", NEW_PW)
 
     def test_last_admin_guard_and_second_admin(self, client: TestClient) -> None:
         login(client)
@@ -322,6 +340,76 @@ class TestActive:
         r = client.put(f"{API_PREFIX}/users/{root}/active", json={"active": "maybe"})
         assert r.status_code == 422
         assert client.put(f"{API_PREFIX}/users/{root}/active", json={}).status_code == 422
+
+    def test_guard_reads_the_row_under_the_lock_not_the_callers_snapshot(
+        self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two admins, root and x. Request A loads x (an operator) before the users lock;
+        between that read and the lock another session promotes x to admin and demotes
+        root. A guard that trusted A's snapshot ("x is an operator, no admin at stake")
+        deactivated the last admin — reproduced by the verifier on 2026-09-21. The guard
+        must decide on the row as it is under the lock: 409 ``last_admin``, and one active
+        admin remains."""
+        login(client)
+        root = client.get(f"{API_PREFIX}/auth/me").json()["id"]
+        x = create(client, "xx", "operator")
+        real_get_user = admin_routes._get_user
+
+        def get_then_race(db: Any, user_id: str) -> Any:
+            user = real_get_user(db, user_id)
+            if user_id == x:
+                with app.state.session_factory() as other:
+                    other.get(User, x).role = "admin"
+                    other.get(User, root).role = "operator"
+                    other.commit()
+            return user
+
+        monkeypatch.setattr(admin_routes, "_get_user", get_then_race)
+        r = client.put(f"{API_PREFIX}/users/{x}/active", json={"active": False})
+        assert r.status_code == 409 and err(r)["code"] == "last_admin"
+        with app.state.session_factory() as s:
+            assert count_active_admins(s) == 1
+            assert s.get(User, x).active is True
+        assert [e.action for e in events_for(app, x)] == ["user.created"]  # nothing written
+
+    def test_primitive_refreshes_under_the_lock(self, client: TestClient, app: Any) -> None:
+        """The same interleaving on ``set_user_active`` directly — the one implementation
+        both doors (route and ``crb users deactivate``) share, so fixing it here fixes both.
+        Mirrors the verifier's two-session reproduction (scratchpad verify-U-race.py)."""
+        with app.state.session_factory() as s:
+            y = create_local_user(s, username="yy", password=USER_PW, role="admin").id
+            x = create_local_user(s, username="xx", password=USER_PW, role="operator").id
+            z = create_local_user(s, username="zz", password=USER_PW, role="viewer").id
+            for u in s.execute(select(User).where(User.subject == "local:root")).scalars():
+                u.active = False  # leave y as the only other admin
+            s.commit()
+        a, b = app.state.session_factory(), app.state.session_factory()
+        try:
+            x_in_a = a.get(User, x)
+            assert x_in_a.role == "operator"
+            b.get(User, x).role = "admin"
+            b.get(User, y).role = "operator"
+            b.commit()
+            with pytest.raises(ApiError) as excinfo:
+                set_user_active(a, x_in_a, False)
+            assert excinfo.value.status_code == 409 and excinfo.value.code == "last_admin"
+            a.rollback()
+            # Idempotency is decided on the refreshed row too: a snapshot that still says
+            # "active" after another session deactivated the account is a no-op (``False``),
+            # so the caller writes no second ``user.deactivated`` event.
+            z_in_a = a.get(User, z)
+            assert z_in_a.active is True
+            b.get(User, z).active = False
+            b.commit()
+            assert set_user_active(a, z_in_a, False) is False
+            assert set_user_active(a, z_in_a, True) is True
+            a.commit()
+        finally:
+            a.close()
+            b.close()
+        with app.state.session_factory() as s:
+            assert count_active_admins(s) == 1 and s.get(User, x).role == "admin"
+            assert s.get(User, z).active is True
 
 
 # --- list rows --------------------------------------------------------------------------------

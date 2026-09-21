@@ -7,10 +7,11 @@ What it is:   The test suite for the ``crb users`` verbs.
 What it does: Pins that the verbs resolve the same database as ``crb serve`` (an account the
               CLI created logs in through the API; a password the CLI set ends the API session
               issued under the old one), that a password is never taken from argv (prompt or
-              ``CRB_USERS_PASSWORD_FILE``; no terminal and no file is a clean exit 2), the
-              last-admin guard on ``deactivate``, the ≥ 12 character rule, unknown accounts,
-              an uninitialised database, and that every change is one ``user.*`` event with
-              actor ``cli:<os user>`` and never a password.
+              ``CRB_USERS_PASSWORD_FILE``; no terminal and no file is a clean exit 2; a
+              taken username is refused before the prompt), the last-admin guard on
+              ``deactivate``, the ≥ 12 character rule, unknown accounts, a database that is
+              not the server's (refused by name, never created), and that every change is
+              one ``user.*`` event with actor ``cli:<os user>`` and never a password.
 How:          ``crb migrate`` on a temp SQLite URL, ``main(argv)`` in-process with
               ``CRB_DATABASE_URL`` set and the password in a temp file; the API side is
               ``create_app`` over the same URL (no bootstrap admin) behind a ``TestClient``.
@@ -38,7 +39,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import select
 
-from crb.cli.commands.users import PASSWORD_FILE_ENV, actor, read_password
+from crb.cli.commands.users import PASSWORD_FILE_ENV, actor, describe_database, read_password
 from crb.cli.main import main
 from crb.server.app import API_PREFIX, create_app
 from crb.server.auth import CSRF_COOKIE
@@ -175,7 +176,11 @@ class TestPasswordSource:
 
 
 def test_lifecycle_end_to_end(
-    run: Run, db_url: str, tmp_path: Path, password_file: Callable[[str], None]
+    run: Run,
+    db_url: str,
+    tmp_path: Path,
+    password_file: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # An empty database lists nothing and says what to do.
     code, out, _ = run(["users", "list"])
@@ -185,8 +190,12 @@ def test_lifecycle_end_to_end(
     password_file(PW)
     code, out, _ = run(["users", "create", "root", "--role", "admin"])
     assert code == 0 and "created root (admin)" in out and PW not in out
+    # A taken username is refused BEFORE the password is asked for: with no password
+    # source at all the answer is still user_exists, not "no terminal to prompt on".
+    monkeypatch.delenv(PASSWORD_FILE_ENV)
     code, _, errtxt = run(["users", "create", "root", "--role", "admin"])
-    assert code == 2 and "user_exists" in errtxt
+    assert code == 2 and "user_exists" in errtxt and PASSWORD_FILE_ENV not in errtxt
+    password_file(PW)
     code, _, errtxt = run(["users", "create", "x y", "--role", "admin"])
     assert code == 2 and "username" in errtxt
     code, _, errtxt = run(["users", "create", "ok", "--role", "god"])
@@ -217,13 +226,16 @@ def test_lifecycle_end_to_end(
         password_file(PW)
         assert run(["users", "create", "admin2", "--role", "admin"])[0] == 0
         code, out, _ = run(["users", "deactivate", "root"])
-        assert code == 0 and "deactivated root" in out
+        assert code == 0 and "deactivated root" in out and "set-password root" in out
         assert c.get(f"{API_PREFIX}/auth/me").status_code == 401
         assert login(c, "root", PW2).status_code == 401
         code, out, _ = run(["users", "deactivate", "root"])
         assert code == 0 and "already deactivated" in out
         code, out, _ = run(["users", "activate", "root"])
         assert code == 0 and "activated root" in out
+        # The documented contract: the session issued before the deactivation is back
+        # (the credential version did not move); a password set is what ends it.
+        assert c.get(f"{API_PREFIX}/auth/me").status_code == 200
         assert login(c, "root", PW2).status_code == 200
 
     code, _, errtxt = run(["users", "set-password", "nobody"])
@@ -264,12 +276,37 @@ def test_lifecycle_end_to_end(
         assert PW not in blob and PW2 not in blob and "argon2" not in blob
 
 
-def test_uninitialised_database_says_migrate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setenv("CRB_DATABASE_URL", f"sqlite:///{tmp_path / 'empty.db'}")
-    assert main(["users", "list"]) == 2
-    assert "crb migrate" in capsys.readouterr().err
+class TestWrongDatabase:
+    """A verb run without the service's environment must not build a stray database in
+    the operator's cwd, and must say which database it resolved (verifier, 2026-09-21)."""
+
+    def test_missing_sqlite_file_is_refused_and_not_created(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.chdir(tmp_path)  # no CRB_DATABASE_URL, no CRB_HOME: ./.crb/crb.db
+        assert main(["users", "list"]) == 2
+        errtxt = capsys.readouterr().err
+        assert "no database file at sqlite:///.crb/crb.db" in errtxt
+        assert "CRB_DATABASE_URL" in errtxt and "crb migrate" in errtxt
+        assert not (tmp_path / ".crb").exists()
+
+    def test_existing_file_without_users_table_says_which(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        empty = tmp_path / "empty.db"
+        empty.touch()
+        monkeypatch.setenv("CRB_DATABASE_URL", f"sqlite:///{empty}")
+        assert main(["users", "list"]) == 2
+        errtxt = capsys.readouterr().err
+        assert f"no users table in sqlite:///{empty}" in errtxt and "crb migrate" in errtxt
+
+    def test_describe_never_shows_a_password(self) -> None:
+        assert (
+            describe_database("postgresql+psycopg://app:s3cret@db.internal:5432/crb")
+            == "postgresql+psycopg://db.internal:5432/crb"
+        )
+        assert describe_database("sqlite:///./.crb/crb.db") == "sqlite:///./.crb/crb.db"
+        assert describe_database("sqlite://") == "sqlite:///:memory:"
 
 
 def test_users_without_a_verb_prints_help(capsys: pytest.CaptureFixture[str]) -> None:

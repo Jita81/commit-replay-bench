@@ -16,10 +16,13 @@ Navigation
 ----------
 What it is:   ``crb users …`` — the break-glass account CLI (list, create, set-password,
               activate, deactivate) over the server's own database.
-What it does: Resolves the same database as ``crb serve``, reads a password from a prompt or
-              ``CRB_USERS_PASSWORD_FILE`` (never argv), applies the change through the auth
-              primitives (last-admin guard, ≥ 12 characters, local accounts only) and writes
-              one ``user.*`` event with actor ``cli:<os user>`` in the same transaction.
+What it does: Resolves the same database as ``crb serve`` (and refuses one that is not it —
+              a missing SQLite file or no ``users`` table — naming what it resolved, without
+              creating a stray database), reads a password from a prompt or
+              ``CRB_USERS_PASSWORD_FILE`` (never argv), refuses a taken username before the
+              prompt, applies the change through the auth primitives (last-admin guard under
+              the users lock, ≥ 12 characters, local accounts only) and writes one ``user.*``
+              event with actor ``cli:<os user>`` in the same transaction.
 How:          Lazy imports of the store and server layers (the base CLI works without the
               ``[server]`` extra); ``ApiError`` from the primitives becomes a ``CliError``
               (exit 2) with the same message the API would give.
@@ -44,6 +47,7 @@ import json
 import os
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from crb.cli.commands import EXIT_OK, CliError
@@ -97,7 +101,9 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     act.set_defaults(func=cmd_activate)
 
     deact = verbs.add_parser(
-        "deactivate", help="disable an account (never the last active admin); its sessions end"
+        "deactivate",
+        help="disable an account (never the last active admin): refused while inactive; "
+        "set-password as well to end its sessions for good",
     )
     _common(deact)
     deact.add_argument("username")
@@ -147,18 +153,52 @@ def read_password(*, confirm: bool) -> str:
     return pw
 
 
+_WRONG_DB_HINT = (
+    "is this the database `crb serve` uses? Run with the service's environment "
+    "(CRB_DATABASE_URL / CRB_HOME) or `--database-url`; for a new install run `crb migrate`"
+)
+
+
+def describe_database(url: str) -> str:
+    """The resolved database for an error message: dialect and path or host, never a
+    password (``postgresql://app:***@db/crb`` → ``postgresql://db/crb``)."""
+    from sqlalchemy.engine import make_url  # noqa: PLC0415 — optional extra, see service.py
+
+    parsed = make_url(url)
+    if parsed.get_backend_name() == "sqlite":
+        return f"{parsed.drivername}:///{parsed.database or ':memory:'}"
+    host = parsed.host or ""
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    return f"{parsed.drivername}://{host}/{parsed.database or ''}"
+
+
 def _open(database_url: str | None) -> Any:
-    """A bound session factory over the database ``crb serve`` would use; refuses an
-    uninitialised one with the ``crb migrate`` instruction."""
+    """A bound session factory over the database ``crb serve`` would use.
+
+    A break-glass verb run without the service's environment resolves ``./.crb/crb.db`` in
+    whatever directory the operator is in; opening that would create an empty database
+    there (``make_engine`` makes the directory, SQLite the file) and "run ``crb migrate``"
+    would then build a stray database the server never reads (verifier, 2026-09-21). So a
+    SQLite path that does not exist is refused before anything is created, and both
+    refusals name the database they resolved and the likely cause.
+    """
     try:
         from sqlalchemy import inspect  # noqa: PLC0415 — optional extra, see service.py
+        from sqlalchemy.engine import make_url  # noqa: PLC0415
 
         from crb.store import db as store_db  # noqa: PLC0415
     except ImportError as e:
         raise CliError(f"{_SERVER_HINT} ({e})") from e
-    engine = store_db.make_engine(store_db.database_url(database_url))
+    url = store_db.database_url(database_url)
+    parsed = make_url(url)
+    if parsed.get_backend_name() == "sqlite":
+        path = parsed.database or ""
+        if path and path != ":memory:" and not Path(path).exists():
+            raise CliError(f"no database file at {describe_database(url)} — {_WRONG_DB_HINT}")
+    engine = store_db.make_engine(url)
     if "users" not in inspect(engine).get_table_names():
-        raise CliError("database not initialised — run `crb migrate`")
+        raise CliError(f"no users table in {describe_database(url)} — {_WRONG_DB_HINT}")
     return store_db.make_session_factory(engine)
 
 
@@ -239,12 +279,22 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 def cmd_create(args: argparse.Namespace) -> int:
     """Create a local account; the password is read AFTER the arguments validate."""
-    from crb.server.auth import create_local_user, validate_role, validate_username  # noqa: PLC0415
+    from crb.server.auth import (  # noqa: PLC0415
+        create_local_user,
+        find_local_user,
+        validate_role,
+        validate_username,
+    )
     from crb.server.routes.admin import record_user_event  # noqa: PLC0415
 
     def _go(db: Session) -> int:
-        validate_username(args.username)
+        name = validate_username(args.username)
         validate_role(args.role)
+        # Refuse a taken username BEFORE the prompt: typing a password twice to be told
+        # ``user_exists`` is friction a break-glass tool must not add. create_local_user
+        # checks again, so a race still ends in the same message.
+        if find_local_user(db, name) is not None:
+            raise CliError(f"user_exists: user {name!r} already exists")
         password = read_password(confirm=True)
         user = create_local_user(
             db,
@@ -285,12 +335,20 @@ def _set_active(args: argparse.Namespace, active: bool) -> int:
 
     def _go(db: Session) -> int:
         user = _local_user(db, args.username)
-        if user.active == active:
+        # Idempotency and the last-admin guard are decided under the users lock on a
+        # re-read row (set_user_active), not on the snapshot _local_user returned.
+        if not set_user_active(db, user, active):
             print(f"{args.username} is already {verb}")
             return EXIT_OK
-        set_user_active(db, user, active)
         record_user_event(db, action=f"user.{verb}", actor=actor(), target=user)
-        print(f"{verb} {args.username}")
+        if active:
+            print(f"activated {args.username}")
+        else:
+            print(
+                f"deactivated {args.username}: refused while inactive. Re-activating within "
+                f"the session lifetime restores sessions issued before — "
+                f"`crb users set-password {args.username}` ends them for good."
+            )
         return EXIT_OK
 
     return _run(args.database_url, _go)
@@ -302,8 +360,15 @@ def cmd_activate(args: argparse.Namespace) -> int:
 
 
 def cmd_deactivate(args: argparse.Namespace) -> int:
-    """Disable an account (never the last active admin); its sessions end at once."""
+    """Disable an account (never the last active admin): every request is refused while it
+    is inactive. Re-activation restores sessions issued before; ``set-password`` ends them."""
     return _set_active(args, False)
 
 
-__all__: Sequence[str] = ("PASSWORD_FILE_ENV", "actor", "read_password", "register")
+__all__: Sequence[str] = (
+    "PASSWORD_FILE_ENV",
+    "actor",
+    "describe_database",
+    "read_password",
+    "register",
+)

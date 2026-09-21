@@ -13,7 +13,10 @@ change is one transaction with a ``system`` event on the account's trace
 ``user.deactivated``; actor and target ids, never a password). A password change ends
 the account's other sessions (the cookie is bound to the credential version); the
 response to a self-change carries a fresh cookie so the person is not logged out of the
-browser they changed it in. The same primitives serve the ``crb users`` CLI on the host.
+browser they changed it in. Deactivation refuses the account's requests while it is
+inactive; it does not move the credential version, so re-activating within the session
+lifetime restores the sessions issued before — to contain a compromised account, set a
+new password as well. The same primitives serve the ``crb users`` CLI on the host.
 
 Secrets (``/settings/secrets/*``) go through :mod:`crb.server.secrets`: a value is
 accepted on ``PUT`` and written owner-only to disk; every response — including the
@@ -442,12 +445,15 @@ def set_user_password(  # noqa: PLR0917 — FastAPI injects each dependency by n
     summary="Activate or deactivate a user; never deactivates the last active admin",
 )
 def set_active(user_id: str, body: ActiveChange, admin: AdminDep, db: DbDep) -> UserOut:
-    """Deactivating ends the account's sessions at once (every request is refused while it
-    is inactive); 409 ``last_admin`` when it would leave no active admin. Idempotent."""
+    """Deactivating refuses every request of the account while it is inactive (re-activating
+    within the session lifetime restores sessions issued before; a password set ends them
+    for good); 409 ``last_admin`` when it would leave no active admin. Idempotent. The
+    idempotency and last-admin decisions are ``set_user_active``'s, taken under the users
+    lock on a re-read row — the ``user`` loaded here is only the handle."""
     user = _get_user(db, user_id)
-    if user.active == body.active:
+    if not set_user_active(db, user, body.active):
+        db.rollback()  # nothing to write: release the users lock now, not at teardown
         return _user_out(user)
-    set_user_active(db, user, body.active)
     record_user_event(
         db,
         action="user.activated" if body.active else "user.deactivated",
