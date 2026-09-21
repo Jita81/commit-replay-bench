@@ -5,8 +5,9 @@ RELEASING §2 says a release is a tag on the merge commit; before this rule the 
 checked only the tag's version and the repository, so a tag on an unmerged branch commit
 would build, push to GHCR and keylessly sign an image nobody reviewed (CodeRabbit on PR #43,
 2026-09-21 — CWE-16). ``scripts/check_release_tag.py`` now carries the check as a function,
-``reachable_from``, and the workflow's first step fetches ``main`` and runs the script with
-``--require-on origin/main`` — so the rule the suite pins is the rule the pipeline runs.
+``reachable_from``, and the workflow's first step runs the script with ``--require-on
+origin/main`` on its full-history checkout — so the rule the suite pins is the rule the
+pipeline runs.
 Proven here on a temporary git repository: a tagged commit on ``main`` is accepted, a tagged
 commit on a branch that ``main`` does not contain is refused with the ``::error::``
 annotation, and the workflow file calls the rule before building.
@@ -19,7 +20,8 @@ What it does: Pins that ``reachable_from`` answers True for a commit on the ref 
               one off it (or an unknown ref), that ``main`` with ``--require-on`` exits 1 with a
               ``::error::`` line naming the tag, the commit and the ref for an unmerged commit
               and 0 for a merged one, that a branch push never runs the check, and that
-              ``release.yml`` fetches ``main`` with full history and runs the script with
+              ``release.yml`` checks out full history, asserts ``origin/main`` is present
+              (no fetch: the checkout keeps no token) and runs the script with
               ``--require-on origin/main`` before ``uv build``.
 How:          ``git init`` in ``tmp_path`` (identity via ``-c``; never the developer's config),
               two commits on ``main`` and one on a side branch; the script's functions are
@@ -145,12 +147,15 @@ def test_main_with_require_on_exits_one_with_an_error_annotation(
 
 
 def test_release_workflow_runs_the_main_provenance_check_before_building() -> None:
-    """The ``build`` job fetches ``main`` with full history and runs the script with
-    ``--require-on origin/main`` before ``uv build`` — the step RELEASING §3 names."""
+    """The ``build`` job checks out full history (``fetch-depth: 0`` carries ``origin/main``;
+    ``persist-credentials: false`` leaves no token to fetch with, so it must not fetch), asserts
+    ``origin/main`` is present and runs the script with ``--require-on origin/main`` before
+    ``uv build`` — the step RELEASING §3 names."""
     text = RELEASE.read_text(encoding="utf-8")
     build = text.split("\n  image:", 1)[0]
     assert "fetch-depth: 0" in build
-    fetch = build.index("git fetch --no-tags origin main")
+    assert "git fetch" not in build, "the release checkout has no token — it must not fetch"
+    present = build.index("git rev-parse -q --verify origin/main^{commit}")
     check = build.index("scripts/check_release_tag.py --require-on origin/main")
     uv_build = build.index("run: uv build")
-    assert fetch < check < uv_build
+    assert present < check < uv_build

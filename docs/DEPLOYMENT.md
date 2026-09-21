@@ -348,13 +348,18 @@ table: grades`).
 
 ```bash
 # 1. quiesce — no run in flight (the API may keep serving reads)
-pkill -f 'crb worker' || true                      # or your restart script's stop step
+kill "$(cat ~/crb-stack/worker.pid)"                 # THIS stack's worker: the pid its start script
+                                                   # recorded, or `systemctl stop crb-worker` /
+                                                   # `docker compose stop worker` — never a host-wide
+                                                   # `pkill`, which stops every crb stack's workers
 CHECK='PRAGMA integrity_check; SELECT count(*), max(seq) FROM grades;
        SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1;'
 sqlite3 ~/crb-stack/crb.db "$CHECK"                # record: ok, the row count, the last row_hash
 
 # 2. copy: the store with SQLite's own online-backup API, then the home directories
-STAMP=$(date -u +%Y-%m-%dT%H%MZ); DEST=~/crb-backups/$STAMP; mkdir -p "$DEST"
+STAMP=$(date -u +%Y-%m-%dT%H%M%SZ); DEST=~/crb-backups/$STAMP
+mkdir -p ~/crb-backups && mkdir "$DEST"            # no -p: a second run in the same second
+                                                   # fails here instead of overwriting the first
 sqlite3 ~/crb-stack/crb.db ".backup '$DEST/crb.db'"
 tar -C ~/crb-stack -czf "$DEST/home.tgz" \
   $(cd ~/crb-stack && ls -d home/evidence home/events home/factory home/transcripts home/secrets 2>/dev/null)

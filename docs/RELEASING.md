@@ -36,9 +36,9 @@ Contents: [1 Numbers](#1-the-numbers-and-where-they-live) ·
 
 `scripts/check_release_tag.py` is the rule `release.yml` runs first, before anything is
 built: on a tag push the tag must be exactly `v` + the `pyproject.toml` version, **and the
-tagged commit must be reachable from `main`** (the workflow fetches `origin/main` on its
-full-history checkout and runs `git merge-base --is-ancestor` through the script's
-`--require-on origin/main`), or the job stops with an `::error::` annotation naming the
+tagged commit must be reachable from `main`** (the workflow's full-history checkout carries
+`origin/main` — it never fetches, since the checkout keeps no token — and it runs
+`git merge-base --is-ancestor` through the script's `--require-on origin/main`), or the job stops with an `::error::` annotation naming the
 tag, the commit and the ref, and nothing is built, pushed or signed. The `main` half is
 the release contract enforced, not described: without it a `v*` tag on an unmerged
 branch commit would have built, pushed to GHCR and keylessly signed an image nobody
@@ -48,9 +48,11 @@ outcomes on a throwaway repository and that the workflow runs the step before `u
 The workflow check is the floor; **who may create a `v*` tag** is the repository's setting,
 not the pipeline's — [aspiration] add a **tag-protection ruleset** (*Settings → Rules →
 Rulesets → New tag ruleset*, target `v*`, *Restrict creations* with maintainers as the
-bypass list, and *Restrict deletions* / *Block force pushes* so a tag never moves) so an
-unmerged commit cannot even be tagged. CodeRabbit's ruleset query on PR #43 (2026-09-21) found none;
-until one exists the workflow refuses the release — the same outcome, one step later.
+bypass list, and *Restrict deletions* / *Block force pushes* so a tag never moves). The
+ruleset governs **who** may create, delete or move a `v*` tag — it does not check what the
+tag points at, and a maintainer on the bypass list can still tag an unmerged commit; main
+ancestry is enforced by the workflow alone, on every tag, whoever pushed it. CodeRabbit's
+ruleset query on PR #43 (2026-09-21) found none; the workflow's refusal is the floor either way.
 
 ## 2. Cut a release
 
@@ -99,7 +101,7 @@ change; the tag is pushed **after** the merge, on the merge commit.
 
 | Job | Does | Stops when |
 |---|---|---|
-| `build` | `git fetch --no-tags origin main` then `scripts/check_release_tag.py --require-on origin/main` (the tag is `v<pyproject version>` and its commit is reachable from `main` — nothing is built otherwise); `uv build` (sdist + wheel); installs the wheel into a clean venv and imports `crb.core`; records `SHA256SUMS`; uploads `crb-dist-<tag>` | the tag is not `v<pyproject version>`; the tagged commit is not on `main`; the wheel does not import |
+| `build` | `scripts/check_release_tag.py --require-on origin/main` on the full-history checkout (the tag is `v<pyproject version>` and its commit is reachable from `main` — nothing is built otherwise); `uv build` (sdist + wheel); installs the wheel into a clean venv and imports `crb.core`; records `SHA256SUMS`; uploads `crb-dist-<tag>` | the tag is not `v<pyproject version>`; the tagged commit is not on `main`; the wheel does not import |
 | `image` | builds `deploy/Dockerfile` for `linux/amd64` (UI bundle + the wheel, installed non-editable); smokes the candidate — non-root uid 10001, read-only root, `migrate upgrade` on SQLite, UI and tools present; writes an SPDX 2.3 SBOM with syft and uploads it as `crb-image-sbom-<tag>` (365-day retention); **pushes to GHCR only for a tag of `Jita81/commit-replay-bench`** (a fork or a dispatch builds and smokes but never publishes); smokes the **pushed** digest again | any smoke fails |
 | `sign` | `cosign sign` the pushed digest **keyless** (the workflow's GitHub OIDC token → a Fulcio certificate, recorded in Rekor) and `cosign attest --type spdxjson` the SBOM; then verifies its own signature | the signature does not verify |
 

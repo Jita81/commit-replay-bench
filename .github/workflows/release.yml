@@ -73,7 +73,9 @@ jobs:
         # a dry run) both rules are a no-op.
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main
+          # fetch-depth: 0 checked out every branch, so origin/main is already here — no fetch
+          # (persist-credentials: false leaves git without a token; a fetch would only work on a public repo)
+          git rev-parse -q --verify origin/main^{commit} >/dev/null || { echo '::error::origin/main is missing from the checkout (fetch-depth: 0 is required)'; exit 1; }
           uv run --no-project --python 3.12 python scripts/check_release_tag.py --require-on origin/main
       - name: uv build
         run: uv build --sdist --wheel --out-dir dist
