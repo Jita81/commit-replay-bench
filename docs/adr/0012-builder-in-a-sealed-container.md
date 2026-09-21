@@ -191,9 +191,18 @@ Behind `CRB_BUILDER__EXECUTOR=docker` (`crb.builders.container`, wired through
      `docker ps` not listing the container; apparatus: docker server 29.5.2 (client 29.6.1)
      via colima 0.10.3, macOS 26.6.2 arm64, Python 3.12.13, commit f538cfe). These runs
      exercise the confirmed path only — the daemon confirmed every kill; the unconfirmed
-     path is provable only against a scripted daemon (above). The non-stream path's
-     confirmed kill against a real daemon: `tests/test_sandbox_docker.py`, see the docker
-     suite report in the change that introduced it.
+     path is provable only against a scripted daemon (above).
+   - [measured] **Colima integration runs, the non-stream path** (`tests/test_sandbox_docker.py`,
+     `test_cancel_kills_the_container_and_the_daemon_confirms_it` and
+     `test_wall_clock_kills_the_container_and_the_daemon_confirms_it`; n = 3 runs × 2 tests
+     = 6 passes, 0 failures, the two docker suites 18/18 on each run in 21–24 s, and
+     `docker ps -aq --filter name=crb-` empty afterwards; method: `DockerExecutor.run` on a
+     real `sleep 60` in `crb-test-py:local`, the cancel token flipped at 2 s and a 3 s wall
+     clock, `run()` returning within 30 s with `kill_confirmed` True, the container named on
+     the result and not listed, nothing handed to `on_kill_unconfirmed`; apparatus: docker
+     server 29.5.2 (client 29.6.1) via colima, macOS 26.6.2 arm64, Python 3.12, commit
+     36de2d3, from a worktree under `$HOME` with `PYTHONPATH` pinned to it). Confirmed path
+     only, as above.
 8. **The post-hoc guards stay on as belt-and-braces**, not as the wall: the shell guard,
    the CLI deny rules and the tamper check still run (container paths are translated to
    the host copy so path verification keeps working); a violation is still recorded
