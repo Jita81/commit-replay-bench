@@ -164,7 +164,12 @@ from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace
 from crb.factory.backlog import BacklogItem
-from crb.factory.delivery import GitCredentials, GitCredentialsProvider, github_open_pr_fn
+from crb.factory.delivery import (
+    GitCredentials,
+    GitCredentialsProvider,
+    github_comment_pr_fn,
+    github_open_pr_fn,
+)
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.testfirst import AuthoredTest
 from crb.observability import metrics
@@ -1346,25 +1351,35 @@ class Worker:
         self._progress(ctx, len(scores), total)
         return (STATUS_CANCELLED if cancelled else STATUS_SUCCEEDED), counts, ""
 
-    def _route_lookup(self, repo: str) -> Callable[[BacklogItem], dict[str, Any] | None]:
+    def _route_lookup(
+        self, repo: str, run_id: str = ""
+    ) -> Callable[[BacklogItem], dict[str, Any] | None]:
         """The capability map's decision for an item's (class × size) cell — computed once,
         lazily, from the same signed map ``GET /capability-map`` serves (sighted rows,
         current apparatus, the repo's latest controls verdict, sign-offs overlaid). ``None``
-        for a cell nobody has measured: the loop withholds delivery on it (DL-038)."""
+        for a cell nobody has measured: the loop withholds delivery on it (DL-038).
+
+        Rows of ``run_id`` — THIS run's own graded builds — are excluded: the map that
+        licenses a delivery is the map as it stood before the run, never one the run's own
+        clean rows have nudged (B-1b finding 2: PR bodies said ``n=27`` where the freeze saw
+        26 → DL-045). Each decision also carries ``apparatus_versions`` for the record."""
         cache: dict[str, dict[str, Any] | None] = {}
         computed: dict[str, bool] = {}
 
         def compute() -> None:
-            rows = rows_for_apparatus(
-                rows_for_mode(self.ledger.rows(repo=repo), "sighted"), "current"
-            )
+            before = (r for r in self.ledger.rows(repo=repo) if not run_id or r.run_id != run_id)
+            rows = rows_for_apparatus(rows_for_mode(before, "sighted"), "current")
             with self.factory() as s:
                 cmap, _ = signed_map(
                     rows, PROJECTION_CLASS_SIZE, s, repo, controls=latest_controls_verdict(s, repo)
                 )
             for c in cmap.cells:
                 if c.decision is not None:
-                    cache[f"{c.key.capability_class}|{c.key.size}"] = c.decision.to_dict()
+                    st = c.stats
+                    cache[f"{c.key.capability_class}|{c.key.size}"] = {
+                        **c.decision.to_dict(),
+                        "apparatus_versions": list(st.apparatus_versions) if st else [],
+                    }
             computed["done"] = True
 
         def lookup(item: BacklogItem) -> dict[str, Any] | None:
@@ -1448,6 +1463,9 @@ class Worker:
         def open_pr(**kw: Any) -> tuple[str, int]:
             return github_open_pr_fn(api_base=api_base, **kw)
 
+        def comment_pr(**kw: Any) -> None:
+            github_comment_pr_fn(api_base=api_base, **kw)
+
         spec = FactorySpec(
             config=ctx.config,
             runner=runner,
@@ -1463,10 +1481,12 @@ class Worker:
             deliver=bool(p.get("deliver", False)),
             creds=creds,
             open_pr_fn=open_pr if creds is not None else None,
+            comment_pr_fn=comment_pr if creds is not None else None,
             target_default_branch=str(link.get("default_branch") or "main"),
             # the route gate: the same signed (class × size) map the API serves, under the
-            # repo's latest controls verdict, sighted rows of the current apparatus
-            route_decision_for=self._route_lookup(run.repo),
+            # repo's latest controls verdict, sighted rows of the current apparatus — minus
+            # this run's own rows (DL-045); the loop reads it once per item, at readiness
+            route_decision_for=self._route_lookup(run.repo, run.id),
             deliver_override_by=str(p.get("deliver_override_by", "") or ""),
             run_id=run.id,
             actor=run.actor,

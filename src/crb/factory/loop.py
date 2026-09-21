@@ -2,15 +2,17 @@
 
     assess readiness ──refuse on unsigned structural gap──▶ not_ready
       │ route hint ──human──▶ routed_human
+      │ the capability map's route for the cell is read HERE, once, before any build
       ▼
     RED proof (authored test, or the test-first author rung) ──refused──▶ not_red
       ▼
     build ladder → grade (pack + ledger row, process_step=factory)
       ▼ not clean / disqualified ──▶ not_clean / disqualified
     deliver (OPT-IN, default OFF; fails closed on missing creds) ──▶ delivery_failed
-      ▼
+      ▼   gated on the route read at readiness (DL-038, DL-045)
     review (independent identity, probes) → verdict RECORDED before any edit
-      ▼ accept_with_edit ──▶ rework: edit permitted → RED proof → build → grade → fresh verdict
+      ▼ accept_with_edit ──▶ rework: edit permitted → RED proof → build → grade
+      │                       → re-deliver (the SAME pull request, updated) → fresh verdict
     accepted | rejected | rework_exhausted
 
 Every arrow above appends to :class:`~crb.factory.evidence.FactoryEvidence`;
@@ -22,10 +24,13 @@ Navigation
 ----------
 What it is:   The governed loop — one backlog item end to end, every step evidenced, no
               step skippable.
-What it does: Sequences readiness → RED proof (authored or test-first rung) → build ladder
-              → optional delivery (default OFF, fails closed) → independent review →
-              rework (edit permitted only after a recorded verdict; bounded by
-              ``max_rework``), turning every governed refusal into an ``ItemOutcome`` status
+What it does: Sequences readiness (where the capability map's route for the item's cell
+              is read once, before any build) → RED proof (authored or test-first rung) →
+              build ladder → optional delivery (default OFF, fails closed, gated on that
+              route) → independent review → rework (edit permitted only after a recorded
+              verdict; bounded by ``max_rework``; its re-delivery updates the pull request
+              the first delivery opened), turning every governed refusal into an
+              ``ItemOutcome`` status
               rather than an exception; ``run_backlog`` requires a frozen, verifying
               backlog and records a blocked item explicitly when a dependency was not
               accepted. Emits a ``factory``-stage ``StepEvent`` per step.
@@ -34,7 +39,8 @@ How:          ``FactorySpec`` carries every collaborator; ``FactoryLoop.run_item
               ``_review`` steps under a ``_Stop`` exception that maps to a status.
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
-              docs/adr/0004-builder-registry-sighted-and-blind.md
+              docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0003-one-routing-rule.md (the route gate; amended 2026-09-19)
 Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory/readiness.py
               + src/crb/factory/testfirst.py + src/crb/factory/build.py +
               src/crb/factory/delivery.py + src/crb/factory/review.py (the steps, in order),
@@ -66,6 +72,7 @@ from crb.core.spec import RepoConfig
 from crb.factory.backlog import KIND_OPERATOR, Backlog, BacklogError, BacklogItem
 from crb.factory.build import BuildResult, build_ladder
 from crb.factory.delivery import (
+    CommentPrFn,
     DeliveryError,
     DeliveryResult,
     GitCredentialsProvider,
@@ -158,6 +165,9 @@ class FactorySpec:
     creds: GitCredentialsProvider | None = None
     push_fn: PushFn | None = None
     open_pr_fn: OpenPrFn | None = None
+    #: How a rework's re-delivery tells the pull request's reviewer why the branch moved;
+    #: ``None`` = the branch is updated silently (the evidence chain still says).
+    comment_pr_fn: CommentPrFn | None = None
     target_default_branch: str = "main"
     run_id: str = ""
     actor: str = ""
@@ -166,7 +176,9 @@ class FactorySpec:
     rework_test: ReworkTestFn | None = None
     #: The capability map's decision for the item's (class × size) cell — the ROUTE GATE on
     #: delivery: a pull request is opened only when it reads ``deliver``. ``None`` (no map
-    #: available) withholds delivery like any other non-deliver route.
+    #: available) withholds delivery like any other non-deliver route. Called ONCE per
+    #: item, at readiness, before any build: the map that licenses a delivery is the map
+    #: as it stood before this run's own rows landed (B-1b finding 2 → DL-045).
     route_decision_for: Callable[[BacklogItem], Mapping[str, Any] | None] | None = None
     #: An approver's identity that overrides the route gate for THIS run; recorded on the
     #: evidence chain as a ``route.decided`` event naming the measured route it overrode.
@@ -235,6 +247,29 @@ class ItemOutcome:
         }
 
 
+#: What the ``route.decided`` event keeps of the map's decision: enough for a reader (and
+#: the pull-request body) to quote the pre-run map — the route, why, n, point, the
+#: interval's floor, false-Q1, the policy and the apparatus the rows were graded under.
+_ROUTE_SUMMARY_KEYS: tuple[str, ...] = (
+    "route",
+    "reason",
+    "reason_code",
+    "n",
+    "point",
+    "ci_low",
+    "false_q1",
+    "policy_version",
+    "apparatus_versions",
+)
+
+
+def _route_summary(route: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The evidence-facing slice of a capability-map decision (``None`` stays ``None``)."""
+    if route is None:
+        return None
+    return {k: route[k] for k in _ROUTE_SUMMARY_KEYS if k in route}
+
+
 class _Stop(Exception):
     """Internal: end the item with a status (never escapes ``run_item``)."""
 
@@ -270,8 +305,21 @@ class FactoryLoop:
         gl = self.spec.gap_ledger
         return gl.for_item(item.id) if gl is not None else []
 
-    def _assess(self, item: BacklogItem) -> Readiness:
-        """Step 1: readiness; stops the item on an unsigned structural gap or a human route."""
+    def _map_route(self, item: BacklogItem) -> dict[str, Any] | None:
+        """The capability map's decision for the item's cell — read ONCE per item, here at
+        readiness and before any build, so the gate and the pull-request body quote the map
+        as it stood before this run (a clean build's own row must not nudge the cell that
+        licenses its delivery — B-1b finding 2, DL-045). ``None`` = nobody measured it."""
+        f = self.spec.route_decision_for
+        if f is None:
+            return None
+        d = f(item)
+        return None if d is None else dict(d)
+
+    def _assess(self, item: BacklogItem) -> tuple[Readiness, dict[str, Any] | None]:
+        """Step 1: readiness; stops the item on an unsigned structural gap or a human route.
+        Returns the readiness and the cell's route (:meth:`_map_route`), which the
+        ``route.decided`` event records as ``cell_route``."""
         ev = self.spec.evidence
         r = assess(item, self._signoffs(item))
         ev.record_readiness(r.to_dict())
@@ -294,11 +342,13 @@ class FactoryLoop:
             )
             self._emit("readiness.refused", item.id, status=StepStatus.SKIPPED, reason=r.reason)
             raise _Stop(STATUS_NOT_READY, readiness=r)
-        ev.record_route(item.id, r.route_hint, r.reason)
-        self._emit("route.decided", item.id, route=r.route_hint, reason=r.reason)
+        route = self._map_route(item)
+        cell = _route_summary(route)
+        ev.record_route(item.id, r.route_hint, r.reason, cell_route=cell)
+        self._emit("route.decided", item.id, route=r.route_hint, reason=r.reason, cell_route=cell)
         if r.route_hint == ROUTE_HUMAN:
             raise _Stop(STATUS_ROUTED_HUMAN, readiness=r)
-        return r
+        return r, route
 
     def _oracle(
         self, item: BacklogItem, r: Readiness, authored: AuthoredTest | None
@@ -399,9 +449,20 @@ class FactoryLoop:
             )
         return results
 
-    def _deliver(self, item: BacklogItem, final: BuildResult) -> tuple[DeliveryResult | None, str]:
+    def _deliver(
+        self,
+        item: BacklogItem,
+        final: BuildResult,
+        route: Mapping[str, Any] | None,
+        *,
+        previous: DeliveryResult | None = None,
+        rework_n: int = 0,
+        after_verdict: str = "",
+    ) -> tuple[DeliveryResult | None, str]:
         """Step 4: delivery — skipped and RECORDED when opt-in is off; a failure stops the
-        item (``delivery_failed``). Returns ``(result, pr_ref)``."""
+        item (``delivery_failed``). ``route`` is the cell's decision read at readiness.
+        ``previous`` (a rework) is the item's earlier delivery: the same pull request is
+        updated, never a second one opened. Returns ``(result, pr_ref)``."""
         s = self.spec
         if not s.deliver:
             s.evidence.record_delivery_refused(
@@ -411,13 +472,13 @@ class FactoryLoop:
             )
             self._emit("delivery.skipped", item.id, status=StepStatus.SKIPPED, reason="opt-in off")
             return None, ""
-        route = s.route_decision_for(item) if s.route_decision_for is not None else None
         # THE ROUTE GATE (external review 2026-09-16, point 36 → DL-038): the capability
         # map decides what the factory may deliver. A clean build in a cell that does not
         # route `deliver` — or in a cell nobody has measured — is built, graded and
         # reviewed, but no pull request is opened; the withholding and the measured route
         # are on the evidence chain. An approver may override for one run, and that
-        # override is itself an event naming the route it overrode.
+        # override is itself an event naming the route it overrode. The route was read
+        # ONCE, at readiness, before this build's row landed (DL-045) — never re-read here.
         measured = str(route.get("route", "")) if route else ""
         if measured != ROUTE_DELIVER_WORD:
             why = (
@@ -465,14 +526,35 @@ class FactoryLoop:
                 creds=s.creds,
                 open_pr_fn=s.open_pr_fn,
                 push_fn=s.push_fn,
+                comment_pr_fn=s.comment_pr_fn,
                 target_default_branch=s.target_default_branch,
                 pack_link=str(final.pack_path),
                 route_decision=route,
+                previous=previous,
+                rework_n=rework_n,
+                after_verdict=after_verdict,
             )
         except DeliveryError as exc:
-            s.evidence.record_delivery_refused(item.id, str(exc), pack_hash=final.pack_hash)
+            s.evidence.record_delivery_refused(
+                item.id, str(exc), pack_hash=final.pack_hash, rework=rework_n
+            )
             self._emit("delivery.error", item.id, status=StepStatus.ERROR, error=str(exc))
             raise _Stop(STATUS_DELIVERY_FAILED, error=str(exc)) from exc
+        if d.updated:
+            s.evidence.record_delivery_updated(
+                d.to_dict(), rework=rework_n, after_verdict=after_verdict
+            )
+            self._emit(
+                "delivery.updated",
+                item.id,
+                branch=d.branch,
+                base=d.base,
+                pr=d.pr_ref,
+                previous_commit_sha=d.previous_commit_sha,
+                commit_sha=d.commit_sha,
+                rework=rework_n,
+            )
+            return d, d.pr_ref
         s.evidence.record_delivery(d.to_dict())
         self._emit("delivery.opened", item.id, branch=d.branch, base=d.base, pr=d.pr_ref)
         return d, d.pr_ref
@@ -518,7 +600,7 @@ class FactoryLoop:
         reworks = 0
         keep: list[BuildResult] = []
         try:
-            readiness = self._assess(item)
+            readiness, route = self._assess(item)
             oracle = self._oracle(item, readiness, authored)
             proof = self._prove(item, readiness, oracle)
             results = self._build(item, readiness, oracle, proof, trial_prefix="r")
@@ -529,7 +611,7 @@ class FactoryLoop:
                 raise _Stop(STATUS_DISQUALIFIED)
             if not final.clean:
                 raise _Stop(STATUS_NOT_CLEAN)
-            delivery, pr_ref = self._deliver(item, final)
+            delivery, pr_ref = self._deliver(item, final, route)
             verdict = self._review(item, final, proof, pr_ref)
             verdicts.append(verdict)
             while verdict.rework_required and reworks < s.max_rework:
@@ -557,7 +639,16 @@ class FactoryLoop:
                     raise _Stop(STATUS_DISQUALIFIED)
                 if not final.clean:
                     raise _Stop(STATUS_NOT_CLEAN)
-                delivery, pr_ref = self._deliver(item, final)
+                # the rework re-points the branch the first delivery pushed and updates ITS
+                # pull request (B-1b finding 1): the earlier result is what it leases against
+                delivery, pr_ref = self._deliver(
+                    item,
+                    final,
+                    route,
+                    previous=delivery,
+                    rework_n=reworks,
+                    after_verdict=verdict.verdict,
+                )
                 verdict = self._review(item, final, proof, pr_ref)
                 verdicts.append(verdict)
             if verdict.accepted:

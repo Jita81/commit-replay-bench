@@ -1,6 +1,6 @@
 # ADR-0003 — One routing rule
 
-**Status:** Accepted · **Amended 2026-09-13** (controls gate, §"Amendment" below)
+**Status:** Accepted · **Amended 2026-09-13** (controls gate), **2026-09-16** (the rule gates the factory), **2026-09-19** (the gate reads the pre-run map; a rework updates its pull request) — §"Amendment" below
 **Date:** 2026-09-13
 **Apparatus impact:** defines `routing.POLICY_VERSION = "routing.v1"` (stamped on every `RouteDecision`) and, from the amendment, `routing.CONTROLS_POLICY_VERSION = "controls-gate.v1"` (stamped as `controls_policy` on every decision that evaluated a controls verdict)
 
@@ -178,6 +178,50 @@ may have grounds the instrument cannot see; it is an accountable act, not a swit
 `tests/test_factory_loop.py` (withheld on `human`, withheld on no measurement, override on the
 record), `tests/test_worker.py` (the worker feeds the signed map), `tests/test_routing.py`
 (naming rule, thresholds stamped), `tests/test_server_routes_factory.py` (approver-only).
+
+## Amendment (2026-09-19) — the gate reads the map as it stood before the run
+
+**Context.** The first real factory run (B-1b, docs/reviews/2026-09-19-b1b-first-factory-pull-request.md,
+findings 1 and 2; DL-045) showed two things the 2026-09-16 amendment left open. (1) The
+gate was evaluated at delivery, after the item's own build had been graded and its
+`process_step=factory` row appended: both pull-request bodies quoted `n=27` for a cell the
+freeze had seen at `n=26`. It changed nothing there (26 and 27 both route *deliver*) but it
+is circular at the margin — a clean build nudged the cell that licensed its own delivery.
+(2) A rework after `accept_with_edit` could not reach the pull request it answered: the
+re-push used a bare `--force-with-lease`, which has no remote-tracking ref to hold when the
+push goes to a URL (git: `stale info`), and had it succeeded the loop would have opened a
+second pull request for the same branch. One rework was one wasted build.
+
+**Decision.**
+
+1. **The route is read once per item, at readiness, before any build.** `FactoryLoop`
+   asks the map (`route_decision_for`) in `_assess`, records the reading on the item's
+   `route.decided` event as `cell_route` (`route`, `reason`, `reason_code`, `n`, `point`,
+   `ci_low`, `false_q1`, `policy_version`, `apparatus_versions`; `null` when nobody measured
+   the cell) and carries that one reading to the gate and into the pull-request body — a
+   rework does not re-read it. The worker's lookup (`Worker._route_lookup(repo, run_id)`)
+   **excludes the run's own ledger rows**, so the map that licenses a delivery is the map as
+   it stood before the run; rows of every earlier run count as before. The API's
+   `cell_route` on `GET /factory/{repo}/tasks` is the same reading (no run in flight, nothing
+   to exclude).
+2. **A re-delivery updates the pull request it already opened.** `deliver(previous=…)` pushes
+   with `--force-with-lease=<branch>:<previous commit>`, refuses a different branch or base,
+   opens no second pull request (url and number are carried over) and, through the
+   `comment_pr_fn` seam (GitHub: `POST /repos/{owner}/{repo}/issues/{n}/comments` with the
+   installation token), tells the reviewer which rework moved the branch, from which commit
+   to which, under which verdict and pack. The chain records it as `delivery.updated`
+   (the `delivery.opened` payload plus `previous_commit_sha`, `updated: true`, `rework`,
+   `after_verdict`). A first push keeps the bare lease: it is what makes the factory refuse
+   a branch that already exists on the remote.
+
+**Consequences.** The pull-request body and the chain quote the same pre-run map, so a
+reader can check the gate against `GET /capability-map` as it was at the freeze. A rework
+costs one build and lands where the reviewer looks. The bare-repository test in
+`tests/test_factory_delivery.py` reproduces the `stale info` refusal under real git before
+proving the fix; `tests/test_factory_loop.py` pins one read per item before the first
+build and one pull request across a rework; `tests/test_worker.py` pins the own-run
+exclusion. The third B-1b rule (a `weak_oracle` verdict never triggers a rebuild against an
+unchanged oracle) is DL-045's and is not part of this ADR.
 
 ## Alternatives considered
 

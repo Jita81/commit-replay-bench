@@ -8,8 +8,9 @@ What it does: Pins that a backlog registers frozen and hashed with the freeze in
               evidence chain, that the RBAC ladder holds (viewer/operator/approver), that
               invalid items and value-slot sign-offs are refused, that a structural gap
               sign-off lands in both the gap ledger and the evidence, that the task view
-              reads "pending" before any run, and that registration is refused while a
-              factory run is queued or running.
+              reads "pending" before any run and folds ``pr_url`` from a rework's
+              ``delivery.updated`` as from ``delivery.opened`` (DL-045), and that
+              registration is refused while a factory run is queued or running.
 How:          FastAPI TestClient over the seeded SQLite app (``fixtures.server_seed``);
               the factory state is read back through ``FactoryHome`` to check the files.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -31,7 +32,12 @@ from typing import Any
 import pytest
 
 from crb.core.version import APPARATUS_VERSION
-from crb.factory.evidence import EV_BACKLOG_FROZEN, EV_GAP_SIGNOFF
+from crb.factory.evidence import (
+    EV_BACKLOG_FROZEN,
+    EV_DELIVERY,
+    EV_DELIVERY_UPDATED,
+    EV_GAP_SIGNOFF,
+)
 from crb.server.app import API_PREFIX
 from crb.server.factory_state import FactoryHome
 from crb.store.models import Run
@@ -143,6 +149,44 @@ def test_register_freezes_hashes_and_records(env: Env) -> None:
     }
     e = env.get(f"/factory/{ALPHA}/evidence").json()
     assert e["total"] == 1 and e["verified"] is True and e["items"][0]["kind"] == EV_BACKLOG_FROZEN
+
+
+def test_task_view_folds_the_pull_request_from_an_updated_delivery(env: Env) -> None:
+    """A rework's re-delivery is a ``delivery.updated`` event carrying the SAME pull request
+    the first delivery opened (DL-045): the task view shows that PR — and keeps showing it
+    when the update is the item's newest delivery event — with ``last_event`` honest."""
+    assert _register(env, [ITEM]).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    ev = home.evidence(actor="worker")
+    opened = {
+        "item_id": "I-1",
+        "branch": "crb/I-1-add-multiply-to-calc",
+        "base": "main",
+        "commit_sha": "a" * 40,
+        "pr_url": "https://github.invalid/acme/calc/pull/7",
+        "pr_number": 7,
+        "pack_hash": "p" * 64,
+        "body_sha256": "b" * 64,
+        "created": "2026-09-19T00:00:00+00:00",
+        "previous_commit_sha": "",
+        "updated": False,
+    }
+    ev.record_delivery(opened)
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["pr_url"] == opened["pr_url"] and t["last_event"] == EV_DELIVERY
+    ev.record_delivery_updated(
+        {**opened, "commit_sha": "c" * 40, "previous_commit_sha": "a" * 40, "updated": True},
+        rework=1,
+        after_verdict="accept_with_edit",
+    )
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["pr_url"] == opened["pr_url"] and t["last_event"] == EV_DELIVERY_UPDATED
+    items = env.get(f"/factory/{ALPHA}/evidence").json()["items"]
+    up = items[-1]
+    assert up["kind"] == EV_DELIVERY_UPDATED and up["payload"]["rework"] == 1
+    assert up["payload"]["after_verdict"] == "accept_with_edit"
+    assert up["payload"]["previous_commit_sha"] == "a" * 40 and up["payload"]["pr_number"] == 7
+    assert env.get(f"/factory/{ALPHA}/evidence").json()["verified"] is True
 
 
 def test_catalogue_serves_the_classes_their_slots_and_the_vocabularies(env: Env) -> None:

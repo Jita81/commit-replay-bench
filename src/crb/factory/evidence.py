@@ -3,7 +3,8 @@
 Every governed step of forward mode appends ONE :class:`FactoryEvent` here:
 the backlog freeze, each gap sign-off, each RED proof, each build (its evidence
 pack hash and ledger row id — the grade itself lives in the grade ledger), each
-delivery (branch + PR ref), each review verdict, and each horizon checkpoint.
+delivery (branch + PR ref; a rework's re-delivery is ``delivery.updated``), each
+review verdict, and each horizon checkpoint.
 The file is append-only and hash-chained exactly like the grade ledger
 (``prev_hash`` → ``row_hash``); :meth:`FactoryEvidence.verify` proves nothing
 was edited, reordered or removed.
@@ -25,7 +26,8 @@ Navigation
 What it is:   The factory evidence ledger — one hash-chained event per governed step, and
               the home of the verdict-before-edit invariant.
 What it does: Appends ``FactoryEvent`` rows (freeze, sign-off, readiness, route, RED proof,
-              build, delivery, verdict, edit, checkpoint, outcome) through a typed front
+              build, delivery opened / updated / refused, verdict, edit, checkpoint,
+              outcome) through a typed front
               door; redacts every payload string at construction; refuses to record an edit
               for a build with no verdict, and refuses a verdict that claims to precede an
               edit already on the record; ``verify`` proves the chain.
@@ -39,7 +41,8 @@ Works with:   src/crb/factory/loop.py (calls a ``record_*`` at every arrow),
               src/crb/factory/review.py (``record_verdict`` before returning; ``permit_edit``),
               src/crb/core/ledger.py (``GENESIS_HASH``, ``LedgerIntegrityError`` — the shared
               chain vocabulary), src/crb/core/redact.py (the payload scrub),
-              src/crb/server/routes/factory.py (will serve the events — a 501 stub until P6)
+              src/crb/server/factory_state.py (folds the events into the task view),
+              src/crb/server/routes/factory.py (serves the chain)
 Tested by:    tests/test_factory_review.py, tests/test_factory_loop.py
 Touch when:   never for a new repository; adding a governed step means a new ``EV_*`` kind,
               a ``record_*`` method, and a call from the loop — all in one change (an
@@ -80,6 +83,7 @@ EV_RED_PROOF = "red.proved"
 EV_RED_REFUSED = "red.refused"
 EV_BUILD = "build.graded"
 EV_DELIVERY = "delivery.opened"
+EV_DELIVERY_UPDATED = "delivery.updated"
 EV_DELIVERY_REFUSED = "delivery.refused"
 EV_VERDICT = "review.verdict"
 EV_EDIT = "edit.permitted"
@@ -95,6 +99,7 @@ EVENT_KINDS: tuple[str, ...] = (
     EV_RED_REFUSED,
     EV_BUILD,
     EV_DELIVERY,
+    EV_DELIVERY_UPDATED,
     EV_DELIVERY_REFUSED,
     EV_VERDICT,
     EV_EDIT,
@@ -371,6 +376,20 @@ class FactoryEvidence:
     def record_delivery(self, delivery: Mapping[str, Any]) -> FactoryEvent:
         return self.append(EV_DELIVERY, str(delivery.get("item_id", "")), **_payload(delivery))
 
+    def record_delivery_updated(
+        self, delivery: Mapping[str, Any], *, rework: int, after_verdict: str
+    ) -> FactoryEvent:
+        """A rework's re-delivery: the same payload as ``delivery.opened`` (its
+        ``previous_commit_sha`` says where the branch moved from, ``pr_url`` / ``pr_number``
+        are the pull request it updated) plus the rework number and the verdict it answers."""
+        return self.append(
+            EV_DELIVERY_UPDATED,
+            str(delivery.get("item_id", "")),
+            rework=rework,
+            after_verdict=after_verdict,
+            **_payload(delivery),
+        )
+
     def record_delivery_refused(self, item_id: str, reason: str, **extra: Any) -> FactoryEvent:
         return self.append(EV_DELIVERY_REFUSED, item_id, reason=reason, **extra)
 
@@ -460,6 +479,7 @@ __all__ = [
     "EV_CHECKPOINT",
     "EV_DELIVERY",
     "EV_DELIVERY_REFUSED",
+    "EV_DELIVERY_UPDATED",
     "EV_EDIT",
     "EV_GAP_SIGNOFF",
     "EV_ITEM_OUTCOME",

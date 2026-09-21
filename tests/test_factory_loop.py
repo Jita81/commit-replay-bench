@@ -10,12 +10,14 @@ What it does: Pins that a spec refuses a test author that is also a rung, that a
               through the author rung, that no oracle means no build, that a green authored test
               is not RED, that a not-clean build stops before delivery and review, that delivery
               on fails closed without credentials and otherwise opens a branch + PR then reviews,
-              that accept-with-edit forces rework (RED → build → grade → fresh verdict) until the
-              budget is exhausted, the full loop on a frozen backlog, and the ledgered horizon
-              checkpoint.
+              that accept-with-edit forces rework (RED → build → grade → a re-delivery that
+              UPDATES the first pull request → fresh verdict) until the budget is exhausted, that
+              the route gate reads the capability map ONCE per item at readiness — before any
+              build — and the PR body quotes that reading (DL-045), the full loop on a frozen
+              backlog, and the ledgered horizon checkpoint.
 How:          ``Rig`` wires ``MultiBuilder`` (edit picked from the brief's subject; can misbehave
-              once), ``FakeTestAuthor``, a ``MemorySink`` emitter and static credentials over
-              ``pyrepo``.
+              once), ``FakeTestAuthor``, a ``MemorySink`` emitter, static credentials and
+              recording push / PR / comment seams over ``pyrepo``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
 Works with:   src/crb/factory/loop.py (under test), src/crb/factory/readiness.py (the DoR
@@ -186,6 +188,7 @@ class Rig:
     author: FakeTestAuthor
     pushes: list[dict[str, Any]]
     prs: list[dict[str, Any]]
+    comments: list[dict[str, Any]]
 
     def loop(self) -> fl.FactoryLoop:
         """A ``FactoryLoop`` over the rig's spec with an emitter into its sink."""
@@ -208,13 +211,24 @@ def _rig(pyrepo: pr.PyRepo, tmp_path: Path, **overrides: Any) -> Rig:
     author = overrides.pop("author", FakeTestAuthor())
     pushes: list[dict[str, Any]] = []
     prs: list[dict[str, Any]] = []
+    comments: list[dict[str, Any]] = []
 
-    def push(repo: Any, *, branch: str, refspec: str, credentials: GitCredentials) -> None:
-        pushes.append({"branch": branch, "refspec": refspec})
+    def push(
+        repo: Any,
+        *,
+        branch: str,
+        refspec: str,
+        credentials: GitCredentials,
+        expected: str | None = None,
+    ) -> None:
+        pushes.append({"branch": branch, "refspec": refspec, "expected": expected})
 
     def open_pr(**kw: Any) -> tuple[str, int]:
         prs.append(kw)
         return f"https://github.invalid/pr/{len(prs)}", len(prs)
+
+    def comment_pr(**kw: Any) -> None:
+        comments.append(kw)
 
     kw: dict[str, Any] = {
         "config": pyrepo.config,
@@ -231,6 +245,7 @@ def _rig(pyrepo: pr.PyRepo, tmp_path: Path, **overrides: Any) -> Rig:
         "gap_ledger": rd.JsonlGapSignoffLedger(tmp_path / "gaps.jsonl"),
         "push_fn": push,
         "open_pr_fn": open_pr,
+        "comment_pr_fn": comment_pr,
         "run_id": "run-1",
         "actor": "tester",
         # the route gate: delivery tests that want a PR must say the cell routes `deliver`
@@ -238,7 +253,9 @@ def _rig(pyrepo: pr.PyRepo, tmp_path: Path, **overrides: Any) -> Rig:
         "route_decision_for": lambda item: DELIVER_ROUTE,
     }
     kw.update(overrides)
-    return Rig(pyrepo, fl.FactorySpec(**kw), sink, evidence, ledger, builder, author, pushes, prs)
+    return Rig(
+        pyrepo, fl.FactorySpec(**kw), sink, evidence, ledger, builder, author, pushes, prs, comments
+    )
 
 
 #: A capability-map decision as the worker hands it to the loop (``RouteDecision.to_dict``).
@@ -248,6 +265,11 @@ DELIVER_ROUTE: dict[str, Any] = {
     "reason_code": "deliver",
     "policy_version": "routing.v1",
     "n": 12,
+    "point": 1.0,
+    "ci_low": 0.76,
+    "false_q1": 0,
+    "apparatus_versions": ["2.2"],
+    "policy_thresholds": {"min_n": 10},  # not part of the evidence summary
 }
 HUMAN_ROUTE: dict[str, Any] = {
     "route": "human",
@@ -413,7 +435,11 @@ def test_delivery_on_opens_branch_and_pr_then_reviews(pyrepo: pr.PyRepo, tmp_pat
     assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
     assert out.delivery.branch == "crb/I-1-add-multiply-to-calc" and out.delivery.base == "main"
     assert rig.pushes == [
-        {"branch": out.delivery.branch, "refspec": f"{out.delivery.branch}:{out.delivery.branch}"}
+        {
+            "branch": out.delivery.branch,
+            "refspec": f"{out.delivery.branch}:{out.delivery.branch}",
+            "expected": None,
+        }
     ]
     assert out.final_verdict is not None and out.final_verdict.pr_ref == out.delivery.pr_url
     assert pyrepo.repo.rev_parse("main") == pyrepo.docs_sha  # never main
@@ -489,6 +515,79 @@ def test_route_gate_override_by_an_approver_is_itself_on_the_record(
     assert kinds.index(fe.EV_ROUTE) < kinds.index(fe.EV_DELIVERY)
 
 
+def test_route_is_read_once_per_item_at_readiness_before_any_build(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """DL-045 (B-1b finding 2): the map that licenses a delivery is the map as it stood
+    BEFORE the run — read once per item at readiness, never after the item's own row has
+    landed; the gate and the PR body use that one reading, and the ``route.decided`` event
+    records it (n, point, ci_low, false_q1, apparatus) so the chain quotes the pre-run map."""
+    rig_holder: dict[str, Rig] = {}
+    calls: list[tuple[str, int]] = []  # (item id, builder calls so far at the time of the read)
+
+    def route_for(item: BacklogItem) -> dict[str, Any]:
+        calls.append((item.id, rig_holder["rig"].builder.calls))
+        return DELIVER_ROUTE
+
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        builder=MultiBuilder(first_edit=MULTIPLY_HARDCODED),  # forces one rework
+        deliver=True,
+        creds=_creds(),
+        route_decision_for=route_for,
+    )
+    rig_holder["rig"] = rig
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED and out.reworks == 1 and out.delivery is not None
+    # exactly one read, before the first build — and NOT again for the rework's delivery
+    assert calls == [("I-1", 0)] and rig.builder.calls == 2
+    # the reading is on the chain, in the readiness route event, summarised
+    (route,) = rig.evidence.events_for("I-1", fe.EV_ROUTE)
+    assert route.payload["route"] == rd.ROUTE_BUILD
+    assert route.payload["cell_route"] == {
+        "route": "deliver",
+        "reason": DELIVER_ROUTE["reason"],
+        "reason_code": "deliver",
+        "n": 12,
+        "point": 1.0,
+        "ci_low": 0.76,
+        "false_q1": 0,
+        "policy_version": "routing.v1",
+        "apparatus_versions": ["2.2"],
+    }
+    kinds = rig.kinds("I-1")
+    assert kinds.index(fe.EV_ROUTE) < kinds.index(fe.EV_RED_PROOF) < kinds.index(fe.EV_BUILD)
+    # the PR body quotes that reading
+    assert "route: **deliver** — n=12 point=1.000 ci_low=0.76 false_q1=0" in rig.prs[0]["body"]
+    emitted = [e for e in rig.sink.events if e.action == "route.decided"]
+    assert len(emitted) == 1 and emitted[0].payload["cell_route"]["n"] == 12
+
+
+def test_route_read_once_is_what_gates_delivery_even_if_the_map_moves_later(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A map that would say `human` after the build cannot reach the gate: the decision the
+    item carries is the one taken at readiness (and an unmeasured cell is recorded as
+    ``cell_route: None``)."""
+    answers = iter([DELIVER_ROUTE, HUMAN_ROUTE, HUMAN_ROUTE])
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        route_decision_for=lambda item: next(answers),
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None and len(rig.prs) == 1
+    # the reverse: nothing measured at readiness → withheld, and the chain says so
+    rig2 = _rig(pyrepo, tmp_path / "b", deliver=True, creds=_creds(), route_decision_for=None)
+    out2 = rig2.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out2.status == fl.STATUS_ACCEPTED and out2.delivery is None
+    (route,) = rig2.evidence.events_for("I-1", fe.EV_ROUTE)
+    assert route.payload["cell_route"] is None
+
+
 # --- rework -------------------------------------------------------------------------
 
 
@@ -523,9 +622,32 @@ def test_accept_with_edit_forces_rework_red_build_grade_fresh_verdict(
     assert out.status == fl.STATUS_ACCEPTED and out.reworks == 1
     assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT_WITH_EDIT, rv.VERDICT_ACCEPT]
     assert edits == [rv.VERDICT_ACCEPT_WITH_EDIT]
-    # the delivery branch was re-pointed by the rework: two pushes, two PR opens, one branch
+    # the delivery branch was re-pointed by the rework: two pushes, ONE pull request — the
+    # second push leases against the commit the first delivery pushed and updates the PR
+    # the first delivery opened (B-1b finding 1, DL-045)
     assert [p["branch"] for p in rig.pushes] == ["crb/I-1-add-multiply-to-calc"] * 2
-    assert out.delivery is not None and out.delivery.pr_number == 2
+    opened = rig.evidence.events_for("I-1", fe.EV_DELIVERY)
+    assert len(opened) == 1 and len(rig.prs) == 1
+    first_commit = str(opened[0].payload["commit_sha"])
+    assert [p["expected"] for p in rig.pushes] == [None, first_commit]
+    assert out.delivery is not None and out.delivery.updated
+    assert out.delivery.pr_number == 1 and out.delivery.pr_url == opened[0].payload["pr_url"]
+    assert out.delivery.previous_commit_sha == first_commit != out.delivery.commit_sha
+    assert out.final_verdict is not None and out.final_verdict.pr_ref == out.delivery.pr_url
+    updated = rig.evidence.events_for("I-1", fe.EV_DELIVERY_UPDATED)
+    assert len(updated) == 1
+    up = updated[0].payload
+    assert up["rework"] == 1 and up["after_verdict"] == rv.VERDICT_ACCEPT_WITH_EDIT
+    assert up["previous_commit_sha"] == first_commit and up["commit_sha"] == out.delivery.commit_sha
+    assert up["pr_url"] == out.delivery.pr_url and up["updated"] is True
+    (comment,) = rig.comments
+    assert comment["pr_number"] == 1 and "Rework 1" in comment["body"]
+    assert first_commit in comment["body"] and out.delivery.commit_sha in comment["body"]
+    assert up["body_sha256"] and out.delivery.body_sha256 == up["body_sha256"]
+    assert [e.action for e in rig.sink.events if e.action.startswith("delivery.")] == [
+        "delivery.opened",
+        "delivery.updated",
+    ]
     assert (
         pyrepo.repo.show_file(out.delivery.commit_sha, "tests/test_multiply.py") == stronger.content
     )
@@ -535,10 +657,11 @@ def test_accept_with_edit_forces_rework_red_build_grade_fresh_verdict(
     )  # the rework re-proved RED
     assert [b["trial"] for b in out.builds] == ["r1", "w1r1"]
     kinds = rig.kinds("I-1")
-    # verdict → edit permitted → RED proof → build → … → fresh verdict, in that order
+    # verdict → edit permitted → RED proof → build → re-delivery → fresh verdict, in that order
     v1 = kinds.index(fe.EV_VERDICT)
     assert kinds[v1 + 1] == fe.EV_EDIT
     assert kinds[v1 + 2] == fe.EV_RED_PROOF and fe.EV_BUILD in kinds[v1 + 2 :]
+    assert kinds[v1 + 2 :].index(fe.EV_BUILD) < kinds[v1 + 2 :].index(fe.EV_DELIVERY_UPDATED)
     assert kinds.count(fe.EV_VERDICT) == 2 and kinds[-2] == fe.EV_VERDICT
     assert rig.evidence.verify() == len(kinds)
     rows = list(rig.ledger.rows())

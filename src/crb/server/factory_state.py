@@ -12,8 +12,8 @@ hash-chained JSONL files, like evidence packs: the API and the worker share
 
 Nothing here decides anything: the loop, the grader and the reviewer do. This module
 only places the records, and derives the task view (:func:`task_views`) a reader sees —
-the latest readiness, RED proof, build, delivery and verdict per item, straight from the
-evidence events, never from a cached status.
+the latest readiness, RED proof, build, delivery (opened, or updated by a rework) and
+verdict per item, straight from the evidence events, never from a cached status.
 
 Navigation
 ----------
@@ -48,6 +48,7 @@ from crb.factory.evidence import (
     EV_BUILD,
     EV_DELIVERY,
     EV_DELIVERY_REFUSED,
+    EV_DELIVERY_UPDATED,
     EV_GAP_SIGNOFF,
     EV_ITEM_OUTCOME,
     EV_READINESS,
@@ -210,7 +211,10 @@ class FactoryHome:
                     if build.payload.get("clean")
                     else ("disqualified" if build.payload.get("disqualified") else "not_clean")
                 )
-            delivery = by.get(EV_DELIVERY)
+            # a rework's re-delivery (`delivery.updated`) carries the SAME pull request the
+            # first delivery opened — it always follows an `opened` for the item, and its
+            # pr_url is the one to show (DL-045)
+            delivery = by.get(EV_DELIVERY_UPDATED) or by.get(EV_DELIVERY)
             pr = str(delivery.payload.get("pr_url", "")) if delivery else ""
             if not pr and by.get(EV_DELIVERY_REFUSED) is not None:
                 pr = ""

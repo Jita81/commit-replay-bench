@@ -8,6 +8,38 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-19 — what the first factory run taught the loop
+
+The first real factory run (B-1b: two pull requests on `Jita81/cobra`, $0.69 **[measured —
+run `e9acd89c…`, apparatus 2.2, local executor: a development reading; n = 2 items]**,
+record: docs/reviews/2026-09-19-b1b-first-factory-pull-request.md, decision DL-045) found
+two product defects. Both are fixed here, with the tests that would have caught them.
+
+- **A re-delivery after `accept_with_edit` updates the pull request it already opened**
+  (finding 1). The rework's push used a bare `--force-with-lease`; delivery pushes to a URL,
+  so git had no remote-tracking ref to lease against and answered `[rejected] … (stale
+  info)` — and had the push gone through, a second pull request would have been opened for
+  the same branch (GitHub 422). Now `git_push_fn(expected=…)` leases against the commit the
+  first delivery pushed (`--force-with-lease=<branch>:<sha>`; a first push keeps the bare
+  lease, which is what refuses a branch that already exists), `deliver(previous=…)` refuses
+  a different branch or base, opens no second PR (url and number carried over) and posts a
+  comment naming the rework (n, the verdict it answers, the new pack hash, the new commit)
+  through the new `comment_pr_fn` seam (`github_comment_pr_fn`, the installation token, wired
+  by the worker beside `open_pr_fn`). `DeliveryResult` gains `previous_commit_sha` and
+  `updated`; the chain records the re-delivery as **`delivery.updated`**; the task view's
+  `pr_url` folds from `delivery.opened` or `delivery.updated`. The bare-repository test in
+  `tests/test_factory_delivery.py` reproduces the `stale info` refusal under real git, then
+  proves the fix (correct lease moves the branch, a wrong lease is rejected and the remote
+  does not move).
+- **The route gate reads the map as it stood before the run** (finding 2). The gate was
+  evaluated at delivery, after the item's own `build.graded` row had landed: both PR bodies
+  said `n=27` where the freeze saw 26. The decision is now taken ONCE per item at readiness,
+  before any build — the worker's `_route_lookup(repo, run_id)` excludes the run's own rows —
+  cached on the item, used by the gate and the PR body, and recorded on the item's
+  `route.decided` event as `cell_route` (`n`, `point`, `ci_low`, `false_q1`, `policy_version`,
+  `apparatus_versions`) so the chain quotes the pre-run map. ADR-0003 amended (2026-09-19);
+  docs/API.md updated.
+
 ### 2026-09-18 — link a repository you already measured to the GitHub App
 
 - **`POST /repos/{name}/github-link`** `{installation_id, full_name}` (operator) attaches an
