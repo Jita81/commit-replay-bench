@@ -8,6 +8,22 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-19 — B-1b: the first real factory pull requests
+
+- **Two pull requests opened by the factory on a real repository** — `Jita81/cobra` (a fork
+  of `spf13/cobra` at `adbc881`), items authored from open upstream issues #2154 and #1918 with
+  operator-authored oracles proven RED at the base, built by `claude_code / claude-sonnet-5`
+  under the five belts, gated on the signed `bug.fix × S` cell (route *deliver*, `routing.v1`),
+  reviewed independently, $0.69 in total, 11 minutes **[measured — run `e9acd89c…`, apparatus
+  2.2, local executor: a development reading]**. Record:
+  docs/reviews/2026-09-19-b1b-first-factory-pull-request.md; the backlog and the two Go tests
+  are in docs/reviews/2026-09-19-b1b/. Decision DL-045.
+- Found by the run, not yet fixed: a re-delivery after `accept_with_edit` cannot update the PR
+  branch (`--force-with-lease` with no lease to hold — one rework build wasted); the route gate
+  reads the map after the item's own row has landed (`n=27` in the PR body where the freeze saw
+  26); the UI's *Run the factory* posts no builder (fix on the journeys branch); a deployment
+  under `/private/tmp` loses files to the OS after ~3 days (stack relocated to `~/crb-stack`).
+
 ### 2026-09-19 — journeys that explain themselves: contextual help, honest in-flight states, telemetry a platform team can use
 
 Six streams on one foundation. Every screen now says what it is for, what to do next
@@ -181,7 +197,7 @@ the worker report the same facts to the person and to the platform team's dashbo
 
 - **One help mechanism.** `ui/src/help/`: `glossary.ts` (22 terms, plain English, each
   with a guide anchor), `docs.ts` (the eight user-facing guides bundled at UI build time
-  as lazy chunks — the repository is private and a deployment may have no egress; DL-045),
+  as lazy chunks — the repository is private and a deployment may have no egress; DL-046),
   `markdown.ts` (a subset renderer to React elements, never raw HTML), `help.ts` (`HELP`,
   one entry per route in App.tsx; `helpFor` via `matchPath`). `AboutThisScreen` is
   mounted once in Layout after the outlet: purpose · next step by role · what the numbers

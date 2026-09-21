@@ -10,7 +10,7 @@ Read alongside: [README](../README.md) · [ARCHITECTURE](ARCHITECTURE.md) ·
 
 This guide is also bundled into the UI: open **Help** in the top bar (`/help`) for the
 glossary and the guide index, or `/help/docs/OPERATOR` for this page, so an operator on a
-deployment with no egress reads the same text the build was made from (DL-045). Every
+deployment with no egress reads the same text the build was made from (DL-046). Every
 screen ends with an *About this screen* block: its purpose, the next step for your role,
 what the numbers mean and where the terms are defined.
 
