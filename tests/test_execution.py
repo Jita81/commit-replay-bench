@@ -770,6 +770,23 @@ def test_docker_run_wall_clock_kill_treats_a_removed_container_as_confirmed(
     assert reports == [] and e.unconfirmed_kills == []
 
 
+def test_docker_run_without_a_cancel_token_still_kills_the_container_on_the_wall_clock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI's executors carry no cancel token (``build_executor`` passes none). The
+    wall clock must still end in a confirmed ``docker kill`` of the CONTAINER — the plain
+    ``subprocess.run(timeout=…)`` path would kill only the ``docker run`` client and leave
+    the container running. So a real daemon always takes the polled path."""
+    monkeypatch.setattr(ex, "_CANCEL_POLL_S", 0.05)
+    docker, calls = _fake_docker_stream(tmp_path, inspect="no-such")
+    e = _cancellable(docker, cancel=None)
+    r = e.run(Command(("sleep", "60"), tmp_path, timeout=1))
+    assert r.timed_out and not r.cancelled and r.returncode == 124
+    assert r.kill_confirmed is True and r.container.startswith("crb-")
+    log = calls.read_text().split()
+    assert log.count("kill") == 1 and log.count("inspect") == 1
+
+
 def test_docker_run_natural_exit_confirms_nothing(tmp_path: Path) -> None:
     """No kill was issued → ``kill_confirmed`` stays None (the container is still named)
     and the daemon is asked nothing."""

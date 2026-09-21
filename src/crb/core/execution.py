@@ -663,9 +663,12 @@ class DockerExecutor:
         itself to launch (exit 125, a missing binary) is :class:`SandboxUnavailable`."""
         argv = self.build_argv(cmd)
         started = time.monotonic()
-        # the cancellable path drives Popen itself; an injected runner (tests) cannot
-        # be polled, so it takes the plain timeout path
-        if self._cancel is not None and self._runner is subprocess.run:
+        # The real daemon always takes the polled path — with or without a cancel token —
+        # because it is the one that kills the CONTAINER on the wall clock and confirms
+        # it: subprocess.run's own timeout kills only the ``docker run`` client and would
+        # leave the container running (the CLI's executors carry no cancel token). An
+        # injected runner (tests) cannot be polled, so it keeps the plain timeout path.
+        if self._runner is subprocess.run:
             return self._run_cancellable(argv, cmd, started)
         try:
             r = self._runner(argv, capture_output=True, text=True, timeout=cmd.timeout, check=False)
