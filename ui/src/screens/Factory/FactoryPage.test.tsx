@@ -59,6 +59,15 @@ describe('stepsFor — an item the factory has not touched', () => {
     expect(steps[2]!.detail).toBe('not started')
   })
 
+  it('a delivery a rework updated says so, rather than reading as a first opening', () => {
+    // `delivery.updated` is the chain's event for a rework re-pointing the SAME pull request (DL-045)
+    const updated: FactoryTask = { id: 'T-3', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'pending', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/calc/pull/7', review_verdict: 'accept_with_edit', last_event: 'delivery.updated', cell_route: { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, apparatus_versions: ['2.2'], deliverable: true } }
+    const delivery = stepsFor(updated)[3]!
+    expect(delivery.status).toBe('done')
+    expect(delivery.detail).toBe('pull request updated by a rework')
+    expect(stepsFor({ ...updated, last_event: 'delivery.opened' })[3]!.detail).toBe('branch + pull request opened')
+  })
+
   it('a build that ran and was not clean is the failure, spelled out', () => {
     const notClean: FactoryTask = { id: 'T-2', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'not_clean', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'not_clean', pr_url: null, review_verdict: null, last_event: 'build', cell_route: { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, apparatus_versions: ['2.2'], deliverable: true } }
     const build = stepsFor(notClean)[2]!

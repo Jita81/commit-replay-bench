@@ -12,7 +12,9 @@ What it does: Pins that the default branch is refused (before any credential is 
               refspecs, ``owner/repo`` from the remote, that the delivery commit never sweeps
               unrelated files in, and — B-1b finding 1 — that a re-delivery leases against the
               commit the first delivery pushed, opens no second pull request and posts the
-              rework comment, with the lease semantics proven against a REAL bare repository.
+              rework comment (a comment that fails after the push is ``comment_error`` on an
+              ``updated`` result, never a refusal), with the lease semantics proven against a
+              REAL bare repository.
 How:          ``Seams`` record the push, the PR and the comment calls instead of reaching a
               forge; the build comes from ``test_factory_build``'s harness; ``_ToBare`` runs
               ``git_push_fn``'s exact argv with the https remote swapped for a local bare repo.
@@ -537,6 +539,62 @@ def test_redelivery_without_a_comment_seam_updates_the_branch_silently(
         second = dv.deliver(harness.repo.repo, item, b2, previous=first, rework_n=1, **kw)
         assert second.updated and second.body_sha256 == "" and not seams.comments
         assert len(seams.prs) == 1 and seams.pushes[-1]["expected"] == first.commit_sha
+    finally:
+        b2.close()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        dv.DeliveryError(f"GitHub comments API returned 403: token {TOKEN} may not comment"),
+        TimeoutError("timed out"),
+        ValueError("Expecting value: line 1 column 1 (char 0)"),
+    ],
+    ids=["api-refusal", "timeout", "non-json-body"],
+)
+def test_redelivery_whose_comment_fails_keeps_the_moved_branch_on_the_record(
+    harness: Harness, failure: Exception
+) -> None:
+    """The comment is the OPTIONAL step and it runs AFTER the push has moved the remote
+    branch: its failure must not undo the record of the delivery that succeeded (the chain
+    would say `refused` while the pull request carries the rework). The result is still
+    `updated`, carries the redacted failure as ``comment_error``, and hashes no body."""
+    item = multiply_item()
+    seams = Seams()
+
+    def failing_comment(**kw: Any) -> None:
+        seams.comments.append(dict(kw))
+        raise failure
+
+    kw: dict[str, Any] = {
+        "creds": dv.StaticProvider(_creds()),
+        "push_fn": seams.push,
+        "open_pr_fn": seams.open_pr,
+        "comment_pr_fn": failing_comment,
+        "target_default_branch": "main",
+    }
+    b1 = _clean_build(harness)
+    try:
+        first = dv.deliver(harness.repo.repo, item, b1, **kw)
+    finally:
+        b1.close()
+    assert first.comment_error == "" and first.to_dict()["comment_error"] == ""
+    b2 = _clean_build(harness)
+    try:
+        second = dv.deliver(
+            harness.repo.repo, item, b2, previous=first, rework_n=1, after_verdict="x", **kw
+        )
+        # the push happened (leased against the first commit) and the result says so
+        assert seams.pushes[-1]["expected"] == first.commit_sha and len(seams.prs) == 1
+        assert second.updated and second.commit_sha != first.commit_sha
+        assert harness.repo.repo.rev_parse(second.branch) == second.commit_sha
+        assert (second.pr_url, second.pr_number) == (first.pr_url, first.pr_number)
+        # the comment was attempted once, failed, and the failure is on the result — redacted
+        assert len(seams.comments) == 1
+        assert second.body_sha256 == ""
+        assert second.comment_error.startswith(type(failure).__name__ + ": ")
+        assert TOKEN not in second.comment_error
+        assert second.to_dict()["comment_error"] == second.comment_error
     finally:
         b2.close()
 

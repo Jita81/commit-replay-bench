@@ -30,7 +30,15 @@ two product defects. Both are fixed here, with the tests that would have caught 
   `pr_url` folds from `delivery.opened` or `delivery.updated`. The bare-repository test in
   `tests/test_factory_delivery.py` reproduces the `stale info` refusal under real git, then
   proves the fix (correct lease moves the branch, a wrong lease is rejected and the remote
-  does not move).
+  does not move). The rework comment is the optional step and runs after the push has
+  moved the remote branch, so its failure (a rate limit, a 5xx, a timeout) is not a delivery
+  failure: `DeliveryResult.comment_error` carries the redacted failure, the chain still
+  records `delivery.updated`, the trace gets a `delivery.comment_failed` warning and the
+  item is reviewed on the branch the pull request now carries — the record agrees with the
+  remote (verifier finding on this fix). The task view's `pr_url` follows whichever delivery
+  event is newest on the chain, so a fresh pull request opened by a later run is never
+  hidden behind an earlier run's update; the Factory screen's delivery step says
+  "pull request updated by a rework" when that is the item's newest event.
 - **The route gate reads the map as it stood before the run** (finding 2). The gate was
   evaluated at delivery, after the item's own `build.graded` row had landed: both PR bodies
   said `n=27` where the freeze saw 26. The decision is now taken ONCE per item at readiness,

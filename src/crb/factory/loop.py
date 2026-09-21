@@ -12,7 +12,8 @@
       ▼   gated on the route read at readiness (DL-038, DL-045)
     review (independent identity, probes) → verdict RECORDED before any edit
       ▼ accept_with_edit ──▶ rework: edit permitted → RED proof → build → grade
-      │                       → re-deliver (the SAME pull request, updated) → fresh verdict
+      │                       → re-deliver (the SAME pull request, updated; a failed
+      │                         rework comment is a warning, never a stop) → fresh verdict
     accepted | rejected | rework_exhausted
 
 Every arrow above appends to :class:`~crb.factory.evidence.FactoryEvidence`;
@@ -45,7 +46,7 @@ Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory
               + src/crb/factory/testfirst.py + src/crb/factory/build.py +
               src/crb/factory/delivery.py + src/crb/factory/review.py (the steps, in order),
               src/crb/observability/events.py (``Emitter`` for the step events),
-              src/crb/server/routes/factory.py (the HTTP surface — a 501 stub until P6)
+              src/crb/server/routes/factory.py (serves the chain and the task view)
 Tested by:    tests/test_factory_loop.py
 Touch when:   never for a new repository (delivery is switched on per run, not per repo);
               adding a status means ``STATUSES`` here, the UI's factory screen and
@@ -462,7 +463,10 @@ class FactoryLoop:
         """Step 4: delivery — skipped and RECORDED when opt-in is off; a failure stops the
         item (``delivery_failed``). ``route`` is the cell's decision read at readiness.
         ``previous`` (a rework) is the item's earlier delivery: the same pull request is
-        updated, never a second one opened. Returns ``(result, pr_ref)``."""
+        updated, never a second one opened; its rework comment failing (after the push has
+        moved the branch) is recorded on the ``delivery.updated`` event as ``comment_error``
+        and emitted as a ``delivery.comment_failed`` warning — the item goes on to review
+        the branch the pull request now carries. Returns ``(result, pr_ref)``."""
         s = self.spec
         if not s.deliver:
             s.evidence.record_delivery_refused(
@@ -554,6 +558,17 @@ class FactoryLoop:
                 commit_sha=d.commit_sha,
                 rework=rework_n,
             )
+            if d.comment_error:
+                # the branch and the pull request carry the rework; only the note to the
+                # reviewer is missing — a warning on the trace, never a delivery failure
+                self._emit(
+                    "delivery.comment_failed",
+                    item.id,
+                    status=StepStatus.ERROR,
+                    error=d.comment_error,
+                    pr=d.pr_ref,
+                    rework=rework_n,
+                )
             return d, d.pr_ref
         s.evidence.record_delivery(d.to_dict())
         self._emit("delivery.opened", item.id, branch=d.branch, base=d.base, pr=d.pr_ref)

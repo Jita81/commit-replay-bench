@@ -26,7 +26,11 @@ the earlier :class:`DeliveryResult` as ``previous``, the push leases against the
 commit that delivery pushed (``--force-with-lease=<branch>:<sha>`` — a bare lease
 has nothing to hold when the push goes to a URL, and git answers ``stale info``;
 B-1b, 2026-09-19), the PR url and number are carried over, and a short comment
-names the rework so the human reviewer sees why the branch moved.
+names the rework so the human reviewer sees why the branch moved. The comment is
+the OPTIONAL step and it runs AFTER the push has moved the remote branch: when it
+fails (a rate limit, a 5xx, a timeout) the result is still ``updated`` and carries
+the redacted failure as ``comment_error`` — the record must agree with the remote,
+never say "refused" of a branch the pull request already carries.
 
 Navigation
 ----------
@@ -41,7 +45,8 @@ What it does: Enforces the hard invariant first (``assert_not_default_branch``, 
 How:          ``deliver`` = invariant → credentials → deliverability → ``commit_on_branch``
               → ``push_fn`` → ``open_pr_fn`` → ``DeliveryResult``; with ``previous`` the
               push leases against ``previous.commit_sha``, no PR is opened and
-              ``comment_pr_fn`` posts the rework note (``updated=True``).
+              ``comment_pr_fn`` posts the rework note (``updated=True``; a failed note is
+              ``comment_error`` on the result, never a refusal of the moved branch).
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md (the PR body is a
               summary, never raw output)
@@ -489,7 +494,10 @@ class DeliveryResult:
     """What a delivery produced: the branch, its commit, the PR (url + number) and the
     hash of the body that was posted (the PR description; for a re-delivery, the rework
     comment). ``updated`` marks a re-delivery: the branch moved from
-    ``previous_commit_sha`` to ``commit_sha`` on the pull request the first delivery opened."""
+    ``previous_commit_sha`` to ``commit_sha`` on the pull request the first delivery opened.
+    ``comment_error`` (a re-delivery) is the redacted failure of the rework comment — the
+    branch HAD moved, so the delivery stands and the reviewer was not told why; empty when
+    the comment posted (``body_sha256`` is its hash) or none was asked for."""
 
     item_id: str
     branch: str
@@ -502,6 +510,7 @@ class DeliveryResult:
     created: str = field(default_factory=utc_now_iso)
     previous_commit_sha: str = ""
     updated: bool = False
+    comment_error: str = ""
 
     @property
     def pr_ref(self) -> str:
@@ -521,6 +530,7 @@ class DeliveryResult:
             "created": self.created,
             "previous_commit_sha": self.previous_commit_sha,
             "updated": self.updated,
+            "comment_error": self.comment_error,
         }
 
 
@@ -574,7 +584,9 @@ def deliver(
     base must be the previous ones, the push leases against ``previous.commit_sha``, no
     second pull request is opened (url and number are carried over) and, when a
     ``comment_pr_fn`` is given, a comment naming the rework (``rework_n``, the
-    ``after_verdict`` it answers, the new pack hash and commit) is posted on it."""
+    ``after_verdict`` it answers, the new pack hash and commit) is posted on it. The
+    comment runs after the push has moved the remote branch, so its failure is NOT a
+    delivery failure: the result is returned ``updated`` with ``comment_error`` set."""
     branch = assert_not_default_branch(delivery_branch_name(item), target_default_branch)
     base = _norm_branch(target_default_branch)
     if not base:
@@ -632,14 +644,23 @@ def deliver(
             pack_link=pack_link,
         )
         posted = ""
+        comment_error = ""
         if comment_pr_fn is not None and previous.pr_number > 0:
-            comment_pr_fn(
-                remote=credentials.remote,
-                pr_number=previous.pr_number,
-                body=note,
-                credentials=credentials,
-            )
-            posted = sha256_text(note)
+            try:
+                comment_pr_fn(
+                    remote=credentials.remote,
+                    pr_number=previous.pr_number,
+                    body=note,
+                    credentials=credentials,
+                )
+            except Exception as exc:
+                # the push above already moved the remote branch: a failed comment (an API
+                # refusal, a timeout, an undecodable reply) must not turn a delivery that
+                # happened into a refusal on the record. It is carried on the result; the
+                # loop warns and reviews the branch the pull request now carries.
+                comment_error = redact(f"{type(exc).__name__}: {exc}")[:400]
+            else:
+                posted = sha256_text(note)
         return DeliveryResult(
             item_id=item.id,
             branch=branch,
@@ -651,6 +672,7 @@ def deliver(
             body_sha256=posted,
             previous_commit_sha=previous.commit_sha,
             updated=True,
+            comment_error=comment_error,
         )
     body = pr_body(item, build, pack_link=pack_link, route_decision=route_decision)
     push(repo, branch=branch, refspec=f"{branch}:{branch}", credentials=credentials, expected=None)

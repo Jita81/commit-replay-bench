@@ -94,7 +94,8 @@ export function stepsFor(t: FactoryTask): Step[] {
       : { id: 'build', title: 'Build under the belts', status: 'failed', detail: t.build_status.replace(/_/g, ' ') }
   const withheld = buildDone && !t.pr_url && t.last_event === 'delivery.refused'
   const delivery: Step = t.pr_url
-    ? { id: 'delivery', title: 'Delivery', status: 'done', detail: 'branch + pull request opened' }
+    ? // `delivery.updated` = a rework re-pointed the branch on the SAME pull request (DL-045)
+      { id: 'delivery', title: 'Delivery', status: 'done', detail: t.last_event === 'delivery.updated' ? 'pull request updated by a rework' : 'branch + pull request opened' }
     : withheld
       ? { id: 'delivery', title: 'Delivery', status: 'skipped', detail: 'withheld — the route gate or delivery opt-in (see the chain)' }
       : { id: 'delivery', title: 'Delivery', status: buildDone ? 'current' : 'todo', detail: buildDone ? 'pending' : 'not yet' }

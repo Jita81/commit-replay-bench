@@ -11,7 +11,8 @@ What it does: Pins that a spec refuses a test author that is also a rung, that a
               is not RED, that a not-clean build stops before delivery and review, that delivery
               on fails closed without credentials and otherwise opens a branch + PR then reviews,
               that accept-with-edit forces rework (RED → build → grade → a re-delivery that
-              UPDATES the first pull request → fresh verdict) until the budget is exhausted, that
+              UPDATES the first pull request → fresh verdict; a failed rework comment is a
+              warning on the record, never a stop) until the budget is exhausted, that
               the route gate reads the capability map ONCE per item at readiness — before any
               build — and the PR body quotes that reading (DL-045), the full loop on a frozen
               backlog, and the ledgered horizon checkpoint.
@@ -49,9 +50,9 @@ from crb.factory import loop as fl
 from crb.factory import readiness as rd
 from crb.factory import review as rv
 from crb.factory.backlog import KIND_CODE, KIND_OPERATOR, Backlog, BacklogError, BacklogItem
-from crb.factory.delivery import GitCredentials, StaticProvider
+from crb.factory.delivery import DeliveryError, GitCredentials, StaticProvider
 from crb.factory.testfirst import AuthoredTest, SameIdentityError
-from crb.observability.events import Emitter, MemorySink
+from crb.observability.events import Emitter, MemorySink, StepStatus
 from fixtures import pyrepo as pr
 from test_factory_build import (
     DIVIDE_DEF,
@@ -667,6 +668,71 @@ def test_accept_with_edit_forces_rework_red_build_grade_fresh_verdict(
     rows = list(rig.ledger.rows())
     assert len(rows) == 2 and all(r.process_step == PROCESS_FACTORY for r in rows)
     assert [r.trial for r in rows] == ["r1", "w1r1"] and false_q1_total(rows) == 0
+
+
+def test_rework_whose_pull_request_comment_fails_is_still_updated_and_reviewed(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The rework comment is posted AFTER the lease push has moved the remote branch. When
+    it fails (a rate limit, a 5xx, a timeout) the branch and the pull request already carry
+    the rework: the loop must record `delivery.updated` (with the failure as
+    ``comment_error``), warn, and REVIEW the moved branch — never end the item
+    `delivery_failed` with a `delivery.refused` that contradicts the remote."""
+    stronger = AuthoredTest(
+        "tests/test_multiply.py",
+        TEST_MULTIPLY_SRC + "\n\ndef test_multiply_other():\n    assert multiply(5, 6) == 30\n",
+        OPERATOR,
+    )
+    comments: list[dict[str, Any]] = []
+
+    def failing_comment(**kw: Any) -> None:
+        comments.append(kw)
+        raise DeliveryError("GitHub comments API returned 403: rate limit exceeded")
+
+    creds = StaticProvider(
+        GitCredentials(remote="https://github.com/acme/calc.git", token="x" * 20)
+    )
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        builder=MultiBuilder(first_edit=MULTIPLY_HARDCODED),
+        rework_test=lambda item, verdict, previous: stronger,
+        deliver=True,
+        creds=creds,
+        comment_pr_fn=failing_comment,
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    # the item ran to its fresh verdict; the rework's build is the one reviewed
+    assert out.status == fl.STATUS_ACCEPTED and out.reworks == 1 and out.error == ""
+    assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT_WITH_EDIT, rv.VERDICT_ACCEPT]
+    opened = rig.evidence.events_for("I-1", fe.EV_DELIVERY)
+    first_commit = str(opened[0].payload["commit_sha"])
+    assert [p["expected"] for p in rig.pushes] == [None, first_commit]
+    assert out.delivery is not None and out.delivery.updated
+    assert out.delivery.commit_sha != first_commit
+    assert out.delivery.commit_sha == pyrepo.repo.rev_parse("crb/I-1-add-multiply-to-calc")
+    # the chain agrees with the remote: updated, with the comment failure on the event
+    assert not rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    (updated,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_UPDATED)
+    assert updated.payload["commit_sha"] == out.delivery.commit_sha
+    assert updated.payload["body_sha256"] == "" and out.delivery.body_sha256 == ""
+    assert updated.payload["comment_error"] == out.delivery.comment_error
+    assert out.delivery.comment_error.startswith("DeliveryError: GitHub comments API returned 403")
+    assert len(comments) == 1 and comments[0]["pr_number"] == 1
+    # the step events: the update is recorded, the failed comment is a warning, not a stop
+    steps = [e for e in rig.sink.events if e.action.startswith("delivery.")]
+    assert [e.action for e in steps] == [
+        "delivery.opened",
+        "delivery.updated",
+        "delivery.comment_failed",
+    ]
+    assert steps[1].status == StepStatus.OK and steps[2].status == StepStatus.ERROR
+    assert steps[2].error_message == out.delivery.comment_error
+    assert steps[2].payload["pr"] == out.delivery.pr_url
+    kinds = rig.kinds("I-1")
+    assert kinds.count(fe.EV_VERDICT) == 2 and kinds[-2] == fe.EV_VERDICT
+    assert kinds.index(fe.EV_DELIVERY_UPDATED) < len(kinds) - 2  # the fresh verdict follows it
+    assert rig.evidence.verify() == len(kinds)
 
 
 def test_rework_exhausted_when_no_budget(pyrepo: pr.PyRepo, tmp_path: Path) -> None:

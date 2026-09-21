@@ -187,10 +187,17 @@ class FactoryHome:
             return []
         latest: dict[str, dict[str, FactoryEvent]] = {}
         last_kind: dict[str, str] = {}  # the kind of each item's newest event
+        # the newest delivery event of EITHER kind, in chain order: a rework's re-delivery
+        # (`delivery.updated`) carries the SAME pull request the first delivery opened
+        # (DL-045), but a later run may open a FRESH one (the branch deleted after the
+        # first PR closed) — so recency decides, never a preference between the kinds
+        latest_delivery: dict[str, FactoryEvent] = {}
         for ev in self.events():
             if ev.item_id:
                 latest.setdefault(ev.item_id, {})[ev.kind] = ev  # newest wins per kind
                 last_kind[ev.item_id] = ev.kind
+                if ev.kind in (EV_DELIVERY, EV_DELIVERY_UPDATED):
+                    latest_delivery[ev.item_id] = ev
         views: list[TaskView] = []
         for item in backlog.ordered():
             by = latest.get(item.id, {})
@@ -211,10 +218,7 @@ class FactoryHome:
                     if build.payload.get("clean")
                     else ("disqualified" if build.payload.get("disqualified") else "not_clean")
                 )
-            # a rework's re-delivery (`delivery.updated`) carries the SAME pull request the
-            # first delivery opened — it always follows an `opened` for the item, and its
-            # pr_url is the one to show (DL-045)
-            delivery = by.get(EV_DELIVERY_UPDATED) or by.get(EV_DELIVERY)
+            delivery = latest_delivery.get(item.id)
             pr = str(delivery.payload.get("pr_url", "")) if delivery else ""
             if not pr and by.get(EV_DELIVERY_REFUSED) is not None:
                 pr = ""

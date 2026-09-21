@@ -212,7 +212,13 @@ second pull request for the same branch. One rework was one wasted build.
    to which, under which verdict and pack. The chain records it as `delivery.updated`
    (the `delivery.opened` payload plus `previous_commit_sha`, `updated: true`, `rework`,
    `after_verdict`). A first push keeps the bare lease: it is what makes the factory refuse
-   a branch that already exists on the remote.
+   a branch that already exists on the remote. The comment is the optional step and it runs
+   after the push has moved the remote branch, so its failure (a rate limit, a 5xx, a
+   timeout) is **not** a delivery failure: the chain still records `delivery.updated`, with
+   the redacted failure as `comment_error` (and `body_sha256` empty), the trace carries a
+   `delivery.comment_failed` warning, and the item goes on to review the branch the pull
+   request now carries — the record must agree with the remote, never say "refused" of a
+   rework the pull request already shows.
 
 **Consequences.** The pull-request body and the chain quote the same pre-run map, so a
 reader can check the gate against `GET /capability-map` as it was at the freeze. A rework

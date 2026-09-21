@@ -9,7 +9,8 @@ What it does: Pins that a backlog registers frozen and hashed with the freeze in
               invalid items and value-slot sign-offs are refused, that a structural gap
               sign-off lands in both the gap ledger and the evidence, that the task view
               reads "pending" before any run and folds ``pr_url`` from a rework's
-              ``delivery.updated`` as from ``delivery.opened`` (DL-045), and that
+              ``delivery.updated`` as from ``delivery.opened`` — whichever is newest on the
+              chain (DL-045) — and that
               registration is refused while a factory run is queued or running.
 How:          FastAPI TestClient over the seeded SQLite app (``fixtures.server_seed``);
               the factory state is read back through ``FactoryHome`` to check the files.
@@ -186,6 +187,46 @@ def test_task_view_folds_the_pull_request_from_an_updated_delivery(env: Env) -> 
     assert up["kind"] == EV_DELIVERY_UPDATED and up["payload"]["rework"] == 1
     assert up["payload"]["after_verdict"] == "accept_with_edit"
     assert up["payload"]["previous_commit_sha"] == "a" * 40 and up["payload"]["pr_number"] == 7
+    assert env.get(f"/factory/{ALPHA}/evidence").json()["verified"] is True
+
+
+def test_task_view_shows_the_newest_delivery_when_a_fresh_pull_request_follows_an_update(
+    env: Env,
+) -> None:
+    """The fold picks the delivery event that is LATEST in chain order, not the `updated`
+    kind by preference: an earlier run's reworked delivery (opened + updated) followed by a
+    later run that opens a FRESH pull request (the branch was deleted after the first PR
+    closed) must show the fresh PR, not the stale run's."""
+    assert _register(env, [ITEM]).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    ev = home.evidence(actor="worker")
+    opened = {
+        "item_id": "I-1",
+        "branch": "crb/I-1-add-multiply-to-calc",
+        "base": "main",
+        "commit_sha": "a" * 40,
+        "pr_url": "https://github.invalid/acme/calc/pull/7",
+        "pr_number": 7,
+        "pack_hash": "p" * 64,
+        "body_sha256": "b" * 64,
+        "created": "2026-09-19T00:00:00+00:00",
+        "previous_commit_sha": "",
+        "updated": False,
+        "comment_error": "",
+    }
+    ev.record_delivery(opened)
+    ev.record_delivery_updated(
+        {**opened, "commit_sha": "c" * 40, "previous_commit_sha": "a" * 40, "updated": True},
+        rework=1,
+        after_verdict="accept_with_edit",
+    )
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["pr_url"] == opened["pr_url"]
+    fresh = {**opened, "commit_sha": "d" * 40, "pr_url": "https://github.invalid/acme/calc/pull/9"}
+    fresh["pr_number"] = 9
+    ev.record_delivery(fresh)
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["pr_url"] == fresh["pr_url"] and t["last_event"] == EV_DELIVERY
     assert env.get(f"/factory/{ALPHA}/evidence").json()["verified"] is True
 
 
