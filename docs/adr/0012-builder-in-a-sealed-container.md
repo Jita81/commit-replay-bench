@@ -90,19 +90,66 @@ Behind `CRB_BUILDER__EXECUTOR=docker` (`crb.builders.container`, wired through
    either kind is recorded. There is no "build on the host if the container is unavailable"
    path, and no per-run parameter can select host execution: the posture is the worker's
    environment. [measured]
-7. **Cancel and the wall clock end in `docker kill`.** `DockerExecutor.stream()` /
+7. **Cancel and the wall clock end in `docker kill`, and an unconfirmed kill is visible and
+   reaped — never a silent terminal `cancelled`.** `DockerExecutor.stream()` /
    `DockerStream` (core, additive) stream the container's stdout to the unchanged
    stream-json parser and kill the *container* (then the client) on the run's cancel token
    or the budget's wall clock — killing the client alone would leave the container running.
    `docker kill` returns when the signal is sent, not when the daemon stops listing the
-   container, so the kill is **confirmed** (2026-09-21): `DockerStream.kill()` polls
-   `docker inspect -f {{.State.Running}}` (up to 10 s after the kill, 100 ms steps; a
-   removed `--rm` container is gone) and `lines()` waits for that poll, recording
-   `kill_confirmed` and warning when the bound is hit. "Cancelled" therefore means the
-   container was confirmed stopped, or the confirmation timed out and the pack says so
-   (`kill_confirmed: false`); the wait is bounded by the command's timeout plus 10 s.
-   [measured — tests/test_execution.py: confirmed, bounded, and gone cases against a
-   scripted docker; tests/test_builders_container_docker.py under colima, n = 4 runs]
+   container, so `DockerStream.kill()` makes a **bounded confirmation attempt**
+   (2026-09-21): it polls `docker inspect -f {{.State.Running}}` for at most 10 s in total
+   after the kill (100 ms steps; every inspect call is given only the time left, so a slow
+   daemon cannot stretch the wait; only the exact strings `true` / `false` are read — an
+   empty or otherwise malformed exit-0 answer is unknown, never a stop; a removed `--rm`
+   container is gone) and `lines()` waits for that attempt to end. The attempt can end
+   without confirming, and a reader must read `kill_confirmed`. **The reaper contract**
+   (2026-09-21) governs that case: the run still ends `cancelled` / timed out — it did stop
+   building — but the sealed build reports the session's unconfirmed kills
+   (`ContainerSession.unconfirmed_kills` → `build_fn_for(on_kill_unconfirmed=…)`) and the
+   worker (1) writes a system `run.kill_unconfirmed` event (status error; `container`,
+   `run_id`, `bound_s`, `task_id`) on the run's trace and appends "container `<name>` may
+   still be running — it will be reaped by the worker; `docker rm -f <name>` reaps it by
+   hand" to the run's error, the attempt's evidence pack carrying `notes.kill_confirmed:
+   false` and `notes.container`; (2) queues the name durably in
+   `<CRB_HOME>/unconfirmed-containers.json` (`crb.server.reaper`) and, on every poll of its
+   loop, makes one pass — `docker inspect`, `docker rm -f`, `inspect` — writing
+   `run.kill_reaped` when the daemon reports the container gone or not running, or after
+   20 passes `run.kill_reap_failed` (status error, with the by-hand command) and dropping
+   it; the check-in row carries the pending count (`workers.unconfirmed_containers`,
+   revision 0008) so the `/health` worker probe reports `unconfirmed_containers` and reads
+   `degraded` until the queue is empty; (3) the run page's Progress card says "a container
+   may still be running (being reaped by the worker)" from `run.kill_unconfirmed` until
+   `run.kill_reaped` lands (or names the by-hand command after `run.kill_reap_failed`).
+   The wait after a cancel is bounded by the command's timeout plus 10 s.
+
+   Evidence, by apparatus:
+   - [measured] **Scripted-docker unit tests** (no daemon; `tests/test_execution.py`, n = 16
+     cases; method: `DockerStream` and the helpers against a `docker` shell script whose
+     `inspect` answers are scripted): the kill is confirmed by polling (`true, true, false`
+     → three inspects, `kill_confirmed` True before `lines()` returns); the bound is held and
+     warned (`always-true` → False, 1.3 s ≤ elapsed < 5 s); a removed container is gone
+     (`No such container` → True after one inspect); a natural exit asks nothing; the strict
+     parse (8 parametrised answers — only exact `true` / `false` read, `""`, `True`,
+     `FALSE`, `false extra`, `<no value>`, `null` are unknown; a non-zero exit without
+     "no such" is unknown); the budget across inspect calls (an inspect that sleeps 5 s under
+     a 0.5 s bound ends in 0.5–2 s, never 5.5 s; each call's budget is the time remaining,
+     strictly decreasing). The worker side (`tests/test_worker.py`, n = 4 cases; method: the
+     worker over SQLite with a session double that reports one unconfirmed kill): the event,
+     the run's error note, `notes.kill_confirmed: false` in the pack, the durable queue and
+     the check-in count; the reap pass writing `run.kill_reaped`; giving up at the bound with
+     `run.kill_reap_failed`; the polling loop reaping without a run claimed. The reaper alone
+     (`tests/test_server_reaper.py`, n = 6 cases). The session's report
+     (`tests/test_builders_container.py`, n = 1 case). The probe
+     (`tests/test_server_system.py`, n = 1 case).
+   - [measured] **Colima integration runs** (`tests/test_builders_container_docker.py`,
+     `test_cancel_kills_the_container` and `test_wall_clock_kills_the_container`, unchanged;
+     n = 4 runs × 2 tests = 8 passes, 0 failures, and `docker ps -a --filter name=crb-build`
+     empty afterwards; method: a real `sleep 60` container in the builder image, cancelled
+     via the token and killed by a 3 s wall clock, `lines()` returning within 30 s and
+     `docker ps` not listing the container; apparatus: docker server 29.5.2 (client 29.6.1)
+     via colima 0.10.3, macOS 26.6.2 arm64, Python 3.12.13, commit f538cfe). These runs
+     exercise the confirmed path only — the daemon confirmed every kill; the unconfirmed
+     path is provable only against a scripted daemon (above).
 8. **The post-hoc guards stay on as belt-and-braces**, not as the wall: the shell guard,
    the CLI deny rules and the tamper check still run (container paths are translated to
    the host copy so path verification keeps working); a violation is still recorded
