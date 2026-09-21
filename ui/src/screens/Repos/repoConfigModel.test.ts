@@ -4,8 +4,7 @@
  *
  * Navigation
  * ----------
- * What it is:   Unit tests for the repo-config form model; also exports the `REPO` fixture
- *               the tab test reuses.
+ * What it is:   Unit tests for the repo-config form model (over the shared `REPO` fixture).
  * What it does: Pins that `formFromRepo` mirrors the stored config (an explicit belt list
  *               becomes LIST + rows; an unknown stored runner falls back to the language
  *               default, never an empty select), that `changedFields` is empty for an untouched
@@ -16,7 +15,7 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/screens/Repos/repoConfigModel.ts (the code under test),
- *               ui/src/screens/Repos/RepoConfigTab.test.tsx (imports `REPO`),
+ *               ui/src/screens/Repos/repoFixtures.ts (`REPO`, shared with the screen tests),
  *               src/crb/core/spec.py (the messages the validation cases quote)
  * Tested by:    ui/src/screens/Repos/repoConfigModel.test.ts
  * Touch when:   a `RepoConfig` field or validation message changes — update the fixture and
@@ -25,37 +24,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RepoDetail } from '../../api/types'
 import { beltScopeOf, changedFields, formFromRepo, miningOf, parseScopeList, requestOf, sameJson, validateForm } from './repoConfigModel'
-
-export const REPO: RepoDetail = {
-  name: 'walk-pyrepo',
-  language: 'python',
-  runner: 'pytest',
-  url: 'file:///tmp/pyrepo.git',
-  clone_path: '/srv/home/repos/walk-pyrepo',
-  probe: { status: 'ok', run_id: 'a'.repeat(32), checked: '2026-09-13T10:00:00+00:00', detail: '.....\n5 passed in 0.02s' },
-  task_counts: { total: 0, standard: 0, hard: 0, gold_clean: 0, gold_failed: 0, unchecked: 0 },
-  last_run: null,
-  created: '2026-09-13T09:00:00+00:00',
-  updated: '2026-09-13T09:00:00+00:00',
-  github_full_name: null,
-  config: {
-    name: 'walk-pyrepo',
-    language: 'python',
-    runner: 'pytest',
-    src_prefix: 'src/',
-    test_prefix: 'tests/',
-    ext: '.py',
-    test_mode: 'prefix',
-    test_suffix: '',
-    belt_scope: 'AFFECTED_DIRS',
-    probe: 'tests/test_calc.py',
-    url: 'file:///tmp/pyrepo.git',
-    layer: '',
-    runner_opts: { pythonpath_suffix: '/src', python: '/opt/py/bin/python' },
-    sandbox_image: '',
-    mining: { log_n: 50 } as RepoDetail['config']['mining'],
-  },
-}
+import { REPO } from './repoFixtures'
 
 describe('repoConfigModel', () => {
   it('formFromRepo mirrors the stored config; an explicit belt list becomes LIST + rows', () => {

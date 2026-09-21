@@ -72,6 +72,9 @@ describe('ClaudeCodeLoginCard', () => {
     // nothing to verify or remove yet
     expect(screen.getByTestId('claude-login-verify')).toBeDisabled()
     expect(screen.getByTestId('claude-login-remove')).toBeDisabled()
+    // the guide is a link into the bundled docs, not a file path (J-HEL-20)
+    expect(screen.getByRole('link', { name: 'Supplying the Claude Code login token' })).toHaveAttribute('href', '/help/docs/OPERATOR#301-supplying-the-claude-code-login-token-auth-cli')
+    expect(screen.getByRole('link', { name: 'How credentials are held' })).toHaveAttribute('href', '/help/docs/SECURITY#33-credentials')
   })
 
   it('shows presence, the ≤4-char fingerprint and provenance — never a value', async () => {

@@ -587,7 +587,13 @@ def test_every_graded_version_is_newer_than_wall_clock(go_fixture, tmp_path):
         )
         graded = seen[1:]  # the baseline is the untouched overlay
         assert len(graded) == n
-        assert all(mtime > now for mtime, now in graded)  # newer than any artefact built before it
+        # Newer than any artefact built BEFORE the write: the previous run's wall clock is
+        # the latest moment an artefact could have been compiled, and the write comes
+        # after it. (Comparing with the wall clock read AFTER the write flaked on a slow
+        # CI runner whenever the second boundary fell between the stamp and the read —
+        # the stamp is an integer second, so 101 > 100.95 held but 101 > 101.05 did not.)
+        before = [now for _, now in seen[:-1]]
+        assert all(mtime > prev for (mtime, _), prev in zip(graded, before, strict=True))
         mtimes = [m for m, _ in graded]
         assert mtimes == sorted(mtimes) and len(set(mtimes)) == n  # strictly increasing
         restored = (ws.root / gorepo.SRC_SUB).stat().st_mtime

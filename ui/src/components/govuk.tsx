@@ -9,7 +9,9 @@
  *               blue frame), `WarningCallout` (yellow, for what is NOT requested / NOT meant),
  *               `InsetText` (the blue-railed aside), `BackLink`, `ConfirmationPanel` (the
  *               green "recorded" panel with a reference), `StartButton` (green with the 4px
- *               shadow) and `WarningButton` (red — spends money / irreversible).
+ *               shadow), `WarningButton` (red — spends money / irreversible) and `Details`
+ *               (the GOV.UK details: a native `<details>` whose summary is the one line
+ *               shown, for the why behind a screen).
  * What it does: Gives every governance moment the shape a UK public-sector reader already
  *               knows (docs/reviews/2026-09-17-enterprise-front-end.md §6): a task list for
  *               onboarding, summary lists for confirmation, a banner for what needs
@@ -22,7 +24,8 @@
  *               ui/src/lib/verdict.ts, which are the soft-fill verdict chips.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none (DL-042 adopted the NHS design system for the journey)
- * Works with:   ui/src/screens/Home/HomePage.tsx (TaskList, NotificationBanner, InsetText, StartButton),
+ * Works with:   ui/src/components/Help.tsx (the About block is a `Details`),
+ *               ui/src/screens/Home/HomePage.tsx (TaskList, NotificationBanner, InsetText, StartButton),
  *               ui/src/screens/Connect/MeasurePage.tsx (SummaryList, WarningButton, BackLink),
  *               ui/src/screens/Results/ResultsPage.tsx (InsetText, WarningCallout; Tag through MapTable),
  *               ui/src/screens/Decisions/DecisionsPage.tsx (Tag, StartButton, SecondaryButton),
@@ -218,6 +221,26 @@ export function SecondaryButton({ children, onClick, to, disabled, type = 'butto
     <button type={type} onClick={onClick} disabled={disabled} className={cls}>
       {children}
     </button>
+  )
+}
+
+/**
+ * GOV.UK details — progressive disclosure for the why. A native `<details>`/`<summary>`, so
+ * keyboard and screen-reader semantics come free; the summary is styled as the GOV.UK
+ * details link (19 px, underlined, a ▸ marker that turns when open). Closed unless `open`.
+ * With an `id`, the summary gets `<id>-summary` so a landmark can be labelled by it.
+ */
+export function Details({ summary, children, id, open, className = '' }: { summary: string; children: ReactNode; id?: string; open?: boolean; className?: string }) {
+  return (
+    <details id={id} open={open} className={`group mb-6 max-w-[44em] text-[16px] leading-[1.5] ${className}`}>
+      <summary id={id ? `${id}-summary` : undefined} className="inline-flex cursor-pointer list-none items-center gap-2 text-[19px] leading-[1.47] text-primary underline underline-offset-4 marker:hidden [&::-webkit-details-marker]:hidden">
+        <span aria-hidden className="inline-block text-[14px] transition-transform group-open:rotate-90">
+          ▸
+        </span>
+        {summary}
+      </summary>
+      <div className="mt-3 border-l-4 border-border py-1 pl-5 [&_a]:underline">{children}</div>
+    </details>
   )
 }
 

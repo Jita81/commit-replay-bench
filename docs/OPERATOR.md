@@ -14,6 +14,12 @@ hint; this guide is the same material in one place, with the commands.
 Read alongside: [README](../README.md) · [ARCHITECTURE](ARCHITECTURE.md) ·
 [EVIDENCE-AND-CLAIMS](EVIDENCE-AND-CLAIMS.md) · [ADR-0005 (sandbox)](adr/0005-fail-closed-docker-sandbox.md).
 
+This guide is also bundled into the UI: open **Help** in the top bar (`/help`) for the
+glossary and the guide index, or `/help/docs/OPERATOR` for this page, so an operator on a
+deployment with no egress reads the same text the build was made from (DL-046). Every
+screen ends with an *About this screen* block: its purpose, the next step for your role,
+what the numbers mean and where the terms are defined.
+
 Contents: [1 Install](#1-install) · [1.1 Check the installation](#11-check-the-installation-crb-doctor) ·
 [2 Configure a repository](#2-configure-a-repository) ·
 [3 Run a sweep](#3-run-a-sweep) · [4 Read the capability map](#4-read-the-capability-map) ·
@@ -67,7 +73,7 @@ Run it on the API host and on the worker host after installing, after changing a
 | `github_app` | the app is configured, the key file is readable and parses, GitHub answers `/app/installations`, how many installations can deliver | half configured, an unreadable or malformed key, GitHub refusing (`skip` when not configured; `warn` with no installation yet) |
 | `database` | the store answers and is initialised, every append-only trigger is present and they fire (an UPDATE on `grades` is refused) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
 | `migrations` | the store's Alembic revision is the code's head — the same reading as `/health`, whose contract is [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead or empty — both revisions named, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id (`crb doctor` runs in the operator's own terminal, so its `migrations` line shows the driver's error type and message — there is no unauthenticated reader to protect; only its `sandbox` and `worker` lines share `/health`'s fixed sentence) | the `down` states: behind, ahead or empty, or cannot be read — `crb migrate` (or the log). `warn` only for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps it) |
-| `worker` | the worker heartbeat and queue depth, as `/health` reads them | `warn` when a running run's heartbeat is stale or absent (an idle queue is `ok`) |
+| `worker` | the workers' check-ins (the `workers` table), the queue depth and running runs' heartbeats, as `/health` reads them | `warn` when no worker has checked in yet, one stopped checking in (named, with its age), runs are queued and no worker is alive, or a running run's heartbeat is stale (an idle queue with a live worker is `ok`) |
 | `ui` | the built UI the API serves and the help bundle in it (one non-empty chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
 
 `/health` on the running API answers the same questions from inside the process
@@ -521,10 +527,14 @@ schedule — the token is long-lived):
    evaluation is over — `auth: cli` is a developer/evaluation mode; production runs use
    `ANTHROPIC_API_KEY` on the worker and never read the file.
 
-What you will see (events; the run screen streams them live): `mine.candidate` → `mine.red` /
-`mine.skip` → `mine.gold` → `build.*` → `grade.belt` (four per task) → `ledger.append`.
-Skips are normal: a commit whose target is already green at the parent, or times out, is
-not a valid oracle and is excluded, not counted.
+What you will see (the run's live log on `/runs/<id>`, and `crb` on the terminal):
+`mine.candidate` → `mine.red` / `mine.skip` → `mine.gold` → `build.*` → `grade.belt` (five
+per task with belt 5, `repo_lint_clean`; four on a repository without a lint plan) →
+`ledger.append`. The full vocabulary — every action, its payload and who reads it — is
+[API.md § Event vocabulary](API.md#event-vocabulary). Skips are normal: a commit whose
+target is already green at the parent, or times out, is not a valid oracle and is
+excluded, not counted. A queued run shows its place in the line ("Queued — 3 runs ahead of
+it"); if the health check's `worker` probe is not `ok`, no worker will take it — see §7.
 
 Every graded task produces an **evidence pack** (redacted; no raw diff, no transcript by
 default) and a **ledger row** that carries the pack's hash. A row cannot be `clean` without
@@ -639,6 +649,14 @@ What to do:
    `daemon not reachable`, `refusing to run untrusted tests as root`, `refusing to mount …`).
 4. Fix the cause and **re-run**; the worker resumes blocked runs. Tasks that were
    never graded have no rows — nothing needs correcting in the ledger.
+
+Where to look first: `GET /api/v1/health` — the `sandbox` probe (on the worker, or a
+one-process deployment) says whether the daemon answers, and the `worker` probe says
+whether any worker has checked in at all (a run that stays "Queued" with a healthy
+sandbox is a worker that is not running — the probe names the last one seen and how long
+ago). On the dashboards `crb_sandbox_unavailable_total` counts every run that stopped
+this way; the alert rules and the metrics table are
+[DEPLOYMENT.md §9](DEPLOYMENT.md#9-observability).
 
 Do **not** switch the executor to `local` for a repository you do not fully trust; the
 local executor exists for development and fixture repositories and is visible on every

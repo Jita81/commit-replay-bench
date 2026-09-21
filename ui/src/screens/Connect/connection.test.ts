@@ -3,13 +3,17 @@
  *
  * Navigation
  * ----------
- * What it is:   Tests for `stagesFor`, `stageSummary` and `nameFromGitUrl`.
+ * What it is:   Tests for `stagesFor`, `runningDetail`, `stageSummary` and `nameFromGitUrl`.
  * What it does: Pins that a fresh repository is at "probe"; that a running probe/mine run
  *               marks its stage in progress; that mined counts, an oracle report, a controls
  *               report and measured rows each complete their stage; that a failed controls
  *               report is `failed`, not done; that stages after a not-done stage are
  *               `blocked` (so the walk never offers step 4 before step 3); that the first
- *               measurement is the only stage that spends; and the GitHub-URL → name rule.
+ *               measurement is the only stage that spends; that a failed or cancelled
+ *               measurement with no rows reads as such, never "not started" (J-ONR-6); that
+ *               the polled run turns the ellipsis lines into k of n, counters and spend, and
+ *               a queued run into its place in the queue (J-TEL-6); and the GitHub-URL →
+ *               name rule.
  * How:          Plain unit tests over hand-built `RepoSummary` shapes.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -19,8 +23,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import type { ControlsReport, OracleReport, RepoSummary } from '../../api/types'
-import { nameFromGitUrl, stageSummary, stagesFor } from './connection'
+import type { ControlsReport, OracleReport, RepoSummary, Run } from '../../api/types'
+import { controlsFinding, nameFromGitUrl, runningDetail, stageComplete, stageSummary, stagesFor } from './connection'
 
 function repo(over: Partial<RepoSummary> = {}): RepoSummary {
   return {
@@ -67,6 +71,7 @@ describe('stagesFor', () => {
     expect(s[2]?.detail).toBe('12 tasks (10 gold-clean, 1 gold-failed, 1 unchecked)')
     expect(s[3]?.detail).toBe('2 tasks scored')
     expect(s[4]?.detail).toBe('passed · 42 rows · 0 violations · 0 escapes · 6 not constructible')
+    expect(s[4]?.status).toBe('done')
     expect(s[5]?.detail).toBe('22 rows on the current apparatus')
     expect(stageSummary(s)).toEqual({ label: 'measured', status: 'done' })
   })
@@ -75,8 +80,25 @@ describe('stagesFor', () => {
     const r = repo({ probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: '' }, task_counts: { total: 5, standard: 5, hard: 0, gold_clean: 5, gold_failed: 0, unchecked: 0 } })
     const s = stagesFor({ repo: r, oracle: ORACLE, controls: CONTROLS_BAD })
     expect(s[4]).toMatchObject({ status: 'failed' })
-    expect(s[4]?.detail).toContain('FAILED · 42 rows · 3 violations · 1 escapes')
+    expect(s[4]?.detail).toContain('FAILED · 42 rows · 3 violations · 1 escape ·')
     expect(s[5]?.status).toBe('blocked')
+  })
+
+  it('a passed controls report with an escape or a thin set is "warn": the walk goes on, the finding is named, deliver is withheld (the server’s passed = no violation only)', () => {
+    const escaped = { passed: true, n_rows: 7, violations: 0, escapes: 1, not_constructible: 1 } as unknown as ControlsReport
+    const s = stagesFor({ repo: MEASURED, oracle: ORACLE, controls: escaped, measuredRows: 0 })
+    expect(s[4]?.status).toBe('warn')
+    expect(s[4]?.detail).toBe('passed with 1 escape — deliver is withheld until the tests are hardened and the controls re-run · 7 rows · 0 violations · 1 escape · 1 not constructible')
+    expect(stageComplete('warn')).toBe(true)
+    // the next stage unlocks: measuring is still allowed, delivering is not
+    expect(s[5]?.status).toBe('todo')
+    expect(stageSummary(s)).toEqual({ label: 'first measurement', status: 'todo' })
+    const thin = { passed: true, n_rows: 10, violations: 0, escapes: 0, not_constructible: 6, verdict: { state: 'thin', constructible: 4, total: 10, escapes: 0 } } as unknown as ControlsReport
+    expect(controlsFinding(thin)).toBe('too few controls constructible (4 of 10) — the cell routes calibrate until more can be built')
+    expect(controlsFinding(CONTROLS_OK)).toBeNull()
+    // a fully measured walk that still carries a finding summarises as warn, never a plain done
+    const measured = stagesFor({ repo: MEASURED, oracle: ORACLE, controls: escaped, measuredRows: 31 })
+    expect(stageSummary(measured)).toEqual({ label: 'measured', status: 'warn' })
   })
 
   it('a null oracle/controls (404 = never run) is todo once the earlier stages are done', () => {
@@ -94,6 +116,99 @@ describe('stagesFor — an active run outranks done', () => {
     expect(s[5]).toMatchObject({ status: 'running', runId: 'r9' })
     expect(s[5]?.detail).toBe('measuring… (54 rows already on the current apparatus)')
     expect(stageSummary(s)).toEqual({ label: 'first measurement', status: 'running' })
+  })
+})
+
+const MEASURED = repo({ probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: '' }, task_counts: { total: 12, standard: 9, hard: 3, gold_clean: 10, gold_failed: 1, unchecked: 1 } })
+
+describe('stagesFor — a failed or cancelled measurement never reads as not started (J-ONR-6)', () => {
+  it('a failed replay with no rows is failed with the run to open, and offers Retry not a blind spend', () => {
+    const s = stagesFor({ repo: { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'failed', finished: 'x' } }, oracle: ORACLE, controls: CONTROLS_OK, measuredRows: 0 })
+    expect(s[5]).toMatchObject({ status: 'failed', runId: 'r9', detail: 'the last measurement failed — open it for the reason before spending again' })
+    expect(stageSummary(s)).toEqual({ label: 'first measurement', status: 'failed' })
+  })
+
+  it('a cancelled replay is todo with how many rows landed', () => {
+    const s = stagesFor({ repo: { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'cancelled', finished: 'x' } }, oracle: ORACLE, controls: CONTROLS_OK, measuredRows: 0 })
+    expect(s[5]).toMatchObject({ status: 'todo', runId: 'r9', detail: 'the last measurement was cancelled after 0 rows; start another when you are ready' })
+  })
+
+  it('rows on the apparatus still outrank an earlier failed or cancelled run', () => {
+    const s = stagesFor({ repo: { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'failed', finished: 'x' } }, oracle: ORACLE, controls: CONTROLS_OK, measuredRows: 22 })
+    expect(s[5]).toMatchObject({ status: 'done', detail: '22 rows on the current apparatus' })
+  })
+})
+
+function run(over: Partial<Run>): Run {
+  return {
+    id: 'r9',
+    repo: 'alpha',
+    kind: 'replay',
+    status: 'running',
+    mode: 'sighted',
+    builder: 'fixture',
+    model: 'gold',
+    provider: '',
+    ladder: [],
+    executor: 'docker',
+    timeout: 600,
+    pool: '',
+    limit: null,
+    task_ids: [],
+    builder_config: {},
+    actor: 'op',
+    created: '2026-09-19T10:00:00Z',
+    started: '2026-09-19T10:00:20Z',
+    finished: null,
+    cancel_requested: false,
+    error: '',
+    cost_usd: 0,
+    apparatus_version: '2.2',
+    counts: { tasks: 0, clean: 0, disqualified: 0, errors: 0, first_pass_clean: 0, rows: 0 },
+    progress: { done: 0, total: 0, current_task_id: null },
+    ...over,
+  }
+}
+const NOW = Date.parse('2026-09-19T10:01:00Z')
+
+describe('runningDetail — the live line from the polled run (J-TEL-6)', () => {
+  it('falls back to the ellipsis line until the run has loaded', () => {
+    expect(runningDetail('mine', undefined)).toBe('mining…')
+    expect(runningDetail('measure', undefined)).toBe('measuring…')
+  })
+
+  it('a queued run says where it is in the queue, never "in progress"', () => {
+    expect(runningDetail('oracle', run({ status: 'queued', started: null }))).toBe('Queued — waiting for a worker')
+    expect(runningDetail('oracle', run({ status: 'queued', started: null }), { queuedAhead: 0 })).toBe('Queued — next in line for a worker')
+    expect(runningDetail('oracle', run({ status: 'queued', started: null }), { queuedAhead: 1 })).toBe('Queued — 1 run ahead of it')
+    expect(runningDetail('oracle', run({ status: 'queued', started: null }), { queuedAhead: 2 })).toBe('Queued — 2 runs ahead of it')
+  })
+
+  it('each kind reads its own counter: elapsed, found / examined / target, task k of n, attempt k of n with spend', () => {
+    expect(runningDetail('probe', run({ kind: 'probe' }), { now: NOW })).toBe("Probing — running the repository's own suite (started 40 s ago)")
+    expect(runningDetail('mine', run({ kind: 'mine', limit: 25, counts: { tasks: 0, clean: 0, disqualified: 0, errors: 0, first_pass_clean: 0, rows: 0, detail: { found: 4, examined: 37 } } }))).toBe('Mining — 4 tasks found · 37 commits examined · target 25')
+    expect(runningDetail('mine', run({ kind: 'mine' }), { now: NOW })).toBe('Mining — reading the history (started 40 s ago)')
+    expect(runningDetail('oracle', run({ kind: 'oracle', progress: { done: 2, total: 12, current_task_id: 't3' } }))).toBe('Scoring oracles — task 3 of 12')
+    expect(runningDetail('controls', run({ kind: 'controls', progress: { done: 4, total: 12, current_task_id: 't5' } }))).toBe('Running the controls — task 5 of 12')
+    expect(runningDetail('measure', run({ progress: { done: 2, total: 10, current_task_id: 't3' }, cost_usd: 0.42 }))).toBe('Measuring — attempt 3 of 10 · $0.42 so far, builder-reported')
+    expect(runningDetail('measure', run({}))).toBe('Measuring — first attempt starting · $0.00 so far, builder-reported')
+  })
+
+  it('stagesFor uses the watched run only when it is the stage\'s own, and flags queued', () => {
+    const r = { ...MEASURED, last_run: { id: 'r9', kind: 'replay' as const, status: 'running' as const, finished: null } }
+    const s = stagesFor({ repo: r, oracle: ORACLE, controls: CONTROLS_OK, measuredRows: 54, watched: run({ progress: { done: 2, total: 10, current_task_id: 't3' }, cost_usd: 0.42 }) })
+    expect(s[5]?.detail).toBe('Measuring — attempt 3 of 10 · $0.42 so far, builder-reported (54 rows already on the current apparatus)')
+    expect(s[5]?.queued).toBe(false)
+    const other = stagesFor({ repo: r, oracle: ORACLE, controls: CONTROLS_OK, measuredRows: 54, watched: run({ id: 'stale' }) })
+    expect(other[5]?.detail).toBe('measuring… (54 rows already on the current apparatus)')
+    const q = stagesFor({ repo: { ...r, last_run: { ...r.last_run, status: 'queued' } }, oracle: ORACLE, controls: CONTROLS_OK, measuredRows: 54, watched: run({ status: 'queued', started: null }), queuedAhead: 2 })
+    expect(q[5]).toMatchObject({ status: 'running', queued: true })
+    expect(q[5]?.detail).toBe('Queued — 2 runs ahead of it (54 rows already on the current apparatus)')
+  })
+
+  it('the started-at age is the shared formatter (ui/src/lib/format.ts fmtAgo): the walk and the run page agree', () => {
+    expect(runningDetail('probe', run({ kind: 'probe', started: '2026-09-19T09:58:00Z' }), { now: NOW })).toContain('(started 3 min ago)')
+    expect(runningDetail('probe', run({ kind: 'probe', started: '2026-09-19T07:55:00Z' }), { now: NOW })).toContain('(started 2 h 6 min ago)')
   })
 })
 

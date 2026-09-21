@@ -504,7 +504,12 @@ class TestDoctorReport:
         assert rows["github_app"][0] == "skip"
         assert rows["database"] == ("ok", "answers · triggers present; UPDATE on grades refused")
         assert rows["migrations"] == ("ok", f"database at {migrate.head_revision()} = code head")
-        assert rows["worker"] == ("ok", "idle")
+        # no worker has ever checked in on this fresh store: /health's worker probe says so
+        # (degraded, never down); doctor renders it as warn
+        assert rows["worker"] == (
+            "warn",
+            "no worker has checked in yet — queued runs will not start",
+        )
         assert rows["ui"][0] == "warn" and "no built UI" in rows["ui"][1]
         assert "claude_code" in rows and "verify" not in rows["claude_code"][1]
         assert out.rstrip().endswith("overall: warn") and code == 0
@@ -521,7 +526,7 @@ class TestDoctorReport:
         assert m["detail"].startswith(
             f"database at 0001, code head {migrate.head_revision()} — run `crb migrate`"
         )
-        assert next(p for p in body["probes"] if p["name"] == "worker")["status"] == "ok"
+        assert next(p for p in body["probes"] if p["name"] == "worker")["status"] == "degraded"
 
     def test_uninitialised_store_fails_and_the_worker_is_not_guessed(
         self, home: Path, fake_cli: Callable[[bool], None], capsys: pytest.CaptureFixture[str]

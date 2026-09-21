@@ -994,6 +994,16 @@ class TestListAndRevoke:
         assert [x.revoke for x in rows] == [False, True]
         assert rows[1].prev_hash == rows[0].row_hash and rows[1].note == "evidence re-examined"
         assert verify_signoff_rows(rows) == 2
+        # J-TEL-8: the audit event ties itself to the chain by hash — the revocation row's
+        # hash, the hash of the row it revokes, and the reason — so an auditor reconciling
+        # the events trace against the sign-off chain never has to search by scope and time
+        (revoked,) = _events(env, "signoff.revoked")
+        assert revoked.actor == d["revoked_by"]
+        assert revoked.payload_json["signoff_id"] == sid
+        assert revoked.payload_json["row_hash"] == rows[1].row_hash
+        assert revoked.payload_json["revokes_row_hash"] == rows[0].row_hash
+        assert revoked.payload_json["note"] == "evidence re-examined"
+        assert revoked.payload_json["cell"] == rows[1].cell_json  # the scope, as the row says
         # hidden from the active list, present in the history, tier back to automated-pass
         assert env.get(f"/signoffs?repo={ALPHA}").json()["total"] == 0
         hist = env.get(f"/signoffs?repo={ALPHA}&include_revoked=true").json()

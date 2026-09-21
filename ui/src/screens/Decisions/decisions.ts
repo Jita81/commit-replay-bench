@@ -17,12 +17,17 @@
  *               records the human's answer.
  * How:          Pure functions over the API types; no fetching. `kind` orders the rows;
  *               `act` is the verb the button shows; `href` is the screen with the cell / item
- *               preselected.
+ *               preselected; a cell row also carries its `reasonCode` on its own so the
+ *               screen can render it as a term with its meaning (`evidenceStats` is the
+ *               evidence line without the code).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md (the routes and reason codes),
  *               docs/adr/0006-zero-raw-retention-and-evidence-packs.md (a sign-off is a
  *               human attestation anchored to evidence)
  * Works with:   ui/src/screens/Decisions/DecisionsPage.tsx (renders it),
+ *               ui/src/screens/Capability/contract.ts (`REASON_DISPLAY` — the meaning of a
+ *               `reasonCode`), ui/src/screens/Results/ResultsPage.tsx (the same rows for one
+ *               repository),
  *               ui/src/screens/Signoff/SignoffPage.tsx (`?cell=` preselects the cell),
  *               ui/src/screens/Factory/FactoryPage.tsx (`?item=` scrolls to the item),
  *               src/crb/factory/loop.py (the route gate whose withholding shows here)
@@ -48,6 +53,8 @@ export interface Decision {
   title: string
   /** The evidence line: n, interval, reason code, gaps. */
   evidence: string
+  /** The routing reason code on a cell row (the tail of `evidence`), for rendering as a term. */
+  reasonCode?: string
   /** The verb on the button. */
   act: string
   /** Where the act is recorded (an approver's surface) or read (a viewer's). */
@@ -85,6 +92,12 @@ function pct(x: number): string {
   return `${(x * 100).toFixed(0)}%`
 }
 
+/** The evidence line without its trailing reason code — the screen renders the code as a term. */
+export function evidenceStats(d: Pick<Decision, 'evidence' | 'reasonCode'>): string {
+  const tail = d.reasonCode ? ` · ${d.reasonCode}` : ''
+  return tail && d.evidence.endsWith(tail) ? d.evidence.slice(0, -tail.length) : d.evidence
+}
+
 /** The rows for one repository, ordered by what blocks what. */
 export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; signoffs: Signoff[]; tasks: FactoryTask[] }): Decision[] {
   const { repo } = input
@@ -97,12 +110,13 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
     const label = `${c.capability_class} × ${c.size}`
     const ev = `n=${c.n}${c.n_tasks !== undefined ? ` on ${c.n_tasks} tasks` : ''} · ${pct(c.point)} [${pct(c.ci_low)}, ${pct(c.ci_high)}]${c.reason_code ? ` · ${c.reason_code}` : ''}`
     const cellQ = `${q}&cell=${encodeURIComponent(cellKeyOf(c))}`
+    const code = c.reason_code ? { reasonCode: c.reason_code } : {}
     if (c.route === 'do_not_ship') {
-      out.push({ kind: 'do_not_ship', repo, title: `${label} must not ship — false-Q1 in the cell`, evidence: ev, act: 'Investigate', href: `/ledger?${q}`, role: 'viewer' })
+      out.push({ kind: 'do_not_ship', repo, title: `${label} must not ship — false-Q1 in the cell`, evidence: ev, ...code, act: 'Investigate', href: `/ledger?${q}`, role: 'viewer' })
     } else if (c.route === 'deliver' && !signed.has(cellKeyOf(c))) {
-      out.push({ kind: 'signoff_due', repo, title: `${label} clears the bar — attest it or decline`, evidence: ev, act: 'Attest', href: `/signoff?${cellQ}`, role: 'approver' })
+      out.push({ kind: 'signoff_due', repo, title: `${label} clears the bar — attest it or decline`, evidence: ev, ...code, act: 'Attest', href: `/signoff?${cellQ}`, role: 'approver' })
     } else if (c.route === 'human') {
-      out.push({ kind: 'routed_human', repo, title: `${label} routed to a human — ${c.reason}`, evidence: ev, act: 'Read why', href: `/routing?${q}`, role: 'viewer' })
+      out.push({ kind: 'routed_human', repo, title: `${label} routed to a human — ${c.reason}`, evidence: ev, ...code, act: 'Read why', href: `/routing?${q}`, role: 'viewer' })
     }
   }
 

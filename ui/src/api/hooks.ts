@@ -32,6 +32,8 @@
  *               newer readings not yet folded in here), ui/src/test/utils.tsx (`mockApi` — how
  *               tests answer these hooks)
  * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx,
+ *               ui/src/screens/Home/HomePage.test.tsx (`useActiveRun`),
+ *               ui/src/screens/Connect/ConnectPage.test.tsx (`useQueuedRuns`),
  *               ui/src/screens/Capability/CapabilityPage.test.tsx,
  *               ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/src/screens/Signoff/SignoffPage.test.tsx,
@@ -84,6 +86,7 @@ import type {
   RoutesResponse,
   Run,
   RunCreateRequest,
+  RunKind,
   RunListParams,
   RunTaskRow,
   Settings,
@@ -301,6 +304,44 @@ export function useRuns(p: RunListParams = {}): UseQueryResult<Page<Run>, ApiErr
     queryFn: () => api<Page<Run>>(`/runs${qs({ repo: p.repo, kind: p.kind, status: p.status, limit: p.limit, offset: p.offset })}`),
     retry: false,
     refetchInterval: (q) => (q.state.data?.items.some((r) => !isRunTerminal(r.status)) ? RUN_POLL_MS * 2 : false),
+    refetchIntervalInBackground: false,
+  })
+}
+
+/**
+ * The run in flight for one repository and kind (`GET /runs?repo=&kind=` — the newest 20,
+ * newest first; the first `queued`/`running` one), or `null` when none is. Polls at the
+ * list's pace while one is active; disabled with no repository. Home's task 8 reads the
+ * active factory run through this so "In progress" is never shown without a run behind it.
+ */
+export function useActiveRun(repo: string, kind: RunKind): UseQueryResult<Run | null, ApiError> {
+  const p: RunListParams = { repo, kind, limit: 20 }
+  return useQuery({
+    queryKey: [...keys.runs(p), 'active'] as const,
+    queryFn: async () => {
+      const page = await api<Page<Run>>(`/runs${qs({ repo, kind, limit: 20 })}`)
+      return page.items.find((r) => !isRunTerminal(r.status)) ?? null
+    },
+    enabled: repo.length > 0,
+    retry: false,
+    refetchInterval: (q) => (q.state.data ? RUN_POLL_MS * 2 : false),
+    refetchIntervalInBackground: false,
+  })
+}
+
+/**
+ * `GET /runs?status=queued` (up to 200, newest first) — the queue, so a screen can say how
+ * many runs sit ahead of the one it watches (the worker claims FIFO by `created`). Enabled
+ * only while asked; polls at the list's pace while anything is queued.
+ */
+export function useQueuedRuns(enabled: boolean): UseQueryResult<Page<Run>, ApiError> {
+  const p: RunListParams = { status: 'queued', limit: 200 }
+  return useQuery({
+    queryKey: keys.runs(p),
+    queryFn: () => api<Page<Run>>(`/runs${qs({ status: 'queued', limit: 200 })}`),
+    enabled,
+    retry: false,
+    refetchInterval: (q) => (q.state.data?.items.length ? RUN_POLL_MS * 2 : false),
     refetchIntervalInBackground: false,
   })
 }
@@ -632,14 +673,19 @@ export function useFactoryBacklog(repo: string): UseQueryResult<FactoryBacklog, 
   })
 }
 
-/** `GET /factory/{repo}/tasks` (P6). */
-export function useFactoryTasks(repo: string): UseQueryResult<FactoryTask[], ApiError> {
+/** Poll period for the factory item chain while a factory run is working it (J-FAC-5). */
+export const FACTORY_POLL_MS = 5_000
+
+/** `GET /factory/{repo}/tasks` (P6); polls every 5 s while `poll` (a factory run is active), never in a hidden tab. */
+export function useFactoryTasks(repo: string, opts: { poll?: boolean } = {}): UseQueryResult<FactoryTask[], ApiError> {
   return useQuery({
     queryKey: keys.factoryTasks(repo),
     // the server answers a bare list here (docs/API.md), not a Page
     queryFn: () => api<FactoryTask[]>(`/factory/${enc(repo)}/tasks`),
     enabled: repo.length > 0,
     retry: false,
+    refetchInterval: opts.poll ? FACTORY_POLL_MS : false,
+    refetchIntervalInBackground: false,
   })
 }
 

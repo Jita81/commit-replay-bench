@@ -19,9 +19,10 @@
  * ADRs:         none
  * Works with:   ui/src/screens/Settings/claudeCodeLogin.ts (the hooks and types),
  *               ui/src/screens/Settings/SettingsPage.tsx (the host), ui/src/lib/auth.tsx
- *               (`can('admin')`), src/crb/server/routes/admin.py (the routes and their 422 /
- *               409 / 429 answers), src/crb/builders/claude_code.py (the `cli` auth mode
- *               that consumes the stored token)
+ *               (`can('admin')`), ui/src/components/Help.tsx (`DocLink` — the token and
+ *               credentials guides), src/crb/server/routes/admin.py (the routes and their
+ *               422 / 409 / 429 answers), src/crb/builders/claude_code.py (the `cli` auth
+ *               mode that consumes the stored token)
  * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   a `LoginCheckStatus` is added on the server (src/crb/server/secrets.py) —
@@ -32,6 +33,7 @@ import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { ErrorState } from '../../components/ErrorState'
 import { TextField } from '../../components/Field'
+import { DocLink } from '../../components/Help'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { useAuth } from '../../lib/auth'
@@ -279,7 +281,8 @@ export function ClaudeCodeLoginCard() {
               {' '}
               On this host: <code className="break-all">{secrets.data.secrets_dir}</code>.
             </>
-          )}
+          )}{' '}
+          Guides: <DocLink to="OPERATOR#301-supplying-the-claude-code-login-token-auth-cli">Supplying the Claude Code login token</DocLink> · <DocLink to="SECURITY#33-credentials">How credentials are held</DocLink>.
         </p>
         {admin ? (
           <>

@@ -4,7 +4,9 @@
  * Navigation
  * ----------
  * What it is:   The screen at /login, outside the shell.
- * What it does: Signs in with `POST /auth/login` (the local bootstrap account) or hands off to
+ * What it does: Says what the product does for a team in one plain sentence (the only screen
+ *               a sponsor sees before signing in carries no undefined term), then signs in
+ *               with `POST /auth/login` (the local bootstrap account) or hands off to
  *               `GET /auth/oidc/start` (the organisation's identity provider — the button is
  *               offered only when `/version` says one is configured); renders the
  *               error envelope on a wrong password (never a blank form), and returns the user
@@ -19,7 +21,8 @@
  *               ui/src/api/hooks.ts (`useLogin`), ui/src/components/ErrorState.tsx (the 401
  *               envelope), src/crb/server/routes/auth.py (login and the OIDC start URL),
  *               src/crb/server/auth.py (the session and CSRF cookies the login sets)
- * Tested by:    ui/e2e/smoke.spec.ts (renders against a mocked API, OIDC button href, axe),
+ * Tested by:    ui/src/screens/Login/LoginPage.test.tsx (the strapline),
+ *               ui/e2e/smoke.spec.ts (renders against a mocked API, OIDC button href, axe),
  *               ui/e2e/walkthrough/01-login.spec.ts (wrong password → envelope; right one →
  *               the role chip)
  * Touch when:   the OIDC start path or the login body changes (docs/API.md "Auth"); never for
@@ -68,7 +71,7 @@ export function LoginPage() {
         <header className="space-y-1 text-center">
           <div className="label">Sign in</div>
           <h1 className="text-[26px] leading-8">{BRAND}</h1>
-          <p className="text-sm text-on-surface-muted">Grade an AI builder against a repository's own tests, under four belts. false-Q1 = 0.</p>
+          <p className="text-sm text-on-surface-muted">Measures what an AI builder can be trusted to change in your repository, graded by your own tests.</p>
         </header>
 
         <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">

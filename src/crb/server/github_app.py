@@ -28,7 +28,10 @@ Works with:   src/crb/server/settings.py (``GitHubAppSettings``), src/crb/server
               carries the token to ``git push`` and the pulls API), docs/GITHUB-APP.md
 Tested by:    tests/test_server_github_app.py
 Touch when:   GitHub changes the app-auth flow; GHES needs a different path prefix (``api_url``
-              already covers ``https://ghes.example/api/v3``).
+              already covers ``https://ghes.example/api/v3``); the scopes delivery needs change
+              — ``DELIVERY_PERMISSIONS`` / ``permissions_allow_delivery`` is the one place
+              (``Installation.can_deliver``, the factory pre-flight and the installations
+              route all read it).
 Claims:       none — a transport.
 """
 
@@ -64,6 +67,19 @@ class GitHubAppError(RuntimeError):
         self.message = message
 
 
+#: The permission levels an installation must grant before the factory may push a
+#: branch and open a pull request — the ONE definition ``Installation.can_deliver``, the
+#: factory pre-flight and the installations route all read.
+DELIVERY_PERMISSIONS: dict[str, str] = {"contents": "write", "pull_requests": "write"}
+
+
+def permissions_allow_delivery(permissions: Mapping[str, Any] | None) -> bool:
+    """Does this ``permission → level`` mapping (as GitHub reports it, or as a row stored
+    it) grant every level in :data:`DELIVERY_PERMISSIONS`? Missing or ``None`` is no."""
+    perms = permissions or {}
+    return all(str(perms.get(k, "")) == v for k, v in DELIVERY_PERMISSIONS.items())
+
+
 @dataclass(frozen=True)
 class Installation:
     """One installation of the app: the account it lives on and what it may see."""
@@ -93,10 +109,7 @@ class Installation:
     @property
     def can_deliver(self) -> bool:
         """Delivery needs to push a branch and open a pull request."""
-        return (
-            self.permissions.get("contents") == "write"
-            and self.permissions.get("pull_requests") == "write"
-        )
+        return permissions_allow_delivery(self.permissions)
 
     def to_dict(self) -> dict[str, Any]:
         return {

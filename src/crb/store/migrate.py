@@ -103,6 +103,7 @@ REVISION_MARKERS: tuple[tuple[str, str, str], ...] = (
     ("0002", "grades", "repo_lint_clean"),
     ("0003", "reviews", "review_id"),
     ("0006", "repos", "github_full_name"),
+    ("0008", "workers", "unconfirmed_containers"),
 )
 #: ``(revision, table)`` — the TABLE each revision after the initial one ADDS. An older
 #: release's ``create_all`` schema lacks it and is still a complete schema *for its
@@ -110,6 +111,7 @@ REVISION_MARKERS: tuple[tuple[str, str, str], ...] = (
 REVISION_TABLES: tuple[tuple[str, str], ...] = (
     ("0003", "reviews"),
     ("0005", "github_installations"),
+    ("0007", "workers"),
 )
 #: ``(revision, table, index)`` — the INDEX a revision adds when it adds no column or table.
 #: Walked after :data:`REVISION_MARKERS` in the same way: a ``create_all`` schema that
