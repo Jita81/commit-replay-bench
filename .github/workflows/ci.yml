@@ -342,7 +342,7 @@ jobs:
           load: true
           tags: crb:ci
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
       - name: Smoke the image — non-root, read-only root, migrate on SQLite, UI + tools present
         # tmpfs ownership is explicit: newer daemons make --tmpfs inherit the image
         # directory's root:0750, which uid 10001 cannot write ("unable to open database

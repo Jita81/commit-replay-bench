@@ -133,7 +133,7 @@ jobs:
           tags: crb:release-candidate
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - name: Smoke the candidate — non-root, read-only root, migrate on SQLite, UI + tools present
         # Same checks as ci.yml `container`, run on the exact image that will be pushed.
