@@ -142,7 +142,8 @@ describe('ResultsPage', () => {
     renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
     await waitFor(() => expect(screen.getByRole('region', { name: 'A measurement is queued' })).toBeInTheDocument())
     const banner = screen.getByRole('region', { name: 'A measurement is queued' })
-    expect(banner).toHaveTextContent('A measurement is waiting for a worker; nothing has been graded yet.')
+    // the reclaimed run still carries done: 3 — the banner says those were graded, without an attempt-in-hand number
+    expect(banner).toHaveTextContent('A measurement is waiting for a worker — 3 attempt(s) were graded before it went back to the queue.')
     expect(banner).not.toHaveTextContent(/attempt \d/)
     expect(banner).not.toHaveTextContent('spent so far')
     expect(within(banner).getByRole('link', { name: 'Open the run' })).toHaveAttribute('href', '/runs/run1')

@@ -96,10 +96,13 @@ Behind `CRB_BUILDER__EXECUTOR=docker` (`crb.builders.container`, wired through
    or the budget's wall clock — killing the client alone would leave the container running.
    `docker kill` returns when the signal is sent, not when the daemon stops listing the
    container, so the kill is **confirmed** (2026-09-21): `DockerStream.kill()` polls
-   `docker inspect -f {{.State.Running}}` (≤ 10 s, 100 ms steps; a removed `--rm`
-   container is gone) and `lines()` waits for that poll, recording `kill_confirmed` and
-   warning when the bound is hit — "cancelled" means the container is not running.
-   [measured]
+   `docker inspect -f {{.State.Running}}` (up to 10 s after the kill, 100 ms steps; a
+   removed `--rm` container is gone) and `lines()` waits for that poll, recording
+   `kill_confirmed` and warning when the bound is hit. "Cancelled" therefore means the
+   container was confirmed stopped, or the confirmation timed out and the pack says so
+   (`kill_confirmed: false`); the wait is bounded by the command's timeout plus 10 s.
+   [measured — tests/test_execution.py: confirmed, bounded, and gone cases against a
+   scripted docker; tests/test_builders_container_docker.py under colima, n = 4 runs]
 8. **The post-hoc guards stay on as belt-and-braces**, not as the wall: the shell guard,
    the CLI deny rules and the tamper check still run (container paths are translated to
    the host copy so path verification keeps working); a violation is still recorded

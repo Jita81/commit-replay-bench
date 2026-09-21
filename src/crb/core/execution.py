@@ -755,9 +755,10 @@ class DockerStream:
             self._kill_confirmed = self._wait_stopped()
 
     def _confirm_stopped(self) -> None:
-        """Block until any in-flight :meth:`kill` has finished its confirmation, and
-        confirm ourselves if none recorded one (the reader saw EOF from ``docker
-        kill`` alone before the killer took the lock)."""
+        """Block until any in-flight :meth:`kill` has finished its confirmation (it
+        holds ``_kill_lock`` for its whole body), and confirm ourselves if none was
+        recorded — the deadline or cancel flag was set but the reader reached EOF
+        before :meth:`kill` ran, e.g. the container exited on its own at that moment."""
         with self._kill_lock:
             if self._kill_confirmed is None:
                 self._kill_confirmed = self._wait_stopped()

@@ -148,7 +148,7 @@ export function ResultsPage() {
             <NotificationBanner title={replayQueued ? 'A measurement is queued' : 'A measurement is running'}>
               <p className="m-0">
                 {replayQueued
-                  ? 'A measurement is waiting for a worker; nothing has been graded yet.'
+                  ? `A measurement is waiting for a worker${(run.data?.progress?.done ?? 0) > 0 ? ` — ${run.data?.progress?.done} attempt(s) were graded before it went back to the queue` : '; nothing has been graded yet'}.`
                   : `A measurement is running${replayProgress ? `: attempt ${replayProgress}, $${(run.data?.cost_usd ?? 0).toFixed(2)} spent so far` : ''}.`}{' '}
                 The numbers on this page change as each attempt is graded.{' '}
                 <Link to={`/runs/${encodeURIComponent(activeReplayId)}`}>Open the run</Link>
