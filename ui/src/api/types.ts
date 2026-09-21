@@ -1251,9 +1251,11 @@ export interface User {
   email: string
   role: Role
   issuer: string
-  active?: boolean
+  /** Served by every current API; a deactivated account cannot sign in (F23). */
+  active: boolean
   created: string
-  last_login?: string
+  /** ISO time of the last successful sign-in; empty before the first (UserOut serves a string). */
+  last_login: string
 }
 
 /** `POST /users` body — a local account; the password never comes back. */

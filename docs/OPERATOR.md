@@ -24,7 +24,8 @@ Contents: [1 Install](#1-install) · [1.1 Check the installation](#11-check-the-
 [2 Configure a repository](#2-configure-a-repository) ·
 [3 Run a sweep](#3-run-a-sweep) · [4 Read the capability map](#4-read-the-capability-map) ·
 [5 Sign off](#5-sign-off) · [6 Export the ledger](#6-export-and-verify-the-ledger) ·
-[7 When the sandbox is unavailable](#7-when-the-sandbox-is-unavailable) · [8 Stop conditions](#8-stop-conditions)
+[7 When the sandbox is unavailable](#7-when-the-sandbox-is-unavailable) · [8 Stop conditions](#8-stop-conditions) ·
+[9 Users](#9-users)
 
 ---
 
@@ -674,3 +675,47 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 
 Resume only after root cause, correction, a targeted regression run and re-qualification
 of the affected cells.
+
+## 9. Users
+
+An admin manages accounts through the API (`/users`, [API.md](API.md#admin): create, role,
+password, active; the Settings screen lists accounts and changes roles), and — when no
+admin can sign in — with `crb users` on the API host. The host
+verbs need no login: access to the host and the database is the credential. They read the
+database `crb serve` reads (`--database-url` → `CRB_DATABASE_URL` → `$CRB_HOME/crb.db`),
+so run them with the service's environment (the same `CRB_DATABASE_URL`; on a host, source
+the unit's `EnvironmentFile` first; in the container, `kubectl exec` into the API pod). A
+verb that resolves a database the server does not use — no file at the SQLite path, or no
+`users` table — refuses, names the database it resolved, and creates nothing.
+
+```
+crb users list                       # username, role, active, issuer, last login
+crb users create <name> --role admin # password from a prompt or CRB_USERS_PASSWORD_FILE
+crb users set-password <name>        # its sessions end on their next request
+crb users deactivate <name>          # refused for the last active admin (last_admin)
+crb users activate <name>            # restores sessions issued before the deactivation
+```
+
+**Forgot the admin password?** On the API host: `crb users set-password admin` (the
+bootstrap username, or whichever `crb users list` shows as an active admin), type the new
+password at the prompt, sign in. **Locked out with no admin at all** (every admin
+deactivated by mistake): `crb users activate <name>` or `crb users create <name> --role
+admin`. There is no need to empty the `users` table again.
+
+A password is never a command-line argument (shell history, `ps`): the verbs prompt, or
+read the first line of the file `CRB_USERS_PASSWORD_FILE` names when there is no terminal
+(a deployment script; delete the file afterwards). Passwords are ≥ 12 characters and are
+stored as argon2id hashes only. An account that signs in through the organisation's
+identity provider has no local password; disable it there.
+
+Every change — by the API or the CLI — is one `system` event on the account's trace
+(`user.created`, `user.role_set`, `user.password_set`, `user.activated`,
+`user.deactivated`) with the actor (the admin's user id, or `cli:<os user>`) and the
+target; never the password. Setting a password ends the account's sessions on their next
+request (the cookie is bound to the credential it was issued under —
+[SECURITY.md §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
+Deactivating refuses every request while the account is inactive, but does not move that
+credential: re-activating within the session lifetime (`CRB_SESSION_TTL`, 8 hours by
+default) restores the sessions issued before. To contain a suspected compromise, deactivate
+**and** set a new password; the password is what ends the sessions for good. The last
+active admin can never be deactivated, by either door.

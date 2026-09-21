@@ -466,7 +466,12 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
 - [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0`; the last `row_hash`
       (`SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1`) is recorded out of band.
 - [ ] OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the
-      bootstrap admin password has been rotated or the account disabled.
+      bootstrap admin password has been rotated (`PUT /users/{id}/password`, or
+      `crb users set-password <admin>` on the API host) or the account deactivated
+      (`PUT /users/{id}/active {"active": false}` / `crb users deactivate <admin>` —
+      possible once another active admin exists, for example the first OIDC sign-in
+      from an `CRB_OIDC__ADMIN_GROUPS` member); `CRB_BOOTSTRAP_ADMIN__*` unset
+      ([OPERATOR.md §9](OPERATOR.md#9-users)).
 - [ ] Egress test from a worker pod fails to any public address.
 - [ ] `crb repo probe <repo>` is green inside the sandbox for every configured repository.
 - [ ] Backups: PITR enabled; a restore has been rehearsed and verified against the chain.

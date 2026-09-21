@@ -16,7 +16,13 @@ in parallel, so changes here are changes to both.
   Mutating requests must carry `X-CSRF-Token` equal to the `crb_csrf` cookie.
 - **Roles** (ascending): `viewer` (read everything), `operator` (+ create/cancel runs,
   add/probe repos, mine), `approver` (+ sign-offs), `admin` (+ users, settings).
-  A route lists its minimum role. 401 = not logged in, 403 = insufficient role.
+  A route lists its minimum role. 401 = not logged in (`unauthenticated`, `session_expired`,
+  `session_revoked` — the account's password changed after the cookie was issued, which is
+  what ends a session for good, or `unauthenticated` with "account unknown or disabled" —
+  the account is deactivated: every request is refused while it is inactive, but the session
+  is not revoked, so requests resume with the same cookie once an admin re-activates the
+  account within the session lifetime, `CRB_SESSION_TTL`; see OPERATOR.md §9 and
+  SECURITY.md), 403 = insufficient role.
 - **Errors**: `{"error": {"code": "<snake_case>", "message": "...", "detail": {...}}}`.
   `409 false_q1_refused` is reserved for sign-off refusals and ledger invariant
   violations; `503 sandbox_unavailable` for fail-closed sandbox stops.
@@ -174,8 +180,11 @@ Not yet: a model-backed test author (an item without an authored oracle ends `no
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET/POST | `/users` | admin | list / create local user; each `{id, subject, username, issuer, email, display_name, role, active, created, last_login}` — `username` is what a local account types at login (`subject` without its `local:` namespace; an OIDC account's provider subject) |
-| PUT | `/users/{id}/role` | admin | change role |
+| GET/POST | `/users` | admin | list / create local user; each `{id, subject, username, issuer, email, display_name, role, active, created, last_login}` — `username` is what a local account types at login (`subject` without its `local:` namespace; an OIDC account's provider subject); `active: false` is an account that cannot sign in; `last_login` is `""` until the first sign-in. Create writes a `user.created` event |
+| PUT | `/users/{id}/role` | admin | body `{role, active?}` — change role (and, optionally, the active flag); **409 `last_admin`** when it would leave no active admin. Writes `user.role_set` / `user.activated` / `user.deactivated` |
+| PUT | `/users/{id}/password` | admin | body `{password}` (≥ 12 characters) — set a local account's password. Every session that account holds ends on its next request (**401 `session_revoked`**: the cookie is bound to the credential it was issued under); when an admin sets their own, this response re-issues their cookie. **409 `not_local`** for an OIDC account (its password is the identity provider's); 404 unknown id; 422 too short. Writes `user.password_set` (`by: admin`) with actor and target ids — never the password |
+| PUT | `/users/me/password` | any | body `{current_password, new_password}` — change your own password. **401 `invalid_credentials`** when the current one does not verify (the session stays; five failures per minute per username + IP trip the login limiter, **429 `rate_limited`** with `Retry-After`); the response carries a fresh session + CSRF cookie so this browser stays signed in while every other session of the account ends; **409 `not_local`** for an OIDC account. Writes `user.password_set` (`by: self`) |
+| PUT | `/users/{id}/active` | admin | body `{active: bool}` — deactivate (the account is refused on its very next request and cannot sign in while inactive; re-activating within `session_ttl` restores the sessions issued before — set a password as well to end them for good) or reactivate; **409 `last_admin`** when it would leave no active admin (decided under the users lock on a re-read row, so a concurrent role change cannot slip past it); idempotent. Writes `user.deactivated` / `user.activated`. The same actions run on the host without a login as `crb users deactivate | activate | set-password` (actor `cli:<os user>`, [OPERATOR.md §9](OPERATOR.md#9-users)) |
 | GET | `/settings` | admin | non-secret settings (builders configured: yes/no, sandbox mode, retention) |
 | GET | `/settings/secrets` | viewer | `{items, secrets_dir}` — statuses of the operator-supplied secrets, never values. `items` is a homogeneous list: for operators and above `[SecretStatus]` (`{name, present, fingerprint, set_at, set_by}`); for a **viewer** `[SecretPresence]` — exactly `{name, present}`, no other keys. `secrets_dir` (the on-host path) is `""` unless the caller is an admin |
 | PUT | `/settings/secrets/claude-code-token` | admin | body `{token}` (a `claude setup-token` value: `sk-ant-oat01-…`, 40–512 chars, `[A-Za-z0-9_-]`); stores it owner-only under `CRB_SECRETS_DIR` / `$CRB_HOME/secrets`; returns the `SecretStatus`; `422 invalid_token` on shape, `409 secrets_insecure` when the directory is group/world accessible |

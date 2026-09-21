@@ -167,6 +167,22 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   `CRB_ENV=dev`; the secret key is mandatory in production. CSRF is double-submit
   (`crb_csrf` cookie + `X-CSRF-Token` header) on every unsafe method. [measured]
   `tests/test_server_auth.py`
+- **Sessions end on a password change and on deactivation.** The cookie carries the
+  credential version it was issued under (a fingerprint of the account's argon2 hash);
+  setting a password re-salts the hash, so every session of that account answers
+  `401 session_revoked` on its next request — no server-side session table to keep or
+  leak. A deactivated account is refused on its very next request and for as long as it
+  is inactive; the active flag is not part of the version, so re-activating within
+  `session_ttl` restores the sessions issued before — containing a compromised account
+  means deactivating **and** setting a new password. A self-service change
+  (`PUT /users/me/password`) requires the current password — a borrowed session cannot
+  change it — and re-issues the cookie only to the browser that made the change. The
+  break-glass path (`crb users set-password | deactivate` on the host, where database
+  access is the credential) goes through the same primitives and writes the same
+  `user.*` events with actor `cli:<os user>`; a password never enters an event, a log
+  line, stdout or argv (prompt or `CRB_USERS_PASSWORD_FILE`). The last active admin can
+  never be deactivated (`409 last_admin`), by either door. [measured]
+  `tests/test_server_admin_users.py`, `tests/test_cli_users.py`
 
 #### 3.3.1 Secrets at rest — `crb.core.secrets_file`, `crb.server.secrets`
 
@@ -243,6 +259,14 @@ a ticket or a shell history again (review 2026-09-13, action #9).
 - Local accounts (argon2id, constant-time compare, per-user+IP rate limit) exist for
   bootstrap and air-gapped installs; disable with `CRB_LOCAL_AUTH_ENABLED=false` once OIDC
   works. [measured]
+- Account lifecycle: an admin sets a password or the active flag (`PUT /users/{id}/password`,
+  `PUT /users/{id}/active`); a person changes their own with the current password
+  (`PUT /users/me/password`); on the host, `crb users` does the same without a login
+  (break-glass — database access is the credential). One implementation behind both
+  (`set_password`, `set_user_active`): ≥ 12 characters, argon2id, OIDC accounts refused
+  (`not_local`), the last active admin never deactivated (`last_admin`), every change an
+  audit event with actor and target, sessions ended by the change (§3.3). [measured]
+  `tests/test_server_admin_users.py`, `tests/test_cli_users.py`
 - Roles are an ascending ladder `viewer < operator < approver < admin`; every mutating route
   names its minimum role; `/health` and `/metrics` are unauthenticated and must be bound to
   an internal interface. [measured] RBAC matrix in `tests/test_server_app.py`
