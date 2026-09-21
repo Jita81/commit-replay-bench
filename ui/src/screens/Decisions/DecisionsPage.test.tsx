@@ -45,7 +45,7 @@ describe('DecisionsPage', () => {
       'GET /factory/beta/tasks': [{ id: 'I-1', title: 'Divide', capability_class: 'bug.fix', size: 'S', kind: 'code', status: 'blocked', dor_gaps: ['method_path'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked' }],
     })
     renderApp(<DecisionsPage />, { route: '/decisions' })
-    await waitFor(() => expect(screen.getByText('3 waiting')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('3 waiting across 2 repositories')).toBeInTheDocument())
     expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument()
     expect(screen.getByRole('list', { name: 'Decisions for beta' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Attest' })).toHaveAttribute('href', '/signoff?repo=alpha&cell=bug.fix%7CXS')
@@ -108,7 +108,8 @@ describe('DecisionsPage', () => {
       'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
     })
     renderApp(<DecisionsPage />, { route: '/decisions' })
-    await waitFor(() => expect(screen.getAllByText('1 waiting')).toHaveLength(2)) // the pill AND the card eyebrow
+    await waitFor(() => expect(screen.getByText('1 waiting across 1 repository')).toBeInTheDocument()) // the pill names the spread; the card eyebrow carries the repository's own count
+    expect(screen.getByText('1 waiting')).toBeInTheDocument()
     expect(screen.getByTestId('decisions-count')).toHaveAttribute('data-ready', 'true') // the e2e sweep's readiness anchor
     expect(screen.getByRole('link', { name: 'Read' })).toBeInTheDocument()
     expect(screen.getByText('approver acts')).toBeInTheDocument()

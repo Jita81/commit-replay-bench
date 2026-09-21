@@ -72,6 +72,7 @@ export function DecisionsPage() {
   const apparatus = useApparatus()
   const total = d.decisions.length + d.stale.length
   const repos = Object.keys(d.byRepo)
+  const withRows = repos.filter((r) => (d.byRepo[r] ?? []).length > 0).length
 
   return (
     <>
@@ -92,8 +93,9 @@ export function DecisionsPage() {
       </Lede>
       {/* the page-level readiness marker the walkthrough's axe sweep waits on: true only when every repository's queries settled */}
       <div className="mb-6" data-testid="decisions-count" data-ready={d.ready ? 'true' : 'false'}>
+        {/* the count across repositories: each card's eyebrow carries its own, so the pill names the spread rather than repeating one card's number */}
         <Pill tone={total > 0 ? 'primary' : 'green'} size="sm" label={`${total} decisions waiting`}>
-          {d.ready ? `${total} waiting` : 'counting…'}
+          {d.ready ? `${total} waiting${withRows > 0 ? ` across ${withRows} ${withRows === 1 ? 'repository' : 'repositories'}` : ''}` : 'counting…'}
         </Pill>
       </div>
       {d.errors.map((e) => (

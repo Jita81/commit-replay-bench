@@ -1062,14 +1062,25 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     assert s.home == tmp_path / "h" and s.executor == "docker"
     assert s.docker is not None and s.docker.image == "img:1" and s.worker_id == "env-w"
     # J-TEL-1: the worker's own /metrics port — CRB_METRICS_PORT (default 9464; 0 = off),
-    # gated by the same CRB_METRICS_ENABLED the API reads
+    # gated by the same CRB_METRICS_ENABLED the API reads; the bind is loopback unless the
+    # deployment says otherwise (the series name repositories, builders and installations)
     assert s.metrics_enabled is True and s.metrics_port == 9464
+    assert s.metrics_host == "127.0.0.1"
     s_off = worker_main.settings_from_args(
         args, {**env, "CRB_METRICS_PORT": "0", "CRB_METRICS_ENABLED": "false"}
     )
     assert s_off.metrics_port == 0 and s_off.metrics_enabled is False
     with pytest.raises(ValueError, match="CRB_METRICS_PORT"):
         worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "70000"})
+    s_all = worker_main.settings_from_args(args, {**env, "CRB_METRICS_HOST": "0.0.0.0"})
+    assert s_all.metrics_host == "0.0.0.0"
+    flag = parser.parse_args(["--once", "--metrics-host", "10.0.0.5"])
+    assert (
+        worker_main.settings_from_args(flag, {**env, "CRB_METRICS_HOST": "0.0.0.0"}).metrics_host
+        == "10.0.0.5"
+    )
+    with pytest.raises(ValueError, match="CRB_METRICS_HOST"):
+        worker_main.settings_from_args(args, {**env, "CRB_METRICS_HOST": "  "})
     args = parser.parse_args(
         ["--home", str(tmp_path / "flag"), "--executor", "local", "--kinds", "mine, probe"]
     )
@@ -1249,6 +1260,9 @@ def test_github_settings_read_only_their_own_keys_and_refuse_a_malformed_one(
     gh = shared.github
     assert gh.app_id == "12345" and gh.app_slug == "crb-bench"
     assert shared.metrics_enabled is True and shared.metrics_port == 9464
+    assert shared.metrics_host == "127.0.0.1"
+    monkeypatch.setenv("CRB_METRICS_HOST", "0.0.0.0")
+    assert worker_main._shared_settings().metrics_host == "0.0.0.0"
     monkeypatch.setenv("CRB_GITHUB__API_URL", "ftp://not-https")
     with pytest.raises(pydantic.ValidationError):
         worker_main._shared_settings()

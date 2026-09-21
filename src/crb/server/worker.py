@@ -95,10 +95,10 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               reads), src/crb/observability/metrics.py (the recorders, ``record_event`` on
               the emitter's metering sink, ``crb_queue_depth`` on check-in),
               src/crb/core/run.py (a replay's task loop), src/crb/builders/adapter.py (the
-              build function, ladder, pre-flight), src/crb/core/mine.py (mining),
-              src/crb/core/oracle/mutation.py (oracle scores), src/crb/core/oracle/controls.py
-              (negative controls), src/crb/factory/loop.py (forward mode),
-              src/crb/server/factory_state.py (the factory's files), src/crb/store/ledger.py
+              build function, ladder, pre-flight), src/crb/core/mine.py (mining; the oracle
+              and controls kinds call their core modules the same way),
+              src/crb/factory/loop.py (forward mode — its files live in
+              src/crb/server/factory_state.py)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
               tests/test_worker_clone.py, tests/test_store_jobs.py,
               tests/test_observability_metrics.py
@@ -352,10 +352,12 @@ class WorkerSettings:
     max_reclaims: int = 3
     #: The worker's own Prometheus exposition (J-TEL-1): every build / grade / cost series
     #: is recorded in THIS process, so the API's ``/metrics`` never carries them. Served by
-    #: ``prometheus_client.start_http_server`` on ``metrics_port`` (``CRB_METRICS_PORT``,
-    #: default 9464; ``0`` = off) when ``metrics_enabled`` (``CRB_METRICS_ENABLED``, the
-    #: same switch the API reads) and the client is installed.
+    #: ``prometheus_client.start_http_server`` on ``metrics_host:metrics_port``
+    #: (``CRB_METRICS_HOST``, default loopback like the API's bind — a container sets
+    #: ``0.0.0.0``; ``CRB_METRICS_PORT``, default 9464; ``0`` = off) when ``metrics_enabled``
+    #: (``CRB_METRICS_ENABLED``, the same switch the API reads) and the client is installed.
     metrics_enabled: bool = True
+    metrics_host: str = "127.0.0.1"
     metrics_port: int = 9464
     #: The GitHub App this deployment is registered as (``CRB_GITHUB__*``): the worker
     #: mints installation tokens to clone and deliver linked repositories (ADR-0014).
@@ -369,6 +371,8 @@ class WorkerSettings:
             raise ValueError("poll_s, heartbeat_s and stale_after_s must be positive")
         if not 0 <= int(self.metrics_port) <= 65535:
             raise ValueError("CRB_METRICS_PORT must be 0 (off) or a port 1-65535")
+        if not str(self.metrics_host).strip():
+            raise ValueError("CRB_METRICS_HOST must name an address to bind (127.0.0.1, 0.0.0.0)")
 
 
 # ---------------------------------------------------------------------------

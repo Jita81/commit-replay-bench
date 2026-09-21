@@ -95,8 +95,8 @@ export const HELP: ScreenHelp[] = [
     route: '/connect/:name',
     purpose: 'The six stages that take one repository from registered to measured. Each stage says what it proves and whether it spends money; the first five involve no model.',
     next: {
-      viewer: 'Read each stage’s status. The Results button opens the baseline once any stage has produced rows.',
-      operator: 'Run the next stage that reads Incomplete. A Failed stage shows its first error line; open the run for the full log, fix the cause, then Retry. Measure is the only stage that spends.',
+      viewer: 'Read each stage’s status and detail line. The Baseline button opens the baseline once any stage has produced rows; a stage that reads Done, with a finding names what deliver is waiting on.',
+      operator: 'Press Run on the next stage that reads Not started. A Failed stage shows its first error line; open run gives the full log, fix the cause, then Retry. Measure… is the only stage that spends.',
     },
     numbers: 'Stage detail lines carry counts (tasks mined, controls constructed, mutants killed). They are counts, not rates: the rates, with n and a Wilson interval, appear on the Baseline.',
     terms: ['negative_controls', 'oracle_strength', 'sighted', 'wilson', 'apparatus'],
@@ -126,8 +126,8 @@ export const HELP: ScreenHelp[] = [
     purpose: 'Everything that is waiting on a person, across every repository. A cell the policy would refuse anyway is never listed; it stays on the map with its reason.',
     next: {
       viewer: 'Read why each row is here; the evidence line names the cell, n, interval and reason code.',
-      operator: 'Rows marked “approver acts” are not yours. Sign a gap and Decide rows on factory items are.',
-      approver: 'Attest opens the sign-off form with the cell chosen. Decline by doing nothing: an unsigned cell keeps its route.',
+      operator: 'Rows marked “approver acts” are not yours — a Sign a gap row needs an approver. Decide and Review rows on factory items are yours; Read opens the rest.',
+      approver: 'Attest opens the sign-off form with the cell chosen; Sign a gap opens the item on the Factory. Decline by doing nothing: an unsigned cell keeps its route.',
     },
     numbers: 'n on a row is the attempts in that cell; the bracket is its 95 % Wilson interval; the code after it is the routing reason. A stale row was signed under an earlier apparatus and licenses nothing until re-signed.',
     terms: ['cell', 'wilson', 'reason_code', 'signoff', 'stale', 'apparatus'],
@@ -200,7 +200,7 @@ export const HELP: ScreenHelp[] = [
     purpose: 'Every run the worker has executed or queued: mine, replay, blind, oracle, controls and factory. A run’s rows are what the ledger and the map are made of.',
     next: {
       viewer: 'Open a run to read its progress and the evidence pack of any row.',
-      operator: 'Start a run with New run, or open one to watch its live log and cancel it. The kind’s hint says what it produces and whether it spends.',
+      operator: 'Press Start a run, or open one to watch its live log and cancel it. The kind’s hint says what it produces and whether it spends.',
     },
     numbers: 'Progress counts are tasks attempted of tasks planned. Cost is builder-reported and summed; it is not an estimate.',
     terms: ['sighted', 'blind', 'negative_controls', 'oracle_strength', 'evidence_pack'],

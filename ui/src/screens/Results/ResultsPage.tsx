@@ -27,13 +27,12 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Results/MapTable.tsx (the grid; `canSign`),
- *               ui/src/screens/Decisions/decisions.ts and
- *               ui/src/screens/Decisions/DecisionsPage.tsx (the rows and the role rule reused
+ *               ui/src/screens/Decisions/decisions.ts (the rows and the role rule reused
  *               here), ui/src/components/RepoPicker.tsx (`defaultToLatest`),
  *               ui/src/components/StatTile.tsx (the tile anatomy), ui/src/components/Help.tsx
  *               (`Term` on the route tiles), ui/src/screens/Capability/CapabilityPage.tsx
  *               (the full grid), ui/src/screens/Connect/ConnectPage.tsx (the walk that leads
- *               here), docs/EVIDENCE-AND-CLAIMS.md
+ *               here), docs/EVIDENCE-AND-CLAIMS.md (what a number may be said to mean)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx
  * Touch when:   a headline fact is added to the map summary; the wording of what `deliver`
  *               means changes (EVIDENCE-AND-CLAIMS §6 first).

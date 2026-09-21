@@ -24,7 +24,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ControlsReport, OracleReport, RepoSummary, Run } from '../../api/types'
-import { elapsed, nameFromGitUrl, runningDetail, stageSummary, stagesFor } from './connection'
+import { controlsFinding, nameFromGitUrl, runningDetail, stageComplete, stageSummary, stagesFor } from './connection'
 
 function repo(over: Partial<RepoSummary> = {}): RepoSummary {
   return {
@@ -71,6 +71,7 @@ describe('stagesFor', () => {
     expect(s[2]?.detail).toBe('12 tasks (10 gold-clean, 1 gold-failed, 1 unchecked)')
     expect(s[3]?.detail).toBe('2 tasks scored')
     expect(s[4]?.detail).toBe('passed · 42 rows · 0 violations · 0 escapes · 6 not constructible')
+    expect(s[4]?.status).toBe('done')
     expect(s[5]?.detail).toBe('22 rows on the current apparatus')
     expect(stageSummary(s)).toEqual({ label: 'measured', status: 'done' })
   })
@@ -79,8 +80,25 @@ describe('stagesFor', () => {
     const r = repo({ probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: '' }, task_counts: { total: 5, standard: 5, hard: 0, gold_clean: 5, gold_failed: 0, unchecked: 0 } })
     const s = stagesFor({ repo: r, oracle: ORACLE, controls: CONTROLS_BAD })
     expect(s[4]).toMatchObject({ status: 'failed' })
-    expect(s[4]?.detail).toContain('FAILED · 42 rows · 3 violations · 1 escapes')
+    expect(s[4]?.detail).toContain('FAILED · 42 rows · 3 violations · 1 escape ·')
     expect(s[5]?.status).toBe('blocked')
+  })
+
+  it('a passed controls report with an escape or a thin set is "warn": the walk goes on, the finding is named, deliver is withheld (the server’s passed = no violation only)', () => {
+    const escaped = { passed: true, n_rows: 7, violations: 0, escapes: 1, not_constructible: 1 } as unknown as ControlsReport
+    const s = stagesFor({ repo: MEASURED, oracle: ORACLE, controls: escaped, measuredRows: 0 })
+    expect(s[4]?.status).toBe('warn')
+    expect(s[4]?.detail).toBe('passed with 1 escape — deliver is withheld until the tests are hardened and the controls re-run · 7 rows · 0 violations · 1 escape · 1 not constructible')
+    expect(stageComplete('warn')).toBe(true)
+    // the next stage unlocks: measuring is still allowed, delivering is not
+    expect(s[5]?.status).toBe('todo')
+    expect(stageSummary(s)).toEqual({ label: 'first measurement', status: 'todo' })
+    const thin = { passed: true, n_rows: 10, violations: 0, escapes: 0, not_constructible: 6, verdict: { state: 'thin', constructible: 4, total: 10, escapes: 0 } } as unknown as ControlsReport
+    expect(controlsFinding(thin)).toBe('too few controls constructible (4 of 10) — the cell routes calibrate until more can be built')
+    expect(controlsFinding(CONTROLS_OK)).toBeNull()
+    // a fully measured walk that still carries a finding summarises as warn, never a plain done
+    const measured = stagesFor({ repo: MEASURED, oracle: ORACLE, controls: escaped, measuredRows: 31 })
+    expect(stageSummary(measured)).toEqual({ label: 'measured', status: 'warn' })
   })
 
   it('a null oracle/controls (404 = never run) is todo once the earlier stages are done', () => {
@@ -188,10 +206,9 @@ describe('runningDetail — the live line from the polled run (J-TEL-6)', () => 
     expect(q[5]?.detail).toBe('Queued — 2 runs ahead of it (54 rows already on the current apparatus)')
   })
 
-  it('elapsed rounds to seconds, minutes, then hours', () => {
-    expect(elapsed('2026-09-19T10:00:20Z', NOW)).toBe('40 s ago')
-    expect(elapsed('2026-09-19T09:58:00Z', NOW)).toBe('3 min ago')
-    expect(elapsed('2026-09-19T08:00:00Z', NOW)).toBe('2 h ago')
+  it('the started-at age is the shared formatter (ui/src/lib/format.ts fmtAgo): the walk and the run page agree', () => {
+    expect(runningDetail('probe', run({ kind: 'probe', started: '2026-09-19T09:58:00Z' }), { now: NOW })).toContain('(started 3 min ago)')
+    expect(runningDetail('probe', run({ kind: 'probe', started: '2026-09-19T07:55:00Z' }), { now: NOW })).toContain('(started 2 h 6 min ago)')
   })
 })
 

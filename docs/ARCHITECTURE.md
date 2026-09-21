@@ -390,7 +390,7 @@ non-zero value is a stop condition) at `/metrics`; the **worker** serves
 `crb_builder_cost_usd_total{repo, builder, model}`, `crb_grade_latency_seconds{runner}`,
 `crb_build_latency_seconds{builder}`, `crb_sandbox_unavailable_total`,
 `crb_deliveries_total{repo, outcome}`, `crb_github_tokens_minted_total{installation}` and
-`crb_queue_depth` on its own port (`CRB_METRICS_PORT`, default 9464). The table with
+`crb_queue_depth` on its own listener (`CRB_METRICS_HOST:CRB_METRICS_PORT`, default `127.0.0.1:9464` — loopback unless the container opts in, because the series name repositories, builders and installations). The table with
 meanings, the scrape targets per deployment shape and the alert rules are
 [DEPLOYMENT.md §9](DEPLOYMENT.md#9-observability). JSON logs pass through the same
 redaction as evidence packs (message, arguments, extras and tracebacks). `/health` runs

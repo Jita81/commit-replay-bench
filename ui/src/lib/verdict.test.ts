@@ -9,46 +9,43 @@
  *               failed, a cheat graded clean), that deliver and the strong band say "a branch
  *               and pull request under review" and never "auto-ship" / "merge"-as-licensed,
  *               that the gate labels are "Clears the bar" / "Review-gated" / "Needs a human",
- *               and that `actionHelp` returns one sentence for every action in the event
- *               vocabulary (grouped by stage) with a generic sentence for an unknown one.
- * How:          Plain assertions over the exported lookups.
+ *               and that `actionHelp` returns one sentence for every action in
+ *               docs/API.md#event-vocabulary (read from the doc, the way
+ *               tests/test_event_vocabulary.py reads it) and none for an action nothing
+ *               emits, with a generic sentence for an unknown one.
+ * How:          Plain assertions over the exported lookups; the doc as `?raw` text.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/src/lib/verdict.ts, ui/src/components/LiveLog.tsx (renders `actionHelp`)
+ * Works with:   ui/src/lib/verdict.ts, ui/src/components/LiveLog.tsx (renders `actionHelp`),
+ *               docs/API.md (the vocabulary table), tests/test_event_vocabulary.py (the
+ *               server-side half of the same ratchet)
  * Tested by:    ui/src/lib/verdict.test.ts
  * Touch when:   a route, band, gate or event action is added on the server.
  */
 import { describe, expect, it } from 'vitest'
+import apiDoc from '../../../docs/API.md?raw'
 import { ACTION_HELP, actionHelp, bandDisplay, gateDisplay, routeDisplay } from './verdict'
 
-/** The vocabulary (scratch: journeys/telemetry-vocabulary.md), stage by stage. */
-const VOCABULARY = [
-  // system
-  'run.claimed', 'run.executor', 'run.error', 'run.finish_refused', 'run.finished', 'run.outage_stop', 'run.skip', 'run.start', 'run.done',
-  'run.cancel_requested', 'run.reclaimed', 'run.abandoned', 'repo.clone.start', 'repo.clone.done', 'probe.start', 'probe.done',
-  // prep
-  'setup.auto', 'setup.start', 'setup.step', 'setup.done', 'prep.start',
-  // mine
-  'mine.candidate', 'mine.red', 'mine.skip', 'mine.gold', 'mine.done', 'mine.task', 'mine.cancelled', 'label.task',
-  // build
-  'build.start', 'build.done', 'build.attempt', 'build.applied', 'build.turn', 'build.tool', 'build.event',
-  'preflight.fixed', 'preflight.repaired', 'preflight.rejected', 'preflight.error',
-  // grade
-  'grade.belt', 'grade.tamper', 'grade.malformed_oracle', 'grade.error',
-  // ledger
-  'ledger.append', 'ledger.pack_missing', 'ledger.pack_store_error',
-  // oracle
-  'oracle.mutation.mutant', 'oracle.mutation.scored', 'oracle.mutation.uncompilable', 'oracle.mutation.unscoreable', 'oracle.mutation.error', 'oracle.score',
-  'controls.control', 'controls.row', 'controls.skip', 'controls.error', 'controls.done', 'controls.report',
-  // factory
-  'item.start', 'item.done', 'item.error', 'item.blocked', 'item.outcome', 'readiness.assessed', 'readiness.refused', 'route.decided',
-  'author.start', 'author.done', 'red.start', 'red.proved', 'red.refused', 'build.oracle_staged', 'build.graded',
-  'delivery.skipped', 'delivery.withheld', 'delivery.override', 'delivery.error', 'delivery.opened', 'delivery.refused',
-  'review.start', 'review.probe', 'review.verdict', 'review.recorded', 'rework.start', 'horizon.checkpoint',
-  'backlog.frozen', 'backlog.evolved', 'gap.signoff', 'edit.permitted',
-  // audit traces
-  'repo.created', 'repo.updated', 'repo.github_linked', 'github.installation.recorded', 'signoff.created', 'signoff.refused', 'signoff.revoked', 'review.created', 'review.refused',
-]
+/**
+ * The vocabulary is docs/API.md#event-vocabulary — the table tests/test_event_vocabulary.py
+ * keeps equal to what src/crb emits — read the way that test reads it (the second cell of
+ * every six-cell row), so the UI's sentences cannot drift from the server's actions.
+ */
+function documentedActions(): string[] {
+  const section = /^## Event vocabulary\n([\s\S]*?)(?=^## )/m.exec(apiDoc)?.[1] ?? ''
+  const out = new Set<string>()
+  for (const line of section.split('\n')) {
+    const cells = line
+      .trim()
+      .replace(/^\||\|$/g, '')
+      .split(/(?<!\\)\|/)
+      .map((c) => c.trim())
+    if (cells.length !== 6 || cells[0] === 'stage' || cells[0] === '---') continue
+    for (const m of cells[1]!.matchAll(/`([a-z_]+(?:\.[a-z_]+)+)`/g)) out.add(m[1]!)
+  }
+  return Array.from(out).sort()
+}
+const VOCABULARY = documentedActions()
 
 describe('route, band and gate copy', () => {
   it('the human route names every cause the rule has', () => {
@@ -85,14 +82,29 @@ describe('route, band and gate copy', () => {
 })
 
 describe('actionHelp', () => {
-  it('has one plain sentence for every action in the vocabulary', () => {
+  it('has one plain sentence for every action in docs/API.md#event-vocabulary, and no sentence for an action nothing emits', () => {
+    expect(VOCABULARY.length).toBeGreaterThan(90)
+    expect(VOCABULARY).toContain('run.claimed')
+    expect(VOCABULARY).toContain('builder.preflight.rejected')
     for (const a of VOCABULARY) {
-      const s = ACTION_HELP[a]
+      // a builder's own build.* event is written once, unprefixed; actionHelp strips the prefix
+      const s = ACTION_HELP[a] ?? (a.startsWith('builder.build.') ? ACTION_HELP[a.slice('builder.'.length)] : undefined)
       expect(s, `no ACTION_HELP for ${a}`).toBeDefined()
       expect(s, a).toMatch(/^[A-Z].*\.$/)
       expect(s, a).not.toMatch(/!/)
       expect(actionHelp(a)).toBe(s)
     }
+    const documented = new Set(VOCABULARY)
+    const ghosts = Object.keys(ACTION_HELP).filter((k) => !documented.has(k))
+    expect(ghosts, 'ACTION_HELP names actions the vocabulary table does not (nothing emits them)').toEqual([])
+  })
+
+  it('the belt-5 pre-flight and the sealed-container events are keyed as emitted — under the builder prefix', () => {
+    expect(actionHelp('builder.preflight.rejected')).toBe('The patch was rejected before grading; the payload names why.')
+    expect(actionHelp('builder.preflight.fixed')).toMatch(/fixed before grading/)
+    expect(actionHelp('builder.sealed')).toMatch(/sealed in a container/)
+    expect(ACTION_HELP['preflight.rejected']).toBeUndefined()
+    expect(actionHelp('builder.build.turn')).toBe('One builder turn (a model call and its tool calls).')
   })
 
   it('the three sentences the audit wrote are used verbatim', () => {

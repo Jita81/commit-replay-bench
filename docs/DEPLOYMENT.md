@@ -65,6 +65,7 @@ server and never appear in logs or `/settings`.
 | `CRB_GITHUB__APP_ID`, `__APP_SLUG`, `__PRIVATE_KEY` or `__PRIVATE_KEY_FILE`, `__API_URL`, `__WEB_URL` | for *Connect from GitHub* | the deployment's GitHub App (docs/GITHUB-APP.md); set on the **API and the worker**; the key from the secret store, never inline in a values file |
 | `CRB_SANDBOX__EXECUTOR` | | `docker` (default, fail-closed) or `local` (development) |
 | `CRB_METRICS_ENABLED` | api, worker | `true` (default). `false` → the api's `/metrics` answers 404 and the worker starts no exposition |
+| `CRB_METRICS_HOST` | worker | the address the worker's exposition binds (default `127.0.0.1`, like `CRB_BIND_HOST`: the series name repositories, builders and installations, so a bare `crb worker` on a host offers them to nobody else). Compose and Helm set `0.0.0.0` inside the container, where only the compose network / the NetworkPolicy's scraper can reach the port (§9.1) |
 | `CRB_METRICS_PORT` | worker | the worker's own Prometheus exposition port (default `9464`; `0` = off) — the build / grade / cost / delivery series live here, not on the api (§9) |
 | `CRB_LOG_FORMAT` / `CRB_LOG_LEVEL` | api, worker | `json` (default, one object per line) or `text`; `INFO` — every record is redacted before a handler sees it (§9) |
 | `CRB_WORKER_HEARTBEAT_STALE_S` | api | seconds after which a *running* run's heartbeat is reported stale by `/health` (default 120). Worker liveness itself is judged against each worker's own `heartbeat_s` (§9) |
@@ -378,9 +379,9 @@ series — every cost, run, belt and delivery counter reads as absent. Scrape bo
 
 | Shape | api | worker |
 |---|---|---|
-| compose | `http://api:8000/api/v1/metrics` (published on `127.0.0.1:8000`) | `http://worker:9464/metrics` — `expose`d on the compose network only, never published; `CRB_METRICS_PORT=0` switches it off |
-| Helm | Service `crb-api`, port `http`, path `/api/v1/metrics`; `serviceMonitor.enabled` | headless Service `crb-worker`, port `metrics` (one target per worker pod); `serviceMonitor.worker.enabled`; `worker.metrics.port` (0 = off); the NetworkPolicy admits `networkPolicy.metricsIngress` peers to that port only |
-| one process (`crb serve` + `crb worker` on a host) | `/api/v1/metrics` | `:9464/metrics` |
+| compose | `http://api:8000/api/v1/metrics` (published on `127.0.0.1:8000`) | `http://worker:9464/metrics` — the container sets `CRB_METRICS_HOST=0.0.0.0` and the port is `expose`d on the compose network only, never published; `CRB_METRICS_PORT=0` switches it off |
+| Helm | Service `crb-api`, port `http`, path `/api/v1/metrics`; `serviceMonitor.enabled` | headless Service `crb-worker`, port `metrics` (one target per worker pod; the pod sets `CRB_METRICS_HOST=0.0.0.0`); `serviceMonitor.worker.enabled`; `worker.metrics.port` (0 = off); the NetworkPolicy admits `networkPolicy.metricsIngress` peers to that port only |
+| one process (`crb serve` + `crb worker` on a host) | `/api/v1/metrics` | `127.0.0.1:9464/metrics` — loopback by default; a Prometheus on another host needs `CRB_METRICS_HOST=<the interface it may reach>` (or `0.0.0.0` behind a host firewall) — the series name repositories, builders, per-repository cost and installation ids |
 
 The table is checked against the code by `tests/test_observability_metrics.py`: a metric
 the module defines that is not here, or is here under other labels, fails the suite.

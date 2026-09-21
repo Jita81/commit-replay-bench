@@ -28,10 +28,10 @@
  * Works with:   ui/src/screens/Runs/contract.ts (retained-patch fetch, diff parser, review
  *               hooks), ui/src/screens/Runs/telemetry.ts (`packHeadline`),
  *               ui/src/screens/Runs/ReviewPanel.tsx (the Review tab), ui/src/api/types.ts
- *               (`EvidencePack`, `TestRun`, `LintRun`), ui/src/components/BeltPills.tsx and
- *               ui/src/components/Provenance.tsx, ui/src/screens/Runs/RunDetailPage.tsx and
- *               ui/src/screens/Runs/TaskDetailPage.tsx (the openers), src/crb/core/evidence.py
- *               (the pack's shape and `verify_pack`)
+ *               (`EvidencePack`, `TestRun`, `LintRun`), ui/src/components/BeltPills.tsx (the
+ *               belt pills), ui/src/screens/Runs/RunDetailPage.tsx (the opener; the task
+ *               page opens it the same way), src/crb/core/evidence.py (the pack's shape and
+ *               `verify_pack`)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx (Patch tab: verified / redacted /
  *               unavailable; row resolution from the task),
  *               ui/src/screens/Runs/RunDetailPage.test.tsx

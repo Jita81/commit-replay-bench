@@ -14,14 +14,17 @@
  *               refusal's own reason from the chain — J-FAC-4), and what the route gate
  *               withheld. Before the run it says what will be spent, with which builder,
  *               how many items can be worked and delivered, and where a pull request would
- *               go — or why delivery is not possible for this repository (J-FAC-2/3). While
+ *               go — or why delivery is not possible for this repository (J-FAC-2/3); the
+ *               button names the estimate, never a cap (F5b: nothing on this page promises
+ *               a ceiling nothing enforces). While
  *               a factory run is active the chain polls and a banner names the run and the
  *               item in hand (J-FAC-5 / J-TEL-9). A built item opens its evidence (F15); a
  *               stopped item says the way forward, and a revised backlog starts from the
  *               active one (J-FAC-15). Every act goes through the API under its role; the
  *               chain (`/factory/{repo}/evidence`) is the record, and this screen renders the
  *               folded view of it (`task_views`).
- * How:          `useFactoryBacklog` + `useFactoryTasks` (polled while `useRuns` lists an
+ * How:          `useRepoParam({ defaultToLatest: true })` (as the Baseline: reached from the
+ *               nav, the latest repository is chosen) → `useFactoryBacklog` + `useFactoryTasks` (polled while `useRuns` lists an
  *               active factory run) → `stepsFor(task)` → `<StepList>`; `builderChoice(health)`
  *               picks the builder exactly as Measure does (an operator may name another —
  *               the factory has no "every knob" form); `estimateFromMap` is Measure's
@@ -37,13 +40,13 @@
  * ADRs:         docs/adr/0003-one-routing-rule.md (amendment 2026-09-16: the route gate)
  * Works with:   ui/src/api/hooks.ts (`useFactoryBacklog`, `useFactoryTasks`, `useSignGap`,
  *               `useRegisterBacklog`, `useCreateRun`, `useCancelRun`, `useRuns`, `useHealth`,
- *               `useCapabilityMap`), ui/src/api/types.ts (`FactoryTask`, `FactoryBacklog`),
- *               ui/src/lib/builder.ts (`builderChoice`, shared with Measure),
- *               ui/src/screens/Runs/EvidenceDrawer.tsx (the pack view an item row opens),
- *               ui/src/components/Help.tsx (`Term`, `DocLink`), src/crb/server/routes/factory.py,
- *               src/crb/server/factory_state.py (`task_views`), src/crb/factory/loop.py (the
- *               process itself), ui/src/screens/Decisions/decisions.ts (the inbox rows that
- *               link here), docs/API.md "Factory"
+ *               `useCapabilityMap`, `useAllRepos`), ui/src/api/types.ts (`FactoryTask`,
+ *               `FactoryBacklog`), ui/src/lib/builder.ts (`builderChoice`, shared with
+ *               Measure), ui/src/components/RepoPicker.tsx (`defaultToLatest`, as the
+ *               Baseline), ui/src/screens/Runs/EvidenceDrawer.tsx (the pack view an item
+ *               row opens), src/crb/server/routes/factory.py (the shapes, documented under
+ *               "Factory" in the API doc), src/crb/server/factory_state.py (`task_views`,
+ *               the fold of the factory loop's chain this screen renders)
  * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx, ui/e2e/walkthrough/10-factory.spec.ts
  * Touch when:   a step is added to the loop (add it to `stepsFor` and the loop's docstring);
  *               a field is added to `FactoryTaskOut`; a refusal is recorded in a new shape.
@@ -51,7 +54,7 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'react-router'
-import { useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useRegisterBacklog, useRuns, useSignGap } from '../../api/hooks'
+import { useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useRegisterBacklog, useRuns, useSignGap } from '../../api/hooks'
 import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryTask, type Run } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -354,7 +357,11 @@ function useNarrow(): boolean {
 }
 
 export function FactoryPage() {
-  const [repo, setRepo] = useRepoParam()
+  // reached from the nav with no ?repo=, the most recently updated repository is chosen and
+  // written into the URL (as the Baseline does): journey step 4 must never open on an empty
+  // "choose a repository" for a deployment that has one
+  const [repo, setRepo] = useRepoParam({ defaultToLatest: true })
+  const repos = useAllRepos()
   const [params] = useSearchParams()
   const focus = params.get('item') ?? ''
   const { can } = useAuth()
@@ -404,7 +411,14 @@ export function FactoryPage() {
         }
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
-      {!repo && <EmptyState title="Choose a repository" reason="The factory works one repository at a time." action={<LinkButton to="/connect">Connect one</LinkButton>} />}
+      {!repo && repos.data && repos.data.items.length === 0 && (
+        <EmptyState
+          title="No repository connected yet"
+          reason="The factory works one repository at a time, on the baseline the connection walk earns; nothing is connected on this deployment."
+          action={can('operator') ? <LinkButton to="/connect">Connect a repository</LinkButton> : undefined}
+        />
+      )}
+      {!repo && (!repos.data || repos.data.items.length > 0) && <EmptyState title="Choose a repository" reason={repos.data ? 'The factory works one repository at a time: choose one from the picker above.' : 'Loading the repositories…'} />}
       {repo && (
         <>
           <Card
@@ -674,7 +688,8 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
       <p className="mb-3 mt-3 text-sm">You can cancel the run at any point. Items already built are still charged.</p>
       <div className="flex flex-wrap items-center gap-3" data-testid="factory-run-controls">
         <WarningButton onClick={startRun} disabled={!startable}>
-          {worked > 0 && (measured || own || choice) ? `Run the factory and spend up to ${usd(hi)}` : 'Run the factory'}
+          {/* an estimate, never a promised cap: the request carries no spend cap (F5b), as the Budget cap row above says */}
+          {worked > 0 && (measured || own || choice) ? `Run the factory — estimated ${usd(lo)} to ${usd(hi)}` : 'Run the factory'}
         </WarningButton>
         {run.data && (
           <LinkButton size="sm" to={`/runs/${run.data.id}`}>

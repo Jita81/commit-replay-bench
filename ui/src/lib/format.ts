@@ -7,19 +7,23 @@
  * ----------
  * What it is:   The formatters every screen renders numbers through (`fmtPct`, `fmtInt`,
  *               `fmtUsd`, `fmtSeconds`, `fmtMs`, `fmtRatio`, `fmtCi`, `fmtDate`, `fmtTime`,
- *               `shortId`) and the client-side Wilson interval.
+ *               `fmtAge`, `fmtAgo`, `count`, `shortId`) and the client-side Wilson interval.
  * What it does: Guarantees `NaN`, `Infinity` and `undefined` cannot reach the page: an absent
  *               or non-finite value renders as the em-dash, never as a fabricated `0` or
  *               `0.0%`. `wilson` reproduces `crb.core.stats.wilson_interval` (95 %, same z) so
  *               a tile can show an interval for a count the API did not pre-compute.
  * How:          One `finite()` guard at the top of every formatter; fixed en-GB locale so the
- *               output is the same in tests and in production.
+ *               output is the same in tests and in production. `fmtAgo` is THE relative-age
+ *               formatter: the Connection walk and the run page read the same started-at
+ *               stamp through it, so they can never disagree on an age.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/components/StatTile.tsx (value + n + interval, always through these),
  *               ui/src/components/CiBar.tsx (the interval bar), src/crb/core/stats.py (the
  *               Wilson formula this file mirrors — keep the two identical),
- *               ui/src/screens/Runs/RunDetailPage.tsx (a heavy user of every formatter)
+ *               ui/src/screens/Runs/RunDetailPage.tsx (a heavy user of every formatter),
+ *               ui/src/screens/Runs/telemetry.ts and ui/src/screens/Connect/connection.ts
+ *               (the two live lines that share `fmtAgo` and `count`)
  * Tested by:    ui/src/components/StatTile.test.tsx (the dash for an absent value and the
  *               interval text), ui/src/screens/Capability/CapabilityPage.test.tsx (percentages
  *               and intervals as rendered)
@@ -108,6 +112,30 @@ export function fmtTime(iso: string | null | undefined): string {
   const ss = String(d.getSeconds()).padStart(2, '0')
   const ms = String(d.getMilliseconds()).padStart(3, '0')
   return `${hh}:${mm}:${ss}.${ms}`
+}
+
+/** Seconds → "6 s" / "12 min" / "2 h 5 min" (whole units; the reader wants an age, not a stopwatch). */
+export function fmtAge(seconds: number): string {
+  if (!finite(seconds)) return DASH
+  const s = Math.max(0, Math.round(seconds))
+  if (s < 60) return `${s} s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} min`
+  const h = Math.floor(m / 60)
+  return `${h} h ${m - h * 60} min`
+}
+
+/** An ISO timestamp as an age against `nowMs`: "6 s ago", "12 min ago", "2 h 5 min ago"; `null` when absent or unreadable. */
+export function fmtAgo(iso: string | null | undefined, nowMs: number): string | null {
+  if (!iso) return null
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return null
+  return `${fmtAge((nowMs - t) / 1000)} ago`
+}
+
+/** "1 task" / "2 tasks" — a count with its noun pluralised (a regular plural, or `plural` when given). */
+export function count(n: number, noun: string, plural = `${noun}s`): string {
+  return `${fmtInt(n)} ${n === 1 ? noun : plural}`
 }
 
 /** A git sha or hash, shortened for display; the full value goes in `title`. */

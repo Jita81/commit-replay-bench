@@ -79,7 +79,12 @@ describe('MeasurePage', () => {
     expect(box).toHaveTextContent('$6.00 to $18.00 for 30 attempts')
     await waitFor(() => expect(box).toHaveTextContent('local executor — a development reading, not evidence'))
     expect(screen.queryByRole('button', { name: /Start the run/ })).not.toBeInTheDocument()
-    expect(within(box).getByText('Starting a run needs the operator role.')).toBeInTheDocument()
+    // the role is said under the title, and the choices are read-only lists, not live controls
+    expect(screen.getByTestId('measure-role-note')).toHaveTextContent('Starting a run needs the operator role.')
+    expect(screen.queryByRole('radio')).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.getByText('30 attempts')).toBeInTheDocument()
+    expect(screen.getByText('the first useful picture (the default)')).toBeInTheDocument()
     expect(box).toHaveTextContent('No builder is configured on this deployment')
   })
 

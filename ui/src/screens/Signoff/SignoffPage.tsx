@@ -36,11 +36,10 @@
  *               ui/src/components/RepoPicker.tsx (`defaultToLatest`),
  *               ui/src/components/Help.tsx (`Term` in the refusal clauses),
  *               ui/src/screens/Decisions/DecisionsPage.tsx (Attest → `?cell=` here),
- *               ui/src/screens/Capability/contract.ts and
- *               ui/src/screens/Capability/FailureSplit.tsx
- *               (the cells, the controls pill and the split), ui/src/api/hooks.ts
- *               (`useSignoffs`, `useRevokeSignoff`), src/crb/server/routes/signoffs.py (the
- *               server's decision this screen previews and submits), src/crb/core/signoff.py
+ *               ui/src/screens/Capability/FailureSplit.tsx (the controls pill and the split),
+ *               ui/src/api/hooks.ts (`useSignoffs`, `useRevokeSignoff`),
+ *               src/crb/server/routes/signoffs.py (the server's decision this screen
+ *               previews and submits; the core rule it applies is the policy module it names)
  * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx, ui/e2e/walkthrough/08-signoff.spec.ts
  *               (a thin cell refused with observed vs threshold; a policy-clearing cell
  *               signed with an attestation), ui/e2e/walkthrough/05-replay-fake.spec.ts

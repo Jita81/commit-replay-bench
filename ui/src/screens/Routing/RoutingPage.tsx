@@ -25,7 +25,7 @@
  *               ui/src/api/types.ts (`RouteDecision`, `ROUTES`),
  *               src/crb/core/routing.py (`route()` — the rule this page describes),
  *               src/crb/server/routes/capability.py (the `/routes` route),
- *               ui/src/components/VerdictPill.tsx and ui/src/components/CiBar.tsx
+ *               ui/src/components/VerdictPill.tsx (the route pill with its sentence)
  * Tested by:    ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   the routing policy gains a threshold or a reason code (an ADR-0003 amendment)

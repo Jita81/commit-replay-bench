@@ -44,10 +44,10 @@ import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFact
 import { isApiError } from '../../api/client'
 import { InsetText, Kicker, Lede, NotificationBanner, PageTitle, StartButton, type TagTone, TaskList, type TaskItem } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
-import { type StageStatus, stagesFor } from '../Connect/connection'
+import { type StageStatus, stageComplete, stagesFor } from '../Connect/connection'
 
-const TONE: Record<StageStatus, TagTone> = { done: 'pale', running: 'blue', todo: 'blue', failed: 'red', blocked: 'grey' }
-const LABEL: Record<StageStatus, string> = { done: 'Completed', running: 'In progress', todo: 'Incomplete', failed: 'Failed', blocked: 'Cannot start yet' }
+const TONE: Record<StageStatus, TagTone> = { done: 'pale', warn: 'pale', running: 'blue', todo: 'blue', failed: 'red', blocked: 'grey' }
+const LABEL: Record<StageStatus, string> = { done: 'Completed', warn: 'Completed', running: 'In progress', todo: 'Incomplete', failed: 'Failed', blocked: 'Cannot start yet' }
 
 function notRun(err: unknown): boolean {
   return isApiError(err) && err.status === 404
@@ -130,7 +130,7 @@ export function HomePage() {
         : hasRepo
           ? { status: 'Optional', tone: 'grey' }
           : { status: 'Not configured', tone: 'blue' }
-  const proveDone = stage('oracle') === 'done' && stage('controls') === 'done'
+  const proveDone = stage('oracle') === 'done' && stageComplete(stage('controls') ?? 'todo')
   const proveStatus: StageStatus = proveDone ? 'done' : stage('probe') !== 'done' || stage('mine') !== 'done' ? (stage('mine') === 'running' || stage('probe') === 'running' ? 'running' : 'blocked') : stage('oracle') === 'failed' || stage('controls') === 'failed' ? 'failed' : stage('oracle') === 'running' || stage('controls') === 'running' ? 'running' : 'todo'
   const measureStage = stage('measure')
   const measured = measureStage === 'done'
@@ -178,7 +178,7 @@ export function HomePage() {
       <PageTitle>{operator ? 'Get started' : 'Where this deployment is'}</PageTitle>
       {!operator && (
         <Lede className="mb-4">
-          You can read everything here and change nothing. The tasks below are the operators' progress from an empty deployment to a signed cell; the capability map and your decisions are where a {me?.role ?? 'viewer'} spends their time.
+          You can read everything here and change nothing. The tasks below are the operators' progress from an empty deployment to a signed cell; the capability map and Decisions are where {me?.role === 'approver' ? 'an approver reads what the evidence says and signs what is waiting on them' : 'a viewer reads what the evidence says and what is waiting on a person'}.
         </Lede>
       )}
       {sandbox && sandbox.status !== 'ok' && (
@@ -207,7 +207,7 @@ export function HomePage() {
       {operator ? (
         <StartButton to={nextTask?.to ?? (chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory')}>{nextTask ? `Continue to task ${nextTask.num}: ${nextTask.name}` : 'Continue to the factory'}</StartButton>
       ) : (
-        <StartButton to={anyRows ? `/results${q}` : '/decisions'}>Continue</StartButton>
+        <StartButton to={anyRows ? `/results${q}` : '/decisions'}>{anyRows && chosen ? `Continue to the baseline for ${chosen}` : 'Continue to Decisions'}</StartButton>
       )}
     </>
   )

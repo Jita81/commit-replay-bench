@@ -350,18 +350,23 @@ def available() -> bool:
     return _AVAILABLE
 
 
-#: The worker's exposition binds every interface by default: in a container the scraper
-#: is another pod / service, and the port is never published beyond the compose network
-#: or admitted by the NetworkPolicy to anything but the scraper (docs/DEPLOYMENT.md#9).
-ALL_INTERFACES = "0.0.0.0"  # noqa: S104 — see above; a single-host deployment binds loopback
+#: The worker's exposition binds loopback by default, like the API's ``CRB_BIND_HOST``: the
+#: series carry repository names, builder / model names, per-repository cost and GitHub
+#: installation ids, so a bare ``crb worker`` on a host (or a laptop) must not offer them to
+#: every interface. A container sets ``CRB_METRICS_HOST=0.0.0.0`` (compose, Helm): there the
+#: scraper is another pod / service, the port is never published beyond the compose network,
+#: and the NetworkPolicy admits only the scraper (docs/DEPLOYMENT.md#9).
+LOOPBACK = "127.0.0.1"
+ALL_INTERFACES = "0.0.0.0"  # noqa: S104 — opted into per container, never the default
 
 
-def start_worker_exposition(port: int, *, enabled: bool = True, addr: str = ALL_INTERFACES) -> bool:
-    """Serve this process's registry on ``port`` (J-TEL-1) — the worker's ``/metrics``,
-    where the build / grade / cost series live. ``True`` when a server was started;
-    ``False`` when metrics are disabled, ``port`` is 0, or the client is absent (each is
-    logged once so an operator scraping nothing knows why). A port that cannot be bound
-    is logged and the worker still runs: a missing dashboard must not stop measurement."""
+def start_worker_exposition(port: int, *, enabled: bool = True, addr: str = LOOPBACK) -> bool:
+    """Serve this process's registry on ``addr:port`` (J-TEL-1) — the worker's ``/metrics``,
+    where the build / grade / cost series live. ``addr`` defaults to loopback
+    (``CRB_METRICS_HOST``). ``True`` when a server was started; ``False`` when metrics are
+    disabled, ``port`` is 0, or the client is absent (each is logged once so an operator
+    scraping nothing knows why). A port that cannot be bound is logged and the worker
+    still runs: a missing dashboard must not stop measurement."""
     if not enabled or int(port) <= 0:
         _LOG.info("worker metrics exposition off (enabled=%s port=%s)", enabled, port)
         return False
@@ -373,5 +378,5 @@ def start_worker_exposition(port: int, *, enabled: bool = True, addr: str = ALL_
     except OSError as exc:  # pragma: no cover — bind failure
         _LOG.error("worker metrics exposition could not bind port %s: %s", port, exc)
         return False
-    _LOG.info("worker metrics exposition on :%s/metrics", port)  # pragma: no cover
+    _LOG.info("worker metrics exposition on %s:%s/metrics", addr, port)  # pragma: no cover
     return True  # pragma: no cover

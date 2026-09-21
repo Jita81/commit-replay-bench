@@ -13,7 +13,10 @@
  *               an error state or fabricated rows (the old screen matched a phase-P6 501
  *               that the shipped server never answers — CodeRabbit on PR #6); that "Run the
  *               factory" posts the builder `builderChoice` picks (J-FAC-1 — the 422 a run
- *               without one met), says what it will spend and where it delivers first
+ *               without one met), names the estimate and never a cap (F5b), says what it
+ *               will spend and where it delivers first, that reached without `?repo=` the
+ *               latest repository is chosen (as the Baseline) and a viewer is offered no
+ *               action on an empty deployment
  *               (J-FAC-2/3), that a refusal's reason reaches the step and the row (J-FAC-4,
  *               J-FAC-15), that a built item opens its evidence (F15), and that an active
  *               factory run is a banner that polls the chain (J-FAC-5 / J-TEL-9), and that
@@ -29,7 +32,7 @@
  * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx
  * Touch when:   a factory action moves into the UI; a `FactoryTaskOut` field is added.
  */
-import { screen, waitFor, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FactoryBacklog, FactoryTask } from '../../api/types'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
@@ -197,7 +200,9 @@ describe('FactoryPage — the shipped contract', () => {
     expect(box).toHaveTextContent('no spend cap yet')
     expect(box).toHaveTextContent('You can cancel the run at any point. Items already built are still charged.')
     const { default: userEvent } = await import('@testing-library/user-event')
-    await userEvent.click(screen.getByRole('button', { name: 'Run the factory and spend up to $0.41' }))
+    // the button names the estimate — never a cap the request does not carry (F5b)
+    await userEvent.click(screen.getByRole('button', { name: 'Run the factory — estimated $0.27 to $0.41' }))
+    expect(screen.queryByRole('button', { name: /spend up to/ })).not.toBeInTheDocument()
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
     expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))).toEqual({
       repo: 'alpha',
@@ -208,6 +213,23 @@ describe('FactoryPage — the shipped contract', () => {
       builder_config: { auth: 'cli' },
     })
     expect(await screen.findByRole('link', { name: /run ffffffff/ })).toHaveAttribute('href', `/runs/${'f'.repeat(32)}`)
+  })
+
+  it('with no ?repo= the most recently updated repository is chosen (as the Baseline); an empty deployment offers Connect to an operator only', async () => {
+    mockApi(base({ 'GET /repos': { items: [{ name: 'alpha', updated: '2026-09-10T00:00:00Z' }, { name: 'beta', updated: '2026-09-12T00:00:00Z' }], total: 2, limit: 50, offset: 0 }, 'GET /factory/beta/backlog': { ...BACKLOG, repo: 'beta' }, 'GET /factory/beta/tasks': TASKS }))
+    renderApp(<FactoryPage />, { route: '/factory' })
+    await waitFor(() => expect(screen.getByText(/hash aaaaaaaaaaaaaaaa/)).toBeInTheDocument())
+    expect(screen.queryByText('Choose a repository')).toBeNull()
+    expect((screen.getByTestId('repo-picker') as HTMLSelectElement).value).toBe('beta')
+    cleanup()
+    mockApi(base({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /repos': { items: [], total: 0, limit: 50, offset: 0 } }))
+    renderApp(<FactoryPage />, { route: '/factory' })
+    await screen.findByText('No repository connected yet')
+    expect(screen.queryByRole('link', { name: /Connect/ })).toBeNull()
+    cleanup()
+    mockApi(base({ 'GET /repos': { items: [], total: 0, limit: 50, offset: 0 } }))
+    renderApp(<FactoryPage />, { route: '/factory' })
+    expect(await screen.findByRole('link', { name: 'Connect a repository' })).toHaveAttribute('href', '/connect')
   })
 
   it('with no builder the button is disabled and the reason is the one Measure gives; the estimate says it is unmeasured', async () => {

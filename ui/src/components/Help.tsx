@@ -4,25 +4,29 @@
  *
  * Navigation
  * ----------
- * What it is:   `AboutThisScreen`, `Term` and `DocLink`.
+ * What it is:   `AboutThisScreen`, `InlineDisclosure`, `Term` and `DocLink`.
  * What it does: `AboutThisScreen` is mounted once in the shell after the page content and
  *               reads the route and the signed-in role: a collapsed GOV.UK details with what
  *               this screen is for, what to do next for this role (falling down the ladder to
  *               the viewer's step), what the numbers mean, the terms on the screen and where
- *               to read more; it renders nothing where the registry has no entry. `Term` is a
- *               real button (`aria-expanded` / `aria-controls`) that toggles the glossary's
- *               definition inline under the word — click, Enter or Space; Escape closes; never
- *               a hover tooltip, so it works on touch and reflows at phone width. `DocLink`
- *               links into a guide section at /help/docs.
+ *               to read more; it renders nothing where the registry has no entry.
+ *               `InlineDisclosure` is the one disclosure primitive: a real button
+ *               (`aria-expanded` / `aria-controls`) that toggles a `role="note"` inline under
+ *               its label — click, Enter or Space; Escape closes; never a hover tooltip, so it
+ *               works on touch and reflows at phone width. `Term` renders the glossary's
+ *               definition through it; ui/src/screens/Capability/ReasonCode.tsx renders a
+ *               reason code's sentence through it. `DocLink` links into a guide section at
+ *               /help/docs.
  * How:          `useLocation` + `useAuth` + `helpFor`; `useId` for the controls id; state
- *               local to each `Term`. `Term` must never sit inside another button.
+ *               local to each disclosure. A disclosure must never sit inside another button.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/help/help.ts (the registry the About block renders),
  *               ui/src/help/glossary.ts (`TERMS`), ui/src/help/docs.ts (`docHref`),
  *               ui/src/components/govuk.tsx (`Details`), ui/src/components/Layout.tsx (mounts
  *               the About block once, after `<Outlet/>`), ui/src/screens/Help/HelpPage.tsx
- *               (where the glossary link lands)
+ *               (where the glossary link lands), ui/src/screens/Capability/ReasonCode.tsx
+ *               (the other `InlineDisclosure` client)
  * Tested by:    ui/src/components/Help.test.tsx, ui/e2e/walkthrough/11-screens.spec.ts (the
  *               block renders on every authenticated route on the live stack)
  * Touch when:   the About block gains a part (add it to the registry type first); never for
@@ -106,14 +110,13 @@ export function AboutThisScreen() {
 }
 
 /**
- * A term with its definition one click away, inline. A real `<button>` with
- * `aria-expanded` / `aria-controls`; the open definition is a `role="note"` under the word
- * with the glossary's short text, a Read more link and a link to the glossary entry.
+ * The one inline disclosure: a real `<button>` (`aria-expanded` / `aria-controls`) carrying
+ * `label` and the ⓘ glyph; when open, `children` render as a `role="note"` block under it.
+ * Click, Enter or Space toggle; Escape closes. `noteClassName` sets the note's type size.
  */
-export function Term({ id, children }: { id: TermId; children?: ReactNode }) {
+export function InlineDisclosure({ label, children, noteClassName = 'text-[16px]' }: { label: ReactNode; children: ReactNode; noteClassName?: string }) {
   const [open, setOpen] = useState(false)
   const noteId = useId()
-  const t = TERMS[id]
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key === 'Escape' && open) {
       e.stopPropagation()
@@ -129,22 +132,35 @@ export function Term({ id, children }: { id: TermId; children?: ReactNode }) {
         onClick={() => setOpen((o) => !o)}
         className="inline cursor-pointer border-0 bg-transparent p-0 underline decoration-dotted underline-offset-4"
       >
-        {children ?? t.term}
+        {label}
         <span aria-hidden> ⓘ</span>
       </button>
       {open && (
-        <span id={noteId} role="note" className="my-1 block max-w-[44em] border-l-4 border-primary pl-3 text-[16px] leading-[1.5] text-on-surface-body">
-          {t.short}{' '}
-          {t.readMore && (
-            <>
-              <Link to={docHref(t.readMore)}>Read more</Link>
-              {' · '}
-            </>
-          )}
-          <Link to={`/help#${id}`}>glossary</Link>
+        <span id={noteId} role="note" className={`my-1 block max-w-[44em] border-l-4 border-primary pl-3 leading-[1.5] text-on-surface-body ${noteClassName}`}>
+          {children}
         </span>
       )}
     </span>
+  )
+}
+
+/**
+ * A term with its definition one click away, inline: an `InlineDisclosure` whose note is
+ * the glossary's short text, a Read more link and a link to the glossary entry.
+ */
+export function Term({ id, children }: { id: TermId; children?: ReactNode }) {
+  const t = TERMS[id]
+  return (
+    <InlineDisclosure label={children ?? t.term}>
+      {t.short}{' '}
+      {t.readMore && (
+        <>
+          <Link to={docHref(t.readMore)}>Read more</Link>
+          {' · '}
+        </>
+      )}
+      <Link to={`/help#${id}`}>glossary</Link>
+    </InlineDisclosure>
   )
 }
 

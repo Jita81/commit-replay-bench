@@ -61,6 +61,9 @@ export function PosturePage() {
   const verify = useLedgerVerify()
   const gh = useGitHubApp()
   const probe = (name: string) => health.data?.probes.find((p) => p.name === name)
+  // a probe's sentence, or why there is none: "…" while loading, and the truth when the health
+  // check itself could not be read (never a silent ellipsis)
+  const probeText = (name: string) => (health.isError ? 'the health check could not be read' : (probe(name)?.detail ?? '…'))
   const s = settings.data
   const admin = can('admin')
   const adminOnly = (v: unknown): ReactNode => (admin ? String(v ?? '—') : 'shown to admins')
@@ -156,7 +159,25 @@ export function PosturePage() {
           ),
         },
         { key: 'Builder posture', value: s ? adminOnly(s.raw?.builder?.executor ? `${s.raw.builder.executor}${s.raw.builder.egress_network ? ` · egress ${s.raw.builder.egress_network}` : ''}` : 'not reported by this deployment') : adminOnly(undefined) },
-        { key: 'Toolchains', value: probe('toolchains')?.detail ?? '…' },
+        { key: 'Toolchains', value: probeText('toolchains') },
+        {
+          key: 'Worker',
+          // the worker probe's own sentence (queued runs, last check-in, a stopped worker):
+          // degraded, never a 503 — the API pod's readiness is not the worker's liveness
+          value: (
+            <>
+              {probeText('worker')}
+              {probe('worker') && probe('worker')!.status !== 'ok' && (
+                <>
+                  {' '}
+                  <NextStep admin={admin} doc={<DocLink to="DEPLOYMENT#9-observability">Observability (DEPLOYMENT)</DocLink>}>
+                    Start a worker, or find why the running one stopped checking in; queued runs wait until one does.
+                  </NextStep>
+                </>
+              )}
+            </>
+          ),
+        },
         { key: 'Secrets', value: 'Read from the environment or mounted files; never persisted, never returned by the API' },
       ],
     },
@@ -201,7 +222,7 @@ export function PosturePage() {
         {
           key: 'Ledger',
           value: !verify.data ? (
-            (probe('ledger')?.detail ?? '…')
+            probeText('ledger')
           ) : verify.data.ok ? (
             `Append-only, hash-chained · ${verify.data.rows} rows · chain intact · false-Q1 ${verify.data.false_q1_total}`
           ) : (
@@ -213,7 +234,7 @@ export function PosturePage() {
             </>
           ),
         },
-        { key: 'Append-only triggers', value: probe('append_only')?.detail ?? '…' },
+        { key: 'Append-only triggers', value: probeText('append_only') },
         { key: 'Export', value: 'JSONL export and evidence packs by hash' },
       ],
     },

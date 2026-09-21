@@ -73,7 +73,9 @@ the worker report the same facts to the person and to the platform team's dashbo
   pull request* with the reason and the admin's next step, or *pushes a branch to
   owner/repo and opens a pull request against main; nothing is written to main*), that
   there is no spend cap yet and that cancelling still charges built items; the button
-  names the amount.
+  names the estimate (*Run the factory — estimated $X to $Y*), never a cap the request
+  does not carry. Reached from the nav with no repository chosen, the most recently
+  updated one is picked and written into the URL, as the Baseline does.
 - **`GET /factory/{repo}/backlog`** carries `delivery: {can_deliver, reason_code, reason,
   full_name, default_branch, installation_id, account_login}` — a server pre-flight
   answered by the same rule as the worker's delivery credentials (host check included,
@@ -137,10 +139,15 @@ the worker report the same facts to the person and to the platform team's dashbo
 
 - **Worker heartbeats:** a `workers` table every worker upserts each `heartbeat_s` even
   when idle. The `/health` worker probe reads it: three queued runs with a crashed worker
-  read `down` *3 queued, no worker has checked in for 360 s (w-1)* instead of ok *idle,
-  3 queued*; a fresh store says *no worker has checked in yet*; ok reads *1 worker, last
-  check-in 4 s ago · 2 runs queued*. `data` carries `workers[]`, `queued`, `stale`,
-  `stale_after_s`; alive = a heartbeat within 3 × that worker's `heartbeat_s`.
+  read `degraded` *3 runs queued, no worker has checked in for 360 s (w-1) — queued runs
+  will not start until a worker does* instead of ok *idle, 3 queued* (never `down`: the
+  API pod's readiness is not the worker's liveness, and a 503 would take the API — and the
+  sentence — out of the Service); behind a clean stop it names the stop (*the last worker
+  (w-1) stopped 40 s ago*); a fresh store says *no worker has checked in yet*; ok reads *1
+  worker, last check-in 4 s ago · 2 runs queued*. `data` carries `workers[]`, `queued`,
+  `stale`, `stale_after_s`; alive = a heartbeat within 3 × that worker's `heartbeat_s`.
+  Deployment (`/posture`) shows the worker probe's sentence as a row, and says when the
+  health check itself could not be read.
 - **`RunOut`** gains `queue_position` (1-based FIFO; null unless queued),
   `queue_kinds_ahead` (oldest first) and `factory {deliver, deliver_override_by,
   deliver_override_by_name, backlog_hash}` (null for every other kind). An oracle,
@@ -152,9 +159,12 @@ the worker report the same facts to the person and to the platform team's dashbo
   `signoff.revoked` carries `row_hash`, `revokes_row_hash` and the note, so an auditor
   reconciles against the chain without searching by time. `tests/test_event_vocabulary.py`
   fails on a missing or a ghost action in API.md.
-- **Metrics:** the worker serves its own `/metrics` on `CRB_METRICS_PORT` (default 9464;
-  0 = off; compose internal; Helm container port + headless Service + opt-in
-  `serviceMonitor.worker` + NetworkPolicy rule). `crb_builder_tokens_total` and
+- **Metrics:** the worker serves its own `/metrics` on `CRB_METRICS_HOST:CRB_METRICS_PORT`
+  (default `127.0.0.1:9464` — loopback like the API's bind, because the series name
+  repositories, builders, per-repository cost and installation ids; 0 = off; compose and
+  Helm set `0.0.0.0` inside the container, where only the compose network / the
+  NetworkPolicy's scraper reaches the port: Helm container port + headless Service +
+  opt-in `serviceMonitor.worker` + NetworkPolicy rule). `crb_builder_tokens_total` and
   `crb_builder_cost_usd_total` gain a leading `repo` label; new
   `crb_deliveries_total{repo, outcome ∈ opened|withheld|failed}` (metered from the
   worker's event sink), `crb_github_tokens_minted_total{installation}` (a real mint only,
@@ -180,8 +190,9 @@ the worker report the same facts to the person and to the platform team's dashbo
   bundled guide at its heading. `PageHeader` defaults its eyebrow to the journey position
   (`journeyEyebrow`).
 - **`/help`** (glossary, guide index, ADR titles) and **`/help/docs/:name`** (a bundled
-  guide, scrolls to the hash; unknown name → empty state). Help in the top bar; Help ·
-  Glossary in the footer; the top-bar group wraps at 375 px.
+  guide, scrolls to the hash; unknown name → empty state). Help as a compact ? icon in
+  the top bar (the display name hides below `sm`, so the cluster is one row at 375 px and
+  *Sign out* never a third header row); Help · Glossary in the footer.
 - **Copy:** the human route names all three causes; deliver, the strong band and the
   oracle gate say *a branch and pull request under review, never a merge* — the
   *Auto-ship* label is gone (API enum values unchanged). `ACTION_HELP` / `actionHelp`:
@@ -195,6 +206,31 @@ authored test's sha* (J-FAC-18); `DocLink` is underlined, so a guide link inside
 sentence is told apart without colour (axe `link-in-text-block` on `/settings`, WCAG
 1.4.1); `repo.github_linked` (#34) joins the event vocabulary table and `ACTION_HELP` —
 the ratchet caught it; the `/results` help copy no longer cites a backlog id.
+
+**On review** (three adversarial verifiers, 21 surviving findings): the worker probe never
+turns `/health` into a 503 (above); the worker's `/metrics` binds loopback unless
+`CRB_METRICS_HOST` says otherwise (above); `ACTION_HELP` is keyed exactly as the
+vocabulary table is — the belt-5 pre-flight and sealed-container events under their
+`builder.` prefix, the four legacy import events added, seven sentences for events
+nothing emits removed — and `verdict.test.ts` now reads docs/API.md as
+`test_event_vocabulary.py` does, so the two halves cannot drift; the Connection walk
+reads `queue_position` from the API (the queued list is the older-server fallback); one
+`fmtAgo` in `ui/src/lib/format.ts` serves the walk and the run page; every count line is
+pluralised (*1 task scored*, *1 escape*); a passed controls report that still carries an
+escape or a thin set reads *Done, with a finding* in amber with *deliver is withheld
+until the tests are hardened and the controls re-run* — the walk goes on, the finding is
+named — and the glossary's negative-controls entry says what *passed* means; the help
+copy names controls that exist (*Baseline*, *Not started*, *Start a run*) and actions the
+role can take (a *Sign a gap* row is the approver's); a viewer's Home button names its
+destination; a non-operator on Measure reads the choices as lists, not live radios; the
+Factory empty state offers *Connect* only to an operator on an empty deployment; the
+licence sentence carries builder/model (EVIDENCE-AND-CLAIMS §7); the Decisions pill reads
+*n waiting across k repositories*; `Term` and `ReasonCode` share one `InlineDisclosure`;
+Deployment shows the worker probe and says when the health check could not be read; the
+11-screens spec annotates instead of `console.log` and asserts a two-row top bar at
+375 px; a filled button darkens on hover instead of fading (the axe sweep caught a filled
+*Baseline* at 3.97:1 under the pointer); ten *Works with* blocks are back within three to
+eight entries.
 
 **Tests.** UI: 49 files / 340 tests — `Help`, `Layout`, `PageHeader`, `govuk`, `StatTile`,
 `help/{glossary,docs,help,markdown}`, `verdict`, `builder`, `connection`, `HomePage`,

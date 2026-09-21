@@ -19,7 +19,9 @@
  *               documented range), the button says "estimated" because the request carries
  *               no cost cap (F5b: nothing on this page promises a ceiling nothing enforces),
  *               the posture is the real sandbox mode, and nothing is queued until the red
- *               button.
+ *               button. A reader without the operator role is told so under the title and
+ *               sees the choices as read-only lists — nothing a role cannot act on is shown
+ *               as a control.
  * How:          `useRepo` (+ `last_run` → `useRun`, polled, for the in-flight banner),
  *               `useCapabilityMap` (cost_usd_mean over measured cells), `useHealth` (sandbox
  *               posture and the builder), `builderChoice` (ui/src/lib/builder.ts) for the
@@ -101,6 +103,7 @@ export function MeasurePage() {
   const [limit, setLimit] = useState(30)
   const [worktrees, setWorktrees] = useState(false)
   const [transcripts, setTranscripts] = useState(false)
+  const operator = can('operator')
 
   // the repository's own measured mean per attempt, when it has one: a row-weighted mean
   // over the map's measured cells (the map is served on the current apparatus, so the
@@ -160,6 +163,11 @@ export function MeasurePage() {
         <Kicker>{journeyEyebrow(pathname, 'task 5 of 8 · this step spends money')}</Kicker>
       </div>
       <PageTitle>Measure {name}</PageTitle>
+      {!operator && (
+        <p className="m-0 mb-4 max-w-[44em] text-[19px] leading-[1.47]" data-testid="measure-role-note">
+          Starting a run needs the operator role. This page shows what an operator confirms here: the attempts, the retention and the estimate. You can read it and change nothing.
+        </p>
+      )}
       {repo.isError && <ErrorState error={repo.error} onRetry={() => void repo.refetch()} />}
       {inFlight && (
         <NotificationBanner title="Important">
@@ -181,13 +189,18 @@ export function MeasurePage() {
       )}
       <h2 className="mb-2 text-[24px] font-bold leading-[1.3]">How many attempts</h2>
       <div className="mb-8 max-w-[44em]">
-        {LIMITS.map((l) => (
-          <label key={l.n} className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
-            <input type="radio" name="limit" className="h-6 w-6 accent-[var(--trust)]" checked={limit === l.n} onChange={() => setLimit(l.n)} />
-            <span>{l.n} attempts</span>
-            <span className="text-on-surface-muted">{l.note}</span>
-          </label>
-        ))}
+        {operator ? (
+          LIMITS.map((l) => (
+            <label key={l.n} className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
+              <input type="radio" name="limit" className="h-6 w-6 accent-[var(--trust)]" checked={limit === l.n} onChange={() => setLimit(l.n)} />
+              <span>{l.n} attempts</span>
+              <span className="text-on-surface-muted">{l.note}</span>
+            </label>
+          ))
+        ) : (
+          // nothing a role cannot act on is shown as a control: the choices as a read-only list
+          <SummaryList label="How many attempts" rows={LIMITS.map((l) => ({ key: `${l.n} attempts`, value: `${l.note}${l.n === limit ? ' (the default)' : ''}` }))} />
+        )}
         {gold > 0 && gold < limit && (
           <p className="m-0 mt-2 text-[16px] text-on-surface-muted">
             {name} has {gold} gold-clean tasks, so this run makes {gold} attempts (one per task).
@@ -202,14 +215,26 @@ export function MeasurePage() {
       <h2 className="mb-2 text-[24px] font-bold leading-[1.3]">Retention</h2>
       <Lede className="mb-2">This deployment retains no raw artefacts by default. Anything you keep here is stored until you delete it and is in scope for your own retention policy.</Lede>
       <div className="mb-8 max-w-[44em]">
-        <label className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
-          <input type="checkbox" className="h-6 w-6 accent-[var(--trust)]" checked={worktrees} onChange={(e) => setWorktrees(e.target.checked)} />
-          <span>Keep worktrees for failed attempts</span>
-        </label>
-        <label className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
-          <input type="checkbox" className="h-6 w-6 accent-[var(--trust)]" checked={transcripts} onChange={(e) => setTranscripts(e.target.checked)} />
-          <span>Keep builder transcripts</span>
-        </label>
+        {operator ? (
+          <>
+            <label className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
+              <input type="checkbox" className="h-6 w-6 accent-[var(--trust)]" checked={worktrees} onChange={(e) => setWorktrees(e.target.checked)} />
+              <span>Keep worktrees for failed attempts</span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
+              <input type="checkbox" className="h-6 w-6 accent-[var(--trust)]" checked={transcripts} onChange={(e) => setTranscripts(e.target.checked)} />
+              <span>Keep builder transcripts</span>
+            </label>
+          </>
+        ) : (
+          <SummaryList
+            label="Retention"
+            rows={[
+              { key: 'Worktrees for failed attempts', value: 'not kept unless the operator chooses to' },
+              { key: 'Builder transcripts', value: 'not kept unless the operator chooses to' },
+            ]}
+          />
+        )}
       </div>
       <div className="mb-8 max-w-[44em] border border-border p-6 shadow-[0_4px_0_var(--line)]" data-testid="before-you-start">
         <h2 className="mb-4 text-[24px] font-bold leading-[1.3]">Before you start</h2>
@@ -229,12 +254,10 @@ export function MeasurePage() {
         ) : (
           <>
             <p className="mb-4 mt-6 text-[19px] leading-[1.47]">You can cancel the run at any point. Attempts already made are still charged.</p>
-            {can('operator') ? (
+            {operator && (
               <WarningButton onClick={start} disabled={create.isPending || !repo.data || !choice || gold === 0}>
                 Start the run — estimated {usd(lo)} to {usd(hi)}
               </WarningButton>
-            ) : (
-              <p className="m-0 text-[16px] text-on-surface-muted">Starting a run needs the operator role.</p>
             )}
           </>
         )}

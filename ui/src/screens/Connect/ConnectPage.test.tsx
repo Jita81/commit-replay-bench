@@ -182,7 +182,22 @@ describe('ConnectPage', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs/r9/cancel')).toBe(true))
   })
 
-  it('a queued run reads Queued with its place in the line, not In progress (J-TEL-6)', async () => {
+  it('a queued run reads Queued with the server’s queue_position (the worker’s own order), never a client recount (J-TEL-6)', async () => {
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'queued', finished: null } },
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+      'GET /runs/r9': { ...RUN, status: 'queued', started: null, progress: { done: 0, total: 0, current_task_id: null }, cost_usd: 0, queue_position: 3, queue_kinds_ahead: ['replay', 'mine'] },
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('Queued — 2 runs ahead of it'))
+    // the queued list is not read when the server states the position
+    expect(calls.some((c) => c.method === 'GET' && c.path === '/runs')).toBe(false)
+  })
+
+  it('an older server that sends no queue_position: the place in the line falls back to the queued list', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
       'GET /repos/alpha': { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'queued', finished: null } },

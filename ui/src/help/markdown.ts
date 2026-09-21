@@ -22,7 +22,8 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/screens/Help/DocPage.tsx (the only caller), ui/src/help/docs.ts
- *               (`slugify`, `isDocName`, `docHref` for the link rewrite)
+ *               (`slugify`, `isDocName`, `docHref` for the link rewrite), ui/src/help/help.ts
+ *               (the `readMore` anchors whose slugs the headings rendered here must satisfy)
  * Tested by:    ui/src/help/markdown.test.tsx
  * Touch when:   a guide uses a construct this does not render (add it here with a test);
  *               never for a new repository.

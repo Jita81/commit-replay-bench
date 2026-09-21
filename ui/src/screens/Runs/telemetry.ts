@@ -8,8 +8,9 @@
  *               `stageLine` (the last StepEvent as task · stage · detail), `heartbeatLine`
  *               (worker liveness against the worker probe's limit), `queueLine` (position and
  *               what is ahead), `factoryLine` (a factory run's identity and delivery switch),
- *               `packHeadline` (one sentence for an evidence pack) and the two small
- *               formatters they share (`fmtAgo`, `fmtDurationWords`).
+ *               `packHeadline` (one sentence for an evidence pack) and `fmtDurationWords`;
+ *               the age formatter is ui/src/lib/format.ts's `fmtAgo`, shared with the
+ *               Connection walk so the two never disagree on a started-at stamp.
  * What it does: Turns fields the run page already holds into one honest sentence each. Every
  *               estimate names its basis and its n ("the mean of the 3 done") and calls
  *               itself a planning estimate; a field an older server does not send reads as
@@ -24,7 +25,7 @@
  * Works with:   ui/src/screens/Runs/RunDetailPage.tsx (the Progress card and header render
  *               these), ui/src/screens/Runs/EvidenceDrawer.tsx (`packHeadline` above the
  *               pills), ui/src/api/types.ts (`Run`, `StepEvent`, `GradeResult`, `beltNamesFor`),
- *               ui/src/lib/format.ts (`fmtInt`, `fmtUsd`, `fmtSeconds`), ui/src/lib/verdict.ts
+ *               ui/src/lib/format.ts (`fmtInt`, `fmtUsd`, `fmtSeconds`, `fmtAge`, `fmtAgo`), ui/src/lib/verdict.ts
  *               (`BELT_LABELS` — the belt numbering the headline names)
  * Tested by:    ui/src/screens/Runs/telemetry.test.ts (every line's copy and its absent
  *               cases), ui/src/screens/Runs/RunDetailPage.test.tsx (as rendered),
@@ -36,30 +37,13 @@
  *               a measurement of the builder (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
  */
 import { beltNamesFor, isRunTerminal, ladderEntryLabel, type BeltName, type GradeResult, type Run, type StepEvent } from '../../api/types'
-import { DASH, fmtInt, fmtSeconds, fmtUsd } from '../../lib/format'
+import { DASH, fmtAge, fmtAgo, fmtInt, fmtSeconds, fmtUsd } from '../../lib/format'
 
 /** Parse an ISO timestamp to ms, or `null` when absent or unreadable. */
 function ms(iso: string | null | undefined): number | null {
   if (!iso) return null
   const t = Date.parse(iso)
   return Number.isFinite(t) ? t : null
-}
-
-/** Seconds → "6 s" / "12 min" / "2 h 5 min" (whole units; the reader wants an age, not a stopwatch). */
-function fmtAge(seconds: number): string {
-  const s = Math.max(0, Math.round(seconds))
-  if (s < 60) return `${s} s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m} min`
-  const h = Math.floor(m / 60)
-  return `${h} h ${m - h * 60} min`
-}
-
-/** An ISO timestamp as an age against `nowMs`: "6 s ago", "12 min ago", "2 h 5 min ago"; `null` when absent or unreadable. */
-export function fmtAgo(iso: string | null | undefined, nowMs: number): string | null {
-  const t = ms(iso)
-  if (t === null) return null
-  return `${fmtAge((nowMs - t) / 1000)} ago`
 }
 
 /** A duration in words for a forecast: "under a minute", "about 28 minutes", "about 1 hour 5 minutes"; the dash for a non-finite value. */

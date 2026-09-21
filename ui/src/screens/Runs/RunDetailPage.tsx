@@ -28,8 +28,8 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
  * Works with:   ui/src/api/hooks.ts (the queries), ui/src/api/types.ts (Run, RunTaskRow —
- *               mirror docs/API.md), ui/src/screens/Runs/telemetry.ts (the Now, stage,
- *               heartbeat, queue and factory lines), ui/src/screens/Runs/EvidenceDrawer.tsx
+ *               the shapes the API doc states), ui/src/screens/Runs/telemetry.ts (the Now,
+ *               stage, heartbeat, queue and factory lines), ui/src/screens/Runs/EvidenceDrawer.tsx
  *               (the pack view), ui/src/components/LiveLog.tsx (the stream; its last event
  *               is the stage line), ui/src/components/Help.tsx (`Term` on the Progress card),
  *               ui/src/screens/Capability/FailureSplit.tsx (the split pills),

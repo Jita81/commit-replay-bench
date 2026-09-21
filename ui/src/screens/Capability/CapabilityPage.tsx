@@ -27,12 +27,11 @@
  * Works with:   ui/src/screens/Capability/contract.ts (the extended map type and hook),
  *               ui/src/screens/Capability/ReasonCode.tsx (a reason code's sentence, inline),
  *               ui/src/screens/Capability/FailureSplit.tsx (split, model point, controls pill),
- *               ui/src/components/Help.tsx (`Term` in the legend), ui/src/lib/auth.tsx (`can`),
- *               ui/src/api/types.ts (`CapabilityMap`, `CellField`, `NOT_YET_MEASURED`),
- *               ui/src/components/StatTile.tsx and ui/src/components/CiBar.tsx (the numbers
- *               with their method), src/crb/server/routes/capability.py (the route),
- *               src/crb/core/capability.py (the cell statistics), src/crb/core/taxonomy.py
- *               (`ALL_CLASSES` — the list `ALL_CLASSES` here must match)
+ *               ui/src/components/Help.tsx (`Term` in the legend), ui/src/api/types.ts
+ *               (`CapabilityMap`, `CellField`, `NOT_YET_MEASURED`), ui/src/components/StatTile.tsx
+ *               (the numbers with their method), src/crb/server/routes/capability.py (the
+ *               route and the cell statistics), src/crb/core/taxonomy.py (`ALL_CLASSES` —
+ *               the list `ALL_CLASSES` here must match)
  * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx,
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (a real cell with route `calibrate`),

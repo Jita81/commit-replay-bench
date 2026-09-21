@@ -155,7 +155,10 @@ services:
       # cost / delivery series are recorded in THIS process; the api's /metrics carries the
       # HTTP and ledger series only. Internal to the compose network (`expose`, never
       # `ports`): scrape http://worker:9464/metrics from a Prometheus on the same network.
-      # 0 switches the port off.
+      # 0 switches the port off. The bind is loopback by default (a bare `crb worker` on a
+      # host offers repository / builder / cost series to nobody else); inside the
+      # container it must listen on every interface for the compose network to reach it.
+      CRB_METRICS_HOST: 0.0.0.0
       CRB_METRICS_PORT: ${CRB_METRICS_PORT:-9464}
     expose:
       - "${CRB_METRICS_PORT:-9464}"

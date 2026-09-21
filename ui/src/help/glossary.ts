@@ -140,7 +140,7 @@ export const TERMS: Record<TermId, Term> = {
   },
   negative_controls: {
     term: 'negative controls',
-    short: 'Seven deliberate cheats (no change, a stub, a tampered test, a regression, a hard-coded answer, a poisoned environment, plus the real change as the positive control) the grader must catch before any pass rate means anything. The gate passes only when a majority could be constructed and none escaped.',
+    short: 'Seven deliberate cheats (no change, a stub, a tampered test, a regression, a hard-coded answer, a poisoned environment, plus the real change as the positive control) the grader must catch before any pass rate means anything. The report reads passed when no cheat produced a violation; an escape (a cheat graded clean) or a thin set (fewer than half constructible) is counted separately and on its own withholds deliver.',
     readMore: 'ONBOARDING-A-REPO#step-3--prove-the-instrument-on-this-repository-operator-0',
   },
   controls_escape: {

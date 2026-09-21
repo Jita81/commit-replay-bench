@@ -12,13 +12,17 @@ store-level checks:
   The same numbers refresh the ``crb_false_q1_total`` / ``crb_ledger_rows`` gauges.
 * ``worker``      — liveness from the ``workers`` table each worker upserts every
   ``heartbeat_s`` even when idle (J-TEL-2): a worker seen within 3 × its own
-  ``heartbeat_s`` is alive. ``down`` when runs are queued and no worker is alive
-  (nothing will start — the first thing a tech lead hits on a broken deployment);
-  ``degraded`` when no worker has checked in yet, when one stopped checking in
-  (named, with its age), or when a running run's ``heartbeat`` is older than
-  ``worker_heartbeat_stale_s``; ``ok`` otherwise with the workers listed. Before the
-  table existed the probe read running runs' heartbeats only, so a crashed worker with
-  three queued runs answered ``ok "idle, 3 queued"``.
+  ``heartbeat_s`` is alive. ``degraded`` (never ``down``) when runs are queued and no
+  worker is alive — nothing will start, and the sentence says so with the queue depth
+  and the last check-in; when no worker has checked in yet; when one stopped checking
+  in (named, with its age); or when a running run's ``heartbeat`` is older than
+  ``worker_heartbeat_stale_s``; ``ok`` otherwise with the workers listed. The worker is
+  a dependency the API pod does not own: ``/health`` is the API's readiness probe, and a
+  503 for a crashed worker would take every API pod out of the Service — exactly when
+  the person needs to read "no worker has checked in" (the same rule as the sandbox
+  probe for the ``api`` role). Before the table existed the probe read running runs'
+  heartbeats only, so a crashed worker with three queued runs answered ``ok "idle, 3
+  queued"``.
 * ``sandbox``     — the docker daemon answers (``docker`` executor) — **role-aware**:
   the sandbox is the WORKER's instrument. A process whose role is ``api`` (the
   ``serve`` container: no docker socket, by design — see ``deploy/Dockerfile``)
@@ -59,9 +63,9 @@ Works with:   src/crb/observability/probes.py (the probe vocabulary and ``aggreg
               (the gauges and the registry — the API's series only; the worker serves its
               own, docs/DEPLOYMENT.md#9-observability), src/crb/server/worker.py (upserts
               the ``workers`` rows the worker probe reads), src/crb/server/routes/signoffs.py
-              (the same false-Q1 predicate, kept in step), deploy/entrypoint.sh +
-              deploy/Dockerfile (``CRB_ROLE`` per container and the ``HEALTHCHECK`` on
-              ``/health/live``), docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface
+              (the same false-Q1 predicate, kept in step), deploy/Dockerfile (``CRB_ROLE``
+              per container and the ``HEALTHCHECK`` on ``/health/live``),
+              docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface
 Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py
 Touch when:   never for a new repository; adding a probe means deciding which role owns it
               (``skipped`` elsewhere) and whether it may fail readiness; a new belt means
@@ -276,10 +280,13 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
     """``worker`` (J-TEL-2): liveness from the ``workers`` table (every worker checks in
     every ``heartbeat_s``, idle or not), plus running runs' heartbeats.
 
-    ``down``: runs are queued and no worker is alive — nothing will start.
-    ``degraded``: no worker has ever checked in; a worker stopped checking in (named, with
-    its age); or a running run's heartbeat is older than ``stale_s`` (the queue will
-    reclaim it; the probe is the early warning). ``ok`` otherwise, naming the workers.
+    ``degraded``: runs are queued and no worker is alive (nothing will start — said with
+    the queue depth and the last check-in, or the last clean stop); no worker has ever
+    checked in; a worker stopped checking in (named, with its age); or a running run's
+    heartbeat is older than ``stale_s`` (the queue will reclaim it; the probe is the early
+    warning). ``ok`` otherwise, naming the workers. Never ``down``: the API pod's readiness
+    is not the worker's liveness (module docstring) — ``down`` is reserved for the store
+    not answering.
     """
     now = _dt.datetime.now(_dt.UTC)
     try:
@@ -317,16 +324,24 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
     # a worker that should be alive and is not: not stopped, last seen too long ago
     lapsed = [w for w in workers if not w["alive"] and not w["stopped"]]
     if queued and not alive:
+        stopped = [w for w in workers if w["stopped"]]
         if lapsed:
             recent = min(lapsed, key=lambda w: w["heartbeat_age_s"] or float("inf"))
-            since = f"{recent['heartbeat_age_s'] or 0:.0f} s ({recent['worker_id']})"
+            since = f"no worker has checked in for {recent['heartbeat_age_s'] or 0:.0f} s"
+            since += f" ({recent['worker_id']})"
+        elif stopped:
+            last = min(stopped, key=lambda w: _age_s(w["stopped"], now) or float("inf"))
+            since = (
+                f"the last worker ({last['worker_id']}) stopped "
+                f"{_age_s(last['stopped'], now) or 0:.0f} s ago"
+            )
         else:
-            since = "ever"
+            since = "no worker has checked in yet"
         return ProbeResult(
             "worker",
-            DOWN,
-            f"{queued} queued, no worker has checked in for {since} — queued runs will not "
-            "start until one does",
+            DEGRADED,
+            f"{_plural(queued, 'run')} queued, {since} — queued runs will not start until "
+            "a worker does",
             data,
         )
     if stale_runs:

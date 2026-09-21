@@ -86,9 +86,13 @@ def test_worker_exposes_its_own_metrics_port_in_every_shipped_shape() -> None:
     compose = (ROOT / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
     worker = compose.split("\n  worker:\n", 1)[1]
     assert "CRB_METRICS_PORT: ${CRB_METRICS_PORT:-9464}" in worker
+    # the worker binds loopback by default; the container opts into every interface so the
+    # compose network (and nothing beyond it) can reach the port
+    assert "CRB_METRICS_HOST: 0.0.0.0" in worker
     assert re.search(r"\n    expose:\n      - \"\$\{CRB_METRICS_PORT:-9464\}\"", worker)
     assert "ports:" not in worker.split("healthcheck:")[0]  # internal only, never published
     deployment = WORKER_DEPLOYMENT.read_text(encoding="utf-8")
+    assert re.search(r"name:\s*CRB_METRICS_HOST\s*\n\s*value:\s*\"0.0.0.0\"", deployment)
     assert re.search(
         r"name:\s*CRB_METRICS_PORT\s*\n\s*value:\s*\{\{ .Values.worker.metrics.port", deployment
     )

@@ -254,11 +254,25 @@ def test_metered_github_app_counts_real_mints_only_and_never_the_token(
 # --- the worker's exposition and the no-op path -----------------------------------------
 
 
-def test_start_worker_exposition_honours_the_switches(caplog: pytest.LogCaptureFixture) -> None:
+def test_start_worker_exposition_honours_the_switches(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
     caplog.set_level("INFO", logger="crb.observability.metrics")
     assert metrics.start_worker_exposition(9464, enabled=False) is False
     assert metrics.start_worker_exposition(0, enabled=True) is False
     assert "exposition off" in caplog.text
+    # the default bind is loopback, never every interface: the series name repositories,
+    # builders, per-repository cost and installation ids (CRB_METRICS_HOST opts a container in)
+    seen: dict[str, Any] = {}
+
+    def fake_start(port: int, addr: str = "", registry: Any = None) -> None:
+        seen.update(port=port, addr=addr)
+
+    monkeypatch.setattr(metrics, "start_http_server", fake_start)
+    assert metrics.start_worker_exposition(9464) is True
+    assert seen == {"port": 9464, "addr": metrics.LOOPBACK} and metrics.LOOPBACK == "127.0.0.1"
+    assert metrics.start_worker_exposition(9464, addr=metrics.ALL_INTERFACES) is True
+    assert seen["addr"] == "0.0.0.0"
 
 
 def test_start_worker_exposition_serves_the_registry_on_a_free_port(registry: Any) -> None:

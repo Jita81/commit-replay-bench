@@ -143,8 +143,10 @@ describe('HomePage', () => {
     expect(screen.getByText(/Only an admin can add users/)).toBeInTheDocument()
     // a frozen backlog with no factory run behind it is ready to run, not "in progress"
     expect(rows[7]).toHaveTextContent('Backlog frozen — run the factory')
-    // the viewer's Continue keeps its rule: the baseline once any row exists
-    expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute('href', '/results?repo=alpha')
+    // the viewer's Continue keeps its rule — the baseline once any row exists — and names
+    // its destination like the operator's does; the lede says what a viewer does there
+    expect(screen.getByRole('link', { name: 'Continue to the baseline for alpha' })).toHaveAttribute('href', '/results?repo=alpha')
+    expect(screen.getByText(/a viewer reads what the evidence says and what is waiting on a person/)).toBeInTheDocument()
   })
 
   it('an active sign-off completes "Read the baseline"; an active factory run reads item k of n; Continue lands on the factory', async () => {

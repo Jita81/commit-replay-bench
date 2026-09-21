@@ -189,7 +189,12 @@ export function beltDisplay(value: boolean | null | undefined, name?: string): D
 /**
  * One plain sentence per event action the worker and the factory loop emit (the live log's
  * vocabulary), grouped by stage. The live log renders it as the row's explanation so a reader
- * does not need the loop's source to follow a run.
+ * does not need the loop's source to follow a run. The keys are exactly the actions in
+ * docs/API.md#event-vocabulary, which tests/test_event_vocabulary.py keeps equal to what the
+ * code emits — ui/src/lib/verdict.test.ts reads that table, so a sentence for an action
+ * nothing emits, or an emitted action with no sentence, fails the suite. A builder's own
+ * `build.*` events reach a replay trace prefixed `builder.build.*` and a factory trace
+ * unprefixed: `actionHelp` strips the prefix, so the sentence is written once.
  */
 export const ACTION_HELP: Record<string, string> = {
   // system — the run itself, the clone and the probe
@@ -232,10 +237,16 @@ export const ACTION_HELP: Record<string, string> = {
   'build.turn': 'One builder turn (a model call and its tool calls).',
   'build.tool': 'The builder called a tool.',
   'build.event': 'A builder event that has no closer name.',
-  'preflight.fixed': 'A formatting or lint problem in the patch was fixed before grading.',
-  'preflight.repaired': 'The patch was repaired by a bounded repair turn before grading.',
-  'preflight.rejected': 'The patch was rejected before grading; the payload names why.',
-  'preflight.error': 'The preflight step itself failed.',
+  // the sealed container the builder works in (ADR-0012) and the belt-5 pre-flight — always
+  // emitted under the builder prefix (builders/adapter.py)
+  'builder.sealed': 'The builder’s worktree was sealed in a container with no network before any turn.',
+  'builder.copy_back': 'The builder’s changes were copied back from the sealed container; the payload is the summary.',
+  'builder.discard': 'The builder’s container and scratch files were discarded after the attempt.',
+  'builder.discard.error': 'Discarding the builder’s container failed; the attempt’s grade is unaffected.',
+  'builder.preflight.fixed': 'A formatting or lint problem in the patch was fixed before grading.',
+  'builder.preflight.repaired': 'The patch was repaired by a bounded repair turn before grading.',
+  'builder.preflight.rejected': 'The patch was rejected before grading; the payload names why.',
+  'builder.preflight.error': 'The preflight step itself failed.',
   // grade — the belts
   'grade.belt': 'One belt was evaluated; the value says whether it held.',
   'grade.tamper': 'A test file was changed; the row is disqualified, not counted.',
@@ -263,7 +274,6 @@ export const ACTION_HELP: Record<string, string> = {
   'item.done': 'The item finished its loop.',
   'item.error': 'The item stopped on an error; its chain records where.',
   'item.blocked': 'The item is blocked on something a person must decide.',
-  'item.outcome': 'The item’s final outcome was recorded on the chain.',
   'readiness.assessed': 'The item’s readiness was assessed against the backlog’s gaps.',
   'readiness.refused': 'The item was refused before any spend because a readiness gap is open.',
   'route.decided': 'The item’s cell was routed by the published rule before any build was paid for.',
@@ -273,23 +283,17 @@ export const ACTION_HELP: Record<string, string> = {
   'red.proved': 'The new test failed on the current code, so the build may start.',
   'red.refused': 'The new test did not fail on the current code; no build.',
   'build.oracle_staged': 'The item’s test was staged as the oracle the build must satisfy.',
-  'build.graded': 'The build was graded through the same belts as a replay.',
   'delivery.skipped': 'Delivery was skipped for this item; the payload names why.',
   'delivery.withheld': 'Built clean, but the map does not route deliver for this cell: no branch, no pull request; the measured route is on the chain.',
   'delivery.override': 'An approver overrode the route gate; the override is on the chain under their name.',
   'delivery.error': 'Opening the branch or pull request failed.',
   'delivery.opened': 'A branch and pull request were opened under review; never a merge.',
-  'delivery.refused': 'Delivery was refused by the route gate; the measured route and reason are on the chain.',
   'review.start': 'A review of the delivered change started.',
   'review.probe': 'The review probed the delivered change.',
   'review.verdict': 'The review’s verdict was recorded; it is advisory to a person, never a route.',
   'review.recorded': 'The review was written to the chain.',
   'rework.start': 'The item went back for another build after a review finding.',
   'horizon.checkpoint': 'The factory recorded a checkpoint of the whole backlog’s state.',
-  'backlog.frozen': 'The backlog was frozen; the factory works only on what it lists.',
-  'backlog.evolved': 'The frozen backlog was changed by a person; the change is on the chain.',
-  'gap.signoff': 'An approver signed a readiness gap.',
-  'edit.permitted': 'A person permitted an edit the factory could not make on its own.',
   // audit traces — out-of-band records, never rendered in the log but named for completeness
   'repo.created': 'The repository was registered.',
   'repo.updated': 'The repository’s configuration was changed; the diff is recorded.',
@@ -300,12 +304,21 @@ export const ACTION_HELP: Record<string, string> = {
   'signoff.revoked': 'A sign-off was revoked.',
   'review.created': 'A human review of an accepted patch was recorded, anchored to the bytes read.',
   'review.refused': 'A review was refused because its patch hash did not match the pack.',
+  // legacy — the CLI's ledger import, never on a run's live log
+  'legacy.tasks': 'A legacy task file was read for import; the payload counts the tasks.',
+  'legacy.skip': 'A legacy line was skipped on import; the payload names the reason.',
+  'legacy.grade': 'A legacy grade was imported under the belt set it named.',
+  'legacy.aggregate': 'Imported legacy grades were aggregated into a cell with the model and sample count recorded.',
 }
 
-/** The sentence for an action; a `builder.*` event names its family; anything else gets a generic sentence. */
+/**
+ * The sentence for an action. A builder's own `builder.build.*` event (a replay / blind trace
+ * prefixes it; a factory trace does not) reads the `build.*` sentence; any other `builder.*`
+ * event names its family; anything else gets a generic sentence naming the action.
+ */
 export function actionHelp(action: string): string {
   const s = ACTION_HELP[action]
   if (s) return s
-  if (action.startsWith('builder.')) return 'A builder-level event, passed through from the builder.'
+  if (action.startsWith('builder.')) return ACTION_HELP[action.slice('builder.'.length)] ?? 'A builder-level event, passed through from the builder.'
   return `An event the loop emitted as “${action}”; this version of the UI has no sentence for it.`
 }

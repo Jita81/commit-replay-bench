@@ -21,7 +21,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { GradeResult, Run, StepEvent } from '../../api/types'
-import { factoryLine, fmtAgo, fmtDurationWords, heartbeatLine, nowLine, packHeadline, queueLine, stageLine } from './telemetry'
+import { fmtAgo } from '../../lib/format'
+import { factoryLine, fmtDurationWords, heartbeatLine, nowLine, packHeadline, queueLine, stageLine } from './telemetry'
 
 const T0 = Date.parse('2026-09-13T09:00:00Z')
 
@@ -102,7 +103,7 @@ const grade = (over: Partial<GradeResult> = {}): GradeResult => ({
   ...over,
 })
 
-describe('fmtAgo / fmtDurationWords', () => {
+describe('fmtAgo (ui/src/lib/format.ts, shared with the Connection walk) / fmtDurationWords', () => {
   it('reads seconds, minutes and hours ago', () => {
     expect(fmtAgo('2026-09-13T09:11:54Z', T0 + 12 * 60_000)).toBe('6 s ago')
     expect(fmtAgo('2026-09-13T09:00:00Z', T0 + 12 * 60_000)).toBe('12 min ago')

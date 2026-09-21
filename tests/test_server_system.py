@@ -224,7 +224,10 @@ class TestHealth:
     ) -> None:
         """J-TEL-2: liveness comes from the ``workers`` table the loop upserts even when
         idle — not from running runs' heartbeats. Queued work with no live worker is
-        ``down`` (nothing will start); a worker that stopped checking in is named."""
+        ``degraded`` with the queue depth and the last check-in (nothing will start) —
+        never ``down``: ``/health`` is the API pod's readiness probe and the worker is a
+        dependency the API does not own, so a crashed worker must not take the API (and
+        the sentence) out of the Service. A worker that stopped checking in is named."""
         now = _dt.datetime.now(_dt.UTC)
         fresh = (now - _dt.timedelta(seconds=4)).isoformat(timespec="seconds")
         with factory() as s:
@@ -255,7 +258,8 @@ class TestHealth:
         assert 3 <= w["heartbeat_age_s"] <= 10 and w["stale_after_s"] == 30.0
         assert worker["data"]["queued"] == 2 and worker["data"]["alive"] == 1
 
-        # the worker stops checking in (> 3 × its own heartbeat_s): queued work → down
+        # the worker stops checking in (> 3 × its own heartbeat_s): queued work → degraded,
+        # and readiness stays 200 (the API pod is up; the worker is not its liveness)
         stale = (now - _dt.timedelta(seconds=360)).isoformat(timespec="seconds")
         with factory() as s:
             row = s.get(WorkerRow, "w-1")
@@ -263,11 +267,14 @@ class TestHealth:
             row.heartbeat = stale
             s.commit()
         r = client.get(f"{API_PREFIX}/health")
-        assert r.status_code == 503
+        assert r.status_code == 200
+        assert r.json()["status"] == "degraded"
         worker = _probe(r.json(), "worker")
-        assert worker["status"] == "down"
-        assert worker["detail"].startswith("2 queued, no worker has checked in for ")
-        assert "w-1" in worker["detail"]
+        assert worker["status"] == "degraded"
+        assert worker["detail"].startswith("2 runs queued, no worker has checked in for ")
+        assert (
+            "(w-1)" in worker["detail"] and "will not start until a worker does" in worker["detail"]
+        )
         assert worker["data"]["workers"][0]["alive"] is False
         assert worker["data"]["alive"] == 0
 
@@ -292,6 +299,18 @@ class TestHealth:
         assert worker["status"] == "degraded"
         assert "no worker has checked in yet" in worker["detail"]
         assert worker["data"]["workers"][0]["stopped"] == stale
+
+        # queued work behind a cleanly stopped worker names the stop, never "for ever"
+        with factory() as s:
+            s.add(Run(id="run-q3", repo="demo", status="queued"))
+            s.commit()
+        r = client.get(f"{API_PREFIX}/health")
+        assert r.status_code == 200
+        worker = _probe(r.json(), "worker")
+        assert worker["status"] == "degraded"
+        assert worker["detail"].startswith("1 run queued, the last worker (w-1) stopped ")
+        assert " s ago — queued runs will not start until a worker does" in worker["detail"]
+        assert "ever" not in worker["detail"].replace("never", "")
 
     def test_health_needs_no_auth(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/health").status_code == 200

@@ -16,12 +16,16 @@
  *               is, and the action is gated on the operator role like the API is (a
  *               non-operator reads "An operator runs this."). Nothing here fabricates
  *               progress: a stage is done only when the API holds its evidence, a queued run
- *               reads "Queued" with its place in the line, and the running stage's line is
- *               the polled run's own counter (`runningDetail`). Every door to /results is
- *               named "Baseline", as the nav names it.
+ *               reads "Queued" with its place in the line (the server's `queue_position`),
+ *               the running stage's line is the polled run's own counter (`runningDetail`),
+ *               and a passed controls report that still carries a finding (an escape, a
+ *               thin set) reads "Done, with a finding" in amber — deliver is withheld until
+ *               it is answered. Every door to /results is named "Baseline", as the nav
+ *               names it; at phone width the repository link is the row's door.
  * How:          `useAllRepos` → the table; `useRepo` + `useOracle` + `useOracleControls` +
- *               `useCapabilityMap` (+ the polled `useRun` and `useQueuedRuns` while a stage
- *               runs) → `stagesFor` → the stage list; actions are the existing mutations
+ *               `useCapabilityMap` (+ the polled `useRun` while a stage runs, and
+ *               `useQueuedRuns` only for an older server that sends no `queue_position`)
+ *               → `stagesFor` → the stage list; actions are the existing mutations
  *               (`useProbeRepo`, `useCreateRun`, `useCancelRun` behind a confirm) and dialogs
  *               (`RepoNewDialog`, `RunNewDialog`); the watched run's end refetches the inputs.
  *               The eyebrow is `PageHeader`'s default (`journeyEyebrow`).
@@ -66,10 +70,13 @@ import type { Tone } from '../../lib/verdict'
 import { RepoNewDialog } from '../Repos/RepoNewDialog'
 import { RunNewDialog } from '../Runs/RunNewDialog'
 import { GitHubConnectDialog } from './GitHubConnectDialog'
-import { type Stage, type StageStatus, stageSummary, stagesFor } from './connection'
+import { type Stage, type StageStatus, stageComplete, stageSummary, stagesFor } from './connection'
 
 const STATUS_DISPLAY: Record<StageStatus, { label: string; tone: Tone; glyph: string }> = {
   done: { label: 'Done', tone: 'green', glyph: '✓' },
+  // the stage holds its evidence and the walk goes on, but the evidence carries a finding
+  // (a controls escape, a thin set): read before spending — deliver is withheld meanwhile
+  warn: { label: 'Done, with a finding', tone: 'amber', glyph: '!' },
   running: { label: 'In progress', tone: 'blue', glyph: '◐' },
   todo: { label: 'Not started', tone: 'muted', glyph: '○' },
   failed: { label: 'Failed', tone: 'red', glyph: '✕' },
@@ -170,7 +177,7 @@ export function ConnectPage() {
                   <th className="py-2 pr-4 font-medium">Tasks</th>
                   <th className="py-2 pr-4 font-medium">Next stage</th>
                   <th className="py-2 pr-4 font-medium">Last run</th>
-                  <th className="py-2 font-medium"></th>
+                  <th className="hidden py-2 font-medium sm:table-cell"></th>
                 </tr>
               </thead>
               <tbody>
@@ -231,7 +238,7 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
         {repo.language}
         {repo.runner ? ` / ${repo.runner}` : ''}
       </td>
-      <td className="num py-2 pr-4 font-mono text-xs">
+      <td className="num whitespace-nowrap py-2 pr-4 font-mono text-xs">
         {repo.task_counts.total} · {repo.task_counts.gold_clean} <Term id="gold_clean">gold-clean</Term>
       </td>
       <td className="py-2 pr-4">
@@ -242,9 +249,10 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
       <td className="py-2 pr-4 font-mono text-xs text-on-surface-muted">
         {repo.last_run ? `${repo.last_run.kind} · ${repo.last_run.status}` : '—'}
       </td>
-      <td className="py-2 text-right">
+      {/* below sm the column is off-canvas in the scrolling table: the repository link in column one is the row's action there */}
+      <td className="hidden py-2 text-right sm:table-cell">
         <LinkButton size="sm" to={`/connect/${encodeURIComponent(repo.name)}`}>
-          {s.status === 'done' ? 'Baseline' : 'Continue'}
+          {stageComplete(s.status) ? 'Baseline' : 'Continue'}
         </LinkButton>
       </td>
     </tr>
@@ -273,8 +281,19 @@ export function ConnectRepoPage() {
   // are read only while one is active, and feed the stage's live line
   const activeRunId = repo.data?.last_run && (repo.data.last_run.status === 'queued' || repo.data.last_run.status === 'running') ? repo.data.last_run.id : ''
   const watched = useRun(activeRunId, { poll: Boolean(activeRunId) })
-  const queue = useQueuedRuns(watched.data?.status === 'queued')
-  const queuedAhead = watched.data?.status === 'queued' && queue.data ? queue.data.items.filter((r) => r.id !== watched.data!.id && r.created < watched.data!.created).length : undefined
+  // the place in the line is the server's `queue_position` (1-based, the same (created, id)
+  // order the worker claims in); the queued list is read only for an older server that
+  // does not send it, and then it is the best the client can do (no id tiebreak)
+  const serverPosition = watched.data?.status === 'queued' && typeof watched.data.queue_position === 'number' ? watched.data.queue_position : null
+  const queue = useQueuedRuns(watched.data?.status === 'queued' && serverPosition === null)
+  const queuedAhead =
+    watched.data?.status !== 'queued'
+      ? undefined
+      : serverPosition !== null
+        ? Math.max(0, serverPosition - 1)
+        : queue.data
+          ? queue.data.items.filter((r) => r.id !== watched.data!.id && r.created < watched.data!.created).length
+          : undefined
   const stages = repo.data
     ? stagesFor({ repo: repo.data, oracle: oracleInput, controls: controlsInput, measuredRows: map.data?.summary.n_total, watched: watched.data, queuedAhead })
     : []
@@ -302,8 +321,8 @@ export function ConnectRepoPage() {
   }
   const busy = probe.isPending || createRun.isPending
   const actionError = probe.error ?? createRun.error ?? cancel.error
-  const allDone = stages.length > 0 && stages.every((s) => s.status === 'done')
-  const next = stages.find((s) => s.status !== 'done')
+  const allDone = stages.length > 0 && stages.every((s) => stageComplete(s.status))
+  const next = stages.find((s) => !stageComplete(s.status))
 
   return (
     <>
@@ -345,7 +364,7 @@ export function ConnectRepoPage() {
                       <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`${s.title}: ${d.label}`}>
                         {d.label}
                       </Pill>
-                      {s.spends && s.status !== 'done' && (
+                      {s.spends && !stageComplete(s.status) && (
                         <Pill tone="amber" size="xs" glyph="$">
                           spends model budget
                         </Pill>

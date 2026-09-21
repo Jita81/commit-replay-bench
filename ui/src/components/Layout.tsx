@@ -8,8 +8,11 @@
  *               `JOURNEY_STEPS` and `journeyEyebrow()` — the one source of "where am I".
  * What it does: One brand name in chrome, the journey nav and the instrument row, the
  *               instrument health pill from `GET /health`, the user chip showing the
- *               principal's ROLE (so a viewer knows why a button is missing), theme cycling,
- *               Help and sign-out. `AboutThisScreen` is mounted once after the outlet so every
+ *               principal's ROLE (so a viewer knows why a button is missing; the display name
+ *               only from `sm` up), theme cycling, Help as a compact "?" icon (the footer
+ *               carries the words) and sign-out — sized so the cluster is one row at 375 px
+ *               and "Sign out" never becomes a third header row. `AboutThisScreen` is mounted
+ *               once after the outlet so every
  *               screen carries its help with no wiring. The footer carries crb / apparatus /
  *               policy versions — the one place internals appear, because an auditor needs
  *               the provenance of what they are reading — and links to Help and the glossary.
@@ -142,20 +145,28 @@ export function Layout() {
               <span className="block rounded-[2px] bg-on-primary px-2.5 pb-[7px] pt-[9px] text-[22px] font-bold leading-none tracking-[-.02em] text-primary">crb</span>
               <span className="text-[22px] font-bold leading-none">{BRAND}</span>
             </NavLink>
-            <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-[16px]">
+            {/* the gaps and the role pill are tighter below sm so pill · role · help · theme · sign out is ONE row at 375 px */}
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-x-2.5 gap-y-2 text-[16px] sm:gap-x-4">
               {h && (
                 <Pill tone={h.tone} glyph={h.glyph} size="xs" label={`Instrument health: ${h.label}`}>
                   {h.label}
                 </Pill>
               )}
               {me && (
-                <span className="inline-flex items-center gap-3" data-testid="user-chip">
-                  <span>{me.display_name || me.email}</span>
-                  <span className="label rounded-[4px] bg-on-primary px-2 py-1 text-[13px] font-bold uppercase tracking-[.05em] text-primary">{me.role}</span>
+                <span className="inline-flex items-center gap-2.5 sm:gap-3" data-testid="user-chip">
+                  {/* the name is a courtesy the role pill does not need: below sm it goes, so the cluster stays on one row at 375 px and "Sign out" is never a third header row */}
+                  <span className="hidden sm:inline">{me.display_name || me.email}</span>
+                  <span className="label rounded-[4px] bg-on-primary px-1.5 py-1 text-[12px] font-bold uppercase tracking-[.05em] text-primary sm:px-2 sm:text-[13px]">{me.role}</span>
                 </span>
               )}
-              <NavLink to="/help" className="text-[16px] text-on-primary underline">
-                Help
+              {/* a compact icon, not a word: the footer carries the written Help · Glossary links on every screen */}
+              <NavLink
+                to="/help"
+                aria-label="Help"
+                title="Help: glossary and guides"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-on-primary text-[15px] font-bold text-on-primary no-underline"
+              >
+                <span aria-hidden>?</span>
               </NavLink>
               <Button size="sm" variant="ghost" className="text-on-primary" onClick={cycle} aria-label={`Theme: ${theme}. Switch theme`} title={`Theme: ${theme}`}>
                 <span aria-hidden>{THEME_GLYPH[theme]}</span>

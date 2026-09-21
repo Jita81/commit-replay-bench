@@ -167,5 +167,17 @@ export function licenseSentence(repo: string, map: CapabilityMap & { controls?: 
   const belts = c.belt_sets?.join(', ') || '—'
   const gate = map.controls?.state ? `a ${map.controls.state} controls gate` : 'the controls gate'
   const moved = c.n !== ev.n ? ` The cell has since grown to n=${c.n} (${pct(c.point)}); that is not what was signed.` : ''
-  return `On ${repo} at apparatus ${apparatus}, under belt set ${belts} and ${gate}, ${ev.n} sighted attempts at ${c.capability_class} × ${c.size} were graded clean at ${pct(ev.point)} (95% Wilson ${pct(ev.ci_low)}–${pct(ev.ci_high)}) with false-Q1 ${ev.false_q1}, as signed by ${approverName(so)} on ${new Date(so.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.${moved} It says nothing about any other repository, class or size.`
+  return `On ${repo} at apparatus ${apparatus}, under belt set ${belts} and ${gate}, ${ev.n} sighted attempts at ${c.capability_class} × ${c.size} ${builderClause(map)} were graded clean at ${pct(ev.point)} (95% Wilson ${pct(ev.ci_low)}–${pct(ev.ci_high)}) with false-Q1 ${ev.false_q1}, as signed by ${approverName(so)} on ${new Date(so.created).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.${moved} It says nothing about any other repository, class, size, builder or model.`
+}
+
+/**
+ * The builder and model the rate is about — EVIDENCE-AND-CLAIMS §7 forbids any rate without
+ * them. This table is the class × size projection, so a sign-off here spans every builder
+ * (a sign-off scoped to one builder never covers a class × size cell —
+ * `signoffScopeMatches`); the sentence says so and names the models the map's rows hold,
+ * never a builder it invented. With no model on the map it points at the signed rows.
+ */
+function builderClause(map: CapabilityMap): string {
+  const models = map.models.filter((m) => m && m !== '*')
+  return models.length > 0 ? `across every builder on the map (${models.length === 1 ? 'model' : 'models'} ${models.join(', ')} — the signed rows name their builder; open the cell)` : 'by the builders and models recorded on the signed rows (open the cell)'
 }

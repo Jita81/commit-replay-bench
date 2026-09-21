@@ -20,8 +20,10 @@
  * What it does: Creates the three non-admin accounts if missing, finds a finished run and a
  *               task to anchor the detail routes, then for each persona × width signs in
  *               through the form, visits every route, saves a full-page screenshot under
- *               `<CRB_E2E_OUTPUT_DIR>/screens/` and asserts the About block is present on
- *               every route that is not /help. It changes no data.
+ *               `<CRB_E2E_OUTPUT_DIR>/screens/`, asserts the About block is present on
+ *               every route that is not /help and, at 375 px, that the top bar is at most
+ *               two rows (a wrapped "Sign out" is a phone-width defect). It changes no data;
+ *               the fixture context goes into the test's annotations, never stdout.
  * How:          Playwright; `signIn` from support.ts; the routes list is built from the
  *               primary repo, the run and the task found through the API as the admin.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -154,7 +156,7 @@ test.describe('11-screens: every route × persona × width, with the About block
       const tj = (await tasks.json()) as { items: Array<{ task_id?: string; id?: string }> }
       ctx.taskId = (tj.items[0]?.task_id ?? tj.items[0]?.id ?? '') as string
     }
-    console.log(`11-screens: repo=${ctx.repo} run=${ctx.runId || '(none)'} task=${ctx.taskId || '(none)'} out=${OUT}`)
+    test.info().annotations.push({ type: 'note', description: `repo=${ctx.repo} run=${ctx.runId || '(none)'} task=${ctx.taskId || '(none)'} out=${OUT}` })
   })
 
   for (const persona of PERSONAS) {
@@ -171,6 +173,13 @@ test.describe('11-screens: every route × persona × width, with the About block
           await page.goto(r.path)
           await settle(page)
           await shot(page, persona, r.slug, vp.width)
+          if (vp.width === 375) {
+            // the top bar is two rows on a phone (brand; pill · role · help · theme · sign out) —
+            // never three: a third row is ~400 px of chrome before the content
+            const bar = page.getByRole('banner').locator('> div').first()
+            const box = await bar.boundingBox()
+            expect(box?.height ?? 0, `${persona} @ 375 ${r.path}: the top bar wrapped past two rows (${box?.height} px)`).toBeLessThan(130)
+          }
           const about = page.getByTestId('about-this-screen')
           if (r.about) {
             await expect(about, `${persona} @ ${vp.width} ${r.path}: no About this screen block`).toHaveCount(1)
