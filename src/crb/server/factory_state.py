@@ -12,8 +12,9 @@ hash-chained JSONL files, like evidence packs: the API and the worker share
 
 Nothing here decides anything: the loop, the grader and the reviewer do. This module
 only places the records, and derives the task view (:func:`task_views`) a reader sees —
-the latest readiness, RED proof, build, delivery and verdict per item, straight from the
-evidence events, never from a cached status.
+the latest readiness, RED proof, build, delivery (opened, or updated by a rework) and
+verdict per item, plus the outcome's reason (why a governed stop stopped), straight from
+the evidence events, never from a cached status.
 
 Navigation
 ----------
@@ -48,6 +49,7 @@ from crb.factory.evidence import (
     EV_BUILD,
     EV_DELIVERY,
     EV_DELIVERY_REFUSED,
+    EV_DELIVERY_UPDATED,
     EV_GAP_SIGNOFF,
     EV_ITEM_OUTCOME,
     EV_READINESS,
@@ -75,6 +77,10 @@ class TaskView:
     size: str
     kind: str
     status: str  # the latest item.outcome status, or "pending"
+    #: Why a governed stop stopped — the item.outcome's ``error`` (``not_red``'s refusal,
+    #: ``delivery_failed``'s error, ``oracle_needs_strengthening``'s finding and way
+    #: forward); empty when accepted or not yet run.
+    outcome_reason: str
     dor_gaps: tuple[str, ...]
     route_hint: str
     red_proof: bool | None
@@ -91,6 +97,7 @@ class TaskView:
             "size": self.size,
             "kind": self.kind,
             "status": self.status,
+            "outcome_reason": self.outcome_reason,
             "dor_gaps": list(self.dor_gaps),
             "route_hint": self.route_hint,
             "red_proof": self.red_proof,
@@ -186,10 +193,17 @@ class FactoryHome:
             return []
         latest: dict[str, dict[str, FactoryEvent]] = {}
         last_kind: dict[str, str] = {}  # the kind of each item's newest event
+        # the newest delivery event of EITHER kind, in chain order: a rework's re-delivery
+        # (`delivery.updated`) carries the SAME pull request the first delivery opened
+        # (DL-045), but a later run may open a FRESH one (the branch deleted after the
+        # first PR closed) — so recency decides, never a preference between the kinds
+        latest_delivery: dict[str, FactoryEvent] = {}
         for ev in self.events():
             if ev.item_id:
                 latest.setdefault(ev.item_id, {})[ev.kind] = ev  # newest wins per kind
                 last_kind[ev.item_id] = ev.kind
+                if ev.kind in (EV_DELIVERY, EV_DELIVERY_UPDATED):
+                    latest_delivery[ev.item_id] = ev
         views: list[TaskView] = []
         for item in backlog.ordered():
             by = latest.get(item.id, {})
@@ -210,7 +224,7 @@ class FactoryHome:
                     if build.payload.get("clean")
                     else ("disqualified" if build.payload.get("disqualified") else "not_clean")
                 )
-            delivery = by.get(EV_DELIVERY)
+            delivery = latest_delivery.get(item.id)
             pr = str(delivery.payload.get("pr_url", "")) if delivery else ""
             if not pr and by.get(EV_DELIVERY_REFUSED) is not None:
                 pr = ""
@@ -224,6 +238,7 @@ class FactoryHome:
                     size=item.size_estimate,
                     kind=item.kind,
                     status=str(outcome.payload.get("status", "pending")) if outcome else "pending",
+                    outcome_reason=str(outcome.payload.get("error", "")) if outcome else "",
                     dor_gaps=gaps,
                     route_hint=str(route.payload.get("route", "")) if route else "",
                     red_proof=red,

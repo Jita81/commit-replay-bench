@@ -1060,13 +1060,9 @@ def test_run_where_every_attempt_errors_is_failed_not_succeeded(h: Harness) -> N
 # --- factory (P6) ---------------------------------------------------------------------------
 
 
-def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -> None:
-    """The forward-mode loop as a run kind: a frozen backlog with an operator-authored
-    oracle → readiness → RED proof → build under the belts → (delivery refused, opt-in)
-    → mechanical review → item outcome; a process_step=factory ledger row; the evidence
-    chain under CRB_HOME/factory/<repo>/; live counts on the run."""
-    from crb.core.ledger import PROCESS_FACTORY
-    from crb.factory import evidence as fe
+def _multiply_backlog(h: Harness) -> tuple[Any, Any, Any]:
+    """Register the one-item ``bug.fix × XS`` backlog with its operator-authored oracle and
+    the fake builder; returns ``(home, item, backlog)``."""
     from crb.factory.backlog import KIND_CODE, BacklogItem
     from crb.factory.testfirst import AuthoredTest
     from crb.server.factory_state import FactoryHome
@@ -1097,6 +1093,19 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
         }
     )
     builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="multiply", **cfg)
+    return home, item, backlog
+
+
+def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -> None:
+    """The forward-mode loop as a run kind: a frozen backlog with an operator-authored
+    oracle → readiness → RED proof → build under the belts → (delivery refused, opt-in)
+    → mechanical review → item outcome; a process_step=factory ledger row; the evidence
+    chain under CRB_HOME/factory/<repo>/; live counts on the run."""
+    from crb.core.ledger import PROCESS_FACTORY
+    from crb.factory import evidence as fe
+    from crb.server.factory_state import FactoryHome
+
+    home, _item, backlog = _multiply_backlog(h)
     run = h.enqueue("factory", ladder_json=["fake:m0"])
     done = h.run_one()
     assert done.status == STATUS_SUCCEEDED, done.error
@@ -1133,11 +1142,18 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     # The first factory run above wrote one sighted process_step=factory row into the
     # fixture's bug.fix XS cell, so the map now says `calibrate (n_below_min)` for it →
     # delivery WITHHELD (recorded with the measured route, no PR attempted), and the item
-    # is still built, reviewed and accepted
+    # is still built, reviewed and accepted. The reading is the PRE-run map (DL-045): the
+    # first run's row counts (n=1), the gated run's own row does not — and it is on the
+    # route event, read at readiness, before the build
     h.enqueue("factory", ladder_json=["fake:m0"], params_json={"deliver": True})
     gated = h.run_one()
     assert gated.status == STATUS_SUCCEEDED, gated.error
     assert gated.counts_json["by_status"] == {"accepted": 1}
+    routes = [e for e in home.events() if e.kind == fe.EV_ROUTE]
+    cell = routes[-1].payload["cell_route"]
+    assert cell["route"] == "calibrate" and cell["n"] == 1 and cell["reason_code"] == "n_below_min"
+    assert cell["apparatus_versions"] == [rows[0].apparatus_version]
+    assert len(list(h.worker.ledger.rows(run_id=gated.id))) == 1  # its own row landed after
     refused = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED]
     assert refused and refused[-1].payload["reason"].startswith(
         "route gate: the cell routes calibrate"
@@ -1174,6 +1190,37 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     h.enqueue("factory", ladder_json=["fake:m0"])
     again = h.run_one()
     assert again.status == STATUS_FAILED and "no frozen backlog" in again.error
+
+
+def test_route_lookup_reads_the_map_as_it_stood_before_the_run(h: Harness) -> None:
+    """DL-045 (B-1b finding 2 — PR bodies said ``n=27`` where the freeze saw 26): the
+    worker's route lookup for a run EXCLUDES that run's own ledger rows, so a clean build
+    cannot nudge the cell that licenses its own delivery. Rows of every other run count."""
+    home, item, _ = _multiply_backlog(h)
+    first = h.enqueue("factory", ladder_json=["fake:m0"])
+    assert h.run_one().status == STATUS_SUCCEEDED
+    second = h.enqueue("factory", ladder_json=["fake:m0"])
+    assert h.run_one().status == STATUS_SUCCEEDED
+    rows = list(h.worker.ledger.rows(repo=pr.REPO_NAME))
+    assert {r.run_id for r in rows if r.process_step == "factory"} == {first.id, second.id}
+    # the map with everything: two factory rows in bug.fix × XS
+    everything = h.worker._route_lookup(pr.REPO_NAME)(item)
+    assert everything is not None and everything["n"] == 2
+    assert everything["apparatus_versions"] == [rows[-1].apparatus_version]
+    # as the second run saw it: its own row excluded, the first run's counted
+    before_second = h.worker._route_lookup(pr.REPO_NAME, second.id)(item)
+    assert before_second is not None and before_second["n"] == 1
+    # excluding the FIRST run's row today still counts the second's (n=1): the filter is
+    # by run id, not by time — and an unknown run id excludes nothing
+    minus_first = h.worker._route_lookup(pr.REPO_NAME, first.id)(item)
+    assert minus_first is not None and minus_first["n"] == 1
+    assert h.worker._route_lookup(pr.REPO_NAME, "not-a-run")(item) == everything
+    # what each run actually saw is on its route event: the first run found the cell
+    # unmeasured (None — its own row could not count), the second saw exactly one row
+    cells = [e.payload["cell_route"] for e in home.events() if e.kind == "route.decided"]
+    assert cells[0] is None and len(cells) == 2
+    assert cells[1] == {k: before_second[k] for k in cells[1]}  # the evidence-facing slice
+    assert cells[1]["n"] == 1 and cells[1]["apparatus_versions"] == [rows[-1].apparatus_version]
 
 
 def test_github_settings_read_only_their_own_keys_and_refuse_a_malformed_one(
