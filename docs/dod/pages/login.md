@@ -1,0 +1,56 @@
+---
+id: dod.page.login
+level: page
+name: Sign in
+scope: /login
+parent: dod.journey.orient
+children: []
+persons: [anonymous, viewer, operator, approver, admin]
+owner: ui
+status: partial                # WRITTEN BY THE CHECKER — never by hand
+updated: 2026-09-22
+---
+
+# Sign in
+
+**Purpose.** "Measures what an AI builder can be trusted to change in your repository, graded by
+your own tests." — the strapline under the brand name (`LoginPage.tsx:77`), the only sentence a
+person reads before they have a role.
+
+**Entry → exit.** Arrives by `RequireAuth` bouncing a protected route here with `?next=` (`auth.tsx:88`),
+by Sign out (`Layout.tsx`, `navigate('/login')`), or by typing the URL. Leaves with a session: a
+successful `POST /auth/login` seeds `/auth/me` and navigates to `next` (same-origin paths only,
+default `/home`); the organisation button hands off to `GET /auth/oidc/start?next=` and is shown only
+when `GET /version` says `oidc_enabled`. A visitor who already has a session is sent to `next`
+without seeing the form.
+
+**Non-goals.** The page does not create accounts, reset or change passwords, choose a role or
+show an About block (it renders outside the shell, so `AboutThisScreen` never mounts). Accounts
+and passwords are an admin's job (Settings → Users, `OPERATOR.md` §9) or the host operator's (`crb users`).
+
+## Definition of done
+
+| id | category | criterion | evidence | state | gap |
+|---|---|---|---|---|---|
+| login.purpose.1 | PURPOSE | Before any role, the page states in one plain sentence what the product does: the strapline under the brand name reads "Measures what an AI builder can be trusted to change in your repository, graded by your own tests." | `vitest:ui/src/screens/Login/LoginPage.test.tsx::"the strapline is one plain sentence about what the product does for a team"` | met | |
+| login.entry-exit.2 | ENTRY-EXIT | An unauthenticated visit to a protected route lands on `/login?next=<that route>` and a successful sign-in returns there; a direct sign-in lands on `/home`; a `next` that is not a same-origin path is replaced by `/home` | `spec:ui/e2e/walkthrough/01-login.spec.ts::"a protected route bounces to /login?next= and comes back after signing in"` · `spec:ui/e2e/walkthrough/01-login.spec.ts::"a wrong password shows the error envelope"` · `code:ui/src/screens/Login/LoginPage.tsx::safeNext` · `test:tests/test_server_auth.py::test_safe_next_path` | met | |
+| login.entry-exit.3 | ENTRY-EXIT | A person who cannot sign in is told on the page who can reset their password or reactivate their account, so the stop has a way forward without leaving the product | `absent` | unmet | G-917 |
+| login.truth.4 | TRUTH | The page renders no number, and the only states it reports are the API's: the organisation button appears only when `GET /version` reports `oidc_enabled`, "Checking for an organisation sign-in…" shows while that call is pending, and a failed `/version` call shows an error with Retry instead of silently hiding the button | `spec:ui/e2e/smoke.spec.ts::"renders, links to OIDC start, and has no WCAG 2.1 AA violations"` · `route:GET /version` | partial | G-191 |
+| login.actions.5 | ACTIONS | Sign in: while pending the button reads "Signing in…" and is disabled; a wrong username or password keeps the form and shows the error envelope titled "Wrong username or password" with `HTTP 401`; a sixth failure within a minute shows an envelope that names the wait in seconds; success navigates to `next` | `spec:ui/e2e/walkthrough/01-login.spec.ts::"a wrong password shows the error envelope"` · `test:tests/test_server_auth.py::test_wrong_password_401_envelope` · `test:tests/test_server_auth.py::test_rate_limit_after_five_failures` | partial | G-189 |
+| login.actions.6 | ACTIONS | Sign in with organisation account hands off to `GET /auth/oidc/start?next=`, and a failed provider round-trip returns the person to this page with the reason and the form, never to a raw API error | `spec:ui/e2e/smoke.spec.ts::"renders, links to OIDC start, and has no WCAG 2.1 AA violations"` · `test:tests/test_server_auth.py::test_callback_rejects_state_mismatch_and_provider_errors` | partial | G-188 |
+| login.explanation.7 | EXPLANATION | Every element on the page — both fields and both sign-in buttons — carries a hint that opens on hover, focus and tap, and the ratchet enforces the route so a new unhinted element fails a test | `hint:id:field.login.username` · `hint:id:field.login.password` · `hint:id:button.login.submit` · `hint:id:button.login.oidc` · `vitest:ui/src/screens/Login/LoginPage.test.tsx::"every field and both sign-in buttons carry a hint"` | partial | G-909 |
+| login.evidence.8 | EVIDENCE | The form, the redirects and sign-out are walked against the live stack, the strapline and hints are unit-tested, and axe (WCAG 2.1 AA) is clean on the page — all of it run by CI | `vitest:ui/src/screens/Login/LoginPage.test.tsx::"the strapline is one plain sentence about what the product does for a team"` · `spec:ui/e2e/walkthrough/01-login.spec.ts::"a wrong password shows the error envelope"` · `spec:ui/e2e/walkthrough/01-login.spec.ts::"sign out ends the session"` · `spec:ui/e2e/smoke.spec.ts::"renders, links to OIDC start, and has no WCAG 2.1 AA violations"` · `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` | partial | G-910 |
+| login.roles.9 | ROLES | No role is needed to reach the page; the API refuses local login when it is disabled (`403 local_auth_disabled`), returns one message for every failure so an attacker cannot learn which half was wrong, trips a `429` after five failures per minute per username and IP, and records each sign-in and failed sign-in as an audit event with the actor | `test:tests/test_server_auth.py::test_local_auth_can_be_disabled` · `test:tests/test_server_auth.py::test_wrong_password_401_envelope` · `test:tests/test_server_auth.py::test_rate_limit_after_five_failures` · `code:src/crb/server/auth.py::LoginRateLimiter` · `doc:docs/SECURITY.md#34-authentication-and-authorisation-crbserverauth` | partial | G-190 |
+| login.operations.10 | OPERATIONS | The platform team can turn local login off, configure the organisation sign-in and recover an account without the UI: `API.md` lists the auth routes, `DEPLOYMENT.md` §4.1 the Entra settings, `OPERATOR.md` §9 the `crb users` verbs, and a failed login is logged with the username and client address | `doc:docs/API.md#auth` · `doc:docs/DEPLOYMENT.md#41-entra-id-crboidc` · `doc:docs/OPERATOR.md#9-users` · `route:POST /auth/login` · `route:GET /auth/oidc/start` · `code:src/crb/server/routes/auth.py::login` | met | |
+| login.accessibility.11 | ACCESSIBILITY | Both fields have visible labels, the form is named "Local account sign in", the error envelope is a live region (`role="alert"`), the page is captured at 375 and 1280 for every persona, and axe (WCAG 2.1 AA) is clean at both widths | `spec:ui/e2e/smoke.spec.ts::"renders, links to OIDC start, and has no WCAG 2.1 AA violations"` · `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` · `code:ui/src/components/ErrorState.tsx::ErrorState` | partial | G-192 |
+| login.non-goals.12 | NON-GOALS | The page says what it does not do: that accounts are created and passwords reset by an admin or the host operator, not here | `absent` | unmet | G-917 |
+
+## Gaps
+- **G-909** — `/login`, `/help`, `/help/docs/:name` and `*` have no `SCREENS` entry and no `MIN_HINTS` floor: the ratchet skips them by name (`hints-ratchet.test.tsx:184`), so a new unhinted element on any of them never fails a test, against the operator's ask that every element explains itself · add a `SCREENS` entry with a fixture and a floor for each (login 4, help 2, guide 1, 404 1) and delete the skip · ui
+- **G-910** — `ci.yml` has no UI job: `tsc -b`, vitest, the hint ratchet and the mocked smoke spec run only as local gates before a release, so a hint-registry or type regression passes branch protection and the only axe run on `/login` and the only end-to-end 404 are local-only evidence; README's "eleven jobs" also counts the two-way Python test matrix as two jobs · add a `ui` job to `ci.yml` running `npm ci`, `tsc -b`, `npm test` and the mocked smoke spec, and correct the README count · deploy
+- **G-917** — a person who cannot sign in has no way forward on the page: nothing says who resets a password or reactivates an account (an admin in Settings, or the host operator with `crb users`, `OPERATOR.md` §9), and the page states none of its non-goals · one sentence under the form ("Forgotten your password or locked out? Ask an admin, or the person who runs this deployment.") — the reset screen itself is backlog F23 · ui
+- **G-188** — a failed organisation sign-in never returns to this page: `oidc_callback` raises an `ApiError` JSON envelope (`oidc_provider_error`, `oidc_state_mismatch`, `oidc_exchange_failed`, `account_disabled`) and the page reads only `?next=` · redirect the callback's failures to `/login?error=<code>` and render that code as an `ErrorState` above the form · server
+- **G-189** — the `429 rate_limited` response renders under the generic heading "Request failed" with `retry_after_s` hidden behind the collapsed Details · add `rate_limited` to `CODE_TITLES` ("Too many failed sign-ins") and print the wait from `Retry-After` in the message · ui
+- **G-190** — a sign-in writes no audit event: `routes/auth.py` stamps `last_login` and logs a failure, and the event vocabulary in `API.md` has no `user.login` or `user.login_failed`, so an auditor cannot see from the product who signed in when · emit `user.login` (actor = the user) on success and `user.login_failed` (username only, never the password) on failure, and list both in the vocabulary · server
+- **G-191** — the "Checking for an organisation sign-in…" and "Could not check for an organisation sign-in" states (`LoginPage.tsx:105-110`) have no test · one vitest case each, with `GET /version` pending and failing · ui
+- **G-192** — `11-screens` captures `/login` at 375 and 1280 but runs axe only on the authenticated routes (`hintSample` runs after `signIn`), so the page has no axe run at phone width anywhere · run the axe sweep on `/login` before signing in, at both widths · ui

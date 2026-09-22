@@ -208,6 +208,72 @@ describe('AboutThisScreen', () => {
     expect(out[0]!.text).toBe(HINTS['nav.home'])
   })
 
+  it('says, on each screen whose definition of done quotes it, the sentence that record quotes', async () => {
+    const cases: Array<{ route: string; path: string; role: 'viewer' | 'operator' | 'approver' | 'admin'; says: string[] }> = [
+      {
+        route: '/posture',
+        path: '/posture',
+        role: 'admin',
+        says: [
+          'A printable statement of how this deployment is built, secured and audited',
+          'configure OpenID Connect',
+          'nothing measured is evidence',
+        ],
+      },
+      {
+        route: '/repos',
+        path: '/repos',
+        role: 'viewer',
+        says: [
+          'Every repository this deployment knows, with its probe status and task counts.',
+          'gold-clean is how many pass their own test at the recorded commit',
+        ],
+      },
+      {
+        route: '/repos/cobra',
+        path: '/repos/:name',
+        role: 'viewer',
+        says: ['The change profile counts commits by class and size; it weights the coverage figure on the map.'],
+      },
+      {
+        route: '/connect',
+        path: '/connect',
+        role: 'viewer',
+        says: ['A repository with 0 gold-clean tasks cannot be measured.'],
+      },
+      {
+        route: '/connect/cobra',
+        path: '/connect/:name',
+        role: 'viewer',
+        says: ['the rates, with n and a Wilson interval, appear on the Baseline'],
+      },
+      {
+        route: '/decisions',
+        path: '/decisions',
+        role: 'approver',
+        says: [
+          'A cell the policy would refuse anyway is never listed',
+          'Decline by doing nothing: an unsigned cell keeps its route.',
+        ],
+      },
+      {
+        route: '/tasks/cobra/abc',
+        path: '/tasks/:repo/:taskId',
+        role: 'viewer',
+        says: ['Trials are single attempts; the cell\u2019s rate is on the map, not here.'],
+      },
+    ]
+    for (const c of cases) {
+      mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: c.role } })
+      const view = renderApp(<AboutThisScreen />, { route: c.route, path: c.path })
+      for (const sentence of c.says) {
+        await waitFor(() => expect(screen.getByTestId('about-this-screen')).toHaveTextContent(sentence))
+      }
+      view.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('renders nothing on a route with no entry', async () => {
     mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
     const { container } = renderApp(<AboutThisScreen />, { route: '/help', path: '/help' })

@@ -5,6 +5,7 @@
 #   lint      ruff check + ruff format --check
 #   types     mypy --strict over src/crb
 #   code-map  every source file carries a valid Navigation header; docs/CODE-MAP.md current
+#   dod       every page/journey/stream + the product carry a definition of done; docs/dod/GAP-ANALYSIS.md current
 #   layers    import-linter: crb.core is stdlib-only; layers depend downward only
 #   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
 #   security  gitleaks (secrets in history) + pip-audit on the resolved environment
@@ -112,6 +113,20 @@ jobs:
           python-version: "3.12"
       - name: Headers present, links resolve, map current
         run: python scripts/code_map.py --check
+
+  dod:
+    name: dod (every route, journey, stream and the product carry a definition of done; evidence resolves; the gap analysis is current)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Artefacts valid, evidence resolves, docs/dod/GAP-ANALYSIS.md current
+        run: python scripts/dod_check.py --check
 
   layers:
     name: layers (import-linter)
