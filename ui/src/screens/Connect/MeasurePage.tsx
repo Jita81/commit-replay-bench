@@ -36,11 +36,12 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
  * Works with:   ui/src/lib/builder.ts (`builderChoice`, shared with the Factory),
- *               ui/src/components/govuk.tsx, ui/src/components/Layout.tsx (`journeyEyebrow`),
- *               ui/src/components/Hint.tsx + ui/src/help/hints.ts (the triggers and copy),
- *               ui/src/components/Help.tsx (`DocLink`), ui/src/screens/Connect/ConnectPage.tsx
- *               (the walk that lands here), ui/src/screens/Runs/RunNewDialog.tsx (the full
- *               form for an operator who wants every knob), src/crb/server/routes/runs.py
+ *               ui/src/components/govuk.tsx (SummaryList, WarningButton, BackLink),
+ *               ui/src/components/Layout.tsx (`journeyEyebrow`), ui/src/help/hints.ts (the
+ *               `*.measure.*` copy; the trigger is `Hint`), ui/src/components/Help.tsx
+ *               (`DocLink`), ui/src/screens/Connect/ConnectPage.tsx (the walk that lands here),
+ *               ui/src/screens/Runs/RunNewDialog.tsx (the full form for an operator who wants
+ *               every knob), src/crb/server/routes/runs.py (the request it submits)
  * Tested by:    ui/src/screens/Connect/MeasurePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
  * Touch when:   the run request grows a field the walk should expose.

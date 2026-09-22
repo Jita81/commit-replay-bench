@@ -36,10 +36,11 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none (DL-042, DL-044)
  * Works with:   ui/src/components/govuk.tsx (TaskList, NotificationBanner, InsetText),
- *               ui/src/components/Hint.tsx + ui/src/help/hints.ts (the triggers and their
- *               copy), ui/src/api/hooks.ts (`useActiveRun`, `useSignoffs`),
- *               ui/src/screens/Connect/connection.ts, ui/src/screens/Connect/ConnectPage.tsx,
- *               ui/src/screens/Results/ResultsPage.tsx, ui/src/screens/Factory/FactoryPage.tsx,
+ *               ui/src/help/hints.ts (the `task.home.*` copy; the trigger is `Hint`),
+ *               ui/src/api/hooks.ts (`useActiveRun`, `useSignoffs`),
+ *               ui/src/screens/Connect/connection.ts (the connection state each task reads),
+ *               ui/src/screens/Connect/ConnectPage.tsx, ui/src/screens/Results/ResultsPage.tsx,
+ *               ui/src/screens/Factory/FactoryPage.tsx (where the tasks lead),
  *               ui/src/screens/Posture/PosturePage.tsx (the health banner's target)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)

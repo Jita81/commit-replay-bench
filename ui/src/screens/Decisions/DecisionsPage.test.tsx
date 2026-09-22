@@ -24,11 +24,9 @@
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hintText } from '../../help/hints'
 import { unhinted } from '../../help/hints-collector'
-import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
 import { DecisionsPage } from './DecisionsPage'
 
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22', reason_code: 'deliver', verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }
@@ -169,9 +167,6 @@ describe('DecisionsPage', () => {
     }
     const pill = screen.getByText(/waiting across/).closest('[data-hint]')!
     expect(pill).toHaveAttribute('data-hint', 'stat.decisions.count')
-    await userEvent.hover(pill)
-    const tip = document.getElementById(pill.getAttribute('aria-describedby')!)!
-    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
-    expect(tip).toHaveTextContent(hintText('stat.decisions.count'))
+    await expectHintOpens(pill, 'stat.decisions.count')
   })
 })

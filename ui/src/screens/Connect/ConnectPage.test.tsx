@@ -28,9 +28,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hintText } from '../../help/hints'
 import { unhinted } from '../../help/hints-collector'
-import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { ConnectPage, ConnectRepoPage } from './ConnectPage'
 
 const REPO = {
@@ -116,10 +115,7 @@ describe('ConnectPage', () => {
     expect(screen.getByRole('button', { name: 'Connect by URL' })).toHaveAttribute('data-hint', 'button.connect.url')
     expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute('data-hint', 'button.connect.row_action')
     const pill = container.querySelector('[data-hint="pill.connect.stage_summary"]')!
-    await userEvent.hover(pill)
-    const tip = document.getElementById(pill.getAttribute('aria-describedby')!)!
-    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
-    expect(tip).toHaveTextContent(hintText('pill.connect.stage_summary'))
+    await expectHintOpens(pill, 'pill.connect.stage_summary')
   })
 
   it('every stage title, status pill, detail line and action on the walk carries a hint; the oracle stage title opens on hover', async () => {
@@ -141,10 +137,7 @@ describe('ConnectPage', () => {
     const title = screen.getByTestId('stage-oracle').querySelector('[data-hint="stage.walk.oracle"]')!
     expect(within(title as HTMLElement).getByRole('button', { name: 'Oracle strength' })).toBeInTheDocument()
     expect(title).not.toHaveAttribute('tabindex')
-    await userEvent.hover(title)
-    const tip = document.getElementById(title.getAttribute('aria-describedby')!)!
-    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
-    expect(tip).toHaveTextContent(hintText('stage.walk.oracle'))
+    await expectHintOpens(title, 'stage.walk.oracle')
   })
 
   it('the per-repository walk: six stages, statuses from the API, the operator runs the next one', async () => {

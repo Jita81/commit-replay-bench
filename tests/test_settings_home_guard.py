@@ -71,6 +71,11 @@ class TestTempDirReason:
         assert "$TMPDIR" in str(temp_dir_reason(persistent / "scratch" / "home", env))
         assert temp_dir_reason(persistent / "home", env) is None
 
+    def test_var_tmp_is_a_temporary_root_on_both_spellings(self) -> None:
+        # systemd-tmpfiles ages /var/tmp on the RHEL family (verifier, 2026-09-22)
+        assert temp_dir_reason("/var/tmp/crb", {}) is not None
+        assert temp_dir_reason("/private/var/tmp/crb", {}) is not None
+
     def test_a_persistent_path_is_not_flagged(self, persistent: Path) -> None:
         assert temp_dir_reason(persistent, {}) is None
         assert temp_dir_reason("~/crb-stack/home", {}) is None

@@ -6,9 +6,17 @@
  * ----------
  * What it is:   Component tests for the `Hint` primitive.
  * What it does: Pins the trigger contract every hinted element inherits: mouse-over opens at
- *               150 ms and not at 149; focus of the wrapper or a focusable descendant opens
- *               at once and blur closes; a touch `pointerdown` toggles and a mouse one does
- *               not; Escape closes and does not propagate (a dialog behind it stays open);
+ *               150 ms and not at 149; the pointer may cross into the bubble and rest there
+ *               (leaving the bubble closes); focus of the wrapper or a focusable descendant
+ *               opens at once and blur closes; typing in a control inside the trigger
+ *               closes it and a pointer over the field does not reopen it until the
+ *               control is left; a touch `pointerdown` toggles and a mouse one does not;
+ *               Escape closes, does not propagate and is default-prevented (a native
+ *               dialog behind it does not cancel); inside a `<dialog>` the bubble is
+ *               portalled into the dialog (the top layer), elsewhere into `<body>`; a
+ *               control that is itself a hint opens only its own bubble on focus, and a
+ *               focus-opened bubble carries `data-trigger="focus"` (no pointer events) until
+ *               the pointer arrives on its trigger;
  *               the trigger's `aria-describedby` resolves to a `role="tooltip"` whose text is
  *               the registry sentence while closed; two hints of the same id render two
  *               distinct bubble ids; a hint on a button lets its click through; a hint on a
@@ -30,6 +38,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { HINTS } from '../help/hints'
 import { Button } from './Button'
+import { TextField } from './Field'
 import { Term } from './Help'
 import { HINT_CLOSE_MS, HINT_OPEN_MS, Hint } from './Hint'
 
@@ -82,6 +91,99 @@ describe('Hint', () => {
     expect(tip).toHaveAttribute('data-open', 'true')
     act(() => vi.advanceTimersByTime(HINT_CLOSE_MS))
     expect(tip).toHaveAttribute('data-open', 'false')
+  })
+
+  it('the bubble is part of the hover region: moving the pointer into it keeps it open; leaving the bubble closes it', () => {
+    render(<Hint id={ID}>Baseline</Hint>)
+    const trigger = screen.getByText('Baseline')
+    const tip = tooltipFor(trigger)
+    fireEvent.mouseOver(trigger)
+    act(() => vi.advanceTimersByTime(HINT_OPEN_MS))
+    expect(tip).toHaveAttribute('data-open', 'true')
+    // trigger → bubble: no close is scheduled, and the bubble's own mouse-over cancels any
+    fireEvent.mouseOut(trigger, { relatedTarget: tip })
+    fireEvent.mouseOver(tip)
+    act(() => vi.advanceTimersByTime(HINT_CLOSE_MS + 50))
+    expect(tip).toHaveAttribute('data-open', 'true')
+    // bubble → trigger: still open
+    fireEvent.mouseOut(tip, { relatedTarget: trigger })
+    fireEvent.mouseOver(trigger)
+    act(() => vi.advanceTimersByTime(HINT_CLOSE_MS + 50))
+    expect(tip).toHaveAttribute('data-open', 'true')
+    // bubble → elsewhere: closes after the grace period
+    fireEvent.mouseOut(trigger, { relatedTarget: tip })
+    fireEvent.mouseOut(tip, { relatedTarget: document.body })
+    act(() => vi.advanceTimersByTime(HINT_CLOSE_MS))
+    expect(tip).toHaveAttribute('data-open', 'false')
+    // a pointer-down on the open bubble closes it (it never swallows an action)
+    fireEvent.mouseOver(trigger)
+    act(() => vi.advanceTimersByTime(HINT_OPEN_MS))
+    expect(tip).toHaveAttribute('data-open', 'true')
+    pointerDown(tip, 'mouse')
+    expect(tip).toHaveAttribute('data-open', 'false')
+  })
+
+  it('a control that is itself a hint opens only its own bubble on focus — its nested hints stay closed (no bubble storm on a map cell)', () => {
+    const onClick = vi.fn()
+    render(
+      <Hint as="button" id="map.cell.tile" type="button" onClick={onClick}>
+        <Hint id="route.deliver">Deliver</Hint> <Hint id="chart.ci_bar">bar</Hint>
+      </Hint>,
+    )
+    const cell = screen.getByRole('button')
+    const inner = screen.getByText('Deliver')
+    fireEvent.focus(cell)
+    expect(tooltipFor(cell)).toHaveAttribute('data-open', 'true')
+    expect(tooltipFor(inner)).toHaveAttribute('data-open', 'false')
+    expect(tooltipFor(screen.getByText('bar'))).toHaveAttribute('data-open', 'false')
+    // and the click that focused it still lands
+    fireEvent.click(cell)
+    expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('a bubble opened by focus takes no pointer events (data-trigger=focus) until the pointer arrives on its trigger; a hover-opened one is hoverable', () => {
+    render(<Hint id={ID}>Baseline</Hint>)
+    const trigger = screen.getByText('Baseline')
+    const tip = tooltipFor(trigger)
+    fireEvent.focus(trigger)
+    expect(tip).toHaveAttribute('data-trigger', 'focus')
+    // the pointer moves onto the trigger: from here the bubble is hover content
+    fireEvent.mouseOver(trigger)
+    expect(tip).toHaveAttribute('data-trigger', 'hover')
+    fireEvent.blur(trigger, { relatedTarget: document.body })
+    expect(tip).not.toHaveAttribute('data-trigger')
+    fireEvent.mouseOver(trigger)
+    act(() => vi.advanceTimersByTime(HINT_OPEN_MS))
+    expect(tip).toHaveAttribute('data-trigger', 'hover')
+  })
+
+  it('inside a <dialog> the bubble is portalled into the dialog, so the top layer cannot paint over it', () => {
+    render(
+      <dialog open data-testid="dlg">
+        <Hint id={ID}>In a dialog</Hint>
+      </dialog>,
+    )
+    const tip = tooltipFor(screen.getByText('In a dialog'))
+    expect(tip.parentElement).toBe(screen.getByTestId('dlg'))
+    expect(tip.parentElement).not.toBe(document.body)
+  })
+
+  it('typing in a control inside the trigger closes the bubble and keeps it closed until the control is left', () => {
+    render(<TextField label="Name" hint="field.login.username" />)
+    const input = screen.getByLabelText('Name')
+    const tip = tooltipFor(input.closest('[data-hint]') as HTMLElement)
+    fireEvent.focus(input)
+    expect(tip).toHaveAttribute('data-open', 'true')
+    fireEvent.input(input, { target: { value: 'a' } })
+    expect(tip).toHaveAttribute('data-open', 'false')
+    // a pointer over the field while typing does not bring it back over the next field
+    fireEvent.mouseOver(input)
+    act(() => vi.advanceTimersByTime(HINT_OPEN_MS + 10))
+    expect(tip).toHaveAttribute('data-open', 'false')
+    // leaving and coming back explains again
+    fireEvent.blur(input, { relatedTarget: document.body })
+    fireEvent.focus(input)
+    expect(tip).toHaveAttribute('data-open', 'true')
   })
 
   it('a wrapper with no focusable child is the tab stop; focus opens at once and blur closes', () => {
@@ -185,6 +287,20 @@ describe('Hint', () => {
     expect(outer).not.toHaveBeenCalled()
     fireEvent.keyDown(trigger, { key: 'Escape' })
     expect(outer).toHaveBeenCalledTimes(1)
+    // a native <dialog> cancels on an Escape keydown unless it is default-prevented: while
+    // a bubble is open the press is consumed; while closed it reaches the dialog
+    fireEvent.focus(trigger)
+    const consumed = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    act(() => {
+      trigger.dispatchEvent(consumed)
+    })
+    expect(consumed.defaultPrevented).toBe(true)
+    expect(tip).toHaveAttribute('data-open', 'false')
+    const passed = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    act(() => {
+      trigger.dispatchEvent(passed)
+    })
+    expect(passed.defaultPrevented).toBe(false)
     // a hovered bubble has no focus inside it: Escape pressed anywhere still closes it
     fireEvent.mouseOver(trigger)
     act(() => vi.advanceTimersByTime(HINT_OPEN_MS))

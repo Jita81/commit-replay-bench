@@ -90,8 +90,8 @@ Honesty properties
   apparatus carries ``base_sha``.
 * **The merge outcome comes back as evidence (B-9 / F30).** A factory run on a linked
   repository first reads every delivered pull request's state through the installation
-  token and records ``delivery.merged`` / ``delivery.closed`` once per PR on the item's
-  chain (``factory.outcomes.synced`` on the trace); a sync that cannot read never fails
+  token and records ``delivery.merged`` / ``delivery.closed`` (at most closed then merged
+  per PR) on the item's chain (``factory.outcomes.synced`` on the trace); a sync that cannot read never fails
   the run.
 * **Builder config is recorded.** ``params.builder_config`` (from ``POST /runs``)
   is passed to every builder as constructor overrides AND stamped into the run's
@@ -126,15 +126,15 @@ How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (g
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0012-builder-in-a-sealed-container.md
-Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finish),
-              src/crb/store/models.py (``WorkerRow`` — the check-in row the health probe
-              reads), src/crb/observability/metrics.py (the recorders, ``record_event`` on
+Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finish; the
+              check-in row the health probe reads is ``WorkerRow`` in src/crb/store/models.py),
+              src/crb/observability/metrics.py (the recorders, ``record_event`` on
               the emitter's metering sink, ``crb_queue_depth`` on check-in),
               src/crb/core/run.py (a replay's task loop), src/crb/builders/adapter.py (the
               build function, ladder, pre-flight), src/crb/core/mine.py (mining; the oracle
               and controls kinds call their core modules the same way),
-              src/crb/factory/loop.py (forward mode — its files live in
-              src/crb/server/factory_state.py, whose ``sync_outcomes`` runs first),
+              src/crb/server/factory_state.py (forward mode's files and ``sync_outcomes``,
+              which runs first; the loop itself is src/crb/factory/loop.py),
               src/crb/server/github_app.py (installation tokens for clone, fetch,
               delivery and the pull-request read), src/crb/server/reaper.py (the durable
               queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
@@ -1096,7 +1096,10 @@ class Worker:
         def refuse(why: str) -> FetchRefused:
             exc = FetchRefused(
                 f"repo {name!r}: the clone could not be brought up to date with {safe_url} "
-                f"({why}) — the run is refused so it does not build on a stale base"
+                f"({why}) — the run is refused so it does not build on a stale base. "
+                f"Bring the clone's {branch or 'default'} branch back onto the remote's "
+                "history by hand, or clear the repository's clone path in its configuration "
+                "so the next run clones afresh"
             )
             if emitter is not None:
                 emitter.error(
@@ -1855,6 +1858,17 @@ class Worker:
                 f"backlog changed since this run was queued: pinned {pinned[:16]}…, "
                 f"active {backlog.backlog_hash[:16]}… — re-queue against the active backlog"
             )
+        # An evolution moves only the evolutions chain (the frozen hash stays), so the
+        # same window admits an item the person who queued the run never saw: the API
+        # stamps that chain too and the pin is checked on both (a run queued before the
+        # stamp existed carries no key and is not held to it).
+        if "evolutions_hash" in p and str(p["evolutions_hash"] or "") != backlog.evolutions_hash:
+            pinned_ev = str(p["evolutions_hash"] or "")
+            raise ValueError(
+                "backlog evolved since this run was queued: pinned evolutions chain "
+                f"{pinned_ev[:16] or '(none)'}…, active {backlog.evolutions_hash[:16] or '(none)'}… "
+                "— re-queue so the run works the items you can see"
+            )
         ladder = self._ladder(ctx)
         budget = self._budget(ctx)
         rungs = trial_labels_for(ladder, budget)
@@ -1899,7 +1913,8 @@ class Worker:
         link = dict(cfg_json.get("github") or {})
         remote = str(ctx.config.url or "")
         # B-9 / F30 — before any build: each delivered pull request's fate, read through
-        # the installation token, onto the item's chain (once per PR); never fails the run
+        # the installation token, onto the item's chain (at most closed then merged per
+        # PR); never fails the run
         self._sync_outcomes(ctx, home, cfg_json, remote)
         creds = self._delivery_credentials(cfg_json, remote) if remote else None
         api_base = self.settings.github.api_url if creds is not None else "https://api.github.com"
@@ -1974,8 +1989,8 @@ class Worker:
     ) -> None:
         """The outcome sync at the start of a factory run (B-9 / F30): for a repository
         linked through the GitHub App on the app's own host, read every delivered pull
-        request with no outcome yet and record ``delivery.merged`` / ``delivery.closed``
-        once per PR. ``factory.outcomes.synced`` carries the report (``skipped`` with the
+        request whose fate can still change and record ``delivery.merged`` /
+        ``delivery.closed`` (at most closed then merged per PR). ``factory.outcomes.synced`` carries the report (``skipped`` with the
         reason when the repository cannot be read; ``status: error`` when the token could
         not be minted). Nothing here can fail the run."""
         installation = self._github_installation(cfg)

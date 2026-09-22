@@ -8,7 +8,9 @@
  *               required marker as `Label *`, and wires `description` / `error` through
  *               `aria-describedby` and `aria-invalid` so validation is announced, not just
  *               coloured. `hint` (a registry id) makes the field the hover / focus / tap
- *               trigger for what the value is for: focusing the control opens it, and the
+ *               trigger for what the value is for: focusing the control opens it, the first
+ *               keystroke closes it (the bubble sits under the field, over the next label —
+ *               it explains on arrival and gets out of the way when typing starts), and the
  *               control's `aria-describedby` then names both the description line and the
  *               hint bubble. `InlineSelect` is the compact labelled select toolbars use
  *               (`RepoPicker`, filters).
@@ -25,6 +27,7 @@
  *               ui/e2e/walkthrough/support.ts (`field(scope, 'Label')` matches the `Label *`
  *               rendering exactly)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx (the hint contract),
+ *               ui/src/components/Hint.test.tsx (typing closes a field's bubble),
  *               ui/src/screens/Repos/RepoConfigTab.test.tsx (the `aria-describedby` wiring),
  *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (a select's hint as its
  *               accessible description), ui/src/screens/Runs/RunNewDialog.test.tsx,

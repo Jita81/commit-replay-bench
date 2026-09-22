@@ -36,10 +36,9 @@
  *               ui/src/screens/Decisions/decisions.ts (the rows and the role rule reused
  *               here), ui/src/components/RepoPicker.tsx (`defaultToLatest`),
  *               ui/src/components/StatTile.tsx (the tile anatomy), ui/src/components/Help.tsx
- *               (`Term` on the route tiles), ui/src/components/Hint.tsx + ui/src/help/hints.ts
- *               (the triggers and copy), ui/src/screens/Capability/CapabilityPage.tsx
- *               (the full grid), ui/src/screens/Connect/ConnectPage.tsx (the walk that leads
- *               here), docs/EVIDENCE-AND-CLAIMS.md (what a number may be said to mean)
+ *               (`Term` on the route tiles), ui/src/help/hints.ts (the `stat.results.*` copy;
+ *               the trigger is `Hint`), ui/src/screens/Capability/CapabilityPage.tsx
+ *               (the full grid), docs/EVIDENCE-AND-CLAIMS.md (what a number may be said to mean)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
  * Touch when:   a headline fact is added to the map summary; the wording of what `deliver`
@@ -258,7 +257,7 @@ export function ResultsPage() {
             )}
           </Card>
 
-          <Card title="Waiting on a person" eyebrow={`${decisions.length} for this repository`} actions={<LinkButton size="sm" to="/decisions" hint="button.results.all_decisions">All decisions</LinkButton>}>
+          <Card title="Waiting on a person" eyebrow={`${decisions.length} for this repository`} eyebrowHint="stat.results.waiting_count" actions={<LinkButton size="sm" to="/decisions" hint="button.results.all_decisions">All decisions</LinkButton>}>
             {decisions.length === 0 ? (
               <EmptyState compact glyph="✓" title="Nothing is waiting on a person here" />
             ) : (

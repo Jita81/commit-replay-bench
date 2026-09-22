@@ -17,11 +17,14 @@ Two invariants live here rather than in the loop, so no caller can skip them:
   build already exists.
 * **Nothing secret.** Every string in a payload passes through
   :mod:`crb.core.redact` at construction.
-* **One outcome per pull request.** :meth:`FactoryEvidence.record_delivery_outcome`
-  appends ``delivery.merged`` / ``delivery.closed`` at most once per pull request on
-  the item's chain: a second call for the same PR returns the event already there and
-  appends nothing (B-9 / F30 — an outcome sync may run on every factory run and by
-  hand, and the record must not grow with the number of syncs).
+* **At most closed, then merged, per pull request.**
+  :meth:`FactoryEvidence.record_delivery_outcome` appends ``delivery.merged`` /
+  ``delivery.closed`` for a pull request at most once per STATE, and only in the order
+  GitHub allows: a ``closed`` PR can be reopened and merged by a person, so ``merged``
+  after ``closed`` is a real transition and is recorded (newest wins in every fold);
+  ``merged`` is terminal, so nothing follows it; the same state twice returns the event
+  already there and appends nothing (B-9 / F30 — an outcome sync may run on every factory
+  run and by hand, and the record must not grow with the number of syncs).
 
 Persistence is behind the :class:`FactoryStore` protocol; :class:`JsonlFactoryStore`
 is the stdlib reference. The database store is a later workstream.
@@ -426,13 +429,15 @@ class FactoryEvidence:
     ) -> tuple[FactoryEvent, bool]:
         """The pull request's fate, read back from GitHub: ``state`` is ``merged`` or
         ``closed``. Returns ``(event, recorded)``: ``recorded`` is False — and the event is
-        the one already on the chain — when this PR already has an outcome (idempotent;
-        an outcome is never re-recorded, whatever the sync reads later)."""
+        the one already on the chain — when this PR's newest outcome is already ``state``,
+        or is ``merged`` (terminal: a merge is never followed by anything). ``merged``
+        after ``closed`` IS recorded: a person can reopen a closed pull request and merge
+        it, and the chain must say so (idempotent per state; at most two outcomes per PR)."""
         kind = OUTCOME_KINDS.get(state)
         if kind is None:
             raise ValueError(f"state must be one of {tuple(OUTCOME_KINDS)}, got {state!r}")
         existing = self.outcome_for(item_id, pr_number)
-        if existing is not None:
+        if existing is not None and existing.kind in (kind, EV_DELIVERY_MERGED):
             return existing, False
         ev = self.append(
             kind,
@@ -513,14 +518,16 @@ class FactoryEvidence:
         ]
 
     def outcome_for(self, item_id: str, pr_number: int) -> FactoryEvent | None:
-        """The outcome event (``delivery.merged`` / ``delivery.closed``) already recorded
-        for this item's pull request ``pr_number``, or ``None``."""
+        """The NEWEST outcome event (``delivery.merged`` / ``delivery.closed``) recorded
+        for this item's pull request ``pr_number``, or ``None`` (a closed-then-merged PR
+        answers the merge)."""
+        found: FactoryEvent | None = None
         for e in self.events_for(item_id):
             if e.kind in (EV_DELIVERY_MERGED, EV_DELIVERY_CLOSED) and int(
                 e.payload.get("pr_number", 0) or 0
             ) == int(pr_number):
-                return e
-        return None
+                found = e
+        return found
 
     def signed_gaps(self, item_id: str) -> dict[str, FactoryEvent]:
         """Mirror of the gap ledger: latest sign-off event per slot (revoked dropped)."""

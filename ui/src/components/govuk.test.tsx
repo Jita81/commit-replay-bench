@@ -5,23 +5,30 @@
  * ----------
  * What it is:   Tests for the GOV.UK / NHS pattern components and the Posture page.
  * What it does: Pins the task list's "completed n of m" and row links; the summary list's
- *               key / value / change cells; the banner's landmark and title; the
+ *               key / value / change cells and that a hinted row opens from its value with
+ *               the key as its About label; the banner's landmark and title; the
  *               confirmation panel's reference; the details pattern (a native `<details>`
  *               whose summary is the one line shown, closed unless `open`); and that the
  *               posture page renders every group from the API without a secret value.
  * How:          Plain renders; `mockApi` + `renderApp` for the page.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/components/govuk.tsx, ui/src/screens/Posture/PosturePage.tsx
+ * Works with:   ui/src/components/govuk.tsx (the code under test),
+ *               ui/src/screens/Posture/PosturePage.tsx (rendered through `renderApp`),
+ *               ui/src/components/Hint.tsx (a summary row's trigger), ui/src/components/Help.tsx
+ *               (`collectHints` — the About label a row gets), ui/src/help/hints.ts (the copy)
  * Tested by:    ui/src/components/govuk.test.tsx
  * Touch when:   a pattern is added.
  */
 
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { HINTS } from '../help/hints'
 import { PosturePage } from '../screens/Posture/PosturePage'
 import { PRINCIPAL, envelope, mockApi, renderApp } from '../test/utils'
+import { collectHints } from './Help'
 import { ConfirmationPanel, Details, NotificationBanner, SummaryList, TaskList } from './govuk'
 
 describe('govuk patterns', () => {
@@ -42,6 +49,27 @@ describe('govuk patterns', () => {
     expect(screen.getByRole('link', { name: /Change/ })).toHaveAttribute('href', '/repos/x')
     expect(screen.getByRole('region', { name: 'Important' })).toHaveTextContent('The sandbox probe is degraded.')
     expect(screen.getByText('sgn_7f3c04a9')).toBeInTheDocument()
+  })
+
+  it('a hinted summary row is the trigger as a whole: hovering the VALUE opens the hint, and the About block lists it under the key', async () => {
+    render(
+      <MemoryRouter>
+        <SummaryList rows={[{ key: 'Roles', value: 'four', hint: 'summary.posture.roles', changeTo: '/posture' }, { key: 'Plain', value: '2', hint: 'summary.posture.roles' }]} />
+      </MemoryRouter>,
+    )
+    const value = screen.getByText('four')
+    const row = value.closest('[data-hint]') as HTMLElement
+    expect(row.tagName).toBe('DIV')
+    expect(row).toHaveAttribute('data-hint-label', 'Roles')
+    expect(row.querySelector('dt')?.textContent).toBe('Roles')
+    // a row with a Change link is not a tab stop of its own (the link is); one without is
+    expect(row).not.toHaveAttribute('tabindex')
+    expect(screen.getByText('2').closest('[data-hint]')).toHaveAttribute('tabindex', '0')
+    const tip = document.getElementById(row.getAttribute('aria-describedby')!)!
+    await userEvent.hover(value)
+    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
+    expect(tip).toHaveTextContent(HINTS['summary.posture.roles'])
+    expect(collectHints(document)[0]).toMatchObject({ id: 'summary.posture.roles', label: 'Roles' })
   })
 
   it('details is a native <details> with the summary as its one visible line, closed by default', () => {

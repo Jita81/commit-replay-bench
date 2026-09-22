@@ -372,12 +372,16 @@ export const HINTS = {
     'Take the decision if your role can, or read it if not. The role that acts is named under the button.',
   'button.results.all_decisions':
     'Every decision waiting on a person, across every repository.',
+  'stat.results.waiting_count':
+    'How many decisions are waiting on a person for this repository alone: sign-offs due, gaps to sign and factory items to decide.',
 
   // ── /decisions (screens/Decisions/DecisionsPage.tsx)
   'stat.decisions.apparatus':
     'The apparatus version every decision below is read under. A sign-off made under an earlier version is listed as stale.',
   'stat.decisions.count':
     'How many decisions are ready for a person now, and across how many repositories. A cell the policy would refuse anyway is never counted; it stays on the map with its reason.',
+  'stat.decisions.repo_count':
+    'How many of the decisions above belong to this repository; each is listed under it.',
   'pill.decisions.kind':
     'The kind of decision: must not ship (false-Q1), sign-off due, a structural gap to sign, a factory item routed to a person, a review to read, or delivery withheld by the route.',
   'stat.decisions.evidence':
@@ -545,9 +549,9 @@ export const HINTS = {
   'link.factory.pr':
     'The pull request the factory opened in the repository, for review under the repository’s own rules.',
   'banner.factory.refusal':
-    'Why the loop stopped on this item, from the chain, and the two ways forward: add the fact and freeze a revised backlog, or open the change by hand and mark the item done next time.',
+    'Why the loop stopped on this item, from the chain, and the two ways forward: add the fact and register an evolution that supersedes the item, or open the change by hand and mark it done next time.',
   'button.factory.freeze_revised':
-    'Open the freeze form prefilled from the active backlog: change what this item needs and keep the rest. A new hash is recorded and the old chain stays.',
+    'Open the freeze form prefilled from the active backlog: change what this item needs and keep the rest. This is the heavier path, a new backlog with a new hash; an evolution keeps the frozen hash.',
   'pill.factory.step_current':
     'The step the item is at out of six, and its state. All six steps are behind the disclosure below.',
   'step.factory.readiness':
@@ -908,6 +912,10 @@ export const HINTS = {
     'Tasks that hit a harness or sandbox error. The instrument failed closed; they are not counted clean.',
   'stat.run.rows':
     'Rows this run appended to the ledger: one per attempt, so a ladder with several rungs writes several rows per task.',
+  'stat.run.rows_live':
+    'How many ledger rows the not-clean breakdown below is read from so far; updating means the run is still writing rows and the figures will move.',
+  'stat.run.event_count':
+    'How many step events the live log has received on this stream, malformed frames excluded.',
   'stat.run.cost':
     'Builder-reported dollars, summed over the run’s attempts. A measurement, not an estimate.',
   'stat.run.detail_counter':
@@ -1040,8 +1048,6 @@ export const HINTS = {
     'The evidence pack by hash; open it for every belt and the diff.',
 
   // ── /capability — Map grid (screens/Capability/CapabilityPage.tsx)
-  'pill.capability.controls':
-    'The repository’s negative-controls verdict every cell below was routed under.',
   'button.capability.export':
     'Download the ledger rows behind this map for this repository as CSV.',
   'stat.capability.coverage':
@@ -1398,7 +1404,11 @@ export const HINTS = {
 
 export type HintId = keyof typeof HINTS
 
-/** The ids shared components derive themselves; the orphan check exempts them from needing a literal `data-hint` in a screen file. */
+/**
+ * The ids shared components derive themselves (`VerdictPill`, `BeltPills`, `ControlsPill`…): the
+ * orphan check in hints-ratchet.test.tsx ("every registered id is referenced") exempts them,
+ * with `tab.repo.*` (derived by RepoDetail), from needing a literal `'<id>'` in a source file.
+ */
 export const SHARED_IDS: readonly HintId[] = [
   'route.deliver',
   'route.calibrate',

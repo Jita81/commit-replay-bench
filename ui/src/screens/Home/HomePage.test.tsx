@@ -32,11 +32,9 @@
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hintText } from '../../help/hints'
 import { unhinted } from '../../help/hints-collector'
-import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
 import { HomePage, factoryStatusFor } from './HomePage'
 
 const REPO = {
@@ -268,9 +266,6 @@ describe('HomePage', () => {
     const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
     const tag = rows[4]!.querySelector('[data-hint="task.home.measure"]')!
     expect(tag).not.toHaveAttribute('tabindex')
-    await userEvent.hover(tag)
-    const tip = document.getElementById(tag.getAttribute('aria-describedby')!)!
-    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
-    expect(tip).toHaveTextContent(hintText('task.home.measure'))
+    await expectHintOpens(tag, 'task.home.measure')
   })
 })

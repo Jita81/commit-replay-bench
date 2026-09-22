@@ -66,8 +66,9 @@ jobs:
       - name: Check the tag is v<pyproject version> AND its commit is on main (scripts/check_release_tag.py — the rules the tests pin)
         # Fail fast, before anything is built: a `v*` tag on a commit main does not contain
         # must never reach GHCR or a signature (the release contract, docs/RELEASING.md §2).
-        # The checkout above has full history (fetch-depth 0); the fetch makes this step
-        # stand on its own and sees a main that moved since the checkout. The script runs
+        # The checkout above has full history (fetch-depth 0), which carries origin/main as
+        # it was at checkout; nothing fetches (the checkout keeps no token) and rev-parse
+        # below asserts the ref is present before the script runs. The script runs
         # `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` and stops the job with a
         # `::error::` naming the tag, the commit and the ref. On a workflow_dispatch (a branch,
         # a dry run) both rules are a no-op.

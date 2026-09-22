@@ -12,7 +12,9 @@
  * How:          Testing Library render; attribute assertions.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/components/Pill.tsx (the code under test), ui/src/help/hints.ts
+ * Works with:   ui/src/components/Pill.tsx (the code under test), ui/src/help/hints.ts (the
+ *               copy asserted), ui/src/components/Hint.tsx (the trigger a hinted pill renders
+ *               through)
  * Tested by:    ui/src/components/Pill.test.tsx
  * Touch when:   the pill's markup changes.
  */

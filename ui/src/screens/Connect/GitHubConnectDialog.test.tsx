@@ -34,7 +34,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { hintText } from '../../help/hints'
 import { unhinted } from '../../help/hints-collector'
-import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { GitHubAppCard } from '../Settings/GitHubAppCard'
 import { ConnectPage } from './ConnectPage'
 import { GitHubConnectDialog } from './GitHubConnectDialog'
@@ -181,10 +181,7 @@ describe('GitHubConnectDialog', () => {
       expect(baseElement.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
     }
     const root = baseElement.querySelector('[data-hint="field.github.installation"]')!
-    await userEvent.hover(root)
-    const tip = document.getElementById(root.getAttribute('aria-describedby')!)!
-    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
-    expect(tip).toHaveTextContent(hintText('field.github.installation'))
+    await expectHintOpens(root, 'field.github.installation')
   })
 
   it('the Connect screen opens the picker on ?installation= (the setup callback lands there)', async () => {

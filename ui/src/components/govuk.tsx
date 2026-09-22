@@ -19,7 +19,8 @@
  *               with a reference after an irreversible act. All tokens from ui/src/index.css
  *               — nothing hard-coded, so the dark theme keeps working.
  *               A `hint` (a registry id) on a `Tag`, a `TaskItem` (its status tag), a
- *               `SummaryRow` (its key) or a button makes that element the hover / focus / tap
+ *               `SummaryRow` (the whole row, so the value — the number — opens it as well
+ *               as the key) or a button makes that element the hover / focus / tap
  *               trigger for what it means; `StartButton` and `WarningButton` carry
  *               `data-primary` so the ratchet can require one. `Details` reports `onToggle`
  *               so the About block can collect the hints on the screen when it opens.
@@ -34,10 +35,9 @@
  *               ui/src/components/Help.tsx (the About block is a `Details`),
  *               ui/src/screens/Home/HomePage.tsx (TaskList, NotificationBanner, InsetText, StartButton),
  *               ui/src/screens/Connect/MeasurePage.tsx (SummaryList, WarningButton, BackLink),
- *               ui/src/screens/Results/ResultsPage.tsx (InsetText, WarningCallout; Tag through MapTable),
- *               ui/src/screens/Decisions/DecisionsPage.tsx (Tag, StartButton, SecondaryButton),
  *               ui/src/screens/Signoff/SignoffPage.tsx (WarningCallout, ConfirmationPanel, SummaryList, WarningButton),
- *               ui/src/screens/Posture/PosturePage.tsx (SummaryList), ui/src/components/Layout.tsx (the shell these sit in)
+ *               ui/src/screens/Posture/PosturePage.tsx (SummaryList; the other consumers are
+ *               in docs/CODE-MAP.md), ui/src/components/Layout.tsx (the shell these sit in)
  * Tested by:    ui/src/components/govuk.test.tsx, ui/src/help/hints-ratchet.test.tsx (the hint contract)
  * Touch when:   a pattern is added (name it after the GOV.UK/NHS component it is).
  */
@@ -134,42 +134,51 @@ export interface SummaryRow {
   changeTo?: string
   onChange?: () => void
   changeLabel?: string
-  /** What this row states — a registry id; the key becomes the hover / focus / tap trigger. */
+  /** What this row states — a registry id; the whole row (key and value) becomes the hover / focus / tap trigger. */
   hint?: HintId
 }
 
 /** GOV.UK summary list — the "check your answers" rows. */
 export function SummaryList({ rows, label }: { rows: SummaryRow[]; label?: string }) {
+  const rowCls = 'grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] items-baseline gap-4 border-b border-border py-3'
   return (
     <dl className="m-0 border-t border-border" aria-label={label}>
-      {rows.map((r, i) => (
-        <div key={i} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] items-baseline gap-4 border-b border-border py-3">
-          {r.hint ? (
-            <Hint as="dt" id={r.hint} className="text-[19px] font-bold leading-[1.47]">
-              {r.key}
-            </Hint>
-          ) : (
+      {rows.map((r, i) => {
+        // the whole row is the trigger, so the VALUE — where the number lives — opens the
+        // hint as well as the key; a row with a Change link is not a tab stop of its own
+        // (the link's focus opens it), a row without one is
+        const cells = (
+          <>
             <dt className="text-[19px] font-bold leading-[1.47]">{r.key}</dt>
-          )}
-          <dd className="m-0 text-[19px] leading-[1.47]">
-            {r.value}
-            {r.note && <div className="text-[16px] leading-[1.5] text-on-surface-muted">{r.note}</div>}
-          </dd>
-          <dd className="m-0 justify-self-end text-[19px] leading-[1.47]">
-            {r.changeTo && (
-              <Link to={r.changeTo}>
-                {r.changeLabel ?? 'Change'}
-                <span className="sr-only"> {typeof r.key === 'string' ? r.key : ''}</span>
-              </Link>
-            )}
-            {!r.changeTo && r.onChange && (
-              <button type="button" className="bg-transparent p-0 text-primary underline" onClick={r.onChange}>
-                {r.changeLabel ?? 'Change'}
-              </button>
-            )}
-          </dd>
-        </div>
-      ))}
+            <dd className="m-0 text-[19px] leading-[1.47]">
+              {r.value}
+              {r.note && <div className="text-[16px] leading-[1.5] text-on-surface-muted">{r.note}</div>}
+            </dd>
+            <dd className="m-0 justify-self-end text-[19px] leading-[1.47]">
+              {r.changeTo && (
+                <Link to={r.changeTo}>
+                  {r.changeLabel ?? 'Change'}
+                  <span className="sr-only"> {typeof r.key === 'string' ? r.key : ''}</span>
+                </Link>
+              )}
+              {!r.changeTo && r.onChange && (
+                <button type="button" className="bg-transparent p-0 text-primary underline" onClick={r.onChange}>
+                  {r.changeLabel ?? 'Change'}
+                </button>
+              )}
+            </dd>
+          </>
+        )
+        return r.hint ? (
+          <Hint key={i} as="div" id={r.hint} className={rowCls} label={typeof r.key === 'string' ? r.key : undefined}>
+            {cells}
+          </Hint>
+        ) : (
+          <div key={i} className={rowCls}>
+            {cells}
+          </div>
+        )
+      })}
     </dl>
   )
 }

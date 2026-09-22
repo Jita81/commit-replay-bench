@@ -33,8 +33,7 @@
  *               (`AboutThisScreen`, mounted once here), ui/src/components/PageHeader.tsx
  *               (defaults its eyebrow to `journeyEyebrow`), ui/src/lib/auth.tsx (the
  *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`),
- *               ui/src/lib/theme.ts (the toggle), ui/src/lib/verdict.ts (`probeDisplay` for
- *               the health pill), ui/src/screens/Login/LoginPage.tsx (uses `BRAND`)
+ *               ui/src/lib/verdict.ts (`probeDisplay` for the health pill)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx (every element of the
  *               shell carries a hint), ui/src/components/Layout.test.tsx (the steps, the eyebrow, Help, the About
  *               block), ui/e2e/smoke.spec.ts (the shell renders the nav),

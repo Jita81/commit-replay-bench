@@ -20,11 +20,10 @@
  */
 
 import { screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { hintText } from '../../help/hints'
 import { unhinted } from '../../help/hints-collector'
-import { envelope, mockApi, renderApp } from '../../test/utils'
+import { envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
 import { LoginPage } from './LoginPage'
 
 describe('LoginPage', () => {
@@ -52,10 +51,7 @@ describe('LoginPage', () => {
     expect(unhinted(container)).toEqual([])
     const submit = screen.getByRole('button', { name: 'Sign in' })
     expect(submit).toHaveAttribute('data-hint', 'button.login.submit')
-    await userEvent.hover(submit)
-    const tip = document.getElementById(submit.getAttribute('aria-describedby')!)!
-    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
-    expect(tip).toHaveTextContent(hintText('button.login.submit'))
+    await expectHintOpens(submit, 'button.login.submit')
     // a field's control lists the bubble in its own description, so focus reaches the same text
     expect(screen.getByLabelText(/^Username/)).toHaveAccessibleDescription(hintText('field.login.username'))
   })

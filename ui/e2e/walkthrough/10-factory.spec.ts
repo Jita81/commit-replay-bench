@@ -164,7 +164,7 @@ test.describe('10 factory (fixture_gold)', () => {
     await expect(i2.getByTestId('step-I-2-readiness')).toContainText('1 structural gap unsigned: method_path')
     await expect(i2.getByTestId('item-status-I-2')).toHaveText('Waiting on a signature')
     await expect(i2.getByTestId('refusal-I-2')).toContainText('This item goes to a person:')
-    await expect(i2.getByTestId('refusal-I-2')).toContainText('freeze a revised backlog (a new hash, the old chain stays)')
+    await expect(i2.getByTestId('refusal-I-2')).toContainText('register an evolution that supersedes this item (the frozen hash stays; the old chain is kept)')
     await expect(i2.getByTestId('step-I-2-red')).toContainText('not run')
     await expect(i2.getByTestId('evidence-I-2')).toHaveCount(0)
     // J-FAC-16 — the approver's gap form asks the catalogue's question

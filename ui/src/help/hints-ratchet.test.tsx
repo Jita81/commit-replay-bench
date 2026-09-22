@@ -17,11 +17,13 @@
  *               stop-condition banner. (3) Every shared component is enforced: a route,
  *               belt, provenance, controls, failure-kind, model-point, tier, band, gate,
  *               run-status pill, the interval bar, a journey eyebrow, and a StatTile, Tag,
- *               DataTable column, button, field, gate criterion, summary row and task item
- *               given a hint all carry `data-hint`; a StatTile without one is reported by
- *               the collector, so the collector itself is proved. (4) Native `title=` on an
+ *               DataTable column, button, field, gate criterion, summary row, task item and
+ *               count eyebrow given a hint all carry `data-hint`; a StatTile without one is
+ *               reported by the collector, so the collector itself is proved. (4) Native `title=` on an
  *               element (or a component that spreads onto one) is counted per file and may
- *               not exceed `TITLE_ALLOWLIST` — the count only goes down.
+ *               not exceed `TITLE_ALLOWLIST` — the count only goes down. (5) No orphan: every
+ *               registered id is written as a literal by some source, except `SHARED_IDS`
+ *               and the derived `tab.repo.*` family — dead copy fails.
  * How:          `renderApp` / `mockApi` from ui/src/test/utils.tsx; the shell through a
  *               layout route; `unhinted(container)` (ui/src/help/hints-collector.ts, re-exported
  *               here) walks the selectors the mechanism names and describes each miss
@@ -29,15 +31,15 @@
  *               `import.meta.glob(…, { query: '?raw' })`.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/help/hints.ts (`HINTS`, `MIN_HINTS`), ui/src/help/hints-collector.ts
- *               (`unhinted`), ui/src/help/hints-ratchet.onramp.tsx (the on-ramp routes'
- *               entries and fixtures), ui/src/components/Hint.tsx (the `data-hint` the
- *               collector looks for), ui/src/App.tsx (the route table),
- *               ui/src/components/Layout.tsx (the shell), ui/src/test/utils.tsx (`renderApp`,
- *               `mockApi`, `PRINCIPAL`), ui/src/help/hints.test.ts (the copy lint),
- *               ui/src/help/hints-ratchet.instrument.tsx (`INSTRUMENT_SCREENS` and
- *               `INSTRUMENT_VARIANTS`: the factory, deployment and instrument routes' entries
- *               and their deeper states — tabs, dialogs, the evidence drawer)
+ * Works with:   ui/src/help/hints.ts (`HINTS`, `MIN_HINTS`, `SHARED_IDS`),
+ *               ui/src/help/hints-collector.ts (`unhinted`),
+ *               ui/src/help/hints-ratchet.onramp.tsx (the on-ramp routes' entries and
+ *               fixtures), ui/src/help/hints-ratchet.instrument.tsx (`INSTRUMENT_SCREENS`
+ *               and `INSTRUMENT_VARIANTS`: the factory, deployment and instrument routes'
+ *               entries and their deeper states — tabs, dialogs, the evidence drawer),
+ *               ui/src/components/Hint.tsx (the `data-hint` the collector looks for),
+ *               ui/src/App.tsx (the route table), ui/src/components/Layout.tsx (the shell),
+ *               ui/src/test/utils.tsx (`renderApp`, `mockApi`, `PRINCIPAL`)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx
  * Touch when:   a screen is added — it needs a `SCREENS` entry (in the on-ramp or instrument
  *               sidecar) with its fixtures and roles before this passes; a `title=` is
@@ -52,6 +54,7 @@ import appSource from '../App.tsx?raw'
 import type { Role } from '../api/types'
 import { BeltPills } from '../components/BeltPills'
 import { Button, LinkButton } from '../components/Button'
+import { Card } from '../components/Card'
 import { CiBar } from '../components/CiBar'
 import { DataTable } from '../components/DataTable'
 import { InlineSelect, SelectField, TextArea, TextField } from '../components/Field'
@@ -69,7 +72,7 @@ import { PRINCIPAL, mockApi, renderApp } from '../test/utils'
 import { unhinted } from './hints-collector'
 import { INSTRUMENT_SCREENS, INSTRUMENT_VARIANTS } from './hints-ratchet.instrument'
 import { ONRAMP_SCREENS } from './hints-ratchet.onramp'
-import { HINTS, MIN_HINTS } from './hints'
+import { HINTS, MIN_HINTS, SHARED_IDS } from './hints'
 
 // ─── the per-route table ──────────────────────────────────────────────────────────────────
 
@@ -142,6 +145,12 @@ const TITLE_ALLOWLIST: Record<string, number> = {
 const TITLE_RE = /<(?:a|abbr|button|code|div|img|input|li|p|span|svg|td|th|tr|time|strong|small|em|label|select|textarea|pre|dd|dt|h[1-6]|Button|LinkButton|AnchorButton|Pill|Tag|Hint)\b(?:[^>]|=>)*?\btitle=/g
 
 const SOURCES = import.meta.glob(['../components/**/*.tsx', '../screens/**/*.tsx', '!**/*.test.tsx'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+
+/** Every non-test source a hint id may be referenced from (the registry and this suite excluded). */
+const ALL_SOURCES = import.meta.glob(['../components/**/*.{ts,tsx}', '../screens/**/*.{ts,tsx}', '../lib/**/*.{ts,tsx}', '../App.tsx', '!**/*.test.{ts,tsx}'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+
+/** Id families a component derives from its data (`tab.repo.${t.id}`): exempt from the literal scan along with `SHARED_IDS`. */
+const DERIVED_FAMILIES = ['tab.repo.']
 
 // ─── the shell ────────────────────────────────────────────────────────────────────────────
 
@@ -244,14 +253,24 @@ describe('hint ratchet: the shell (enforced from the start)', () => {
 })
 
 describe('hint ratchet: the shared components (enforced from the start)', () => {
-  it('the collector reports a StatTile without a hint and a column without one', () => {
+  it('the collector reports a StatTile without a hint, a column without one and a count eyebrow without one (a prose eyebrow is not a number)', () => {
     const { container } = render(
       <MemoryRouter>
         <StatTile label="X" value="1" n={1} apparatus="a" />
         <DataTable rows={[{ a: 1 }]} columns={[{ key: 'a', header: 'A', cell: (r) => r.a }]} rowKey={() => 'r'} caption="A table" empty={<span>none</span>} />
+        <Card title="Counted" eyebrow="2 waiting">
+          x
+        </Card>
+        <Card title="Described" eyebrow="the routes, with n">
+          y
+        </Card>
+        <Card title="Hinted" eyebrow="3 for this repository" eyebrowHint="stat.results.waiting_count">
+          z
+        </Card>
       </MemoryRouter>,
     )
-    expect(unhinted(container)).toEqual(["tile <div> 'X1n =1apparatusa'", "column header <th> 'A' in table 'A table'"])
+    expect(unhinted(container)).toEqual(["tile <div> 'X1n =1apparatusa'", "column header <th> 'A' in table 'A table'", "count eyebrow <div> '2 waiting'"])
+    expect(container.querySelector('[data-eyebrow][data-hint="stat.results.waiting_count"]')?.textContent).toBe('3 for this repository')
   })
 
   it('every pill a shared component derives carries its own id', () => {
@@ -347,7 +366,10 @@ describe('hint ratchet: the shared components (enforced from the start)', () => 
     expect(input).toHaveAccessibleDescription(`a description ${HINTS['field.login.username']}`)
     expect(screen.getByLabelText('Repository')).toHaveAccessibleDescription(HINTS['field.shared.repo_picker'])
     expect(container.querySelector('[data-component="gate"] li [data-hint="gate.ledger.chain"]')).not.toBeNull()
-    expect(container.querySelector('dt[data-hint="summary.posture.roles"]')).not.toBeNull()
+    // the whole summary row is the trigger: the value (the number) opens it, not only the key
+    const row = container.querySelector('[data-hint="summary.posture.roles"]')!
+    expect(row.querySelector('dt')).not.toBeNull()
+    expect(row.querySelector('dd')?.textContent).toBe('four')
     expect(container.querySelector('[data-hint="task.home.connect_github"]')).toHaveAttribute('data-component', 'pill')
     // a journey eyebrow renders through PageHeader on /results? this MemoryRouter is at "/", so no eyebrow: the eyebrow case is below
   })
@@ -359,6 +381,19 @@ describe('hint ratchet: the shared components (enforced from the start)', () => 
       </MemoryRouter>,
     )
     expect(container.querySelector('[data-hint="nav.journey_position"]')?.textContent).toBe('Journey · 2 of 4 · Baseline')
+  })
+})
+
+describe('hint ratchet: no orphan in the registry', () => {
+  it('every registered id is referenced as a literal by some source, or is a shared / derived id', () => {
+    const corpus = Object.values(ALL_SOURCES).join('\n')
+    const orphans = Object.keys(HINTS).filter((id) => {
+      if ((SHARED_IDS as readonly string[]).includes(id) || DERIVED_FAMILIES.some((f) => id.startsWith(f))) return false
+      return !corpus.includes(`'${id}'`) && !corpus.includes(`"${id}"`) && !corpus.includes(`\`${id}\``)
+    })
+    expect(orphans, `registered but rendered nowhere (dead copy): ${orphans.join(', ')}`).toEqual([])
+    // and the exemptions are earned: a shared id is derived by a component that never writes the literal
+    for (const id of SHARED_IDS) expect(HINTS[id], id).toBeTruthy()
   })
 })
 

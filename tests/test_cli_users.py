@@ -190,6 +190,8 @@ def test_lifecycle_end_to_end(
     password_file(PW)
     code, out, _ = run(["users", "create", "root", "--role", "admin"])
     assert code == 0 and "created root (admin)" in out and PW not in out
+    # every change names the database it landed in (never the password)
+    assert describe_database(db_url) in out
     # A taken username is refused BEFORE the password is asked for: with no password
     # source at all the answer is still user_exists, not "no terminal to prompt on".
     monkeypatch.delenv(PASSWORD_FILE_ENV)
@@ -212,6 +214,7 @@ def test_lifecycle_end_to_end(
         password_file(PW2)
         code, out, _ = run(["users", "set-password", "root"])
         assert code == 0 and "sessions have ended" in out and PW2 not in out
+        assert describe_database(db_url) in out
         r = c.get(f"{API_PREFIX}/auth/me")
         assert r.status_code == 401 and r.json()["error"]["code"] == "session_revoked"
         assert login(c, "root", PW).status_code == 401
@@ -247,10 +250,14 @@ def test_lifecycle_end_to_end(
     code, out, _ = run(["users", "list"])
     assert code == 0
     lines = [ln for ln in out.splitlines() if ln and not ln.startswith("-")]
-    assert lines[0].split()[:4] == ["username", "role", "active", "issuer"]
-    assert {ln.split()[0] for ln in lines[1:]} == {"root", "admin2"}
+    # the first line names the store the verb read, so a verb run in the wrong directory
+    # against a stray crb.db is visible; --json stays pure JSON
+    assert lines[0] == f"database {describe_database(db_url)}"
+    assert lines[1].split()[:4] == ["username", "role", "active", "issuer"]
+    assert {ln.split()[0] for ln in lines[2:]} == {"root", "admin2"}
     assert "argon2" not in out
     code, out, _ = run(["users", "list", "--json"])
+    assert "database" not in out.splitlines()[0]
     rows = {r["username"]: r for r in json.loads(out)}
     assert rows["root"]["role"] == "admin" and rows["root"]["active"] is True
     assert rows["root"]["last_login"] != "" and rows["admin2"]["last_login"] == ""

@@ -7,42 +7,55 @@
  * What it is:   `<Hint id="stat.results.false_q1">…</Hint>`, the trigger wrapper every hinted
  *               element renders through, and its `role="tooltip"` bubble.
  * What it does: Makes its element a trigger (`data-hint="<id>"`) whose bubble opens on
- *               mouse-over after 150 ms (closes 100 ms after leave, so the pointer can cross
- *               into it), on keyboard focus of the element or any focusable descendant at
- *               once, and on a touch tap (toggles; stays until a tap outside, Escape or a
- *               scroll). Escape closes from anywhere on the page (a hovered bubble has no
- *               focus inside it) and stops propagating so a dialog behind it does not also
- *               close. The bubble is ALWAYS in the DOM (hidden by `visibility`, never
- *               `display: none`) and portalled to `<body>` so `aria-describedby` on the
- *               trigger resolves whether or not it is visible and no scrolling table or
- *               sticky header can clip it. It never contains a link and never swallows a
- *               click: a hint on a button opens AND lets the click through. A hint adds a
- *               description; it never replaces the element's own name or `aria-label`. When
+ *               mouse-over after 150 ms (closes 100 ms after leave; the bubble is part of
+ *               the hover region, so the pointer can cross into it and rest there — WCAG
+ *               1.4.13 Hoverable; a bubble opened by FOCUS takes no pointer events until
+ *               the pointer arrives on its trigger, so the mouse-up of the click that focused
+ *               a button never lands on it), on keyboard focus of the element or any
+ *               focusable descendant at once, and on a touch tap (toggles; stays until a tap
+ *               outside, Escape or a scroll). Typing in a control inside the trigger closes it and
+ *               keeps it closed until the control is left (the bubble explains on arrival
+ *               and gets out of the way of the next field). Escape closes from anywhere on
+ *               the page (a hovered bubble has no focus inside it) and stops there —
+ *               `preventDefault` as well as `stopPropagation`, so a native `<dialog>`
+ *               behind it does not also cancel. The bubble is ALWAYS in the DOM (hidden by
+ *               `visibility`, never `display: none`) and portalled to `<body>` — or to the
+ *               nearest `<dialog>` ancestor, since a modal dialog paints in the browser's
+ *               top layer above any z-index — so `aria-describedby` on the trigger resolves
+ *               whether or not it is visible and no scrolling table or sticky header can
+ *               clip it. It never contains a link and never swallows a click: a hint on a
+ *               button opens AND lets the click through; a pointer-down on the bubble itself
+ *               closes it. A hint adds a description; it never replaces the element's own
+ *               name or `aria-label`. When
  *               the element has no focusable descendant the wrapper is the tab stop
  *               (`tabIndex=0`, decided at mount) so a sighted keyboard reader reaches every
  *               hint; `tabStop={false}` opts a dense repeated pill out; an element inside a
  *               link or button is never a tab stop of its own (nested-interactive) — the
- *               control's focus opens it. A hint nested in a hint (the Decisions badge
- *               inside its nav link) opens only the innermost.
+ *               control's focus opens it, unless the control is itself a hint (a map cell),
+ *               in which case only the control's own bubble opens. A hint nested in a hint
+ *               (the Decisions badge inside its nav link) opens only the innermost on hover.
  * How:          `useId` for the bubble id (or the caller's `bubbleId`, so a field can add it
  *               to its input's `aria-describedby`); position from `getBoundingClientRect` on
  *               open — below the trigger, flipped above when fewer than 120 px remain, clamped
- *               to a 16 px gutter; `createPortal` for the bubble; `matchMedia` for reduced
+ *               to a 16 px gutter; `createPortal` for the bubble into the host decided at
+ *               mount (`closest('dialog')` or `document.body`); the bubble's own
+ *               mouse-over / mouse-out keep the close timer honest; `matchMedia` for reduced
  *               motion (no fade, inline as well as in the stylesheet); a `crb:help`
- *               CustomEvent on `document` (`{event: 'help.hint_open', id, trigger}`) for
- *               telemetry.
+ *               CustomEvent on `document` (`{event: 'help.hint_open', id, trigger}`) — a
+ *               seam for telemetry: nothing listens to it yet.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/help/hints.ts (`HINTS`, `HintId`, `hintText` — the copy),
  *               ui/src/index.css (`.hint-bubble` — tokens for both themes, reduced motion),
- *               ui/src/components/StatTile.tsx, ui/src/components/Pill.tsx,
- *               ui/src/components/DataTable.tsx, ui/src/components/Button.tsx,
- *               ui/src/components/Field.tsx (the shared components that render through this),
- *               ui/src/components/Help.tsx (the About block lists every `data-hint` on the
- *               screen from the same registry), ui/src/components/Layout.tsx (the shell's
- *               nav and chrome hints)
- * Tested by:    ui/src/components/Hint.test.tsx (hover / focus / tap / Escape, the
- *               description resolves, no duplicate ids, reduced motion),
+ *               ui/src/components/Field.tsx (a field's root renders through this; typing
+ *               closes the bubble), ui/src/components/govuk.tsx (a summary row, a tag, a
+ *               task item), ui/src/components/Dialog.tsx (the `<dialog>` the bubble is
+ *               portalled into), ui/src/components/Help.tsx (the About block lists every
+ *               `data-hint` on the screen from the same registry), ui/src/components/Layout.tsx
+ *               (the shell's nav and chrome hints)
+ * Tested by:    ui/src/components/Hint.test.tsx (hover / focus / tap / Escape, hoverable
+ *               bubble, typing closes, the dialog host, the description resolves, no
+ *               duplicate ids, reduced motion),
  *               ui/src/help/hints-ratchet.test.tsx (every element carries one),
  *               ui/e2e/walkthrough/11-screens.spec.ts (opens on the live stack; axe clean
  *               with a bubble open)
@@ -88,6 +101,8 @@ interface HintProps {
   bubbleId?: string
   /** `false` opts a dense, repeated element out of being a tab stop; its text still reaches the About block and assistive technology. */
   tabStop?: boolean
+  /** The short name the About block lists the element under (`data-hint-label`) when the trigger's own text is a whole row, not a name. */
+  label?: string
   /** Anything else lands on the wrapper (`data-testid`, `role`, `aria-label`, handlers, `to`…). */
   [prop: string]: unknown
 }
@@ -104,11 +119,15 @@ function ownsEvent(wrapper: HTMLElement | null, target: EventTarget | null): boo
  * The trigger wrapper and its bubble. Every wrapped element gets `data-hint="<id>"` and
  * `aria-describedby` pointing at a bubble that is always rendered.
  */
-export function Hint({ id, children, as: Tag = 'span', className = '', elementId, bubbleId, tabStop = true, ...rest }: HintProps) {
+export function Hint({ id, children, as: Tag = 'span', className = '', elementId, bubbleId, tabStop = true, label, ...rest }: HintProps) {
   const autoId = useId()
   const tipId = bubbleId ?? `hint-${autoId}`
   const ref = useRef<HTMLElement | null>(null)
   const [open, setOpen] = useState(false)
+  // how the open bubble was opened: a focus-opened bubble takes no pointer events (it is
+  // not hover content, and it must never catch the mouse-up of the click that focused the
+  // trigger); a hover- or tap-opened one is part of the hover region (WCAG 1.4.13)
+  const [via, setVia] = useState<HintTrigger | null>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const [tabbable, setTabbable] = useState(false)
   const openTimer = useRef<number | null>(null)
@@ -124,6 +143,12 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
   }, [])
 
   const bubbleRef = useRef<HTMLSpanElement | null>(null)
+  // where the bubble is portalled: the nearest <dialog> (a modal paints in the top layer,
+  // above anything under <body>) or the body; decided at mount, when the ref exists
+  const [host, setHost] = useState<Element | null>(null)
+  // set on the first keystroke inside the trigger, cleared on blur: while the person types,
+  // a pointer wandering over the field must not bring the bubble back over the next field
+  const quiet = useRef(false)
 
   // below the trigger by default, above when fewer than 120 px remain, clamped to a 16 px
   // gutter — measured from the rendered bubble, so it is right at phone width too
@@ -149,6 +174,7 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
       clearTimers()
       if (!openRef.current) document.dispatchEvent(new CustomEvent('crb:help', { detail: { event: 'help.hint_open', id, trigger } }))
       openRef.current = true
+      setVia(trigger)
       setOpen(true)
     },
     [id, clearTimers],
@@ -157,6 +183,7 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
     clearTimers()
     tapped.current = false
     openRef.current = false
+    setVia(null)
     setOpen(false)
   }, [clearTimers])
 
@@ -166,16 +193,19 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const host = el.parentElement?.closest<HTMLElement>('a[href],button,[role="button"],[role="link"]') ?? null
-    setTabbable(tabStop && host === null && !el.matches(FOCUSABLE) && el.querySelector(FOCUSABLE) === null)
-    if (!host) return
+    setHost(el.closest('dialog') ?? document.body)
+    const control = el.parentElement?.closest<HTMLElement>('a[href],button,[role="button"],[role="link"]') ?? null
+    setTabbable(tabStop && control === null && !el.matches(FOCUSABLE) && el.querySelector(FOCUSABLE) === null)
+    // a control that is itself a hint explains itself on focus: its nested hints (a map
+    // cell's pills and bar) stay closed, or one focus would open a dozen bubbles at once
+    if (!control || control.hasAttribute('data-hint')) return
     const onHostFocus = () => show('focus')
     const onHostBlur = () => hide()
-    host.addEventListener('focus', onHostFocus)
-    host.addEventListener('blur', onHostBlur)
+    control.addEventListener('focus', onHostFocus)
+    control.addEventListener('blur', onHostBlur)
     return () => {
-      host.removeEventListener('focus', onHostFocus)
-      host.removeEventListener('blur', onHostBlur)
+      control.removeEventListener('focus', onHostFocus)
+      control.removeEventListener('blur', onHostBlur)
     }
   }, [tabStop, show, hide])
 
@@ -188,10 +218,12 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
     }
     const onScroll = () => hide()
     // Escape closes from anywhere (a hovered bubble has no focus inside it) and goes no
-    // further: a dialog or drawer behind the bubble stays open
+    // further: stopPropagation for React handlers behind it, preventDefault so a native
+    // <dialog>'s cancel (its Escape default action) does not fire for the same press
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       e.stopPropagation()
+      e.preventDefault()
       hide()
     }
     document.addEventListener('pointerdown', onDown, true)
@@ -208,11 +240,27 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
 
   useEffect(() => () => clearTimers(), [clearTimers])
 
-  const onMouseOver = (e: MouseEvent) => {
-    if (!ownsEvent(ref.current, e.target)) return
-    if (open || openTimer.current !== null) {
-      if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
+  const cancelClose = () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
+    closeTimer.current = null
+  }
+  const scheduleClose = () => {
+    if (!open || tapped.current) return
+    cancelClose()
+    closeTimer.current = window.setTimeout(() => {
       closeTimer.current = null
+      openRef.current = false
+      setOpen(false)
+    }, HINT_CLOSE_MS)
+  }
+  /** Inside the hover region: the trigger or the bubble. */
+  const inRegion = (node: EventTarget | null) => node instanceof Node && (ref.current?.contains(node) || bubbleRef.current?.contains(node) || false)
+  const onMouseOver = (e: MouseEvent) => {
+    if (!ownsEvent(ref.current, e.target) || quiet.current) return
+    if (open || openTimer.current !== null) {
+      cancelClose()
+      // the pointer has arrived on a focus-opened bubble's trigger: from here it is hover content
+      if (open && via === 'focus') setVia('hover')
       return
     }
     openTimer.current = window.setTimeout(() => {
@@ -221,18 +269,10 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
     }, HINT_OPEN_MS)
   }
   const onMouseOut = (e: MouseEvent) => {
-    const to = e.relatedTarget
-    if (to instanceof Node && ref.current?.contains(to)) return
+    if (inRegion(e.relatedTarget)) return
     if (openTimer.current !== null) window.clearTimeout(openTimer.current)
     openTimer.current = null
-    if (open && !tapped.current) {
-      if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
-      closeTimer.current = window.setTimeout(() => {
-        closeTimer.current = null
-        openRef.current = false
-        setOpen(false)
-      }, HINT_CLOSE_MS)
-    }
+    scheduleClose()
   }
   const onFocus = (e: FocusEvent) => {
     if (!ownsEvent(ref.current, e.target)) return
@@ -241,6 +281,13 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
   const onBlur = (e: FocusEvent) => {
     const to = e.relatedTarget
     if (to instanceof Node && ref.current?.contains(to)) return
+    quiet.current = false
+    hide()
+  }
+  // the first keystroke in a control inside the trigger: the person has arrived and read
+  // it — close, and stay closed until they leave the control
+  const onInput = () => {
+    quiet.current = true
     hide()
   }
   const onPointerDown = (e: PointerEvent) => {
@@ -262,7 +309,13 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
       role="tooltip"
       className="hint-bubble"
       data-open={open ? 'true' : 'false'}
+      data-trigger={via ?? undefined}
       style={{ ...(pos ? { top: pos.top, left: pos.left } : {}), ...(reduced ? { transition: 'none' } : {}) }}
+      onMouseOver={cancelClose}
+      onMouseOut={(e) => {
+        if (inRegion(e.relatedTarget)) return
+        scheduleClose()
+      }}
     >
       {text}
     </span>
@@ -285,6 +338,7 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
         id={elementId}
         className={className || undefined}
         data-hint={id}
+        data-hint-label={label}
         data-open={open ? 'true' : undefined}
         aria-describedby={theirDescribedBy ? `${theirDescribedBy} ${tipId}` : tipId}
         tabIndex={tabbable ? 0 : (rest.tabIndex as number | undefined)}
@@ -293,10 +347,11 @@ export function Hint({ id, children, as: Tag = 'span', className = '', elementId
         onFocus={chain(rest.onFocus, onFocus)}
         onBlur={chain(rest.onBlur, onBlur)}
         onPointerDown={chain(rest.onPointerDown, onPointerDown)}
+        onInput={chain(rest.onInput, onInput)}
       >
         {children}
       </Tag>
-      {typeof document !== 'undefined' && createPortal(bubble, document.body)}
+      {host !== null && createPortal(bubble, host)}
     </>
   )
 }

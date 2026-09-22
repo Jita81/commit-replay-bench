@@ -287,6 +287,14 @@ def test_task_view_folds_an_oracle_needs_strengthening_stop_with_its_reason(env:
         "measured_route": "",
     }
     assert t["error"] == REASON
+    # the API serves the link the stop's sentence points at: the evolutions route,
+    # superseding this item (a documented route the response never named was not a
+    # served link — verifier on feat/shippable, 2026-09-22)
+    assert t["way_forward"] == {
+        "action": "register_evolution",
+        "route": f"/factory/{ALPHA}/backlog/evolutions",
+        "supersedes": "I-1",
+    }
     assert env.get(f"/factory/{ALPHA}/evidence").json()["verified"] is True
 
 
@@ -404,6 +412,9 @@ def test_factory_run_pins_the_active_backlog_hash_at_enqueue(env: Env) -> None:
     with env.factory() as s:
         run = s.get(Run, r.json()["id"])
         assert run is not None and run.params_json["backlog_hash"] == active
+        # the evolutions chain is pinned too (empty: nothing evolved yet) — an evolution
+        # in the enqueue window moves it without moving the frozen hash
+        assert run.params_json["evolutions_hash"] == ""
     # the pin is a factory-only field
     r = env.post("/runs", json={"repo": ALPHA, "kind": "mine", "backlog_hash": active})
     assert r.status_code == 422 and "factory runs only" in envelope(r)["message"]
@@ -523,6 +534,11 @@ def test_task_view_folds_the_refusal_reason_and_the_build_ids(env: Env) -> None:
         "measured_route": "",
     }
     assert by_id["I-2"]["task_id"] == "" and by_id["I-2"]["run_id"] == ""
+    # a readiness stop and a red stop serve the evolutions route as the way forward; a
+    # delivery refusal does not (the item was built and is reviewed — nothing to revise)
+    assert by_id["I-2"]["way_forward"]["supersedes"] == "I-2"
+    assert by_id["I-3"]["way_forward"]["route"] == f"/factory/{ALPHA}/backlog/evolutions"
+    assert by_id["I-1"]["way_forward"] is None
     # dor_gaps are the STRUCTURAL gaps (what blocks and what an approver can sign);
     # value gaps are served apart, never offered for signing
     assert by_id["I-2"]["dor_gaps"] == ["method_path"]
@@ -543,6 +559,11 @@ def test_task_view_folds_the_refusal_reason_and_the_build_ids(env: Env) -> None:
         "reason_code": "",
         "measured_route": "",
     }
+    # a dependency block is not a stop a revised item answers: no way forward is served;
+    # I-2's status is still the last outcome's (not_ready), so its link stands until a run
+    # records a new outcome
+    assert by_id["I-3"]["way_forward"] is None
+    assert by_id["I-2"]["way_forward"]["supersedes"] == "I-2"
 
 
 def _link(
@@ -713,6 +734,21 @@ def test_evolution_refusals(env: Env) -> None:
         f"/factory/{ALPHA}/backlog/evolutions", json={"item": {**ITEM, "id": "I-x"}, "extra": 1}
     )
     assert r.status_code == 422
+    # a malformed authored oracle is refused BEFORE the evolution is written: a path that
+    # escapes the repository (or blank content, which passes the schema's min_length) is a
+    # 422, the chain gains nothing and the same id can be registered again with a good one
+    # (verifier on feat/shippable, 2026-09-22: it used to be a 500 with the evolution
+    # already persisted without its oracle)
+    for bad in (
+        {"path": "../../escape.py", "content": "def test_x():\n    assert 0\n"},
+        {"path": "tests/test_x.py", "content": "   "},
+    ):
+        r = env.post(
+            f"/factory/{ALPHA}/backlog/evolutions",
+            json={"item": {**ITEM, "id": "I-1x", "supersedes": "I-1"}, "authored": bad},
+        )
+        assert r.status_code == 422 and envelope(r)["code"] == "validation_error", r.text
+        assert env.get(f"/factory/{ALPHA}/backlog").json()["evolutions"] == []
     assert (
         env.post(
             f"/factory/{ALPHA}/backlog/evolutions",
@@ -897,12 +933,16 @@ def test_outcome_sync_records_each_pull_requests_fate_once(
         for c in env.get(f"/capability-map?repo={ALPHA}&by=class").json()["cells"]
     }
     assert (by_class["bug.fix"]["n_delivered"], by_class["bug.fix"]["n_merged"]) == (2, 1)
-    # a second sync: #7 and #8 are never read again; #9 (still open) is; nothing appended
+    # a second sync: #7 (merged) is never read again; #8 (closed — a person can reopen and
+    # merge it) and #9 (still open) are; nothing appended while neither has moved
     gh.calls.clear()
     n_events = env.get(f"/factory/{ALPHA}/evidence").json()["total"]
     r = env.post(f"/factory/{ALPHA}/outcomes/sync")
-    assert r.status_code == 200 and (r.json()["checked"], r.json()["open"]) == (1, 1)
-    assert [c[1] for c in gh.calls if "/pulls/" in c[1]] == ["/repos/acme/alpha/pulls/9"]
+    assert r.status_code == 200 and (r.json()["checked"], r.json()["open"]) == (2, 1)
+    assert [c[1] for c in gh.calls if "/pulls/" in c[1]] == [
+        "/repos/acme/alpha/pulls/8",
+        "/repos/acme/alpha/pulls/9",
+    ]
     assert env.get(f"/factory/{ALPHA}/evidence").json()["total"] == n_events
     # #9 merges later — recorded once; a PR GitHub cannot find is an error entry, not a 5xx
     gh.pulls[("acme/alpha", 9)] = pull_request_api(

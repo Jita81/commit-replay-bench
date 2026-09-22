@@ -159,7 +159,9 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
           <Pill tone={s.tone} glyph={s.glyph} size="xs" label={`Stream: ${s.label}`} hint="pill.run.stream">
             <span className={status === 'open' ? 'crb-pulse' : ''}>{s.label}</span>
           </Pill>
-          <span className="num">{total.toLocaleString('en-GB')} events</span>
+          <Hint id="stat.run.event_count" className="num">
+            {total.toLocaleString('en-GB')} events
+          </Hint>
           {reconnects > 0 && <span className="num">· {reconnects} reconnect{reconnects === 1 ? '' : 's'}</span>}
           {dropped > 0 && (
             <span className="num text-status-amber" role="status">

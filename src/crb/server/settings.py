@@ -75,8 +75,16 @@ MIN_PASSWORD_LENGTH = 12
 
 #: OS-managed temporary roots (``$TMPDIR`` is added at run time). On macOS ``/tmp`` and
 #: ``/var`` are symlinks into ``/private``, so both spellings are listed and both sides are
-#: resolved before the comparison.
-TEMP_DIR_ROOTS: tuple[str, ...] = ("/tmp", "/private/tmp", "/var/folders", "/private/var/folders")
+#: resolved before the comparison. ``/var/tmp`` is included because systemd-tmpfiles ages it
+#: (30 days on the RHEL family) even though Debian's default does not.
+TEMP_DIR_ROOTS: tuple[str, ...] = (
+    "/tmp",
+    "/private/tmp",
+    "/var/tmp",
+    "/private/var/tmp",
+    "/var/folders",
+    "/private/var/folders",
+)
 #: What the guard tells the person, once, in the refusal and in the warning.
 TEMP_HOME_ADVICE = (
     "macOS's periodic clean-up removes untouched files there and a reboot may empty it; "

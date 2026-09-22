@@ -218,7 +218,7 @@ function SplitTiles({ repo, runId, poll }: { repo: string; runId: string; poll: 
   if (!d) return null
   const app = 'from the run\'s ledger rows · Wilson 95%'
   return (
-    <Card title="Why not clean" eyebrow={`${fmtInt(d.rows)} ledger row${d.rows === 1 ? '' : 's'}${poll ? ' · updating' : ''}`}>
+    <Card title="Why not clean" eyebrow={`${fmtInt(d.rows)} ledger row${d.rows === 1 ? '' : 's'}${poll ? ' · updating' : ''}`} eyebrowHint="stat.run.rows_live">
       <div className="flex flex-wrap gap-3">
         <StatTile label="Clean (all rows)" hint="stat.run.split_point" value={d.n ? fmtPct(d.point) : '—'} n={d.n} ci={d.n ? { low: d.ci_low, high: d.ci_high } : null} apparatus={`${fmtInt(d.clean)} clean of ${fmtInt(d.n)} eligible rows · ${app} · the rate that routes`} tone={d.n ? 'green' : undefined} data-testid="tile-split-point" />
         <StatTile label="Model rate (fair attempts)" hint="stat.run.split_model" value={d.model_point == null ? '—' : fmtPct(d.model_point)} n={d.model_n} ci={d.model_point == null || d.model_ci_low == null || d.model_ci_high == null ? null : { low: d.model_ci_low, high: d.model_ci_high }} apparatus={`${fmtInt(d.clean)} clean of ${fmtInt(d.model_n)} finished attempts (clean + red) · ${app} · diagnostic, not a gate`} data-testid="tile-split-model" />

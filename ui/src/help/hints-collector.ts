@@ -5,7 +5,8 @@
  * ----------
  * What it is:   `unhinted(root)`: the elements under `root` the mechanism requires a hint on
  *               (tiles, pills, column headers, fields, primary buttons, nav links, gate
- *               criteria) that sit under no `data-hint` the registry knows, each described in
+ *               criteria, card eyebrows that are a count) that sit under no `data-hint` the
+ *               registry knows, each described in
  *               one line (`column header <th> 'Wilson lower' in table 'Route decisions'`).
  * What it does: One walk, shared by the ratchet and by every screen test that asserts its
  *               own screen is fully hinted, so the two can never disagree about what counts.
@@ -36,6 +37,7 @@ export const REQUIRED: Array<[string, string]> = [
   ['button[data-primary], a[data-primary]', 'primary button'],
   ['nav a', 'nav link'],
   ['[data-component="gate"] li', 'gate criterion'],
+  ['[data-eyebrow]', 'count eyebrow'],
 ]
 
 /** A one-line description of an element for the failure message. */
@@ -53,6 +55,8 @@ export function unhinted(root: ParentNode): string[] {
     for (const el of Array.from(root.querySelectorAll(selector))) {
       // a column header whose text is empty carries nothing to explain
       if (kind === 'column header' && !(el.textContent ?? '').trim()) continue
+      // a card eyebrow is a number only when it starts with one ("2 waiting"); a descriptive eyebrow is prose
+      if (kind === 'count eyebrow' && !/^\d/.test((el.textContent ?? '').trim())) continue
       // the trigger is the element itself, an ancestor (a field's root) or a descendant (a header's sort button, a criterion's label)
       const wrapper = el.closest('[data-hint]') ?? el.querySelector('[data-hint]')
       const id = wrapper?.getAttribute('data-hint') ?? ''

@@ -43,8 +43,7 @@
  *               the 409 shape), ui/src/components/GateBanner.tsx (the gate),
  *               ui/src/components/RepoPicker.tsx (`defaultToLatest`),
  *               ui/src/components/Help.tsx (`Term` in the refusal clauses),
- *               ui/src/components/Hint.tsx + ui/src/help/hints.ts (the triggers and copy),
- *               ui/src/screens/Decisions/DecisionsPage.tsx (Attest → `?cell=` here),
+ *               ui/src/help/hints.ts (the `*.signoff.*` copy; the trigger is `Hint`),
  *               ui/src/screens/Capability/FailureSplit.tsx (the controls pill and the split),
  *               ui/src/api/hooks.ts (`useSignoffs`, `useRevokeSignoff`),
  *               src/crb/server/routes/signoffs.py (the server's decision this screen

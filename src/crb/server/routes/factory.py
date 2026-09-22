@@ -20,11 +20,12 @@ recorded before any edit — :mod:`crb.factory.loop`). This module serves its re
   registration.
 * ``GET /factory/{repo}/tasks`` — every item's latest state, folded from the evidence,
   with every refusal's reason, the newest build's ids (J-FAC-4 / F15), the pull request's
-  outcome (B-9 / F30) and the item's place in its supersession chain (F32).
+  outcome (B-9 / F30), the item's place in its supersession chain (F32) and, for an item
+  the loop stopped, ``way_forward`` — the evolutions route that supersedes it.
 * ``POST /factory/{repo}/outcomes/sync`` (operator) — read each delivered pull request's
   state through the installation token and record ``delivery.merged`` /
-  ``delivery.closed`` once per PR (the worker does the same at the start of every factory
-  run).
+  ``delivery.closed`` — at most closed then merged per PR (the worker does the same at
+  the start of every factory run).
 * ``POST /factory/{repo}/tasks/{id}/signoff-gap`` (approver) — sign one structural
   gap: appended to the hash-chained gap ledger and echoed into the evidence chain.
   Value slots cannot be signed (the DoR gate refuses them by design).
@@ -58,6 +59,7 @@ Touch when:   a factory record gains a field the UI needs (extend TaskView + Fac
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -253,6 +255,15 @@ class RefusalOut(BaseModel):
     measured_route: str = ""
 
 
+class WayForwardOut(BaseModel):
+    """The next action the API serves for a stopped item: register an evolution that
+    supersedes it (F32) — ``route`` is the path to POST to, ``supersedes`` the item id."""
+
+    action: str = "register_evolution"
+    route: str
+    supersedes: str
+
+
 class FactoryTaskOut(BaseModel):
     id: str
     title: str
@@ -288,6 +299,39 @@ class FactoryTaskOut(BaseModel):
     #: F32 — the supersession chain: what this item replaced / what replaced it.
     supersedes: str = ""
     superseded_by: str = ""
+    #: The served link for a stopped item (a readiness / red / review refusal, a rejected
+    #: or rework-exhausted verdict, no oracle): the evolutions route that supersedes it.
+    #: null while the item is not stopped or already superseded.
+    way_forward: WayForwardOut | None = None
+
+
+#: The statuses whose way forward is a superseding evolution (the loop stopped the item
+#: for a reason a revised item answers); a dependency block or a delivery refusal is not.
+_STOPPED_STATUSES = frozenset(
+    {
+        "not_ready",
+        "not_red",
+        "no_oracle",
+        "oracle_needs_strengthening",
+        "rejected",
+        "rework_exhausted",
+    }
+)
+_STOPPED_STEPS = frozenset({"readiness", "red", "review"})
+
+
+def _way_forward(repo: str, view: Mapping[str, Any]) -> WayForwardOut | None:
+    """The evolutions route as the next action, for an item the loop stopped and no
+    evolution has replaced yet; ``None`` otherwise."""
+    if view.get("superseded_by"):
+        return None
+    refusal = view.get("refusal") or {}
+    stopped = view.get("status") in _STOPPED_STATUSES or refusal.get("step") in _STOPPED_STEPS
+    if not stopped:
+        return None
+    return WayForwardOut(
+        route=f"/factory/{repo}/backlog/evolutions", supersedes=str(view.get("id", ""))
+    )
 
 
 class CatalogueSlotOut(BaseModel):
@@ -614,23 +658,27 @@ def register_evolution(
         raise ApiError(404, "not_found", f"no backlog registered for {repo!r}")
     item = _item_from(body.item, supersedes=body.item.supersedes)
     try:
-        evolved = home.register_evolution(item, actor=operator.id)
-    except BacklogFrozen as exc:
-        code = "already_superseded" if "already superseded" in str(exc) else "item_exists"
-        raise ApiError(409, code, str(exc)) from exc
-    except (BacklogError, ValueError) as exc:
-        raise ApiError(422, "validation_error", str(exc)) from exc
-    if body.authored is not None:
-        home.save_authored(
+        # the oracle is validated BEFORE the evolution is written (the same order as
+        # register_backlog): a repo-escaping path or blank content is a 422 and the chain
+        # gains nothing — never an evolution persisted without its oracle and a 500
+        authored = (
             {
                 item.id: AuthoredTest(
                     path=body.authored.path,
                     content=body.authored.content,
                     author=f"operator:{operator.id}",
                 )
-            },
-            merge=True,
+            }
+            if body.authored is not None
+            else {}
         )
+        evolved = home.register_evolution(item, actor=operator.id)
+    except BacklogFrozen as exc:
+        raise ApiError(409, exc.code, str(exc)) from exc
+    except (BacklogError, ValueError) as exc:
+        raise ApiError(422, "validation_error", str(exc)) from exc
+    if authored:
+        home.save_authored(authored, merge=True)
     out = _backlog_out(home, _delivery_preflight(db, settings, row))
     assert out is not None and out.evolutions_hash == evolved.evolutions_hash
     return out
@@ -640,7 +688,7 @@ def register_evolution(
     "/factory/{repo}/outcomes/sync",
     response_model=OutcomeSyncOut,
     responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 502: _ERR},
-    summary="Read each delivered pull request's state from GitHub and record delivery.merged / delivery.closed once per PR",
+    summary="Read each delivered pull request's state from GitHub and record delivery.merged / delivery.closed (at most closed then merged per PR)",
 )
 def sync_delivery_outcomes(
     repo: str, operator: OperatorDep, db: DbDep, settings: SettingsDep
@@ -651,7 +699,8 @@ def sync_delivery_outcomes(
     the app's host, or the installation is missing / suspended); a token that cannot be
     minted is **502 ``github_error``**; a single pull request that cannot be read is an
     entry in ``errors`` and is retried by the next sync. Records nothing for a pull
-    request still open, and never a second outcome for one already recorded."""
+    request still open; a closed one is read again (a person can reopen and merge it —
+    ``merged`` after ``closed`` is recorded once); a merged one is never read again."""
     row = get_repo_or_404(db, repo)
     home = _home(settings, repo)
     if home.load_backlog() is None:
@@ -724,6 +773,7 @@ def list_tasks(
                 **d,
                 run_id=run_by_row.get(v.row_id, ""),
                 cell_route=routes.get(f"{v.capability_class}|{v.size}", CellRouteOut()),
+                way_forward=_way_forward(repo, d),
             )
         )
     return out

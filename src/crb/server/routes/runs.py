@@ -517,9 +517,11 @@ def default_model_for(builder: str) -> str:
     return ""
 
 
-def active_backlog_hash(settings: Any, repo: str, expected: str | None) -> str:
-    """The hash of ``repo``'s active frozen backlog — 409 ``no_frozen_backlog`` when there
-    is none, 409 ``backlog_hash_mismatch`` when the caller named a different one."""
+def active_backlog_hash(settings: Any, repo: str, expected: str | None) -> tuple[str, str]:
+    """``(backlog_hash, evolutions_hash)`` of ``repo``'s active frozen backlog — the pair
+    the run is pinned to at enqueue (an evolution moves only the second; the worker
+    compares both on claim). 409 ``no_frozen_backlog`` when there is none, 409
+    ``backlog_hash_mismatch`` when the caller named a different frozen hash."""
     backlog = FactoryHome(settings.home, repo).load_backlog()
     if backlog is None or not backlog.frozen:
         raise ApiError(
@@ -534,7 +536,7 @@ def active_backlog_hash(settings: Any, repo: str, expected: str | None) -> str:
             "the active backlog is not the one this run names — re-read it and re-submit",
             detail={"active": backlog.backlog_hash, "requested": expected},
         )
-    return str(backlog.backlog_hash)
+    return str(backlog.backlog_hash), str(backlog.evolutions_hash)
 
 
 def new_run(body: RunCreateRequest, *, actor: str) -> Run:
@@ -618,12 +620,16 @@ def create_run(
     api = require_jobs()
     run = new_run(body, actor=operator.id)
     if body.kind == KIND_FACTORY:
-        # Pin the backlog the run will work at ENQUEUE time; the worker re-verifies the
-        # stamp on claim. Closes the window between the register route's
-        # "no active run" check and this enqueue (CodeRabbit on PR #4, 2026-09-15).
+        # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the
+        # evolutions chain, since an evolution registered in the same window changes what
+        # is worked without moving the frozen hash; the worker re-verifies both on claim.
+        # Closes the window between the register / evolutions routes' "no active run"
+        # check and this enqueue (CodeRabbit on PR #4, 2026-09-15; verifier 2026-09-22).
+        pinned, pinned_evolutions = active_backlog_hash(settings, body.repo, body.backlog_hash)
         params = {
             **dict(run.params_json or {}),
-            "backlog_hash": active_backlog_hash(settings, body.repo, body.backlog_hash),
+            "backlog_hash": pinned,
+            "evolutions_hash": pinned_evolutions,
         }
         if body.deliver is not None:
             params["deliver"] = bool(body.deliver)

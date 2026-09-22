@@ -28,9 +28,10 @@ Two more things live here because both the API and the worker need them:
   the superseded item as ``superseded`` (with ``superseded_by``) directly above its
   evolution, so the chain reads as it was registered.
 * **The outcome sync** (B-9 / F30): :func:`sync_outcomes` reads every delivered pull
-  request that has no outcome yet through a caller-supplied reader (the installation
-  token's ``GET /pulls/{n}``) and records ``delivery.merged`` / ``delivery.closed`` once
-  per PR. It runs at the start of every factory run and on ``POST
+  request whose fate can still change (no outcome yet, or closed — a person can reopen
+  and merge it) through a caller-supplied reader (the installation token's ``GET
+  /pulls/{n}``) and records ``delivery.merged`` / ``delivery.closed`` — at most closed
+  then merged per PR; a merged one is never read again. It runs at the start of every factory run and on ``POST
   /factory/{repo}/outcomes/sync``; the capability map reads
   :meth:`FactoryHome.delivery_counts` for ``n_delivered`` / ``n_merged`` per cell.
 
@@ -50,7 +51,7 @@ How:          Plain JSON/JSONL under ``<home>/factory/<repo>/``; the backlog is 
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md
 Works with:   src/crb/factory/backlog.py (Backlog/BacklogItem, the hash, ``evolve``),
-              src/crb/factory/evidence.py (the chain, its event kinds, the once-per-PR
+              src/crb/factory/evidence.py (the chain, its event kinds, the closed-then-merged
               outcome recorder), src/crb/factory/readiness.py (gap sign-offs),
               src/crb/factory/testfirst.py (AuthoredTest), src/crb/server/github_app.py
               (``PullRequest`` — what the sync's reader returns), src/crb/server/routes/factory.py
@@ -327,15 +328,17 @@ ReadPrFn = Callable[[int], PullRequest]
 
 
 def sync_outcomes(home: FactoryHome, read_pr: ReadPrFn, *, actor: str) -> OutcomeSyncReport:
-    """Read every delivered pull request that has no outcome on the chain yet and record
-    ``delivery.merged`` / ``delivery.closed`` for the ones that ended — once per PR (the
-    evidence ledger refuses a second). A PR still open records nothing; a read that fails
-    is an entry in ``errors`` and the PR is retried by the next sync."""
+    """Read every delivered pull request whose fate can still change — no outcome on the
+    chain yet, or ``delivery.closed`` (a person can reopen and merge it) — and record
+    ``delivery.merged`` / ``delivery.closed`` for the ones that ended: at most closed then
+    merged per PR (the evidence ledger refuses a repeat of the same state and anything
+    after a merge). A merged PR is never read again; a PR still open records nothing; a
+    read that fails is an entry in ``errors`` and the PR is retried by the next sync."""
     report = OutcomeSyncReport()
     ev = home.evidence(actor=actor)
     for d in home.deliveries():
-        if d.outcome is not None:
-            continue  # once per PR: never read again, never re-recorded
+        if d.outcome is not None and d.outcome.kind == EV_DELIVERY_MERGED:
+            continue  # terminal: never read again, never re-recorded
         report.checked += 1
         try:
             pr = read_pr(d.pr_number)

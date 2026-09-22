@@ -27,9 +27,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hintText } from '../../help/hints'
 import { unhinted } from '../../help/hints-collector'
-import { PRINCIPAL, json, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { MeasurePage } from './MeasurePage'
 
 const REPO = { name: 'cobra', language: 'go', runner: 'go', url: 'https://github.com/spf13/cobra', clone_path: '', probe: { status: 'ok', run_id: 'r', checked: 'x', detail: '' }, task_counts: { total: 36, standard: 30, hard: 6, gold_clean: 32, gold_failed: 4, unchecked: 0 }, last_run: null, created: '', updated: '', config: {} }
@@ -164,10 +163,7 @@ describe('MeasurePage', () => {
     const radio = screen.getByLabelText(/10 attempts/)
     const label = radio.closest('[data-hint="field.measure.attempts"]')!
     expect(label).not.toHaveAttribute('tabindex')
-    await userEvent.hover(label)
-    const tip = document.getElementById(label.getAttribute('aria-describedby')!)!
-    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
-    expect(tip).toHaveTextContent(hintText('field.measure.attempts'))
+    await expectHintOpens(label, 'field.measure.attempts')
     expect(screen.getByRole('link', { name: /Every knob/ })).toHaveAttribute('href', '/runs')
   })
 })

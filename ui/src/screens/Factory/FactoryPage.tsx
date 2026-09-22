@@ -19,8 +19,9 @@
  *               a ceiling nothing enforces). While
  *               a factory run is active the chain polls and a banner names the run and the
  *               item in hand (J-FAC-5 / J-TEL-9). A built item opens its evidence (F15); a
- *               stopped item says the way forward, and a revised backlog starts from the
- *               active one (J-FAC-15). Every act goes through the API under its role; the
+ *               stopped item says the way forward — an evolution that supersedes it, the
+ *               route the API serves as `way_forward` (DL-048) — and the freeze form for a
+ *               revised backlog (a new hash) starts from the active one (J-FAC-15). Every act goes through the API under its role; the
  *               chain (`/factory/{repo}/evidence`) is the record, and this screen renders the
  *               folded view of it (`task_views`).
  * How:          `useRepoParam({ defaultToLatest: true })` (as the Baseline: reached from the
@@ -44,10 +45,10 @@
  *               `FactoryBacklog`), ui/src/lib/builder.ts (`builderChoice`, shared with
  *               Measure), ui/src/components/RepoPicker.tsx (`defaultToLatest`, as the
  *               Baseline), ui/src/screens/Runs/EvidenceDrawer.tsx (the pack view an item
- *               row opens), src/crb/server/routes/factory.py (the shapes, documented under
- *               "Factory" in the API doc), src/crb/server/factory_state.py (`task_views`,
- *               the fold of the factory loop's chain this screen renders),
- *               src/crb/factory/loop.py (the process itself),
+ *               row opens), src/crb/server/routes/factory.py (the shapes — `way_forward`
+ *               included — documented under "Factory" in the API doc),
+ *               src/crb/server/factory_state.py (`task_views`, the fold of the factory
+ *               loop's chain this screen renders; the loop itself is src/crb/factory/loop.py),
  *               ui/src/screens/Decisions/decisions.ts (the inbox rows that link here)
  * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx, ui/e2e/walkthrough/10-factory.spec.ts
  * Touch when:   a step or a stop status is added to the loop (add it to `stepsFor` and the
@@ -320,16 +321,19 @@ export function stepsFor(t: FactoryTask): Step[] {
  */
 export function refusalSentence(t: FactoryTask): string {
   const r = t.refusal
-  const forward = 'To bring it back into the factory, add the fact and freeze a revised backlog (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.'
+  // DL-048: a frozen backlog does not change, it evolves — the way forward is an evolution
+  // that supersedes this item (the frozen hash stays; the old chain is kept), which the API
+  // serves as `way_forward`; freezing a revised backlog (a new hash) is the heavier path
+  const evolve = (fix: string) => `To bring it back into the factory, ${fix} and register an evolution that supersedes this item (the frozen hash stays; the old chain is kept); or open the change by hand and mark the item done in the next backlog.`
   if (r?.step === 'dependency') return `${r.reason.replace(/^waiting on /, 'Waiting on ')}, which has not been accepted yet.`
-  if (r?.step === 'readiness') return `This item goes to a person: ${r.reason}. ${forward}`
+  if (r?.step === 'readiness') return `This item goes to a person: ${r.reason}. ${evolve('add the fact')}`
   if (t.status === 'oracle_needs_strengthening' || r?.step === 'review')
-    return `The review found the test too weak to rebuild against${t.outcome_reason || r?.reason ? `: ${findingOf(t.outcome_reason || r?.reason || '')}` : ''}. Strengthen the test and freeze a revised backlog with a superseding item (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.`
-  if (r?.step === 'red') return `The factory could not prove the test: ${r.reason}. ${forward.replace('add the fact', 'author a test that fails today')}`
+    return `The review found the test too weak to rebuild against${t.outcome_reason || r?.reason ? `: ${findingOf(t.outcome_reason || r?.reason || '')}` : ''}. ${evolve('strengthen the test')}`
+  if (r?.step === 'red') return `The factory could not prove the test: ${r.reason}. ${evolve('author a test that fails today')}`
   if (t.status === 'rejected' || t.status === 'rework_exhausted')
-    return `The review said ${t.review_verdict?.replace(/_/g, ' ') ?? t.status.replace(/_/g, ' ')}. Read the evidence, then either open the change by hand or freeze a revised backlog with the fact the review asked for (a new hash, the old chain stays).`
+    return `The review said ${t.review_verdict?.replace(/_/g, ' ') ?? t.status.replace(/_/g, ' ')}. Read the evidence, then ${evolve('add the fact the review asked for').replace(/^To bring it back into the factory, /, '')}`
   if (t.status === 'no_oracle' || t.status === 'not_red')
-    return `No failing test proves this item${r ? `: ${r.reason}` : ''}. Author a test that fails today and freeze a revised backlog (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.`
+    return `No failing test proves this item${r ? `: ${r.reason}` : ''}. ${evolve('author a test that fails today')}`
   return ''
 }
 

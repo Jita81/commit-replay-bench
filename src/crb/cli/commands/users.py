@@ -18,7 +18,8 @@ What it is:   ``crb users …`` — the break-glass account CLI (list, create, s
               activate, deactivate) over the server's own database.
 What it does: Resolves the same database as ``crb serve`` (and refuses one that is not it —
               a missing SQLite file or no ``users`` table — naming what it resolved, without
-              creating a stray database), reads a password from a prompt or
+              creating a stray database; every success line names the database it changed,
+              ``list`` prints it as its first line), reads a password from a prompt or
               ``CRB_USERS_PASSWORD_FILE`` (never argv), refuses a taken username before the
               prompt, applies the change through the auth primitives (last-admin guard under
               the users lock, ≥ 12 characters, local accounts only) and writes one ``user.*``
@@ -173,8 +174,8 @@ def describe_database(url: str) -> str:
     return f"{parsed.drivername}://{host}/{parsed.database or ''}"
 
 
-def _open(database_url: str | None) -> Any:
-    """A bound session factory over the database ``crb serve`` would use.
+def _open(database_url: str | None) -> tuple[Any, str]:
+    """``(session factory, described url)`` over the database ``crb serve`` would use.
 
     A break-glass verb run without the service's environment resolves ``./.crb/crb.db`` in
     whatever directory the operator is in; opening that would create an empty database
@@ -199,7 +200,7 @@ def _open(database_url: str | None) -> Any:
     engine = store_db.make_engine(url)
     if "users" not in inspect(engine).get_table_names():
         raise CliError(f"no users table in {describe_database(url)} — {_WRONG_DB_HINT}")
-    return store_db.make_session_factory(engine)
+    return store_db.make_session_factory(engine), describe_database(url)
 
 
 def _row(user: User) -> dict[str, Any]:
@@ -230,16 +231,19 @@ def _local_user(db: Session, username: str) -> User:
 
 
 def _run(database_url: str | None, fn: Any) -> int:
-    """Open the database, run ``fn(db)`` in one transaction, commit; an ``ApiError`` from
-    the shared primitives becomes the same message the API would give, exit 2."""
+    """Open the database, run ``fn(db, where)`` in one transaction, commit; an ``ApiError``
+    from the shared primitives becomes the same message the API would give, exit 2.
+    ``where`` is the resolved database (``describe_database``): every verb that changes
+    something names it in its success line, so an operator who ran the verb without the
+    service's environment sees which store changed (verifier, 2026-09-22)."""
     try:
         from crb.server.deps import ApiError  # noqa: PLC0415
     except ImportError as e:
         raise CliError(f"{_SERVER_HINT} ({e})") from e
-    factory = _open(database_url)
+    factory, where = _open(database_url)
     with factory() as db:
         try:
-            result = fn(db)
+            result = fn(db, where)
             db.commit()
         except ApiError as exc:
             db.rollback()
@@ -256,11 +260,12 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     from crb.store.models import User  # noqa: PLC0415
 
-    def _go(db: Session) -> int:
+    def _go(db: Session, where: str) -> int:
         rows = [_row(u) for u in db.execute(select(User).order_by(User.created, User.id)).scalars()]
         if args.json:
             print(json.dumps(rows, indent=1, sort_keys=True))
             return EXIT_OK
+        print(f"database {where}")
         header = f"{'username':<24} {'role':<9} {'active':<7} {'issuer':<10} last_login"
         print(header)
         print("-" * len(header))
@@ -287,7 +292,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     )
     from crb.server.routes.admin import record_user_event  # noqa: PLC0415
 
-    def _go(db: Session) -> int:
+    def _go(db: Session, where: str) -> int:
         name = validate_username(args.username)
         validate_role(args.role)
         # Refuse a taken username BEFORE the prompt: typing a password twice to be told
@@ -305,7 +310,7 @@ def cmd_create(args: argparse.Namespace) -> int:
             email=args.email,
         )
         record_user_event(db, action="user.created", actor=actor(), target=user)
-        print(f"created {args.username} ({args.role})")
+        print(f"created {args.username} ({args.role}) in {where}")
         return EXIT_OK
 
     return _run(args.database_url, _go)
@@ -316,12 +321,12 @@ def cmd_set_password(args: argparse.Namespace) -> int:
     from crb.server.auth import set_password  # noqa: PLC0415
     from crb.server.routes.admin import record_user_event  # noqa: PLC0415
 
-    def _go(db: Session) -> int:
+    def _go(db: Session, where: str) -> int:
         user = _local_user(db, args.username)
         password = read_password(confirm=True)
         set_password(user, password)
         record_user_event(db, action="user.password_set", actor=actor(), target=user, by="cli")
-        print(f"password set for {args.username}; its sessions have ended")
+        print(f"password set for {args.username} in {where}; its sessions have ended")
         return EXIT_OK
 
     return _run(args.database_url, _go)
@@ -333,19 +338,20 @@ def _set_active(args: argparse.Namespace, active: bool) -> int:
 
     verb = "activated" if active else "deactivated"
 
-    def _go(db: Session) -> int:
+    def _go(db: Session, where: str) -> int:
         user = _local_user(db, args.username)
         # Idempotency and the last-admin guard are decided under the users lock on a
         # re-read row (set_user_active), not on the snapshot _local_user returned.
         if not set_user_active(db, user, active):
-            print(f"{args.username} is already {verb}")
+            print(f"{args.username} is already {verb} in {where}")
             return EXIT_OK
         record_user_event(db, action=f"user.{verb}", actor=actor(), target=user)
         if active:
-            print(f"activated {args.username}")
+            print(f"activated {args.username} in {where}")
         else:
             print(
-                f"deactivated {args.username}: refused while inactive. Re-activating within "
+                f"deactivated {args.username} in {where}: refused while inactive. "
+                f"Re-activating within "
                 f"the session lifetime restores sessions issued before — "
                 f"`crb users set-password {args.username}` ends them for good."
             )

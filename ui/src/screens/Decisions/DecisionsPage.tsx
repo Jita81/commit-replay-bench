@@ -118,7 +118,7 @@ export function DecisionsPage() {
         const rows = d.byRepo[repo] ?? []
         if (rows.length === 0) return null
         return (
-          <Card key={repo} title={repo} eyebrow={`${rows.length} waiting`} id={`decisions-${repo}`}>
+          <Card key={repo} title={repo} eyebrow={`${rows.length} waiting`} eyebrowHint="stat.decisions.repo_count" id={`decisions-${repo}`}>
             <ul className="m-0 list-none border-t-2 border-on-surface p-0" aria-label={`Decisions for ${repo}`}>
               {rows.map((row, i) => {
                 const allowed = row.role === 'viewer' || can(row.role)

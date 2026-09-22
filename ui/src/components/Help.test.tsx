@@ -11,8 +11,10 @@
  *               step for the signed-in role (falling down the ladder to viewer), every term,
  *               the read-more links and the glossary link, and renders nothing on a route
  *               with no entry; that "Elements on this screen" lists every hinted element on
- *               the page when the block opens — deduplicated, in DOM order, with the
- *               registry text and never a link; that `DocLink` builds the /help/docs href.
+ *               the page when the block opens — deduplicated, the screen's own (under
+ *               `<main>`) in DOM order and the shell's after them under their own
+ *               sub-heading, with the registry text and never a link; that `DocLink` builds
+ *               the /help/docs href.
  * How:          `renderApp` with a mocked `/auth/me` per role; `Term` rendered inside a
  *               `MemoryRouter` on its own.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -161,11 +163,45 @@ describe('AboutThisScreen', () => {
     await waitFor(() => expect(within(about).queryByTestId('about-elements')).toBeNull())
   })
 
+  it('lists the screen’s own elements (under <main>) first and the shell’s after them under their own sub-heading', async () => {
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
+    renderApp(
+      <>
+        <nav>
+          <Hint id="nav.home">Home</Hint>
+        </nav>
+        <main>
+          <Hint id="stat.results.false_q1">False-Q1 0</Hint>
+          <AboutThisScreen />
+        </main>
+        <footer>
+          <Hint id="nav.footer_help">Help</Hint>
+        </footer>
+      </>,
+      { route: '/results', path: '/results' },
+    )
+    const about = await screen.findByTestId('about-this-screen')
+    const details = about.querySelector('details')!
+    details.open = true
+    details.dispatchEvent(new Event('toggle'))
+    await waitFor(() => expect(within(about).getByTestId('about-shell-elements')).toBeInTheDocument())
+    const own = Array.from(within(about).getByTestId('about-elements').querySelectorAll('[data-hint-id]')).map((r) => r.getAttribute('data-hint-id'))
+    expect(own).toEqual(['stat.results.false_q1'])
+    expect(within(about).getByRole('heading', { level: 4, name: 'The shell: navigation, header and footer' })).toBeInTheDocument()
+    const shell = Array.from(within(about).getByTestId('about-shell-elements').querySelectorAll('[data-hint-id]')).map((r) => r.getAttribute('data-hint-id'))
+    expect(shell).toEqual(['nav.home', 'nav.footer_help'])
+    // every <dl> holds only dt/dd groups (the sub-heading sits between two lists, never inside one)
+    for (const dl of Array.from(about.querySelectorAll('dl'))) {
+      for (const child of Array.from(dl.children)) expect(['DIV', 'DT', 'DD']).toContain(child.tagName)
+    }
+  })
+
   it('collectHints skips ids the registry does not know and cuts a long label to one line', () => {
     const root = document.createElement('div')
     root.innerHTML = `<span data-hint="nav.home">${'x'.repeat(80)}</span><span data-hint="not.a.real.id">y</span><span data-hint="nav.home">again</span><span data-hint="nav.help"></span>`
     const out = collectHints(root)
     expect(out.map((e) => e.id)).toEqual(['nav.home', 'nav.help'])
+    expect(out.every((e) => e.shell === false)).toBe(true) // no <main>: nothing is the shell
     expect(out[0]!.label.length).toBe(58)
     expect(out[0]!.label.endsWith('…')).toBe(true)
     expect(out[1]!.label).toBe('help')

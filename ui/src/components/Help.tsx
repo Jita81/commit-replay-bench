@@ -11,10 +11,11 @@
  *               the viewer's step), what the numbers mean, the terms on the screen, the
  *               elements on the screen and where to read more; it renders nothing where the
  *               registry has no entry. "Elements on this screen" is generated when the block
- *               opens: every `data-hint` on the page (deduplicated, in DOM order) with the
- *               trigger's visible text and the registry sentence — the printable, touch-safe,
- *               screen-reader-safe copy of every tooltip, from the same registry the bubbles
- *               read, so it cannot drift.
+ *               opens: every `data-hint` on the page (deduplicated; the screen's own, under
+ *               `<main>`, in DOM order, then the shell's under their own sub-heading) with
+ *               the trigger's visible text and the registry sentence — the printable,
+ *               touch-safe, screen-reader-safe copy of every tooltip, from the same
+ *               registry the bubbles read, so it cannot drift.
  *               `InlineDisclosure` is the one disclosure primitive: a real button
  *               (`aria-expanded` / `aria-controls`) that toggles a `role="note"` inline under
  *               its label — click, Enter or Space; Escape closes; never a hover tooltip, so it
@@ -29,12 +30,12 @@
  * ADRs:         none
  * Works with:   ui/src/help/help.ts (the registry the About block renders),
  *               ui/src/help/hints.ts (`hintText` — the elements part), ui/src/components/Hint.tsx
- *               (the `data-hint` triggers it collects),
+ *               (the `data-hint` triggers it collects; `data-hint-label` names a row),
  *               ui/src/help/glossary.ts (`TERMS`), ui/src/help/docs.ts (`docHref`),
  *               ui/src/components/govuk.tsx (`Details`), ui/src/components/Layout.tsx (mounts
- *               the About block once, after `<Outlet/>`), ui/src/screens/Help/HelpPage.tsx
- *               (where the glossary link lands), ui/src/screens/Capability/ReasonCode.tsx
- *               (the other `InlineDisclosure` client)
+ *               the About block once, after `<Outlet/>`; its `<main>` is the screen/shell
+ *               boundary), ui/src/screens/Capability/ReasonCode.tsx (the other
+ *               `InlineDisclosure` client)
  * Tested by:    ui/src/components/Help.test.tsx, ui/e2e/walkthrough/11-screens.spec.ts (the
  *               block renders on every authenticated route on the live stack)
  * Touch when:   the About block gains a part (add it to the registry type first); never for
@@ -53,8 +54,10 @@ import { Details } from './govuk'
 /** One hinted element as the About block lists it: the trigger's visible text and the registry sentence. */
 export interface HintedElement {
   id: HintId
-  /** The trigger's visible text (or its `aria-label`), cut to one line; the id's last segment when it has none. */
+  /** The trigger's `data-hint-label` (a summary row's key), else its `aria-label`, else its visible text, cut to one line; the id's last segment when it has none. */
   label: string
+  /** True for an element of the shell (outside `<main>`): listed after the screen's own, under their own sub-heading. */
+  shell: boolean
   text: string
 }
 
@@ -65,13 +68,19 @@ export interface HintedElement {
 export function collectHints(root: ParentNode): HintedElement[] {
   const seen = new Set<string>()
   const out: HintedElement[] = []
-  for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-hint]'))) {
+  // the screen's own elements (under <main>) first, in DOM order; the shell — nav, chrome,
+  // footer, the same on every screen — after them, so a reader opening About on a screen
+  // is not scrolled past the shell block they already saw on the last one
+  const main = root.querySelector('main')
+  const all = Array.from(root.querySelectorAll<HTMLElement>('[data-hint]'))
+  const ordered = main ? [...all.filter((el) => main.contains(el)), ...all.filter((el) => !main.contains(el))] : all
+  for (const el of ordered) {
     const id = el.getAttribute('data-hint') ?? ''
     if (seen.has(id) || !(id in HINTS)) continue
     seen.add(id)
-    const raw = (el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim()
+    const raw = (el.getAttribute('data-hint-label') || el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim()
     const label = raw.length > 60 ? `${raw.slice(0, 57)}…` : raw || id.split('.').pop()!.replace(/_/g, ' ')
-    out.push({ id: id as HintId, label, text: hintText(id as HintId) })
+    out.push({ id: id as HintId, label, text: hintText(id as HintId), shell: main !== null && !main.contains(el) })
   }
   return out
 }
@@ -136,16 +145,37 @@ export function AboutThisScreen() {
             <h3 className="mb-1 mt-0 text-[16px]">Elements on this screen</h3>
             <p className="mb-2 mt-0 text-on-surface-muted">What each element shows, as its hover or focus hint says. Hover, focus or tap the element itself for the same text.</p>
             <dl className="mb-4 mt-0" data-testid="about-elements">
-              {elements.map((e) => (
-                <div key={e.id} className="mb-2" data-hint-id={e.id}>
-                  <dt className="inline font-bold">{e.label}</dt>
-                  <dd className="ml-0 inline">
-                    {' '}
-                    — {e.text}
-                  </dd>
-                </div>
-              ))}
+              {elements
+                .filter((e) => !e.shell)
+                .map((e) => (
+                  <div key={e.id} className="mb-2" data-hint-id={e.id}>
+                    <dt className="inline font-bold">{e.label}</dt>
+                    <dd className="ml-0 inline">
+                      {' '}
+                      — {e.text}
+                    </dd>
+                  </div>
+                ))}
             </dl>
+            {elements.some((e) => e.shell) && (
+              <>
+                <h4 className="mb-1 mt-0 text-[16px]">The shell: navigation, header and footer</h4>
+                <p className="mb-2 mt-0 text-on-surface-muted">The same on every screen.</p>
+                <dl className="mb-4 mt-0" data-testid="about-shell-elements">
+                  {elements
+                    .filter((e) => e.shell)
+                    .map((e) => (
+                      <div key={e.id} className="mb-2" data-hint-id={e.id}>
+                        <dt className="inline font-bold">{e.label}</dt>
+                        <dd className="ml-0 inline">
+                          {' '}
+                          — {e.text}
+                        </dd>
+                      </div>
+                    ))}
+                </dl>
+              </>
+            )}
           </>
         )}
         <h3 className="mb-1 mt-0 text-[16px]">Read more</h3>

@@ -1009,6 +1009,31 @@ def test_run_backlog_works_the_latest_evolution_of_each_item(
     assert rig.evidence.verify() == len(evs)
 
 
+def test_a_dependency_is_resolved_through_its_evolution_before_the_block_check(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A dependant names its dependency by the REGISTERED id; when an evolution replaced
+    that dependency and the evolution was not accepted, the dependant is blocked on the
+    evolution's id — never built because the raw id has no outcome (verifier on
+    feat/shippable, 2026-09-22: ``ordered()`` resolved the chain but the block check did
+    not)."""
+    from dataclasses import replace as dc_replace
+
+    rig = _rig(pyrepo, tmp_path)
+    needs_route, route = _items()[5], _items()[3]  # I-6 depends on I-4 (unsigned gap)
+    route_b = dc_replace(route, id="I-4b", title="Add a health route (revised)", supersedes="I-4")
+    backlog = Backlog(items=(route, needs_route), repo="pyrepo").freeze().evolve(route_b)
+    assert backlog.resolve("I-4") == "I-4b" and backlog.resolve("I-6") == "I-6"
+    outcomes = rig.loop().run_backlog(backlog, expected_hash=backlog.backlog_hash)
+    assert [(o.item_id, o.status) for o in outcomes] == [
+        ("I-4b", fl.STATUS_NOT_READY),
+        ("I-6", fl.STATUS_BLOCKED),
+    ]
+    blocked = rig.evidence.events_for("I-6", fe.EV_ITEM_OUTCOME)
+    assert blocked and blocked[0].payload["blocked_on"] == ["I-4b"]
+    assert rig.author.calls == [], "the dependant was never sent to a builder"
+
+
 def test_horizon_checkpoint_is_ledgered(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     rig = _rig(pyrepo, tmp_path)
     ev = rig.loop().checkpoint(

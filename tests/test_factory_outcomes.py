@@ -148,7 +148,11 @@ def test_pull_request_reads_githubs_shapes_into_one_outcome_word() -> None:
 # --- the evidence rule: once per pull request --------------------------------------------
 
 
-def test_outcome_is_recorded_once_per_pull_request() -> None:
+def test_outcome_is_recorded_at_most_closed_then_merged_per_pull_request() -> None:
+    """A merge is terminal and the same state is never re-appended; ``merged`` after
+    ``closed`` IS a second row, because a person can reopen a closed pull request and
+    merge it (verifier on feat/shippable, 2026-09-22: once-per-PR had left such a PR
+    ``closed`` on the chain for ever)."""
     ev = fe.FactoryEvidence(fe.MemoryFactoryStore(), actor="sync", repo=REPO)
     ev.record_delivery(_delivery("I-1", 7))
     first, recorded = ev.record_delivery_outcome(
@@ -162,17 +166,30 @@ def test_outcome_is_recorded_once_per_pull_request() -> None:
     )
     assert recorded is True and first.kind == fe.EV_DELIVERY_MERGED
     assert first.payload["merged_by"] == "paul" and first.payload["pr_number"] == 7
-    # a second call — same PR, even a different state — appends nothing
-    again, recorded = ev.record_delivery_outcome("I-1", state=PR_CLOSED, pr_number=7)
-    assert recorded is False and again.event_id == first.event_id
+    # merged is terminal: the same state, or closed after it, appends nothing
+    for state in (PR_MERGED, PR_CLOSED):
+        again, recorded = ev.record_delivery_outcome("I-1", state=state, pr_number=7)
+        assert recorded is False and again.event_id == first.event_id
     assert [e.kind for e in ev.events()] == [fe.EV_DELIVERY, fe.EV_DELIVERY_MERGED]
     # another PR of the same item is its own outcome; another item's PR too
-    _, recorded = ev.record_delivery_outcome("I-1", state=PR_CLOSED, pr_number=9)
+    closed, recorded = ev.record_delivery_outcome("I-1", state=PR_CLOSED, pr_number=9)
     assert recorded is True
     assert ev.outcome_for("I-1", 9) is not None and ev.outcome_for("I-2", 7) is None
+    # closed twice appends nothing; closed → merged (reopened and merged by a person) is
+    # the one transition recorded, and the newest outcome is what a reader gets
+    same, recorded = ev.record_delivery_outcome("I-1", state=PR_CLOSED, pr_number=9)
+    assert recorded is False and same.event_id == closed.event_id
+    merged, recorded = ev.record_delivery_outcome(
+        "I-1", state=PR_MERGED, pr_number=9, merged_by="ada", merge_sha="f" * 40
+    )
+    assert recorded is True and merged.kind == fe.EV_DELIVERY_MERGED
+    assert ev.outcome_for("I-1", 9) is not None
+    assert ev.outcome_for("I-1", 9).event_id == merged.event_id  # type: ignore[union-attr]
+    _, recorded = ev.record_delivery_outcome("I-1", state=PR_MERGED, pr_number=9)
+    assert recorded is False, "a third row never follows a merge"
     with pytest.raises(ValueError, match="state must be one of"):
         ev.record_delivery_outcome("I-1", state="open", pr_number=11)
-    assert ev.verify() == 3
+    assert ev.verify() == 4
 
 
 # --- the sync ------------------------------------------------------------------------------
@@ -215,29 +232,44 @@ def test_sync_records_merged_and_closed_once_skips_open_and_reports_read_failure
     assert (
         closed.payload["closed_at"] == "2026-09-20T09:00:00Z" and closed.payload["merge_sha"] == ""
     )
-    # the next sync: #8 is never read again (once per PR); #7 merged meanwhile; #9 retried
+    # the next sync: #8 is read again (closed can still be reopened) but still closed, so
+    # nothing is re-recorded; #7 merged meanwhile; #9 retried
     answers[7] = PullRequest.from_api(PR_MERGED_API)
     answers[9] = PullRequest.from_api({**PR_OPEN_API, "number": 9})
     reads.clear()
     r2 = sync_outcomes(home, read_pr, actor="worker")
-    assert reads == [7, 9] and (r2.checked, r2.merged, r2.closed, r2.open) == (2, 1, 0, 1)
+    assert reads == [7, 8, 9] and (r2.checked, r2.merged, r2.closed, r2.open) == (3, 1, 0, 1)
     merged = home.evidence().outcome_for("I-1", 7)
     assert merged is not None and merged.kind == fe.EV_DELIVERY_MERGED
     assert merged.payload["merged_by"] == "paul" and merged.payload["merge_sha"].startswith(
         "e0fefb2"
     )
-    # a third sync with everything ended reads only what is still open, records nothing new
+    assert [e.kind for e in home.events() if e.kind == fe.EV_DELIVERY_CLOSED] == [
+        fe.EV_DELIVERY_CLOSED
+    ], "a closed PR read as still closed appends nothing"
+    # a third sync: #7 (merged) is never read again; #8 was reopened and merged by a
+    # person meanwhile — the one transition the chain records — and #9 is still open
+    answers[8] = PullRequest.from_api({**PR_MERGED_API, "number": 8})
+    reads.clear()
     n_before = len(home.events())
     r3 = sync_outcomes(home, read_pr, actor="worker")
-    assert (r3.checked, r3.open) == (1, 1) and len(home.events()) == n_before
+    assert reads == [8, 9] and (r3.checked, r3.merged, r3.closed, r3.open) == (2, 1, 0, 1)
+    assert len(home.events()) == n_before + 1
+    reopened = home.evidence().outcome_for("I-2", 8)
+    assert reopened is not None and reopened.kind == fe.EV_DELIVERY_MERGED
+    # a fourth sync with everything ended reads only what is still open, records nothing new
+    reads.clear()
+    n_before = len(home.events())
+    r4 = sync_outcomes(home, read_pr, actor="worker")
+    assert reads == [9] and (r4.checked, r4.open) == (1, 1) and len(home.events()) == n_before
     assert home.evidence().verify() == n_before
-    # the summary Home's task 8 reads: one merged delivery = the loop closed once
+    # the summary Home's task 8 reads: newest wins — two merged deliveries, none closed
     assert home.outcomes_summary() == {
         "delivered": 3,
-        "merged": 1,
-        "closed": 1,
+        "merged": 2,
+        "closed": 0,
         "open": 1,
-        "last_synced": merged.created,
+        "last_synced": reopened.created,
     }
 
 

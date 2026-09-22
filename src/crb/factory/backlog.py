@@ -28,16 +28,20 @@ Navigation
 What it is:   The frozen, hashed backlog — the integrity anchor of forward mode.
 What it does: Validates items (id shape, kind, level, size, no self-dependency), freezes the
               record under a SHA-256 of its canonical JSON, refuses any mutation of a
-              frozen item (``BacklogFrozen``), admits change only as a new item chained
-              onto the frozen hash (``evolve``), and orders the active items by dependency
+              frozen item (``BacklogFrozen``; ``ItemExists`` / ``AlreadySuperseded`` carry a
+              stable ``code`` for the API), admits change only as a new item chained onto
+              the frozen hash (``evolve``), resolves a dependency on a superseded item to
+              its latest evolution (``resolve``) and orders the active items by dependency
               (cycles raise). Pure dataclasses and functions; the caller persists.
 How:          ``BacklogItem.__post_init__`` checks the shape; ``Backlog.freeze`` stamps
               ``backlog_hash``; ``evolve`` extends ``evolutions_hash``; ``verify`` recomputes
-              both; ``ordered`` is a stable topological sort with supersession resolved.
+              both; ``_latest`` folds the supersession chains once for ``resolve`` and
+              ``ordered`` (a stable topological sort over the resolved dependencies).
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md (the same hash discipline)
 Works with:   src/crb/factory/readiness.py (reads ``structural_facts`` and ``kind``),
-              src/crb/factory/loop.py (``run_backlog`` requires a frozen, verifying record),
+              src/crb/factory/loop.py (``run_backlog`` requires a frozen, verifying record
+              and resolves each dependency through ``resolve`` before the block check),
               src/crb/factory/evidence.py (``record_freeze`` / ``record_evolution``),
               src/crb/core/evidence.py (``canonical_json`` / ``sha256_text``),
               src/crb/cli/commands/learn.py (emits items in this shape),
@@ -81,7 +85,26 @@ class BacklogError(ValueError):
 
 
 class BacklogFrozen(BacklogError):
-    """An operation would mutate a frozen record. Register an evolution instead."""
+    """An operation would mutate a frozen record. Register an evolution instead.
+
+    ``code`` is the stable word an API maps to its own error code (never the
+    sentence, which may be reworded): ``frozen`` here, ``item_exists`` /
+    ``already_superseded`` on the subclasses.
+    """
+
+    code = "frozen"
+
+
+class ItemExists(BacklogFrozen):
+    """An evolution names an id the record already holds."""
+
+    code = "item_exists"
+
+
+class AlreadySuperseded(BacklogFrozen):
+    """An evolution supersedes an item a later evolution already replaced."""
+
+    code = "already_superseded"
 
 
 @dataclass(frozen=True)
@@ -261,7 +284,7 @@ class Backlog:
         if not self.frozen:
             raise BacklogError("freeze the backlog before registering evolutions")
         if self.get(item.id) is not None:
-            raise BacklogFrozen(
+            raise ItemExists(
                 f"item {item.id!r} already exists — a frozen record never mutates; register a new id"
             )
         if item.supersedes:
@@ -269,7 +292,7 @@ class Backlog:
             if old is None:
                 raise BacklogError(f"cannot supersede unknown item {item.supersedes!r}")
             if any(e.supersedes == old.id for e in self.evolutions):
-                raise BacklogFrozen(
+                raise AlreadySuperseded(
                     f"item {old.id!r} is already superseded — supersede its latest evolution"
                 )
         new = replace(self, evolutions=(*self.evolutions, item))
@@ -315,25 +338,33 @@ class Backlog:
         gone = self.superseded_ids()
         return tuple(i for i in self.all_items() if i.id not in gone)
 
-    def ordered(self) -> tuple[BacklogItem, ...]:
-        """Active items in dependency order (stable topological sort). A dependency
-        on a superseded item resolves to its latest evolution. Cycles raise."""
-        active = self.active_items()
-        by_id = {i.id: i for i in active}
-        # ``latest`` maps a superseded id to the END of its supersession chain, so a
-        # dependency on an old id follows the chain to whatever replaced it last.
+    def _latest(self) -> dict[str, str]:
+        """``superseded id → the END of its supersession chain``: what a dependency on
+        an old id resolves to. Empty when nothing was superseded."""
         latest: dict[str, str] = {}
         for e in self.evolutions:
             if e.supersedes:
-                root = e.supersedes
-                while root in latest:
-                    root = latest[root]
                 latest[e.supersedes] = e.id
         for k in list(latest):
             v = latest[k]
             while v in latest:
                 v = latest[v]
             latest[k] = v
+        return latest
+
+    def resolve(self, item_id: str) -> str:
+        """The id that stands for ``item_id`` today: itself, or the latest evolution
+        that replaced it. The loop resolves every ``depends_on`` through this before it
+        asks whether the dependency was accepted, so a dependency's evolution that failed
+        blocks the dependant (the same map ``ordered`` sorts by)."""
+        return self._latest().get(item_id, item_id)
+
+    def ordered(self) -> tuple[BacklogItem, ...]:
+        """Active items in dependency order (stable topological sort). A dependency
+        on a superseded item resolves to its latest evolution (``resolve``). Cycles raise."""
+        active = self.active_items()
+        by_id = {i.id: i for i in active}
+        latest = self._latest()
 
         def deps(i: BacklogItem) -> list[str]:
             out = []
@@ -400,9 +431,11 @@ __all__ = [
     "LEVEL_L1",
     "LEVEL_L2",
     "LEVEL_L3",
+    "AlreadySuperseded",
     "Backlog",
     "BacklogError",
     "BacklogFrozen",
     "BacklogItem",
+    "ItemExists",
     "backlog_hash",
 ]

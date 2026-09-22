@@ -25,8 +25,10 @@ What it does: ``check(ref_type, ref_name, version, commit=, ref=, cwd=)`` return
               with a GitHub ``::error::`` line on a refusal.
 How:          ``tomllib`` on ``pyproject.toml`` → string comparison after stripping the ``v``;
               ``subprocess`` → ``git merge-base --is-ancestor`` (exit 0 = reachable) for the
-              provenance rule — the caller has fetched the ref first (the workflow's
-              ``git fetch --no-tags origin main`` on a full-history checkout).
+              provenance rule — the caller's checkout must already carry the ref (the
+              workflow's ``fetch-depth: 0`` checkout brings ``origin/main`` with it and
+              ``git rev-parse`` asserts it is there; nothing fetches, since the checkout
+              keeps no token — docs/RELEASING.md §1).
 Layer:        tooling — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   .github/workflows/release.yml (the caller), pyproject.toml (the version),

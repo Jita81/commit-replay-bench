@@ -7,13 +7,17 @@
  *               actions slot over a padded body.
  * What it does: Gives every screen section the same anatomy so a reader can scan a page; the
  *               actions slot is where selectors and export buttons live (design law 10 in
- *               ui/README.md), never inside the body.
+ *               ui/README.md), never inside the body. An eyebrow that is a count ("2
+ *               waiting") is a number, so `eyebrowHint` makes it a hover / focus / tap
+ *               trigger; the eyebrow carries `data-eyebrow` for the ratchet's collector.
  * How:          A `<section>` with a conditional `<header>`; `padded={false}` for bodies that
  *               are a table.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/components/PageHeader.tsx (the page-level counterpart with the `h1`),
  *               ui/src/components/DataTable.tsx (the usual unpadded body),
+ *               ui/src/components/Hint.tsx (the eyebrow's trigger), ui/src/help/hints.ts
+ *               (`eyebrowHint` ids), ui/src/help/hints-collector.ts (`[data-eyebrow]`),
  *               ui/src/screens/Runs/RunDetailPage.tsx (a typical multi-card screen)
  * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (heading order and axe on
  *               every screen); rendered by every screen test
@@ -21,10 +25,14 @@
  *               standard in ui/README.md.
  */
 import type { ReactNode } from 'react'
+import type { HintId } from '../help/hints'
+import { Hint } from './Hint'
 
 interface CardProps {
   title?: ReactNode
   eyebrow?: string
+  /** What the eyebrow states — a registry id; required by the ratchet when the eyebrow is a count (starts with a digit). */
+  eyebrowHint?: HintId
   /** Top-right slot: selectors + export buttons (STANDARD law 10). */
   actions?: ReactNode
   children: ReactNode
@@ -34,7 +42,7 @@ interface CardProps {
 }
 
 /** Borders-first surface, 12px radius, one soft shadow. */
-export function Card({ title, eyebrow, actions, children, className = '', padded = true, id }: CardProps) {
+export function Card({ title, eyebrow, eyebrowHint, actions, children, className = '', padded = true, id }: CardProps) {
   return (
     <section
       id={id}
@@ -43,7 +51,16 @@ export function Card({ title, eyebrow, actions, children, className = '', padded
       {(title || actions || eyebrow) && (
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-3.5">
           <div className="min-w-0">
-            {eyebrow && <div className="label">{eyebrow}</div>}
+            {eyebrow &&
+              (eyebrowHint ? (
+                <Hint as="div" id={eyebrowHint} className="label" data-eyebrow>
+                  {eyebrow}
+                </Hint>
+              ) : (
+                <div className="label" data-eyebrow>
+                  {eyebrow}
+                </div>
+              ))}
             {title && <h2 className="text-[16px] leading-6">{title}</h2>}
           </div>
           {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}

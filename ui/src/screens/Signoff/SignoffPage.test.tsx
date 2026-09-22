@@ -37,9 +37,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hintText } from '../../help/hints'
 import { unhinted } from '../../help/hints-collector'
-import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import type { CapabilityMapWithControls, ControlsVerdict } from '../Capability/contract'
 import { SignoffPage } from './SignoffPage'
 import type { SignoffPreview, SignoffRefusal, SignoffWithPolicy } from './contract'
@@ -576,10 +575,7 @@ describe('SignoffPage (signoff-policy.v2)', () => {
     expect(screen.getByTestId('signoff-row-attestation')).toHaveTextContent('I read the diff.')
     expect(first.container.querySelectorAll('[title]').length).toBe(0)
     const clause = first.container.querySelector('[data-hint="gate.signoff.false_q1"]')!
-    await userEvent.hover(clause)
-    const tip = document.getElementById(clause.getAttribute('aria-describedby')!)!
-    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
-    expect(tip).toHaveTextContent(hintText('gate.signoff.false_q1'))
+    await expectHintOpens(clause, 'gate.signoff.false_q1')
     first.unmount()
     vi.unstubAllGlobals()
 
