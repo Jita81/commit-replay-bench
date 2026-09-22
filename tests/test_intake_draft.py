@@ -10,14 +10,14 @@ What it does: Pins the id shape (``ado-4711``, ``jira-abc-123``) against the bac
               ``kind_reason``, ``Classification.reason``), that a low-confidence
               classification is ``unclassified`` and never a silent guess, and that a
               re-read at a new revision produces a NEW id that supersedes the old one.
-How:          Plain ``Ticket`` objects from ``tests/test_intake_client.py``'s helper; the
+How:          Plain ``Ticket`` objects from ``fixtures.intake``'s helper; the
               produced ``BacklogItem`` is fed to the real ``crb.factory.readiness.assess``
               so the facts this module writes are the facts the gate reads.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
 Works with:   src/crb/intake/draft.py (under test), src/crb/factory/backlog.py (the id
               regex and the item shape), src/crb/factory/readiness.py (the slot catalogue
-              the facts must satisfy), tests/test_intake_client.py (the ticket helper)
+              the facts must satisfy), tests/fixtures/intake.py (the ticket helper)
 Tested by:    tests/test_intake_draft.py
 Touch when:   a capability class is added to the readiness catalogue (give it cues here
               first); the points → size mapping changes (it is published in the guide).
@@ -26,12 +26,12 @@ Touch when:   a capability class is added to the readiness catalogue (give it cu
 from __future__ import annotations
 
 import pytest
-from tests.test_intake_client import a_ticket
 
 from crb.factory import readiness as rd
 from crb.factory.backlog import KIND_CODE, KIND_INFRA, KIND_OPERATOR, BacklogItem
 from crb.intake import client as c
 from crb.intake import draft as d
+from fixtures.intake import a_ticket
 
 # --- the id ----------------------------------------------------------------------
 

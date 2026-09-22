@@ -52,6 +52,7 @@ from crb.core.secrets_file import (
 )
 from crb.server import secrets as srv
 from crb.server.secrets import (
+    SECRETS,
     SecretsFile,
     VerifyRateLimiter,
     secrets_dir_for,
@@ -321,8 +322,11 @@ class TestSecretsFile:
         f.set(NAME, TOKEN)
         os.chmod(tmp_path / "secrets" / NAME, 0o644)
         with caplog.at_level(logging.WARNING, logger="crb.server.secrets"):
-            [st] = f.statuses()
-        assert st.name == NAME and not st.present and st.fingerprint == ""
+            statuses = f.statuses()
+        # statuses() answers for every registered secret, so assert on the one we broke
+        assert [st.name for st in statuses] == list(SECRETS)
+        [st] = [s for s in statuses if s.name == NAME]
+        assert not st.present and st.fingerprint == ""
         assert any("unreadable" in r.getMessage() for r in caplog.records)
         with pytest.raises(SecretsInsecure):
             f.verify(NAME)

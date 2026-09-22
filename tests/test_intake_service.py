@@ -12,13 +12,13 @@ What it does: Pins that the same column polled twice writes to the ticket once, 
               ``intake.stopped`` event with a published reason and advice, and that an
               empty outcome map moves no ticket at all.
 How:          A real ``FactoryHome`` under ``tmp_path`` (so the hash chain is the real
-              one) plus ``tests/test_intake_client.py``'s ``FakeTracker``. No HTTP, no
+              one) plus ``fixtures.intake``'s ``FakeTracker``. No HTTP, no
               database, no model — the whole flow is exercised in milliseconds.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
 Works with:   src/crb/server/intake.py (under test), src/crb/server/factory_state.py (the
               ``FactoryHome`` it registers through), src/crb/intake/client.py (the fake's
-              protocol), tests/test_intake_client.py (the fake)
+              protocol), tests/fixtures/intake.py (the fake)
 Tested by:    tests/test_intake_service.py
 Touch when:   a step is added to the poll — pin its idempotency here before its behaviour.
 """
@@ -29,12 +29,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.test_intake_client import FakeTracker
 
 from crb.factory.backlog import BacklogItem
 from crb.intake import client as c
 from crb.server import intake as sv
 from crb.server.factory_state import FactoryHome
+from fixtures.intake import FakeTracker
 
 READY_AC = (
     "method_path: POST /health",

@@ -46,7 +46,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from crb.server.app import API_PREFIX, create_app
-from crb.server.secrets import VerifyRateLimiter
+from crb.server.secrets import SECRETS, VerifyRateLimiter
 from crb.server.settings import Settings
 
 ROOT_PW = "correct-horse-battery-staple"
@@ -202,7 +202,11 @@ class TestAccess:
         assert client.put(PATH_, json={"token": GOOD}).status_code == 200
         login(client, "viewer2", USER_PW)
         body = client.get(f"{API_PREFIX}/settings/secrets").json()
-        assert body == {"items": [{"name": NAME, "present": True}], "secrets_dir": ""}
+        # every registered secret is listed, presence only, in the registry's own order
+        assert [i["name"] for i in body["items"]] == list(SECRETS)
+        assert {"name": NAME, "present": True} in body["items"]
+        assert all(set(i) == {"name", "present"} for i in body["items"])
+        assert body["secrets_dir"] == ""
         login(client, "op2", USER_PW)
         item = client.get(f"{API_PREFIX}/settings/secrets").json()["items"][0]
         assert set(item) == {"name", "present", "fingerprint", "set_at", "set_by"}
@@ -242,12 +246,16 @@ class TestStore:
     ) -> None:
         login(client)
         r = client.get(f"{API_PREFIX}/settings/secrets")
-        assert r.json() == {
-            "items": [
-                {"name": NAME, "present": False, "fingerprint": "", "set_at": "", "set_by": ""}
-            ],
-            "secrets_dir": str(settings.home / "secrets"),
-        }
+        listed = r.json()
+        assert [i["name"] for i in listed["items"]] == list(SECRETS)
+        assert {
+            "name": NAME,
+            "present": False,
+            "fingerprint": "",
+            "set_at": "",
+            "set_by": "",
+        } in listed["items"]
+        assert listed["secrets_dir"] == str(settings.home / "secrets")
         with caplog.at_level(logging.INFO):
             r = client.put(PATH_, json={"token": f" {GOOD}\n"})
         assert r.status_code == 200, r.text

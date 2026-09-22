@@ -28,12 +28,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests.test_intake_client import a_ticket
-
 from crb.factory import readiness as rd
 from crb.intake import client as c
 from crb.intake import draft as d
 from crb.intake import feedback as fb
+from fixtures.intake import a_ticket
 
 
 def _ready_ticket() -> c.Ticket:
