@@ -290,6 +290,51 @@ a ticket or a shell history again (review 2026-09-13, action #9).
 - Roles are an ascending ladder `viewer < operator < approver < admin`; every mutating route
   names its minimum role; `/health` and `/metrics` are unauthenticated and must be bound to
   an internal interface. [measured] RBAC matrix in `tests/test_server_app.py`
+- **Two-person rule, enforced at write** (`signoff-policy.v3`, F7b, DL-047, ADR-0016):
+  `409 signoff_refused` / `same_actor` — the approver is refused when they are the actor of
+  the attested row (`Grade.actor`), the actor of the run that produced it (`Run.actor`), or
+  the only person behind the cell's accepted evidence — the person who produced the evidence
+  can never be the person who signs it. Non-person actors (the worker, `cli:<os user>`,
+  `service:…`, the census importer, the empty actor) never count as a second person. The
+  clause has no `CRB_SIGNOFF__*` knob and cannot be relaxed (`require_independent_verifier`
+  may only be `true`; anything else is `503 signoff_policy_invalid`), the preview shows it
+  to the would-be approver before they try, and the record stamps
+  `require_independent_verifier: true` so an audit reads that the rule was in force. The
+  rule bites exactly when a person is behind the evidence: where a person actor matches
+  the approver, or the approver is the only person behind the cell's accepted rows, the
+  sign-off is refused — so a deployment in which one account both queues runs and approves
+  cannot sign those cells at all, and a separate operator and approver account is the
+  precondition for signing evidence people produced. Evidence with no person actor at all
+  (the worker's scheduled runs, `cli:` and `service:` actors, the census importer) is not
+  judged by this clause (`same_actor_refusal` is silent when no person actor resolves)
+  and is guarded by the other clauses only. [measured — n = 15 tests under apparatus 2.2: 7 in
+  `tests/test_server_routes_signoffs.py::TestTwoPersonRule` drive `POST /signoffs`,
+  `GET /signoffs/preview` and `cell_actors` against a seeded ledger (refused on the attested
+  row's run actor; refused on the row's own `Grade.actor` alone, the run unnamed; `cell_actors`
+  gathers both halves over accepted rows only; refused as the only person behind the cell; a
+  second approver signs the same cell; the seeded operator/approver split signs; the preview
+  names the refusal first — the three route tests added after an adversarial mutation pass
+  each kill a mutant the first six let live), and 8 in `tests/test_signoff.py` exercise
+  `same_actor_refusal` /
+  `is_person_actor` in the core (each of the three grounds, non-person actors never
+  count, the clause is last and not lifted by a relaxed policy, the ledger write boundary
+  refuses, the silent case when no actors were resolved); pass/fail, not a rate]
+- **Who signed is on the record** (F34): every sign-off carries `verifier_kind` — `local`
+  or `oidc`, stamped from the signing account's issuer under the hash; `service` is reserved
+  for a delegated, non-person signature and no write path of this API mints it, so a
+  delegated signature can never read as a person's. Rows written before the field carry
+  `""`, never a guessed kind. A blank `users.issuer` (no product path writes one) is
+  **503 `account_issuer_missing`** on the write, the preview and a revocation — nothing
+  written, the account named — never a guessed kind and never a 500. [measured — n = 5
+  tests under apparatus 2.2: 3 in
+  `tests/test_signoff.py` (a `crb.signoff.v3` record round-trips and hashes with the kind;
+  a v2 record with no kind still verifies and serves `""`, and flipping a stored kind to
+  `service` breaks its hash; `verifier_kind_for_issuer` maps the local issuer → `local`
+  and any other → `oidc`, refusing an empty issuer) and 2 in
+  `tests/test_server_routes_signoffs.py::TestVerifierKind` (an identity-provider session
+  signs and the served record reads `oidc`; a blanked issuer is 503 on all three routes with
+  the signoffs table unchanged); the seed's `local` stamp is also asserted on every write
+  and preview in that file; pass/fail, not a rate]
 
 ### 3.5 Evidence integrity — `crb.core.ledger`, `crb.store`
 

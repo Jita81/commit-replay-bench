@@ -1,4 +1,4 @@
-"""Request / response models for ``/signoffs`` under ``signoff-policy.v2``.
+"""Request / response models for ``/signoffs`` under ``signoff-policy.v3``.
 
 Extends the base shapes in :mod:`crb.server.schemas` (``SignoffOut``,
 ``SignoffCreateRequest``, ``SignoffEvidence``) with what the critical-friend review
@@ -9,14 +9,17 @@ approver's **attestation** that they read one specific accepted row of the cell.
 WOULD record and every refusal that would apply — so the UI can show the approver
 the bar before they try. ``signoff-policy.v2`` adds the cell's oracle measurement
 (:class:`SignoffOracleOut`: how many of the cell's tasks carry a mutation score) and
-the non-relaxable ``require_oracle_measured`` switch on the policy.
+the non-relaxable ``require_oracle_measured`` switch on the policy;
+``signoff-policy.v3`` (F7b) the non-relaxable ``require_independent_verifier`` switch
+behind the ``same_actor`` refusal, and every served record ``verifier_kind`` (F34,
+on the base ``SignoffOut``).
 
 Nothing here is computed: every field is a core ``to_dict`` value re-typed so the
 OpenAPI document is honest and a drift is a diff.
 
 Navigation
 ----------
-What it is:   The request / response models for ``/signoffs`` under ``signoff-policy.v2`` —
+What it is:   The request / response models for ``/signoffs`` under ``signoff-policy.v3`` —
               the attestation input, the policy, the refusals, the preview.
 What it does: Validates the approver's attestation at the edge (64-hex row hash, non-blank
               statement, no extra fields) and re-types every core ``to_dict`` the sign-off
@@ -109,6 +112,8 @@ class SignoffPolicyOut(BaseModel):
     min_oracle_strength: float
     require_oracle_measured: bool
     require_attestation: bool
+    #: v3: the two-person rule — always ``true``, no knob (503 to any attempt to set one).
+    require_independent_verifier: bool
 
 
 class SignoffRefusalOut(BaseModel):
@@ -163,7 +168,8 @@ class SignoffEvidenceWithOracle(SignoffEvidence):
 class SignoffWithPolicyOut(SignoffOut):
     """``SignoffOut`` + the policy decision the record was made under. A record
     written before the policy (``schema: crb.signoff.v1``) reports
-    ``policy_version: ""``, an empty route / controls snapshot and no attestation."""
+    ``policy_version: ""``, an empty route / controls snapshot and no attestation; one
+    written before F34 (``crb.signoff.v2``) reports ``verifier_kind: ""``."""
 
     schema_: str = Field(alias="schema", default="")
     evidence: SignoffEvidenceWithOracle
