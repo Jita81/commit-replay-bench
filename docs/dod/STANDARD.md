@@ -79,7 +79,17 @@ Rules for the table:
   that **resolves** (the checker looks it up). `partial` and `unmet` require a `gap` id.
   `n/a` requires a one-line reason in the gap column (why the category does not apply here).
 - `gap` is a `G-nnn` id defined under `## Gaps` in the same file, or an existing `F-`/`B-`
-  backlog id from `docs/reviews/2026-09-17-enterprise-front-end.md` §9.
+  backlog id from `docs/reviews/2026-09-17-enterprise-front-end.md` §9. The checker looks the
+  backlog id up: an id that no §9 row carries is a defect, not a link.
+- A gap line reads `- **G-nnn** — what is missing · the smallest change that closes it · owner`,
+  and `owner` is one of `ui`, `server`, `factory`, `docs`, `deploy`. (A ` · ` inside quoted
+  product copy is allowed; the rule is that the line ends with its owner and carries at least
+  the two separators.)
+- **A gap id names one piece of work.** Two files may share an id — and must, when the same
+  change closes criteria in both — but then the line is identical in both, word for word. The
+  checker fails when one id carries two different lines. Ids are allocated from one register
+  per band: pages `G-100`–`G-299`, journeys `G-300`–`G-499`, streams `G-500`–`G-599`, the
+  product `G-600`–`G-699`, and gaps shared across files `G-900`–`G-999`.
 
 ## 3. Evidence references (typed, resolvable)
 
@@ -95,6 +105,10 @@ Rules for the table:
 | `ci:` | `ci:sandbox-images` | `.github/workflows/ci.yml` has that job |
 | `adr:` / `dl:` | `adr:0016` · `dl:DL-047` | the ADR file exists · the row is in `DECISION-LOG.md` |
 | `measured:` | `measured:<free text with n, method, apparatus>` | never resolved by the checker; allowed only alongside another reference |
+
+References in one cell are separated by ` · ` or `; `, and the checker cuts only where the
+next typed prefix begins — so a quoted `vitest:` or `spec:` title may itself contain ` · `
+(Layout's `Journey · n of 4 · Step`) without being torn into unresolvable pieces.
 
 `absent` is honest and expected; a criterion whose only evidence is prose is `unmet`.
 
@@ -146,9 +160,13 @@ are named and exercised).
 - **product** status: `done` when every stream is `done` and its own criteria are met.
 - Every route in `App.tsx` must have a page artefact; every `JOURNEY_STEPS` entry a journey;
   every stream a parent chain to `dod.product`. A missing artefact fails the check.
-- `GAP-ANALYSIS.md` lists, per level, the status and the open gaps ranked by
-  (level weight × count of criteria blocked × severity of the category), so the first gap in
-  the list is the one that unblocks the most "done".
+- `GAP-ANALYSIS.md` lists, per level, the status, then the open criteria ranked by
+  (level weight × count of criteria the gap blocks, capped at 3 × severity of the category ×
+  the state factor), so the first line is the one that unblocks the most "done". The state
+  factor doubles `unmet` everywhere, and doubles `partial` too in TRUTH, CLAIMS, ROLES and
+  POSTURE: where the criterion is about telling the truth, built-wrong is not a lesser defect
+  than not-built. The first 25 rows are *the order of work*; *Open gaps by fan-out* repeats
+  them as one row per gap, with how many criteria and which levels that one change closes.
 
 ## 6. What this is for
 

@@ -46,6 +46,12 @@ updated: 2026-09-22
 - **G-001** — <what is missing · the smallest change that closes it · owner layer>
 ```
 
+`owner layer` is one of `ui`, `server`, `factory`, `docs`, `deploy`. Take the `G-nnn` from
+this level's band — pages `G-100`–`G-299`, journeys `G-300`–`G-499`, streams `G-500`–`G-599`,
+the product `G-600`–`G-699` — and from the shared band `G-900`–`G-999` when the same change
+closes a criterion in another artefact too; a shared id carries the same line, word for word,
+in every file that cites it.
+
 Journeys add rows for `STEPS`, `PROOF`, `TIME-COST`, `RECOVERY`; value streams add `TRIGGER`,
 `OUTCOME`, `HANDOFF`, `MEASURE`, `AUTOMATION`; the product adds `IDENTITY`, `GO-LIVE`,
 `CLAIMS`, `RELEASE`, `POSTURE`, `SUPPORT`, `EXTENSIBILITY` (`STANDARD.md` §4). A journey's

@@ -11,7 +11,12 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               ``partial`` while a child page is; that every evidence prefix resolves against
               the real file shapes (test defs, vitest/spec titles, ratchet SCREENS keys,
               help.ts routes, hint ids, API.md rows, code symbols, doc anchors, CI jobs, ADRs,
-              decision-log rows); and that ``--check`` fails on a stale GAP-ANALYSIS.md.
+              decision-log rows) while a quoted title containing " · " stays one reference;
+              that a gap line must name the change and a known owner layer, that one gap id
+              carries one line across the tree, and that an F-/B- id must be a row of the
+              ordered backlog and is named in the ranking; that the rank counts how many
+              criteria a gap blocks and doubles a `partial` in the honesty categories; and
+              that ``--check`` fails on a stale GAP-ANALYSIS.md.
 How:          Builds a minimal tree under ``tmp_path`` (App.tsx, Layout.tsx, hints.ts, help.ts,
               a ratchet file, API.md, ci.yml, a test file, a spec, an ADR, the decision log),
               points the module's path constants at it with ``monkeypatch``, and calls
@@ -150,6 +155,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, P
     (tmp_path / "docs/dod/journeys").mkdir(parents=True)
     (tmp_path / "docs/dod/streams").mkdir(parents=True)
     (tmp_path / "docs/adr").mkdir(parents=True)
+    (tmp_path / "docs/reviews").mkdir(parents=True)
     (tmp_path / "tests").mkdir()
     (tmp_path / ".github/workflows").mkdir(parents=True)
     (tmp_path / "ui/src/App.tsx").write_text(
@@ -185,6 +191,14 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, P
         "| DL-047 | 2026-09-21 | x | y |\n", encoding="utf-8"
     )
     (tmp_path / "docs/adr/0016-two-person.md").write_text("# ADR-0016\n", encoding="utf-8")
+    (tmp_path / "docs/reviews/backlog.md").write_text(
+        "## 9. Ordered front-end backlog\n\n"
+        "| # | Item | Size | Persona | Pattern | Notes |\n"
+        "|---|---|---|---|---|---|\n"
+        "| F23 | **User lifecycle** — deactivate, reset a password | S | P6 | NHS IG | x |\n"
+        "| B-9 | **Merge outcome and review minutes** | M | P8 | DORA | y |\n",
+        encoding="utf-8",
+    )
     (tmp_path / ".github/workflows/ci.yml").write_text(
         "jobs:\n  code-map:\n    name: code-map\n", encoding="utf-8"
     )
@@ -199,6 +213,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, P
     monkeypatch.setattr(mod, "CI", tmp_path / ".github/workflows/ci.yml")
     monkeypatch.setattr(mod, "DECISION_LOG", tmp_path / "docs/DECISION-LOG.md")
     monkeypatch.setattr(mod, "ADR_DIR", tmp_path / "docs/adr")
+    monkeypatch.setattr(mod, "BACKLOG", tmp_path / "docs/reviews/backlog.md")
     return mod, tmp_path
 
 
@@ -356,3 +371,92 @@ def test_check_fails_on_a_stale_gap_analysis_or_status_line(
     )
     assert mod.main(["--check"]) == 1
     assert "the roll-up says 'done'" in capsys.readouterr().out
+
+
+def test_a_reference_title_may_contain_the_journey_separator(
+    tree: tuple[ModuleType, Path],
+) -> None:
+    """` · ` cuts between references, never inside a quoted test title."""
+    mod, _root = tree
+    title = 'vitest:ui/src/components/Layout.test.tsx::"derives "Journey · n of 4 · Step" from it"'
+    refs = mod.split_refs(f"`{title}` · `hint:about:/results` · `route:GET /health`")
+    assert refs == [title, "hint:about:/results", "route:GET /health"]
+    assert mod.split_refs("absent") == []
+
+
+def test_a_gap_line_names_the_change_and_a_known_owner(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    mod, root = tree
+    page = root / "docs/dod/pages/results.md"
+    good = "- **G-001** — non-goals not on the About block · add one sentence · ui"
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    page.write_text(
+        page.read_text(encoding="utf-8").replace(good, "- **G-001** — no sentence on the page"),
+        encoding="utf-8",
+    )
+    assert mod.main(["--check"]) == 1
+    assert "must read 'what is missing" in capsys.readouterr().out
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    page.write_text(
+        page.read_text(encoding="utf-8").replace(good, good[: -len("ui")] + "tests"),
+        encoding="utf-8",
+    )
+    assert mod.main(["--check"]) == 1
+    assert "the owner must be one of" in capsys.readouterr().out
+
+
+def test_one_gap_id_is_one_piece_of_work_across_the_tree(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two files may share an id — but then they must share the line, word for word."""
+    mod, root = tree
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    j = root / "docs/dod/journeys/read-the-map.md"
+    j.write_text(
+        j.read_text(encoding="utf-8")
+        + "\n## Gaps\n- **G-001** — something else entirely · change it · server\n",
+        encoding="utf-8",
+    )
+    assert mod.main(["--check"]) == 1
+    assert "gap G-001 is defined differently in" in capsys.readouterr().out
+
+
+def test_a_backlog_gap_must_be_a_row_in_the_ordered_backlog_and_the_ranking_names_it(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    mod, root = tree
+    _write_all(root, ng_state="unmet", ng_gap="F99")
+    assert mod.main(["--check"]) == 1
+    assert "gap F99 is in no row of" in capsys.readouterr().out
+    _write_all(root, ng_state="unmet", ng_gap="F23")
+    assert mod.main([]) == 0
+    out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
+    assert "backlog F23 — User lifecycle · S" in out
+
+
+def test_the_rank_counts_what_a_gap_blocks_and_doubles_a_partial_in_the_honesty_categories(
+    tree: tuple[ModuleType, Path],
+) -> None:
+    mod, root = tree
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    page = root / "docs/dod/pages/results.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace(
+            "| results.truth.3 | TRUTH | n on every rate | "
+            '`vitest:ui/src/screens/Results/MapTable.test.tsx::"every cell carries n"` | met | |',
+            "| results.truth.3 | TRUTH | n on every rate | `absent` | partial | G-001 |",
+        ),
+        encoding="utf-8",
+    )
+    arts = [mod.parse_artefact(p)[0] for p in mod.artefact_files()]
+    mod.validate(arts)
+    assert mod.blocked_by_gap(arts)["G-001"] == 2
+    assert mod._state_factor("TRUTH", "partial") == 2
+    assert mod._state_factor("STEPS", "partial") == 1
+    assert mod._state_factor("STEPS", "unmet") == 2
+    truth = next(r for r in mod._rank(arts) if r[3].id == "results.truth.3")
+    # page 2 × TRUTH 5 × 2 criteria blocked × partial-in-an-honesty-category 2
+    assert truth[0] == 40 and truth[1] == 2
+    mod.roll_up(arts)
+    assert "## Open gaps by fan-out" in mod.render(arts)

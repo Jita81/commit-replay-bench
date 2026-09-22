@@ -16,9 +16,13 @@ first line is the one that unblocks the most "done".
 ``--check`` fails on: a route in ``ui/src/App.tsx`` with no page artefact; a ``JOURNEY_STEPS``
 entry with no journey; an artefact whose parent does not exist or whose children are not its
 children; a criterion with a malformed id, an unknown category, an unknown state, ``met``
-without a resolvable evidence reference, ``partial``/``unmet`` without a gap id, or a gap id
-defined nowhere; an evidence reference that does not resolve; and a ``GAP-ANALYSIS.md`` or a
-``status:`` line that differs from what the artefacts generate. It never edits a criterion.
+without a resolvable evidence reference, ``partial``/``unmet`` without a gap id, a gap id
+defined nowhere, or an ``F-``/``B-`` id that is in no row of the ordered backlog (§9); a gap
+line that does not read "what is missing · the smallest change that closes it · owner", or
+whose owner is not one of ui/server/factory/docs/deploy; the same gap id carrying two
+different lines in two files (one id is one piece of work); an evidence reference that does
+not resolve; and a ``GAP-ANALYSIS.md`` or a ``status:`` line that differs from what the
+artefacts generate. It never edits a criterion.
 
 Navigation
 ----------
@@ -28,15 +32,17 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               and parent/child links, resolves each typed evidence reference against the tree
               (tests, vitest titles, walkthrough specs, hint registry and ratchet, API routes,
               code symbols, doc anchors, CI jobs, ADRs, decision-log rows), computes the
-              four-level roll-up and writes docs/dod/GAP-ANALYSIS.md; --check exits non-zero
-              on any defect or drift.
+              four-level roll-up and writes docs/dod/GAP-ANALYSIS.md (the order of work, the
+              gaps by fan-out, and every open criterion); --check exits non-zero on any defect
+              or drift.
 How:          Walk docs/dod/{pages,journeys,streams}/*.md + product.md → parse front matter
               and the criteria table → resolve evidence (one resolver per prefix) → demote
               ``met`` with no resolving reference → roll up child → parent → render.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/dod/STANDARD.md (the format it enforces), docs/dod/GAP-ANALYSIS.md (its
-              output), ui/src/App.tsx (the routes every page artefact must cover),
+              output), docs/reviews/2026-09-17-enterprise-front-end.md §9 (the F-/B- backlog
+              a gap may cite), ui/src/App.tsx (the routes every page artefact must cover),
               ui/src/components/Layout.tsx (JOURNEY_STEPS), ui/src/help/hints.ts and
               hints-ratchet*.tsx (hint: references), docs/API.md (route: references),
               .github/workflows/ci.yml (the dod job that runs --check)
@@ -65,6 +71,7 @@ HELP = ROOT / "ui" / "src" / "help" / "help.ts"
 API_DOC = ROOT / "docs" / "API.md"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 DECISION_LOG = ROOT / "docs" / "DECISION-LOG.md"
+BACKLOG = ROOT / "docs" / "reviews" / "2026-09-17-enterprise-front-end.md"
 ADR_DIR = ROOT / "docs" / "adr"
 
 LEVELS: tuple[str, ...] = ("page", "journey", "stream", "product")
@@ -91,6 +98,8 @@ EXTRA: dict[str, tuple[str, ...]] = {
 }
 #: Category weight for the gap ranking — what blocks a governance reviewer outranks polish.
 WEIGHT: dict[str, int] = {
+    "TRIGGER": 5,
+    "OUTCOME": 5,
     "TRUTH": 5,
     "ROLES": 5,
     "GO-LIVE": 5,
@@ -98,27 +107,47 @@ WEIGHT: dict[str, int] = {
     "POSTURE": 5,
     "EVIDENCE": 4,
     "PROOF": 4,
-    "OUTCOME": 4,
-    "AUTOMATION": 4,
     "HANDOFF": 4,
+    "STEPS": 4,
+    "MEASURE": 4,
+    "ACCESSIBILITY": 4,
     "ACTIONS": 3,
     "RECOVERY": 3,
     "OPERATIONS": 3,
-    "MEASURE": 3,
-    "TRIGGER": 3,
-    "STEPS": 3,
+    "EXTENSIBILITY": 3,
     "EXPLANATION": 2,
-    "ACCESSIBILITY": 2,
     "ENTRY-EXIT": 2,
+    "AUTOMATION": 2,
+    "RELEASE": 2,
+    "SUPPORT": 2,
     "PURPOSE": 1,
     "TIME-COST": 1,
     "NON-GOALS": 1,
     "IDENTITY": 1,
-    "RELEASE": 2,
-    "SUPPORT": 2,
-    "EXTENSIBILITY": 3,
 }
-LEVEL_WEIGHT: dict[str, int] = {"product": 4, "stream": 3, "journey": 2, "page": 1}
+LEVEL_WEIGHT: dict[str, int] = {"product": 4, "stream": 3, "journey": 2, "page": 2}
+#: How many ranked rows are "the order of work"; the rest sit under a collapsed heading.
+TOP = 25
+#: Categories where a half-built answer is as dishonest as no answer: `partial` scores like
+#: `unmet`. Everywhere else `partial` means "some of it is there" and scores half.
+HONESTY: tuple[str, ...] = ("TRUTH", "CLAIMS", "ROLES", "POSTURE")
+#: The layers a gap can be owned by — the last field of a `## Gaps` line (STANDARD.md §2).
+OWNERS: tuple[str, ...] = ("ui", "server", "factory", "docs", "deploy")
+#: The reference prefixes; also the boundary the evidence splitter cuts on, so a `vitest:`
+#: title may itself contain " · " (Layout's `Journey · n of 4 · Step`).
+PREFIXES: tuple[str, ...] = (
+    "test",
+    "vitest",
+    "spec",
+    "hint",
+    "route",
+    "code",
+    "doc",
+    "ci",
+    "adr",
+    "dl",
+    "measured",
+)
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.[a-z-]+\.\d+$")
 _GAP_RE = re.compile(r"^(G-\d{3}|F\d+[a-z]?|B-\d+[a-z]?)$")
 _ART_ID_RE = re.compile(r"^dod\.(page|journey|stream)\.[a-z0-9][a-z0-9-]*$|^dod\.product$")
@@ -214,7 +243,19 @@ def parse_artefact(path: Path) -> tuple[Artefact, list[str]]:
         if in_gaps and s.startswith("- **"):
             m = re.match(r"^- \*\*(G-\d{3})\*\*\s*[—-]\s*(.+)$", s)
             if m:
-                gaps[m.group(1)] = m.group(2)
+                body = m.group(2).strip()
+                gaps[m.group(1)] = body
+                fields = body.split(" · ")
+                if len(fields) < 3:
+                    errors.append(
+                        f"{path.name}:{n}: gap {m.group(1)} must read "
+                        "'what is missing · the smallest change that closes it · owner'"
+                    )
+                elif fields[-1].strip().rstrip(".") not in OWNERS:
+                    errors.append(
+                        f"{path.name}:{n}: gap {m.group(1)} ends {fields[-1].strip()!r}; "
+                        f"the owner must be one of {OWNERS}"
+                    )
             else:
                 errors.append(f"{path.name}:{n}: gap line must be '- **G-nnn** — text'")
     return Artefact(path, front, criteria, gaps, status_line), errors
@@ -345,6 +386,28 @@ def _resolve_dl(ref: str) -> bool:
     )
 
 
+_BACKLOG_ROW = re.compile(r"^\|\s*(F\d+[a-z]?|B-\d+[a-z]?)\s*\|\s*(.+?)\s*\|\s*([^|]*?)\s*\|")
+
+
+def backlog_index() -> dict[str, tuple[str, str]]:
+    """``F23`` → (its bold title, its size), read from the ordered backlog (§9).
+
+    A gap may cite a backlog row instead of defining a ``G-nnn``; the ranked list has to be
+    able to say what that row is, so an id that §9 does not carry is a defect, not a link.
+    """
+    out: dict[str, tuple[str, str]] = {}
+    if not BACKLOG.is_file():
+        return out
+    for line in BACKLOG.read_text(encoding="utf-8").split("\n"):
+        m = _BACKLOG_ROW.match(line.strip())
+        if not m:
+            continue
+        item, cell, size = m.group(1), m.group(2), m.group(3)
+        bold = re.search(r"\*\*(.+?)\*\*", cell)
+        out[item] = (bold.group(1) if bold else cell.split("—")[0].strip(), size.strip() or "—")
+    return out
+
+
 RESOLVERS = {
     "test": _resolve_test,
     "vitest": _resolve_title,
@@ -359,11 +422,19 @@ RESOLVERS = {
 }
 
 
+_SEP_RE = re.compile(r"(?:\s·\s|;\s+)(?=`{0,2}(?:" + "|".join(PREFIXES) + r"):)")
+
+
 def split_refs(evidence: str) -> list[str]:
-    """References are separated by ` · ` or `;`; a `measured:` reference may contain anything."""
+    """References are separated by ` · ` or `; `.
+
+    The cut is made only where the next reference begins — a typed prefix from ``PREFIXES``
+    — so a quoted ``vitest:`` / ``spec:`` title may itself contain " · " (Layout's
+    ``Journey · n of 4 · Step``) without being torn into three unresolvable pieces.
+    """
     if evidence.strip() in ("", "absent"):
         return []
-    parts = re.split(r"\s·\s|;\s*", evidence)
+    parts = _SEP_RE.split(evidence)
     return [p.strip().strip("`") for p in parts if p.strip()]
 
 
@@ -406,6 +477,19 @@ def route_slug(route: str) -> str:
 def validate(arts: list[Artefact]) -> list[str]:
     errors: list[str] = []
     by_id = {a.id: a for a in arts}
+    backlog = backlog_index()
+    # A gap id names one piece of work: the same id in two files must carry the same line,
+    # or the ranked list cannot be grouped, counted or spoken about.
+    defined: dict[str, tuple[str, str]] = {}
+    for a in arts:
+        for gid, text in a.gaps.items():
+            norm = " ".join(text.split())
+            first = defined.setdefault(gid, (norm, a.rel))
+            if first[0] != norm:
+                errors.append(
+                    f"{a.rel}: gap {gid} is defined differently in {first[1]} — "
+                    "one id is one piece of work; renumber or make the two lines identical"
+                )
     seen_crit: set[str] = set()
     for a in arts:
         if not _ART_ID_RE.match(a.id):
@@ -466,6 +550,11 @@ def validate(arts: list[Artefact]) -> list[str]:
                     errors.append(f"{where}: gap {c.gap!r} must be G-nnn or an F-/B- backlog id")
                 elif c.gap.startswith("G-") and c.gap not in a.gaps:
                     errors.append(f"{where}: gap {c.gap} is not defined under '## Gaps'")
+                elif not c.gap.startswith("G-") and c.gap not in backlog:
+                    errors.append(
+                        f"{where}: gap {c.gap} is in no row of "
+                        "docs/reviews/2026-09-17-enterprise-front-end.md §9"
+                    )
             if c.state == "n/a" and not c.gap:
                 errors.append(f"{where}: n/a needs a one-line reason in the gap column")
     # coverage
@@ -502,18 +591,51 @@ def roll_up(arts: list[Artefact]) -> None:
 # ------------------------------------------------------------------ rendering
 
 
-def _rank(arts: list[Artefact]) -> list[tuple[int, Artefact, Criterion]]:
-    rows: list[tuple[int, Artefact, Criterion]] = []
-    for a in arts:
-        for c in a.criteria:
-            if c.effective_state in ("partial", "unmet"):
-                score = (
-                    LEVEL_WEIGHT.get(a.level, 1)
-                    * WEIGHT.get(c.category, 1)
-                    * (2 if c.effective_state == "unmet" else 1)
-                )
-                rows.append((score, a, c))
-    rows.sort(key=lambda r: (-r[0], r[1].id, r[2].id))
+def _open(arts: list[Artefact]) -> list[tuple[Artefact, Criterion]]:
+    return [(a, c) for a in arts for c in a.criteria if c.effective_state in ("partial", "unmet")]
+
+
+def blocked_by_gap(arts: list[Artefact]) -> dict[str, int]:
+    """How many open criteria across the whole tree each gap id blocks."""
+    counts: dict[str, int] = {}
+    for _a, c in _open(arts):
+        if c.gap:
+            counts[c.gap] = counts.get(c.gap, 0) + 1
+    return counts
+
+
+def _state_factor(category: str, state: str) -> int:
+    """`unmet` is always double; in the honesty categories so is `partial`.
+
+    "Built wrong" is not a lesser defect than "not built" where the criterion is about
+    telling the truth — a screen that presents a fallback as an answer is the defect class
+    this product exists to refuse.
+    """
+    if state == "unmet" or category in HONESTY:
+        return 2
+    return 1
+
+
+def _rank(arts: list[Artefact]) -> list[tuple[int, int, Artefact, Criterion]]:
+    """(score, fan-out, artefact, criterion), highest first.
+
+    ``score`` is STANDARD.md §5's formula: level weight × criteria blocked × category
+    severity, with the state factor. The fan-out factor is what finds the shared blocker —
+    the single change that closes the most criteria in the tree — and is capped at 3 so one
+    widely-cited gap cannot bury everything else.
+    """
+    counts = blocked_by_gap(arts)
+    rows: list[tuple[int, int, Artefact, Criterion]] = []
+    for a, c in _open(arts):
+        fan = counts.get(c.gap, 1)
+        score = (
+            LEVEL_WEIGHT.get(a.level, 1)
+            * WEIGHT.get(c.category, 1)
+            * min(fan, 3)
+            * _state_factor(c.category, c.effective_state)
+        )
+        rows.append((score, fan, a, c))
+    rows.sort(key=lambda r: (-r[0], -r[1], -LEVEL_WEIGHT.get(r[2].level, 1), r[2].id, r[3].id))
     return rows
 
 
@@ -533,8 +655,9 @@ def render(arts: list[Artefact]) -> str:
         "",
         f"**{done} of {total} artefacts done · {met} of {len(crit)} criteria met, {na} n/a, "
         f"{len(crit) - met - na} open.** A level is done only when its children are done and its own "
-        "criteria are met (`docs/dod/STANDARD.md` §5). The ranked list is the order of work: the first "
-        "line unblocks the most done.",
+        "criteria are met (`docs/dod/STANDARD.md` §5). *The order of work* is the first "
+        f"{TOP} open criteria, ranked; *Open gaps by fan-out* is the same work as one row per gap, "
+        "so a change that closes eight criteria reads as one job.",
         "",
     ]
     for lvl in reversed(LEVELS):
@@ -555,18 +678,73 @@ def render(arts: list[Artefact]) -> str:
                 f"| [{a.id}]({a.rel.removeprefix('docs/dod/')}) | {a.front.get('name', '')} | **{a.status}** | {m} | {o} | {n} |"
             )
         out.append("")
+    backlog = backlog_index()
+    gap_text: dict[str, str] = {}
+    for a in arts:
+        gap_text.update(a.gaps)
+
+    def says(gap: str) -> str:
+        if gap.startswith("G-"):
+            return gap_text.get(gap, "")
+        title, size = backlog.get(gap, ("", "—"))
+        return f"backlog {gap} — {title} · {size}" if title else f"backlog {gap}"
+
+    def owner_of(gap: str) -> str:
+        if not gap.startswith("G-"):
+            return "backlog"
+        fields = gap_text.get(gap, "").split(" · ")
+        return fields[-1].strip().rstrip(".") if len(fields) > 2 else "—"
+
+    ranked = _rank(arts)
+    head = "| rank | score | blocks | level | artefact | criterion | category | state | gap | what is missing |"
+    rule = "|---|---|---|---|---|---|---|---|---|---|"
     out += [
-        "## Open gaps, ranked",
+        "## The order of work",
         "",
-        "| rank | score | level | artefact | criterion | category | state | gap | what is missing |",
-        "|---|---|---|---|---|---|---|---|---|",
+        f"The first {min(TOP, len(ranked))} of {len(ranked)} open criteria, by "
+        "(level weight, the criteria this gap blocks, category severity and state). "
+        "`blocks` is how many open criteria across the whole tree close with this one gap.",
+        "",
+        head,
+        rule,
     ]
-    for i, (score, a, c) in enumerate(_rank(arts), start=1):
-        what = a.gaps.get(c.gap, "") if c.gap.startswith("G-") else f"backlog {c.gap}"
+    for i, (score, fan, a, c) in enumerate(ranked[:TOP], start=1):
         out.append(
-            f"| {i} | {score} | {a.level} | {a.id} | {c.id} | {c.category} | {c.effective_state} | {c.gap} | {what} |"
+            f"| {i} | {score} | {fan} | {a.level} | {a.id} | {c.id} | {c.category} | "
+            f"{c.effective_state} | {c.gap} | {says(c.gap)} |"
         )
-    out.append("")
+    counts = blocked_by_gap(arts)
+    levels: dict[str, set[str]] = {}
+    for a, c in _open(arts):
+        if c.gap:
+            levels.setdefault(c.gap, set()).add(a.level)
+    out += [
+        "",
+        "## Open gaps by fan-out",
+        "",
+        "One row per gap: the change, and how much of the tree it closes.",
+        "",
+        "| gap | criteria blocked | levels | owner | what is missing |",
+        "|---|---|---|---|---|",
+    ]
+    for gap in sorted(counts, key=lambda g: (-counts[g], g)):
+        touched = ", ".join(lvl for lvl in LEVELS if lvl in levels.get(gap, set()))
+        out.append(f"| {gap} | {counts[gap]} | {touched} | {owner_of(gap)} | {says(gap)} |")
+    out += [
+        "",
+        "## Every open criterion, ranked",
+        "",
+        f"<details><summary>All {len(ranked)} open criteria</summary>",
+        "",
+        head,
+        rule,
+    ]
+    for i, (score, fan, a, c) in enumerate(ranked, start=1):
+        out.append(
+            f"| {i} | {score} | {fan} | {a.level} | {a.id} | {c.id} | {c.category} | "
+            f"{c.effective_state} | {c.gap} | {says(c.gap)} |"
+        )
+    out += ["", "</details>", ""]
     return "\n".join(out)
 
 
