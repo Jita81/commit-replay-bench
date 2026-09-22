@@ -279,9 +279,15 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   clause has no `CRB_SIGNOFF__*` knob and cannot be relaxed (`require_independent_verifier`
   may only be `true`; anything else is `503 signoff_policy_invalid`), the preview shows it
   to the would-be approver before they try, and the record stamps
-  `require_independent_verifier: true` so an audit reads that the rule was in force. A
-  separate operator and approver account is therefore not a deployment convention but a
-  precondition for any sign-off. [measured — n = 15 tests under apparatus 2.2: 7 in
+  `require_independent_verifier: true` so an audit reads that the rule was in force. The
+  rule bites exactly when a person is behind the evidence: where a person actor matches
+  the approver, or the approver is the only person behind the cell's accepted rows, the
+  sign-off is refused — so a deployment in which one account both queues runs and approves
+  cannot sign those cells at all, and a separate operator and approver account is the
+  precondition for signing evidence people produced. Evidence with no person actor at all
+  (the worker's scheduled runs, `cli:` and `service:` actors, the census importer) is not
+  judged by this clause (`same_actor_refusal` is silent when no person actor resolves)
+  and is guarded by the other clauses only. [measured — n = 15 tests under apparatus 2.2: 7 in
   `tests/test_server_routes_signoffs.py::TestTwoPersonRule` drive `POST /signoffs`,
   `GET /signoffs/preview` and `cell_actors` against a seeded ledger (refused on the attested
   row's run actor; refused on the row's own `Grade.actor` alone, the run unnamed; `cell_actors`
