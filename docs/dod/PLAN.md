@@ -46,10 +46,10 @@ This is what makes the workflow easy for an enterprise to follow.*
 
 | stream | gaps closed | what ships |
 |---|---|---|
-| **S1 — connect & prove** | G-500, G-056, G-057 | the next £0 stage is queued when the previous one passes (opt-in per repository); each `gold_note` becomes a named candidate config change to accept or reject; re-qualify selected tasks from the Tasks tab; a controls escape links to the weak task's escaped mutants and a strengthening item |
-| **S2 — measure** | G-520, G-521 | every under-bar cell serves "n needed and what it costs" with the run body pre-filled |
+| **S1 — connect & prove** | G-500, G-431, G-432, G-428 | the next £0 stage is queued when the previous one passes (opt-in per repository); each `gold_note` becomes a named candidate config change to accept or reject; re-qualify selected tasks from the Tasks tab; a controls escape links to the weak task's escaped mutants and a strengthening item |
+| **S2 — measure** | G-565, G-564 | every under-bar cell serves "n needed and what it costs" with the run body pre-filled |
 | **S3 — learn** | G-532 | the three write paths behind the same named-person decision the CLI already requires: accept a refusal line, register a strengthening item, queue a re-measurement |
-| **S4 — decide & license** | G-530, G-078 | an approver invitation with a one-time link; Home task 7 reads the deployment's real two-person readiness, not the presence of an admin |
+| **S4 — decide & license** | G-518, G-516, G-517 | an approver invitation with a one-time link; Home task 7 reads the deployment's real two-person readiness, not the presence of an admin |
 
 **Done when:** from Home, an operator can reach the next action of every stream in one click,
 and no stream's top gap is `AUTOMATION`.
@@ -62,7 +62,7 @@ and no stream's top gap is `AUTOMATION`.
 | **U2 — factory** | B-9, F32 | outcome pills with the pull-request link and synced-at; "Sync outcomes"; the evolution form; `way_forward` as a link |
 | **U3 — phone** | F26 | navigation collapses under 640 px; no horizontal scroll at 375 on any route |
 | **M — measures** | G-925 (one gap, five streams) | lead time and cost per certified change derived from the events already stored, shown on the stream's own screen |
-| **R — roles** | the `/learn` and `/oracle` nav gating rows | `/learn` and `/oracle` nav entries match their viewer-readable routes |
+| **R — roles** | G-919, G-920 | `/learn` and `/oracle` nav entries match their viewer-readable routes |
 
 ## Wave 4 — go-live truth and the release
 
