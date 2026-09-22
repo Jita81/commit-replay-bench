@@ -13,15 +13,19 @@ What it does: Pins that a backlog registers frozen and hashed with the freeze in
               as from ``delivery.opened`` — whichever is newest on the chain (DL-045) —
               folds an ``oracle_needs_strengthening`` stop with its reason (DL-045 rule 3),
               that the backlog carries the delivery pre-flight the worker's credentials
-              rule implies (J-FAC-3), and that registration is refused while a factory run
-              is queued or running.
+              rule implies (J-FAC-3), that registration is refused while a factory run
+              is queued or running, that an evolution chains onto the frozen record and
+              the task view shows the supersession chain (F32), and that the outcome sync
+              records each delivered pull request's fate once — task view, backlog summary
+              and capability-map counts agree (B-9 / F30).
 How:          FastAPI TestClient over the seeded SQLite app (``fixtures.server_seed``);
               the factory state is read back through ``FactoryHome`` to check the files.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/server/routes/factory.py (under test), src/crb/server/factory_state.py
               (the state it writes), src/crb/factory/backlog.py (validation),
-              src/crb/factory/readiness.py (slots), tests/fixtures/server_seed.py (the app)
+              src/crb/factory/readiness.py (slots), tests/fixtures/server_seed.py (the app),
+              tests/test_server_github_app.py (``FakeGitHub`` plays the pulls API)
 Tested by:    tests/test_server_routes_factory.py
 Touch when:   a factory route or a field of the task view changes (docs/API.md first).
 """
@@ -58,6 +62,8 @@ PATHS: list[tuple[str, str, str]] = [
     ("GET", f"/factory/{ALPHA}/tasks", "viewer"),
     ("POST", f"/factory/{ALPHA}/tasks/I-1/signoff-gap", "approver"),
     ("GET", f"/factory/{ALPHA}/evidence", "viewer"),
+    ("POST", f"/factory/{ALPHA}/backlog/evolutions", "operator"),
+    ("POST", f"/factory/{ALPHA}/outcomes/sync", "operator"),
 ]
 
 #: What the loop writes when it refuses a rebuild against an unchanged oracle (DL-045 rule 3).
@@ -610,3 +616,317 @@ def test_backlog_carries_the_delivery_preflight(env: Env) -> None:
     r = _register(env, [ITEM])
     assert r.status_code == 201 and r.json()["delivery"]["reason_code"] == "host_mismatch"
     assert r.json()["items"][0]["description"] == ITEM["description"]
+
+
+# --- evolutions (F32) ------------------------------------------------------------------
+
+
+def test_evolution_registers_onto_the_frozen_backlog_and_shows_the_chain(env: Env) -> None:
+    """F32: an evolution is a NEW item chained onto the frozen hash — optionally superseding
+    one — with the same authored-oracle handling as registration; the frozen record never
+    changes. ``GET /backlog`` lists the evolutions and the chain hash; the task view shows
+    the superseded item as ``superseded`` above the item that replaced it; the loop works
+    the evolution (``ordered()``)."""
+    assert (
+        _register(
+            env,
+            [ITEM],
+            authored={
+                "I-1": {"path": "tests/test_m.py", "content": "def test_m():\n    assert 0\n"}
+            },
+        ).status_code
+        == 201
+    )
+    frozen = env.get(f"/factory/{ALPHA}/backlog").json()
+    assert frozen["evolutions"] == [] and frozen["evolutions_hash"] == ""
+    login(env.client, "operator")
+    v2 = {**ITEM, "id": "I-1-v2", "title": "Add multiply to calc (44 tests)", "supersedes": "I-1"}
+    r = env.post(
+        f"/factory/{ALPHA}/backlog/evolutions",
+        json={
+            "item": v2,
+            "authored": {"path": "tests/test_m2.py", "content": "def test_m2():\n    assert 0\n"},
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["hash"] == frozen["hash"], "the frozen hash never moves"
+    assert len(body["evolutions_hash"]) == 64
+    assert [(i["id"], i["supersedes"], i["superseded_by"]) for i in body["items"]] == [
+        ("I-1-v2", "I-1", "")
+    ]
+    assert [(e["id"], e["supersedes"], e["has_authored_test"]) for e in body["evolutions"]] == [
+        ("I-1-v2", "I-1", True)
+    ]
+    home = FactoryHome(env.settings.home, ALPHA)
+    active = home.load_backlog()
+    assert active is not None and active.verify(frozen["hash"]) and active.evolutions_hash
+    assert (home.dir / f"backlog-{active.evolutions_hash[:16]}.json").exists()
+    assert sorted(home.authored()) == ["I-1", "I-1-v2"], "the superseded oracle stays on record"
+    assert [e.kind for e in home.events()] == [EV_BACKLOG_FROZEN, "backlog.evolved"]
+    assert home.events()[-1].payload["supersedes"] == "I-1"
+    tasks = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert [(t["id"], t["status"], t["supersedes"], t["superseded_by"]) for t in tasks] == [
+        ("I-1", "superseded", "", "I-1-v2"),
+        ("I-1-v2", "pending", "I-1", ""),
+    ]
+    ev = env.get(f"/factory/{ALPHA}/evidence").json()
+    assert ev["verified"] is True and ev["items"][-1]["kind"] == "backlog.evolved"
+    # a pure amendment (no supersedes) is an evolution too; a chain of three supersedes the latest
+    r = env.post(f"/factory/{ALPHA}/backlog/evolutions", json={"item": {**ITEM, "id": "I-7"}})
+    assert r.status_code == 201 and [e["id"] for e in r.json()["evolutions"]] == ["I-1-v2", "I-7"]
+    r = env.post(
+        f"/factory/{ALPHA}/backlog/evolutions",
+        json={"item": {**v2, "id": "I-1-v3", "supersedes": "I-1-v2"}},
+    )
+    assert r.status_code == 201
+    # active items keep registration order (I-7 before I-1-v3); a chain reads oldest first
+    ids = [(t["id"], t["status"]) for t in env.get(f"/factory/{ALPHA}/tasks").json()]
+    assert ids == [
+        ("I-7", "pending"),
+        ("I-1", "superseded"),
+        ("I-1-v2", "superseded"),
+        ("I-1-v3", "pending"),
+    ]
+
+
+def test_evolution_refusals(env: Env) -> None:
+    """The frozen record never mutates: an existing id (409 ``item_exists``), superseding an
+    item already superseded (409 ``already_superseded``), an unknown ``supersedes`` or a
+    malformed item (422), no backlog (404), and never under an active run (409)."""
+    login(env.client, "operator")
+    r = env.post(f"/factory/{ALPHA}/backlog/evolutions", json={"item": {**ITEM, "id": "I-9"}})
+    assert r.status_code == 404
+    assert _register(env, [ITEM]).status_code == 201
+    r = env.post(f"/factory/{ALPHA}/backlog/evolutions", json={"item": {**ITEM, "title": "edit"}})
+    assert r.status_code == 409 and envelope(r)["code"] == "item_exists"
+    r = env.post(
+        f"/factory/{ALPHA}/backlog/evolutions",
+        json={"item": {**ITEM, "id": "I-x", "supersedes": "ghost"}},
+    )
+    assert r.status_code == 422 and "unknown item" in envelope(r)["message"]
+    r = env.post(
+        f"/factory/{ALPHA}/backlog/evolutions", json={"item": {**ITEM, "id": "I-x", "kind": "wish"}}
+    )
+    assert r.status_code == 422
+    r = env.post(
+        f"/factory/{ALPHA}/backlog/evolutions", json={"item": {**ITEM, "id": "I-x"}, "extra": 1}
+    )
+    assert r.status_code == 422
+    assert (
+        env.post(
+            f"/factory/{ALPHA}/backlog/evolutions",
+            json={"item": {**ITEM, "id": "I-1b", "supersedes": "I-1"}},
+        ).status_code
+        == 201
+    )
+    r = env.post(
+        f"/factory/{ALPHA}/backlog/evolutions",
+        json={"item": {**ITEM, "id": "I-1c", "supersedes": "I-1"}},
+    )
+    assert r.status_code == 409 and envelope(r)["code"] == "already_superseded"
+    with env.factory() as s:
+        s.add(
+            Run(
+                id="fac" + "1" * 29,
+                repo=ALPHA,
+                kind="factory",
+                status="running",
+                params_json={},
+                actor="x",
+            )
+        )
+        s.commit()
+    r = env.post(
+        f"/factory/{ALPHA}/backlog/evolutions",
+        json={"item": {**ITEM, "id": "I-1c", "supersedes": "I-1b"}},
+    )
+    assert r.status_code == 409 and envelope(r)["code"] == "factory_run_active"
+    home = FactoryHome(env.settings.home, ALPHA)
+    assert [e["id"] for e in env.get(f"/factory/{ALPHA}/backlog").json()["evolutions"]] == ["I-1b"]
+    assert home.evidence().verify() == 2
+
+
+# --- the merge outcome as evidence (B-9 / F30) -------------------------------------------
+
+
+def _delivered(env: Env, item_id: str, number: int, *, pr_host: str = "github.com") -> None:
+    FactoryHome(env.settings.home, ALPHA).evidence(actor="worker").record_delivery(
+        {
+            "item_id": item_id,
+            "branch": f"crb/{item_id}",
+            "base": "trunk",
+            "commit_sha": "a" * 40,
+            "pr_url": f"https://{pr_host}/acme/alpha/pull/{number}",
+            "pr_number": number,
+            "pack_hash": "p" * 64,
+            "body_sha256": "b" * 64,
+            "created": "2026-09-19T00:00:00+00:00",
+            "previous_commit_sha": "",
+            "updated": False,
+            "comment_error": "",
+        }
+    )
+
+
+def test_outcome_sync_is_refused_until_the_repository_is_linked(env: Env) -> None:
+    login(env.client, "operator")
+    assert env.post(f"/factory/{ALPHA}/outcomes/sync").status_code == 404
+    assert _register(env, [ITEM]).status_code == 201
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 409 and envelope(r)["code"] == "outcome_sync_unavailable"
+    assert "not through the GitHub App" in envelope(r)["message"]
+    _link(env)
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 409 and "not configured" in envelope(r)["message"]
+    # linked + configured + read-only: reading is allowed (an installation that delivered
+    # once had write; a narrowed one can still read) — with nothing delivered, nothing is read
+    env.settings.github = GitHubAppSettings(app_id="4242", app_slug="crb", private_key="pem")
+    _installation(env, {"contents": "read", "pull_requests": "read"})
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "checked": 0,
+        "merged": 0,
+        "closed": 0,
+        "open": 0,
+        "errors": [],
+        "outcomes": {"delivered": 0, "merged": 0, "closed": 0, "open": 0, "last_synced": ""},
+    }
+
+
+def test_outcome_sync_records_each_pull_requests_fate_once(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B-9 / F30 end to end over the API: three delivered pull requests, read through the
+    installation token from a fake GitHub — one merged, one closed, one open — recorded
+    ONCE each on the item's chain; the task view carries ``outcome``, the backlog the
+    summary (task 8's fact), the capability map's cell ``n_delivered`` / ``n_merged``;
+    a second sync reads only what is still open and appends nothing."""
+    import httpx
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    from crb.server.routes import factory as factory_routes
+    from test_server_github_app import FakeGitHub, pull_request_api
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    gh = FakeGitHub(key.public_key())
+    gh.pulls = {
+        ("acme/alpha", 7): pull_request_api(7, "merged", full_name="acme/alpha"),
+        ("acme/alpha", 8): pull_request_api(8, "closed", full_name="acme/alpha"),
+        ("acme/alpha", 9): pull_request_api(9, "open", full_name="acme/alpha"),
+    }
+    monkeypatch.setattr(
+        factory_routes, "_github_client", lambda: httpx.Client(transport=gh.transport())
+    )
+    deliver = {**ITEM, "id": "D-1", "capability_class": "bug.fix", "size_estimate": "S"}
+    other = {**ITEM, "id": "D-2", "capability_class": "bug.fix", "size_estimate": "S"}
+    third = {**ITEM, "id": "D-3", "capability_class": "backend.route.add", "size_estimate": "M"}
+    assert _register(env, [deliver, other, third]).status_code == 201
+    _link(env)
+    env.settings.github = GitHubAppSettings(app_id="4242", app_slug="crb", private_key=pem)
+    _installation(env, {"contents": "write", "pull_requests": "write"})
+    _delivered(env, "D-1", 7)
+    _delivered(env, "D-2", 8)
+    _delivered(env, "D-3", 9)
+    by_id = {t["id"]: t for t in env.get(f"/factory/{ALPHA}/tasks").json()}
+    assert by_id["D-1"]["outcome"]["state"] == "open" and by_id["D-1"]["outcome"]["pr_number"] == 7
+    login(env.client, "operator")
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "checked": 3,
+        "merged": 1,
+        "closed": 1,
+        "open": 1,
+        "errors": [],
+        "outcomes": {
+            "delivered": 3,
+            "merged": 1,
+            "closed": 1,
+            "open": 1,
+            "last_synced": r.json()["outcomes"]["last_synced"],
+        },
+    }
+    assert r.json()["outcomes"]["last_synced"]
+    reads = [c[1] for c in gh.calls if "/pulls/" in c[1]]
+    assert reads == [
+        "/repos/acme/alpha/pulls/7",
+        "/repos/acme/alpha/pulls/8",
+        "/repos/acme/alpha/pulls/9",
+    ]
+    assert gh.tokens_minted == 1
+    by_id = {t["id"]: t for t in env.get(f"/factory/{ALPHA}/tasks").json()}
+    merged = by_id["D-1"]["outcome"]
+    assert merged["state"] == "merged" and merged["merged_by"] == "paul"
+    assert merged["merged_at"] == "2026-09-19T17:02:11Z" and merged["merge_sha"].startswith(
+        "e0fefb2"
+    )
+    assert merged["synced_at"] and merged["pr_url"].endswith("/pull/7")
+    closed = by_id["D-2"]["outcome"]
+    assert closed["state"] == "closed" and closed["closed_at"] == "2026-09-20T09:00:00Z"
+    assert closed["merged_by"] == "" and closed["merge_sha"] == ""
+    assert by_id["D-3"]["outcome"]["state"] == "open" and by_id["D-3"]["outcome"]["synced_at"] == ""
+    # the chain: one outcome per PR, as the ledger records it; the backlog summary agrees
+    kinds = [
+        (e["kind"], e["item_id"]) for e in env.get(f"/factory/{ALPHA}/evidence").json()["items"]
+    ]
+    assert kinds[-2:] == [("delivery.merged", "D-1"), ("delivery.closed", "D-2")]
+    summary = env.get(f"/factory/{ALPHA}/backlog").json()["outcomes"]
+    assert (summary["delivered"], summary["merged"], summary["closed"], summary["open"]) == (
+        3,
+        1,
+        1,
+        1,
+    )
+    # the capability map's cell: COUNTS beside n, no interval — bug.fix × S delivered two
+    # pull requests, one merged; the projection by class sums over sizes
+    cells = {
+        (c["capability_class"], c["size"]): c
+        for c in env.get(f"/capability-map?repo={ALPHA}").json()["cells"]
+    }
+    assert (cells["bug.fix", "S"]["n_delivered"], cells["bug.fix", "S"]["n_merged"]) == (2, 1)
+    by_class = {
+        c["capability_class"]: c
+        for c in env.get(f"/capability-map?repo={ALPHA}&by=class").json()["cells"]
+    }
+    assert (by_class["bug.fix"]["n_delivered"], by_class["bug.fix"]["n_merged"]) == (2, 1)
+    # a second sync: #7 and #8 are never read again; #9 (still open) is; nothing appended
+    gh.calls.clear()
+    n_events = env.get(f"/factory/{ALPHA}/evidence").json()["total"]
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 200 and (r.json()["checked"], r.json()["open"]) == (1, 1)
+    assert [c[1] for c in gh.calls if "/pulls/" in c[1]] == ["/repos/acme/alpha/pulls/9"]
+    assert env.get(f"/factory/{ALPHA}/evidence").json()["total"] == n_events
+    # #9 merges later — recorded once; a PR GitHub cannot find is an error entry, not a 5xx
+    gh.pulls[("acme/alpha", 9)] = pull_request_api(
+        9, "merged", full_name="acme/alpha", merged_by="ada"
+    )
+    _delivered(env, "D-3", 10)
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 200 and r.json()["merged"] == 1
+    assert r.json()["errors"] == ["PR #10 (D-3): GitHub 404: Not Found"]
+    assert r.json()["outcomes"]["merged"] == 2 and r.json()["outcomes"]["open"] == 1
+    # the newest delivery of D-3 is #10, still open: the task says so, the chain keeps #9's merge
+    by_id = {t["id"]: t for t in env.get(f"/factory/{ALPHA}/tasks").json()}
+    assert (by_id["D-3"]["outcome"]["state"], by_id["D-3"]["outcome"]["pr_number"]) == ("open", 10)
+    assert env.get(f"/factory/{ALPHA}/evidence").json()["verified"] is True
+    # a dead credential is ONE 502, never a run of per-PR errors
+    monkeypatch.setattr(
+        factory_routes,
+        "_github_client",
+        lambda: httpx.Client(
+            transport=httpx.MockTransport(
+                lambda req: httpx.Response(401, json={"message": "Bad credentials"})
+            )
+        ),
+    )
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 502 and envelope(r)["code"] == "github_error"
+    assert "Bad credentials" in envelope(r)["message"]

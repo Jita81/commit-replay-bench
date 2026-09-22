@@ -140,10 +140,35 @@ link over a measured row. The same guard sits under connect.
   it as a one-shot `Authorization` header passed through git's `GIT_CONFIG_COUNT`
   environment mechanism — never on the command line, never in `.git/config`, never in an
   event or a log (`repo.clone.start` carries `github_app: true` and the redacted URL only).
+- **Fetch before a run** (a factory run on any repository with a URL; a replay, blind or
+  mine run on a linked repository): the worker fetches the row's URL the same way (the token
+  in the environment) and fast-forwards the clone's default branch to the remote's, so the
+  RED proof, the build and the pull request's base are the repository as it is now — not as
+  it was first cloned. The run's trace carries `repo.fetch.start {url, branch, dest,
+  github_app}` and `repo.fetch.done {before, after, fast_forwarded, duration_ms}`; a factory
+  run's apparatus carries `base_sha`. If the remote cannot be reached, the default branch is
+  gone, or the clone's own default branch has a commit the remote does not (it cannot
+  fast-forward), the run ends `failed` with the reason before anything is built — the
+  product never merges or resets a clone on its own. Fix the remote, or remove the stray
+  commit from the clone under `CRB_HOME/repos/<name>`, and queue the run again.
+- **Outcome sync** (the start of every factory run on a linked repository, and
+  `POST /factory/{repo}/outcomes/sync` by an operator): the same token
+  reads each delivered pull request's state (`GET /repos/{owner}/{name}/pulls/{n}`). A
+  merged pull request is recorded on the item's chain as `delivery.merged` (`merged_by`,
+  `merged_at`, `merge_sha`), one closed without merging as `delivery.closed` — once per
+  pull request, never again, whatever a later sync reads. An open pull request records
+  nothing; a pull request GitHub cannot serve is an entry in the sync's `errors` and is
+  retried next time. The trace carries `factory.outcomes.synced {checked, merged, closed,
+  open, errors}`; a repository not linked through the app records the sync as skipped and
+  the run goes on. The task view shows the outcome on the item, the backlog shows the counts
+  (`outcomes`), and the capability map's cell shows `n_delivered` / `n_merged` beside `n` —
+  counts, never a rate: a merge is a person's decision. Webhooks stay off (§2).
 - **Delivery** (a factory run with `deliver: true`, after the route gate): the same
   installation's token pushes the `crb/<item>` branch and opens the pull request against the
-  repository's default branch. If the installation is read-only, delivery fails closed —
-  recorded as `delivery_failed`, no branch, no PR — and the Settings card says why.
+  repository's default branch — the branch the fetch just brought up to date. If the
+  installation is read-only, delivery fails closed — recorded as `delivery_failed`, no
+  branch, no PR — and the Settings card says why. Reading the outcome later needs only
+  `Pull requests: read`, so an installation narrowed after a delivery still closes the loop.
 
 ## 6. Federated use
 
@@ -156,8 +181,9 @@ link over a measured row. The same guard sits under connect.
 - **Revocation is GitHub's.** Uninstall the app or remove a repository from the selection
   and the next token mint fails; **Sync installations** marks the installation
   *uninstalled* on record. No token to rotate on the crb side.
-- **Audit.** Installations recorded, repositories connected, and every clone and delivery
-  are events on the trace; the GitHub side has its own audit log of the app's actions.
+- **Audit.** Installations recorded, repositories connected, and every clone, fetch,
+  delivery and outcome sync are events on the trace; the GitHub side has its own audit log
+  of the app's actions.
 
 ## 7. Trial without the app
 

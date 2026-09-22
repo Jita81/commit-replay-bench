@@ -41,7 +41,9 @@ Works with:   src/crb/factory/readiness.py (reads ``structural_facts`` and ``kin
               src/crb/factory/evidence.py (``record_freeze`` / ``record_evolution``),
               src/crb/core/evidence.py (``canonical_json`` / ``sha256_text``),
               src/crb/cli/commands/learn.py (emits items in this shape),
-              src/crb/server/routes/factory.py (the HTTP surface — a 501 stub until P6)
+              src/crb/server/factory_state.py (``register_evolution`` calls ``evolve`` and
+              the task view walks ``lineage`` / ``superseded_by``),
+              src/crb/server/routes/factory.py (the HTTP surface: register, evolutions)
 Tested by:    tests/test_factory_backlog.py, tests/test_factory_loop.py
 Touch when:   never for a new repository; adding an item field changes the frozen hash of
               every future record — bump ``BACKLOG_SCHEMA`` and note it in
@@ -289,6 +291,24 @@ class Backlog:
     def superseded_ids(self) -> frozenset[str]:
         """Ids that a later evolution replaced."""
         return frozenset(e.supersedes for e in self.evolutions if e.supersedes)
+
+    def superseded_by(self) -> dict[str, str]:
+        """``old id → the evolution's id`` for every superseded item (one step, never the
+        end of the chain: a reader walks it to show the chain as it was registered)."""
+        return {e.supersedes: e.id for e in self.evolutions if e.supersedes}
+
+    def lineage(self, item_id: str) -> tuple[BacklogItem, ...]:
+        """The supersession chain that ends in ``item_id``, oldest first (the item itself
+        last): what the task view shows above an evolution so a reader sees what it
+        replaced. An unknown id is an empty chain."""
+        out: list[BacklogItem] = []
+        cur = self.get(item_id)
+        seen: set[str] = set()
+        while cur is not None and cur.id not in seen:
+            seen.add(cur.id)
+            out.append(cur)
+            cur = self.get(cur.supersedes) if cur.supersedes else None
+        return tuple(reversed(out))
 
     def active_items(self) -> tuple[BacklogItem, ...]:
         """The effective backlog: every item not superseded, in registration order."""

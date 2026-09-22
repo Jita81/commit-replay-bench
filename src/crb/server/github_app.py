@@ -4,8 +4,9 @@ Navigation
 ----------
 What it is:   ``GitHubApp`` — the product acting as the GitHub App an organisation installed:
               an app JWT (RS256, ten minutes), the app's installations, one installation's
-              repositories, and short-lived **installation tokens** (one hour, minted on
-              demand, cached until five minutes before expiry, never persisted).
+              repositories, one pull request's state (the merge outcome the factory reads
+              back — B-9 / F30), and short-lived **installation tokens** (one hour, minted
+              on demand, cached until five minutes before expiry, never persisted).
 What it does: Replaces personal access tokens with the pattern every comparable product uses
               (docs/reviews/2026-09-17-enterprise-front-end.md §3): an org admin installs the
               app on *selected* repositories; the product clones with an installation token
@@ -17,14 +18,17 @@ What it does: Replaces personal access tokens with the pattern every comparable 
 How:          ``authlib.jose.jwt`` signs the app JWT with the private key from
               ``GitHubAppSettings``; ``httpx.Client`` (injectable — tests pass a
               ``MockTransport``) calls ``/app/installations``, ``/app/installations/{id}``,
-              ``/app/installations/{id}/access_tokens`` and ``/installation/repositories``.
+              ``/app/installations/{id}/access_tokens``, ``/installation/repositories``,
+              ``/repos/{owner}/{name}`` and ``/repos/{owner}/{name}/pulls/{n}``.
               Every failure is a ``GitHubAppError`` carrying the status and GitHub's message
               (redacted); the API maps it to 502 ``github_error``.
 Layer:        server — docs/ARCHITECTURE.md#43-server
 ADRs:         docs/adr/0014-github-app-is-the-connection.md
 Works with:   src/crb/server/settings.py (``GitHubAppSettings``), src/crb/server/routes/github.py
               (the routes), src/crb/server/worker.py (clone with an installation token; the
-              delivery credentials provider), src/crb/factory/delivery.py (``GitCredentials``
+              delivery credentials provider; the outcome sync at the start of a factory
+              run), src/crb/server/factory_state.py (``sync_outcomes`` consumes
+              ``PullRequest``), src/crb/factory/delivery.py (``GitCredentials``
               carries the token to ``git push`` and the pulls API), docs/GITHUB-APP.md
 Tested by:    tests/test_server_github_app.py
 Touch when:   GitHub changes the app-auth flow; GHES needs a different path prefix (``api_url``
@@ -160,6 +164,72 @@ class InstallationRepo:
             "private": self.private,
             "language": self.language,
             "archived": self.archived,
+        }
+
+
+#: A pull request's fate as the factory records it: ``open`` (nothing to record yet),
+#: ``merged`` or ``closed`` (closed without merging).
+PR_OPEN = "open"
+PR_MERGED = "merged"
+PR_CLOSED = "closed"
+
+
+@dataclass(frozen=True)
+class PullRequest:
+    """One pull request's state as GitHub reports it (``GET /repos/{o}/{n}/pulls/{n}``) —
+    what the outcome sync reads: whether it merged (and by whom, when, into which sha) or
+    closed without merging. ``outcome`` is the factory's word for it."""
+
+    number: int
+    html_url: str
+    state: str  # GitHub's: "open" | "closed"
+    merged: bool
+    merged_at: str
+    merge_commit_sha: str
+    merged_by: str
+    closed_at: str
+    head_sha: str
+
+    @classmethod
+    def from_api(cls, d: Mapping[str, Any]) -> PullRequest:
+        by = d.get("merged_by") or {}
+        head = d.get("head") or {}
+        merged = bool(d.get("merged")) or bool(d.get("merged_at"))
+        return cls(
+            number=int(d.get("number") or 0),
+            html_url=str(d.get("html_url", "")),
+            state=str(d.get("state", "")),
+            merged=merged,
+            merged_at=str(d.get("merged_at") or ""),
+            # GitHub fills merge_commit_sha for an OPEN PR too (a test merge): it is the
+            # merge sha only once the PR merged
+            merge_commit_sha=str(d.get("merge_commit_sha") or "") if merged else "",
+            merged_by=str(by.get("login", "")) if isinstance(by, Mapping) else "",
+            closed_at=str(d.get("closed_at") or ""),
+            head_sha=str(head.get("sha", "")) if isinstance(head, Mapping) else "",
+        )
+
+    @property
+    def outcome(self) -> str:
+        """``merged`` / ``closed`` / ``open``."""
+        if self.merged:
+            return PR_MERGED
+        if self.state == "closed":
+            return PR_CLOSED
+        return PR_OPEN
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "number": self.number,
+            "html_url": self.html_url,
+            "state": self.state,
+            "outcome": self.outcome,
+            "merged": self.merged,
+            "merged_at": self.merged_at,
+            "merge_commit_sha": self.merge_commit_sha,
+            "merged_by": self.merged_by,
+            "closed_at": self.closed_at,
+            "head_sha": self.head_sha,
         }
 
 
@@ -318,16 +388,35 @@ class GitHubApp:
         repos = [InstallationRepo.from_api(d) for d in data.get("repositories", [])]
         return repos, int(data.get("total_count", len(repos)))
 
-    def repository(self, installation_id: int, full_name: str) -> InstallationRepo:
-        """One repository by ``owner/name`` — 404 from GitHub when the installation cannot
-        see it, which is the check the connect route relies on."""
+    @staticmethod
+    def _owner_name(full_name: str) -> tuple[str, str]:
         owner, _, name = full_name.partition("/")
         if not owner or not name or owner in (".", "..") or name in (".", "..") or "/" in name:
             # a dot segment would be collapsed by the URL layer: ``/repos/../rate_limit``
             # is ``GET /rate_limit`` under the installation's bearer — never build it
             raise GitHubAppError(422, f"not an owner/name: {full_name!r}")
+        return owner, name
+
+    def repository(self, installation_id: int, full_name: str) -> InstallationRepo:
+        """One repository by ``owner/name`` — 404 from GitHub when the installation cannot
+        see it, which is the check the connect route relies on."""
+        owner, name = self._owner_name(full_name)
         return InstallationRepo.from_api(
             self._get(f"/repos/{owner}/{name}", bearer=self.installation_token(installation_id))
+        )
+
+    def pull_request(self, installation_id: int, full_name: str, number: int) -> PullRequest:
+        """One pull request's state under the installation's token — the merge outcome the
+        factory records back on the item's chain (B-9 / F30). A non-positive ``number``
+        never reaches GitHub."""
+        owner, name = self._owner_name(full_name)
+        if int(number) <= 0:
+            raise GitHubAppError(422, f"not a pull request number: {number!r}")
+        return PullRequest.from_api(
+            self._get(
+                f"/repos/{owner}/{name}/pulls/{int(number)}",
+                bearer=self.installation_token(installation_id),
+            )
         )
 
 
