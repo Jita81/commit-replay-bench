@@ -282,13 +282,18 @@ gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/requir
  "test (py3.12)", "test (py3.13)", "test-postgres (store suite on PostgreSQL 16)",
  "security (gitleaks + pip-audit)", "container (docker build + smoke + helm lint)",
  "walkthrough (browser, live stack, tier 1)",
+ "ui-unit (tsc -b + vitest, the hint ratchet included)",
+ "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
  "sandbox-images (build + hadolint + smoke each reference sandbox image)"]}
 JSON
 ```
 
-(the list is the current set plus the new context — `PATCH` replaces it, so send all of
+(the list is the current set plus the new contexts — `PATCH` replaces it, so send all of
 them; `GET …/protection` first to confirm the set has not moved). Until then the job's
-verdict is visible on every pull request but advisory.
+verdict is visible on every pull request but advisory. The same holds for the two UI jobs
+`ui-unit` and `ui-smoke`, added to the list above: they run the type-check, the vitest suites
+(the hint ratchet and the native-`title=` allowlist among them) and the mocked browser smoke
+on every pull request, and they block a merge only once their contexts are in this set.
 
 ## 4. Azure
 

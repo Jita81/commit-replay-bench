@@ -177,7 +177,7 @@ export function RunnerOptsEditor({ runner, value, onChange, errors = {}, onJsonE
                 {extra.map((k) => (
                   <li key={k} className="flex items-center gap-2 text-xs">
                     <code className="font-mono">{k}</code>
-                    <span className="min-w-0 flex-1 truncate font-mono text-on-surface-muted" title={JSON.stringify(value[k])}>
+                    <span className="min-w-0 flex-1 truncate font-mono text-on-surface-muted">
                       {JSON.stringify(value[k])}
                     </span>
                     {!disabled && (

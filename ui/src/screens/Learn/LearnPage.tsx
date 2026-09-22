@@ -266,7 +266,22 @@ function StrengthenSection({ repo }: { repo: string }) {
   const q = useLearnStrengthen(repo)
   const columns = useMemo<Column<StrengthenItem>[]>(
     () => [
-      { key: 'id', header: 'Item', hint: 'col.learn_strengthen.item', mono: true, sortValue: (i) => i.id, cell: (i) => <span className="text-xs" title={i.description}>{i.id}</span> },
+      {
+        key: 'id',
+        header: 'Item',
+        hint: 'col.learn_strengthen.item',
+        mono: true,
+        sortValue: (i) => i.id,
+        // The description is a second line under the id, as text. It used to be a native
+        // `title=`, which opens on hover alone: no keyboard and no touch reader could ever
+        // read it (G-287). Nothing here is hover-only.
+        cell: (i) => (
+          <span className="block text-xs">
+            {i.id}
+            {i.description ? <span className="mt-0.5 block font-sans font-normal text-on-surface-muted">{i.description}</span> : null}
+          </span>
+        ),
+      },
       { key: 'title', header: 'Title', hint: 'col.learn_strengthen.item', cell: (i) => <span className="text-xs">{i.title}</span> },
       { key: 'cell', header: 'Cell', hint: 'col.learn_strengthen.cell', mono: true, sortValue: (i) => i.labels.cell, cell: (i) => i.labels.cell },
       {

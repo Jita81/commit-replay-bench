@@ -414,7 +414,10 @@ export function ConnectRepoPage() {
                       )}
                     </div>
                     <p className="mt-1 mb-1 max-w-[70ch] text-sm text-on-surface-body">{s.why}</p>
-                    <p className="m-0 text-xs text-on-surface-muted">
+                    {/* `break-words`: the first stage's detail is the repository's clone URL, one
+                        unbreakable token. Without it a long URL pushed the whole page sideways at
+                        375 px (found by 11-screens' scrollWidth check, G-905). */}
+                    <p className="m-0 break-words text-xs text-on-surface-muted">
                       {s.detail && <Hint id="stat.walk.stage_detail">{s.detail}</Hint>}
                       {s.runId && !live && (
                         <>

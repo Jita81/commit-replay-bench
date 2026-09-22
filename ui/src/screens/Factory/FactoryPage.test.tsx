@@ -222,7 +222,7 @@ describe('FactoryPage — the shipped contract', () => {
   it('renders the frozen backlog and the bare task list', async () => {
     mockApi(base({ 'GET /auth/me': PRINCIPAL }))
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
-    await waitFor(() => expect(screen.getByText(/hash aaaaaaaaaaaaaaaa/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('factory-backlog-hash')).toHaveTextContent(`hash ${'a'.repeat(64)}`))
     expect(screen.getByText('frozen')).toBeInTheDocument()
     expect(screen.getByText('2 items')).toBeInTheDocument()
     expect(screen.getAllByText('Multiply').length).toBeGreaterThan(0)
@@ -273,7 +273,7 @@ describe('FactoryPage — the shipped contract', () => {
   it('with no ?repo= the most recently updated repository is chosen (as the Baseline); an empty deployment offers Connect to an operator only', async () => {
     mockApi(base({ 'GET /repos': { items: [{ name: 'alpha', updated: '2026-09-10T00:00:00Z' }, { name: 'beta', updated: '2026-09-12T00:00:00Z' }], total: 2, limit: 50, offset: 0 }, 'GET /factory/beta/backlog': { ...BACKLOG, repo: 'beta' }, 'GET /factory/beta/tasks': TASKS }))
     renderApp(<FactoryPage />, { route: '/factory' })
-    await waitFor(() => expect(screen.getByText(/hash aaaaaaaaaaaaaaaa/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('factory-backlog-hash')).toHaveTextContent(`hash ${'a'.repeat(64)}`))
     expect(screen.queryByText('Choose a repository')).toBeNull()
     expect((screen.getByTestId('repo-picker') as HTMLSelectElement).value).toBe('beta')
     cleanup()

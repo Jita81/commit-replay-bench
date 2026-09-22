@@ -40,11 +40,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { StepEvent } from '../api/types'
 import type { SseStatus } from '../api/sse'
-import { fmtMs, fmtTime, fmtUsd, shortId } from '../lib/format'
+import { fmtMs, fmtTime, fmtUsd } from '../lib/format'
 import { TONE_TEXT, actionHelp, stepStatusDisplay, type Display } from '../lib/verdict'
 import { EmptyState } from './EmptyState'
 import { Hint } from './Hint'
 import { Pill } from './Pill'
+import { ShortId } from './ShortId'
 
 interface LiveLogProps {
   events: readonly StepEvent[]
@@ -222,7 +223,7 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
                   <div className="flex items-center gap-2 whitespace-nowrap" style={{ height: ROW_H }}>
                     <span className="w-[86px] shrink-0 text-on-surface-muted">{fmtTime(ev.timestamp)}</span>
                     <span className="w-[54px] shrink-0 text-on-surface-muted">{ev.stage}</span>
-                    <span className="w-[150px] shrink-0 truncate text-on-surface" title={ev.action}>
+                    <span className="w-[150px] shrink-0 truncate text-on-surface">
                       {ev.action}
                     </span>
                     {/* one glyph per row, hundreds of rows: hover and tap open the hint; the status text is the accessible name */}
@@ -231,20 +232,18 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
                     </Hint>
                     {ev.task_id ? (
                       onSelectTask ? (
-                        <Hint as="button" id="link.run.event_task" type="button" onClick={() => onSelectTask(ev.task_id)} className="w-[84px] shrink-0 text-left text-primary underline-offset-2 hover:underline" title={ev.task_id}>
-                          {shortId(ev.task_id)}
+                        <Hint as="button" id="link.run.event_task" type="button" onClick={() => onSelectTask(ev.task_id)} className="w-[84px] shrink-0 text-left text-primary underline-offset-2 hover:underline">
+                          <ShortId value={ev.task_id} />
                         </Hint>
                       ) : (
-                        <span className="w-[84px] shrink-0 text-on-surface-muted" title={ev.task_id}>
-                          {shortId(ev.task_id)}
-                        </span>
+                        <ShortId value={ev.task_id} className="w-[84px] shrink-0 text-on-surface-muted" />
                       )
                     ) : (
                       <span className="w-[84px] shrink-0 text-on-surface-muted">—</span>
                     )}
                     <span className="w-[60px] shrink-0 text-right text-on-surface-muted">{ev.duration_ms !== null ? fmtMs(ev.duration_ms) : ''}</span>
                     <span className="w-[64px] shrink-0 text-right text-on-surface-muted">{ev.cost_usd !== null ? fmtUsd(ev.cost_usd) : ''}</span>
-                    <span className="min-w-0 flex-1 truncate text-on-surface-muted" title={d.isError ? d.summary : payloadSummary(ev.payload)}>
+                    <span className="min-w-0 flex-1 truncate text-on-surface-muted">
                       {d.isError ? <span className="text-status-red">{d.summary}</span> : d.summary}
                     </span>
                   </div>
