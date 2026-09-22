@@ -7,12 +7,13 @@ MEASURED from the seed's ``oracle.score`` events at 0.58 over 3 of its 4 tasks, 
 still ``oracle_weak`` until strong scores land (``score_oracle``); then it signs — with an
 attestation naming an accepted row — and the record carries the whole snapshot. A cell
 whose tasks were never scored is ``oracle_unmeasured``: refused under every deployment
-knob (the v2 clause). The approver who queued the run that produced the attested row, or
-the only person behind every accepted row of the cell, is ``same_actor``: refused at write
-and shown in the preview before they try, never overridable; a second approver signs the
-same cell (the v3 clause, F7b). Every record says what kind of account signed it
-(``verifier_kind``: ``local`` for the seed's users, ``oidc`` for an identity-provider
-account; F34). Also: the false-Q1 floor (first, non-overridable, its historical envelope
+knob (the v2 clause). The approver who is the actor of the attested row, the actor of the
+run that produced it, or the only person behind the cell's accepted evidence, is
+``same_actor``: refused at write and shown in the preview before they try, never
+overridable, the run named only when it is theirs; a second approver signs the same cell
+(the v3 clause, F7b). Every record says what kind of account signed it (``verifier_kind``:
+``local`` for the seed's users, ``oidc`` for an identity-provider account; a blank issuer
+is a 503, nothing written; F34). Also: the false-Q1 floor (first, non-overridable, its historical envelope
 code), the preview, attestation validation (422), the policy endpoint and the deployment
 knobs, revoke, the chain, and records signed under v1 / v2 served as such.
 
@@ -24,9 +25,11 @@ What it does: Pins that the seed's deliver cell is refused on its controls escap
               ``signoff_refused`` / ``controls_escapes``), signs (201) once the controls gate is
               clean AND the oracle is strong, is ``oracle_weak`` at the seed's measured 0.58 and
               ``oracle_unmeasured`` (not overridable) when never scored; ``same_actor`` (not
-              overridable) for the approver behind the evidence — at write, in the preview,
-              and a second approver signing; ``verifier_kind`` stamped ``local`` / ``oidc``,
-              hash-covered and served on every read; full-cell scope and a second attestation
+              overridable) for the approver behind the evidence — on the run's actor, on the
+              row's own actor with the run unnamed, ``cell_actors`` over accepted rows only,
+              at write, in the preview, and a second approver signing; ``verifier_kind``
+              stamped ``local`` / ``oidc``, hash-covered and served on every read, a blank
+              issuer 503 on every route with nothing written; full-cell scope and a second attestation
               chaining; every clause listed with observed vs threshold on a thin cell;
               attestation missing not overridable; the false-Q1 floor first and its
               historical envelope code; the read-time check invalidating a signed cell; 422
@@ -55,7 +58,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -63,10 +68,12 @@ import pytest
 from sqlalchemy import select, text
 
 from crb.core.ledger import BELT_SET_V5, GENESIS_HASH, LedgerIntegrityError
+from crb.core.signoff import is_person_actor
 from crb.core.version import APPARATUS_VERSION
 from crb.server.routes.runs import system_trace_id
-from crb.server.routes.signoffs import signoff_hash, verify_signoff_rows
-from crb.store.models import Event, Grade, Run, Signoff
+from crb.server.routes.signoffs import cell_actors, signoff_hash, verify_signoff_rows
+from crb.store.ledger import DbLedger
+from crb.store.models import Event, Grade, Run, Signoff, User
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -627,7 +634,8 @@ class TestCreate:
 
 def _set_run_actor(env: Env, run_id: str, actor: str) -> None:
     """Re-stamp a seeded run's actor through the ORM (``runs`` is not append-only): the
-    seed's runs were queued by ``op1``; a test moves one to the approver's own id."""
+    seed's runs were queued by the operator (``op1``'s id); a test moves one to the
+    approver's own id."""
     with env.factory() as s:
         run = s.get(Run, run_id)
         assert run is not None
@@ -665,13 +673,38 @@ def _body_naming(env: Env, cell: dict[str, str], row_hash: str) -> dict[str, Any
     }
 
 
+#: A run id no ``runs`` row knows — a ``crb grade`` row's, or a census import's.
+GHOST_RUN = "9" * 32
+
+
+def _append_own_row(env: Env, cell: dict[str, str], actor: str, *, run_id: str = GHOST_RUN) -> Any:
+    """Append a NEW accepted row of ``cell`` through the ledger's write path (chained, the
+    invariant checked) with ``actor`` as the row's OWN ``Grade.actor`` — what
+    ``crb grade --actor <id>`` writes — under ``run_id``."""
+    row = replace(
+        accepted_row(env, cell),
+        row_id=uuid.uuid4().hex,
+        run_id=run_id,
+        trial="r9",
+        actor=actor,
+        created="2026-09-21T12:00:00+00:00",
+        prev_hash="",
+        row_hash="",
+    )
+    return DbLedger(env.factory).append(row)
+
+
 class TestTwoPersonRule:
-    """The seed's deliver cell: 5 rows from the ``succeeded`` run (queued by ``op1``) and 35
-    historical rows whose runs have no row (their actor is the worker — nobody). Moving the
-    ``succeeded`` run to the approver's id makes the approver the only person in the cell."""
+    """The seed's deliver cell: 5 rows from the ``succeeded`` run (queued by the operator,
+    ``op1``'s id) and 35 historical rows whose runs have no row (their actor is the worker —
+    nobody). Moving the ``succeeded`` run to the approver's id makes the approver the only
+    person in the cell. The mutation gaps an adversarial pass found on PR #45 (drop the
+    ``Grade.actor`` half, drop the run half, count red rows as evidence) each have a test
+    here that kills them."""
 
     APPROVER = user_id(USERS["approver"])
     ADMIN = user_id(USERS["admin"])
+    OPERATOR = user_id(USERS["operator"])
     #: The seed's first historical run (4 rows of the deliver cell): rows exist, no run row.
     HIST_RUN = hashlib.md5(b"hist-0").hexdigest()
 
@@ -707,6 +740,70 @@ class TestTwoPersonRule:
         assert theirs.run_id != RUN_IDS["succeeded"]
         r = env.post("/signoffs", json=_body_naming(env, DELIVER, theirs.row_hash))
         assert r.status_code == 201, r.text
+
+    def test_attested_rows_own_grade_actor_is_ground_1(self, env: Env) -> None:
+        """Ground 1 on ``Grade.actor`` ALONE: the approver graded the row themself
+        (``crb grade --actor <their id>``) under a run the store never saw. Refused — and
+        the sentence does NOT claim they "queued run …": no such run exists, so the core's
+        run-less wording is the true one (PR #45 named the run whenever the row carried
+        any run id, whichever half fired). Preview and write say the same; the event
+        carries the same sentence."""
+        clear_policy(env)
+        mine = _append_own_row(env, DELIVER, self.APPROVER)
+        assert mine.run_id == GHOST_RUN and mine.actor == self.APPROVER
+        with env.factory() as s:
+            assert s.get(Run, GHOST_RUN) is None
+        r = env.post("/signoffs", json=_body_naming(env, DELIVER, mine.row_hash))
+        assert r.status_code == 409, r.text
+        e = envelope(r)
+        assert e["code"] == "signoff_refused" and _codes(e["detail"]["refusals"]) == ["same_actor"]
+        assert "queued run" not in e["message"]
+        assert f"produced the attested row {mine.row_hash[:12]}" in e["message"]
+        assert "as its actor, or the actor of the run that graded it" in e["message"]
+        assert _signoffs(env) == []
+        (ev,) = _events(env, "signoff.refused")
+        assert "queued run" not in ev.error_message and ev.error_message == e["message"]
+        d = _preview(env, DELIVER, reviewed_row_hash=mine.row_hash).json()
+        (same,) = d["refusals"]
+        assert same["code"] == "same_actor" and same["message"] == e["message"]
+        # the run IS named when the approver queued it: the same row re-graded under a run
+        # of theirs
+        _add_run(env, self.HIST_RUN, self.APPROVER)
+        theirs = _append_own_row(env, DELIVER, self.APPROVER, run_id=self.HIST_RUN)
+        r = env.post("/signoffs", json=_body_naming(env, DELIVER, theirs.row_hash))
+        assert r.status_code == 409, r.text
+        assert f"queued run {self.HIST_RUN[:8]}, which produced" in envelope(r)["message"]
+        # ... and an admin naming the approver's own row is nobody's same actor: 201
+        login(env.client, "admin")
+        r = env.post("/signoffs", json=_body_naming(env, DELIVER, mine.row_hash))
+        assert r.status_code == 201, r.text
+
+    def test_cell_actors_counts_accepted_rows_only(self, env: Env) -> None:
+        """``cell_actors`` gathers BOTH halves (``Grade.actor`` and ``Run.actor``) over the
+        ACCEPTED rows only: a person whose run produced nothing but red / disqualified rows
+        is not behind the cell's evidence, so their presence cannot make the approver's
+        own evidence "independent". A ghost run contributes the empty actor."""
+        _add_run(env, self.HIST_RUN, self.APPROVER)
+        ok = RUN_IDS["succeeded"]
+        rows = [
+            r
+            for r in env.info.rows
+            if r.capability_class == DELIVER["capability_class"] and r.size == DELIVER["size"]
+        ]
+        assert any(r.run_id == ok and r.clean for r in rows)
+        assert any(r.run_id == ok and not r.clean for r in rows)
+        # the operator's run keeps only its red row; every clean row moves to the approver's
+        restamped = [
+            replace(r, run_id=self.HIST_RUN) if r.clean and not r.disqualified else r for r in rows
+        ]
+        with env.factory() as s:
+            actors = cell_actors(s, restamped)
+            assert self.OPERATOR not in actors
+            assert {a for a in actors if is_person_actor(a)} == {self.APPROVER}
+            assert "worker-1" in actors  # the rows' own actor, gathered as-is
+            ghosts = [replace(r, run_id=GHOST_RUN) for r in rows]
+            assert cell_actors(s, ghosts) == frozenset({"worker-1", ""})
+            assert cell_actors(s, []) == frozenset()
 
     def test_409_when_the_approver_is_the_only_person_behind_the_cell(self, env: Env) -> None:
         """Ground 2: every accepted row of the cell is the worker's or the approver's own
@@ -780,6 +877,13 @@ class TestTwoPersonRule:
         d = _preview(env, DELIVER, reviewed_row_hash=mine.row_hash).json()
         assert d["signable"] is True and d["refusals"] == []
 
+
+class TestVerifierKind:
+    """F34: every record says what kind of account signed it — derived from the signing
+    account's issuer, never guessed; a blank issuer is diagnosed, never a 500."""
+
+    APPROVER = user_id(USERS["approver"])
+
     def test_verifier_kind_is_oidc_for_an_identity_provider_account(self, env: Env) -> None:
         """An approver signed in through OIDC stamps ``oidc``; the key is in ``cell_json``
         under the hash and served on the POST, by id and in the list."""
@@ -823,6 +927,39 @@ class TestTwoPersonRule:
         row.cell_json = {**row.cell_json, "verifier_kind": "service"}
         with pytest.raises(LedgerIntegrityError, match="row_hash mismatch"):
             verify_signoff_rows([row])
+
+    def test_blank_issuer_is_503_account_issuer_missing_on_every_write_and_the_preview(
+        self, env: Env
+    ) -> None:
+        """``users.issuer`` is NOT NULL and no product path writes ``""`` — but the column
+        stores it. The core fails closed (``ValueError``); the API turns that into a
+        **503 account_issuer_missing** envelope naming the account on ``POST /signoffs``,
+        ``GET /signoffs/preview`` and ``POST …/revoke``, with the signoffs table unchanged
+        (a revocation is blocked by the account defect, never by a stack trace)."""
+        clear_policy(env)
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 201, r.text
+        signed = r.json()["id"]
+        with env.factory() as s:
+            user = s.get(User, self.APPROVER)
+            assert user is not None
+            user.issuer = ""
+            s.commit()
+        before = [row.row_hash for row in _signoffs(env)]
+        assert len(before) == 1
+        for r in (
+            env.post("/signoffs", json=attested_body(env, DELIVER)),
+            _preview(env, DELIVER),
+            env.post(f"/signoffs/{signed}/revoke", json={"note": "withdrawn"}),
+        ):
+            assert r.status_code == 503, r.text
+            e = envelope(r)
+            assert e["code"] == "account_issuer_missing"
+            assert self.APPROVER in e["message"] and "repair the users row" in e["message"]
+            assert e["detail"] == {"user": self.APPROVER}
+        assert [row.row_hash for row in _signoffs(env)] == before
+        assert _events(env, "signoff.refused") == [] and _events(env, "signoff.revoked") == []
+        assert env.get(f"/signoffs/{signed}").json()["revoked"] is False
 
 
 # ---------------------------------------------------------------------------

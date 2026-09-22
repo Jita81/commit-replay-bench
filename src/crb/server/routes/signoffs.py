@@ -26,10 +26,11 @@ A sign-off is a policy decision, refused at write (``signoff-policy.v3``,
 4. applies the policy (:func:`crb.core.signoff.evaluate_signoff`): a thin cell, a
    controls gate that failed / was never run / let a control escape / was thin, an
    **unmeasured** oracle (``oracle_unmeasured``, never overridable since v2), a weak
-   oracle, a route other than ``deliver``, a missing attestation, or an approver who
-   produced the evidence (``same_actor``, never overridable since v3 — the actor of the
-   attested row or of the run that graded it, or the only person behind every accepted
-   row of the cell; non-person actors — the worker, ``cli:…``, ``import`` — never count)
+   oracle, a route other than ``deliver``, a missing attestation, or ``same_actor``
+   (never overridable since v3): the approver is refused when they are the actor of the
+   attested row (``Grade.actor``), the actor of the run that produced it (``Run.actor``),
+   or the only person behind the cell's accepted evidence; non-person actors — the
+   worker, ``cli:…``, ``import`` — never count (the core's ``is_person_actor`` decides)
    → **409 signoff_refused** with ``detail.code``, ``detail.thresholds`` and
    ``detail.observed`` plus every failing clause; nothing is written and the refusal is
    recorded as a ``system/signoff.refused`` event;
@@ -79,7 +80,8 @@ Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0003-one-routing-rule.md,
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/core/signoff.py (the policy, ``SignoffRecord``, ``evaluate_signoff``,
-              ``stamp_evidence``, ``is_person_actor``, ``verifier_kind_for_issuer``),
+              ``stamp_evidence``, ``verifier_kind_for_issuer``; its ``is_person_actor`` decides
+              personhood — this module only gathers actors),
               src/crb/server/auth.py (``Principal.issuer`` — what ``verifier_kind`` is
               stamped from), src/crb/core/capability.py (``measure_cell``,
               ``task_oracle_strength``), src/crb/server/routes/oracle.py
@@ -151,7 +153,7 @@ from crb.core.signoff import (
 from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepStatus
 from crb.server.auth import ApproverDep, ViewerDep
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope
+from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal
 from crb.server.routes.grades import grade_to_dict
 from crb.server.routes.oracle import (
     latest_controls_verdict,
@@ -606,12 +608,27 @@ class ResolvedAttestation:
     """The approver's attestation resolved against the ledger: the core record's
     ``attestation``, the graded task's ``subject`` for display, and — for the two-person
     rule — the ``actors`` behind the row (its own ``Grade.actor`` and its run's
-    ``Run.actor``) with the ``run_id`` that produced it (``""`` when the row names none)."""
+    ``Run.actor``) with the ``run_id`` that produced it (``""`` when the row names none)
+    and that run's ``run_actor`` on its own (``""`` when the store knows no such run), so
+    a caller can tell WHICH half of ``actors`` is the run's before naming the run in a
+    refusal (:func:`attested_run_id_for`)."""
 
     attestation: Attestation
     subject: str
     actors: frozenset[str]
     run_id: str
+    run_actor: str
+
+
+def attested_run_id_for(attested: ResolvedAttestation | None, approver: str) -> str:
+    """The run id the ``same_actor`` sentence may name for ``approver``: the attested row's
+    run only when ``approver`` is that run's actor — "queued run X, which produced the
+    attested row" must be true of the person it is said to. When the row's OWN
+    ``Grade.actor`` is the approver (a ``crb grade --actor`` row, a run the store never
+    saw), ``""``: the core then states the ground without a run."""
+    if attested is None or not attested.run_id:
+        return ""
+    return attested.run_id if attested.run_actor == approver else ""
 
 
 def _attestation_422(msg: str) -> ApiError:
@@ -671,6 +688,7 @@ def resolve_attestation(
         subject=subject,
         actors=frozenset({str(g.actor or ""), run_actor}),
         run_id=str(g.run_id or ""),
+        run_actor=run_actor,
     )
 
 
@@ -867,6 +885,28 @@ def _refuse(
     )
 
 
+#: The envelope code when the signing account's ``users.issuer`` is blank — a defect of the
+#: users table (no product path writes one), not of the request; nothing is written.
+CODE_ISSUER_MISSING = "account_issuer_missing"
+
+
+def verifier_kind_of(principal: Principal) -> str:
+    """The ``verifier_kind`` ``principal`` stamps (:func:`verifier_kind_for_issuer`), or a
+    **503 account_issuer_missing** envelope when its issuer is blank — the core fails
+    closed with a ``ValueError``; here that becomes a diagnosed answer naming the account
+    to repair, never a 500, and never a guessed kind. Called before any lock is taken."""
+    try:
+        return verifier_kind_for_issuer(principal.issuer)
+    except ValueError as exc:
+        raise ApiError(
+            503,
+            CODE_ISSUER_MISSING,
+            f"account {principal.id} has no issuer; verifier_kind cannot be stamped — "
+            "repair the users row",
+            detail={"user": principal.id},
+        ) from exc
+
+
 def _record_from(
     repo: str,
     cell: dict[str, str],
@@ -1035,7 +1075,7 @@ def preview_signoff(
         repo,
         cell_in,
         verifier=viewer.id,
-        verifier_kind=verifier_kind_for_issuer(viewer.issuer),
+        verifier_kind=verifier_kind_of(viewer),
         tier="human-verified",
         note="",
     )
@@ -1083,7 +1123,7 @@ def preview_signoff(
         repo=repo,
         attested_actors=None if attested is None else attested.actors,
         cell_actors=cell_actors(db, rows),
-        attested_run_id="" if attested is None else attested.run_id,
+        attested_run_id=attested_run_id_for(attested, viewer.id),
     )
     stamped = (
         stamp_evidence(
@@ -1174,7 +1214,7 @@ def create_signoff(
         body.repo,
         body.cell,
         verifier=approver.id,
-        verifier_kind=verifier_kind_for_issuer(approver.issuer),
+        verifier_kind=verifier_kind_of(approver),
         tier=body.tier,
         note=body.note,
     )
@@ -1205,7 +1245,7 @@ def create_signoff(
         repo=body.repo,
         attested_actors=None if attested is None else attested.actors,
         cell_actors=cell_actors(db, rows),
-        attested_run_id="" if attested is None else attested.run_id,
+        attested_run_id=attested_run_id_for(attested, approver.id),
     )
     if refusals:
         first = refusals[0]
@@ -1307,7 +1347,7 @@ def create_signoff(
 @router.post(
     "/signoffs/{signoff_id}/revoke",
     response_model=SignoffWithPolicyOut,
-    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR},
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 503: _ERR},
     summary="Withdraw an attestation (appends a revocation row; never edits)",
 )
 def revoke_signoff(
@@ -1329,16 +1369,14 @@ def revoke_signoff(
     if _revocation_for(row, all_rows) is not None:
         raise ApiError(409, "already_revoked", f"attestation {signoff_id!r} is already revoked")
     note = body.note
+    kind = verifier_kind_of(approver)  # a diagnosed 503 before the lock, never a 500 under it
     _lock(db)
     revocation = _chain_and_add(
         db,
         Signoff(
             signoff_id=uuid.uuid4().hex,
             repo=row.repo,
-            cell_json={
-                **scope_of(row).to_dict(),
-                _VERIFIER_KIND: verifier_kind_for_issuer(approver.issuer),
-            },
+            cell_json={**scope_of(row).to_dict(), _VERIFIER_KIND: kind},
             tier=row.tier,
             verifier=approver.id,
             note=redact(note),
@@ -1370,12 +1408,14 @@ def revoke_signoff(
 __all__ = [
     "ACCEPTED_ROWS_LIMIT",
     "CODE_FALSE_Q1",
+    "CODE_ISSUER_MISSING",
     "CODE_POLICY_INVALID",
     "CODE_REFUSED",
     "FALSE_Q1_PREDICATE",
     "CellOracle",
     "ResolvedAttestation",
     "accepted_rows",
+    "attested_run_id_for",
     "cell_actors",
     "cell_false_q1",
     "cell_oracle_strength",
@@ -1392,5 +1432,6 @@ __all__ = [
     "signoff_hash",
     "signoff_out",
     "to_record",
+    "verifier_kind_of",
     "verify_signoff_rows",
 ]

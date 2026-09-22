@@ -281,12 +281,15 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   to the would-be approver before they try, and the record stamps
   `require_independent_verifier: true` so an audit reads that the rule was in force. A
   separate operator and approver account is therefore not a deployment convention but a
-  precondition for any sign-off. [measured — n = 14 tests under apparatus 2.2: 6 in
-  `tests/test_server_routes_signoffs.py::TestTwoPersonRule` drive `POST /signoffs` and
-  `GET /signoffs/preview` through the API against a seeded ledger (refused on the attested
-  row's run actor; refused as the only person behind the cell; a second approver signs the
-  same cell; the seeded operator/approver split signs; the preview names the refusal
-  first), and 8 in `tests/test_signoff.py` exercise `same_actor_refusal` /
+  precondition for any sign-off. [measured — n = 15 tests under apparatus 2.2: 7 in
+  `tests/test_server_routes_signoffs.py::TestTwoPersonRule` drive `POST /signoffs`,
+  `GET /signoffs/preview` and `cell_actors` against a seeded ledger (refused on the attested
+  row's run actor; refused on the row's own `Grade.actor` alone, the run unnamed; `cell_actors`
+  gathers both halves over accepted rows only; refused as the only person behind the cell; a
+  second approver signs the same cell; the seeded operator/approver split signs; the preview
+  names the refusal first — the three route tests added after an adversarial mutation pass
+  each kill a mutant the first six let live), and 8 in `tests/test_signoff.py` exercise
+  `same_actor_refusal` /
   `is_person_actor` in the core (each of the three grounds, non-person actors never
   count, the clause is last and not lifted by a relaxed policy, the ledger write boundary
   refuses, the silent case when no actors were resolved); pass/fail, not a rate]
@@ -294,14 +297,18 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   or `oidc`, stamped from the signing account's issuer under the hash; `service` is reserved
   for a delegated, non-person signature and no write path of this API mints it, so a
   delegated signature can never read as a person's. Rows written before the field carry
-  `""`, never a guessed kind. [measured — n = 4 tests under apparatus 2.2: 3 in
+  `""`, never a guessed kind. A blank `users.issuer` (no product path writes one) is
+  **503 `account_issuer_missing`** on the write, the preview and a revocation — nothing
+  written, the account named — never a guessed kind and never a 500. [measured — n = 5
+  tests under apparatus 2.2: 3 in
   `tests/test_signoff.py` (a `crb.signoff.v3` record round-trips and hashes with the kind;
   a v2 record with no kind still verifies and serves `""`, and flipping a stored kind to
   `service` breaks its hash; `verifier_kind_for_issuer` maps the local issuer → `local`
-  and any other → `oidc`, refusing an empty issuer) and 1 in
-  `tests/test_server_routes_signoffs.py::TestTwoPersonRule` (an identity-provider session
-  signs and the served record reads `oidc`); the seed's `local` stamp is also asserted on
-  every write and preview in that file; pass/fail, not a rate]
+  and any other → `oidc`, refusing an empty issuer) and 2 in
+  `tests/test_server_routes_signoffs.py::TestVerifierKind` (an identity-provider session
+  signs and the served record reads `oidc`; a blanked issuer is 503 on all three routes with
+  the signoffs table unchanged); the seed's `local` stamp is also asserted on every write
+  and preview in that file; pass/fail, not a rate]
 
 ### 3.5 Evidence integrity — `crb.core.ledger`, `crb.store`
 

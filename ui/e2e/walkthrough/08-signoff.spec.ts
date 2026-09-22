@@ -389,6 +389,9 @@ test.describe('08 sign-off policy', () => {
     await expect(table.getByTestId('signoff-row-policy')).toContainText('signoff-policy.v3 · deliver (deliver) · controls passed')
     await expect(table.getByTestId('signoff-row-policy')).toContainText('esc 0')
     await expect(table.getByTestId('signoff-row-attestation')).toContainText(rowHash!.slice(0, 10))
+    // F34 in the product, not only the API: the row says what kind of account signed, with the meaning on hover
+    await expect(table.getByTestId('signoff-row-approver')).toContainText('local account')
+    await expect(table.getByTestId('verifier-kind')).toHaveAttribute('title', /verifier_kind: local/)
     await expect(table.getByRole('img', { name: 'Active attestation' })).toBeVisible()
 
     // and the API serves the same snapshot, hash-chained

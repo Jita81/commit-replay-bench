@@ -505,12 +505,16 @@ def seed(factory: sessionmaker[Session], *, clone_path: str = "") -> SeedInfo:
 
 
 def _runs() -> list[Run]:
+    """The seed's runs, every one queued by the operator — ``Run.actor`` carries the account's
+    ID (:func:`user_id`), as the API stamps it, never the bare username: the two-person
+    rule's "second person" in the seed is then a real user id."""
+    op = user_id(USERS["operator"])
     common = {
         "repo": ALPHA,
         "builder": BUILDER,
         "model": MODEL,
         "provider": PROVIDER,
-        "actor": "op1",
+        "actor": op,
     }
     return [
         Run(
@@ -519,7 +523,7 @@ def _runs() -> list[Run]:
             mode="sighted",
             status="queued",
             repo=ALPHA,
-            actor="op1",
+            actor=op,
             params_json={
                 "limit": 20,
                 "pool": "standard",
@@ -620,7 +624,7 @@ def _runs() -> list[Run]:
             kind="oracle",
             status="succeeded",
             repo=ALPHA,
-            actor="op1",
+            actor=op,
             created="2026-08-27T09:00:00+00:00",
             finished="2026-08-27T09:20:00+00:00",
         ),
@@ -629,7 +633,7 @@ def _runs() -> list[Run]:
             kind="controls",
             status="succeeded",
             repo=ALPHA,
-            actor="op1",
+            actor=op,
             created="2026-08-26T09:00:00+00:00",
             finished="2026-08-26T09:20:00+00:00",
         ),
@@ -638,7 +642,7 @@ def _runs() -> list[Run]:
             kind="probe",
             status="succeeded",
             repo=ALPHA,
-            actor="op1",
+            actor=op,
             created="2026-08-25T09:00:00+00:00",
             finished="2026-08-25T09:00:30+00:00",
         ),

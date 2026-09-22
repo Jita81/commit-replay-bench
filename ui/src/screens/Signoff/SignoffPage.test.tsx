@@ -143,6 +143,7 @@ const SIGNED: SignoffWithPolicy = {
   cell: { process_step: '*', capability_class: 'bug.fix', size: 'S', language: '*', builder: '*', model: '*', provider: '*' },
   note: 'reviewed',
   approver: 'u1',
+  verifier_kind: 'local',
   created: '2026-09-14T10:00:00+00:00',
   revoked: false,
   revoked_by: null,
@@ -563,8 +564,38 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(gateRow(gate, 'Route = deliver').textContent).toMatch(/✓\s*satisfied:/)
   })
 
+  it('does not claim the second-person row is satisfied before a row is named: the preview has judged the cell, not the attested row', async () => {
+    // a signable preview with no attestation: ground 2 held (nobody refused), ground 1 not yet judged
+    const unsigned = signablePreview()
+    const signed = { ...unsigned, refusals: [], signable: true, attestation: SIGNED.attestation }
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, controls: PASSED, cells: [{ ...MAP.cells[0]!, route: 'deliver', reason: 'ok', reason_code: 'deliver' }] },
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /signoffs/preview': previewFor(unsigned, signed),
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const gate = screen.getByTestId('signoff-gate')
+    await waitFor(() => expect(screen.getByTestId('refusal-attestation_missing')).toBeInTheDocument())
+    let row = gateRow(gate, 'Signed by a second person')
+    expect(row.textContent).toMatch(/○\s*not yet evaluated:/)
+    expect(row.textContent).not.toMatch(/✓|✗/)
+    expect(row.textContent).toContain('judged once you name the row you read')
+    expect(gateRow(gate, 'Accepted row read and affirmed').textContent).toMatch(/✗\s*not satisfied:/)
+    // naming the row re-fetches the preview with the attested row → judged, and it holds
+    await user.selectOptions(screen.getByLabelText(/^Accepted row/), ROW)
+    await waitFor(() => expect(screen.queryByTestId('signoff-refusals')).toBeNull())
+    row = gateRow(gate, 'Signed by a second person')
+    expect(row.textContent).toMatch(/✓\s*satisfied:/)
+    expect(row.textContent).toContain('you did not queue the run behind the attested row')
+  })
+
   it('lists a pre-policy record honestly (no snapshot) next to a policy record', async () => {
-    const legacy: SignoffWithPolicy = { ...SIGNED, id: 's0', schema: 'crb.signoff.v1', policy_version: '', policy_thresholds: {}, route: { route: '', reason: '', reason_code: '' }, controls: { verdict: '', run_id: '', k: 0, total: 0, escapes: 0, created: '' }, attestation: null, created: '2026-09-01T00:00:00+00:00', note: 'old' }
+    const legacy: SignoffWithPolicy = { ...SIGNED, id: 's0', schema: 'crb.signoff.v1', policy_version: '', policy_thresholds: {}, route: { route: '', reason: '', reason_code: '' }, controls: { verdict: '', run_id: '', k: 0, total: 0, escapes: 0, created: '' }, attestation: null, verifier_kind: '', created: '2026-09-01T00:00:00+00:00', note: 'old' }
     mockApi({
       'GET /auth/me': PRINCIPAL,
       'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
@@ -577,5 +608,28 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(table.textContent).toContain('pre-policy record')
     expect(within(table).getAllByTestId('signoff-row-policy')).toHaveLength(1)
     expect(within(table).getAllByTestId('signoff-row-attestation')).toHaveLength(1)
+    // F34: every row says what kind of account signed it, with the meaning on hover; a
+    // record written before the field existed says so rather than guessing
+    const kinds = within(table).getAllByTestId('verifier-kind')
+    expect(kinds).toHaveLength(2)
+    expect(kinds[0]!.textContent).toBe('local account')
+    expect(kinds[0]!.getAttribute('title')).toContain('verifier_kind: local')
+    expect(kinds[1]!.textContent).toBe('kind not recorded')
+    expect(kinds[1]!.getAttribute('title')).toContain('pre-F34')
+  })
+
+  it('names a delegated service signature as not a person', async () => {
+    const service: SignoffWithPolicy = { ...SIGNED, id: 's2', verifier_kind: 'service' }
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': MAP,
+      'GET /signoffs': { items: [service], total: 1, limit: 50, offset: 0 },
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const table = await screen.findByRole('table', { name: 'Sign-offs for r' })
+    const kind = await within(table).findByTestId('verifier-kind')
+    expect(kind.textContent).toBe('service — delegated, not a person')
+    expect(kind.getAttribute('title')).toContain('never mints it')
   })
 })

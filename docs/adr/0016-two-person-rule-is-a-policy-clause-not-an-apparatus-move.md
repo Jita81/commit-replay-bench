@@ -78,7 +78,7 @@ read-time expiry rule.
   keeps its hash and reads as `v2`) and `tests/test_server_routes_signoffs.py::TestTwoPersonRule`
   (the API refuses at write and in the preview; a second approver signs; the served record
   carries `policy_version: signoff-policy.v3`). `tests/test_version_consistency.py` pins the
-  apparatus at `2.2`. [measured — n = 14 + 4 tests, apparatus 2.2; pass/fail, not a rate;
+  apparatus at `2.2`. [measured — n = 15 + 5 tests, apparatus 2.2; pass/fail, not a rate;
   the counts are stated in SECURITY.md §3.4]
 
 ## Alternatives considered

@@ -14,11 +14,13 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   /signoffs` and `GET /signoffs/preview` resolve the actors behind the evidence from the
   ledger (`Grade.actor` of the attested row and `Run.actor` of the run that produced it; the
   same for every accepted row of the measured cell) and refuse — `409 signoff_refused`,
-  `detail.code: same_actor`, `observed` the approver's id, the message naming the run and
-  the row — when the approver produced the attested row or is the only person behind the
-  cell. The preview judges it for the signed-in viewer, so "you queued run X, which produced
-  the attested row — a second approver must sign" shows before they try; the gate gains a
-  *Signed by a second person* row. Non-person actors never count (`is_person_actor`: the
+  `detail.code: same_actor`, `observed` the approver's id, the message naming the row (and
+  the run, when the approver is the actor of that run) — the approver is refused when they
+  are the actor of the attested row (`Grade.actor`), the actor of the run that produced it
+  (`Run.actor`), or the only person behind the cell's accepted evidence. The preview judges
+  it for the signed-in viewer, so "you queued run X, which produced the attested row — a
+  second approver must sign" shows before they try; the gate gains a *Signed by a second
+  person* row, judged (○) only once a row is named. Non-person actors never count (`is_person_actor`: the
   worker, `system…`, `cli:<os user>`, `service:…`, `import`, the empty actor) — a cell the
   worker graded from one operator's runs is that operator's alone, and a second approver
   CAN sign it. No `CRB_SIGNOFF__*` knob: `require_independent_verifier` may only be `true`
@@ -32,7 +34,12 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   delegated, non-person signature and no write path mints it. Served on `POST /signoffs`,
   `GET /signoffs` and `GET /signoffs/{id}`, in `would_record`, on the `signoff.created`
   event and in the JSONL ledger's records; rows written before the field read `""`
-  (`schema: crb.signoff.v2`), never a guessed kind. No migration.
+  (`schema: crb.signoff.v2`), never a guessed kind. No migration. The Sign-off page shows
+  it as a tag next to the approver (`local account` / `identity provider` / `service —
+  delegated, not a person` / `kind not recorded`) with its meaning on hover. A signing
+  account whose `users.issuer` is blank (no product path writes one) answers **503
+  `account_issuer_missing`** on the write, the preview and a revocation, nothing written —
+  a diagnosed answer naming the account, never a 500.
 - The posture page's *Separation of duties* row and Home's *Why two people* now state the
   enforced rule; `docs/API.md` (`/signoffs`), `SECURITY.md` §3.4, `EVIDENCE-AND-CLAIMS` §6a
   (the claim sentence names the second person and the account kind; four clauses have no
