@@ -494,7 +494,12 @@ jobs:
   walkthrough:
     name: walkthrough (browser, live stack, tier 1)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # The tier-1 walk is 56 specs and grows with the product: this wave added the hint sample
+    # on every route x persona x width (11-screens) and the two-person sign-off walk, taking it
+    # past the old 25-minute budget on a GitHub runner (run 35741391422 was cancelled at 25m18s
+    # with the walk still running). 40 leaves headroom; if a future wave needs more, split the
+    # job rather than raising this again — a gate nobody can finish is not a gate.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
         with:
