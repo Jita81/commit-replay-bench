@@ -154,7 +154,11 @@ class ListenerState:
     column: str = ""
     switched_by: str = ""
     switched_at: str = ""
-    #: The newest ``changed`` watermark a poll saw — the next poll asks from here.
+    #: A watermark the poll may ask from (``entered(column, since)``). It is carried on
+    #: the row and preserved across switches, and nothing advances it yet: correctness
+    #: does not rest on it — ``(tracker, key, revision)`` on the evidence chain is what
+    #: makes a re-read a no-op — so a whole-column read is the safe default, and a
+    #: watermark is an optimisation for a board with a long column.
     since: str = ""
 
     @classmethod
@@ -608,7 +612,13 @@ def _handle_ticket(
         route=(route or {}).get("route", ""),
     )
     awaiting = False
-    if feedback.ready_to_register:
+    already_registered = backlog is not None and backlog.get(draft.item.id) is not None
+    if feedback.ready_to_register and already_registered:
+        # a forced re-read of a ticket nothing has changed: the item is already on the
+        # frozen record, so registering it again would be an ItemExists refusal recorded
+        # as a stop. The comment and the label have been refreshed; that is the whole job.
+        row = replace_row(row, registered=True, label=LABEL_QUEUED)
+    elif feedback.ready_to_register:
         awaiting = not _register_and_queue(
             draft,
             tracker=tracker,

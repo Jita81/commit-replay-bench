@@ -529,3 +529,18 @@ def test_a_ticket_with_a_pull_request_is_told_about_that_rather_than_an_earlier_
     body = "".join(tracker.comments["4711"].values())
     assert "https://github.invalid/pr/9" in body
     assert "not_ready" not in body
+
+
+def test_a_forced_re_read_of_a_registered_ticket_re_posts_without_registering_again(
+    home: FactoryHome,
+) -> None:
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver())
+    tracker.comments["4711"].clear()
+    report = _poll(home, tracker, route=_deliver(), force=True)
+    assert report.read == 1 and report.registered == 0
+    # the comment is back, the item is untouched, and nothing was recorded as a stop
+    assert c.marker_for("fake", "4711") in tracker.comments["4711"]
+    assert report.rows[0].registered is True
+    assert report.rows[0].label == c.LABEL_QUEUED
+    assert [e.kind for e in home.events() if e.kind == sv.EV_STOPPED] == []
