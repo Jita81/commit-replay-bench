@@ -30,7 +30,10 @@ they are the enterprise's on-ramp: a ticket moves into a column and the product 
 | **E — evidence & explanation** | G-910, G-905, G-909, G-906, G-921, G-917, G-918 | the UI gates run in CI (`tsc -b`, vitest, the ratchet, the mocked smoke spec — 7 criteria); the 11-screens keyboard pass and the 375-px `scrollWidth` check cover every route, not two (11 criteria); `/login`, `/help`, `/help/docs/:name` and `*` get a `SCREENS` entry and a `MIN_HINTS` floor, so the ratchet stops skipping four shell screens (5); the last six native `title=` tooltips are retired (6); `/` is visited by a test (4); `/login` says who resets a password and the 404 is axe-swept (4+) |
 | **C — claims** | G-603 | `scripts/claims_check.py` + a `claims` CI job: every public claim in README, SECURITY, DEPLOYMENT, OPERATOR, the reviews and the book carries a permitted tag, and a `[measured]` one carries n, method and apparatus; the two wrong claims on `main` corrected (README's "eleven jobs"; RELEASING's `[aspiration]` ruleset) |
 
-**Stream E rides with this wave because its gaps have the highest fan-out in the whole tree — G-910 and G-905 alone close 18 criteria for a day's work — and it touches no file the other three streams own.**
+**Stream E rides with this wave because its gaps have the highest fan-out in the whole tree — G-910 and G-905 alone
+close 18 criteria **[measured — n = 2 gaps, method: the `blocks` column of `docs/dod/GAP-ANALYSIS.md`
+(7 + 11), apparatus 2.2]** for about a day's work **[hypothesis]** — and it touches no file the other three
+streams own.**
 
 **Done when:** a ticket moved into a watched column on a test project produces a gap comment
 on that ticket, and a ticket with a testable acceptance criterion produces a pull request on

@@ -331,13 +331,18 @@ def _resolve_route(ref: str) -> bool:
 
 
 def _resolve_code(ref: str) -> bool:
-    rel, _, symbol = ref.partition("::")
+    """``code:<file>::<symbol>`` (the file defines it) or ``code:<file>::"<literal>"`` (the
+    file contains that exact text). A bare ``code:<file>`` never resolves: a file existing
+    proves nothing about the criterion, and an evidence reference that cannot fail is not
+    evidence (CodeRabbit on PR #47).
+    """
+    rel, sep, symbol = ref.partition("::")
     p = _file(rel)
-    if p is None:
+    if p is None or not sep or not symbol:
         return False
-    if not symbol:
-        return True
     text = p.read_text(encoding="utf-8")
+    if symbol[0] in "\"'" and symbol[-1] == symbol[0] and len(symbol) > 2:
+        return symbol[1:-1] in text
     return bool(
         re.search(
             r"^\s*(?:async\s+def|def|class|export\s+(?:const|function|class|type|interface)|const|function)\s+"
@@ -470,7 +475,13 @@ def resolve(criterion: Criterion) -> None:
     for ref in split_refs(criterion.evidence):
         prefix, _, rest = ref.partition(":")
         if prefix == "measured":
-            continue  # never resolved; allowed only beside another reference
+            # never resolved (it names a measurement, not a file); allowed only beside a
+            # resolvable reference, and it must carry what a measured claim carries:
+            # n, a method and an apparatus version (docs/dod/STANDARD.md §3).
+            low = rest.lower()
+            if not (re.search(r"\bn\s*=", low) and "method" in low and "apparatus" in low):
+                criterion.unresolved.append(ref)
+            continue
         fn = RESOLVERS.get(prefix)
         if fn is not None and fn(rest):
             criterion.resolved.append(ref)

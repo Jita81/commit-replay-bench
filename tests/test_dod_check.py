@@ -77,7 +77,7 @@ updated: 2026-09-22
 | id | category | criterion | evidence | state | gap |
 |---|---|---|---|---|---|
 | results.purpose.1 | PURPOSE | About block | `hint:about:/results` | met | |
-| results.entry-exit.2 | ENTRY-EXIT | Next step | `code:ui/src/App.tsx` | met | |
+| results.entry-exit.2 | ENTRY-EXIT | Next step | `code:ui/src/App.tsx::App` | met | |
 | results.truth.3 | TRUTH | n on every rate | `vitest:ui/src/screens/Results/MapTable.test.tsx::"every cell carries n"` | met | |
 | results.actions.4 | ACTIONS | Open a cell | `spec:ui/e2e/walkthrough/11-screens.spec.ts::"viewer @ 375"` | met | |
 | results.explanation.5 | EXPLANATION | Ratchet | `hint:ratchet:/results` · `hint:id:tile.results.n` | met | |
@@ -139,7 +139,7 @@ PRODUCT = (
 
 def _rows(prefix: str, cats: list[str]) -> str:
     return "\n".join(
-        f"| {prefix}.{c.lower()}.{i} | {c} | ok | `code:ui/src/App.tsx` | met | |"
+        f"| {prefix}.{c.lower()}.{i} | {c} | ok | `code:ui/src/App.tsx::App` | met | |"
         for i, c in enumerate(cats, start=1)
     )
 
@@ -159,7 +159,8 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, P
     (tmp_path / "tests").mkdir()
     (tmp_path / ".github/workflows").mkdir(parents=True)
     (tmp_path / "ui/src/App.tsx").write_text(
-        '<Route path="/results" element={<X />} />\n', encoding="utf-8"
+        'export function App() {\n  return <Route path="/results" element={<X />} />\n}\n',
+        encoding="utf-8",
     )
     (tmp_path / "ui/src/components/Layout.tsx").write_text(
         "export const JOURNEY_STEPS = [\n  { label: 'Baseline', to: '/results' },\n]\n",
@@ -420,6 +421,40 @@ def test_one_gap_id_is_one_piece_of_work_across_the_tree(
     )
     assert mod.main(["--check"]) == 1
     assert "gap G-001 is defined differently in" in capsys.readouterr().out
+
+
+def test_a_code_reference_needs_a_symbol_or_a_quoted_literal_and_measured_needs_its_metadata(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two references that used to be unfalsifiable: a bare ``code:<file>`` (a file existing
+    proves nothing) and a ``measured:`` annotation with no n, method or apparatus."""
+    mod, root = tree
+    _write_all(root)
+    page = root / "docs/dod/pages/results.md"
+    good = page.read_text(encoding="utf-8")
+    for bad, message in (
+        ("`code:ui/src/App.tsx`", "code:ui/src/App.tsx"),
+        ('`code:ui/src/App.tsx::"no such text"`', 'code:ui/src/App.tsx::"no such text"'),
+        ("`code:ui/src/App.tsx::Missing`", "code:ui/src/App.tsx::Missing"),
+        (
+            "`code:ui/src/App.tsx::App` \u00b7 `measured:the tiles show a mean`",
+            "measured:the tiles show a mean",
+        ),
+    ):
+        page.write_text(good.replace("`code:ui/src/App.tsx::App`", bad, 1), encoding="utf-8")
+        assert mod.main(["--check"]) == 1, bad
+        assert f"evidence does not resolve: {message}" in capsys.readouterr().out, bad
+    # the quoted-literal form and a complete measured annotation both pass
+    page.write_text(
+        good.replace(
+            "`code:ui/src/App.tsx::App`",
+            '`code:ui/src/App.tsx::"<Route path="` \u00b7 '
+            "`measured:n = 1 route, method: by inspection of App.tsx, apparatus 2.2`",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    assert mod.main([]) == 0
 
 
 def test_a_backlog_row_that_names_a_pair_or_a_range_resolves_every_id_it_names(

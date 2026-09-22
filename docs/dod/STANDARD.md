@@ -100,11 +100,11 @@ Rules for the table:
 | `spec:` | `spec:ui/e2e/walkthrough/NN-x.spec.ts::"test title"` | the file exists and contains that title |
 | `hint:` | `hint:ratchet:/route` · `hint:about:/route` · `hint:id:<HintId>` | the route is a `SCREENS` key in `hints-ratchet.*.tsx` · `help.ts` has a `HELP[]` entry for it · the id is in `hints.ts` |
 | `route:` | `route:GET /health` (the path as `docs/API.md` lists it, no `/api/v1`) | `docs/API.md` lists it |
-| `code:` | `code:src/crb/core/signoff.py::same_actor_refusal` | the file defines that symbol |
+| `code:` | `code:src/crb/core/signoff.py::same_actor_refusal` · `code:ui/src/index.css::"@media (prefers-reduced-motion"` | the file defines that symbol, or (quoted form) contains that exact text. A bare `code:<file>` is a defect: a file existing proves nothing |
 | `doc:` | `doc:docs/OPERATOR.md#9-users` | the file exists and the heading anchor resolves |
 | `ci:` | `ci:sandbox-images` | `.github/workflows/ci.yml` has that job |
 | `adr:` / `dl:` | `adr:0016` · `dl:DL-047` | the ADR file exists · the row is in `DECISION-LOG.md` |
-| `measured:` | `measured:<free text with n, method, apparatus>` | never resolved by the checker; allowed only alongside another reference |
+| `measured:` | `measured:n = 2 economics fields with no interval, method: by inspection of capability.py cell_out, apparatus 2.2` | the checker never looks it up, but it refuses one that does not name **n**, a **method** and an **apparatus** version, and it is allowed only alongside a resolvable reference |
 
 References in one cell are separated by ` · ` or `; `, and the checker cuts only where the
 next typed prefix begins — so a quoted `vitest:` or `spec:` title may itself contain ` · `
