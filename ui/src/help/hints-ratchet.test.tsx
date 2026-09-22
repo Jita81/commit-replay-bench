@@ -116,10 +116,12 @@ function hinted(root: ParentNode): number {
 /**
  * Native `title=` per file (a hover-only attribute nothing on touch or a keyboard can reach):
  * the maximum each file may carry. Kept: the full value of a shortened id or hash whose
- * visible text is the short form. Retired as hints land: the count only goes down.
+ * visible text is the short form. Retired as hints land: the count only goes down (LiveLog's
+ * 4 and TaskDetailPage's 1 are what the tightened `TITLE_RE` — `Hint`, arrow-function props —
+ * had been missing, not new attributes).
  */
 const TITLE_ALLOWLIST: Record<string, number> = {
-  'components/LiveLog.tsx': 3,
+  'components/LiveLog.tsx': 4,
   'screens/Capability/CapabilityPage.tsx': 1,
   'screens/Factory/FactoryPage.tsx': 1,
   'screens/Learn/LearnPage.tsx': 1,
@@ -129,10 +131,15 @@ const TITLE_ALLOWLIST: Record<string, number> = {
   'screens/Runs/EvidenceDrawer.tsx': 6,
   'screens/Runs/ReviewPanel.tsx': 2,
   'screens/Runs/RunDetailPage.tsx': 1,
+  'screens/Runs/TaskDetailPage.tsx': 1,
 }
 
-/** A `title=` on a native element, or on a component that spreads its props onto one. */
-const TITLE_RE = /<(?:a|abbr|button|code|div|img|input|li|p|span|svg|td|th|tr|time|strong|small|em|label|select|textarea|pre|dd|dt|h[1-6]|Button|LinkButton|AnchorButton|Pill|Tag)\b[^>]*?\btitle=/g
+/**
+ * A `title=` on a native element, or on a component that spreads its props onto one (`Hint`
+ * included: `<Hint as="button" … title=>` renders the attribute). An arrow-function prop
+ * (`onClick={() => …}`) inside the tag does not end the match.
+ */
+const TITLE_RE = /<(?:a|abbr|button|code|div|img|input|li|p|span|svg|td|th|tr|time|strong|small|em|label|select|textarea|pre|dd|dt|h[1-6]|Button|LinkButton|AnchorButton|Pill|Tag|Hint)\b(?:[^>]|=>)*?\btitle=/g
 
 const SOURCES = import.meta.glob(['../components/**/*.tsx', '../screens/**/*.tsx', '!**/*.test.tsx'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 

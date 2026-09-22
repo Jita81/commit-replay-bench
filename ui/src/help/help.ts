@@ -148,7 +148,7 @@ export const HELP: ScreenHelp[] = [
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-7--sign-off-approver', label: 'Sign off' },
       { to: 'EVIDENCE-AND-CLAIMS#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2', label: 'What a signed cell may be claimed to mean' },
-      { to: 'OPERATOR#5-sign-off-p4', label: 'Sign-off in the operator guide' },
+      { to: 'OPERATOR#5-sign-off', label: 'Sign-off in the operator guide' },
     ],
   },
   {
