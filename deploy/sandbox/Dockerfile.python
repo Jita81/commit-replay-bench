@@ -42,7 +42,9 @@
 #   * Works with a read-only root: everything the runner writes goes to the tmpfs /tmp the
 #     executor provides (HOME, pytest's temporary files) or to the declared writable path.
 #   * Nothing secret is baked in; nothing listens; no docker client, no package manager
-#     invocation after the one install below.
+#     invocation after the one install below; no setuid/setgid binary — the base's su,
+#     mount, passwd and friends have the bits stripped (inert anyway under --cap-drop=ALL and
+#     no-new-privileges; stripped so the image needs neither to hold).
 
 FROM python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
 
@@ -66,6 +68,7 @@ COPY python-requirements.txt /opt/crb/python-requirements.txt
 RUN set -eu; \
     pip install --no-cache-dir --require-hashes --root-user-action=ignore \
         -r /opt/crb/python-requirements.txt; \
+    find / -xdev -perm /6000 -type f -exec chmod a-s '{}' +; \
     mkdir -p /work; chmod 0755 /work; \
     python -m pytest --version
 

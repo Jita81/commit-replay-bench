@@ -133,3 +133,27 @@ def test_require_docker_image_a_present_image_is_recorded_clean(
     langs.require_docker_image("crb-sandbox-node:ci", "CRB_TEST_SANDBOX_IMAGE_NODE")
     assert langs._IMAGES["crb-sandbox-node:ci"] == ""
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("helper", ["require_docker_image", "ensure_docker_image"])
+def test_a_missing_daemon_is_a_skip_on_every_call_even_under_strict_warmup(
+    monkeypatch: pytest.MonkeyPatch, helper: str
+) -> None:
+    """The documented policy — a missing daemon is always a skip — must hold for the
+    *second* caller too: the daemon reason is memoised by ``docker_unavailable_reason``
+    already, and must never be recorded against a tag, where a later caller would re-raise
+    it through ``warmup_unavailable`` and FAIL under ``CRB_TEST_STRICT_WARMUP=1``."""
+    monkeypatch.setattr(langs, "STRICT_WARMUP", True)
+    monkeypatch.setattr(langs, "_IMAGES", {})
+    monkeypatch.setattr(langs, "_DOCKER_REASON", {"reason": "docker daemon not reachable"})
+    monkeypatch.setattr(subprocess, "run", _raising_run(AssertionError("no subprocess may run")))
+    args = (
+        ("crb-sandbox-python:ci", "CRB_TEST_SANDBOX_IMAGE_PYTHON")
+        if helper == "require_docker_image"
+        else ("crb-test-py:local", langs.TEST_IMAGE_DOCKERFILE)
+    )
+    for _ in range(2):
+        with pytest.raises(pytest.skip.Exception, match="docker daemon not reachable"):
+            getattr(langs, helper)(*args)
+    assert "crb-sandbox-python:ci" not in langs._IMAGES
+    assert "crb-test-py:local" not in langs._IMAGES

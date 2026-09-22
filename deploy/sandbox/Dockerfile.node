@@ -44,7 +44,10 @@
 #     the worker passes --user=65534:65534 as well, and DockerSettings refuses root.
 #   * Works with a read-only root: Node writes nothing outside HOME=/tmp (the tmpfs the
 #     executor provides); npm's update check and its cache are pointed there and disabled.
-#   * Nothing secret is baked in; nothing listens; no package-manager invocation at all.
+#   * Nothing secret is baked in; nothing listens; no package-manager invocation at all;
+#     no setuid/setgid binary — the base's su, mount, passwd and friends have the bits
+#     stripped (inert anyway under --cap-drop=ALL and no-new-privileges; stripped so the
+#     image needs neither to hold).
 
 FROM node:22.19.0-bookworm-slim@sha256:4a4884e8a44826194dff92ba316264f392056cbe243dcc9fd3551e71cea02b90
 
@@ -65,6 +68,7 @@ ENV HOME=/tmp \
 
 # /work is the worktree mount point; the base's own probe proves the runtime is whole.
 RUN set -eu; \
+    find / -xdev -perm /6000 -type f -exec chmod a-s '{}' +; \
     mkdir -p /work; chmod 0755 /work; \
     node --version; npm --version
 

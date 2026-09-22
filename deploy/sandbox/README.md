@@ -29,16 +29,24 @@ at construction regardless; `/work` present for the worktree mount; `HOME=/tmp` 
 toolchain cache under `/tmp` — the tmpfs the executor provides — so the image runs with a
 read-only root; `org.opencontainers.image.{title,description,vendor,licenses,source,documentation}`
 labels; `ENTRYPOINT []` and a `CMD` that prints the toolchain's version; nothing that
-listens, nothing secret, no package manager invoked after the one pinned install; hadolint
+listens, nothing secret, no package manager invoked after the one pinned install; no
+setuid/setgid file — the Debian bases ship `su`, `mount`, `passwd`, `gpasswd`, `chsh`,
+`chfn`, `newgrp`, `chage`, `expiry`, `umount` and `unix_chkpwd` with the bits set, and each
+Dockerfile's `RUN` strips them (`find / -xdev -perm /6000 -type f -exec chmod a-s`) — inert
+under the executor anyway (`--cap-drop=ALL`, `no-new-privileges`, uid 65534), stripped so the
+image depends on neither flag **[measured — 11 files per image before, 0 after, read from
+inside as uid 65534, 3/3 images, 2026-09-22]**; hadolint
 clean (CI runs `hadolint/hadolint-action` on each file, as it does on `deploy/Dockerfile`).
 
 What CI proves on each image, from inside, on every pull request
-(`tests/test_sandbox_images_docker.py`, eight tests per language): the image's own default
+(`tests/test_sandbox_images_docker.py`, ten tests per language): the image's own default
 user and the executor's user are uid 65534; `/usr` and the worktree at `/work` refuse a write
-(`Read-only file system`) and nothing reaches the host, while `/tmp` accepts one; a test that
+(`Read-only file system`) and nothing reaches the host, while `/tmp` accepts one; no
+setuid/setgid file is in the image; `/tmp` is `noexec` for every command but the Go runner's
+(`/proc/mounts` says so and a script written there is refused / runs accordingly); a test that
 asserts `example.com:443` is reachable **fails** through that language's runner, attributed
 to exactly that test id; an image absent from the daemon's store is `SandboxUnavailable`
-rather than a pull; the language's fixture repository qualifies (RED at the parent, gold
+rather than a pull (the daemon's `No such image`, not its `pull access denied`); the language's fixture repository qualifies (RED at the parent, gold
 clean) and grades clean with the same baseline reading the host runner suite pins, leaving
 the host worktree untouched; the OCI labels and `USER` are set. The sandbox suite and the
 sealed-builder suite (`tests/test_sandbox_docker.py`, `tests/test_builders_container_docker.py`)

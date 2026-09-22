@@ -10,7 +10,7 @@
 # distribution (`go`, and `gofmt` for belt 5) copied out of the pinned official image onto
 # a slim Debian base of the SAME release. The official `golang` image itself is not the
 # runtime: it carries gcc, git and the buildpack toolchain (~1.2 GB on disk against
-# ~330 MB here), none of which `go test` needs with CGO_ENABLED=0 — the runner's default.
+# ~477 MB here), none of which `go test` needs with CGO_ENABLED=0 — the runner's default.
 # The runner pins GOTOOLCHAIN=local, so a module's `go` directive can never trigger a
 # toolchain download inside the sandbox. A repository with module dependencies extends
 # this image with a warm module cache (`go mod download` into the directory
@@ -30,7 +30,8 @@
 #
 #     docker run --rm --network=none --memory=2g --cpus=2 --pids-limit=512
 #       --user=65534:65534 --cap-drop=ALL --security-opt no-new-privileges --read-only
-#       --tmpfs /tmp:rw,nosuid,nodev,size=512m
+#       --tmpfs /tmp:rw,exec,nosuid,nodev,size=512m   (exec: the Go runner declares
+#         Command.exec_tmp — every other command's tmpfs is noexec)
 #       --mount type=bind,src=<worktree>,dst=/work,readonly
 #       --env GOFLAGS="-count=1 -mod=mod" --env GOTOOLCHAIN=local --env CGO_ENABLED=0
 #       --env GOCACHE=/tmp/gocache --env GOMODCACHE=/tmp/gomod
@@ -46,7 +47,10 @@
 #   * Works with a read-only root: the build cache, the module cache and GOPATH all live
 #     under the tmpfs /tmp the executor provides (the runner sets GOCACHE / GOMODCACHE to
 #     the same places; the ENV below makes a stray `docker run` of the image behave alike).
-#   * Nothing secret is baked in; nothing listens; no package manager is invoked at all.
+#   * Nothing secret is baked in; nothing listens; no package manager is invoked at all;
+#     no setuid/setgid binary — the base's su, mount, passwd and friends have the bits
+#     stripped (inert anyway under --cap-drop=ALL and no-new-privileges; stripped so the
+#     image needs neither to hold).
 
 FROM golang:1.26.8-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d AS toolchain
 
@@ -72,6 +76,7 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
 
 # /work is the worktree mount point; the toolchain's own probe proves the copy is whole.
 RUN set -eu; \
+    find / -xdev -perm /6000 -type f -exec chmod a-s '{}' +; \
     mkdir -p /work; chmod 0755 /work; \
     go version; command -v gofmt >/dev/null
 

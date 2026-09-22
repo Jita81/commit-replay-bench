@@ -10,6 +10,8 @@ that ships, through the real runner of that language on that language's fixture:
 * the root filesystem is read-only from inside (``/usr`` refuses a write), ``/tmp`` — the
   tmpfs the executor provides — accepts one, and the worktree at ``/work`` refuses one that
   never appears on the host;
+* no setuid/setgid file is in the image (the bases' ``su``, ``mount``, ``passwd`` … have the
+  bits stripped by the Dockerfile) — inert under the executor anyway, held regardless;
 * the network is off: a test that asserts ``example.com:443`` is reachable FAILS, attributed
   to exactly that test id by the runner's parser;
 * an image that is not in the daemon's store is ``SandboxUnavailable`` — ``--pull=never``,
@@ -34,8 +36,10 @@ What it is:   The suite for the shipped reference sandbox images (deploy/sandbox
               parametrisation per language, against a real daemon.
 What it does: Pins, per image, that the default and the executor's user are uid 65534, that
               the root filesystem and the worktree are read-only from inside while ``/tmp``
-              is writable, that a network probe FAILS through the language's runner, that an
-              absent image is ``SandboxUnavailable`` rather than a pull, that the language
+              is writable, that no setuid/setgid file is in the image, that ``/tmp`` is
+              ``noexec`` except for the Go runner's command, that a network probe FAILS
+              through the language's runner, that an absent image is ``SandboxUnavailable``
+              rather than a pull, that the language
               fixture qualifies and grades clean under ``DockerExecutor`` leaving the host
               worktree untouched, and that the image's OCI labels and ``USER`` are set.
 How:          ``lang`` is a module-scoped parametrised fixture; the image comes from
@@ -350,6 +354,24 @@ def test_root_and_worktree_are_read_only_and_tmp_is_not(executor: DockerExecutor
     assert tmp.ok and tmp.stdout.strip() == "scratch", tmp.combined
 
 
+def test_no_setuid_or_setgid_binary_in_the_image(executor: DockerExecutor, trial: Workspace):
+    """The image carries no setuid/setgid file: the Debian bases ship ``su``, ``mount``,
+    ``passwd`` and friends with the bits set, and each Dockerfile's single ``RUN`` strips
+    them (``find / -xdev -perm /6000 -type f -exec chmod a-s``). They are inert under the
+    executor anyway (``--cap-drop=ALL``, ``no-new-privileges``, uid 65534) — stripping them
+    means the image does not depend on either flag to hold. Read from inside as the
+    executor's user; ``-xdev`` keeps ``find`` off ``/proc``, ``/sys``, ``/tmp`` and ``/work``."""
+    run = executor.run(
+        Command(
+            ("sh", "-c", "find / -xdev -perm /6000 -type f 2>/dev/null; echo end-of-list"),
+            trial.root,
+            timeout=120,
+        )
+    )
+    assert run.ok, run.combined
+    assert run.stdout.strip() == "end-of-list", run.combined
+
+
 _TMP_PROBE = (
     "sh",
     "-c",
@@ -406,9 +428,13 @@ def test_network_is_off(lang: Lang, trial, task: TaskSpec, runner: BaseRunner, e
 
 def test_an_absent_image_fails_closed_without_a_pull(trial: Workspace):
     """``--pull=never``: an image that is not in the daemon's store is ``SandboxUnavailable``
-    (exit 125, ``No such image``) — the worker never reaches for a registry at run time."""
+    (exit 125, ``No such image``) — the worker never reaches for a registry at run time.
+
+    The match pins the daemon's *no-pull* wording: without the flag the same unpullable tag
+    is still exit 125 but reads ``pull access denied … repository does not exist`` (the
+    daemon went to the registry), so ``exit 125`` alone would not catch the flag's loss."""
     ex = DockerExecutor(DockerSettings(image=f"crb-sandbox-absent-{uuid.uuid4().hex[:8]}:none"))
-    with pytest.raises(SandboxUnavailable, match="exit 125"):
+    with pytest.raises(SandboxUnavailable, match=r"exit 125.*No such image"):
         ex.run(Command(("id", "-u"), trial.root, timeout=60))
 
 

@@ -63,6 +63,19 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   `docker image inspect` that raises after the daemon probe goes through the warm-up policy
   (skip locally, fail under strict warm-up) instead of erroring the test
   (`tests/test_conftest_langs.py`).
+- Second review round (adversarial verifier): the three sandbox Dockerfiles strip every
+  setuid/setgid bit the Debian bases ship (`su`, `mount`, `passwd` …, 11 files per image →
+  0), proven from inside as uid 65534 (`test_no_setuid_or_setgid_binary_in_the_image`);
+  the absent-image test now pins the daemon's no-pull wording (`No such image`) so losing
+  `--pull=never` fails it rather than passing on the registry's `pull access denied`;
+  a missing daemon is a skip on *every* call under strict warm-up too — the daemon reason
+  is no longer memoised against the image tag, where a later caller re-raised it as a
+  failure (`tests/test_conftest_langs.py`); `Dockerfile.go`'s header shows the argv the
+  Go command really gets (`exec` on the tmpfs) and its true size (477 MB); every
+  `[measured]` sandbox-image tag names the run that executed on which head (a document can
+  never cite a run of its own commit) with the local count on images built from the tree;
+  `sandbox-images` is declared blocking in `ci.yml` and DEPLOYMENT §3.4 gives the
+  branch-protection call that makes it so (a repository setting, for the administrator).
 
 ### 2026-09-21 — the operating envelope: what the platform team is told is true (F36–F41, F44, F47, F25)
 

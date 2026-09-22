@@ -18,7 +18,11 @@
 #                  under deploy/sandbox, then the smoke that matters: the fixture repository of
 #                  each language through DockerExecutor ON THAT IMAGE (uid 65534, read-only
 #                  root, network off, qualify + grade clean — tests/test_sandbox_images_docker.py),
-#                  and the sandbox + sealed-builder suites on the python one. The `test` job
+#                  and the sandbox + sealed-builder suites on the python one; a skip in the
+#                  smoke fails the job. Always runs and is blocking: the context
+#                  "sandbox-images (build + hadolint + smoke each reference sandbox image)"
+#                  belongs in main's required status checks alongside `container`
+#                  (docs/DEPLOYMENT.md §3.4 names the branch-protection call). The `test` job
 #                  deselects the `sandbox_images` marker: these tests build images, and this
 #                  job builds each exactly once with the GHA layer cache
 #   walkthrough    the full-browser walkthrough (ui/e2e/walkthrough) against a LIVE stack that

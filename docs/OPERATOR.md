@@ -302,7 +302,7 @@ Registry credentials likewise live in those files; every step tail is passed thr
 **Sandbox images**: start from the shipped reference set —
 [`deploy/sandbox/`](../deploy/sandbox/README.md): `crb-sandbox-python` (pytest),
 `crb-sandbox-node` (`node --test`), `crb-sandbox-go`, each digest-pinned, running as user
-`65534` with a read-only root and proven from inside by CI **[measured — CI `sandbox-images` job on PR #44, run 35666266465, 2026-09-22: `tests/test_sandbox_images_docker.py`, 8 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, 41 passed / 0 skipped; hadolint on each Dockerfile in the same job; apparatus 2.2]** — and extend one per repository
+`65534` with a read-only root and proven from inside by CI **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]** — and extend one per repository
 (or per toolchain) with the repository's dependencies when its tests need more than the
 runner. Under docker, setup does not run (`BaseRunner.sandbox_refusal`: setup is a host
 phase and fails closed with `SETUP_SANDBOX_REFUSED` when the executor is `docker`), so the

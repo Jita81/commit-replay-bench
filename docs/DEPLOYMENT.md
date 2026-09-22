@@ -256,13 +256,36 @@ python (pytest), node (`node --test`), go — each digest-pinned **[measured —
 in the three Dockerfiles carries `@sha256:…`, n = 4 `FROM` lines, by inspection]**, uid
 65534, read-only-root compatible, hadolint-clean, and proven from inside by CI on every pull
 request (the `sandbox-images` job runs each language's fixture repository through the real
-executor on the image it just built) **[measured — CI `sandbox-images` job on PR #44, run 35666266465, 2026-09-22: `tests/test_sandbox_images_docker.py`, 8 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, 41 passed / 0 skipped; hadolint on each Dockerfile in the same job; apparatus 2.2]**. Build them, push them to your registry, pre-pull them into the
+executor on the image it just built) **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]**. Build them, push them to your registry, pre-pull them into the
 daemon the worker talks to (the `dind` sidecar's store in that mode), and name them: the
 deployment default in `config.CRB_SANDBOX__IMAGE`, a repository's own in its
 `sandbox_image`. Everything else — build, tag, push, select, extend for a repository's
 dependencies, the re-pin cadence — is [deploy/sandbox/README.md](../deploy/sandbox/README.md).
 A JVM reference image is deliberately not shipped: the Maven runner's docker branch cannot
 resolve plugins offline yet (README §6).
+
+The `sandbox-images` job is meant to block a merge to `main` exactly as `container` does —
+it has no `continue-on-error` and fails on any skipped smoke test — but a job blocks only
+when its context is in the branch's required status checks, which is a repository setting,
+not a workflow file **[measured — `GET /repos/Jita81/commit-replay-bench/branches/main/protection`,
+2026-09-22: the context is absent; a red `sandbox-images` would not block a merge]**. The
+repository administrator adds it once:
+
+```bash
+gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks \
+  --input - <<'JSON'
+{"strict": true, "contexts": ["lint (ruff)", "types (mypy --strict)", "layers (import-linter)",
+ "code-map (every file has a valid header; docs/CODE-MAP.md is current)",
+ "test (py3.12)", "test (py3.13)", "test-postgres (store suite on PostgreSQL 16)",
+ "security (gitleaks + pip-audit)", "container (docker build + smoke + helm lint)",
+ "walkthrough (browser, live stack, tier 1)",
+ "sandbox-images (build + hadolint + smoke each reference sandbox image)"]}
+JSON
+```
+
+(the list is the current set plus the new context — `PATCH` replaces it, so send all of
+them; `GET …/protection` first to confirm the set has not moved). Until then the job's
+verdict is visible on every pull request but advisory.
 
 ## 4. Azure
 

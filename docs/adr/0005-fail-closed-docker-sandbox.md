@@ -100,9 +100,10 @@ token (n = 2 tests); `tests/test_sandbox_images_docker.py` reads `/proc/mounts` 
 shipped image and tries to run a script written under `/tmp` — `noexec` and `Permission
 denied` for an ordinary command on every image, `exec` and the script runs only for the
 command the Go runner declares (`test_tmp_is_noexec_unless_the_runner_declares_exec_tmp`,
-3/3 images locally, colima / Docker 29.5.2, 2026-09-22; in CI's `sandbox-images` job from
-this commit) — and proves `go test` runs and `/usr` stays read-only from inside the shipped
-Go image (8 tests × 3 images, CI run 35666266465); apparatus 2.2]**. The builder container (ADR-0012, `crb.builders.container`) has the same
+3/3 images built from this tree, colima / Docker 29.5.2, 2026-09-22, and in CI's
+`sandbox-images` job on every pull request — PR #44 run 35678358686 on the merged head
+4a64fe3) — and proves `go test` runs and `/usr` stays read-only from inside the shipped Go
+image (10 tests × 3 images, same suite); apparatus 2.2]**. The builder container (ADR-0012, `crb.builders.container`) has the same
 implicit `noexec` on its tmpfs and will need the same declaration before a Go builder image
 can run its own tests inside the cell — a follow-up, not changed here.
 
@@ -113,8 +114,11 @@ against a real daemon, same suite]**.
 
 The reference images this argv runs are `deploy/sandbox/Dockerfile.{python,node,go}`
 (`deploy/sandbox/README.md`), built and proven from inside by CI on every pull request
-**[measured — CI run 35666266465, 2026-09-22, `sandbox-images` job: 41 passed, 0 skipped
-(24 image tests + the sandbox and sealed-builder suites on the python image)]**.
+**[measured — the `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip
+fails it): 47 passed / 0 skipped on images built from this tree (30 image tests + the sandbox
+and sealed-builder suites on the python image), colima / Docker 29.5.2, 2026-09-22; in CI,
+PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped before this
+commit's three added tests; apparatus 2.2]**.
 
 ## Alternatives considered
 

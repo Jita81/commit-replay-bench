@@ -317,9 +317,8 @@ def require_docker_image(tag: str, named_by: str) -> None:
             warmup_unavailable(_IMAGES[tag])
         return
     reason = docker_unavailable_reason()
-    if reason:
-        _IMAGES[tag] = reason
-        pytest.skip(reason)
+    if reason:  # no daemon is environmental — a plain skip every time, never memoised
+        pytest.skip(reason)  # against the tag (that would fail a later caller under strict)
     if not _image_present(tag):
         _IMAGES[tag] = reason = (
             f"docker image {tag!r} ({named_by}) is not present; build or load it"
@@ -358,9 +357,8 @@ def ensure_docker_image(tag: str, dockerfile: str | Path, *, context: Path | Non
             warmup_unavailable(_IMAGES[tag])
         return
     reason = docker_unavailable_reason()
-    if reason:  # no daemon is environmental — a plain skip, never a failure
-        _IMAGES[tag] = reason
-        pytest.skip(reason)
+    if reason:  # no daemon is environmental — a plain skip, never a failure; not memoised
+        pytest.skip(reason)  # against the tag (that would fail a later caller under strict)
     docker = shutil.which("docker") or "docker"
     if not _image_present(tag):
         if context is None:
