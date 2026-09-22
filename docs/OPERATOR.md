@@ -310,17 +310,31 @@ image must already contain what setup would have installed — and nothing a hos
 installed is visible inside: the sandbox mounts only the trial worktree, read-only, at
 `/work`, and a trial worktree's `node_modules` is a **symlink to the host clone's**
 (`Workspace._post_create`), which dangles inside the container; a host venv, module cache
-or `~/.m2` is likewise absent. Bake the dependencies into a derived image
+or `~/.m2` is likewise absent by construction — `DockerExecutor.build_argv` binds only the
+worktree (read-only, at `/work`) and tmpfs where the runner declared it, nothing else from
+the host **[measured — `tests/test_execution.py::test_docker_build_argv_has_every_hardening_flag`
+and `::test_docker_build_argv_network_writable_paths_extra_mounts_and_cwd` pin the argv
+token by token; apparatus 2.2]**. Bake the dependencies into a derived image
 ([`deploy/sandbox/README.md` §4](../deploy/sandbox/README.md) — `npm ci` of the lockfile
 under `/opt/app` and `runner_opts.env: {NODE_PATH: /opt/app/node_modules}`; hash-pinned
-test requirements for Python; `GOMODCACHE` for Go) **[measured — a `node_modules` symlink
+test requirements for Python; `GOMODCACHE` for Go) **[measured — the symlink claim only: a `node_modules` symlink
 to a host directory reads `No such file or directory` from inside `crb-sandbox-node`
 under `DockerExecutor`, n = 1 probe, colima / Docker 29.5.2, 2026-09-22; apparatus
-2.2]**. Name the image in the repository's `sandbox_image` (it wins) or the deployment's
+2.2]**; the derived-image recipe itself is the README's and is **[hypothesis]** until a
+repository is measured on one. Name the image in the repository's `sandbox_image` (it wins) or the deployment's
 `CRB_SANDBOX__IMAGE` (the default for repositories that name none); the worker never pulls,
 so it must be in the daemon's store. A JVM reference image is not shipped — the Maven
-runner cannot resolve plugins offline under docker yet (README §6); JVM repositories run
-under the local executor for now, visibly on the apparatus stamp.
+runner cannot resolve plugins offline under docker yet (README §6), so under the compose /
+Helm default (`CRB_SANDBOX__EXECUTOR=docker`) a JVM run fails closed rather than falling
+back. The executor is chosen **per run, never per repository**: a run request's `executor`
+field (`POST /runs`, one of the known executors) wins, else the worker's
+`CRB_SANDBOX__EXECUTOR` / `--executor` applies to every run it handles; to measure a JVM
+repository today, submit its runs with `executor: local` (or on a worker started `local`),
+and the row's apparatus stamp carries the executor it ran under
+**[measured — by inspection of `src/crb/server/worker.py`: `_executor` reads
+`ctx.params.get("executor") or self.settings.executor` and `_stamp` writes
+`executor: <its describe()>` into the run's `apparatus_json`; `tests/test_worker.py` pins that a
+run's `apparatus_json` carries the runner and the executor it ran on; apparatus 2.2]**.
 
 ### 2.1a Packaging-metadata tests (`dist_info_stubs`)
 The harness imports the repository's code from the worktree on `PYTHONPATH` and uninstalls
@@ -653,7 +667,9 @@ the verification.
 
 **Fail closed means the run STOPS.** If Docker is missing, the daemon is unreachable, the
 image is not set, the configured user is root, a forbidden mount is requested, or
-`docker run` fails to launch (exit 125), `crb` raises `SandboxUnavailable` and the run is
+`docker run` fails to launch (exit 125 — the daemon's own launch-failure status, observed
+for an absent image by `tests/test_sandbox_images_docker.py::test_an_absent_image_fails_closed_without_a_pull`
+against colima / Docker 29.5.2), `crb` raises `SandboxUnavailable` and the run is
 recorded `failed` with the error `sandbox unavailable: <cause>` (the job store's terminal
 status — there is no `blocked` status). **No test is run on the host as a fallback**, and no
 verdict is recorded for the affected tasks.

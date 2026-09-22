@@ -108,7 +108,7 @@ server and never appear in logs or `/settings`.
 | `CRB_METRICS_PORT` | worker | the worker's own Prometheus exposition port (default `9464`; `0` = off) — the build / grade / cost / delivery series live here, not on the api (§9) |
 | `CRB_LOG_FORMAT` / `CRB_LOG_LEVEL` | api, worker | `json` (default, one object per line) or `text`; `INFO` — every record is redacted before a handler sees it (§9) |
 | `CRB_WORKER_HEARTBEAT_STALE_S` | api | seconds after which a *running* run's heartbeat is reported stale by `/health` (default 120). Worker liveness itself is judged against each worker's own `heartbeat_s` (§9) |
-| `CRB_SANDBOX__IMAGE` | worker | default sandbox image when a repository config has none (a repository's own `sandbox_image` wins). The shipped reference images — `deploy/sandbox/Dockerfile.{python,node,go}`, built and smoked by CI — are what to push to your registry and name here (`deploy/sandbox/README.md`); the worker never pulls (`docker run --pull=never`), so the image must be in the daemon's store |
+| `CRB_SANDBOX__IMAGE` | worker | default sandbox image when a repository config has none (a repository's own `sandbox_image` wins). The shipped reference images — `deploy/sandbox/Dockerfile.{python,node,go}`, built and smoked by CI — are what to push to your registry and name here (`deploy/sandbox/README.md`); the worker never pulls (`docker run --pull=never` **[measured — `tests/test_execution.py::test_docker_build_argv_has_every_hardening_flag` pins the flag on the argv; `tests/test_sandbox_images_docker.py::test_an_absent_image_fails_closed_without_a_pull` proves an absent image is `SandboxUnavailable` (exit 125, `No such image`) against a daemon, colima / Docker 29.5.2; apparatus 2.2]**), so the image must be in the daemon's store |
 | `CRB_RETENTION__TRANSCRIPTS_DAYS` | | 0 = keep no builder transcripts (default) |
 | `CRB_OPENAI_BASE_URL`, `CRB_OPENAI_KEY_ENV` + the named key var | builder | OpenAI-compatible endpoint (vLLM, Cerebras, …) |
 | `CRB_AZURE_ENDPOINT`, `CRB_AZURE_DEPLOYMENT`, `CRB_AZURE_API_VERSION`, `CRB_AZURE_KEY_ENV` + `AZURE_OPENAI_API_KEY` | builder | Azure OpenAI in-tenant (setting the endpoint selects Azure) |
@@ -253,8 +253,11 @@ and `DockerSettings` refuses to mount the socket, `/` or `$HOME` into a sandbox.
 
 **Which image runs in the sandbox.** `deploy/sandbox/` ships three reference images —
 python (pytest), node (`node --test`), go — each digest-pinned **[measured — every `FROM`
-in the three Dockerfiles carries `@sha256:…`, n = 4 `FROM` lines, by inspection]**, uid
-65534, read-only-root compatible, hadolint-clean, and proven from inside by CI on every pull
+in the three Dockerfiles carries `@sha256:…`, n = 4 `FROM` lines, by inspection; apparatus
+2.2]**, uid 65534 both as the image's own default user and as the user the executor runs
+**[measured — `tests/test_sandbox_images_docker.py`: the image config's `User` is `65534:65534`
+and `id -u` inside prints 65534 with and without the executor, 2 tests × 3 images; apparatus
+2.2]**, read-only-root compatible, hadolint-clean, and proven from inside by CI on every pull
 request (the `sandbox-images` job runs each language's fixture repository through the real
 executor on the image it just built) **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]**. Build them, push them to your registry, pre-pull them into the
 daemon the worker talks to (the `dind` sidecar's store in that mode), and name them: the
