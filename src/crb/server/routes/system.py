@@ -118,14 +118,18 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.ledger import BELT_SET_V3_LEGACY, BELT_SET_V5, LedgerIntegrityError
 from crb.core.routing import POLICY_VERSION
+from crb.core.secrets_file import SecretsError
 from crb.core.version import APPARATUS_VERSION, __version__
+from crb.intake.client import TRACKER_TOKEN_SECRET
 from crb.observability import metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
+from crb.server.intake import ListenerState
+from crb.server.secrets import SecretsFile
 from crb.server.settings import Settings
 from crb.store.ledger import assert_append_only
 from crb.store.migrate import HeadStatus, head_status_on
-from crb.store.models import APPEND_ONLY_TABLES, Grade, Run, User, WorkerRow
+from crb.store.models import APPEND_ONLY_TABLES, Grade, Repo, Run, User, WorkerRow
 
 try:  # pragma: no cover — extra installed in [server]
     from prometheus_client import CONTENT_TYPE_LATEST
@@ -507,6 +511,96 @@ def probe_sandbox(settings: Settings, role: str = ROLE_ALL, *, request_id: str =
     )
 
 
+def probe_intake(
+    factory: sessionmaker[Session], settings: Settings, *, request_id: str = ""
+) -> ProbeResult:
+    """``intake``: is work able to arrive from the enterprise's board (ADR-0017)?
+
+    **It contacts no tracker.** A readiness probe that called somebody else's service would
+    make this deployment's health depend on theirs, and would poll a board nobody asked it
+    to. It reports only what this deployment knows about itself: whether a tracker is
+    configured, whether a credential is stored, and how many repositories have their
+    listener switched on. Whether the tracker actually answers is the listener's own
+    business, and it says so as ``intake.stopped`` on the repository's chain and on the
+    intake screen.
+    """
+
+    def _read() -> ProbeResult:
+        cfg = settings.intake
+        # the store is read FIRST and unconditionally: how many listeners are on is part of
+        # this probe's answer whatever the tracker setting says, and a store that cannot be
+        # read must fail this probe like every other one rather than pass on a skip
+        listening = 0
+        with factory() as session:
+            for row in session.execute(select(Repo)).scalars().all():
+                if ListenerState.from_config(dict(row.config_json or {})).enabled:
+                    listening += 1
+        if cfg.tracker == "none":
+            detail = (
+                "no tracker configured (optional) — set CRB_INTAKE__TRACKER, __URL, __PROJECT "
+                "and __COLUMN to take work from a board "
+                "(docs/adr/0017-the-ticket-is-the-backlog-item.md)"
+            )
+            data = {"tracker": "none", "configured": False, "listening": listening}
+            if listening:
+                return ProbeResult(
+                    "intake",
+                    DEGRADED,
+                    f"{listening} repository listener(s) are on but no tracker is configured — "
+                    "nothing is read; set the CRB_INTAKE__* block or switch them off",
+                    data,
+                )
+            return ProbeResult("intake", SKIPPED, detail, data)
+        secrets_present = False
+        try:
+            secrets_present = bool(
+                SecretsFile.for_settings(settings).status(TRACKER_TOKEN_SECRET).present
+            )
+        except (SecretsError, OSError):
+            secrets_present = False
+        data = {
+            "tracker": cfg.tracker,
+            "configured": cfg.enabled,
+            "column": cfg.column,
+            "credential_set": secrets_present,
+            "listening": listening,
+            "poll_s": cfg.poll_s,
+        }
+        if not cfg.enabled:
+            return ProbeResult(
+                "intake",
+                DEGRADED,
+                f"tracker {cfg.tracker!r} is named but incomplete — CRB_INTAKE__URL and "
+                "CRB_INTAKE__COLUMN are both required",
+                data,
+            )
+        if not secrets_present:
+            return ProbeResult(
+                "intake",
+                DEGRADED,
+                "no tracker credential stored — an admin sets it at "
+                "PUT /settings/secrets/tracker-token; nothing can be read until they do",
+                data,
+            )
+        if listening == 0:
+            return ProbeResult(
+                "intake",
+                OK,
+                f"{cfg.tracker} configured; no repository has its listener switched on "
+                "(the default) — nothing is read or written",
+                data,
+            )
+        return ProbeResult(
+            "intake",
+            OK,
+            f"{cfg.tracker} configured; {listening} repository listener(s) on column "
+            f"{cfg.column!r} every {cfg.poll_s}s",
+            data,
+        )
+
+    return probes.run_probe("intake", _read, request_id=request_id)
+
+
 def _stamp(out: dict[str, Any], role: str) -> dict[str, Any]:
     """Add version, apparatus, role and time to an aggregated probe result."""
     out["version"] = __version__
@@ -540,6 +634,7 @@ def collect_health(
         probes.run_probe("toolchains", probes.probe_toolchains, request_id=rid),
         probes.run_probe("builders", probes.probe_builders, request_id=rid),
         probe_worker(factory, settings.worker_heartbeat_stale_s, request_id=rid),
+        probe_intake(factory, settings, request_id=rid),
     ]
     return _stamp(probes.aggregate(results), role)
 

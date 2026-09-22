@@ -308,6 +308,86 @@ class BuilderSettings(BaseModel):
         }
 
 
+class IntakeSettings(BaseModel):
+    """The tracker this deployment takes work from (``CRB_INTAKE__*``).
+
+    This is the *connection* only — which tracker, where, which project, which column.
+    Whether a given repository's listener is ON is not here: it is per repository, it
+    defaults to OFF, and an operator throws it on the Intake screen
+    (:class:`crb.server.intake.ListenerState`). The credential is not here either: it
+    lives in the product's own secret store as ``tracker_token`` and is read back as a
+    fingerprint, exactly like the GitHub App key.
+
+    ``tracker: none`` (the default) means no column is watched anywhere, whatever any
+    repository's listener says.
+    """
+
+    #: ``fake`` is the walkthrough's file-backed board; it is refused unless
+    #: ``CRB_ENABLE_FAKE_TRACKER=1`` is set, like the fixture builder.
+    tracker: Literal["none", "ado", "jira", "fake"] = "none"
+    #: Azure DevOps organisation URL (``https://dev.azure.com/contoso``) or Jira site URL
+    #: (``https://contoso.atlassian.net``).
+    url: str = ""
+    project: str = ""
+    #: The state (Azure DevOps) or status (Jira) the listener watches.
+    column: str = ""
+    #: Azure DevOps only: restrict the query to one area path.
+    area_path: str = ""
+    #: Jira only: extra JQL ANDed onto the query, the account email the API token belongs
+    #: to, and the custom fields holding story points and acceptance criteria on that site.
+    jql: str = ""
+    email: str = ""
+    points_field: str = ""
+    acceptance_field: str = ""
+    #: Seconds between polls of a switched-on repository's column.
+    poll_s: int = Field(default=300, ge=30)
+    #: ``merged``/``closed`` → the state the ticket moves to. EMPTY BY DEFAULT: a
+    #: deployment that configures nothing never moves anybody's ticket.
+    outcome_map: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def enabled(self) -> bool:
+        """Whether a tracker is configured at all (a listener still has to be switched on)."""
+        return self.tracker != "none" and bool(self.url.strip()) and bool(self.column.strip())
+
+    @field_validator("url")
+    @classmethod
+    def _https_only(cls, v: str) -> str:
+        # The credential travels on this URL. A plain-http tracker would put a personal
+        # access token on the wire, so it is refused at start-up rather than at the first
+        # poll (the same rule as the OIDC issuer and the GitHub API URL).
+        raw = v.strip().rstrip("/")
+        if raw and not raw.lower().startswith("https://"):
+            raise ValueError(f"the tracker URL must be https://, got {raw!r}")
+        return raw
+
+    @field_validator("outcome_map")
+    @classmethod
+    def _outcomes_are_known(cls, v: dict[str, str]) -> dict[str, str]:
+        bad = sorted(k for k in v if k not in ("merged", "closed"))
+        if bad:
+            raise ValueError(f"outcome_map keys must be 'merged' or 'closed', got {bad}")
+        return v
+
+    def redacted(self) -> dict[str, Any]:
+        """What ``/settings`` may show. There is no secret in this model, but the shape
+        matches ``BuilderSettings.redacted`` so a reader treats them alike."""
+        return {
+            "tracker": self.tracker,
+            "url": self.url,
+            "project": self.project,
+            "column": self.column,
+            "area_path": self.area_path,
+            "jql": self.jql,
+            "email": self.email,
+            "points_field": self.points_field,
+            "acceptance_field": self.acceptance_field,
+            "poll_s": self.poll_s,
+            "outcome_map": dict(self.outcome_map),
+            "enabled": self.enabled,
+        }
+
+
 class Settings(BaseSettings):
     """The top-level settings object: one instance per app, built from the environment
     (or by a test with keyword arguments). See the module docstring for the invariants."""
@@ -341,6 +421,9 @@ class Settings(BaseSettings):
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     builder: BuilderSettings = Field(default_factory=BuilderSettings)
+    #: Where work arrives from (ADR-0017). ``tracker: none`` by default: no column is
+    #: watched until an admin configures one AND an operator switches a listener on.
+    intake: IntakeSettings = Field(default_factory=IntakeSettings)
     metrics_enabled: bool = True
     log_format: Literal["json", "text"] = "json"
     log_level: str = "INFO"
@@ -491,6 +574,7 @@ class Settings(BaseSettings):
             "retention": {"transcripts_days": self.retention.transcripts_days},
             "sandbox": {"executor": self.sandbox.executor, "image": self.sandbox.image},
             "builder": self.builder.redacted(),
+            "intake": self.intake.redacted(),
             "metrics_enabled": self.metrics_enabled,
             "log_format": self.log_format,
             "worker_heartbeat_stale_s": self.worker_heartbeat_stale_s,
@@ -505,6 +589,7 @@ __all__ = [
     "TEMP_HOME_ADVICE",
     "BootstrapAdmin",
     "BuilderSettings",
+    "IntakeSettings",
     "OidcSettings",
     "RetentionSettings",
     "Role",

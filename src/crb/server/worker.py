@@ -216,6 +216,7 @@ from crb.core.run import BuildAttempt, RunSpec, RunSummary
 from crb.core.run import run as core_run
 from crb.core.runners import get_runner
 from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
+from crb.core.secrets_file import SecretsStore
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
 from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION, __version__
@@ -229,14 +230,23 @@ from crb.factory.delivery import (
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.testfirst import AuthoredTest
+from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.github_app import GitHubApp, GitHubAppError
+from crb.server.intake import (
+    IntakeStore,
+    ListenerState,
+    apply_outcome_map,
+    build_tracker,
+    poll_repository,
+    post_outcomes_to_tickets,
+)
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
-from crb.server.settings import GitHubAppSettings
+from crb.server.settings import GitHubAppSettings, IntakeSettings
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
@@ -441,6 +451,10 @@ class WorkerSettings:
     #: The GitHub App this deployment is registered as (``CRB_GITHUB__*``): the worker
     #: mints installation tokens to clone and deliver linked repositories (ADR-0014).
     github: GitHubAppSettings = field(default_factory=GitHubAppSettings)
+    #: Where work arrives from (``CRB_INTAKE__*``, ADR-0017): the worker reads the watched
+    #: column of every repository whose listener an operator switched on. ``tracker: none``
+    #: (the default) means the idle loop never polls anything.
+    intake: IntakeSettings = field(default_factory=IntakeSettings)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", Path(self.home).expanduser())
@@ -639,6 +653,9 @@ class Worker:
         self.worker_id = settings.worker_id
         self._checkin_lock = threading.Lock()
         self._last_checkin = 0.0
+        # the intake listener's own timer (ADR-0017): the first idle pass polls, then
+        # every CRB_INTAKE__POLL_S. Zero means "due now".
+        self._intake_last = 0.0
         self.reaper = ContainerReaper(self.home / STATE_FILENAME, docker=_reaper_docker())
         self._handlers: dict[str, Handler] = {
             KIND_SETUP: self._run_setup,
@@ -701,9 +718,127 @@ class Worker:
                 _LOG.exception("worker loop error")
                 run = None
             if run is None:
+                self.poll_intake()
                 stop.wait(self.settings.poll_s)
         self.checkin(stopped=True)
         _LOG.info("worker %s stopped", self.worker_id)
+
+    # --- intake: the enterprise's own board ----------------------------------------
+    def intake_due(self, now: float | None = None) -> bool:
+        """Is a poll due? ``CRB_INTAKE__POLL_S`` since the last one. A deployment with no
+        tracker configured is never due, so the idle loop costs nothing."""
+        if not self.settings.intake.enabled:
+            return False
+        t = time.time() if now is None else now
+        return (t - self._intake_last) >= float(self.settings.intake.poll_s)
+
+    def intake_repos(self) -> list[tuple[str, ListenerState]]:
+        """Every repository whose listener an operator switched ON, with its state.
+
+        Default OFF is enforced here as well as at the API: a repository row with no
+        ``intake`` key in its config is simply not in this list, so a deployment that has
+        configured a tracker still polls nothing until somebody consents.
+        """
+        out: list[tuple[str, ListenerState]] = []
+        with self.factory() as s:
+            for row in s.execute(select(Repo)).scalars().all():
+                state = ListenerState.from_config(dict(row.config_json or {}))
+                if state.enabled:
+                    out.append((str(row.name), state))
+        return out
+
+    def poll_intake(self, now: float | None = None) -> int:
+        """One pass of the intake listener over every switched-on repository.
+
+        Returns how many repositories were polled. Never raises: a tracker that cannot be
+        built or reached is an ``intake.stopped`` event on each repository's chain and the
+        next pass retries. Called from the idle loop only, so a poll never competes with a
+        run for this worker.
+        """
+        if not self.intake_due(now):
+            return 0
+        self._intake_last = time.time() if now is None else now
+        repos = self.intake_repos()
+        if not repos:
+            return 0
+        try:
+            tracker = build_tracker(
+                self.settings.intake, self._tracker_token(), home=self.settings.home
+            )
+        except TrackerError as exc:
+            for repo, _state in repos:
+                FactoryHome(self.home, repo).evidence(actor="worker").append(
+                    "intake.stopped", "", step="connect", reason=exc.reason, detail=exc.detail
+                )
+            _LOG.warning("intake not polled: %s", exc.reason)
+            return 0
+        for repo, state in repos:
+            try:
+                self._poll_one(repo, tracker, state)
+            except Exception:  # the idle loop must survive anything a tracker does
+                _LOG.exception("intake poll failed for %s", repo)
+        return len(repos)
+
+    def _tracker_token(self) -> str:
+        """The stored tracker credential, read at poll time and never held on the worker.
+        Missing or unreadable is an empty string, which ``build_tracker`` turns into the
+        ``no_secret`` stop an operator can act on."""
+        try:
+            return SecretsStore.from_env().get(TRACKER_TOKEN_SECRET) or ""
+        except Exception:  # an insecure or absent store is "no secret", never a crash
+            return ""
+
+    def _poll_one(self, repo: str, tracker: Any, state: ListenerState) -> None:
+        """Read one repository's column, then apply the outcome map to its merged items."""
+        home = FactoryHome(self.home, repo)
+        lookup = self._route_lookup(repo)
+        report = poll_repository(
+            repo,
+            tracker=tracker,
+            listener=state,
+            column=state.column or self.settings.intake.column,
+            home=home,
+            route_for=lookup,
+            item_url=lambda item_id: f"/factory?repo={repo}&item={item_id}",
+            run_active=lambda: self._factory_run_active(repo),
+            actor="worker",
+        )
+        IntakeStore(self.home, repo).write(report)
+        # what the loop did with the items this column produced, told to the tickets that
+        # produced them: the pull request link when one opened, the refusal and its way
+        # forward when the loop stopped. Read from the chain, posted once per marker.
+        post_outcomes_to_tickets(
+            tracker,
+            home=home,
+            item_url=lambda item_id: f"/factory?repo={repo}&item={item_id}",
+            evidence=home.evidence(actor="worker"),
+        )
+        apply_outcome_map(
+            tracker,
+            home=home,
+            outcome_map=dict(self.settings.intake.outcome_map),
+            evidence=home.evidence(actor="worker"),
+        )
+
+    def _factory_run_active(self, repo: str) -> bool:
+        """Is a factory run queued or running for ``repo``? A registration that arrives now
+        is queued rather than refused — the backlog hash a run verifies against must not
+        move under it."""
+        with self.factory() as s:
+            row = (
+                s.execute(
+                    select(Run.id)
+                    .where(
+                        Run.repo == repo,
+                        Run.kind == KIND_FACTORY,
+                        Run.status.in_(("queued", "running")),
+                    )
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+        return row is not None
 
     # --- the reaper ---------------------------------------------------------------
     @property

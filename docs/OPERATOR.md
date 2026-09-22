@@ -716,6 +716,20 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 - a sandbox escape or unexpected network egress from a test container;
 - a builder repeatedly disqualified for test tampering (shows as a rising `disqualified` count).
 
+**Intake stop conditions** (ADR-0017). A listener stops with one of six published reasons,
+shown on `/factory/intake?repo=`, on the item's evidence chain as `intake.stopped` and in
+`crb doctor`'s `intake` line. None of them loses work: the next poll retries, and nothing is
+registered from a partial read.
+
+| Reason | What happened | What you do |
+|---|---|---|
+| `not_configured` | no tracker is configured for this deployment (or `tracker: fake` without `CRB_ENABLE_FAKE_TRACKER=1`) | set the `CRB_INTAKE__*` block; a listener cannot be switched on until you have |
+| `no_secret` | a tracker is configured but no credential is stored | an admin stores the tracker token (`PUT /settings/secrets/tracker-token`, or the Settings screen) |
+| `unauthorised` | the tracker rejected the credential (401/403) | mint a new token with permission to read work items and add comments, and store it |
+| `unreachable` | the tracker did not answer (timeout, 5xx, 429) | check the URL and that the deployment may reach it; the next poll retries on its own |
+| `column_gone` | the watched column or state no longer exists on that board | point the listener at a column that does (`PUT /factory/{repo}/intake` with `column`) |
+| `refused` | the tracker refused a write — usually a workflow transition it does not allow, or a permission the credential lacks | nothing was changed on the ticket; fix the workflow or the permission, or clear `CRB_INTAKE__OUTCOME_MAP` |
+
 Resume only after root cause, correction, a targeted regression run and re-qualification
 of the affected cells.
 
@@ -762,3 +776,55 @@ credential: re-activating within the session lifetime (`CRB_SESSION_TTL`, 8 hour
 default) restores the sessions issued before. To contain a suspected compromise, deactivate
 **and** set a new password; the password is what ends the sessions for good. The last
 active admin can never be deactivated, by either door.
+
+## 10. Intake — work arriving from a board
+
+A team's own board can be the front door of the factory: a ticket moved into one watched
+column is the request to manufacture, and the ticket **is** the backlog item
+(ADR-0017). Nothing about this is on by default, and it takes two separate decisions by
+two different roles to switch on.
+
+**1. An admin configures the connection, once per deployment.** Set the `CRB_INTAKE__*`
+block on the API *and* the worker (DEPLOYMENT.md §2.1), then store the credential:
+
+```
+CRB_INTAKE__TRACKER=ado                       # none (default) | ado | jira
+CRB_INTAKE__URL=https://dev.azure.com/contoso # https only; the site URL for Jira
+CRB_INTAKE__PROJECT=Widgets
+CRB_INTAKE__COLUMN="Ready for manufacture"    # the System.State / Jira status watched
+CRB_INTAKE__AREA_PATH="Widgets\\Payments"      # Azure DevOps only, optional
+CRB_INTAKE__POLL_S=300
+CRB_INTAKE__OUTCOME_MAP='{"merged": "Done"}'  # EMPTY by default: no ticket is ever moved
+```
+
+The credential is deliberately **not** an environment variable. An admin stores it through
+`PUT /settings/secrets/tracker-token` (or the Settings screen): an Azure DevOps personal
+access token with *Work items: read & write*, or a Jira API token with the account email in
+`CRB_INTAKE__EMAIL`. It is held owner-only on the API host and read back only as a
+fingerprint, exactly like the GitHub App key.
+
+**2. An operator switches the listener on, per repository.** `/factory/intake?repo=` →
+*Switch the listener on*. Until they do, that repository's column is never read and no
+ticket is ever written to — and the switch is stored with who threw it and when. It is one
+click to switch off again.
+
+**What the product then does, and what it will never do.** Every `poll_s` the worker reads
+the column. For each ticket it has not already handled at its current revision it drafts a
+backlog item, runs the readiness gate, and leaves **one** comment (idempotent by a hidden
+marker) and **one** `crb:` label. When every question a good acceptance test needs is
+answered, the item is registered through the same path the freeze form uses and the ticket
+gets `crb:queued` with a link. An edited ticket comes back as an *evolution* — a new item
+superseding the old one; the frozen record is never rewritten. It will never edit any other
+field, never create a ticket, and never read a column it was not pointed at.
+
+**Telemetry.** `/health` and `crb doctor` carry an `intake` line: the tracker, whether a
+credential is stored, and how many listeners are on. It contacts no tracker — a readiness
+probe that called somebody else's service would make this deployment's health depend on
+theirs. Every step is on the repository's own evidence chain
+(`GET /factory/{repo}/evidence`) as `intake.polled`, `intake.read`,
+`intake.feedback.posted`, `intake.registered`, `intake.queued`, `intake.delivered`,
+`intake.transitioned` and `intake.stopped` (API.md, "Event vocabulary"). Stop conditions
+are in §8.
+
+**Cost.** Reading a column, drafting an item and posting the feedback call no model and
+spend nothing. Only a factory run spends, and it is still started the same way (§3).

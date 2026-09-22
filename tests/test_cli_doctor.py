@@ -239,6 +239,7 @@ DOCTOR_LINES = (
     "github_app",
     "database",
     "migrations",
+    "intake",
     "worker",
     "ui",
 )

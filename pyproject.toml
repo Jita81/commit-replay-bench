@@ -155,6 +155,7 @@ layers = [
   "(crb.cli)",
   "(crb.mcp)",
   "(crb.server)",
+  "(crb.intake)",
   "(crb.factory)",
   "(crb.store)",
   "(crb.builders) | crb.observability",

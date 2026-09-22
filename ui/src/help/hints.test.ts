@@ -73,6 +73,7 @@ const SEGMENT_ROUTE: Record<string, string | null> = {
   decisions: '/decisions',
   signoff: '/signoff',
   factory: '/factory',
+  intake: '/factory/intake',
   cell_route: '/factory',
   posture: '/posture',
   repos: '/repos',

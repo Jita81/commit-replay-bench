@@ -1,0 +1,54 @@
+---
+id: dod.page.factory-intake
+level: page
+name: Intake (work arriving from your board)
+scope: /factory/intake
+parent: dod.journey.intake-from-a-ticket
+children: []
+persons: [viewer, operator, approver, admin]
+owner: ui
+status: done                # WRITTEN BY THE CHECKER — never by hand
+updated: 2026-09-22
+---
+
+# Intake (work arriving from your board)
+
+**Purpose.** Show one repository's watched column: the listener (the consent gate, off
+until an operator switches it on), the deployment's tracker connection with no secret in
+it, what the last read did, and every ticket with the draft item the product made of it,
+its label, the questions still open and the feedback the ticket itself carries. A person
+can see what the product understood and what it still needs *before* any money is spent.
+
+**Entry → exit.** Arrives from the Factory screen or by URL (`/factory/intake?repo=`); with
+no `?repo=` the most recently updated repository is chosen, and with no repository at all
+the only exit is Connect. Every row's next step is one click: open the ticket on the team's
+own board, or open the item on `/factory?repo=&item=`. The three operator acts — switch the
+listener on or off, re-read the column now, post the feedback again — each leave a success
+state naming what happened, or the server's own stop reason with the server's own advice.
+
+**Non-goals.** It does not configure the tracker (that is a deployment setting an admin
+sets, plus a credential in the product's secret store) and it never shows the credential.
+It does not edit a ticket by hand: the only writes this product makes are one comment, one
+`crb:` label and the one configured state transition (ADR-0017). It does not register a
+backlog item directly — registration happens when the ticket's structural gaps close, on
+the same path the freeze form uses. It does not run the factory: a queued item is worked by
+a factory run started on `/factory`.
+
+## Definition of done
+
+| id | category | criterion | evidence | state | gap |
+|---|---|---|---|---|---|
+| factory-intake.purpose.1 | PURPOSE | The About block and the page purpose say in one sentence that a ticket moved into the watched column is the request to manufacture and that the ticket is the backlog item; the eyebrow reads "Journey · 4 of 4 · Factory · intake" | `hint:about:/factory/intake` · `code:ui/src/screens/Factory/IntakePage.tsx::IntakePage` · `code:ui/src/components/Layout.tsx::journeyEyebrow` | met | |
+| factory-intake.entry-exit.2 | ENTRY-EXIT | With no repository the exit is Connect; with no `?repo=` the latest repository is chosen; every row offers "Open the ticket" and, once registered, "Open the item"; the empty state says what to do rather than showing nothing | `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"says the listener is off, and that is the default for every repository"` · `code:ui/src/components/RepoPicker.tsx::useRepoParam` · `hint:id:link.intake.ticket` · `hint:id:link.intake.item` | met | |
+| factory-intake.truth.3 | TRUTH | Every ticket row carries the class the classifier chose WITH its confidence, the size and its rule, and the cell's route with n and the 95 % interval read from the map before any run; a cell nobody has measured is named as unmeasured and never shown as a zero rate; the served feedback is the comment on the ticket verbatim | `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"a registered ticket links to its item and says what it became"` · `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"an unmeasured cell is named as unmeasured, never shown as a zero rate"` · `test:tests/test_server_routes_intake.py::test_the_served_row_carries_the_cell_route_the_ticket_was_told_about` · `route:GET /factory/{repo}/intake` | met | |
+| factory-intake.truth.4 | TRUTH | The listener reads `off` on every repository until an operator switches it on, and the connection is served without the credential — presence and at most its last four characters | `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"never renders the tracker credential, only that one is stored and its last characters"` · `test:tests/test_server_routes_intake.py::test_every_repository_starts_with_its_listener_off_and_no_rows` · `test:tests/test_server_routes_intake.py::test_the_stored_tracker_token_is_never_served_anywhere` | met | |
+| factory-intake.actions.5 | ACTIONS | Each of the three acts shows a success state naming the outcome (the column and the interval; tickets seen, read, commented on, registered) and an error that says what to do; a stop shows the server's reason and the server's own advice, never the page's guess | `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"switching the listener on sends the PUT and says what it will now do"` · `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"re-reading the column names what happened: seen, read, commented, registered"` · `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"a stop shows the server’s reason and the server’s own advice, never our own"` · `code:src/crb/intake/client.py::TrackerError` | met | |
+| factory-intake.explanation.6 | EXPLANATION | Every element on the screen carries a hint from the registry and the ratchet enforces the route for a viewer and an operator with at least 14 hinted elements; the About block links the forward-mode guide and the operator stop conditions | `hint:ratchet:/factory/intake` · `hint:about:/factory/intake` · `vitest:ui/src/help/hints-ratchet.test.tsx::"${pattern} as ${role}: every element carries a resolved hint"` · `vitest:ui/src/help/hints-hover.instrument.test.tsx::"${route}: mouse-over on ${id} opens its bubble with the registry text; Escape closes it"` | met | |
+| factory-intake.evidence.7 | EVIDENCE | Unit tests cover the default-off listener, both switches, both polls, the stop, the viewer branch and the unconfigured deployment; route tests walk the same journey against the real server with a fake tracker; a tier-1 spec walks it in the browser | `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"a viewer is told who can switch the listener rather than shown a dead button"` · `test:tests/test_server_routes_intake.py::test_a_poll_comments_labels_and_registers_the_ticket` · `spec:ui/e2e/walkthrough/12-intake.spec.ts::"a ticket missing an acceptance fact is told what is missing, and nothing is registered"` · `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` | met | |
+| factory-intake.roles.8 | ROLES | Reading the column is a viewer's; switching the listener and polling are an operator's at the API and in the UI (a viewer is told who can, never shown a dead button); the tracker credential is an admin's | `test:tests/test_server_routes_intake.py::test_the_role_ladder_reading_is_a_viewer_switching_and_polling_are_an_operator` · `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"a viewer is told who can switch the listener rather than shown a dead button"` · `route:PUT /factory/{repo}/intake` · `route:PUT /settings/secrets/tracker-token` | met | |
+| factory-intake.operations.9 | OPERATIONS | `/health` and `crb doctor` carry an `intake` line (tracker, credential stored, listeners on) that contacts no tracker; the operator guide has an intake section and the six stop conditions; the routes and the `intake.*` vocabulary are API.md rows | `code:src/crb/server/routes/system.py::probe_intake` · `doc:docs/OPERATOR.md#10-intake-work-arriving-from-a-board` · `doc:docs/OPERATOR.md#8-stop-conditions` · `doc:docs/API.md#event-vocabulary` | met | |
+| factory-intake.accessibility.10 | ACCESSIBILITY | The route renders for every persona at 375 and 1280 with a hint bubble open and axe (WCAG 2.1 AA) clean, and does not scroll sideways at 375 | `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` · `spec:ui/e2e/walkthrough/12-intake.spec.ts::"at 375 px the intake screen does not scroll sideways"` | met | |
+| factory-intake.accessibility.11 | ACCESSIBILITY | The success and stop panels are announced to a screen reader as they appear, rather than being found only by sighted scanning | `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"announces the outcome and the stop to a screen reader as they land"` · `code:ui/src/screens/Factory/IntakePage.tsx::Stopped` | met |  |
+| factory-intake.non-goals.12 | NON-GOALS | The purpose block states the non-goals in the product's own words — no field edited but the comment, the label and the mapped state; no ticket created; no column read that it was not pointed at — and the comment on the ticket repeats them | `code:ui/src/screens/Factory/IntakePage.tsx::IntakePage` · `code:src/crb/intake/feedback.py::render_feedback` · `spec:ui/e2e/walkthrough/12-intake.spec.ts::"the comment names the cell’s route with its n and interval, read before any build"` | met | |
+
+## Gaps

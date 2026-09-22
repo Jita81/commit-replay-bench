@@ -88,6 +88,9 @@ export const env = {
   work: process.env.CRB_E2E_WORK ?? '',
   publicTier: process.env.CRB_E2E_PUBLIC === '1',
   builder: process.env.CRB_E2E_BUILDER ?? '',
+  /** The fake tracker's board file (ADR-0017). Tier 1 seeds and reads it directly; no
+   *  real Azure DevOps or Jira is contacted by any spec or by CI. */
+  board: process.env.CRB_E2E_BOARD ?? '',
 } as const
 
 const MIN = 60_000

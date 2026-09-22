@@ -1361,3 +1361,83 @@ export interface GitHubConnectRequest {
   belt_scope?: string | string[]
 }
 
+
+// --- intake: the enterprise's own board (ADR-0017) ------------------------------------
+
+/** One repository's intake listener. `enabled` is false until an operator switches it on. */
+export interface IntakeListener {
+  enabled: boolean
+  /** An override for the deployment's watched column; '' means "the deployment's". */
+  column: string
+  switched_by: string
+  switched_at: string
+  /** The newest change watermark a poll saw; the next poll asks from here. */
+  since: string
+}
+
+/** The deployment-wide tracker connection. Never carries the credential — only whether
+ *  one is stored and its fingerprint. */
+export interface IntakeConnection {
+  tracker: string
+  url: string
+  project: string
+  column: string
+  poll_s: number
+  outcome_map: Record<string, string>
+  configured: boolean
+  credential_set: boolean
+  credential_fingerprint: string
+}
+
+/** One ticket in the watched column, exactly as the last read saw it. */
+export interface IntakeRow {
+  key: string
+  title: string
+  url: string
+  revision: string
+  /** One of `crb:needs-info` · `crb:ready` · `crb:not-deliverable` · `crb:queued`, or ''. */
+  label: string
+  /** The ticket's own state on the board. */
+  state: string
+  item_id: string
+  item_url: string
+  /** The comment the product posted, verbatim — the row and the ticket never disagree. */
+  feedback: string
+  open_questions: Array<{ ref: string; severity: string; reason: string }>
+  capability_class: string
+  confidence: number
+  size: string
+  registered: boolean
+  is_evolution: boolean
+  supersedes: string
+  cell_route: FactoryTask['cell_route'] | null
+  read_at: string
+  /** A published stop reason when this ticket's own step stopped; '' otherwise. */
+  stopped: string
+  stopped_advice: string
+}
+
+/** What the last poll did, and why it stopped if it did. */
+export interface IntakePoll {
+  repo: string
+  column: string
+  seen: number
+  read: number
+  skipped: number
+  commented: number
+  registered: number
+  queued: number
+  stopped: string
+  detail: string
+  advice: string
+  at: string
+}
+
+/** `GET /factory/{repo}/intake` — the listener, the connection, the last poll, the column. */
+export interface Intake {
+  repo: string
+  listener: IntakeListener
+  connection: IntakeConnection
+  last_poll: IntakePoll | null
+  rows: IntakeRow[]
+}

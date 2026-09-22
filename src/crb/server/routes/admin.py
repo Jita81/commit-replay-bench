@@ -102,6 +102,8 @@ from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep, client_
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.secrets import (
     CLAUDE_CODE_TOKEN_MAX_LEN,
+    TRACKER_TOKEN_MAX_LEN,
+    TRACKER_TOKEN_SECRET,
     LoginBrokerDep,
     SecretsDep,
     VerifyLimiterDep,
@@ -262,6 +264,13 @@ class ClaudeCodeTokenIn(BaseModel):
     """The pasted ``claude setup-token`` value. Validated for shape in the route."""
 
     token: str = Field(min_length=1, max_length=CLAUDE_CODE_TOKEN_MAX_LEN)
+
+
+class TrackerTokenIn(BaseModel):
+    """The pasted tracker credential — an Azure DevOps personal access token or a Jira
+    API token. Validated for shape in the route; the value is never echoed back."""
+
+    token: str = Field(min_length=1, max_length=TRACKER_TOKEN_MAX_LEN)
 
 
 class LoginSessionOut(BaseModel):
@@ -561,6 +570,48 @@ def delete_claude_code_token(admin: AdminDep, secrets: SecretsDep) -> SecretStat
     del admin
     try:
         return _status_out(secrets.delete(CLI_TOKEN_SECRET))
+    except SecretsInsecure as exc:
+        raise ApiError(409, "secrets_insecure", str(exc)) from None
+
+
+_TRACKER_TOKEN_PATH = "/settings/secrets/tracker-token"  # noqa: S105 — a URL path
+
+
+@router.put(
+    _TRACKER_TOKEN_PATH,
+    response_model=SecretStatusOut,
+    responses={401: _ERR, 403: _ERR, 409: _ERR, 422: _ERR},
+    summary="Store the tracker token the intake listener polls with (ADO PAT or Jira API token)",
+)
+def put_tracker_token(
+    body: TrackerTokenIn, admin: AdminDep, secrets: SecretsDep
+) -> SecretStatusOut:
+    """Store the credential owner-only on the API host; the response is its status — the
+    fingerprint and who set it when — never the value. One credential per deployment: the
+    listener on every repository polls with it (ADR-0017)."""
+    try:
+        stored = secrets.set(
+            TRACKER_TOKEN_SECRET, body.token, set_by=admin.display_name or admin.id
+        )
+    except ValueError as exc:
+        raise ApiError(422, "invalid_token", str(exc)) from None
+    except SecretsInsecure as exc:
+        raise ApiError(409, "secrets_insecure", str(exc)) from None
+    return _status_out(stored)
+
+
+@router.delete(
+    _TRACKER_TOKEN_PATH,
+    response_model=SecretStatusOut,
+    responses={401: _ERR, 403: _ERR, 409: _ERR},
+    summary="Remove the stored tracker token (every listener then stops with no_secret)",
+)
+def delete_tracker_token(admin: AdminDep, secrets: SecretsDep) -> SecretStatusOut:
+    """Remove the credential (idempotent). Nothing is polled afterwards: every listener
+    stops with ``no_secret`` and says so on the Intake screen."""
+    del admin
+    try:
+        return _status_out(secrets.delete(TRACKER_TOKEN_SECRET))
     except SecretsInsecure as exc:
         raise ApiError(409, "secrets_insecure", str(exc)) from None
 

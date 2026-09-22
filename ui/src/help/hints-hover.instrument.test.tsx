@@ -33,6 +33,7 @@ import { INSTRUMENT_SCREENS } from './hints-ratchet.instrument'
 /** One element per screen: something only that screen renders. */
 const HOVER: Record<string, HintId> = {
   '/factory': 'pill.factory.frozen',
+  '/factory/intake': 'pill.intake.queued',
   '/posture': 'summary.posture.apparatus',
   '/repos': 'col.repos.probe',
   '/repos/:name': 'stat.repo.gold',

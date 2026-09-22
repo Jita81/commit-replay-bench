@@ -144,6 +144,51 @@ branch. Every step is in the evidence chain ([API.md](API.md) "Factory").
 
 ---
 
+## Step 9 — Let the work arrive from your own board (optional)
+
+Steps 1 to 8 assume somebody types the backlog into this product. They do not have to.
+A team's own board can be the front door: move a ticket into **one** watched column and
+that is the request to manufacture — the ticket *is* the backlog item, and the column is
+the consent gate (ADR-0017).
+
+**What you get for nothing.** Before any build is paid for, the ticket gets one comment in
+its own thread saying what a good acceptance test still needs answering — each question in
+the catalogue's words with the exact line to paste into the acceptance criteria — plus what
+this deployment has measured about changes of that kind and size (the route, the number of
+graded attempts behind it, the interval, and whether the honesty floor is intact). It is
+labelled `crb:needs-info`, `crb:ready`, `crb:not-deliverable` or `crb:queued`. Reading a
+column, drafting the item and posting that comment call no model and spend nothing.
+
+**Switching it on takes two people.** An admin configures the tracker and stores its
+credential once for the deployment; an operator switches the listener on for a repository
+on `/factory/intake?repo=`. Every repository starts with its listener **off**.
+[OPERATOR §10](OPERATOR.md#10-intake--work-arriving-from-a-board) has both.
+
+**Two things to know about how it reads a ticket.**
+
+*It says when it does not know.* The class of change is inferred from the title and the
+description and comes with a confidence. Below the published threshold the product says it
+could not classify the ticket and asks, rather than routing money at a guess. You can settle
+it yourself with a tag: `crb:class=bug.fix` (and `crb:kind=`, `crb:level=` likewise).
+
+*An edit is never an overwrite.* `(tracker, key, revision)` is the key: a ticket read again
+unchanged is not read again, and nothing is written. A ticket you edit comes back as a new
+item that **supersedes** the old one, so the frozen record a run verified against never
+moves under it.
+
+Story points map to a size tier on a published scale: `≤ 1 → XS`, `≤ 3 → S`, `≤ 8 → M`,
+`≤ 20 → L`, above that `XL`. A ticket with no estimate is `S`, and the comment says so.
+
+**The non-goals, so nobody has to wonder.** The product never edits any ticket field other
+than its own comment, its own `crb:` label and — only where your deployment configured a
+mapping — the one state change after a pull request merges. It never creates a ticket. It
+never reads a column it was not pointed at. It never puts your source code, your diffs, the
+ledger or an evidence pack on the tracker. Those are bounded by the size of the protocol it
+has (six verbs), not by a rule somebody has to remember
+([SECURITY §2](SECURITY.md#2-trust-boundaries)).
+
+---
+
 ## What a developer changes for a new repository — and what they do not
 
 **Change:** the repository's configuration (step 1), its `runner_opts` (step 2), possibly a

@@ -77,7 +77,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from crb.core.execution import DockerSettings, SandboxUnavailable
 from crb.observability import metrics
 from crb.observability.logging import configure_logging
-from crb.server.settings import GitHubAppSettings
+from crb.server.settings import GitHubAppSettings, IntakeSettings
 from crb.server.worker import Worker, WorkerSettings
 from crb.store.jobs import RUN_KINDS
 
@@ -203,6 +203,7 @@ def settings_from_args(
         keep_worktrees=bool(args.keep_worktrees),
         # the same CRB_GITHUB__* / CRB_METRICS_* the API reads (pydantic-settings parses them)
         github=shared.github,
+        intake=shared.intake,
         metrics_enabled=shared.metrics_enabled,
         metrics_host=host,
         metrics_port=int(port),
@@ -221,6 +222,10 @@ class _SharedWithApi(BaseSettings):
         env_prefix="CRB_", env_nested_delimiter="__", extra="ignore", case_sensitive=False
     )
     github: GitHubAppSettings = GitHubAppSettings()
+    #: The tracker this deployment takes work from (``CRB_INTAKE__*``, ADR-0017). The
+    #: worker polls the watched column of every repository whose listener is on; the API
+    #: reads the same block so one environment configures both processes.
+    intake: IntakeSettings = IntakeSettings()
     metrics_enabled: bool = True
     #: The worker's own exposition bind address (loopback by default, like the API's
     #: ``CRB_BIND_HOST``; a container sets ``0.0.0.0``) and port (the API keeps ``/metrics``
@@ -257,6 +262,13 @@ def _keys_for(env: dict[str, str]) -> dict[str, Any]:
     }
     if github:
         out["github"] = github
+    intake = {
+        k.removeprefix("CRB_INTAKE__").lower(): v
+        for k, v in env.items()
+        if k.upper().startswith("CRB_INTAKE__")
+    }
+    if intake:
+        out["intake"] = intake
     return out
 
 
