@@ -48,7 +48,11 @@ asserts `example.com:443` is reachable **fails** through that language's runner,
 to exactly that test id; an image absent from the daemon's store is `SandboxUnavailable`
 rather than a pull (the daemon's `No such image`, not its `pull access denied`); the language's fixture repository qualifies (RED at the parent, gold
 clean) and grades clean with the same baseline reading the host runner suite pins, leaving
-the host worktree untouched; the OCI labels and `USER` are set. The sandbox suite and the
+the host worktree untouched; the OCI labels and `USER` are set **[measured — 10 tests × 3
+images in `tests/test_sandbox_images_docker.py`, run as the CI `sandbox-images` job's smoke
+step on images built from the tree: 47 passed / 0 skipped locally (colima, Docker 29.5.2,
+2026-09-22) and 44 passed / 0 skipped in CI on PR #44 run 35678358686, head 4a64fe3;
+apparatus 2.2]**. The sandbox suite and the
 sealed-builder suite (`tests/test_sandbox_docker.py`, `tests/test_builders_container_docker.py`)
 also run on the python image in that job, so the kill path, the sidecar and the copy-back
 are proven on the shipped bytes too.

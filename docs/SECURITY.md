@@ -399,10 +399,13 @@ subject to a retention window.
   through the sidecar with a live credential has not yet been run in CI (it needs a
   credential and spend). Host mode remains the default until an operator sets
   `CRB_BUILDER__EXECUTOR=docker`. [gap — measured on the fake-model path only]
-- Reference sandbox images ship and are proven in CI (3.1), but every measurement to date
-  is on the host executor posture: no ledger row has yet been produced under the docker
-  posture. A live re-measurement, rows stamped `executor: docker`, is pending. [gap — the
-  images are measured, the posture's verdicts are not]
+- Reference sandbox images ship and are proven in CI (3.1) **[measured — 10 tests × 3 images,
+  `tests/test_sandbox_images_docker.py` as the `sandbox-images` job's smoke step: 44 passed /
+  0 skipped on PR #44 run 35678358686, head 4a64fe3; 47 / 0 locally on images built from the
+  tree, colima / Docker 29.5.2, 2026-09-22; apparatus 2.2]**. Every *verdict* to date is on
+  the host executor posture: no ledger row has yet been produced under the docker posture,
+  and a live re-measurement with rows stamped `executor: docker` is pending [gap — the
+  images are measured, the posture's verdicts are not].
 - Container escape is out of scope for the application layer.
 
 Report a vulnerability to the repository owner privately; do not open a public issue.
