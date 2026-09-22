@@ -102,13 +102,13 @@ server and never appear in logs or `/settings`.
 | `CRB_LOCAL_AUTH_ENABLED` | | set `false` once OIDC works |
 | `CRB_OIDC__ISSUER`, `__CLIENT_ID`, `__CLIENT_SECRET`, `__REDIRECT_URL`, `__SCOPES`, `__ROLE_CLAIM`, `__ROLE_MAP`, `__ADMIN_GROUPS` | for SSO | see §4.1 for the Entra ID mapping |
 | `CRB_GITHUB__APP_ID`, `__APP_SLUG`, `__PRIVATE_KEY` or `__PRIVATE_KEY_FILE`, `__API_URL`, `__WEB_URL` | for *Connect from GitHub* | the deployment's GitHub App (docs/GITHUB-APP.md); set on the **API and the worker**; the key from the secret store, never inline in a values file |
-| `CRB_SANDBOX__EXECUTOR` | | `docker` (default, fail-closed) or `local` (development) |
+| `CRB_SANDBOX__EXECUTOR` | api, worker | `docker` (default, fail-closed) or `local` (development). Read by the API (`/settings`, `/health`) and by the worker (`crb worker`; its short form `CRB_EXECUTOR` is read when this is absent) |
 | `CRB_METRICS_ENABLED` | api, worker | `true` (default). `false` → the api's `/metrics` answers 404 and the worker starts no exposition |
 | `CRB_METRICS_HOST` | worker | the address the worker's exposition binds (default `127.0.0.1`, like `CRB_BIND_HOST`: the series name repositories, builders and installations, so a bare `crb worker` on a host offers them to nobody else). Compose and Helm set `0.0.0.0` inside the container, where only the compose network / the NetworkPolicy's scraper can reach the port (§9.1) |
 | `CRB_METRICS_PORT` | worker | the worker's own Prometheus exposition port (default `9464`; `0` = off) — the build / grade / cost / delivery series live here, not on the api (§9) |
 | `CRB_LOG_FORMAT` / `CRB_LOG_LEVEL` | api, worker | `json` (default, one object per line) or `text`; `INFO` — every record is redacted before a handler sees it (§9) |
 | `CRB_WORKER_HEARTBEAT_STALE_S` | api | seconds after which a *running* run's heartbeat is reported stale by `/health` (default 120). Worker liveness itself is judged against each worker's own `heartbeat_s` (§9) |
-| `CRB_SANDBOX__IMAGE` | | default sandbox image when a repository config has none |
+| `CRB_SANDBOX__IMAGE` | worker | default sandbox image when a repository config has none (a repository's own `sandbox_image` wins). The shipped reference images — `deploy/sandbox/Dockerfile.{python,node,go}`, built and smoked by CI — are what to push to your registry and name here (`deploy/sandbox/README.md`); the worker never pulls (`docker run --pull=never` **[measured — `tests/test_execution.py::test_docker_build_argv_has_every_hardening_flag` pins the flag on the argv; `tests/test_sandbox_images_docker.py::test_an_absent_image_fails_closed_without_a_pull` proves an absent image is `SandboxUnavailable` (exit 125, `No such image`) against a daemon, colima / Docker 29.5.2; apparatus 2.2]**), so the image must be in the daemon's store |
 | `CRB_RETENTION__TRANSCRIPTS_DAYS` | | 0 = keep no builder transcripts (default) |
 | `CRB_OPENAI_BASE_URL`, `CRB_OPENAI_KEY_ENV` + the named key var | builder | OpenAI-compatible endpoint (vLLM, Cerebras, …) |
 | `CRB_AZURE_ENDPOINT`, `CRB_AZURE_DEPLOYMENT`, `CRB_AZURE_API_VERSION`, `CRB_AZURE_KEY_ENV` + `AZURE_OPENAI_API_KEY` | builder | Azure OpenAI in-tenant (setting the endpoint selects Azure) |
@@ -189,7 +189,10 @@ config:
   CRB_TRUSTED_PROXIES: 10.240.0.0/16          # ingress controller pod CIDR
   CRB_AZURE_ENDPOINT: https://<aoai>.openai.azure.com
   CRB_AZURE_DEPLOYMENT: gpt-4o
-  CRB_SANDBOX__IMAGE: <acr>.azurecr.io/crb-sandbox/python:2026-09
+  # the deployment default for repositories that name no sandbox_image: one of the shipped
+  # reference images (deploy/sandbox/README.md), pushed to your registry and pinned by digest;
+  # a repository of another toolchain names its own (`crb repo add --sandbox-image …`)
+  CRB_SANDBOX__IMAGE: <acr>.azurecr.io/crb-sandbox/python@sha256:<digest>
 worker:
   sandbox: { mode: dind }
   nodeSelector: { crb.dev/pool: worker }
@@ -199,7 +202,7 @@ networkPolicy:
   modelEndpoint: { cidrs: ["10.10.2.4/32"] }   # Azure OpenAI private endpoint
   oidc: { cidrs: ["10.10.3.4/32"] }            # egress proxy / firewall for login.microsoftonline.com
   extraEgress:
-    - to: [{ ipBlock: { cidr: 10.10.4.4/32 } }]   # ACR private endpoint (dind pulls sandbox images)
+    - to: [{ ipBlock: { cidr: 10.10.4.4/32 } }]   # ACR private endpoint (the dind sidecar's pre-pull of the sandbox images; the worker itself never pulls)
       ports: [{ protocol: TCP, port: 443 }]
 ingress:
   enabled: true
@@ -235,17 +238,57 @@ managed server; use `sslmode=require` (or `verify-full` with the CA) and a priva
 
 The worker creates one hardened container per test command (`--network=none --read-only
 --cap-drop=ALL --user 65534`). It therefore needs *a* Docker daemon. Without one the
-executor fails **closed**: runs become `blocked`, nothing executes on the node
+executor fails **closed**: runs are recorded `failed` (`sandbox unavailable: …`), nothing
+executes on the node
 ([OPERATOR.md §7](OPERATOR.md#7-when-the-sandbox-is-unavailable)).
 
 | `worker.sandbox.mode` | Mechanism | Blast radius | Use when |
 |---|---|---|---|
-| `none` (default) | — | none; runs are blocked | until you have decided |
+| `none` (default) | — | none; every run fails closed (`failed`, `sandbox unavailable`) | until you have decided |
 | `dind` | `docker:dind` sidecar in the worker pod, unix socket on a shared in-memory emptyDir, image store on an emptyDir | the **pod** — the sidecar is `privileged`, but it is the only privileged container and it never touches the node's runtime socket. Sandbox images are pulled by the sidecar (allow the registry in `extraEgress`) | the recommended cluster mode; put the worker on a dedicated node pool anyway |
 | `hostSocket` | `hostPath` mount of the node's `/var/run/docker.sock` + `supplementalGroups` | the **node** — socket access is root-equivalent | only with a dedicated, tainted node pool, a PodSecurity exemption for that namespace, and a written risk acceptance |
 
 In every mode the worker's own container stays non-root, read-only and capability-less,
 and `DockerSettings` refuses to mount the socket, `/` or `$HOME` into a sandbox.
+
+**Which image runs in the sandbox.** `deploy/sandbox/` ships three reference images —
+python (pytest), node (`node --test`), go — each digest-pinned **[measured — every `FROM`
+in the three Dockerfiles carries `@sha256:…`, n = 4 `FROM` lines, by inspection; apparatus
+2.2]**, uid 65534 both as the image's own default user and as the user the executor runs
+**[measured — `tests/test_sandbox_images_docker.py`: the image config's `User` is `65534:65534`
+and `id -u` inside prints 65534 with and without the executor, 2 tests × 3 images; apparatus
+2.2]**, read-only-root compatible, hadolint-clean, and proven from inside by CI on every pull
+request (the `sandbox-images` job runs each language's fixture repository through the real
+executor on the image it just built) **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]**. Build them, push them to your registry, pre-pull them into the
+daemon the worker talks to (the `dind` sidecar's store in that mode), and name them: the
+deployment default in `config.CRB_SANDBOX__IMAGE`, a repository's own in its
+`sandbox_image`. Everything else — build, tag, push, select, extend for a repository's
+dependencies, the re-pin cadence — is [deploy/sandbox/README.md](../deploy/sandbox/README.md).
+A JVM reference image is deliberately not shipped: the Maven runner's docker branch cannot
+resolve plugins offline yet (README §6).
+
+The `sandbox-images` job is meant to block a merge to `main` exactly as `container` does —
+it has no `continue-on-error` and fails on any skipped smoke test — but a job blocks only
+when its context is in the branch's required status checks, which is a repository setting,
+not a workflow file **[measured — `GET /repos/Jita81/commit-replay-bench/branches/main/protection`,
+2026-09-22: the context is absent; a red `sandbox-images` would not block a merge]**. The
+repository administrator adds it once:
+
+```bash
+gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks \
+  --input - <<'JSON'
+{"strict": true, "contexts": ["lint (ruff)", "types (mypy --strict)", "layers (import-linter)",
+ "code-map (every file has a valid header; docs/CODE-MAP.md is current)",
+ "test (py3.12)", "test (py3.13)", "test-postgres (store suite on PostgreSQL 16)",
+ "security (gitleaks + pip-audit)", "container (docker build + smoke + helm lint)",
+ "walkthrough (browser, live stack, tier 1)",
+ "sandbox-images (build + hadolint + smoke each reference sandbox image)"]}
+JSON
+```
+
+(the list is the current set plus the new context — `PATCH` replaces it, so send all of
+them; `GET …/protection` first to confirm the set has not moved). Until then the job's
+verdict is visible on every pull request but advisory.
 
 ## 4. Azure
 

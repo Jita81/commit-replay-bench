@@ -11,9 +11,13 @@ executed, ``3`` if the queue was empty) — what tests and one-shot CI jobs use.
 Without it the worker polls until ``SIGINT``/``SIGTERM``.
 
 Environment fallbacks: ``CRB_DATABASE_URL`` (see :func:`crb.store.db.database_url`),
-``CRB_HOME`` (default ``./.crb``), ``CRB_EXECUTOR``, ``CRB_SANDBOX_IMAGE``,
+``CRB_HOME`` (default ``./.crb``), ``CRB_SANDBOX__EXECUTOR`` / ``CRB_SANDBOX__IMAGE`` (the
+deployment's keys — what compose and Helm set and the API's ``Settings.sandbox`` reads; the
+short forms ``CRB_EXECUTOR`` / ``CRB_SANDBOX_IMAGE`` are read when those are absent),
 ``CRB_WORKER_ID``, ``CRB_METRICS_HOST`` (default ``127.0.0.1``), ``CRB_METRICS_PORT``
 (default 9464; ``0`` = off) and ``CRB_METRICS_ENABLED``. Flags win over the environment.
+The image is the DEFAULT for a repository that names no ``sandbox_image`` of its own; a
+repository's image wins over it (``crb.server.worker.docker_settings_for``).
 
 The worker serves its own Prometheus exposition on ``CRB_METRICS_HOST:CRB_METRICS_PORT``
 before it starts polling (not with ``--once``): the build / grade / cost series are
@@ -45,8 +49,10 @@ Works with:   src/crb/server/worker.py (``Worker`` / ``WorkerSettings`` — ever
               src/crb/observability/metrics.py (the worker's exposition server),
               src/crb/cli/commands/service.py (``crb worker`` forwards its argv here),
               deploy/entrypoint.sh (the container's ``worker`` role), deploy/docker-compose.yml
-              and deploy/helm/crb/templates/worker-deployment.yaml (expose the metrics port),
-              src/crb/core/execution.py (``DockerSettings`` for ``--image``)
+              and deploy/helm/crb/templates/worker-deployment.yaml (set ``CRB_SANDBOX__*`` and
+              expose the metrics port), src/crb/server/settings.py (``SandboxSettings`` — the
+              API's reading of the same keys), src/crb/core/execution.py (``DockerSettings``
+              for ``--image``), deploy/sandbox/README.md (the reference images ``--image`` names)
 Tested by:    tests/test_worker.py
 Touch when:   never for a new repository (the sandbox image is per repository, set in its
               config); adding a worker flag means adding it to ``WorkerSettings`` and to the
@@ -80,6 +86,13 @@ EXIT_ERROR = 2
 EXIT_IDLE = 3
 
 HOME_ENV = "CRB_HOME"
+#: The sandbox posture. ``CRB_SANDBOX__EXECUTOR`` / ``CRB_SANDBOX__IMAGE`` are the keys the
+#: deployment sets (compose, Helm, docs/DEPLOYMENT.md §2.1) and the API's ``Settings.sandbox``
+#: reads — one environment configures both processes; ``CRB_EXECUTOR`` / ``CRB_SANDBOX_IMAGE``
+#: are the worker's short forms. Until 2026-09-21 the worker read only the short forms, so a
+#: compose / Helm worker silently ran ``local`` while ``/settings`` reported ``docker``.
+SANDBOX_EXECUTOR_ENV = "CRB_SANDBOX__EXECUTOR"
+SANDBOX_IMAGE_ENV = "CRB_SANDBOX__IMAGE"
 EXECUTOR_ENV = "CRB_EXECUTOR"
 IMAGE_ENV = "CRB_SANDBOX_IMAGE"
 WORKER_ID_ENV = "CRB_WORKER_ID"
@@ -111,7 +124,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--image",
         default="",
-        help="sandbox image for --executor docker (default: $CRB_SANDBOX_IMAGE or the repo's)",
+        help="default sandbox image for --executor docker when a repository names none "
+        "(default: $CRB_SANDBOX__IMAGE, else $CRB_SANDBOX_IMAGE)",
     )
     p.add_argument("--worker-id", default="", help="stable worker identity (default: host-pid)")
     p.add_argument("--poll", type=float, default=2.0, help="seconds between polls when idle")
@@ -158,8 +172,12 @@ def settings_from_args(
     # object): a worker started with --home but no CRB_HOME would otherwise look under
     # ./.crb/secrets for the Claude Code token the Settings UI stored under <home>.
     os.environ.setdefault(HOME_ENV, str(home))
-    executor = (args.executor or e.get(EXECUTOR_ENV) or "local").strip().lower()
-    image = (args.image or e.get(IMAGE_ENV) or "").strip()
+    executor = (
+        (args.executor or e.get(SANDBOX_EXECUTOR_ENV) or e.get(EXECUTOR_ENV) or "local")
+        .strip()
+        .lower()
+    )
+    image = (args.image or e.get(SANDBOX_IMAGE_ENV) or e.get(IMAGE_ENV) or "").strip()
     docker = DockerSettings(image=image) if image else None
     kinds = tuple(k.strip() for k in str(args.kinds).split(",") if k.strip())
     unknown = [k for k in kinds if k not in RUN_KINDS]

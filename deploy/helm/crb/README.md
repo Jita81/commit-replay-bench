@@ -28,7 +28,7 @@ Key values (see `values.yaml` for all, every default is the secure choice):
 | `existingSecret` | Secret holding `CRB_SECRET_KEY`, `CRB_DATABASE_URL`, optional client secrets / API keys. The chart never renders secret values and refuses secret-looking keys under `config` |
 | `config.*` | plain `CRB_*` environment (OIDC issuer/client id, model endpoint, sandbox executor/image) |
 | `postgresql.mode` | `external` (managed server; URL in the Secret) or `embedded` (evaluation only) |
-| `worker.sandbox.mode` | `none` (fail-closed; runs `blocked`), `dind` (privileged sidecar, pod-scoped), `hostSocket` (node's docker.sock — dedicated node pool only) |
+| `worker.sandbox.mode` | `none` (fail-closed; runs `failed`, `sandbox unavailable`), `dind` (privileged sidecar, pod-scoped), `hostSocket` (node's docker.sock — dedicated node pool only) |
 | `worker.workDir` | PVC (default, resumable) or emptyDir |
 | `networkPolicy.*` | `apiIngress` peers, `postgres.cidrs`, `modelEndpoint.cidrs` (worker), `oidc.cidrs` (api), `extraEgress` |
 | `ingress.*` | host, class, TLS secret |

@@ -1084,6 +1084,11 @@ def test_docker_settings_resolution(h: Harness) -> None:
         **{**cfg.to_dict(), "language": cfg.language, "sandbox_image": "repo:3"}
     )
     assert docker_settings_for(repo_cfg, None, {}).image == "repo:3"
+    # the worker's image is the DEFAULT for a repository without one: the repository's own
+    # image wins (two toolchains on one worker), with the worker's caps; params still win
+    repo_on_base = docker_settings_for(repo_cfg, base, {})
+    assert repo_on_base.image == "repo:3" and repo_on_base.memory == "4g"
+    assert docker_settings_for(repo_cfg, base, {"image": "other:2"}).image == "other:2"
     with pytest.raises(SandboxUnavailable):
         docker_settings_for(cfg, None, {})
 
@@ -1370,6 +1375,26 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     s = worker_main.settings_from_args(args, env)
     assert s.home == tmp_path / "h" and s.executor == "docker"
     assert s.docker is not None and s.docker.image == "img:1" and s.worker_id == "env-w"
+    # the deployment's keys — what compose / Helm set and the API reads — are honoured and
+    # win over the short forms; without either the worker is `local` with no image
+    deployed = worker_main.settings_from_args(
+        args,
+        {
+            **env,
+            "CRB_SANDBOX__EXECUTOR": "docker",
+            "CRB_SANDBOX__IMAGE": "crb-sandbox-python:2026-09",
+            "CRB_EXECUTOR": "local",
+            "CRB_SANDBOX_IMAGE": "",
+        },
+    )
+    assert deployed.executor == "docker"
+    assert deployed.docker is not None and deployed.docker.image == "crb-sandbox-python:2026-09"
+    only_deployed = worker_main.settings_from_args(
+        args, {"CRB_HOME": str(tmp_path / "h"), "CRB_SANDBOX__EXECUTOR": "Docker"}
+    )
+    assert only_deployed.executor == "docker" and only_deployed.docker is None
+    bare = worker_main.settings_from_args(args, {"CRB_HOME": str(tmp_path / "h")})
+    assert bare.executor == "local" and bare.docker is None
     # J-TEL-1: the worker's own /metrics port — CRB_METRICS_PORT (default 9464; 0 = off),
     # gated by the same CRB_METRICS_ENABLED the API reads; the bind is loopback unless the
     # deployment says otherwise (the series name repositories, builders and installations)
