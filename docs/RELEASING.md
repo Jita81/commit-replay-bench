@@ -46,13 +46,19 @@ reviewed (CodeRabbit on PR #43, 2026-09-21). `tests/test_release_tag.py` proves 
 outcomes on a throwaway repository and that the workflow runs the step before `uv build`.
 
 The workflow check is the floor; **who may create a `v*` tag** is the repository's setting,
-not the pipeline's — [aspiration] add a **tag-protection ruleset** (*Settings → Rules →
-Rulesets → New tag ruleset*, target `v*`, *Restrict creations* with maintainers as the
-bypass list, and *Restrict deletions* / *Block force pushes* so a tag never moves). The
-ruleset governs **who** may create, delete or move a `v*` tag — it does not check what the
-tag points at, and a maintainer on the bypass list can still tag an unmerged commit; main
-ancestry is enforced by the workflow alone, on every tag, whoever pushed it. CodeRabbit's
-ruleset query on PR #43 (2026-09-21) found none; the workflow's refusal is the floor either way.
+not the pipeline's — and that setting does not exist: **this repository has no ruleset at
+all, so anyone who can push may create, move or delete a `v*` tag** [gap] **[measured
+2026-09-22 — the repository's rules read once from the setting itself (`gh api
+…/rules/branches/main`), which returned an empty list, n = 1 reading; apparatus n/a: a
+repository setting, not a graded number]**. The way to close it is a **tag-protection
+ruleset** (*Settings → Rules → Rulesets → New tag ruleset*, target `v*`, *Restrict creations*
+with maintainers as the bypass list, and *Restrict deletions* / *Block force pushes* so a tag
+never moves), which only an administrator of the repository can add. Even then the ruleset
+governs **who** may create, delete or move a `v*` tag — it does not check what the tag points
+at, and a maintainer on the bypass list can still tag an unmerged commit; main ancestry is
+enforced by the workflow alone, on every tag, whoever pushed it, which is why the workflow's
+refusal is the floor either way. (CodeRabbit's ruleset query on PR #43, 2026-09-21, also
+found none — the gap has been open since at least then.)
 
 ## 2. Cut a release
 
@@ -129,7 +135,7 @@ cosign triangulate --type digest ghcr.io/jita81/commit-replay-bench:X.Y.Z   # th
 docker run --rm ghcr.io/jita81/commit-replay-bench:X.Y.Z python -c 'import crb.core.version as v; print(v.__version__)'   # prints X.Y.Z
 ```
 
-And on GitHub: the *release* workflow run for the tag shows all three jobs green and the
+And on GitHub: the *release* workflow run for the tag shows every job green and the
 `crb-dist-<tag>` / `crb-image-sbom-<tag>` artifacts; the package page
 (*Packages → commit-replay-bench*) lists the tags `X.Y.Z` and `sha-<sha>` **and no
 `latest`**; the digest the package page shows is the one `cosign triangulate` printed.
