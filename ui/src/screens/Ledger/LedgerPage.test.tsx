@@ -41,7 +41,11 @@ describe('LedgerPage', () => {
     expect(button.getAttribute('title')).toBeNull()
     const note = screen.getByTestId('abstract-export-note')
     expect(note.textContent).toContain('Cells only: no code, no identifiers; what a federated deployment may share.')
-    expect(button).toHaveAttribute('aria-describedby', note.id)
+    // the note stays the first description; the hint bubble is appended to it (both resolve)
+    const described = button.getAttribute('aria-describedby')!.split(' ')
+    expect(described[0]).toBe(note.id)
+    expect(described).toHaveLength(2)
+    expect(document.getElementById(described[1]!)).toHaveAttribute('role', 'tooltip')
   })
 
   it('a viewer has no abstract export and no note; the filter words are terms that open inline', async () => {

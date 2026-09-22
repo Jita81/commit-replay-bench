@@ -42,6 +42,7 @@ import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
@@ -77,18 +78,18 @@ function ProfileTable({ cells, classes, sizes, total }: { cells: ProfileCell[]; 
         <thead className="bg-surface-high">
           <tr>
             <th scope="col" className="label border-b border-border px-3 py-2 text-left">
-              Class
+              <Hint id="col.profile.class">Class</Hint>
             </th>
             {sizeList.map((s) => (
               <th key={s} scope="col" className="label border-b border-border px-3 py-2 text-right">
-                {s}
+                <Hint id="col.profile.size">{s}</Hint>
               </th>
             ))}
             <th scope="col" className="label border-b border-border px-3 py-2 text-right">
-              Total
+              <Hint id="col.profile.total">Total</Hint>
             </th>
             <th scope="col" className="label border-b border-border px-3 py-2 text-right">
-              Share
+              <Hint id="col.profile.share">Share</Hint>
             </th>
           </tr>
         </thead>
@@ -109,8 +110,11 @@ function ProfileTable({ cells, classes, sizes, total }: { cells: ProfileCell[]; 
                   const n = c?.count ?? 0
                   const alpha = n === 0 ? 0 : 0.15 + 0.6 * (n / max)
                   return (
-                    <td key={s} className="px-3 py-1.5 text-right" style={n ? { background: `color-mix(in srgb, var(--trust) ${Math.round(alpha * 100)}%, transparent)` } : undefined} title={n === 0 ? `0 of ${fmtInt(total)} classified commits — none in this cell (measured, not missing)` : `${fmtInt(n)} of ${fmtInt(total)} classified commits`}>
-                      {n === 0 ? <span className="text-on-surface-muted" aria-label="0 commits">0</span> : fmtInt(n)}
+                    <td key={s} className="px-3 py-1.5 text-right" style={n ? { background: `color-mix(in srgb, var(--trust) ${Math.round(alpha * 100)}%, transparent)` } : undefined}>
+                      {/* one hint for every cell of the census (dense: hover and tap, not a tab stop each) */}
+                      <Hint id="chart.profile.cell" tabStop={false}>
+                        {n === 0 ? <span className="text-on-surface-muted" aria-label="0 commits">0</span> : fmtInt(n)}
+                      </Hint>
                     </td>
                   )
                 })}
@@ -147,22 +151,22 @@ function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => v
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-3">
-        <StatTile label="Replayable tasks" value={fmtInt(tc.total)} n={tc.total} apparatus="mined at the commit's parent, RED-checked" />
-        <StatTile label="Gold-clean" value={tc.total ? fmtPct(tc.gold_clean / tc.total, 0) : '—'} n={tc.total} ci={tc.total ? wilson(tc.gold_clean, tc.total) : null} apparatus={`${fmtInt(tc.gold_clean)} clean · ${fmtInt(tc.gold_failed)} failed · ${fmtInt(tc.unchecked)} unchecked · Wilson 95% over the mined tasks`} />
-        <StatTile label="Hard pool" value={fmtInt(tc.hard)} n={tc.total} apparatus={`${fmtInt(tc.standard)} standard · ${fmtInt(tc.hard)} hard`} />
+        <StatTile label="Replayable tasks" hint="stat.repo.tasks" value={fmtInt(tc.total)} n={tc.total} apparatus="mined at the commit's parent, RED-checked" />
+        <StatTile label="Gold-clean" hint="stat.repo.gold" value={tc.total ? fmtPct(tc.gold_clean / tc.total, 0) : '—'} n={tc.total} ci={tc.total ? wilson(tc.gold_clean, tc.total) : null} apparatus={`${fmtInt(tc.gold_clean)} clean · ${fmtInt(tc.gold_failed)} failed · ${fmtInt(tc.unchecked)} unchecked · Wilson 95% over the mined tasks`} />
+        <StatTile label="Hard pool" hint="stat.repo.hard" value={fmtInt(tc.hard)} n={tc.total} apparatus={`${fmtInt(tc.standard)} standard · ${fmtInt(tc.hard)} hard`} />
       </div>
       <Card
         title="Toolchain probe"
         actions={
           can('operator') && (
-            <Button size="sm" onClick={() => probe.mutate(repo.name, { onSuccess: (run) => navigate(`/runs/${run.id}`) })} disabled={probe.isPending}>
+            <Button size="sm" onClick={() => probe.mutate(repo.name, { onSuccess: (run) => navigate(`/runs/${run.id}`) })} disabled={probe.isPending} hint="button.repo.probe_now">
               {probe.isPending ? 'Enqueuing…' : 'Probe now'}
             </Button>
           )
         }
       >
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <Pill tone={d.tone} glyph={d.glyph} label={d.describe} data-testid="repo-probe">
+          <Pill tone={d.tone} glyph={d.glyph} label={d.describe} data-testid="repo-probe" hint="pill.repo.probe">
             {d.label}
           </Pill>
           <span className="text-on-surface-muted" data-testid="repo-probe-detail">
@@ -170,9 +174,9 @@ function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => v
           </span>
           {repo.probe.checked && <span className="text-xs text-on-surface-muted">checked {fmtDate(repo.probe.checked)}</span>}
           {repo.probe.run_id && (
-            <Link to={`/runs/${repo.probe.run_id}`} className="font-mono text-xs">
+            <Hint as={Link} id="link.repo.probe_run" to={`/runs/${repo.probe.run_id}`} className="font-mono text-xs">
               run {shortId(repo.probe.run_id, 8)}
-            </Link>
+            </Hint>
           )}
         </div>
         {probe.isError && (
@@ -184,15 +188,25 @@ function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => v
       <Card title="Next steps">
         <div className="flex flex-wrap gap-2">
           {can('operator') && (
-            <Button variant="filled" onClick={onStartRun}>
+            <Button variant="filled" onClick={onStartRun} hint="button.repo.start_run">
               Start a run
             </Button>
           )}
-          <LinkButton to={`/connect/${encodeURIComponent(repo.name)}`}>Connection walk</LinkButton>
-          <LinkButton to={`/factory?repo=${encodeURIComponent(repo.name)}`}>Factory</LinkButton>
-          <LinkButton to={`/capability?repo=${encodeURIComponent(repo.name)}`}>Capability map</LinkButton>
-          <LinkButton to={`/oracle?repo=${encodeURIComponent(repo.name)}`}>Oracle adequacy</LinkButton>
-          <LinkButton to={`/runs?repo=${encodeURIComponent(repo.name)}`}>Runs</LinkButton>
+          <LinkButton to={`/connect/${encodeURIComponent(repo.name)}`} hint="button.repo.next_steps">
+            Connection walk
+          </LinkButton>
+          <LinkButton to={`/factory?repo=${encodeURIComponent(repo.name)}`} hint="button.repo.next_steps">
+            Factory
+          </LinkButton>
+          <LinkButton to={`/capability?repo=${encodeURIComponent(repo.name)}`} hint="button.repo.next_steps">
+            Capability map
+          </LinkButton>
+          <LinkButton to={`/oracle?repo=${encodeURIComponent(repo.name)}`} hint="button.repo.next_steps">
+            Oracle adequacy
+          </LinkButton>
+          <LinkButton to={`/runs?repo=${encodeURIComponent(repo.name)}`} hint="button.repo.next_steps">
+            Runs
+          </LinkButton>
         </div>
       </Card>
     </div>
@@ -204,27 +218,34 @@ function TasksTab({ name }: { name: string }) {
   const tasks = useRepoTasks(name, { limit: 500 })
   const columns = useMemo<Column<TaskSpec>[]>(
     () => [
-      { key: 'task_id', header: 'Task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <Link to={`/tasks/${encodeURIComponent(t.repo)}/${t.task_id}`} title={t.task_id}>{shortId(t.task_id)}</Link> },
-      { key: 'subject', header: 'Subject', sortValue: (t) => t.subject, cell: (t) => <span className="line-clamp-1" title={t.subject}>{t.subject}</span> },
-      { key: 'class', header: 'Class', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
-      { key: 'size', header: 'Size', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
-      { key: 'pool', header: 'Pool', sortValue: (t) => t.pool, cell: (t) => t.pool, hideBelowMd: true },
-      { key: 'churn', header: 'Churn', numeric: true, sortValue: (t) => t.src_churn, cell: (t) => fmtInt(t.src_churn), hideBelowMd: true },
+      { key: 'task_id', header: 'Task', hint: 'col.tasks.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <Link to={`/tasks/${encodeURIComponent(t.repo)}/${t.task_id}`} title={t.task_id}>{shortId(t.task_id)}</Link> },
+      { key: 'subject', header: 'Subject', hint: 'col.tasks.subject', sortValue: (t) => t.subject, cell: (t) => <span className="line-clamp-1" title={t.subject}>{t.subject}</span> },
+      { key: 'class', header: 'Class', hint: 'col.tasks.class', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
+      { key: 'size', header: 'Size', hint: 'col.tasks.size', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
+      { key: 'pool', header: 'Pool', hint: 'col.tasks.pool', sortValue: (t) => t.pool, cell: (t) => t.pool, hideBelowMd: true },
+      { key: 'churn', header: 'Churn', hint: 'col.tasks.churn', numeric: true, sortValue: (t) => t.src_churn, cell: (t) => fmtInt(t.src_churn), hideBelowMd: true },
       {
         key: 'gold',
         header: 'Gold',
+        hint: 'col.tasks.gold',
         sortValue: (t) => (t.gold_clean === null ? -1 : Number(t.gold_clean)),
         cell: (t) =>
           t.gold_clean === null ? (
-            <Pill tone="muted" glyph="·" size="xs" label="Gold status: unchecked">unchecked</Pill>
+            <Pill tone="muted" glyph="·" size="xs" label="Gold status: unchecked" hint="pill.tasks.gold" tabStop={false}>
+              unchecked
+            </Pill>
           ) : t.gold_clean ? (
-            <Pill tone="green" glyph="✓" size="xs" label="Gold status: clean">clean</Pill>
+            <Pill tone="green" glyph="✓" size="xs" label="Gold status: clean" hint="pill.tasks.gold" tabStop={false}>
+              clean
+            </Pill>
           ) : (
-            <Pill tone="red" glyph="✗" size="xs" label={`Gold status: failed${t.gold_note ? ` — ${t.gold_note}` : ''}`}>failed</Pill>
+            <Pill tone="red" glyph="✗" size="xs" label={`Gold status: failed${t.gold_note ? ` — ${t.gold_note}` : ''}`} hint="pill.tasks.gold" tabStop={false}>
+              failed
+            </Pill>
           ),
       },
-      { key: 'red', header: 'RED-checked', sortValue: (t) => Number(t.red_checked), cell: (t) => (t.red_checked ? '✓' : '—'), hideBelowMd: true },
-      { key: 'authored', header: 'Authored', sortValue: (t) => t.authored, cell: (t) => <span className="text-xs text-on-surface-muted">{fmtDate(t.authored)}</span>, hideBelowMd: true },
+      { key: 'red', header: 'RED-checked', hint: 'col.tasks.red', sortValue: (t) => Number(t.red_checked), cell: (t) => (t.red_checked ? '✓' : '—'), hideBelowMd: true },
+      { key: 'authored', header: 'Authored', hint: 'col.tasks.authored', sortValue: (t) => t.authored, cell: (t) => <span className="text-xs text-on-surface-muted">{fmtDate(t.authored)}</span>, hideBelowMd: true },
     ],
     [],
   )
@@ -275,8 +296,10 @@ export function RepoDetail() {
       <PageHeader eyebrow="Instrument · Repositories" title={name} purpose="The repository as an instrument: probe, mined tasks, change profile, and the config that governs how its commits are replayed." />
       <div role="tablist" aria-label="Repository sections" className="flex gap-1 border-b border-border">
         {tabs.map((t) => (
-          <button
+          <Hint
+            as="button"
             key={t.id}
+            id={`tab.repo.${t.id}`}
             role="tab"
             type="button"
             aria-selected={tab === t.id}
@@ -284,7 +307,7 @@ export function RepoDetail() {
             className={`-mb-px h-10 border-b-2 px-3 text-sm ${tab === t.id ? 'border-primary font-semibold text-primary' : 'border-transparent text-on-surface-muted hover:text-on-surface'}`}
           >
             {t.label}
-          </button>
+          </Hint>
         ))}
       </div>
       <QueryBoundary query={repo} loading="Loading repository…">

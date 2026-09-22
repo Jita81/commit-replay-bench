@@ -37,6 +37,8 @@ import { Button } from '../../components/Button'
 import { ErrorState } from '../../components/ErrorState'
 import { TextArea, TextField } from '../../components/Field'
 import { Pill } from '../../components/Pill'
+import { Hint } from '../../components/Hint'
+import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
 import { fmtDate, shortId } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
@@ -73,9 +75,10 @@ const VERDICT_GLYPH: Record<Verdict, string> = {
   not_reviewed: '—',
 }
 
-export function VerdictPill({ verdict, size = 'xs' }: { verdict: Verdict; size?: 'xs' | 'sm' }) {
+/** A review verdict as a pill; `hint` is the shared `review.verdict` unless the caller has a more specific one (the draft preview). */
+export function VerdictPill({ verdict, size = 'xs', hint = 'review.verdict' }: { verdict: Verdict; size?: 'xs' | 'sm'; hint?: HintId }) {
   return (
-    <Pill tone={VERDICT_TONE[verdict]} glyph={VERDICT_GLYPH[verdict]} size={size} label={`Review verdict: ${VERDICT_LABELS[verdict]}`} data-testid={`review-verdict-${verdict}`}>
+    <Pill tone={VERDICT_TONE[verdict]} glyph={VERDICT_GLYPH[verdict]} size={size} label={`Review verdict: ${VERDICT_LABELS[verdict]}`} data-testid={`review-verdict-${verdict}`} hint={hint}>
       {VERDICT_LABELS[verdict]}
     </Pill>
   )
@@ -207,8 +210,10 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
           {FINDING_KINDS.map((k) => {
             const on = kinds.includes(k)
             return (
-              <button
+              <Hint
+                as="button"
                 key={k}
+                id="button.review.finding"
                 type="button"
                 aria-pressed={on}
                 disabled={notReviewed}
@@ -219,11 +224,11 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
                 }`}
               >
                 {FINDING_LABELS[k]}
-              </button>
+              </Hint>
             )
           })}
           <span className="ml-auto flex items-center gap-2 text-xs text-on-surface-muted">
-            verdict <VerdictPill verdict={verdict} />
+            verdict <VerdictPill verdict={verdict} hint="pill.review.draft_verdict" />
           </span>
         </div>
 
@@ -232,17 +237,18 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
             <div key={k} className="grid gap-2 rounded-[var(--radius-control)] border border-border bg-surface-high p-3 sm:grid-cols-[1fr_180px_80px]" data-testid={`finding-${k}`}>
               <TextField
                 label={`${FINDING_LABELS[k]} — note`}
+                hint="field.review.finding"
                 required
                 value={drafts[k].note}
                 onChange={(e) => setDrafts((d) => ({ ...d, [k]: { ...d[k], note: e.target.value } }))}
                 placeholder="What you saw, in one sentence"
               />
-              <TextField label="File" value={drafts[k].file} onChange={(e) => setDrafts((d) => ({ ...d, [k]: { ...d[k], file: e.target.value } }))} placeholder="path (optional)" />
-              <TextField label="Line" inputMode="numeric" value={drafts[k].line} onChange={(e) => setDrafts((d) => ({ ...d, [k]: { ...d[k], line: e.target.value.replace(/[^0-9]/g, '') } }))} placeholder="n" />
+              <TextField label="File" hint="field.review.finding" value={drafts[k].file} onChange={(e) => setDrafts((d) => ({ ...d, [k]: { ...d[k], file: e.target.value } }))} placeholder="path (optional)" />
+              <TextField label="Line" hint="field.review.finding" inputMode="numeric" value={drafts[k].line} onChange={(e) => setDrafts((d) => ({ ...d, [k]: { ...d[k], line: e.target.value.replace(/[^0-9]/g, '') } }))} placeholder="n" />
             </div>
           ))}
 
-        <fieldset className="flex flex-wrap items-center gap-4 text-xs" disabled={notReviewed}>
+        <Hint as="fieldset" id="field.review.mergeable" className="flex flex-wrap items-center gap-4 text-xs" disabled={notReviewed}>
           <legend className="label">Would a maintainer merge this as-is?</legend>
           {(['yes', 'no', ''] as const).map((v) => (
             <label key={v || 'unanswered'} className="inline-flex items-center gap-1">
@@ -250,16 +256,16 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
               {v === 'yes' ? 'Mergeable' : v === 'no' ? 'Not mergeable' : 'Not answered'}
             </label>
           ))}
-        </fieldset>
+        </Hint>
 
-        <TextArea label="Statement" required rows={3} value={statement} onChange={(e) => setStatement(e.target.value)} placeholder="What you concluded and why — this is the governance record." />
+        <TextArea label="Statement" hint="field.review.statement" required rows={3} value={statement} onChange={(e) => setStatement(e.target.value)} placeholder="What you concluded and why — this is the governance record." />
 
-        <label className="inline-flex items-center gap-2 text-xs">
+        <Hint as="label" id="field.review.not_reviewed" className="inline-flex items-center gap-2 text-xs">
           <input type="checkbox" checked={notReviewed} onChange={(e) => setNotReviewed(e.target.checked)} data-testid="not-reviewed" />
           I looked but could not review this row (records <em>not reviewed</em>: no findings, no hash)
-        </label>
+        </Hint>
 
-        <div className="rounded-[var(--radius-control)] border border-border bg-surface-high p-3 text-xs" data-testid="review-anchor" data-state={anchored ? 'anchored' : 'unanchored'}>
+        <Hint as="div" id="tile.review.anchor" className="rounded-[var(--radius-control)] border border-border bg-surface-high p-3 text-xs" data-testid="review-anchor" data-state={anchored ? 'anchored' : 'unanchored'}>
           <div className="font-semibold">Anchor</div>
           {patch === null ? (
             <p className="text-on-surface-muted">
@@ -276,7 +282,7 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
               <span className="font-mono">{shortId(patch.diffSha256, 16)}</span>
             </p>
           )}
-        </div>
+        </Hint>
 
         {blockers.length > 0 && (
           <ul className="m-0 list-disc space-y-1 pl-5 text-xs text-on-surface-muted" data-testid="review-blockers">
@@ -298,7 +304,7 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
         {err && !refusal && <ErrorState error={err} onRetry={submit} />}
 
         <div className="flex items-center gap-3">
-          <Button variant="filled" onClick={submit} disabled={!canSubmit} data-testid="review-submit">
+          <Button variant="filled" onClick={submit} disabled={!canSubmit} data-testid="review-submit" hint="button.review.record">
             {create.isPending ? 'Recording…' : 'Record review'}
           </Button>
           {submitted && (
@@ -329,7 +335,7 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
                 <div className="flex flex-wrap items-center gap-2">
                   <VerdictPill verdict={r.verdict} />
                   {r.mergeable !== null && (
-                    <Pill tone={r.mergeable ? 'green' : 'amber'} size="xs" label={r.mergeable ? 'Mergeable' : 'Not mergeable'}>
+                    <Pill tone={r.mergeable ? 'green' : 'amber'} size="xs" label={r.mergeable ? 'Mergeable' : 'Not mergeable'} hint="pill.review.mergeable">
                       {r.mergeable ? 'mergeable' : 'not mergeable'}
                     </Pill>
                   )}

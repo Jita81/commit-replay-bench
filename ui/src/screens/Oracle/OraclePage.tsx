@@ -47,6 +47,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { GateBanner } from '../../components/GateBanner'
 import { Term } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
@@ -63,7 +64,7 @@ const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL']
 function BandPill({ band }: { band: string }) {
   const d = bandDisplay(band)
   return (
-    <Pill tone={d.tone} glyph={d.glyph} size="xs" label={d.describe}>
+    <Pill tone={d.tone} glyph={d.glyph} size="xs" label={d.describe} hint={d.hint} tabStop={false}>
       {d.label}
     </Pill>
   )
@@ -73,7 +74,7 @@ function BandPill({ band }: { band: string }) {
 function GatePill({ gate }: { gate: string }) {
   const d = gateDisplay(gate)
   return (
-    <Pill tone={d.tone} glyph={d.glyph} size="xs" label={d.describe}>
+    <Pill tone={d.tone} glyph={d.glyph} size="xs" label={d.describe} hint={d.hint} tabStop={false}>
       {d.label}
     </Pill>
   )
@@ -94,25 +95,26 @@ function ControlsSection({ repo }: { repo: string }) {
   const q = useOracleControls(repo)
   const columns = useMemo<Column<ControlRow>[]>(
     () => [
-      { key: 'task', header: 'Task', mono: true, sortValue: (r) => r.task_id, cell: (r) => <Link to={`/tasks/${encodeURIComponent(r.repo)}/${r.task_id}`} title={r.task_id}>{shortId(r.task_id)}</Link> },
-      { key: 'control', header: 'Control', mono: true, sortValue: (r) => r.control, cell: (r) => r.control },
-      { key: 'expected', header: 'Expected', sortValue: (r) => r.expected, cell: (r) => r.expected },
-      { key: 'observed', header: 'Observed', sortValue: (r) => r.observed, cell: (r) => r.observed },
+      { key: 'task', header: 'Task', hint: 'col.controls.task', mono: true, sortValue: (r) => r.task_id, cell: (r) => <Link to={`/tasks/${encodeURIComponent(r.repo)}/${r.task_id}`} title={r.task_id}>{shortId(r.task_id)}</Link> },
+      { key: 'control', header: 'Control', hint: 'col.controls.control', mono: true, sortValue: (r) => r.control, cell: (r) => r.control },
+      { key: 'expected', header: 'Expected', hint: 'col.controls.expected', sortValue: (r) => r.expected, cell: (r) => r.expected },
+      { key: 'observed', header: 'Observed', hint: 'col.controls.expected', sortValue: (r) => r.observed, cell: (r) => r.observed },
       {
         key: 'verdict',
         header: 'Verdict',
+        hint: 'col.controls.verdict',
         sortValue: (r) => r.verdict,
         cell: (r) => {
           const t = VERDICT_TONE[r.verdict] ?? { tone: 'muted' as const, glyph: '?' }
           return (
-            <Pill tone={t.tone} glyph={t.glyph} size="xs" label={`Verdict: ${r.verdict}${r.note ? ` — ${r.note}` : ''}`}>
+            <Pill tone={t.tone} glyph={t.glyph} size="xs" label={`Verdict: ${r.verdict}${r.note ? ` — ${r.note}` : ''}`} hint="pill.controls.verdict" tabStop={false}>
               {r.verdict}
             </Pill>
           )
         },
       },
-      { key: 'note', header: 'Note', cell: (r) => <span className="text-xs text-on-surface-muted">{r.note}</span>, hideBelowMd: true },
-      { key: 'dur', header: 'Duration', numeric: true, sortValue: (r) => r.duration_s, cell: (r) => fmtSeconds(r.duration_s), hideBelowMd: true },
+      { key: 'note', header: 'Note', hint: 'col.controls.note_duration', cell: (r) => <span className="text-xs text-on-surface-muted">{r.note}</span>, hideBelowMd: true },
+      { key: 'dur', header: 'Duration', hint: 'col.controls.note_duration', numeric: true, sortValue: (r) => r.duration_s, cell: (r) => fmtSeconds(r.duration_s), hideBelowMd: true },
     ],
     [],
   )
@@ -129,7 +131,7 @@ function ControlsSection({ repo }: { repo: string }) {
         <EmptyState
           title="No controls report yet"
           reason={`The negative-control matrix (gold, noop, test-tamper, stub, regression, hardcode-cheat, env-poison) proves the grader refuses what it must refuse.${can('operator') ? '' : ' An operator runs the controls.'}`}
-          action={can('operator') ? <LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=controls`}>Run controls</LinkButton> : undefined}
+          action={can('operator') ? <LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=controls`} hint="button.oracle.run_controls">Run controls</LinkButton> : undefined}
         />
       )
     }
@@ -146,16 +148,18 @@ function ControlsSection({ repo }: { repo: string }) {
     : `${v.state}${v.measured ? ` · ${fmtInt(v.constructible)} of ${fmtInt(v.total)} constructible (${Math.round(v.share * 100)}%) · ${fmtInt(v.escapes)} escape(s)${v.complete ? '' : ' · run cancelled part-way'}` : ''}${v.run_id ? ` · run ${shortId(v.run_id)}` : ''}`
   return (
     <div className="space-y-4">
-      <GateBanner
-        title="Negative controls"
-        eyebrow="the grader refuses what it must refuse"
-        criteria={[
-          { label: 'Routing verdict (from the API)', ok: verdictOk, detail: verdictDetail },
-          { label: 'No VIOLATION rows', ok: c.violations === 0, detail: `${fmtInt(c.violations)} violation(s) over ${fmtInt(c.n_rows)} rows` },
-          { label: 'Report present', ok: c.n_rows > 0, detail: `${fmtInt(c.n_tasks)} tasks · ${fmtInt(c.n_rows)} control rows` },
-          { label: 'Escapes reported (findings, not failures)', ok: true, detail: `${fmtInt(c.escapes)} escape(s) · ${fmtInt(c.not_constructible)} not constructible · ${fmtInt(c.skipped)} skipped` },
-        ]}
-      />
+      <Hint as="div" id="gate.oracle.controls">
+        <GateBanner
+          title="Negative controls"
+          eyebrow="the grader refuses what it must refuse"
+          criteria={[
+            { label: 'Routing verdict (from the API)', ok: verdictOk, detail: verdictDetail, hint: 'gate.oracle.verdict' },
+            { label: 'No VIOLATION rows', ok: c.violations === 0, detail: `${fmtInt(c.violations)} violation(s) over ${fmtInt(c.n_rows)} rows`, hint: 'gate.oracle.violations' },
+            { label: 'Report present', ok: c.n_rows > 0, detail: `${fmtInt(c.n_tasks)} tasks · ${fmtInt(c.n_rows)} control rows`, hint: 'gate.oracle.present' },
+            { label: 'Escapes reported (findings, not failures)', ok: true, detail: `${fmtInt(c.escapes)} escape(s) · ${fmtInt(c.not_constructible)} not constructible · ${fmtInt(c.skipped)} skipped`, hint: 'gate.oracle.escapes' },
+          ]}
+        />
+      </Hint>
       <DataTable rows={c.rows} columns={columns} rowKey={(r) => `${r.task_id}|${r.control}`} caption="Negative-control rows" dense initialSort={{ key: 'verdict', dir: 'desc' }} empty={<EmptyState compact title="No control rows" />} />
     </div>
   )
@@ -169,40 +173,41 @@ export function OraclePage() {
 
   const cellCols = useMemo<Column<OracleCell>[]>(
     () => [
-      { key: 'class', header: 'Class', mono: true, sortValue: (c) => c.capability_class, cell: (c) => c.capability_class },
-      { key: 'size', header: 'Size', sortValue: (c) => SIZE_ORDER.indexOf(c.size), cell: (c) => <span className="font-mono text-xs">{c.size}</span> },
-      { key: 'n', header: 'n', numeric: true, sortValue: (c) => c.n, cell: (c) => fmtInt(c.n) },
-      { key: 'strength', header: 'Strength (mean)', numeric: true, sortValue: (c) => c.strength_mean ?? -1, cell: (c) => fmtRatio(c.strength_mean) },
-      { key: 'band', header: 'Band', sortValue: (c) => c.band, cell: (c) => <BandPill band={c.band} /> },
-      { key: 'gate', header: 'Gate', sortValue: (c) => c.gate, cell: (c) => <GatePill gate={c.gate} /> },
+      { key: 'class', header: 'Class', hint: 'col.oracle_cell.cell', mono: true, sortValue: (c) => c.capability_class, cell: (c) => c.capability_class },
+      { key: 'size', header: 'Size', hint: 'col.oracle_cell.cell', sortValue: (c) => SIZE_ORDER.indexOf(c.size), cell: (c) => <span className="font-mono text-xs">{c.size}</span> },
+      { key: 'n', header: 'n', hint: 'col.oracle_cell.n', numeric: true, sortValue: (c) => c.n, cell: (c) => fmtInt(c.n) },
+      { key: 'strength', header: 'Strength (mean)', hint: 'col.oracle_cell.strength', numeric: true, sortValue: (c) => c.strength_mean ?? -1, cell: (c) => fmtRatio(c.strength_mean) },
+      { key: 'band', header: 'Band', hint: 'col.oracle_cell.band', sortValue: (c) => c.band, cell: (c) => <BandPill band={c.band} /> },
+      { key: 'gate', header: 'Gate', hint: 'col.oracle_cell.gate', sortValue: (c) => c.gate, cell: (c) => <GatePill gate={c.gate} /> },
     ],
     [],
   )
   const taskCols = useMemo<Column<OracleTask>[]>(
     () => [
-      { key: 'task', header: 'Task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <Link to={`/tasks/${encodeURIComponent(repo)}/${t.task_id}`} title={t.task_id}>{shortId(t.task_id)}</Link> },
-      { key: 'class', header: 'Class', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
-      { key: 'size', header: 'Size', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
+      { key: 'task', header: 'Task', hint: 'col.oracle_task.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <Link to={`/tasks/${encodeURIComponent(repo)}/${t.task_id}`} title={t.task_id}>{shortId(t.task_id)}</Link> },
+      { key: 'class', header: 'Class', hint: 'col.oracle_task.task', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
+      { key: 'size', header: 'Size', hint: 'col.oracle_task.task', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
       // strength = killed / mutants, a binomial rate: it is shown with its Wilson 95% interval
       // (computed from the served counts, never a fabricated bound) and its n
       {
         key: 'strength',
         header: 'Strength [Wilson 95%]',
+        hint: 'col.oracle_task.strength',
         numeric: true,
         sortValue: (t) => t.strength ?? -1,
         cell: (t) => {
           if (t.strength === null || t.mutants <= 0) return fmtRatio(t.strength)
           const w = wilson(t.killed, t.mutants)
           return (
-            <span title={`${fmtInt(t.killed)} of ${fmtInt(t.mutants)} mutants killed · Wilson 95% [${fmtRatio(w.low)}, ${fmtRatio(w.high)}]`}>
+            <span>
               {fmtRatio(t.strength)} <span className="text-[10px] text-on-surface-muted">[{fmtRatio(w.low)}, {fmtRatio(w.high)}]</span>
             </span>
           )
         },
       },
-      { key: 'mutants', header: 'Killed / mutants (n)', numeric: true, sortValue: (t) => t.mutants, cell: (t) => `${fmtInt(t.killed)} / ${fmtInt(t.mutants)}` },
-      { key: 'band', header: 'Band', sortValue: (t) => t.band, cell: (t) => <BandPill band={t.band} /> },
-      { key: 'gate', header: 'Gate', sortValue: (t) => t.gate, cell: (t) => <GatePill gate={t.gate} /> },
+      { key: 'mutants', header: 'Killed / mutants (n)', hint: 'col.oracle_task.mutants', numeric: true, sortValue: (t) => t.mutants, cell: (t) => `${fmtInt(t.killed)} / ${fmtInt(t.mutants)}` },
+      { key: 'band', header: 'Band', hint: 'col.oracle_cell.band', sortValue: (t) => t.band, cell: (t) => <BandPill band={t.band} /> },
+      { key: 'gate', header: 'Gate', hint: 'col.oracle_cell.gate', sortValue: (t) => t.gate, cell: (t) => <GatePill gate={t.gate} /> },
     ],
     [repo],
   )
@@ -224,17 +229,17 @@ export function OraclePage() {
           return (
             <div className="space-y-6">
               <div className="flex flex-wrap gap-3">
-                <StatTile label="Mean strength" value={fmtRatio(mean)} n={scored.length} apparatus={`mean of ${fmtInt(scored.length)} task kill-rates (each carries its own Wilson interval below; a mean of rates has none) · ${o.policy.version} · apparatus ${o.apparatus_versions?.join('/') || '—'}`} />
-                <StatTile label="Strong (clears the deliver bar)" value={fmtInt(bands.strong)} n={o.tasks.length} apparatus={`floor ${fmtRatio(o.policy.autoship_floor)}`} tone={bands.strong ? 'green' : undefined} />
-                <StatTile label="Adequate" value={fmtInt(bands.adequate)} n={o.tasks.length} apparatus={`floor ${fmtRatio(o.policy.adequate_floor)}`} tone={bands.adequate ? 'primary' : undefined} />
-                <StatTile label="Weak" value={fmtInt(bands.weak)} n={o.tasks.length} apparatus="a green on these routes to a human" tone={bands.weak ? 'amber' : undefined} />
-                <StatTile label="Unscoreable" value={fmtInt(bands.unscoreable)} n={o.tasks.length} apparatus="no mutants — never clears the bar" />
+                <StatTile label="Mean strength" hint="stat.oracle.mean" value={fmtRatio(mean)} n={scored.length} apparatus={`mean of ${fmtInt(scored.length)} task kill-rates (each carries its own Wilson interval below; a mean of rates has none) · ${o.policy.version} · apparatus ${o.apparatus_versions?.join('/') || '—'}`} />
+                <StatTile label="Strong (clears the deliver bar)" hint="stat.oracle.strong" value={fmtInt(bands.strong)} n={o.tasks.length} apparatus={`floor ${fmtRatio(o.policy.autoship_floor)}`} tone={bands.strong ? 'green' : undefined} />
+                <StatTile label="Adequate" hint="stat.oracle.adequate" value={fmtInt(bands.adequate)} n={o.tasks.length} apparatus={`floor ${fmtRatio(o.policy.adequate_floor)}`} tone={bands.adequate ? 'primary' : undefined} />
+                <StatTile label="Weak" hint="stat.oracle.weak" value={fmtInt(bands.weak)} n={o.tasks.length} apparatus="a green on these routes to a human" tone={bands.weak ? 'amber' : undefined} />
+                <StatTile label="Unscoreable" hint="stat.oracle.unscoreable" value={fmtInt(bands.unscoreable)} n={o.tasks.length} apparatus="no mutants — never clears the bar" />
               </div>
               <p className="m-0 text-xs text-on-surface-muted">
                 Band is the task’s or cell’s <Term id="oracle_strength">oracle strength</Term> against the policy’s floors. Gate is what a green licenses at that strength: clears the bar (a branch and pull request under review), review-gated, or needs a <Term id="human">human</Term>.
               </p>
               <Card padded={false} title="Per cell">
-                <DataTable rows={o.cells} columns={cellCols} rowKey={(c) => `${c.capability_class}|${c.size}`} caption="Oracle strength per cell" empty={<EmptyState compact title="No cells scored" reason={can('operator') ? 'Run an oracle run to measure mutation strength per task.' : 'Mutation strength is measured per task; an operator runs an oracle run.'} action={can('operator') ? <LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=oracle`}>Run oracle</LinkButton> : undefined} />} />
+                <DataTable rows={o.cells} columns={cellCols} rowKey={(c) => `${c.capability_class}|${c.size}`} caption="Oracle strength per cell" empty={<EmptyState compact title="No cells scored" reason={can('operator') ? 'Run an oracle run to measure mutation strength per task.' : 'Mutation strength is measured per task; an operator runs an oracle run.'} action={can('operator') ? <LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=oracle`} hint="button.oracle.run_oracle">Run oracle</LinkButton> : undefined} />} />
               </Card>
               <Card padded={false} title="Per task">
                 <DataTable rows={o.tasks} columns={taskCols} rowKey={(t) => t.task_id} caption="Oracle strength per task" dense initialSort={{ key: 'strength', dir: 'asc' }} empty={<EmptyState compact title="No tasks scored" />} />

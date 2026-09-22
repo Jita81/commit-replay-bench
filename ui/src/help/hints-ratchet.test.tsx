@@ -5,8 +5,9 @@
  * Navigation
  * ----------
  * What it is:   The ratchet for the hint layer: the collector, the per-route table read
- *               against App.tsx, the ALLOWLIST of routes not yet enforced, the shell and
- *               shared-component checks, and the `title=` allowlist.
+ *               against App.tsx, the ALLOWLIST of routes not yet enforced (empty since the
+ *               shippable wave), the shell and shared-component checks, and the `title=`
+ *               allowlist.
  * What it does: (1) Reads every `<Route path>` in App.tsx: each screen route must be either
  *               an entry in `SCREENS` (enforced: rendered per role under its fixtures, every
  *               element resolved to a registry id, at least `MIN_HINTS[route]` hinted
@@ -33,11 +34,14 @@
  *               entries and fixtures), ui/src/components/Hint.tsx (the `data-hint` the
  *               collector looks for), ui/src/App.tsx (the route table),
  *               ui/src/components/Layout.tsx (the shell), ui/src/test/utils.tsx (`renderApp`,
- *               `mockApi`, `PRINCIPAL`), ui/src/help/hints.test.ts (the copy lint)
+ *               `mockApi`, `PRINCIPAL`), ui/src/help/hints.test.ts (the copy lint),
+ *               ui/src/help/hints-ratchet.instrument.tsx (`INSTRUMENT_SCREENS` and
+ *               `INSTRUMENT_VARIANTS`: the factory, deployment and instrument routes' entries
+ *               and their deeper states — tabs, dialogs, the evidence drawer)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx
- * Touch when:   a screen's hints are wired — move its route from `ALLOWLIST` to `SCREENS`
- *               with its fixtures and roles; a `title=` is retired — lower its file's count;
- *               a screen is added — it needs one or the other before this passes.
+ * Touch when:   a screen is added — it needs a `SCREENS` entry (in the on-ramp or instrument
+ *               sidecar) with its fixtures and roles before this passes; a `title=` is
+ *               retired — lower its file's count; a route is put on `ALLOWLIST` — say why.
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -63,6 +67,7 @@ import { AuthProvider } from '../lib/auth'
 import { ControlsPill, FailureSplitPills, ModelPointLine } from '../screens/Capability/FailureSplit'
 import { PRINCIPAL, mockApi, renderApp } from '../test/utils'
 import { unhinted } from './hints-collector'
+import { INSTRUMENT_SCREENS, INSTRUMENT_VARIANTS } from './hints-ratchet.instrument'
 import { ONRAMP_SCREENS } from './hints-ratchet.onramp'
 import { HINTS, MIN_HINTS } from './hints'
 
@@ -88,24 +93,13 @@ interface ScreenEntry {
  * Example:
  *   '/results': { route: '/results?repo=r', path: '/results', element: <ResultsPage />, api: RESULTS_API, roles: ['viewer', 'approver'] },
  */
-const SCREENS: Record<string, ScreenEntry> = { ...ONRAMP_SCREENS }
+const SCREENS: Record<string, ScreenEntry> = { ...ONRAMP_SCREENS, ...INSTRUMENT_SCREENS }
 
-/** Routes not yet wired (the build wave's H1/H2 streams remove theirs). A route here has no `SCREENS` entry. */
-const ALLOWLIST: readonly string[] = [
-  '/posture',
-  '/repos',
-  '/repos/:name',
-  '/runs',
-  '/runs/:id',
-  '/tasks/:repo/:taskId',
-  '/capability',
-  '/routing',
-  '/oracle',
-  '/learn',
-  '/ledger',
-  '/factory',
-  '/settings',
-]
+/**
+ * Routes not yet wired. Empty since the shippable wave: every route the shell serves is in
+ * `SCREENS` and enforced. A route added here has no `SCREENS` entry — and a reviewer asks why.
+ */
+const ALLOWLIST: readonly string[] = []
 
 // ─── the collector ────────────────────────────────────────────────────────────────────────
 
@@ -125,19 +119,16 @@ function hinted(root: ParentNode): number {
  * visible text is the short form. Retired as hints land: the count only goes down.
  */
 const TITLE_ALLOWLIST: Record<string, number> = {
-  'components/LiveLog.tsx': 4,
+  'components/LiveLog.tsx': 3,
   'screens/Capability/CapabilityPage.tsx': 1,
-  'screens/Factory/FactoryPage.tsx': 2,
+  'screens/Factory/FactoryPage.tsx': 1,
   'screens/Learn/LearnPage.tsx': 1,
   'screens/Ledger/LedgerPage.tsx': 1,
-  'screens/Oracle/OraclePage.tsx': 1,
-  'screens/Repos/RepoConfigTab.tsx': 1,
-  'screens/Repos/RepoDetail.tsx': 2,
+  'screens/Repos/RepoDetail.tsx': 1,
   'screens/Repos/RunnerOptsEditor.tsx': 1,
-  'screens/Runs/EvidenceDrawer.tsx': 7,
+  'screens/Runs/EvidenceDrawer.tsx': 6,
   'screens/Runs/ReviewPanel.tsx': 2,
   'screens/Runs/RunDetailPage.tsx': 1,
-  'screens/Runs/RunNewDialog.tsx': 1,
 }
 
 /** A `title=` on a native element, or on a component that spreads its props onto one. */
@@ -198,6 +189,22 @@ describe('hint ratchet: the route table', () => {
         await waitFor(() => expect(hinted(container)).toBeGreaterThanOrEqual(MIN_HINTS[pattern]!))
         const misses = unhinted(container)
         expect(misses, `unhinted elements on ${pattern} as ${role}:\n  ${misses.join('\n  ')}`).toEqual([])
+      })
+    }
+  }
+
+  // the deeper states one route entry cannot reach — a tab, an open dialog, an open drawer —
+  // held to the same collector (the fixtures and open steps live beside the screens' entries)
+  for (const v of INSTRUMENT_VARIANTS) {
+    for (const role of v.roles) {
+      it(`${v.name} as ${role}: every element carries a resolved hint`, async () => {
+        mockApi({ 'GET /auth/me': { ...PRINCIPAL, role }, ...v.api })
+        const { container } = renderApp(v.element, { route: v.route, path: v.path })
+        await screen.findByRole('heading', { level: 1 })
+        if (v.open) await v.open(container)
+        await waitFor(() => expect(hinted(container)).toBeGreaterThanOrEqual(v.minHints ?? 4))
+        const misses = unhinted(container)
+        expect(misses, `unhinted elements in ${v.name} as ${role}:\n  ${misses.join('\n  ')}`).toEqual([])
       })
     }
   }

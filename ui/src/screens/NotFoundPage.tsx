@@ -27,7 +27,9 @@ export function NotFoundPage() {
   return (
     <>
       <PageHeader eyebrow="Not found" title="This page does not exist" />
-      <EmptyState glyph="∅" title="Nothing lives at this address" reason={<span className="font-mono text-xs">{loc.pathname}</span>} action={<LinkButton variant="filled" to="/home">Back to Home</LinkButton>} />
+      <EmptyState glyph="∅" title="Nothing lives at this address" reason={<span className="font-mono text-xs">{loc.pathname}</span>} action={<LinkButton variant="filled" to="/home" hint="button.notfound.home">
+            Back to Home
+          </LinkButton>} />
     </>
   )
 }

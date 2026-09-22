@@ -13,25 +13,42 @@
  * How:          Controlled: the parent owns the array; every change emits a new array.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/screens/Repos/RunnerOptsEditor.tsx (the `list` and `env` kinds),
+ * Works with:   ui/src/components/Hint.tsx (`hintId` wraps the group so its inputs and
+ *               buttons are explained), ui/src/screens/Repos/RunnerOptsEditor.tsx (the `list` and `env` kinds),
  *               ui/src/screens/Repos/RepoConfigForm.tsx (the belt-scope list),
  *               ui/src/components/Button.tsx
  * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx (rows added and sent),
  *               ui/e2e/walkthrough/repo-config.spec.ts (the belt-scope row editor in Chromium)
  * Touch when:   never for a new repository.
  */
-import { useId, type ReactNode } from 'react'
+import { useId, type HTMLAttributes, type ReactNode } from 'react'
 import { Button } from '../../components/Button'
+import { Hint } from '../../components/Hint'
+import type { HintId } from '../../help/hints'
 
 const control =
   'w-full rounded-[var(--radius-control)] border border-border bg-surface-container px-3 text-sm text-on-surface ' +
   'placeholder:text-on-surface-muted disabled:opacity-60 h-9'
+
+/** The editor's root: a `<Hint as="div">` when it carries a registry id (the inputs and buttons inside are then explained), else a plain `div`. */
+function GroupRoot({ hintId, children, ...rest }: { hintId?: HintId; children: ReactNode } & Omit<HTMLAttributes<HTMLDivElement>, 'id'>) {
+  if (hintId) {
+    return (
+      <Hint as="div" id={hintId} {...rest}>
+        {children}
+      </Hint>
+    )
+  }
+  return <div {...rest}>{children}</div>
+}
 
 interface ListEditorProps {
   label: string
   values: string[]
   onChange: (values: string[]) => void
   hint?: ReactNode
+  /** The registry id the whole editor (its inputs and buttons) is explained by. */
+  hintId?: HintId
   error?: string
   placeholder?: string
   /** Prefix for the `data-testid`s: `<testid>-add`, `<testid>-item-<i>`, `<testid>-remove-<i>`. */
@@ -47,13 +64,13 @@ interface ListEditorProps {
  * `maven_flags`, an explicit belt-scope list…). Items are labelled "<label> N" for
  * assistive tech and keyboard users; the order is the order the runner sees.
  */
-export function ListEditor({ label, values, onChange, hint, error, placeholder, testid, disabled, addLabel = 'Add', mono = true }: ListEditorProps) {
+export function ListEditor({ label, values, onChange, hint, hintId, error, placeholder, testid, disabled, addLabel = 'Add', mono = true }: ListEditorProps) {
   const id = useId()
   const descId = hint || error ? `${id}-desc` : undefined
   const set = (i: number, v: string) => onChange(values.map((x, j) => (j === i ? v : x)))
   const remove = (i: number) => onChange(values.filter((_, j) => j !== i))
   return (
-    <div className="space-y-1" role="group" aria-labelledby={`${id}-label`} aria-describedby={descId} data-testid={testid}>
+    <GroupRoot hintId={hintId} className="space-y-1" role="group" aria-labelledby={`${id}-label`} aria-describedby={descId} data-testid={testid}>
       <div id={`${id}-label`} className="text-xs font-semibold text-on-surface-body">
         {label}
       </div>
@@ -72,7 +89,7 @@ export function ListEditor({ label, values, onChange, hint, error, placeholder, 
               data-testid={`${testid}-item-${i}`}
             />
             {!disabled && (
-              <Button size="sm" onClick={() => remove(i)} aria-label={`Remove ${label} ${i + 1}`} data-testid={`${testid}-remove-${i}`}>
+              <Button size="sm" onClick={() => remove(i)} aria-label={`Remove ${label} ${i + 1}`} data-testid={`${testid}-remove-${i}`} hint="button.repo_config.list_edit">
                 Remove
               </Button>
             )}
@@ -80,7 +97,7 @@ export function ListEditor({ label, values, onChange, hint, error, placeholder, 
         ))}
       </ul>
       {!disabled && (
-        <Button size="sm" onClick={() => onChange([...values, ''])} data-testid={`${testid}-add`}>
+        <Button size="sm" onClick={() => onChange([...values, ''])} data-testid={`${testid}-add`} hint="button.repo_config.list_edit">
           {addLabel}
         </Button>
       )}
@@ -89,7 +106,7 @@ export function ListEditor({ label, values, onChange, hint, error, placeholder, 
           {error ?? hint}
         </div>
       )}
-    </div>
+    </GroupRoot>
   )
 }
 
@@ -98,20 +115,22 @@ interface KeyValueEditorProps {
   entries: Array<[string, string]>
   onChange: (entries: Array<[string, string]>) => void
   hint?: ReactNode
+  /** The registry id the whole editor (its inputs and buttons) is explained by. */
+  hintId?: HintId
   error?: string
   testid: string
   disabled?: boolean
 }
 
 /** Key/value rows for the `env` runner option (string → string). */
-export function KeyValueEditor({ label, entries, onChange, hint, error, testid, disabled }: KeyValueEditorProps) {
+export function KeyValueEditor({ label, entries, onChange, hint, hintId, error, testid, disabled }: KeyValueEditorProps) {
   const id = useId()
   const descId = hint || error ? `${id}-desc` : undefined
   const setKey = (i: number, k: string) => onChange(entries.map((e, j) => (j === i ? [k, e[1]] : e)))
   const setVal = (i: number, v: string) => onChange(entries.map((e, j) => (j === i ? [e[0], v] : e)))
   const remove = (i: number) => onChange(entries.filter((_, j) => j !== i))
   return (
-    <div className="space-y-1" role="group" aria-labelledby={`${id}-label`} aria-describedby={descId} data-testid={testid}>
+    <GroupRoot hintId={hintId} className="space-y-1" role="group" aria-labelledby={`${id}-label`} aria-describedby={descId} data-testid={testid}>
       <div id={`${id}-label`} className="text-xs font-semibold text-on-surface-body">
         {label}
       </div>
@@ -143,7 +162,7 @@ export function KeyValueEditor({ label, entries, onChange, hint, error, testid, 
               data-testid={`${testid}-value-${i}`}
             />
             {!disabled && (
-              <Button size="sm" onClick={() => remove(i)} aria-label={`Remove ${label} ${i + 1}`} data-testid={`${testid}-remove-${i}`}>
+              <Button size="sm" onClick={() => remove(i)} aria-label={`Remove ${label} ${i + 1}`} data-testid={`${testid}-remove-${i}`} hint="button.repo_config.list_edit">
                 Remove
               </Button>
             )}
@@ -151,7 +170,7 @@ export function KeyValueEditor({ label, entries, onChange, hint, error, testid, 
         ))}
       </ul>
       {!disabled && (
-        <Button size="sm" onClick={() => onChange([...entries, ['', '']])} data-testid={`${testid}-add`}>
+        <Button size="sm" onClick={() => onChange([...entries, ['', '']])} data-testid={`${testid}-add`} hint="button.repo_config.list_edit">
           Add variable
         </Button>
       )}
@@ -160,6 +179,6 @@ export function KeyValueEditor({ label, entries, onChange, hint, error, testid, 
           {error ?? hint}
         </div>
       )}
-    </div>
+    </GroupRoot>
   )
 }

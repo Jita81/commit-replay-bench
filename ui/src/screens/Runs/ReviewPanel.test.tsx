@@ -14,22 +14,27 @@
  *               that the Review panel stays disabled until the patch was loaded in the
  *               session and then submits that hash, refuses a regression marked mergeable
  *               client-side and renders a server refusal honestly, records `not_reviewed`
- *               without a patch, and is read-only for a viewer.
+ *               without a patch, and is read-only for a viewer; that opening the drawer
+ *               moves focus into it (the opener's hint bubble closes, one Escape closes the
+ *               drawer) and closing returns focus to the opener.
  * How:          `mockApi` with a pack fixture and a raw `fetch` stub for the byte endpoint;
  *               `userEvent` drives the tabs and the form; assertions on the request bodies
  *               and the `patch-*` / `review-*` test ids.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
  * Works with:   ui/src/screens/Runs/contract.ts, ui/src/screens/Runs/EvidenceDrawer.tsx,
- *               ui/src/screens/Runs/ReviewPanel.tsx (the code under test), ui/src/test/utils.tsx
+ *               ui/src/screens/Runs/ReviewPanel.tsx (the code under test), ui/src/test/utils.tsx,
+ *               ui/src/components/Hint.tsx (the hinted opener in the focus test)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx
  * Touch when:   a header, a refusal code or a finding kind is added (docs/API.md "Reviews",
  *               "/grades/{row_hash}/patch") — extend the fixture and the matching case.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EvidencePack } from '../../api/types'
+import { Hint } from '../../components/Hint'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { deriveVerdict, parseUnifiedDiff, sha256Hex, type RetainedStatus, type Review } from './contract'
 import { EvidenceDrawer } from './EvidenceDrawer'
@@ -282,6 +287,42 @@ describe('EvidenceDrawer: Patch tab', () => {
     await screen.findByText('Review (1)')
     await user.click(screen.getByTestId('tab-patch'))
     await screen.findByTestId('patch-verified')
+  })
+})
+
+describe('EvidenceDrawer: focus', () => {
+  /** The opener: a hinted button, as the factory's Evidence button and the run table's are. */
+  function Opener() {
+    const [open, setOpen] = useState(false)
+    return (
+      <>
+        <Hint as="button" id="button.factory.evidence" type="button" onClick={() => setOpen(true)} data-testid="opener">
+          Evidence
+        </Hint>
+        <EvidenceDrawer packHash={open ? PACK_HASH : null} rowHash={ROW} onClose={() => setOpen(false)} />
+      </>
+    )
+  }
+
+  it('opening moves focus into the drawer (so the opener’s hint closes and Escape reaches the drawer); closing returns it to the opener', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      [`GET /evidence/${PACK_HASH}`]: { pack: pack(), verified: true },
+      [`GET /grades/${ROW}/retained`]: RETAINED,
+      'GET /reviews': { items: [], total: 0, limit: 200, offset: 0 },
+    })
+    renderApp(<Opener />, { me: PRINCIPAL })
+    const user = userEvent.setup()
+    const opener = screen.getByTestId('opener')
+    await user.click(opener)
+    const drawer = await screen.findByTestId('evidence-drawer')
+    // focus is inside the modal, not left on the button behind the backdrop
+    await waitFor(() => expect(drawer.contains(document.activeElement)).toBe(true))
+    expect(document.getElementById(opener.getAttribute('aria-describedby')!.split(' ').pop()!)).toHaveAttribute('data-open', 'false')
+    // one Escape closes the drawer — the bubble is not in the way
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByTestId('evidence-drawer')).toBeNull())
+    expect(document.activeElement).toBe(opener)
   })
 })
 

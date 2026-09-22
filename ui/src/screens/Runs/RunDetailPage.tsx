@@ -54,6 +54,7 @@ import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { Term } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { LiveLog } from '../../components/LiveLog'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
@@ -110,17 +111,17 @@ function Header({ run }: { run: Run }) {
       title={`Run ${shortId(run.id, 8)}`}
       purpose={
         <span className="inline-flex flex-wrap items-center gap-2">
-          <Pill tone={d.tone} glyph={d.glyph} label={d.describe} data-testid="run-status">
+          <Pill tone={d.tone} glyph={d.glyph} label={d.describe} data-testid="run-status" hint="pill.run.status">
             <span className={run.status === 'running' ? 'crb-pulse' : ''}>{d.label}</span>
           </Pill>
           {run.cancel_requested && !isRunTerminal(run.status) && (
-            <Pill tone="amber" glyph="⊘" size="xs" label="Cancel requested; the worker stops between tasks">
+            <Pill tone="amber" glyph="⊘" size="xs" label="Cancel requested; the worker stops between tasks" hint="pill.run.cancel_requested">
               cancel requested
             </Pill>
           )}
-          <span className="font-mono text-xs" data-testid="run-identity">
+          <Hint id="stat.run.identity" className="font-mono text-xs" data-testid="run-identity">
             {run.kind === 'factory' ? factoryLine(run) : run.kind === 'replay' || run.kind === 'blind' ? `${run.mode} · ${run.builder || '—'}${run.model ? ` · ${run.model}` : ''}${run.provider ? ` · ${run.provider}` : ''} · ladder ${run.ladder.map(ladderEntryLabel).join(',') || 'r1'}` : run.kind}
-          </span>
+          </Hint>
           <span className="text-xs text-on-surface-muted">
             created {fmtDate(run.created)}
             {run.started ? ` · started ${fmtDate(run.started)}` : ''}
@@ -130,11 +131,11 @@ function Header({ run }: { run: Run }) {
       }
       actions={
         <>
-          <Link to={`/repos/${encodeURIComponent(run.repo)}`} className="text-sm">
+          <Hint as={Link} id="link.run.repo" to={`/repos/${encodeURIComponent(run.repo)}`} className="text-sm">
             {run.repo}
-          </Link>
+          </Hint>
           {can('operator') && !isRunTerminal(run.status) && !run.cancel_requested && (
-            <Button variant="danger" size="sm" onClick={() => cancel.mutate(run.id)} disabled={cancel.isPending}>
+            <Button variant="danger" size="sm" onClick={() => cancel.mutate(run.id)} disabled={cancel.isPending} hint="button.run.cancel">
               {cancel.isPending ? 'Requesting…' : 'Cancel run'}
             </Button>
           )}
@@ -166,6 +167,7 @@ function DetailTiles({ detail }: { detail: Record<string, unknown> }) {
       {entries.map(([k, v]) => (
         <StatTile
           key={k}
+          hint="stat.run.detail_counter"
           label={k.replace(/_/g, ' ')}
           value={typeof v === 'number' ? fmtInt(v) : String(v)}
           n={typeof v === 'number' ? (examined ?? v) : null}
@@ -187,12 +189,12 @@ function Tiles({ run }: { run: Run }) {
   const app = `apparatus ${run.apparatus_version || '—'} · Wilson 95%`
   return (
     <div className="flex flex-wrap gap-3">
-      <StatTile label="Clean (any rung)" value={graded ? fmtPct(c.clean / graded) : '—'} n={graded} ci={cleanCi} apparatus={app} tone={graded ? 'green' : undefined} data-testid="tile-clean" />
-      <StatTile label="First-pass clean (r1)" value={graded ? fmtPct(c.first_pass_clean / graded) : '—'} n={graded} ci={fpCi} apparatus={app} />
-      <StatTile label="Disqualified" value={fmtInt(c.disqualified)} n={graded} apparatus="tamper or malformed oracle — excluded, not counted" tone={c.disqualified ? 'amber' : undefined} />
-      <StatTile label="Errors" value={fmtInt(c.errors)} n={graded} apparatus="harness/sandbox errors — fail closed" tone={c.errors ? 'red' : undefined} />
-      <StatTile label="Ledger rows" value={fmtInt(c.rows)} n={c.rows} apparatus="one row per attempt (trial r1, r2 …)" data-testid="tile-rows" />
-      <StatTile label="Cost" value={fmtUsd(run.cost_usd)} n={graded} apparatus="builder-reported USD, summed" data-testid="tile-cost" />
+      <StatTile label="Clean (any rung)" hint="stat.run.clean" value={graded ? fmtPct(c.clean / graded) : '—'} n={graded} ci={cleanCi} apparatus={app} tone={graded ? 'green' : undefined} data-testid="tile-clean" />
+      <StatTile label="First-pass clean (r1)" hint="stat.run.first_pass" value={graded ? fmtPct(c.first_pass_clean / graded) : '—'} n={graded} ci={fpCi} apparatus={app} />
+      <StatTile label="Disqualified" hint="stat.run.disqualified" value={fmtInt(c.disqualified)} n={graded} apparatus="tamper or malformed oracle — excluded, not counted" tone={c.disqualified ? 'amber' : undefined} />
+      <StatTile label="Errors" hint="stat.run.errors" value={fmtInt(c.errors)} n={graded} apparatus="harness/sandbox errors — fail closed" tone={c.errors ? 'red' : undefined} />
+      <StatTile label="Ledger rows" hint="stat.run.rows" value={fmtInt(c.rows)} n={c.rows} apparatus="one row per attempt (trial r1, r2 …)" data-testid="tile-rows" />
+      <StatTile label="Cost" hint="stat.run.cost" value={fmtUsd(run.cost_usd)} n={graded} apparatus="builder-reported USD, summed" data-testid="tile-cost" />
     </div>
   )
 }
@@ -218,14 +220,16 @@ function SplitTiles({ repo, runId, poll }: { repo: string; runId: string; poll: 
   return (
     <Card title="Why not clean" eyebrow={`${fmtInt(d.rows)} ledger row${d.rows === 1 ? '' : 's'}${poll ? ' · updating' : ''}`}>
       <div className="flex flex-wrap gap-3">
-        <StatTile label="Clean (all rows)" value={d.n ? fmtPct(d.point) : '—'} n={d.n} ci={d.n ? { low: d.ci_low, high: d.ci_high } : null} apparatus={`${fmtInt(d.clean)} clean of ${fmtInt(d.n)} eligible rows · ${app} · the rate that routes`} tone={d.n ? 'green' : undefined} data-testid="tile-split-point" />
-        <StatTile label="Model rate (fair attempts)" value={d.model_point == null ? '—' : fmtPct(d.model_point)} n={d.model_n} ci={d.model_point == null || d.model_ci_low == null || d.model_ci_high == null ? null : { low: d.model_ci_low, high: d.model_ci_high }} apparatus={`${fmtInt(d.clean)} clean of ${fmtInt(d.model_n)} finished attempts (clean + red) · ${app} · diagnostic, not a gate`} data-testid="tile-split-model" />
-        <StatTile label="Instrument (protocol + harness)" value={fmtInt(d.protocol + d.harness)} n={d.n} apparatus="rows the harness, not the model, failed — count against autonomy until fixed" tone={d.protocol + d.harness ? 'violet' : undefined} data-testid="tile-split-instrument" />
-        <StatTile label="Budget-capped" value={fmtInt(d.budget)} n={d.n} apparatus="attempts cut short by their own cap (wall clock, turns, tool calls, tokens, cost)" tone={d.budget ? 'amber' : undefined} data-testid="tile-split-budget" />
-        <StatTile label="Cost known" value={d.n ? `${fmtInt(d.cost_known)} / ${fmtInt(d.n)}` : '—'} n={d.n} apparatus="rows whose $ is a measurement (a true $0 counts); the rest carry no price" data-testid="tile-split-cost-known" />
+        <StatTile label="Clean (all rows)" hint="stat.run.split_point" value={d.n ? fmtPct(d.point) : '—'} n={d.n} ci={d.n ? { low: d.ci_low, high: d.ci_high } : null} apparatus={`${fmtInt(d.clean)} clean of ${fmtInt(d.n)} eligible rows · ${app} · the rate that routes`} tone={d.n ? 'green' : undefined} data-testid="tile-split-point" />
+        <StatTile label="Model rate (fair attempts)" hint="stat.run.split_model" value={d.model_point == null ? '—' : fmtPct(d.model_point)} n={d.model_n} ci={d.model_point == null || d.model_ci_low == null || d.model_ci_high == null ? null : { low: d.model_ci_low, high: d.model_ci_high }} apparatus={`${fmtInt(d.clean)} clean of ${fmtInt(d.model_n)} finished attempts (clean + red) · ${app} · diagnostic, not a gate`} data-testid="tile-split-model" />
+        <StatTile label="Instrument (protocol + harness)" hint="stat.run.split_instrument" value={fmtInt(d.protocol + d.harness)} n={d.n} apparatus="rows the harness, not the model, failed — count against autonomy until fixed" tone={d.protocol + d.harness ? 'violet' : undefined} data-testid="tile-split-instrument" />
+        <StatTile label="Budget-capped" hint="stat.run.split_budget" value={fmtInt(d.budget)} n={d.n} apparatus="attempts cut short by their own cap (wall clock, turns, tool calls, tokens, cost)" tone={d.budget ? 'amber' : undefined} data-testid="tile-split-budget" />
+        <StatTile label="Cost known" hint="stat.run.split_cost_known" value={d.n ? `${fmtInt(d.cost_known)} / ${fmtInt(d.n)}` : '—'} n={d.n} apparatus="rows whose $ is a measurement (a true $0 counts); the rest carry no price" data-testid="tile-split-cost-known" />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
-        <span className="label">Split</span>
+        <Hint id="pill.run.split" className="label">
+          Split
+        </Hint>
         <FailureSplitPills split={d} size="sm" data-testid="run-split" />
         <span className="text-on-surface-muted">n = clean + red + budget + protocol + harness; DQ sits outside n.</span>
       </div>
@@ -237,47 +241,58 @@ function TaskTable({ runId, poll, onOpenPack }: { runId: string; poll: boolean; 
   const tasks = useRunTasks(runId, { poll })
   const columns = useMemo<Column<RunTaskRow>[]>(
     () => [
-      { key: 'task', header: 'Task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <span title={t.task_id}>{shortId(t.task_id)}</span> },
-      { key: 'class', header: 'Class', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
-      { key: 'size', header: 'Size', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
-      { key: 'trials', header: 'Trials', numeric: true, sortValue: (t) => t.trials, cell: (t) => fmtInt(t.trials) },
+      { key: 'task', header: 'Task', hint: 'col.run_tasks.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <span title={t.task_id}>{shortId(t.task_id)}</span> },
+      { key: 'class', header: 'Class', hint: 'col.run_tasks.cell', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
+      { key: 'size', header: 'Size', hint: 'col.run_tasks.cell', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
+      { key: 'trials', header: 'Trials', hint: 'col.run_tasks.trials', numeric: true, sortValue: (t) => t.trials, cell: (t) => fmtInt(t.trials) },
       {
         key: 'clean',
         header: 'Outcome',
+        hint: 'col.run_tasks.outcome',
         sortValue: (t) => (t.clean ? 2 : t.disqualified ? 1 : 0),
         cell: (t) =>
           t.clean ? (
-            <Pill tone="green" glyph="✓" size="xs" label="Clean: every recorded belt held">clean</Pill>
+            <Pill tone="green" glyph="✓" size="xs" label="Clean: every recorded belt held" hint="pill.run_tasks.outcome" tabStop={false}>
+              clean
+            </Pill>
           ) : t.disqualified ? (
-            <Pill tone="amber" glyph="⊘" size="xs" label="Disqualified — excluded from the denominator">DQ</Pill>
+            <Pill tone="amber" glyph="⊘" size="xs" label="Disqualified — excluded from the denominator" hint="pill.run_tasks.outcome" tabStop={false}>
+              DQ
+            </Pill>
           ) : t.error ? (
-            <Pill tone="red" glyph="✗" size="xs" label={`Error: ${t.error}`}>error</Pill>
+            <Pill tone="red" glyph="✗" size="xs" label={`Error: ${t.error}`} hint="pill.run_tasks.outcome" tabStop={false}>
+              error
+            </Pill>
           ) : (
-            <Pill tone="red" glyph="✗" size="xs" label="Not clean">not clean</Pill>
+            <Pill tone="red" glyph="✗" size="xs" label="Not clean" hint="pill.run_tasks.outcome" tabStop={false}>
+              not clean
+            </Pill>
           ),
       },
-      { key: 'belts', header: 'Belts (last trial)', cell: (t) => <BeltPills belts={t.belts} beltSet={t.belt_set ?? null} showNames={false} /> },
-      { key: 'cost', header: 'Cost', numeric: true, sortValue: (t) => t.cost_usd, cell: (t) => fmtUsd(t.cost_usd), hideBelowMd: true },
-      { key: 'latency', header: 'Latency', numeric: true, sortValue: (t) => t.latency_s, cell: (t) => fmtSeconds(t.latency_s), hideBelowMd: true },
+      { key: 'belts', header: 'Belts (last trial)', hint: 'col.run_tasks.belts', cell: (t) => <BeltPills belts={t.belts} beltSet={t.belt_set ?? null} showNames={false} /> },
+      { key: 'cost', header: 'Cost', hint: 'col.run_tasks.cost_latency', numeric: true, sortValue: (t) => t.cost_usd, cell: (t) => fmtUsd(t.cost_usd), hideBelowMd: true },
+      { key: 'latency', header: 'Latency', hint: 'col.run_tasks.cost_latency', numeric: true, sortValue: (t) => t.latency_s, cell: (t) => fmtSeconds(t.latency_s), hideBelowMd: true },
       {
         key: 'pack',
         header: 'Evidence',
+        hint: 'col.run_tasks.evidence',
         cell: (t) =>
           t.pack_hashes.length ? (
             <span className="inline-flex flex-wrap gap-1">
               {t.pack_hashes.map((h, i) => (
-                <button
+                <Hint
+                  as="button"
                   key={h}
+                  id="link.run_tasks.pack"
                   type="button"
-                  onClick={(e) => {
+                  onClick={(e: { stopPropagation: () => void }) => {
                     e.stopPropagation()
                     onOpenPack(h)
                   }}
                   className="font-mono text-xs text-primary underline-offset-2 hover:underline"
-                  title={h}
                 >
                   r{i + 1} {shortId(h, 8)}
-                </button>
+                </Hint>
               ))}
             </span>
           ) : (
@@ -324,32 +339,32 @@ function ProgressCard({ run, events, latencies, clock }: { run: Run; events: rea
   const build = BUILD_KINDS.has(run.kind)
   return (
     <Card title="Progress">
-      <Progress done={run.progress.done} total={run.progress.total} status={run.status} />
+      <Progress done={run.progress.done} total={run.progress.total} status={run.status} hint="chart.run.progress" tabStop />
       {run.status === 'queued' && (
-        <p className="num mt-2 text-sm" data-testid="run-queue">
+        <Hint as="p" id="stat.run.queue" className="num mt-2 text-sm" data-testid="run-queue">
           {queueLine(run, probe.queued)}
-        </p>
+        </Hint>
       )}
-      <p className="num mt-2 text-sm text-on-surface-body" data-testid="run-now">
+      <Hint as="p" id="stat.run.now" className="num mt-2 text-sm text-on-surface-body" data-testid="run-now">
         {nowLine(run, latencies, now)}
-      </p>
+      </Hint>
       {stage && (
-        <p className="num mt-1 font-mono text-xs text-on-surface" data-testid="run-stage">
+        <Hint as="p" id="stat.run.stage" className="num mt-1 font-mono text-xs text-on-surface" data-testid="run-stage">
           {stage}
-        </p>
+        </Hint>
       )}
       {!stage && run.progress.current_task_id && !terminal && (
         <p className="num mt-1 font-mono text-xs text-on-surface-muted">current task {shortId(run.progress.current_task_id)}</p>
       )}
       {hb &&
         (hb.stale ? (
-          <p className="num mt-1 text-xs text-status-amber" role="status" data-testid="run-heartbeat">
+          <Hint as="p" id="stat.run.heartbeat" className="num mt-1 text-xs text-status-amber" role="status" data-testid="run-heartbeat">
             {hb.text}
-          </p>
+          </Hint>
         ) : (
-          <p className="num mt-1 text-xs text-on-surface-muted" data-testid="run-heartbeat">
+          <Hint as="p" id="stat.run.heartbeat" className="num mt-1 text-xs text-on-surface-muted" data-testid="run-heartbeat">
             {hb.text}
-          </p>
+          </Hint>
         ))}
       {container && (
         <p className={`num mt-1 text-xs ${container.failed ? 'text-status-red' : 'text-status-amber'}`} role="status" data-testid="run-container">

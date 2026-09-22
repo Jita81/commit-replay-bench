@@ -52,6 +52,7 @@ import { CiBar } from '../../components/CiBar'
 import { EmptyState } from '../../components/EmptyState'
 import { InlineSelect } from '../../components/Field'
 import { Term } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
@@ -119,29 +120,50 @@ const CELL_LEGEND_TEXT =
 /** The same legend as one visible line whose words open their definitions inline; shown under the grid and in the open cell. */
 function CellLegend({ 'data-testid': testId }: { 'data-testid'?: string }) {
   return (
-    <p className="m-0 text-[12px] leading-5 text-on-surface-muted" data-testid={testId}>
-      <span className="font-semibold text-on-surface">Legend</span> point [<Term id="wilson">Wilson 95 %</Term>] · <Term id="clean">clean</Term>/n · fQ1 = <Term id="false_q1">false-Q1</Term> count · $ mean cost · mean latency · or = mean{' '}
-      <Term id="oracle_strength">oracle strength</Term> · ✓ ◐ ✗ = verification tier
-    </p>
+    // the legend carries the per-number hints (never nested inside a tile's button): each segment explains one number every tile shows
+    <Hint as="p" id="tile.capability.legend" className="m-0 text-[12px] leading-5 text-on-surface-muted" data-testid={testId}>
+      <span className="font-semibold text-on-surface">Legend</span>{' '}
+      <Hint id="map.cell.point">
+        point [<Term id="wilson">Wilson 95 %</Term>]
+      </Hint>{' '}
+      ·{' '}
+      <Hint id="map.cell.n">
+        <Term id="clean">clean</Term>/n
+      </Hint>{' '}
+      ·{' '}
+      <Hint id="map.cell.fq1">
+        fQ1 = <Term id="false_q1">false-Q1</Term> count
+      </Hint>{' '}
+      · <Hint id="map.cell.cost">$ mean cost</Hint> · <Hint id="map.cell.latency">mean latency</Hint> ·{' '}
+      <Hint id="map.cell.oracle">
+        or = mean <Term id="oracle_strength">oracle strength</Term>
+      </Hint>{' '}
+      · <Hint id="map.cell.tier">✓ ◐ ✗ = verification tier</Hint>
+    </Hint>
   )
 }
 
 function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefined; policy: CapabilityMap['policy'] | undefined; onOpen: () => void; dim?: string }) {
   if (!isMeasured(cell)) {
     return (
-      <div
+      <Hint
+        as="div"
+        id="map.cell.grid_not_measured"
+        tabStop={false}
         data-testid="cell-not-measured"
         className="flex h-full min-h-[92px] flex-col items-center justify-center rounded-[var(--radius-control)] border border-dashed border-border px-2 py-2 text-center"
       >
         <VerdictPill route={NOT_YET_MEASURED} size="xs" />
         <span className="mt-1 text-[10px] text-on-surface-muted">n = 0</span>
-      </div>
+      </Hint>
     )
   }
   const bad = cell.false_q1 > 0
   const tier = tierDisplay(cell.verification_tier)
   return (
-    <button
+    <Hint
+      as="button"
+      id="map.cell.tile"
       type="button"
       onClick={onOpen}
       data-testid={bad ? 'cell-false-q1' : 'cell-measured'}
@@ -180,7 +202,7 @@ function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefin
         <span>or {fmtRatio(cell.oracle_strength_mean)}</span>
         {tier && <span className={`${tier.tone === 'green' ? 'text-status-green' : tier.tone === 'red' ? 'text-status-red' : 'text-status-amber'}`}>{tier.glyph}</span>}
       </div>
-    </button>
+    </Hint>
   )
 }
 
@@ -193,44 +215,45 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
       title={`${cell.capability_class} × ${cell.size}${cell.language ? ` × ${cell.language}` : ''}${cell.model ? ` × ${cell.model}` : ''}`}
       eyebrow="cell"
       actions={
-        <button type="button" onClick={onClose} className="text-xs text-on-surface-muted hover:text-on-surface">
+        <Hint as="button" id="button.capability.close" type="button" onClick={onClose} className="text-xs text-on-surface-muted hover:text-on-surface">
           close
-        </button>
+        </Hint>
       }
     >
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
+        <Hint as="div" id="tile.capability.detail_head" className="flex flex-wrap items-center gap-2">
           <VerdictPill route={cell.route} reason={cell.reason} />
           {tier && (
-            <Pill tone={tier.tone} glyph={tier.glyph} size="xs" label={tier.describe}>
+            <Pill tone={tier.tone} glyph={tier.glyph} size="xs" label={tier.describe} hint={tier.hint}>
               {tier.label}
             </Pill>
           )}
           <Provenance apparatus={cell.apparatus_versions} beltSet={cell.belt_set ?? null} />
-        </div>
-        <p className="text-sm" data-testid="cell-reason">
+        </Hint>
+        <Hint as="p" id="tile.capability.reason" className="text-sm" data-testid="cell-reason">
           {cell.reason_code && (
             <span className="mr-2">
               <ReasonCode code={cell.reason_code} />
             </span>
           )}
           {cell.reason}
-        </p>
+        </Hint>
         {cell.failure_split && (
-          <div className="flex flex-wrap items-center gap-3 text-xs" data-testid="cell-split">
+          <Hint as="div" id="tile.capability.split" className="flex flex-wrap items-center gap-3 text-xs" data-testid="cell-split">
             <span className="label">Why not clean</span>
             <FailureSplitPills split={cell.failure_split} size="sm" data-testid="cell-split-pills" />
             <span className="text-on-surface-muted">
               n = clean + red + budget + protocol + harness; DQ sits outside n. Instrument rows (protocol, harness) count against autonomy until the instrument is fixed.
             </span>
-          </div>
+          </Hint>
         )}
         <div className="flex flex-wrap gap-3">
-          <StatTile label="Pass rate" value={fmtPct(cell.point)} n={cell.n} ci={{ low: cell.ci_low, high: cell.ci_high }} apparatus={`all rows: ${fmtInt(cell.clean)} clean of ${fmtInt(cell.n)} eligible · Wilson 95% · the rate that routes`} data-testid="tile-point" />
-          <StatTile label="Distinct tasks" value={cell.n_tasks == null ? '—' : fmtInt(cell.n_tasks)} n={cell.n} apparatus="n counts attempts; this is the number of commits behind them — the clustering the rate hides" tone={cell.n_tasks != null && cell.n_tasks < 5 ? 'amber' : undefined} data-testid="tile-n-tasks" />
+          <StatTile label="Pass rate" hint="stat.capability.point" value={fmtPct(cell.point)} n={cell.n} ci={{ low: cell.ci_low, high: cell.ci_high }} apparatus={`all rows: ${fmtInt(cell.clean)} clean of ${fmtInt(cell.n)} eligible · Wilson 95% · the rate that routes`} data-testid="tile-point" />
+          <StatTile label="Distinct tasks" hint="stat.capability.n_tasks" value={cell.n_tasks == null ? '—' : fmtInt(cell.n_tasks)} n={cell.n} apparatus="n counts attempts; this is the number of commits behind them — the clustering the rate hides" tone={cell.n_tasks != null && cell.n_tasks < 5 ? 'amber' : undefined} data-testid="tile-n-tasks" />
           {cell.failure_split && (
             <StatTile
               label="Model rate (fair attempts)"
+              hint="stat.capability.model_point"
               value={cell.model_point === null || cell.model_point === undefined ? '—' : fmtPct(cell.model_point)}
               n={cell.model_n ?? 0}
               ci={cell.model_point == null || cell.model_ci_low == null || cell.model_ci_high == null ? null : { low: cell.model_ci_low, high: cell.model_ci_high }}
@@ -238,22 +261,22 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
               data-testid="tile-model-point"
             />
           )}
-          <StatTile label="false-Q1" value={String(cell.false_q1)} n={cell.n} apparatus="clean rows with a failed belt — must be 0" tone={cell.false_q1 > 0 ? 'red' : 'green'} />
-          <StatTile label="Cost / trial" value={fmtUsd(cell.cost_usd_mean)} n={cell.n} apparatus="mean of builder-reported USD" />
-          <StatTile label="Latency / trial" value={fmtSeconds(cell.latency_s_mean)} n={cell.n} apparatus="mean wall-clock of the build" />
-          <StatTile label="Oracle strength" value={fmtRatio(cell.oracle_strength_mean)} n={cell.n} apparatus="mean mutation kill-rate of the tasks' oracles" />
+          <StatTile label="false-Q1" hint="stat.capability.cell_false_q1" value={String(cell.false_q1)} n={cell.n} apparatus="clean rows with a failed belt — must be 0" tone={cell.false_q1 > 0 ? 'red' : 'green'} />
+          <StatTile label="Cost / trial" hint="stat.capability.cost" value={fmtUsd(cell.cost_usd_mean)} n={cell.n} apparatus="mean of builder-reported USD" />
+          <StatTile label="Latency / trial" hint="stat.capability.latency" value={fmtSeconds(cell.latency_s_mean)} n={cell.n} apparatus="mean wall-clock of the build" />
+          <StatTile label="Oracle strength" hint="stat.capability.oracle" value={fmtRatio(cell.oracle_strength_mean)} n={cell.n} apparatus="mean mutation kill-rate of the tasks' oracles" />
         </div>
         <CellLegend data-testid="cell-legend-line" />
         {(Math.abs(ci.low - cell.ci_low) > 0.01 || Math.abs(ci.high - cell.ci_high) > 0.01) && (
-          <p className="text-xs text-status-amber" role="status">
+          <Hint as="p" id="banner.capability.ci_drift" className="text-xs text-status-amber" role="status">
             The interval recomputed in the browser ({fmtPct(ci.low)}–{fmtPct(ci.high)}) differs from the server's — the server's is shown; the drift is flagged, not hidden.
-          </p>
+          </Hint>
         )}
         <div className="flex flex-wrap gap-2">
-          <LinkButton size="sm" to={`/ledger?repo=${encodeURIComponent(repo)}&capability_class=${encodeURIComponent(cell.capability_class)}&size=${encodeURIComponent(cell.size)}`}>
+          <LinkButton size="sm" to={`/ledger?repo=${encodeURIComponent(repo)}&capability_class=${encodeURIComponent(cell.capability_class)}&size=${encodeURIComponent(cell.size)}`} hint="button.capability.rows">
             Rows in ledger
           </LinkButton>
-          <LinkButton size="sm" to={`/routing?repo=${encodeURIComponent(repo)}`}>
+          <LinkButton size="sm" to={`/routing?repo=${encodeURIComponent(repo)}`} hint="button.capability.routing">
             Routing decision
           </LinkButton>
         </div>
@@ -268,7 +291,7 @@ function ControlsTile({ verdict, policy }: { verdict: ControlsVerdict | undefine
   const measured = Boolean(verdict?.measured)
   const value = !measured ? '—' : verdict!.state === 'failed' ? 'FAILED' : verdict!.state === 'escaped' ? `${verdict!.escapes} escape${verdict!.escapes === 1 ? '' : 's'}` : verdict!.state === 'thin' ? 'thin' : 'passed'
   return (
-    <div data-testid="tile-controls" className="min-w-[150px] flex-[1_1_150px] rounded-[var(--radius-card)] border border-border bg-surface-container px-4 py-3 shadow-[var(--shadow-card)]">
+    <Hint as="div" id="stat.capability.controls" data-testid="tile-controls" className="min-w-[150px] flex-[1_1_150px] rounded-[var(--radius-card)] border border-border bg-surface-container px-4 py-3 shadow-[var(--shadow-card)]">
       <div className="label">Negative controls</div>
       <div className={`num mt-1 text-[24px] font-semibold leading-8 ${!measured ? 'text-on-surface-muted' : d.tone === 'green' ? 'text-status-green' : d.tone === 'red' ? 'text-status-red' : 'text-status-amber'}`}>{value}</div>
       <dl className="num mt-1 space-y-0.5 text-[11px] text-on-surface-muted">
@@ -285,7 +308,7 @@ function ControlsTile({ verdict, policy }: { verdict: ControlsVerdict | undefine
         <ControlsPill verdict={verdict} size="xs" />
       </div>
       <p className="mt-1 text-[11px] text-on-surface-muted">{d.describe}</p>
-    </div>
+    </Hint>
   )
 }
 
@@ -326,7 +349,7 @@ export function CapabilityPage() {
             <RepoPicker value={repo} onChange={setRepo} />
             {repo && map.data && <ControlsPill verdict={map.data.controls} minShare={map.data.policy?.min_controls_share} />}
             {repo && (
-              <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=csv&repo=${encodeURIComponent(repo)}`)} download>
+              <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=csv&repo=${encodeURIComponent(repo)}`)} download hint="button.capability.export">
                 Export CSV
               </AnchorButton>
             )}
@@ -363,10 +386,11 @@ export function CapabilityPage() {
           return (
             <div className="space-y-6">
               <div className="flex flex-wrap gap-3">
-                <StatTile label="Trusted autonomy coverage" value={fmtPct(s.trusted_autonomy_coverage)} n={s.n_total ?? nTotal} apparatus={covApp} tone="primary" data-testid="tile-coverage" footer="Share of the repo's change volume (its change profile, weighted by commit count) whose cell routes to deliver — a coverage of the profile, not a sampled rate, so it carries no Wilson interval; each cell's rate carries its own." />
-                <StatTile label="Measured cells" value={`${fmtInt(s.measured_cells)} / ${fmtInt(s.total_cells || grid)}`} n={s.n_total ?? nTotal} apparatus={`apparatus ${s.apparatus_versions?.join('/') || '—'}`} />
+                <StatTile label="Trusted autonomy coverage" hint="stat.capability.coverage" value={fmtPct(s.trusted_autonomy_coverage)} n={s.n_total ?? nTotal} apparatus={covApp} tone="primary" data-testid="tile-coverage" footer="Share of the repo's change volume (its change profile, weighted by commit count) whose cell routes to deliver — a coverage of the profile, not a sampled rate, so it carries no Wilson interval; each cell's rate carries its own." />
+                <StatTile label="Measured cells" hint="stat.capability.measured_cells" value={`${fmtInt(s.measured_cells)} / ${fmtInt(s.total_cells || grid)}`} n={s.n_total ?? nTotal} apparatus={`apparatus ${s.apparatus_versions?.join('/') || '—'}`} />
                 <StatTile
                   label="false-Q1 total"
+                  hint="stat.capability.false_q1"
                   value={String(s.false_q1_total ?? 0)}
                   n={s.n_total ?? nTotal}
                   apparatus="clean rows with a failed belt, across the map — must be 0"
@@ -377,9 +401,9 @@ export function CapabilityPage() {
               </div>
 
               {((s.false_q1_total ?? 0) > 0 || badCells > 0) && (
-                <div role="alert" className="rounded-[var(--radius-card)] border-2 border-status-red bg-status-red-soft px-5 py-3 text-sm text-status-red" data-testid="false-q1-alert">
+                <Hint as="div" id="banner.capability.false_q1" role="alert" className="rounded-[var(--radius-card)] border-2 border-status-red bg-status-red-soft px-5 py-3 text-sm text-status-red" data-testid="false-q1-alert">
                   <strong>✗ false-Q1 &gt; 0.</strong> {badCells} cell{badCells === 1 ? ' contains' : 's contain'} a clean row whose belts did not all hold. The write-time invariant should have made this impossible; treat every number on this page as untrusted until the ledger is audited (<Link to="/ledger">verify chain</Link>).
-                </div>
+                </Hint>
               )}
 
               <Card
@@ -387,11 +411,11 @@ export function CapabilityPage() {
                 eyebrow={`class × size${byLanguage ? ' × language' : ''}${byModel ? ' × model' : ''}`}
                 actions={
                   <>
-                    <label className="inline-flex items-center gap-1.5 text-xs text-on-surface-muted">
+                    <Hint as="label" id="field.capability.by_language" className="inline-flex items-center gap-1.5 text-xs text-on-surface-muted">
                       <input type="checkbox" checked={byLanguage} onChange={(e) => setByLanguage(e.target.checked)} /> by language
-                    </label>
+                    </Hint>
                     {byLanguage && (
-                      <InlineSelect label="Language" value={language} onChange={(e) => setLanguage(e.target.value)}>
+                      <InlineSelect label="Language" hint="field.capability.language" value={language} onChange={(e) => setLanguage(e.target.value)}>
                         <option value="">all</option>
                         {languages.map((l) => (
                           <option key={l} value={l}>
@@ -400,11 +424,11 @@ export function CapabilityPage() {
                         ))}
                       </InlineSelect>
                     )}
-                    <label className="inline-flex items-center gap-1.5 text-xs text-on-surface-muted">
+                    <Hint as="label" id="field.capability.by_model" className="inline-flex items-center gap-1.5 text-xs text-on-surface-muted">
                       <input type="checkbox" checked={byModel} onChange={(e) => setByModel(e.target.checked)} /> by model
-                    </label>
+                    </Hint>
                     {byModel && (
-                      <InlineSelect label="Model" value={model} onChange={(e) => setModel(e.target.value)}>
+                      <InlineSelect label="Model" hint="field.capability.model" value={model} onChange={(e) => setModel(e.target.value)}>
                         <option value="">all</option>
                         {models.map((x) => (
                           <option key={x} value={x}>
@@ -420,7 +444,7 @@ export function CapabilityPage() {
                   <EmptyState
                     title="Nothing measured for this repo yet"
                     reason={can('operator') ? 'Every cell below would read NOT_YET_MEASURED. Run a replay to produce ledger rows; each graded trial is one observation in its (class × size) cell.' : 'Every cell below would read NOT_YET_MEASURED; an operator starts a replay run to produce ledger rows. Each graded trial is one observation in its (class × size) cell.'}
-                    action={can('operator') ? <LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=replay`}>Start a replay run</LinkButton> : undefined}
+                    action={can('operator') ? <LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=replay`} hint="button.capability.start_replay">Start a replay run</LinkButton> : undefined}
                   />
                 ) : (
                   <div className="overflow-auto" tabIndex={0} role="region" aria-label={`Capability map for ${repo}, scrollable`}>
@@ -429,11 +453,11 @@ export function CapabilityPage() {
                       <thead>
                         <tr>
                           <th scope="col" className="label sticky left-0 bg-surface-container px-2 text-left">
-                            Class
+                            <Hint id="col.capability.class">Class</Hint>
                           </th>
                           {sizes.map((sz) => (
                             <th key={sz} scope="col" className="label px-2 text-left">
-                              {sz}
+                              <Hint id="col.capability.size">{sz}</Hint>
                             </th>
                           ))}
                         </tr>

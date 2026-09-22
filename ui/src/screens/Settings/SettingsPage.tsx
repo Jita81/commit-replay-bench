@@ -42,6 +42,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextField } from '../../components/Field'
 import { DocLink } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { JsonView } from '../../components/JsonView'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
@@ -64,13 +65,13 @@ function HealthCard() {
           return (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Pill tone={d.tone} glyph={d.glyph} label={d.describe}>
+                <Pill tone={d.tone} glyph={d.glyph} label={d.describe} hint="pill.settings.health">
                   {d.label}
                 </Pill>
                 {version.data && (
-                  <span className="num font-mono text-xs text-on-surface-muted">
+                  <Hint id="stat.settings.version" className="num font-mono text-xs text-on-surface-muted">
                     crb {version.data.crb} · apparatus {version.data.apparatus} · policy {version.data.policy}
-                  </span>
+                  </Hint>
                 )}
               </div>
               <ul className="m-0 grid list-none gap-2 p-0 sm:grid-cols-2 lg:grid-cols-3">
@@ -78,7 +79,7 @@ function HealthCard() {
                   const pd = probeDisplay(p.status)
                   return (
                     <li key={p.name} className="flex items-start gap-2 rounded-[var(--radius-control)] border border-border px-3 py-2 text-sm">
-                      <Pill tone={pd.tone} glyph={pd.glyph} size="xs" label={`${p.name}: ${pd.label}`}>
+                      <Pill tone={pd.tone} glyph={pd.glyph} size="xs" label={`${p.name}: ${pd.label}`} hint="pill.settings.probe">
                         {pd.label}
                       </Pill>
                       <span className="min-w-0">
@@ -126,19 +127,22 @@ function UsersCard() {
 
   const columns = useMemo<Column<User>[]>(
     () => [
-      { key: 'username', header: 'Username', mono: true, sortValue: (u) => u.username, cell: (u) => u.username },
-      { key: 'display', header: 'Name', sortValue: (u) => u.display_name, cell: (u) => u.display_name },
-      { key: 'email', header: 'Email', sortValue: (u) => u.email, cell: (u) => u.email, hideBelowMd: true },
-      { key: 'issuer', header: 'Issuer', sortValue: (u) => u.issuer, cell: (u) => <span className="font-mono text-xs">{u.issuer || 'local'}</span>, hideBelowMd: true },
+      { key: 'username', header: 'Username', hint: 'col.settings.users', mono: true, sortValue: (u) => u.username, cell: (u) => u.username },
+      { key: 'display', header: 'Name', hint: 'col.settings.users', sortValue: (u) => u.display_name, cell: (u) => u.display_name },
+      { key: 'email', header: 'Email', hint: 'col.settings.users', sortValue: (u) => u.email, cell: (u) => u.email, hideBelowMd: true },
+      { key: 'issuer', header: 'Issuer', hint: 'col.settings.users', sortValue: (u) => u.issuer, cell: (u) => <span className="font-mono text-xs">{u.issuer || 'local'}</span>, hideBelowMd: true },
       {
         key: 'role',
         header: 'Role',
+        hint: 'col.settings.role',
         sortValue: (u) => ROLE_ORDER.indexOf(u.role),
         cell: (u) => (
-          <select
+          <Hint
+            as="select"
+            id="field.settings.user_role"
             aria-label={`Role for ${u.username}`}
             value={u.role}
-            onChange={(e) => setRole.mutate({ id: u.id, role: e.target.value as Role })}
+            onChange={(e: { target: { value: string } }) => setRole.mutate({ id: u.id, role: e.target.value as Role })}
             className="h-8 rounded-[var(--radius-control)] border border-border bg-surface-container px-2 text-xs"
           >
             {ROLE_ORDER.map((r) => (
@@ -146,10 +150,10 @@ function UsersCard() {
                 {r}
               </option>
             ))}
-          </select>
+          </Hint>
         ),
       },
-      { key: 'created', header: 'Created', sortValue: (u) => u.created, cell: (u) => <span className="text-xs text-on-surface-muted">{fmtDate(u.created)}</span>, hideBelowMd: true },
+      { key: 'created', header: 'Created', hint: 'col.settings.users', sortValue: (u) => u.created, cell: (u) => <span className="text-xs text-on-surface-muted">{fmtDate(u.created)}</span>, hideBelowMd: true },
     ],
     [setRole],
   )
@@ -165,19 +169,19 @@ function UsersCard() {
         </QueryBoundary>
         {setRole.isError && <ErrorState compact error={setRole.error} />}
         <form onSubmit={submit} className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
-          <TextField label="Username" required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
-          <TextField label="Display name" required value={display} onChange={(e) => setDisplay(e.target.value)} />
-          <TextField label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-          <SelectField label="Role" value={role} onChange={(e) => setRoleNew(e.target.value as Role)}>
+          <TextField label="Username" hint="field.settings.new_username" required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
+          <TextField label="Display name" hint="field.settings.new_display" required value={display} onChange={(e) => setDisplay(e.target.value)} />
+          <TextField label="Email" hint="field.settings.new_email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          <SelectField label="Role" hint="field.settings.new_role" value={role} onChange={(e) => setRoleNew(e.target.value as Role)}>
             {ROLE_ORDER.map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>
             ))}
           </SelectField>
-          <TextField label="Initial password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+          <TextField label="Initial password" hint="field.settings.new_password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
           <div className="flex items-end">
-            <Button type="submit" variant="filled" disabled={create.isPending}>
+            <Button type="submit" variant="filled" disabled={create.isPending} hint="button.settings.create_user">
               {create.isPending ? 'Creating…' : 'Create local user'}
             </Button>
           </div>
@@ -212,31 +216,41 @@ export function SettingsPage() {
                 <div className="space-y-4">
                   <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                     <div>
-                      <dt className="label">Sandbox mode</dt>
+                      <Hint as="dt" id="tile.settings.sandbox_mode" className="label">
+                        Sandbox mode
+                      </Hint>
                       <dd className="font-mono" data-testid="settings-sandbox-mode">
                         {s.sandbox_mode || '—'}
                       </dd>
                     </div>
                     <div>
-                      <dt className="label">Ledger backend</dt>
+                      <Hint as="dt" id="tile.settings.ledger_backend" className="label">
+                        Ledger backend
+                      </Hint>
                       <dd className="font-mono" data-testid="settings-ledger-backend">
                         {s.ledger_backend || '—'}
                       </dd>
                     </div>
                     <div>
-                      <dt className="label">Apparatus</dt>
+                      <Hint as="dt" id="tile.settings.apparatus_policy" className="label">
+                        Apparatus
+                      </Hint>
                       <dd className="font-mono" data-testid="settings-apparatus">
                         {s.apparatus_version || '—'}
                       </dd>
                     </div>
                     <div>
-                      <dt className="label">Policy</dt>
+                      <Hint as="dt" id="tile.settings.apparatus_policy" className="label">
+                        Policy
+                      </Hint>
                       <dd className="font-mono" data-testid="settings-policy">
                         {s.policy_version || '—'}
                       </dd>
                     </div>
                     <div>
-                      <dt className="label">OIDC</dt>
+                      <Hint as="dt" id="tile.settings.oidc" className="label">
+                        OIDC
+                      </Hint>
                       <dd>{s.oidc_enabled ? 'enabled' : 'disabled'}</dd>
                     </div>
                   </dl>
@@ -248,7 +262,7 @@ export function SettingsPage() {
                       <ul className="m-0 flex list-none flex-wrap gap-2 p-0" data-testid="settings-builders">
                         {s.builders.map((b) => (
                           <li key={b.name}>
-                            <Pill tone={b.configured ? 'green' : 'muted'} glyph={b.configured ? '✓' : '–'} size="xs" label={`${b.name}: ${b.configured ? 'configured' : 'not configured'}`}>
+                            <Pill tone={b.configured ? 'green' : 'muted'} glyph={b.configured ? '✓' : '–'} size="xs" label={`${b.name}: ${b.configured ? 'configured' : 'not configured'}`} hint="pill.settings.builder">
                               {b.name} · {b.configured ? 'configured' : 'not configured'}
                             </Pill>
                           </li>
@@ -257,7 +271,9 @@ export function SettingsPage() {
                     )}
                   </div>
                   <div>
-                    <div className="label mb-1">Retention</div>
+                    <Hint as="div" id="tile.settings.retention" className="label mb-1">
+                      Retention
+                    </Hint>
                     <JsonView value={s.retention} initiallyOpen label="Retention settings" />
                   </div>
                 </div>

@@ -41,6 +41,7 @@ import { Term } from '../../components/Help'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
+import { Hint } from '../../components/Hint'
 import { StatTile } from '../../components/StatTile'
 import { fmtInt, fmtPct, fmtUsd } from '../../lib/format'
 
@@ -188,26 +189,28 @@ function RefusalsSection({ repo }: { repo: string }) {
   const q = useLearnRefusals(repo)
   const columns = useMemo<Column<RefusalGroup>[]>(
     () => [
-      { key: 'n', header: 'n', numeric: true, sortValue: (g) => g.n, cell: (g) => fmtInt(g.n) },
+      { key: 'n', header: 'n', hint: 'col.learn_refusals.n', numeric: true, sortValue: (g) => g.n, cell: (g) => fmtInt(g.n) },
       {
         key: 'prefix',
         header: 'Guard',
+        hint: 'col.learn_refusals.guard',
         sortValue: (g) => g.prefix,
         cell: (g) => (
-          <Pill tone={g.prefix === 'network' ? 'blue' : g.prefix === 'archaeology' ? 'violet' : 'muted'} size="xs" label={`Guard family: ${g.prefix}`}>
+          <Pill tone={g.prefix === 'network' ? 'blue' : g.prefix === 'archaeology' ? 'violet' : 'muted'} size="xs" label={`Guard family: ${g.prefix}`} hint="pill.learn.guard" tabStop={false}>
             {g.prefix}
           </Pill>
         ),
       },
-      { key: 'reason', header: 'Reason', cell: (g) => <span className="text-xs">{g.reason}</span> },
-      { key: 'shape', header: 'Command shape', mono: true, cell: (g) => <span className="text-xs">{g.shape}{g.truncated ? ' …' : ''}</span> },
-      { key: 'cost', header: '$ lost', numeric: true, sortValue: (g) => g.cost_usd, cell: (g) => fmtUsd(g.cost_usd), hideBelowMd: true },
+      { key: 'reason', header: 'Reason', hint: 'col.learn_refusals.reason_shape', cell: (g) => <span className="text-xs">{g.reason}</span> },
+      { key: 'shape', header: 'Command shape', hint: 'col.learn_refusals.reason_shape', mono: true, cell: (g) => <span className="text-xs">{g.shape}{g.truncated ? ' …' : ''}</span> },
+      { key: 'cost', header: '$ lost', hint: 'col.learn_refusals.cost', numeric: true, sortValue: (g) => g.cost_usd, cell: (g) => fmtUsd(g.cost_usd), hideBelowMd: true },
       {
         key: 'verdict',
         header: 'Verdict',
+        hint: 'col.learn_refusals.verdict',
         sortValue: (g) => g.verdict,
         cell: (g) => (
-          <Pill tone="amber" glyph="?" size="xs" label="The product never decides: a human writes honest / refuse via `crb learn refusals --apply`">
+          <Pill tone="amber" glyph="?" size="xs" label="The product never decides: a human writes honest / refuse via `crb learn refusals --apply`" hint="pill.learn.verdict" tabStop={false}>
             {g.verdict}
           </Pill>
         ),
@@ -239,9 +242,10 @@ function RefusalsSection({ repo }: { repo: string }) {
           apparatus={byApp.length > 1 ? `${byApp.map((a) => `${a.apparatus_version}: ${a.rows_protocol}/${a.rows_total} [${fmtPct(a.ci_low, 0)}–${fmtPct(a.ci_high, 0)}]`).join(' · ')} · Wilson 95%` : apparatus}
           tone={byApp.some((a) => a.share > 0.05) ? 'amber' : 'green'}
           footer="review §7.5: read every one until this is < 5%"
+          hint="stat.learn.refusal_share"
         />
-        <StatTile label="Refusal classes" value={r.groups.length ? fmtInt(r.groups.length) : '—'} n={r.rows_protocol} apparatus="grouped by (guard, reason, command shape)" />
-        <StatTile label="Spent on refusals" value={r.rows_protocol ? fmtUsd(r.cost_usd) : '—'} n={r.rows_protocol} apparatus={`${fmtInt(Math.round(r.minutes))} builder-minutes`} />
+        <StatTile label="Refusal classes" hint="stat.learn.refusal_classes" value={r.groups.length ? fmtInt(r.groups.length) : '—'} n={r.rows_protocol} apparatus="grouped by (guard, reason, command shape)" />
+        <StatTile label="Spent on refusals" hint="stat.learn.refusal_cost" value={r.rows_protocol ? fmtUsd(r.cost_usd) : '—'} n={r.rows_protocol} apparatus={`${fmtInt(Math.round(r.minutes))} builder-minutes`} />
       </div>
       <DataTable
         rows={r.groups}
@@ -262,12 +266,22 @@ function StrengthenSection({ repo }: { repo: string }) {
   const q = useLearnStrengthen(repo)
   const columns = useMemo<Column<StrengthenItem>[]>(
     () => [
-      { key: 'id', header: 'Item', mono: true, sortValue: (i) => i.id, cell: (i) => <span className="text-xs" title={i.description}>{i.id}</span> },
-      { key: 'title', header: 'Title', cell: (i) => <span className="text-xs">{i.title}</span> },
-      { key: 'cell', header: 'Cell', mono: true, sortValue: (i) => i.labels.cell, cell: (i) => i.labels.cell },
-      { key: 'reason', header: 'Held because', sortValue: (i) => i.labels.reason_code, cell: (i) => <Pill tone="amber" size="xs">{i.labels.reason_code}</Pill> },
-      { key: 'strength', header: 'Strength', numeric: true, sortValue: (i) => i.labels.oracle_strength, cell: (i) => `${i.labels.oracle_strength ?? '—'} / ${i.labels.threshold ?? '—'}` },
-      { key: 'escaped', header: 'Escaped', numeric: true, sortValue: (i) => Number(i.labels.escaped ?? -1), cell: (i) => i.labels.escaped ?? '—', hideBelowMd: true },
+      { key: 'id', header: 'Item', hint: 'col.learn_strengthen.item', mono: true, sortValue: (i) => i.id, cell: (i) => <span className="text-xs" title={i.description}>{i.id}</span> },
+      { key: 'title', header: 'Title', hint: 'col.learn_strengthen.item', cell: (i) => <span className="text-xs">{i.title}</span> },
+      { key: 'cell', header: 'Cell', hint: 'col.learn_strengthen.cell', mono: true, sortValue: (i) => i.labels.cell, cell: (i) => i.labels.cell },
+      {
+        key: 'reason',
+        header: 'Held because',
+        hint: 'col.learn_strengthen.reason',
+        sortValue: (i) => i.labels.reason_code,
+        cell: (i) => (
+          <Pill tone="amber" size="xs" hint="pill.learn.held_reason" tabStop={false}>
+            {i.labels.reason_code}
+          </Pill>
+        ),
+      },
+      { key: 'strength', header: 'Strength', hint: 'col.learn_strengthen.strength', numeric: true, sortValue: (i) => i.labels.oracle_strength, cell: (i) => `${i.labels.oracle_strength ?? '—'} / ${i.labels.threshold ?? '—'}` },
+      { key: 'escaped', header: 'Escaped', hint: 'col.learn_strengthen.escaped', numeric: true, sortValue: (i) => Number(i.labels.escaped ?? -1), cell: (i) => i.labels.escaped ?? '—', hideBelowMd: true },
     ],
     [],
   )
@@ -280,9 +294,20 @@ function StrengthenSection({ repo }: { repo: string }) {
         <Term id="cell">Cells</Term> withheld from deliver because their <Term id="oracle_strength">oracle strength</Term> is under the bar or their <Term id="negative_controls">negative controls</Term> escaped or were thin, each as a test-writing item a person can freeze on the Factory. More attempts will not move these cells; stronger tests will.
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
-        <StatTile label="Oracle-held cells" value={s.cells_flagged.length ? fmtInt(s.cells_flagged.length) : '—'} n={s.cells_flagged.length} apparatus={`routing.v1 · oracle threshold ${s.threshold.toFixed(2)}`} tone={s.cells_flagged.length ? 'amber' : 'green'} />
-        <StatTile label="Strengthening items" value={s.items.length ? fmtInt(s.items.length) : '—'} n={s.items.length} apparatus="test.add · structural slots only · DoR: build" />
-        <StatTile label="Cells without per-task scores" value={s.cells_without_scores.length ? fmtInt(s.cells_without_scores.length) : '—'} n={s.cells_without_scores.length} apparatus="run an oracle run to list the escaped mutants" footer={<Link to={`/oracle?repo=${enc(repo)}`}>Oracle</Link>} />
+        <StatTile label="Oracle-held cells" hint="stat.learn.oracle_held" value={s.cells_flagged.length ? fmtInt(s.cells_flagged.length) : '—'} n={s.cells_flagged.length} apparatus={`routing.v1 · oracle threshold ${s.threshold.toFixed(2)}`} tone={s.cells_flagged.length ? 'amber' : 'green'} />
+        <StatTile label="Strengthening items" hint="stat.learn.items" value={s.items.length ? fmtInt(s.items.length) : '—'} n={s.items.length} apparatus="test.add · structural slots only · DoR: build" />
+        <StatTile
+          label="Cells without per-task scores"
+          hint="stat.learn.no_scores"
+          value={s.cells_without_scores.length ? fmtInt(s.cells_without_scores.length) : '—'}
+          n={s.cells_without_scores.length}
+          apparatus="run an oracle run to list the escaped mutants"
+          footer={
+            <Hint as={Link} id="link.learn.oracle" to={`/oracle?repo=${enc(repo)}`}>
+              Oracle
+            </Hint>
+          }
+        />
       </div>
       <DataTable
         rows={s.items}
@@ -302,12 +327,12 @@ function RemeasureSection({ repo }: { repo: string }) {
   const q = useLearnRemeasure(repo)
   const columns = useMemo<Column<RemeasureCell>[]>(
     () => [
-      { key: 'cell', header: 'Cell', mono: true, sortValue: (c) => c.label, cell: (c) => <span className="text-xs">{c.label}</span> },
-      { key: 'stale', header: 'Stale', numeric: true, sortValue: (c) => c.n_stale, cell: (c) => `${fmtInt(c.n_stale)} (${c.stale_versions.join(', ')})` },
-      { key: 'current', header: 'Current', numeric: true, sortValue: (c) => c.n_current, cell: (c) => fmtInt(c.n_current) },
-      { key: 'needed', header: 'Needed', numeric: true, sortValue: (c) => c.n_needed, cell: (c) => fmtInt(c.n_needed) },
-      { key: 'cost', header: 'Est. $', numeric: true, sortValue: (c) => (c.cost_known ? c.est_cost_usd : -1), cell: (c) => (c.cost_known ? fmtUsd(c.est_cost_usd) : '?') },
-      { key: 'requests', header: 'Runs to queue', numeric: true, sortValue: (c) => c.requests.length, cell: (c) => fmtInt(c.requests.length), hideBelowMd: true },
+      { key: 'cell', header: 'Cell', hint: 'col.learn_remeasure.cell', mono: true, sortValue: (c) => c.label, cell: (c) => <span className="text-xs">{c.label}</span> },
+      { key: 'stale', header: 'Stale', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_stale, cell: (c) => `${fmtInt(c.n_stale)} (${c.stale_versions.join(', ')})` },
+      { key: 'current', header: 'Current', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_current, cell: (c) => fmtInt(c.n_current) },
+      { key: 'needed', header: 'Needed', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_needed, cell: (c) => fmtInt(c.n_needed) },
+      { key: 'cost', header: 'Est. $', hint: 'col.learn_remeasure.cost', numeric: true, sortValue: (c) => (c.cost_known ? c.est_cost_usd : -1), cell: (c) => (c.cost_known ? fmtUsd(c.est_cost_usd) : '?') },
+      { key: 'requests', header: 'Runs to queue', hint: 'col.learn_remeasure.runs', numeric: true, sortValue: (c) => c.requests.length, cell: (c) => fmtInt(c.requests.length), hideBelowMd: true },
     ],
     [],
   )
@@ -320,9 +345,20 @@ function RemeasureSection({ repo }: { repo: string }) {
         Cells whose rows predate the current <Term id="apparatus">apparatus</Term>. <Term id="stale">Stale</Term> evidence is kept as history and licenses nothing; the plan lists the runs to queue and what they would cost.
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
-        <StatTile label="Stale rows" value={p.rows_total ? fmtInt(p.rows_stale) : '—'} n={p.rows_total} apparatus={`older than apparatus ${p.current_apparatus}`} tone={p.rows_stale ? 'amber' : 'green'} />
-        <StatTile label="Rows still needed" value={p.cells.length ? fmtInt(p.summary.n_needed_total) : '—'} n={p.cells.length} apparatus={`rule n ≥ ${p.min_n} per cell · ${fmtInt(p.summary.cells_stale)} cell(s)`} />
-        <StatTile label="Estimated spend" value={p.summary.cost_known_cells ? fmtUsd(p.summary.est_cost_usd_total) : '—'} n={p.summary.cost_known_cells} apparatus="each cell's own mean row cost × n needed" footer={<Link to={`/runs?repo=${enc(repo)}`}>Queue runs</Link>} />
+        <StatTile label="Stale rows" hint="stat.learn.stale_rows" value={p.rows_total ? fmtInt(p.rows_stale) : '—'} n={p.rows_total} apparatus={`older than apparatus ${p.current_apparatus}`} tone={p.rows_stale ? 'amber' : 'green'} />
+        <StatTile label="Rows still needed" hint="stat.learn.needed" value={p.cells.length ? fmtInt(p.summary.n_needed_total) : '—'} n={p.cells.length} apparatus={`rule n ≥ ${p.min_n} per cell · ${fmtInt(p.summary.cells_stale)} cell(s)`} />
+        <StatTile
+          label="Estimated spend"
+          hint="stat.learn.remeasure_cost"
+          value={p.summary.cost_known_cells ? fmtUsd(p.summary.est_cost_usd_total) : '—'}
+          n={p.summary.cost_known_cells}
+          apparatus="each cell's own mean row cost × n needed"
+          footer={
+            <Hint as={Link} id="link.learn.runs" to={`/runs?repo=${enc(repo)}`}>
+              Queue runs
+            </Hint>
+          }
+        />
       </div>
       <DataTable
         rows={p.cells}

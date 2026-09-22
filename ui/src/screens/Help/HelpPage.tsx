@@ -23,6 +23,7 @@
  */
 import { useEffect } from 'react'
 import { Link, useLocation } from 'react-router'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Lede } from '../../components/govuk'
 import { DOC_NAMES, DOC_TITLES, docHref } from '../../help/docs'
@@ -71,9 +72,9 @@ export function HelpPage() {
                     <>
                       {' '}
                       {/* underlined: it sits inside a sentence, so colour alone may not mark it (WCAG 1.4.1; axe link-in-text-block) */}
-                      <Link to={docHref(t.readMore)} className="underline underline-offset-4">
+                      <Hint as={Link} id="link.help.read_more" to={docHref(t.readMore)} className="underline underline-offset-4">
                         Read more
-                      </Link>
+                      </Hint>
                     </>
                   )}
                 </dd>
@@ -87,9 +88,9 @@ export function HelpPage() {
         <ul className="m-0 max-w-[44em] list-none border-t border-border p-0">
           {DOC_NAMES.map((name) => (
             <li key={name} className="border-b border-border py-3 text-[16px] leading-[1.5]">
-              <Link to={docHref(name)} className="text-[19px] font-bold">
+              <Hint as={Link} id="link.help.guide" to={docHref(name)} className="text-[19px] font-bold">
                 {DOC_TITLES[name].title}
-              </Link>
+              </Hint>
               <p className="m-0 text-on-surface-muted">{DOC_TITLES[name].blurb}</p>
             </li>
           ))}
