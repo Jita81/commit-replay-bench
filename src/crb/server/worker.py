@@ -137,12 +137,15 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               and controls kinds call their core modules the same way),
               src/crb/server/factory_state.py (forward mode's files and ``sync_outcomes``,
               which runs first; the loop itself is src/crb/factory/loop.py),
+              src/crb/server/intake.py (the idle loop's tracker poll — the watched column
+              of every repository whose listener an operator switched on, ADR-0017),
               src/crb/server/github_app.py (installation tokens for clone, fetch,
               delivery and the pull-request read), src/crb/server/reaper.py (the durable
               queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
-              tests/test_worker_test_author.py, tests/test_observability_metrics.py
+              tests/test_worker_test_author.py, tests/test_intake_worker.py,
+              tests/test_observability_metrics.py
 Touch when:   a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
               every run must carry is added (``_RunLedger._stamp``); never for a new
