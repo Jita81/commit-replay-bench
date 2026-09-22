@@ -84,8 +84,12 @@ CRB_GITHUB__PRIVATE_KEY_FILE=/run/secrets/github-app.pem      # or CRB_GITHUB__P
 ```
 
 Put the key in the secret store the deployment already uses (Key Vault → mounted file, or a
-Kubernetes secret; docs/DEPLOYMENT.md §2.4). `GET /settings` reports `private_key_configured`
-— never the key. `GET /github/app` says `configured: true` when both values are present.
+Kubernetes secret; [DEPLOYMENT §2.1](DEPLOYMENT.md#21-environment-reference) for the
+variables, [§4.2](DEPLOYMENT.md#42-key-vault--environment) for Key Vault). `GET /settings`
+reports `private_key_configured` — never the key. `GET /github/app` says `configured: true`
+when both values are present; `crb doctor`'s `github_app` line goes further — the key
+parses, GitHub answers, and which installations can deliver
+([OPERATOR §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
 
 ## 3. Install it (once per organisation)
 

@@ -5,6 +5,13 @@ internal interface.
 store-level checks:
 
 * ``db``          — the database answers.
+* ``migrations``  — the database's Alembic revision IS the code's head
+  (:func:`crb.store.migrate.head_status_on`). ``down`` (503) when it is behind, ahead,
+  empty or an older unversioned schema — a long-lived pod whose store drifted must leave
+  the Service, and the go-live checklist may point here truthfully; the revisions are in
+  the detail where applicable (an empty store has none). A ``create_all`` store whose
+  schema equals the head (a ``crb serve`` without ``crb migrate``) is ``degraded``, not
+  down: complete, but unstamped until ``crb migrate`` runs.
 * ``append_only`` — the ledger triggers exist AND an ``UPDATE`` on ``grades`` is refused
   (:func:`crb.store.ledger.assert_append_only`). Missing triggers = ``down``.
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
@@ -34,6 +41,14 @@ store-level checks:
   role is read from ``CRB_ROLE`` (:func:`process_role`; ``api`` | ``worker`` |
   ``all``, default ``all`` = one process does both, so everything is probed).
 
+**A probe whose read raises never serves the exception.** Every read — the five store
+probes here and the observability probes — runs under :func:`probes.run_probe`: the
+result is ``down`` with the one fixed detail ``<probe> could not be read — see the API
+log, request id <id>`` and empty ``data``, and the exception goes to the log under that
+request id (CWE-209 — the route is unauthenticated, and a driver's message can carry a
+DSN, a host, a user, a path or SQL). The route passes the id the middleware assigned
+(``X-Request-ID``) so the sentence names the log line to look for.
+
 ``/health/live`` (LIVENESS) answers "this process is up and can reach its database"
 and nothing else — never the sandbox, the toolchains, the builders or the ledger.
 It is what the image ``HEALTHCHECK`` and the Helm liveness probe hit: a liveness
@@ -48,30 +63,42 @@ Navigation
 ----------
 What it is:   The ``/health``, ``/health/live``, ``/metrics`` and ``/version`` routes — the
               unauthenticated operational surface.
-What it does: Readiness aggregates the store probes (db, append-only triggers proven live,
-              ledger false-Q1 = 0, worker check-ins from the ``workers`` table) with the
+What it does: Readiness aggregates the store probes (db, migrations at head, append-only
+              triggers proven live, ledger false-Q1 = 0, worker check-ins from the ``workers``
+              table) with the
               observability probes
               (sandbox — skipped for the ``api`` role — toolchains, builders) and answers
-              503 when any is ``down``; liveness checks the database only; ``/metrics``
+              503 when any is ``down``; a read that raises is ``down`` with the fixed
+              ``failure_detail`` naming the request id, the exception logged, never served;
+              liveness checks the database only; ``/metrics``
               refreshes the ledger gauges then renders the shared registry.
-How:          ``collect_health`` = the probe list → ``probes.aggregate`` → stamp;
+How:          ``collect_health`` = the probe list, each under ``probes.run_probe`` with the
+              request id → ``probes.aggregate`` → stamp;
+              ``migrations_result`` turns a ``HeadStatus`` into the probe (``crb doctor``
+              renders the same function from a bare URL);
               ``ledger_counts`` is the SQL twin of ``false_q1_total`` over the stored
               belts; ``process_role`` reads ``CRB_ROLE`` so the API container never fails
               on the docker socket it is not meant to have.
 Layer:        server — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate)
-Works with:   src/crb/observability/probes.py (the probe vocabulary and ``aggregate``),
+Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
+              ``failure_detail`` and ``aggregate``),
+              src/crb/store/migrate.py (``head_status_on`` — the one head check),
+              src/crb/cli/commands/service.py (``crb doctor`` renders ``migrations_result``
+              and ``probe_worker``),
               src/crb/store/ledger.py (``assert_append_only``), src/crb/observability/metrics.py
               (the gauges and the registry — the API's series only; the worker serves its
               own, docs/DEPLOYMENT.md#9-observability), src/crb/server/worker.py (upserts
               the ``workers`` rows the worker probe reads), src/crb/server/routes/signoffs.py
-              (the same false-Q1 predicate, kept in step), deploy/Dockerfile (``CRB_ROLE``
-              per container and the ``HEALTHCHECK`` on ``/health/live``),
-              docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface
+              (the same false-Q1 predicate, kept in step), deploy/entrypoint.sh + deploy/Dockerfile
+              (``CRB_ROLE`` per container and the ``HEALTHCHECK`` on ``/health/live``),
+              docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface (the
+              ``migrations`` contract the other documents copy)
 Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py
 Touch when:   never for a new repository; adding a probe means deciding which role owns it
-              (``skipped`` elsewhere) and whether it may fail readiness; a new belt means
+              (``skipped`` elsewhere), whether it may fail readiness, and putting its read
+              under ``probes.run_probe`` (never an exception in a ``detail``); a new belt means
               extending the predicate here AND in ``FALSE_Q1_PREDICATE`` (signoffs.py) AND
               ``false_q1_total`` in src/crb/core/ledger.py together.
 """
@@ -89,14 +116,15 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from crb.core.ledger import BELT_SET_V3_LEGACY, BELT_SET_V5
+from crb.core.ledger import BELT_SET_V3_LEGACY, BELT_SET_V5, LedgerIntegrityError
 from crb.core.routing import POLICY_VERSION
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.observability import metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
-from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep
+from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.settings import Settings
 from crb.store.ledger import assert_append_only
+from crb.store.migrate import HeadStatus, head_status_on
 from crb.store.models import APPEND_ONLY_TABLES, Grade, Run, User, WorkerRow
 
 try:  # pragma: no cover — extra installed in [server]
@@ -141,16 +169,67 @@ def process_role(environ: Mapping[str, str] | None = None) -> str:
 # --- store-level probes -------------------------------------------------------------
 
 
-def probe_db(factory: sessionmaker[Session]) -> ProbeResult:
+def probe_db(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
     """``db``: the database answers ``SELECT 1`` (plus the user count as a data point)."""
 
-    def _ping() -> dict[str, Any]:
+    def _read() -> ProbeResult:
         with factory() as s:
             s.execute(text("SELECT 1"))
             users = int(s.execute(select(func.count(User.id))).scalar_one())
-            return {"dialect": s.get_bind().dialect.name, "users": users}
+            return ProbeResult(
+                "db", OK, "ok", {"dialect": s.get_bind().dialect.name, "users": users}
+            )
 
-    return probes.probe_callable("db", _ping)
+    return probes.run_probe("db", _read, request_id=request_id)
+
+
+#: The fix every not-at-head reading names (the entrypoint / Helm Job runs the same command).
+MIGRATE_FIX = "run `crb migrate` (the migrate Job / `python -m crb.store.migrate upgrade`)"
+
+
+def migrations_result(st: HeadStatus) -> ProbeResult:
+    """``migrations`` from a :class:`HeadStatus` — shared with ``crb doctor`` so the two
+    surfaces cannot disagree. ``ok`` at head; ``degraded`` for a ``create_all`` schema that
+    equals the head but carries no ``alembic_version`` (complete; ``crb migrate`` stamps it);
+    ``down`` otherwise — behind, ahead, empty or an older unversioned schema — naming the
+    revisions where applicable and the fix."""
+    data = st.to_dict()
+    if st.at_head:
+        return ProbeResult("migrations", OK, f"database at {st.head} = code head", data)
+    if st.database is not None:
+        return ProbeResult(
+            "migrations",
+            DOWN,
+            f"database at {st.database}, code head {st.head} — {MIGRATE_FIX}",
+            data,
+        )
+    if st.matches_models:
+        return ProbeResult(
+            "migrations",
+            DEGRADED,
+            f"schema matches head {st.head} but carries no alembic_version (a create_all "
+            "store) — run `crb migrate` to stamp it",
+            data,
+        )
+    where = "empty" if st.unversioned_at is None else f"unversioned schema at {st.unversioned_at}"
+    return ProbeResult(
+        "migrations",
+        DOWN,
+        f"database not migrated ({where}), code head {st.head} — {MIGRATE_FIX}",
+        data,
+    )
+
+
+def probe_migrations(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
+    """``migrations``: the store's Alembic revision against the packaged head, read on a
+    session's own connection (one ``SELECT`` on ``alembic_version`` for a versioned store).
+    A read that raises is ``down`` with the fixed ``failure_detail`` (``run_probe``)."""
+
+    def _read() -> ProbeResult:
+        with factory() as s:
+            return migrations_result(head_status_on(s.connection()))
+
+    return probes.run_probe("migrations", _read, request_id=request_id)
 
 
 def _count_triggers(s: Session) -> int:
@@ -167,29 +246,28 @@ def _count_triggers(s: Session) -> int:
     return sum(1 for n in names if n in present)
 
 
-def probe_append_only(factory: sessionmaker[Session]) -> ProbeResult:
+def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
     """``append_only``: every trigger present AND an UPDATE on ``grades`` refused —
-    counting alone would pass a trigger that exists but does not fire."""
+    counting alone would pass a trigger that exists but does not fire. An accepted UPDATE
+    is ``down`` in the ledger's own words (:class:`LedgerIntegrityError` names no
+    secret); a read that raises is ``down`` with the fixed ``failure_detail``."""
     expected = 2 * len(APPEND_ONLY_TABLES)
-    try:
+
+    def _read() -> ProbeResult:
         with factory() as s:
             found = _count_triggers(s)
-        assert_append_only(factory)
-    except Exception as exc:
-        return ProbeResult("append_only", DOWN, f"{type(exc).__name__}: {exc}")
-    if found < expected:
-        return ProbeResult(
-            "append_only",
-            DOWN,
-            f"{found}/{expected} append-only triggers present",
-            {"triggers": found, "expected": expected},
-        )
-    return ProbeResult(
-        "append_only",
-        OK,
-        "triggers present; UPDATE on grades refused",
-        {"triggers": found, "expected": expected},
-    )
+        data = {"triggers": found, "expected": expected}
+        try:
+            assert_append_only(factory)
+        except LedgerIntegrityError as exc:
+            return ProbeResult("append_only", DOWN, str(exc), data)
+        if found < expected:
+            return ProbeResult(
+                "append_only", DOWN, f"{found}/{expected} append-only triggers present", data
+            )
+        return ProbeResult("append_only", OK, "triggers present; UPDATE on grades refused", data)
+
+    return probes.run_probe("append_only", _read, request_id=request_id)
 
 
 def ledger_counts(factory: sessionmaker[Session]) -> tuple[int, int]:
@@ -220,16 +298,17 @@ def refresh_ledger_gauges(factory: sessionmaker[Session]) -> tuple[int, int]:
     return rows, fq1
 
 
-def probe_ledger(factory: sessionmaker[Session]) -> ProbeResult:
+def probe_ledger(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
     """``ledger``: ``down`` on any false-Q1 row — the honesty floor is a readiness condition."""
-    try:
+
+    def _read() -> ProbeResult:
         rows, fq1 = refresh_ledger_gauges(factory)
-    except Exception as exc:
-        return ProbeResult("ledger", DOWN, f"{type(exc).__name__}: {exc}")
-    data = {"rows": rows, "false_q1": fq1}
-    if fq1:
-        return ProbeResult("ledger", DOWN, f"false_q1={fq1} — honesty floor breached", data)
-    return ProbeResult("ledger", OK, f"{rows} rows, false_q1=0", data)
+        data = {"rows": rows, "false_q1": fq1}
+        if fq1:
+            return ProbeResult("ledger", DOWN, f"false_q1={fq1} — honesty floor breached", data)
+        return ProbeResult("ledger", OK, f"{rows} rows, false_q1=0", data)
+
+    return probes.run_probe("ledger", _read, request_id=request_id)
 
 
 def _parse_ts(value: str) -> _dt.datetime | None:
@@ -280,7 +359,9 @@ def _plural(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
-def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
+def probe_worker(
+    factory: sessionmaker[Session], stale_s: int, *, request_id: str = ""
+) -> ProbeResult:
     """``worker`` (J-TEL-2): liveness from the ``workers`` table (every worker checks in
     every ``heartbeat_s``, idle or not), plus running runs' heartbeats.
 
@@ -292,10 +373,12 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
     (``unconfirmed_containers`` summed over the listed workers — each may still be
     running). ``ok`` otherwise, naming the workers. Never ``down``: the API pod's readiness
     is not the worker's liveness (module docstring) — ``down`` is reserved for the store
-    not answering.
+    not answering, and then only through ``probes.run_probe`` (the fixed detail; the
+    exception in the log, never served).
     """
     now = _dt.datetime.now(_dt.UTC)
-    try:
+
+    def _read() -> ProbeResult:
         with factory() as s:
             running = list(
                 s.execute(
@@ -306,93 +389,98 @@ def probe_worker(factory: sessionmaker[Session], stale_s: int) -> ProbeResult:
                 s.execute(select(func.count(Run.id)).where(Run.status == "queued")).scalar_one()
             )
             rows = list(s.execute(select(WorkerRow).order_by(WorkerRow.worker_id)).scalars())
-    except Exception as exc:
-        return ProbeResult("worker", DOWN, f"{type(exc).__name__}: {exc}")
-    workers = [
-        _worker_view(r, now)
-        for r in rows
-        if not r.stopped or (_age_s(r.heartbeat, now) or 0.0) <= WORKER_FORGET_AFTER_S
-    ]
-    alive = [w for w in workers if w["alive"]]
-    stale_runs: list[str] = []
-    for run_id, _worker, heartbeat in running:
-        ts = _parse_ts(heartbeat) if heartbeat else None
-        if ts is None or (now - ts).total_seconds() > stale_s:
-            stale_runs.append(str(run_id))
-    # the contract docs/API.md#health documents and ui/src/api/types.ts types (WorkerProbeData):
-    # the top-level ``stale_after_s`` is the RUN threshold behind ``stale``; each worker's own
-    # ``stale_after_s`` (3 × its heartbeat_s) is the bound behind its ``alive``
-    unconfirmed = sum(int(w["unconfirmed_containers"]) for w in workers)
-    data = {
-        "workers": workers,
-        "alive": len(alive),
-        "running": len(running),
-        "queued": queued,
-        "stale": stale_runs,
-        "stale_after_s": stale_s,
-        "unconfirmed_containers": unconfirmed,
-    }
-    # a worker that should be alive and is not: not stopped, last seen too long ago
-    lapsed = [w for w in workers if not w["alive"] and not w["stopped"]]
-    if queued and not alive:
-        stopped = [w for w in workers if w["stopped"]]
-        if lapsed:
-            recent = min(lapsed, key=lambda w: w["heartbeat_age_s"] or float("inf"))
-            since = f"no worker has checked in for {recent['heartbeat_age_s'] or 0:.0f} s"
-            since += f" ({recent['worker_id']})"
-        elif stopped:
-            last = min(stopped, key=lambda w: _age_s(w["stopped"], now) or float("inf"))
-            since = (
-                f"the last worker ({last['worker_id']}) stopped "
-                f"{_age_s(last['stopped'], now) or 0:.0f} s ago"
+        workers = [
+            _worker_view(r, now)
+            for r in rows
+            if not r.stopped or (_age_s(r.heartbeat, now) or 0.0) <= WORKER_FORGET_AFTER_S
+        ]
+        alive = [w for w in workers if w["alive"]]
+        stale_runs: list[str] = []
+        for run_id, _worker, heartbeat in running:
+            ts = _parse_ts(heartbeat) if heartbeat else None
+            if ts is None or (now - ts).total_seconds() > stale_s:
+                stale_runs.append(str(run_id))
+        # the contract docs/API.md#health documents and ui/src/api/types.ts types (WorkerProbeData):
+        # the top-level ``stale_after_s`` is the RUN threshold behind ``stale``; each worker's own
+        # ``stale_after_s`` (3 × its heartbeat_s) is the bound behind its ``alive``
+        unconfirmed = sum(int(w["unconfirmed_containers"]) for w in workers)
+        data = {
+            "workers": workers,
+            "alive": len(alive),
+            "running": len(running),
+            "queued": queued,
+            "stale": stale_runs,
+            "stale_after_s": stale_s,
+            "unconfirmed_containers": unconfirmed,
+        }
+        # a worker that should be alive and is not: not stopped, last seen too long ago
+        lapsed = [w for w in workers if not w["alive"] and not w["stopped"]]
+        if queued and not alive:
+            stopped = [w for w in workers if w["stopped"]]
+            if lapsed:
+                recent = min(lapsed, key=lambda w: w["heartbeat_age_s"] or float("inf"))
+                since = f"no worker has checked in for {recent['heartbeat_age_s'] or 0:.0f} s"
+                since += f" ({recent['worker_id']})"
+            elif stopped:
+                last = min(stopped, key=lambda w: _age_s(w["stopped"], now) or float("inf"))
+                since = (
+                    f"the last worker ({last['worker_id']}) stopped "
+                    f"{_age_s(last['stopped'], now) or 0:.0f} s ago"
+                )
+            else:
+                since = "no worker has checked in yet"
+            return ProbeResult(
+                "worker",
+                DEGRADED,
+                f"{_plural(queued, 'run')} queued, {since} — queued runs will not start until "
+                "a worker does",
+                data,
             )
-        else:
-            since = "no worker has checked in yet"
-        return ProbeResult(
-            "worker",
-            DEGRADED,
-            f"{_plural(queued, 'run')} queued, {since} — queued runs will not start until "
-            "a worker does",
-            data,
+        if stale_runs:
+            return ProbeResult(
+                "worker", DEGRADED, f"{len(stale_runs)} running run(s) with a stale heartbeat", data
+            )
+        if lapsed:
+            w = lapsed[0]
+            return ProbeResult(
+                "worker",
+                DEGRADED,
+                f"worker {w['worker_id']} last checked in {w['heartbeat_age_s'] or 0:.0f} s ago "
+                f"(alive within {w['stale_after_s']:.0f} s)",
+                data,
+            )
+        if not alive:
+            return ProbeResult(
+                "worker",
+                DEGRADED,
+                "no worker has checked in yet — queued runs will not start",
+                data,
+            )
+        if unconfirmed:
+            reaping = [w for w in workers if w["unconfirmed_containers"]]
+            who = ", ".join(str(w["worker_id"]) for w in reaping)
+            return ProbeResult(
+                "worker",
+                DEGRADED,
+                f"{_plural(unconfirmed, 'container')} whose docker kill was not confirmed "
+                f"{'are' if unconfirmed != 1 else 'is'} being reaped by worker {who} — each may "
+                "still be running on its host; `docker ps` there names them and "
+                "`docker rm -f <name>` reaps one by hand",
+                data,
+            )
+        newest = min(alive, key=lambda w: w["heartbeat_age_s"] or 0.0)
+        detail = (
+            f"{_plural(len(alive), 'worker')}, last check-in {newest['heartbeat_age_s']:.0f} s ago"
         )
-    if stale_runs:
-        return ProbeResult(
-            "worker", DEGRADED, f"{len(stale_runs)} running run(s) with a stale heartbeat", data
-        )
-    if lapsed:
-        w = lapsed[0]
-        return ProbeResult(
-            "worker",
-            DEGRADED,
-            f"worker {w['worker_id']} last checked in {w['heartbeat_age_s'] or 0:.0f} s ago "
-            f"(alive within {w['stale_after_s']:.0f} s)",
-            data,
-        )
-    if not alive:
-        return ProbeResult(
-            "worker", DEGRADED, "no worker has checked in yet — queued runs will not start", data
-        )
-    if unconfirmed:
-        reaping = [w for w in workers if w["unconfirmed_containers"]]
-        who = ", ".join(str(w["worker_id"]) for w in reaping)
-        return ProbeResult(
-            "worker",
-            DEGRADED,
-            f"{_plural(unconfirmed, 'container')} whose docker kill was not confirmed "
-            f"{'are' if unconfirmed != 1 else 'is'} being reaped by worker {who} — each may "
-            "still be running on its host; `docker ps` there names them and "
-            "`docker rm -f <name>` reaps one by hand",
-            data,
-        )
-    newest = min(alive, key=lambda w: w["heartbeat_age_s"] or 0.0)
-    detail = f"{_plural(len(alive), 'worker')}, last check-in {newest['heartbeat_age_s']:.0f} s ago"
-    if running:
-        detail += f" · {_plural(len(running), 'run')} running"
-    detail += f" · {_plural(queued, 'run')} queued"
-    return ProbeResult("worker", OK, detail, data)
+        if running:
+            detail += f" · {_plural(len(running), 'run')} running"
+        detail += f" · {_plural(queued, 'run')} queued"
+        return ProbeResult("worker", OK, detail, data)
+
+    return probes.run_probe("worker", _read, request_id=request_id)
 
 
-def probe_sandbox(settings: Settings, role: str = ROLE_ALL) -> ProbeResult:
+def probe_sandbox(settings: Settings, role: str = ROLE_ALL, *, request_id: str = "") -> ProbeResult:
     """The sandbox executor, as seen from a process of ``role``.
 
     The sandbox belongs to the worker. An ``api`` process reports ``skipped``: the
@@ -410,7 +498,7 @@ def probe_sandbox(settings: Settings, role: str = ROLE_ALL) -> ProbeResult:
             {"executor": executor, "role": role},
         )
     if executor == "docker":
-        return probes.probe_docker(timeout=5)
+        return probes.probe_docker(timeout=5, request_id=request_id)
     return ProbeResult(
         "sandbox",
         DEGRADED,
@@ -429,28 +517,41 @@ def _stamp(out: dict[str, Any], role: str) -> dict[str, Any]:
 
 
 def collect_health(
-    factory: sessionmaker[Session], settings: Settings, *, role: str | None = None
+    factory: sessionmaker[Session],
+    settings: Settings,
+    *,
+    role: str | None = None,
+    request_id: str = "",
 ) -> dict[str, Any]:
-    """The deep probe (readiness). ``role`` defaults to :func:`process_role`."""
+    """The deep probe (readiness). ``role`` defaults to :func:`process_role``;
+    ``request_id`` is what a failed read's detail names (the route passes the middleware's).
+    Every probe runs under :func:`probes.run_probe` — the observability probes here too,
+    so no probe in the body can serve an exception."""
     role = process_role() if role is None else role
+    rid = request_id
     results = [
-        probe_db(factory),
-        probe_append_only(factory),
-        probe_ledger(factory),
-        probe_sandbox(settings, role),
-        probes.probe_toolchains(),
-        probes.probe_builders(),
-        probe_worker(factory, settings.worker_heartbeat_stale_s),
+        probe_db(factory, request_id=rid),
+        probe_migrations(factory, request_id=rid),
+        probe_append_only(factory, request_id=rid),
+        probe_ledger(factory, request_id=rid),
+        probes.run_probe(
+            "sandbox", lambda: probe_sandbox(settings, role, request_id=rid), request_id=rid
+        ),
+        probes.run_probe("toolchains", probes.probe_toolchains, request_id=rid),
+        probes.run_probe("builders", probes.probe_builders, request_id=rid),
+        probe_worker(factory, settings.worker_heartbeat_stale_s, request_id=rid),
     ]
     return _stamp(probes.aggregate(results), role)
 
 
-def collect_liveness(factory: sessionmaker[Session], *, role: str | None = None) -> dict[str, Any]:
+def collect_liveness(
+    factory: sessionmaker[Session], *, role: str | None = None, request_id: str = ""
+) -> dict[str, Any]:
     """Liveness: the process is up and its database answers. Exactly ONE probe (``db``);
     never the sandbox, the toolchains, the builders, the ledger or the worker — a
     liveness check that fails on a dependency restarts a healthy process."""
     role = process_role() if role is None else role
-    return _stamp(probes.aggregate([probe_db(factory)]), role)
+    return _stamp(probes.aggregate([probe_db(factory, request_id=request_id)]), role)
 
 
 # --- routes -------------------------------------------------------------------------
@@ -460,9 +561,11 @@ def collect_liveness(factory: sessionmaker[Session], *, role: str | None = None)
     "/health",
     summary="Deep health / readiness (503 when any probe is down; sandbox skipped for CRB_ROLE=api)",
 )
-def health(response: Response, factory: SessionFactoryDep, settings: SettingsDep) -> dict[str, Any]:
+def health(
+    request: Request, response: Response, factory: SessionFactoryDep, settings: SettingsDep
+) -> dict[str, Any]:
     """Readiness: 503 only on ``down`` — ``degraded`` still serves (with caveats)."""
-    out = collect_health(factory, settings)
+    out = collect_health(factory, settings, request_id=request_id(request))
     if out["status"] == DOWN:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return out
@@ -472,9 +575,9 @@ def health(response: Response, factory: SessionFactoryDep, settings: SettingsDep
     "/health/live",
     summary="Liveness: process up + database reachable (503 otherwise); never probes the sandbox",
 )
-def health_live(response: Response, factory: SessionFactoryDep) -> dict[str, Any]:
+def health_live(request: Request, response: Response, factory: SessionFactoryDep) -> dict[str, Any]:
     """Liveness: the process and its database, nothing else (see ``collect_liveness``)."""
-    out = collect_liveness(factory)
+    out = collect_liveness(factory, request_id=request_id(request))
     if out["status"] == DOWN:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return out
@@ -514,6 +617,7 @@ def version(request: Request) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_ROLE",
+    "MIGRATE_FIX",
     "ROLES",
     "ROLE_ALL",
     "ROLE_API",
@@ -523,6 +627,9 @@ __all__ = [
     "collect_health",
     "collect_liveness",
     "ledger_counts",
+    "migrations_result",
+    "probe_migrations",
+    "probe_worker",
     "process_role",
     "refresh_ledger_gauges",
     "router",

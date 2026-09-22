@@ -8,7 +8,9 @@ Navigation
 ----------
 What it is:   ``/settings/secrets``'s test suite — the Claude Code login token through the admin
               API.
-What it does: Pins that every route is 401 anonymous and admin-only, that CSRF is required on
+What it does: Pins that every route is 401 anonymous and admin-only, that a viewer's copy of
+              the status list is presence only while an operator sees the full status (F25),
+              that CSRF is required on
               every mutating route, that PUT stores owner-only and answers with a status never
               the value (shape validated, never echoed), that DELETE is idempotent, that an
               insecure directory refuses the store with 409, that ``CRB_SECRETS_DIR`` relocates
@@ -184,6 +186,36 @@ class TestAccess:
         assert client.put(PATH_, json={"token": GOOD}).status_code == 200
         assert client.post(PATH_ + "/verify").status_code == 200
         assert client.delete(PATH_).status_code == 200
+
+    def test_viewer_sees_presence_only_operator_sees_the_status(
+        self, client: TestClient, fake_claude: Path
+    ) -> None:
+        """F25: a viewer's copy of the list is EXACTLY ``{name, present}`` (a distinct
+        response model — no empty ``fingerprint`` / ``set_by`` / ``set_at`` keys); an operator
+        (who decides whether an ``auth: cli`` run can authenticate) sees the full status."""
+        login(client)
+        for name, role in (("viewer2", "viewer"), ("op2", "operator")):
+            r = client.post(
+                f"{API_PREFIX}/users", json={"username": name, "password": USER_PW, "role": role}
+            )
+            assert r.status_code == 201, r.text
+        assert client.put(PATH_, json={"token": GOOD}).status_code == 200
+        login(client, "viewer2", USER_PW)
+        body = client.get(f"{API_PREFIX}/settings/secrets").json()
+        assert body == {"items": [{"name": NAME, "present": True}], "secrets_dir": ""}
+        login(client, "op2", USER_PW)
+        item = client.get(f"{API_PREFIX}/settings/secrets").json()["items"][0]
+        assert set(item) == {"name", "present", "fingerprint", "set_at", "set_by"}
+        assert item["present"] is True and item["fingerprint"] == GOOD[-4:]
+        assert item["set_by"] == "root" and item["set_at"]
+        # the contract is in the OpenAPI document too: a distinct presence-only item model
+        schemas = client.get(f"{API_PREFIX}/openapi.json").json()["components"]["schemas"]
+        assert set(schemas["SecretPresenceOut"]["properties"]) == {"name", "present"}
+        items = schemas["SecretsStatusList"]["properties"]["items"]
+        assert [a["items"]["$ref"].rsplit("/", 1)[1] for a in items["anyOf"]] == [
+            "SecretStatusOut",
+            "SecretPresenceOut",
+        ]
 
     def test_csrf_required_on_every_mutating_route(self, client: TestClient) -> None:
         login(client)

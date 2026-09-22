@@ -5,12 +5,15 @@
 design behind these choices is [ARCHITECTURE §6](ARCHITECTURE.md#6-deployment-view) and
 [ADR-0005 (fail-closed sandbox)](adr/0005-fail-closed-docker-sandbox.md).
 
-Contents: [1 Shapes](#1-deployment-shapes) · [2 The image](#2-the-image-and-its-roles) ·
+Contents: [1 Shapes](#1-deployment-shapes) ·
+[1.1 Single host without containers](#11-single-host-without-containers-evaluation) ·
+[2 The image](#2-the-image-and-its-roles) ·
 [2.2 Released image, signature, SBOM](#22-the-released-image-name-signature-sbom) ·
 [3 Kubernetes (Helm)](#3-kubernetes-helm) · [4 Azure](#4-azure) ·
-[5 Backup & restore](#5-backup-and-restore) · [6 Upgrade](#6-upgrade) ·
+[5 Backup & restore](#5-backup-and-restore) ·
+[5.1 SQLite](#51-backup-and-restore-sqlite) · [6 Upgrade](#6-upgrade) ·
 [7 Air-gap](#7-air-gap-posture) · [8 Go-live checklist](#8-go-live-checklist) ·
-[9 Observability](#9-observability)
+[9 Observability](#9-observability) · [Releasing](RELEASING.md)
 
 ---
 
@@ -18,14 +21,49 @@ Contents: [1 Shapes](#1-deployment-shapes) · [2 The image](#2-the-image-and-its
 
 | Shape | When | Where documented |
 |---|---|---|
+| **Single host, no containers** | an evaluation on a laptop or one VM: `crb serve` + `crb worker` from a virtual environment, SQLite | §1.1 of this page |
 | **Single host, Docker Compose** | pilots, one team, one VM in the tenant | [deploy/README.md](../deploy/README.md) |
 | **Kubernetes, Helm** | shared platform, AKS/EKS/on-prem, managed PostgreSQL | §3 of this page; [deploy/helm/crb](../deploy/helm/crb/README.md) |
 
-Both run the same image and the same four things: PostgreSQL, a one-shot **migrate** step,
+The two container shapes run the same image and the same four things: PostgreSQL, a one-shot **migrate** step,
 the **api** (HTTP + UI) and the **worker** (queue consumer that mines, builds, grades and
 appends to the ledger). Both enforce the same invariants: the append-only tables carry DB
 triggers, every verdict is hash-chained, the sandbox fails closed, and the only permitted
 egress is the model endpoint (worker) and the OIDC issuer (api).
+
+### 1.1 Single host without containers (evaluation)
+
+The shape every walkthrough, the first factory run (B-1b) and the development stack use:
+one directory, one SQLite file, two processes. It is for evaluation — the local executor
+does not isolate test runs and SQLite is not the production store (§2.1) — but it holds
+sign-offs and ledger rows like any other, so it deserves a fixed address.
+
+```
+~/crb-stack/                 # the stack root — a PERSISTENT path, never a temporary one
+├── home/                    # CRB_HOME: evidence packs, events, factory evidence, transcripts, clones
+│   └── secrets/             # the Claude Code login token (mode 0700; files 0600)
+├── crb.db                   # the SQLite store (CRB_DATABASE_URL=sqlite:///~/crb-stack/crb.db)
+└── env.sh / restart.sh      # the environment and the two commands, kept next to the data
+```
+
+```bash
+export CRB_HOME=~/crb-stack/home CRB_ENV=dev CRB_DATABASE_URL="sqlite:///$HOME/crb-stack/crb.db"
+crb migrate && crb doctor                       # every line ok or warn before the first run
+crb serve --host 127.0.0.1 --port 8000 &        # API + UI
+crb worker --home "$CRB_HOME" --executor local  # the queue consumer
+```
+
+**Never put `CRB_HOME`, the database or the secrets directory under `/tmp`, `/private/tmp`,
+`/var/folders` or `$TMPDIR`** (DL-045). macOS treats those paths as temporary storage: the
+OS's periodic clean-up removes untouched files there (see Apple's `periodic` / `daily`
+documentation for `/tmp` on your macOS version), and it may empty them on reboot. A
+deployment that lives there loses its builder token, its clones' `HEAD` and its restart
+script with no error message. The product enforces the rule rather than relying on this
+paragraph: `Settings` **refuses to start**
+when `CRB_HOME` resolves under one of those roots and `CRB_ENV=prod` (the default), and
+**warns** in `CRB_ENV=dev`; `crb doctor`'s `home` line says the same. `CRB_ALLOW_TEMP_HOME=true`
+admits a temporary home for a throwaway evaluation only (the walkthrough harness runs
+`dev`, so it is warned, never refused). Back this shape up with §5.1.
 
 ## 2. The image and its roles
 
@@ -55,7 +93,8 @@ server and never appear in logs or `/settings`.
 | `CRB_DATABASE_URL` | yes | `postgresql+psycopg://user:pw@host:5432/db?sslmode=require`; SQLite (`sqlite:///…`) is for development only |
 | `CRB_SECRET_KEY` | yes (prod) | ≥ 32 chars; signs sessions. `CRB_ENV=prod` (default) refuses to start without it |
 | `CRB_ENV` | | `prod` (default: Secure cookies, key required) or `dev` |
-| `CRB_HOME` | | state dir; `/srv/crb` in the image |
+| `CRB_HOME` | | state dir; `/srv/crb` in the image. **Refused** in `prod` (warned in `dev`) when it resolves under `/tmp`, `/private/tmp`, `/var/folders` or `$TMPDIR` — §1.1 |
+| `CRB_ALLOW_TEMP_HOME` | | `true` admits a temporary `CRB_HOME` in `prod` for a throwaway evaluation; the warning is still logged. Never on a server |
 | `CRB_BIND_HOST` / `CRB_BIND_PORT` | | `0.0.0.0:8000` in the image |
 | `CRB_FORWARDED_ALLOW_IPS` / `CRB_TRUSTED_PROXIES` | | addresses whose `X-Forwarded-*` are believed (uvicorn / app). Set both to the proxy's CIDR; empty = believe nobody. Never `*` — a wildcard lets any client spoof its address and scheme (Helm ships empty; compose `127.0.0.1`) |
 | `CRB_WEB_CONCURRENCY` | | uvicorn workers (default 1; 2 in compose/Helm) |
@@ -280,13 +319,74 @@ the repositories; convenient to keep).
   every upgrade and monthly for off-platform retention.
 * **Compose**: `pg_dump` + tar of `/srv/crb` — commands in
   [deploy/README.md §4](../deploy/README.md#4-backup-and-restore).
-* **Verify every backup**: `crb ledger verify` (or `GET /api/v1/ledger/verify`) before and
-  after a restore must report the same row count and last `row_hash`. A restore that
-  changes either is not a restore; treat it as an incident.
+* **Verify every backup**: the store's row count and last `row_hash` before and after a
+  restore must be the same, read from the database itself
+  (`SELECT count(*), max(seq) FROM grades; SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1;`),
+  and `GET /api/v1/ledger/verify` on the restored API must read `chain intact, false_q1=0`
+  with that count. A restore that changes either is not a restore; treat it as an incident.
+  `crb ledger verify` walks the core JSONL ledger at `$CRB_HOME/ledger.jsonl`, not the
+  database — it cannot prove a database copy.
 
 Restore order: database (on an *empty* target) → work volume → `migrate` (no-op at head; it
-re-asserts the triggers) → api/worker → ledger verify → the append-only probe on
-`/api/v1/health`.
+re-asserts the triggers) → api/worker → ledger verify → the `migrations` and `append_only`
+probes on `/api/v1/health`.
+
+### 5.1 Backup and restore (SQLite)
+
+The single-host shape (§1.1) keeps everything in `CRB_HOME` and one SQLite file, and it
+holds real sign-offs and ledger rows — back it up like the production store. A copy taken
+while the worker writes can be torn; `sqlite3 .backup` copies a consistent snapshot even
+so, but stopping the worker first is the simplest guarantee.
+
+The proof that a copy is a backup reads the copy: SQLite's own `integrity_check`, the
+`grades` row count and the last `row_hash`, taken from the file with `sqlite3`. (`crb ledger
+verify` walks the core JSONL ledger at `$CRB_HOME/ledger.jsonl`, ignores `CRB_DATABASE_URL`
+and passes an empty or torn `crb.db` — do not use it here.) The same three-line query on
+the live file, the copy and the restored file must give the same count and hash; a torn or
+empty file fails it with a non-zero exit (`database disk image is malformed`, `no such
+table: grades`).
+
+```bash
+# 1. quiesce — no run in flight (the API may keep serving reads)
+kill "$(cat ~/crb-stack/worker.pid)"                 # THIS stack's worker: the pid its start script
+                                                   # recorded, or `systemctl stop crb-worker` /
+                                                   # `docker compose stop worker` — never a host-wide
+                                                   # `pkill`, which stops every crb stack's workers
+CHECK='PRAGMA integrity_check; SELECT count(*), max(seq) FROM grades;
+       SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1;'
+sqlite3 ~/crb-stack/crb.db "$CHECK"                # record: ok, the row count, the last row_hash
+
+# 2. copy: the store with SQLite's own online-backup API, then the home directories
+STAMP=$(date -u +%Y-%m-%dT%H%M%SZ); DEST=~/crb-backups/$STAMP
+mkdir -p ~/crb-backups && mkdir "$DEST"            # no -p: a second run in the same second
+                                                   # fails here instead of overwriting the first
+sqlite3 ~/crb-stack/crb.db ".backup '$DEST/crb.db'"
+tar -C ~/crb-stack -czf "$DEST/home.tgz" \
+  $(cd ~/crb-stack && ls -d home/evidence home/events home/factory home/transcripts home/secrets 2>/dev/null)
+
+# 3. prove the copy is a backup, not a torn file
+sqlite3 "$DEST/crb.db" "$CHECK"                    # ok, the same row count, the same last row_hash
+chmod -R go-rwx "$DEST"                            # it carries the login token
+```
+
+Restore, in this order, onto an **empty** `CRB_HOME`: stop the worker and the API →
+`sqlite3 ~/crb-stack/crb.db ".restore '$DEST/crb.db'"` (or copy the file into place) →
+`sqlite3 ~/crb-stack/crb.db "$CHECK"` must report `ok`, the count and the last `row_hash`
+you recorded at step 1 → `tar -C ~/crb-stack -xzf "$DEST/home.tgz"` →
+`chmod 0700 ~/crb-stack/home/secrets` → `crb migrate` (a no-op at head; it re-asserts the
+append-only triggers) → `crb doctor` → start the API and the worker →
+`GET /api/v1/health` green → `GET /api/v1/ledger/verify` (signed in) reads
+`chain intact, false_q1=0` with the same row count. A restore that changes the count or the
+hash, or breaks the chain, is not a restore; treat it as an incident (§5).
+
+What the tar holds: `home/evidence` (the evidence packs the ledger cites), `home/events`,
+`home/factory` (the factory evidence chain — each repository's frozen backlog,
+`evidence.jsonl` and gap sign-offs),
+`home/transcripts` (retained builder transcripts; the review screen serves them from the
+path on the grade row, and after a restore without them every transcript link answers
+"not retained") and `home/secrets` (the login token — leave it out only if you are prepared
+to sign in again). Clones under `home/repos` and retained worktrees under `home/scratch`
+are reproducible from the repositories and are left out.
 
 ## 6. Upgrade
 
@@ -352,9 +452,19 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
 
 - [ ] The running image is a released digest: `deploy/verify-image.sh <version> --digest
       sha256:<pinned>` passes (§2.2) and the digest is what `image.digest` / `CRB_IMAGE` says.
-- [ ] `GET /api/v1/health` is green: database reachable, migrations at head, append-only
-      probe passes, sandbox reachable (worker), builder reachable.
-- [ ] `crb ledger verify` succeeds; the last `row_hash` is recorded out of band.
+- [ ] `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
+      `database at <rev> = code head` — its contract is
+      [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
+      line. `append_only` proves an
+      UPDATE refused, `ledger` reads `false_q1=0`, `builders`
+      configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
+      worker owns it; prove it with `crb doctor` on the worker host).
+- [ ] `crb doctor` on the API host and on the worker host: every line `ok`, or `warn` for a
+      reason you have written down; no `fail`. It covers what `/health` cannot see from
+      inside a pod — the GitHub App's installations, the secrets directory mode, the
+      `CRB_HOME` location and the help bundle ([OPERATOR.md §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
+- [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0`; the last `row_hash`
+      (`SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1`) is recorded out of band.
 - [ ] OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the
       bootstrap admin password has been rotated (`PUT /users/{id}/password`, or
       `crb users set-password <admin>` on the API host) or the account deactivated
