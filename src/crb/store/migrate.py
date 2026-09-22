@@ -33,16 +33,21 @@ Invariants
 
 Navigation
 ----------
-What it is:   The programmatic Alembic entry point — ``upgrade`` / ``current`` / ``check`` and
-              the ``python -m crb.store.migrate`` CLI the container entrypoint runs.
+What it is:   The programmatic Alembic entry point — ``upgrade`` / ``current`` / ``check`` /
+              ``head_status`` and the ``python -m crb.store.migrate`` CLI the container
+              entrypoint runs.
 What it does: Migrates a database to the packaged head in one transaction, adopts an
               unversioned ``init_db`` database by stamping it at the revision its schema
               matches, and refuses a partial or foreign schema rather than guess. Re-asserts
               the append-only triggers after every upgrade; never logs the URL.
+              ``head_status`` is the one head check ``/health``'s ``migrations`` probe and
+              ``crb doctor`` both read: the applied revision against the packaged head, and
+              for an unversioned store the revision its fingerprints correspond to.
 How:          ``upgrade`` = engine → ``_adopt_unversioned_schema`` (marker walk, parity
               diff at head) → ``command.upgrade`` on the same connection →
               ``install_append_only_triggers``; ``install_append_only_triggers_on`` adapts an
-              open connection so revision scripts reuse the one trigger helper.
+              open connection so revision scripts reuse the one trigger helper;
+              ``head_status_on`` reads ``alembic_version`` and reuses the adoption walk.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/store/migrations/env.py (receives the connection through
@@ -50,7 +55,9 @@ Works with:   src/crb/store/migrations/env.py (receives the connection through
               (the revision that equals ``create_all``), src/crb/store/db.py (the engine and
               the trigger helper), src/crb/store/models.py (``Base.metadata`` for the parity
               diff), deploy/entrypoint.sh (runs ``upgrade`` before serving),
-              src/crb/cli/commands/service.py (``crb migrate``)
+              src/crb/cli/commands/service.py (``crb migrate``; ``crb doctor`` reads
+              ``head_status``), src/crb/server/routes/system.py (the ``migrations`` probe
+              reads ``head_status_on``)
 Tested by:    tests/test_store_migrate.py
 Touch when:   never for a new repository; every new revision that ADDS a column appends a
               ``REVISION_MARKERS`` entry and one that ADDS a table appends a
@@ -65,6 +72,7 @@ import logging
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import cast
@@ -288,16 +296,67 @@ def current(url: str | None = None) -> str | None:
     return heads[0]
 
 
-def check(url: str | None = None) -> bool:
-    """``True`` iff the database is at the packaged head (no pending, no unknown revisions)."""
-    packaged = set(ScriptDirectory.from_config(alembic_config()).get_heads())
+@dataclass(frozen=True)
+class HeadStatus:
+    """Where a database stands against the packaged revision chain — what the ``/health``
+    ``migrations`` probe and ``crb doctor`` report.
+
+    ``database`` is the applied revision (several, comma-joined, when the store reports more
+    than one head; ``None`` when there is no ``alembic_version`` row — an empty store or a
+    ``create_all`` one). ``head`` is the code's single head. ``at_head`` is True only when
+    the applied revision IS the head. For an UNVERSIONED store with crb tables,
+    ``unversioned_at`` is the revision its fingerprints correspond to (the same walk
+    ``upgrade`` uses to adopt it) and ``matches_models`` says whether that revision is the
+    head AND the schema equals the current models — i.e. ``upgrade`` would stamp it
+    without applying anything. Both are ``None`` / ``False`` for a versioned or empty store.
+    """
+
+    database: str | None
+    head: str
+    at_head: bool
+    unversioned_at: str | None = None
+    matches_models: bool = False
+
+    def to_dict(self) -> dict[str, str | bool | None]:
+        return {
+            "database": self.database,
+            "head": self.head,
+            "at_head": self.at_head,
+            "unversioned_at": self.unversioned_at,
+            "matches_models": self.matches_models,
+        }
+
+
+def head_status_on(connection: Connection) -> HeadStatus:
+    """:class:`HeadStatus` for an open connection (a request-scoped session's, in ``/health``)."""
+    head = head_revision()
+    applied = tuple(sorted(_current_heads(connection)))
+    if applied:
+        return HeadStatus(",".join(applied), head, applied == (head,))
+    present, _expected = _model_tables_present(connection)
+    if not present:
+        return HeadStatus(None, head, False)
+    at = _unversioned_revision(connection)
+    matches = at == head and not compare_metadata(
+        MigrationContext.configure(connection), Base.metadata
+    )
+    return HeadStatus(None, head, False, unversioned_at=at, matches_models=matches)
+
+
+def head_status(url: str | None = None) -> HeadStatus:
+    """:class:`HeadStatus` for ``url`` (default: ``CRB_DATABASE_URL``); opens and disposes
+    its own engine, so ``crb doctor`` can call it from a bare shell."""
     engine = make_engine(database_url(url))
     try:
         with engine.connect() as connection:
-            applied = set(_current_heads(connection))
+            return head_status_on(connection)
     finally:
         engine.dispose()
-    return bool(packaged) and applied == packaged
+
+
+def check(url: str | None = None) -> bool:
+    """``True`` iff the database is at the packaged head (no pending, no unknown revisions)."""
+    return head_status(url).at_head
 
 
 # ---------------------------------------------------------------------------
@@ -361,11 +420,14 @@ __all__ = [
     "REVISION_INDEXES",
     "REVISION_MARKERS",
     "REVISION_TABLES",
+    "HeadStatus",
     "SchemaStateError",
     "alembic_config",
     "check",
     "current",
     "head_revision",
+    "head_status",
+    "head_status_on",
     "install_append_only_triggers_on",
     "main",
     "upgrade",

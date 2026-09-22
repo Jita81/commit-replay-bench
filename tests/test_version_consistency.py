@@ -1,27 +1,36 @@
-"""The package version is declared in three places that must never drift.
+"""The package version is declared in three places that must never drift — and the
+Helm chart's own ``version`` is its SemVer 2 form.
 
 ``release.yml`` refuses a ``v*`` tag whose version differs from ``pyproject.toml``;
 ``/version`` and every evidence pack report ``crb.core.version.__version__``; the Helm
 chart's ``appVersion`` is what an operator sees in ``helm list``. One number, three
 readers — pinned here so a bump that misses one is a failing test, not a refused tag
-or a mislabelled deployment. ``APPARATUS_VERSION`` is deliberately NOT tied to it: it
-moves only when the meaning of a verdict changes (ADR-0011 → 2.2).
+or a mislabelled deployment. The chart's ``version`` (SemVer 2, what ``helm package``
+names the archive and the ``helm.sh/chart`` label carries) tracks the same number with
+a PEP 440 pre-release rendered as SemVer's hyphenated pre-release (``2.0.0b1`` →
+``2.0.0-b1``; ``2.1.0rc1`` → ``2.1.0-rc1``; a final release is the same string) — the
+rule docs/RELEASING.md §1 states, pinned by ``test_chart_version_is_the_semver_form_of_the_package_version``.
+``APPARATUS_VERSION`` is deliberately NOT tied to it: it moves only when the meaning of a
+verdict changes (ADR-0011 → 2.2).
 
 Navigation
 ----------
-What it is:   The version-drift test suite — one package version in three places.
+What it is:   The version-drift test suite — one package version in three places, and the
+              chart version as its SemVer form.
 What it does: Pins that ``pyproject.toml``, ``crb.core.version.__version__`` and the Helm chart's
-              ``appVersion`` are the same string, that ``release.yml``'s tag rule would accept
+              ``appVersion`` are the same string, that the chart's ``version`` is
+              ``semver_of(__version__)``, that ``release.yml``'s tag rule would accept
               ``v<version>``, that ``APPARATUS_VERSION`` is deliberately independent of it, and
               that the CHANGELOG has a dated header for the current version.
-How:          Reads the files as text / TOML; no subprocess.
+How:          Reads the files as text / TOML; no subprocess. ``semver_of`` is the one rule.
 Layer:        tests — docs/ARCHITECTURE.md#74-versioning
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
 Works with:   src/crb/core/version.py (the source of truth), deploy/helm/crb/Chart.yaml
-              (``appVersion``), .github/workflows/release.yml (the tag rule),
+              (``appVersion`` and ``version``), .github/workflows/release.yml (the tag rule),
+              docs/RELEASING.md (§1 — the numbers, and this suite as the check),
               docs/EVIDENCE-AND-CLAIMS.md (the apparatus stamp — why the two versions differ, §4)
 Tested by:    tests/test_version_consistency.py
-Touch when:   releasing (bump all three and the CHANGELOG together — this suite is the
+Touch when:   releasing (bump all four and the CHANGELOG together — this suite is the
               checklist); never tie ``APPARATUS_VERSION`` to the package version.
 """
 
@@ -32,6 +41,8 @@ import re
 import sys
 import tomllib
 from pathlib import Path
+
+import pytest
 
 from crb.core.version import APPARATUS_VERSION, __version__
 
@@ -64,10 +75,44 @@ def _chart_app_version() -> str:
     return m.group(1)
 
 
+def _chart_version() -> str:
+    m = re.search(r"^version:\s*([^\s#]+)\s*$", CHART.read_text(encoding="utf-8"), re.M)
+    assert m, "version not found in Chart.yaml"
+    return m.group(1)
+
+
+def semver_of(pep440: str) -> str:
+    """The chart-version rule (docs/RELEASING.md §1): a PEP 440 pre-release suffix becomes
+    SemVer 2's hyphenated pre-release; a final release is unchanged."""
+    m = re.match(r"^(\d+\.\d+\.\d+)((?:a|b|rc)\d+)?$", pep440)
+    assert m, pep440
+    return m.group(1) if m.group(2) is None else f"{m.group(1)}-{m.group(2)}"
+
+
 def test_package_version_is_one_number_in_three_places() -> None:
     assert _PEP440.match(__version__), __version__
     assert _pyproject_version() == __version__
     assert _chart_app_version() == __version__
+
+
+@pytest.mark.parametrize(
+    ("pep440", "semver"),
+    [
+        ("2.0.0a1", "2.0.0-a1"),
+        ("2.0.0b1", "2.0.0-b1"),
+        ("2.1.0rc1", "2.1.0-rc1"),
+        ("2.1.0", "2.1.0"),
+    ],
+)
+def test_the_chart_version_rule(pep440: str, semver: str) -> None:
+    assert semver_of(pep440) == semver
+
+
+def test_chart_version_is_the_semver_form_of_the_package_version() -> None:
+    """``Chart.yaml`` ``version`` — a SemVer 2 string Helm accepts — is the package version
+    with its pre-release hyphenated, so ``helm package`` names ``crb-<semver>.tgz`` for the
+    release the ``appVersion`` runs (RELEASING §1 and its checklist name this test)."""
+    assert _chart_version() == semver_of(__version__)
 
 
 def test_release_tag_rule_accepts_only_the_version_tag() -> None:

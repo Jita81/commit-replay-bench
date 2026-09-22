@@ -401,7 +401,11 @@ seven probes — `db`, `append_only`, `ledger`, `sandbox` (skipped for the api r
 ### 7.3 Data model (store, P4)
 
 All tables carry `created` (UTC ISO-8601) and `actor`. Tables marked **append-only** have
-DB triggers forbidding `UPDATE` and `DELETE`, and rows carry `prev_hash` / `row_hash`.
+DB triggers forbidding `UPDATE` and `DELETE`. The hash chain (`prev_hash` / `row_hash`,
+ADR-0002) is the ledger's: `grades`, `signoffs`, `reviews` and the factory evidence carry
+it; `events` is append-only by trigger only (no chain columns — every system event,
+`repo.created`, `run.cancel_requested`, `user.*`, is one plain envelope row; chaining it is
+backlog F51 in [the front-end review](reviews/2026-09-17-enterprise-front-end.md)).
 
 | Table | Key columns | Notes |
 |---|---|---|
@@ -410,7 +414,7 @@ DB triggers forbidding `UPDATE` and `DELETE`, and rows carry `prev_hash` / `row_
 | `tasks` | `task_id` (sha), `repo`, `subject`, `authored`, `pool`, `size`, `capability_class` (resolved), `language`, `test_files`, `src_files`, `target_tests`, `belt_scope`, `baseline_failing`, `red_checked`, `gold_clean`, `gold_note`; in `spec_json` also `path_class`, `intent` (label or null), `class_source` | `TaskSpec.to_dict()` shape (§7.5). A `label` run rewrites `spec_json` + the `capability_class` column via the same upsert as `mine`. |
 | `attempts` | `id`, `run_id`, `task_id`, `builder`, `mode`, `turns`, `tokens_in/out`, `cost_usd`, `latency_s`, `transcript_ref` (opt-in) | `BuilderRef` shape. |
 | `grades` **(append-only)** | `row_id`, `repo`, `task_id`, `clean`, four belts, `disqualified`, `dq_reason`, `error`, `evidence_pack_hash`, `apparatus_version`, `belt_set ∈ v5\|v4\|v3-legacy`, `provenance`, cell fields, cost/latency, `actor`, `created`, `prev_hash`, `row_hash` | `GradeRow` — same invariants as the JSONL ledger, checked by a DB constraint **and** in Python before write. |
-| `events` **(append-only)** | `StepEvent` envelope columns | SSE reads from here. |
+| `events` **(append-only)** | `StepEvent` envelope columns | SSE reads from here. Trigger-protected, **not** hash-chained (F51). |
 | `oracle_scores` | `task_id`, `mutants`, `killed`, `invalid`, `equivalent`, `strength`, `budget`, `apparatus_version` | Hygiene-adjusted mutation strength (P2). |
 | `signoffs` **(append-only)** | `cell`, `route`, `actor`, `reason`, `revoked_by` | 409 on any false-Q1 in the cell; revocation is a new row. |
 | `factory_backlog` / `factory_tasks` / `factory_evidence` | frozen backlog hash; per-item DoR gaps, RED proof, PR ref, review verdict | P6. |

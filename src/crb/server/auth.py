@@ -4,8 +4,19 @@
   by construction, and an unknown username still pays for one verification so the
   response time does not reveal whether the account exists.
 * **Sessions** — the ``crb_session`` cookie is an ``itsdangerous`` signed, timestamped
-  payload ``{uid, iat}``; nothing server-side to leak or replicate. HttpOnly, SameSite=Lax,
-  Secure per settings. Expiry is checked on every request against ``session_ttl``.
+  payload ``{uid, iat, cv}``; nothing server-side to leak or replicate. HttpOnly,
+  SameSite=Lax, Secure per settings. Expiry is checked on every request against
+  ``session_ttl``. ``cv`` is the :func:`credential_version` the session was issued under —
+  a fingerprint of the account's password hash — so a password change (which re-salts the
+  hash) ends every session of that account on its next request, without a table of
+  sessions. A deactivated account is refused on every request while it is inactive;
+  ``active`` is not part of the version, so re-activating within ``session_ttl`` restores
+  the sessions issued before the deactivation — set a new password as well to end them
+  for good (a per-account revocation nonce would need a ``users`` column; follow-up).
+* **Lifecycle** — :func:`set_password` and :func:`set_user_active` are the one
+  implementation the admin routes and the ``crb users`` break-glass CLI share: a password
+  is hashed here and never logged; the last active admin can never be deactivated
+  (``409 last_admin``); an OIDC account never gains a local password (``409 not_local``).
 * **CSRF** — double submit: the non-HttpOnly ``crb_csrf`` cookie must equal the
   ``X-CSRF-Token`` header on every unsafe method (enforced by the app middleware).
 * **RBAC** — one ascending ladder ``viewer < operator < approver < admin``;
@@ -24,23 +35,32 @@ What it is:   The authentication and authorisation primitives every route depend
               local accounts, signed cookie sessions, CSRF tokens, the role ladder, the login
               rate limit, and the OIDC (PKCE) client behind a protocol.
 What it does: Verifies passwords in constant time (an unknown user pays for a verification
-              too), issues and reads the timestamped session cookie, admits a caller by role
-              rank, maps IdP claims to a role (``admin_groups`` wins, default ``viewer``),
-              upserts OIDC users by ``(issuer, subject)``, and seeds the bootstrap admin only
-              while the users table is empty. Never logs or returns a password or token.
+              too), issues and reads the timestamped session cookie bound to the account's
+              credential version (a password change ends the account's other sessions),
+              admits a caller by role rank, maps IdP claims to a role (``admin_groups`` wins,
+              default ``viewer``), upserts OIDC users by ``(issuer, subject)``, seeds the
+              bootstrap admin only while the users table is empty, and owns the account
+              lifecycle primitives (``set_password``, ``set_user_active`` with the last-admin
+              guard) the admin routes and the ``crb users`` CLI share. Never logs or returns
+              a password or token.
 How:          argon2id via ``argon2-cffi``; ``itsdangerous`` timed serialisers with a salt
-              per cookie kind; ``require_role`` is a dependency factory over ``ROLE_RANK``;
+              per cookie kind; ``credential_version`` = a SHA-256 prefix of the stored hash;
+              ``require_role`` is a dependency factory over ``ROLE_RANK``;
               ``AuthlibOidcClient`` does discovery → PKCE authorization URL → code exchange
               → ID-token validation against the JWKS → optional userinfo merge.
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         none
 Works with:   src/crb/server/routes/auth.py (login / logout / OIDC start + callback — the
-              HTTP surface over these primitives), src/crb/server/settings.py (``ROLE_RANK``,
-              ``OidcSettings``, ``session_ttl``, the secret key), src/crb/server/app.py
-              (``CsrfMiddleware`` uses ``csrf_matches``; the lifespan seeds the admin),
-              src/crb/store/models.py (``User``), src/crb/server/deps.py (``ApiError``,
-              ``Principal``), docs/SECURITY.md#34-authentication-and-authorisation--crbserverauth
-Tested by:    tests/test_server_auth.py, tests/test_server_app.py
+              HTTP surface over these primitives), src/crb/server/routes/admin.py (the
+              ``/users`` lifecycle routes over ``set_password`` / ``set_user_active``),
+              src/crb/cli/commands/users.py (the break-glass CLI over the same primitives),
+              src/crb/server/settings.py (``ROLE_RANK``, ``OidcSettings``, ``session_ttl``,
+              the secret key), src/crb/server/app.py (``CsrfMiddleware`` uses
+              ``csrf_matches``; the lifespan seeds the admin), src/crb/store/models.py
+              (``User``), src/crb/server/deps.py (``ApiError``, ``Principal``),
+              docs/SECURITY.md#34-authentication-and-authorisation--crbserverauth
+Tested by:    tests/test_server_auth.py, tests/test_server_admin_users.py,
+              tests/test_cli_users.py, tests/test_server_app.py
 Touch when:   never for a new repository; adding a role means extending ``ROLE_LADDER`` in
               settings.py, adding a ``*Dep`` alias here, and updating docs/API.md and
               docs/SECURITY.md; changing cookie or session semantics needs a note in
@@ -49,6 +69,7 @@ Touch when:   never for a new repository; adding a role means extending ``ROLE_L
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import secrets
@@ -262,6 +283,69 @@ def count_active_admins(db: Session) -> int:
     )
 
 
+def credential_version(user: User) -> str:
+    """The version stamp a session is bound to: a 16-hex prefix of the SHA-256 of the
+    stored password hash. argon2 salts every hash, so setting a password — even to the
+    same value — changes it and every session issued under the old one stops verifying.
+    An OIDC account (no hash) has one constant version; its sessions end by deactivation."""
+    return hashlib.sha256((user.password_hash or "").encode()).hexdigest()[:16]
+
+
+def is_local_account(user: User) -> bool:
+    """A local (password) account, as opposed to one an identity provider owns."""
+    return user.issuer == LOCAL_ISSUER
+
+
+def set_password(user: User, password: str) -> None:
+    """Replace ``user``'s password with a fresh argon2id hash; the caller commits.
+
+    409 ``not_local`` for an OIDC account (its credential is the provider's, and a hash on
+    it could never be used — ``find_local_user`` looks only under the local issuer);
+    422 ``validation_error`` below ``MIN_PASSWORD_LENGTH``. The clear text is never stored,
+    logged or returned; the new hash re-salts, so :func:`credential_version` moves and the
+    account's existing sessions end (see :func:`current_user`).
+    """
+    if not is_local_account(user):
+        raise ApiError(
+            409,
+            "not_local",
+            "this account signs in through the organisation's identity provider; "
+            "it has no local password",
+        )
+    try:
+        user.password_hash = hash_password(password)
+    except ValueError as exc:
+        raise ApiError(422, "validation_error", str(exc), detail={"field": "password"}) from exc
+
+
+def set_user_active(db: Session, user: User, active: bool) -> bool:
+    """Activate or deactivate ``user``; the caller commits. Returns whether the flag changed.
+
+    Deactivating the last active admin is refused with 409 ``last_admin`` — a deployment
+    can never reach a state nobody can administer. The lock is taken FIRST and ``user`` is
+    re-read under it (:func:`lock_users_table`, then ``Session.refresh``): the caller loaded
+    ``user`` before the lock, and a role change committed in between (promote this account,
+    demote the other admin) would otherwise let a guard that trusted the stale snapshot
+    deactivate the last admin (verifier, 2026-09-21 — the ``set_role`` route already locked
+    before its read; this is the same ordering). Read, count and update are one serialised
+    transaction, so two concurrent deactivations cannot both see "2 admins". Idempotent:
+    setting the flag it already holds changes nothing and returns ``False``.
+    """
+    lock_users_table(db)
+    db.refresh(user)
+    if user.active == active:
+        return False
+    if not active and user.role == "admin" and count_active_admins(db) <= 1:
+        raise ApiError(
+            409,
+            "last_admin",
+            "refusing to deactivate the last active admin",
+            detail={"allowed": list(ROLE_LADDER)},
+        )
+    user.active = active
+    return True
+
+
 def bootstrap_admin_if_empty(factory: sessionmaker[Session], settings: Settings) -> bool:
     """Seed the configured admin ONLY when the users table is empty. Returns True if seeded.
 
@@ -299,15 +383,22 @@ def _serializer(settings: Settings, salt: str) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.secret_key_value, salt=salt)
 
 
-def issue_session(settings: Settings, user_id: str) -> str:
-    """A signed, timestamped session token for ``user_id`` (nothing stored server-side)."""
+def issue_session(settings: Settings, user_id: str, credential_version: str = "") -> str:
+    """A signed, timestamped session token for ``user_id`` (nothing stored server-side),
+    bound to ``credential_version`` — the :func:`credential_version` of the account at
+    issue; :func:`current_user` refuses the token once the account's version has moved."""
     return str(
-        _serializer(settings, _SESSION_SALT).dumps({"uid": user_id, "iat": int(time.time())})
+        _serializer(settings, _SESSION_SALT).dumps(
+            {"uid": user_id, "iat": int(time.time()), "cv": credential_version}
+        )
     )
 
 
-def read_session(settings: Settings, token: str) -> str:
-    """Return the user id or raise :class:`ApiError` 401."""
+def read_session_claims(settings: Settings, token: str) -> tuple[str, str]:
+    """``(user id, credential version)`` from a session token, or :class:`ApiError` 401.
+    A token issued before versions were stamped carries ``""`` and never matches a real
+    account's version — one re-login after the upgrade, never a session that outlives a
+    password change."""
     try:
         data = _serializer(settings, _SESSION_SALT).loads(token, max_age=settings.session_ttl)
     except SignatureExpired as exc:
@@ -317,7 +408,13 @@ def read_session(settings: Settings, token: str) -> str:
     uid = data.get("uid") if isinstance(data, dict) else None
     if not isinstance(uid, str) or not uid:
         raise ApiError(401, "unauthenticated", "invalid session")
-    return uid
+    cv = data.get("cv", "")
+    return uid, cv if isinstance(cv, str) else ""
+
+
+def read_session(settings: Settings, token: str) -> str:
+    """Return the user id or raise :class:`ApiError` 401."""
+    return read_session_claims(settings, token)[0]
 
 
 def _set_cookie(
@@ -340,13 +437,17 @@ def _set_cookie(
     )
 
 
-def set_session_cookie(response: Response, settings: Settings, user_id: str) -> None:
-    """Issue a session and set it as the HttpOnly ``crb_session`` cookie."""
+def set_session_cookie(
+    response: Response, settings: Settings, user_id: str, credential_version: str = ""
+) -> None:
+    """Issue a session and set it as the HttpOnly ``crb_session`` cookie. Callers that
+    hold the ``User`` pass :func:`credential_version` so the session ends with the
+    password it was issued under."""
     _set_cookie(
         response,
         settings,
         SESSION_COOKIE,
-        issue_session(settings, user_id),
+        issue_session(settings, user_id, credential_version),
         max_age=settings.session_ttl,
         httponly=True,
     )
@@ -389,10 +490,14 @@ def current_user(request: Request, settings: SettingsDep, db: DbDep) -> Principa
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         raise ApiError(401, "unauthenticated", "login required")
-    uid = read_session(settings, token)
+    uid, cv = read_session_claims(settings, token)
     user = db.get(User, uid)
     if user is None or not user.active:
         raise ApiError(401, "unauthenticated", "account unknown or disabled")
+    if not hmac.compare_digest(cv.encode(), credential_version(user).encode()):
+        # The password changed after this session was issued (or the token predates
+        # version stamping): the session is over, whoever holds the cookie.
+        raise ApiError(401, "session_revoked", "session no longer valid; log in again")
     request.state.user_id = user.id
     return Principal.model_validate(user)
 
@@ -808,10 +913,12 @@ __all__ = [
     "count_active_admins",
     "count_users",
     "create_local_user",
+    "credential_version",
     "csrf_matches",
     "current_user",
     "find_local_user",
     "hash_password",
+    "is_local_account",
     "issue_github_setup_state",
     "issue_session",
     "map_role",
@@ -819,12 +926,15 @@ __all__ = [
     "new_github_setup_nonce",
     "read_oidc_cookie",
     "read_session",
+    "read_session_claims",
     "require_role",
     "safe_next_path",
     "set_csrf_cookie",
     "set_github_setup_cookie",
     "set_oidc_cookie",
+    "set_password",
     "set_session_cookie",
+    "set_user_active",
     "upsert_oidc_user",
     "validate_role",
     "validate_username",

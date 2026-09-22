@@ -21,8 +21,10 @@ Works with:   src/crb/cli/commands/__init__.py (``CliError``, the exit codes),
               src/crb/cli/commands/grade.py + src/crb/cli/commands/ledger.py +
               src/crb/cli/commands/route.py (the pipeline verbs, in order),
               src/crb/cli/commands/service.py (``serve`` / ``worker`` / ``migrate`` /
-              ``doctor``), src/crb/core/execution.py (``SandboxUnavailable`` → exit 2)
-Tested by:    tests/test_cli.py, tests/test_cli_doctor.py, tests/test_cli_tasks.py
+              ``doctor``), src/crb/cli/commands/users.py (the break-glass account verbs),
+              src/crb/core/execution.py (``SandboxUnavailable`` → exit 2)
+Tested by:    tests/test_cli.py, tests/test_cli_doctor.py, tests/test_cli_tasks.py,
+              tests/test_cli_users.py
 Touch when:   never for a new repository; adding a verb means a ``register`` in a new
               commands module and one line here; a new core exception class that should
               exit 2 with a clean message needs a clause in the ladder.
@@ -47,6 +49,7 @@ from crb.cli.commands import (
     route,
     service,
     tasks,
+    users,
 )
 from crb.core.execution import SandboxUnavailable
 from crb.core.git import GitError
@@ -79,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     learn.register(sub)
     tasks.register(sub)
     config.register(sub)
+    users.register(sub)
     service.register(sub)
     return parser
 
