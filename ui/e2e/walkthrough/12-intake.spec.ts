@@ -21,12 +21,16 @@
  *               it, labels it `crb:queued` and links the item. A second read of an unchanged
  *               column writes nothing. Finally the outcome map moves the ticket when a
  *               merge is recorded, and the screen shows every step at 375 px and 1280 px.
- * How:          `signIn` (admin), a viewer persona for the role gate, `POST
- *               /factory/{repo}/intake/poll` through the UI buttons, and Node's `fs` to
- *               write and read the fake board — the tracker's whole state.
+ * How:          support.ts's `test` fixture, which has ALREADY signed in as the admin —
+ *               calling `signIn` again would go to /login, which redirects an authenticated
+ *               person away, and wait for a form that never renders; a viewer persona in its
+ *               own context for the role gate; `POST /factory/{repo}/intake/poll` through the
+ *               UI buttons; and Node's `fs` to write and read the fake board — the tracker's
+ *               whole state.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
- * Works with:   ui/e2e/walkthrough/support.ts (`env.board`, `signIn`, `personaPassword`),
+ * Works with:   ui/e2e/walkthrough/support.ts (`env.board`, the already-signed-in `test`
+ *               fixture, `personaPassword`),
  *               ui/src/screens/Factory/IntakePage.tsx (under test),
  *               src/crb/intake/fake.py (the board this spec writes),
  *               src/crb/server/intake.py (the flow), scripts/walkthrough.sh (the stack),
@@ -35,7 +39,7 @@
  * Touch when:   a label or a stop reason is added; the screen's act labels change.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
-import { env, expect, primary, signIn, test } from './support'
+import { env, expect, primary, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -95,7 +99,6 @@ test.beforeAll(() => {
 
 test.describe('12 intake from a ticket (fake tracker)', () => {
   test('the listener is off on every repository until somebody switches it on', async ({ page }) => {
-    await signIn(page)
     await page.goto(`/factory/intake?repo=${REPO}`)
     await expect(page.getByRole('heading', { name: 'Work arriving from your board' })).toBeVisible()
     await expect(page.getByText('Not listening')).toBeVisible()
@@ -106,7 +109,6 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
   })
 
   test('switching the listener on is recorded under the name of the person who did it', async ({ page }) => {
-    await signIn(page)
     await page.goto(`/factory/intake?repo=${REPO}`)
     await page.getByRole('button', { name: 'Switch the listener on' }).click()
     await expect(page.getByTestId('intake-success')).toContainText(COLUMN)
@@ -115,7 +117,6 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
   })
 
   test('a ticket missing an acceptance fact is told what is missing, and nothing is registered', async ({ page }) => {
-    await signIn(page)
     await page.goto(`/factory/intake?repo=${REPO}`)
     await page.getByRole('button', { name: 'Re-read the column now' }).click()
     await expect(page.getByTestId('intake-success')).toContainText('1 read')
@@ -143,7 +144,6 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
 
   test('reading the same column again writes nothing to the ticket', async ({ page }) => {
     const before = JSON.stringify(readBoard())
-    await signIn(page)
     await page.goto(`/factory/intake?repo=${REPO}`)
     await page.getByRole('button', { name: 'Re-read the column now' }).click()
     await expect(page.getByTestId('intake-success')).toContainText('0 read')
@@ -161,7 +161,6 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
     ticket.changed = '2026-09-23T09:00:00Z'
     writeBoard(board)
 
-    await signIn(page)
     await page.goto(`/factory/intake?repo=${REPO}`)
     await page.getByRole('button', { name: 'Re-read the column now' }).click()
     await expect(page.getByTestId('intake-success')).toContainText('1 registered')
@@ -176,7 +175,6 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
   })
 
   test('the item is in the frozen backlog the Factory screen shows', async ({ page }) => {
-    await signIn(page)
     await page.goto(`/factory?repo=${REPO}`)
     await expect(page.getByText('fake-4711').first()).toBeVisible()
   })
@@ -186,7 +184,6 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
     delete board.tickets[KEY]!.comments
     writeBoard(board)
 
-    await signIn(page)
     await page.goto(`/factory/intake?repo=${REPO}`)
     await page.getByRole('button', { name: 'Post the feedback again' }).click()
     await expect(page.getByTestId('intake-success')).toContainText('1 read')
@@ -196,7 +193,7 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
   test('a viewer can read the column but cannot switch the listener or re-read it', async ({ browser }) => {
     const ctx = await browser.newContext()
     const page = await ctx.newPage()
-    const { personaPassword } = await import('./support')
+    const { personaPassword, signIn } = await import('./support')
     await signIn(page, 'walk-viewer', personaPassword('walk-viewer'))
     await page.goto(`/factory/intake?repo=${REPO}`)
     await expect(page.getByText(/Only an operator can switch the listener/)).toBeVisible()
@@ -206,7 +203,6 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
   })
 
   test('at 375 px the intake screen does not scroll sideways', async ({ page }) => {
-    await signIn(page)
     await page.setViewportSize({ width: 375, height: 800 })
     await page.goto(`/factory/intake?repo=${REPO}`)
     await expect(page.getByRole('heading', { name: 'Work arriving from your board' })).toBeVisible()
@@ -215,7 +211,6 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
   })
 
   test('switching the listener off stops everything, and says so', async ({ page }) => {
-    await signIn(page)
     await page.goto(`/factory/intake?repo=${REPO}`)
     await page.getByRole('button', { name: 'Switch the listener off' }).click()
     await expect(page.getByTestId('intake-success')).toContainText('is off')
