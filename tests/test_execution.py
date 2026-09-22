@@ -334,7 +334,7 @@ def test_docker_build_argv_has_every_hardening_flag(tmp_path: Path) -> None:
     ]:
         assert flag in argv, flag
     assert argv[argv.index("--security-opt") + 1] == "no-new-privileges"
-    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=512m"
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,noexec,nosuid,nodev,size=512m"
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
     assert mounts == [f"type=bind,src={tmp_path.resolve()},dst=/work,readonly"]
     envs = [argv[i + 1] for i, a in enumerate(argv) if a == "--env"]
@@ -345,14 +345,18 @@ def test_docker_build_argv_has_every_hardening_flag(tmp_path: Path) -> None:
 
 
 def test_docker_build_argv_exec_tmp_is_declared_per_command(tmp_path: Path) -> None:
-    """Docker mounts a tmpfs ``noexec`` unless told otherwise; only a command whose
-    toolchain runs what it builds under ``/tmp`` (``go test``) gets ``exec`` — and it
+    """The tmpfs is ``noexec`` by statement, not by the runtime's default; only a command
+    whose toolchain runs what it builds under ``/tmp`` (``go test``) gets ``exec`` — and it
     still gets ``nosuid,nodev``, the size cap and every other flag."""
     d = DockerExecutor(_settings(), runner=FakeRunner(_ok()), verify_daemon=False)
     plain = d.build_argv(Command(("python", "-m", "pytest"), tmp_path))
-    assert plain[plain.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=512m"
+    plain_tmpfs = plain[plain.index("--tmpfs") + 1]
+    assert plain_tmpfs == "/tmp:rw,noexec,nosuid,nodev,size=512m"
+    assert "noexec" in plain_tmpfs.split(",") and "exec" not in plain_tmpfs.split(",")
     go = d.build_argv(Command(("go", "test", "-json", "./..."), tmp_path, exec_tmp=True))
-    assert go[go.index("--tmpfs") + 1] == "/tmp:rw,exec,nosuid,nodev,size=512m"
+    go_tmpfs = go[go.index("--tmpfs") + 1]
+    assert go_tmpfs == "/tmp:rw,exec,nosuid,nodev,size=512m"
+    assert "exec" in go_tmpfs.split(",") and "noexec" not in go_tmpfs.split(",")
     # every other option is byte-identical: only the tmpfs options (and the argv) differ
     head_plain = plain[: plain.index("crb/py:test")]
     head_go = go[: go.index("crb/py:test")]

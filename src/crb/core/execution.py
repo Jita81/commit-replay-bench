@@ -196,8 +196,8 @@ class Command:
     caches, ``target/``…); a sandboxed executor mounts tmpfs there and nothing else.
     ``exec_tmp`` says the toolchain must RUN what it writes under ``/tmp`` — Go compiles
     every test binary into its temp dir and execs it — so the sandbox's tmpfs is mounted
-    ``exec``; the default keeps Docker's implicit ``noexec`` (``nosuid,nodev`` hold either
-    way). A runner declares it for its toolchain, never per repository.
+    ``exec``; the default mounts it ``noexec`` (``nosuid,nodev`` hold either way). A runner
+    declares it for its toolchain, never per repository.
     """
 
     argv: tuple[str, ...]
@@ -486,9 +486,9 @@ class DockerExecutor:
             "no-new-privileges",
             "--read-only",
             "--tmpfs",
-            # Docker adds noexec to a tmpfs unless `exec` is named: a toolchain that runs
+            # noexec is stated, not left to the runtime's default: only a toolchain that runs
             # the binaries it builds there (Go) declares Command.exec_tmp; nosuid/nodev stay.
-            f"/tmp:rw,{'exec,' if cmd.exec_tmp else ''}nosuid,nodev,size={s.tmp_size}",
+            f"/tmp:rw,{'exec' if cmd.exec_tmp else 'noexec'},nosuid,nodev,size={s.tmp_size}",
         ]
         # the worktree is read-only inside: the builder edits it BEFORE grading, the
         # tests only read it; a test that writes into the tree fails, never mutates it

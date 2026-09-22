@@ -134,7 +134,8 @@ through the proxy will not log in — that is intended.
 ## 3. Let the worker sandbox tests (docker socket, opt-in)
 
 By default the worker has **no** access to a Docker daemon. `CRB_SANDBOX__EXECUTOR=docker`
-then fails **closed**: every run becomes `blocked`, no test runs on the host, no verdict is
+then fails **closed**: every run is recorded `failed` (`sandbox unavailable: …`), no test
+runs on the host, no verdict is
 written ([OPERATOR.md §7](../docs/OPERATOR.md#7-when-the-sandbox-is-unavailable)). To
 enable sandboxing:
 
@@ -268,7 +269,7 @@ of your provisioning, and rotate by editing `.env` and `docker compose up -d wor
 |---|---|
 | `migrate` exits non-zero: `refusing to guess … missing [...]` | The database has *some* crb tables but no `alembic_version` (a partial or foreign schema). Restore from backup or drop the schema; `migrate` never guesses. |
 | `api` restarts with `CRB_SECRET_KEY is required when CRB_ENV=prod` | Set a ≥ 32-character key in `.env`. `CRB_ENV=dev` auto-generates one and turns `Secure` cookies off — never in production. |
-| Runs are `blocked`, health shows the sandbox unavailable | The worker has no daemon socket (§3), the sandbox image is missing from the host daemon (`No such image` — the worker never pulls; `docker pull` / `docker load` it, [sandbox/README.md §2](sandbox/README.md)), or `docker info` fails as the socket's group. Nothing ran on the host; re-run after fixing. |
+| Runs end `failed` with `sandbox unavailable: …`, health shows the sandbox unavailable | The worker has no daemon socket (§3), the sandbox image is missing from the host daemon (`No such image` — the worker never pulls; `docker pull` / `docker load` it, [sandbox/README.md §2](sandbox/README.md)), or `docker info` fails as the socket's group. Nothing ran on the host; re-run after fixing. |
 | Sandboxes start with an empty `/work` | `CRB_HOST_DIR` differs from `/srv/crb` or is a named volume; the paths must match (§3). |
 | `/api/v1/health` reports `append_only: false` | The triggers are missing (someone ran DDL by hand). `docker compose run --rm migrate` re-installs them; then investigate — this is a stop condition ([OPERATOR.md §8](../docs/OPERATOR.md#8-stop-conditions)). |
 | Login loops behind the proxy | `CRB_FORWARDED_ALLOW_IPS` does not include the proxy, so the app sees plain HTTP and refuses to set a `Secure` cookie. |

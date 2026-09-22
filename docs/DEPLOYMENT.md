@@ -199,12 +199,13 @@ managed server; use `sslmode=require` (or `verify-full` with the CA) and a priva
 
 The worker creates one hardened container per test command (`--network=none --read-only
 --cap-drop=ALL --user 65534`). It therefore needs *a* Docker daemon. Without one the
-executor fails **closed**: runs become `blocked`, nothing executes on the node
+executor fails **closed**: runs are recorded `failed` (`sandbox unavailable: …`), nothing
+executes on the node
 ([OPERATOR.md §7](OPERATOR.md#7-when-the-sandbox-is-unavailable)).
 
 | `worker.sandbox.mode` | Mechanism | Blast radius | Use when |
 |---|---|---|---|
-| `none` (default) | — | none; runs are blocked | until you have decided |
+| `none` (default) | — | none; every run fails closed (`failed`, `sandbox unavailable`) | until you have decided |
 | `dind` | `docker:dind` sidecar in the worker pod, unix socket on a shared in-memory emptyDir, image store on an emptyDir | the **pod** — the sidecar is `privileged`, but it is the only privileged container and it never touches the node's runtime socket. Sandbox images are pulled by the sidecar (allow the registry in `extraEgress`) | the recommended cluster mode; put the worker on a dedicated node pool anyway |
 | `hostSocket` | `hostPath` mount of the node's `/var/run/docker.sock` + `supplementalGroups` | the **node** — socket access is root-equivalent | only with a dedicated, tainted node pool, a PodSecurity exemption for that namespace, and a written risk acceptance |
 
@@ -212,10 +213,11 @@ In every mode the worker's own container stays non-root, read-only and capabilit
 and `DockerSettings` refuses to mount the socket, `/` or `$HOME` into a sandbox.
 
 **Which image runs in the sandbox.** `deploy/sandbox/` ships three reference images —
-python (pytest), node (`node --test`), go — each digest-pinned, uid 65534, read-only-root
-compatible, hadolint-clean, and proven from inside by CI on every pull request (the
-`sandbox-images` job runs each language's fixture repository through the real executor on
-the image it just built). Build them, push them to your registry, pre-pull them into the
+python (pytest), node (`node --test`), go — each digest-pinned **[measured — every `FROM`
+in the three Dockerfiles carries `@sha256:…`, n = 4 `FROM` lines, by inspection]**, uid
+65534, read-only-root compatible, hadolint-clean, and proven from inside by CI on every pull
+request (the `sandbox-images` job runs each language's fixture repository through the real
+executor on the image it just built) **[measured — CI `sandbox-images` job on PR #44, run 35666266465, 2026-09-22: `tests/test_sandbox_images_docker.py`, 8 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, 41 passed / 0 skipped; hadolint on each Dockerfile in the same job; apparatus 2.2]**. Build them, push them to your registry, pre-pull them into the
 daemon the worker talks to (the `dind` sidecar's store in that mode), and name them: the
 deployment default in `config.CRB_SANDBOX__IMAGE`, a repository's own in its
 `sandbox_image`. Everything else — build, tag, push, select, extend for a repository's

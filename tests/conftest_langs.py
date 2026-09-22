@@ -41,7 +41,8 @@ Works with:   tests/fixtures/langs/__init__.py (the two-commit fixture shape the
               on), src/crb/core/mine.py (``iter_candidates``), src/crb/core/workspace.py (the
               trial), src/crb/core/runners/__init__.py (``get_runner``), tests/test_runners_node.py
               and tests/test_runners_jvm.py (typical callers)
-Tested by:    tests/test_runners_go.py, tests/test_runners_node.py, tests/test_runners_jvm.py,
+Tested by:    tests/test_conftest_langs.py (the warm-up policy, hermetically),
+              tests/test_runners_go.py, tests/test_runners_node.py, tests/test_runners_jvm.py,
               tests/test_runners_cargo.py, tests/test_sandbox_docker.py,
               tests/test_sandbox_images_docker.py (every consumer)
 Touch when:   adding a runner for a new language (add its availability probe and any per-session
@@ -61,6 +62,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
+from typing import NoReturn
 
 import pytest
 
@@ -161,7 +163,7 @@ def _cache_dir() -> Path:
 STRICT_WARMUP = os.environ.get("CRB_TEST_STRICT_WARMUP", "") not in ("", "0", "false")
 
 
-def warmup_unavailable(reason: str) -> None:
+def warmup_unavailable(reason: str) -> NoReturn:
     """Skip (default) or fail (strict) the calling test with the warm-up's own reason."""
     if STRICT_WARMUP:
         pytest.fail(f"[strict warm-up] {reason}", pytrace=False)
@@ -318,16 +320,33 @@ def require_docker_image(tag: str, named_by: str) -> None:
     if reason:
         _IMAGES[tag] = reason
         pytest.skip(reason)
-    docker = shutil.which("docker") or "docker"
-    have = subprocess.run(
-        [docker, "image", "inspect", tag], capture_output=True, text=True, timeout=60, check=False
-    )
-    if have.returncode != 0:
+    if not _image_present(tag):
         _IMAGES[tag] = reason = (
             f"docker image {tag!r} ({named_by}) is not present; build or load it"
         )
         warmup_unavailable(reason)
     _IMAGES[tag] = ""
+
+
+def _image_present(tag: str) -> bool:
+    """``docker image inspect`` says ``tag`` is in the daemon's store. A daemon that stops
+    answering after the initial probe (``TimeoutExpired``, a broken pipe, an ``OSError``
+    from the client) goes through the warm-up policy like any other unavailable warm-up —
+    recorded against the tag, a skip locally, a failure under strict warm-up — never an
+    uncontrolled test error."""
+    docker = shutil.which("docker") or "docker"
+    try:
+        have = subprocess.run(
+            [docker, "image", "inspect", tag],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        _IMAGES[tag] = reason = f"docker image inspection of {tag!r} failed: {exc}"
+        warmup_unavailable(reason)
+    return have.returncode == 0
 
 
 def ensure_docker_image(tag: str, dockerfile: str | Path, *, context: Path | None = None) -> None:
@@ -343,10 +362,7 @@ def ensure_docker_image(tag: str, dockerfile: str | Path, *, context: Path | Non
         _IMAGES[tag] = reason
         pytest.skip(reason)
     docker = shutil.which("docker") or "docker"
-    have = subprocess.run(
-        [docker, "image", "inspect", tag], capture_output=True, text=True, timeout=60, check=False
-    )
-    if have.returncode != 0:
+    if not _image_present(tag):
         if context is None:
             argv = [docker, "build", "-t", tag, "-"]
             stdin: str | None = str(dockerfile)

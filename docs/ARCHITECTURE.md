@@ -478,7 +478,7 @@ vocabulary changes the instrument (§7.4).
 |---|---|---|---|
 | Q1 | Integrity | A builder rewrites a target test so that it passes trivially. | Belt 1 detects the byte change; the trial is **disqualified**; `tamper_files` recorded; no `clean` row can be written. |
 | Q2 | Integrity | Someone edits a ledger line by hand to flip `clean` to `True`. | `crb ledger verify` fails at that row (`row_hash mismatch`); `/health` reports the chain broken; `cell_stats.false_q1 > 0` routes the cell `do_not_ship`. |
-| Q3 | Safety | Docker is not running when a sweep starts. | `DockerExecutor.__init__` raises `SandboxUnavailable`; the run status becomes `blocked`; **no test runs on the host**. |
+| Q3 | Safety | Docker is not running when a sweep starts. | `DockerExecutor.__init__` raises `SandboxUnavailable`; the run is recorded `failed` (`sandbox unavailable: …`); **no test runs on the host**. |
 | Q4 | Safety | A repository test tries to reach the network or write outside `/tmp`. | `--network=none`, `--read-only`, tmpfs `/tmp` only; the test fails; the failure is attributed to the trial, not to the instrument. |
 | Q5 | Confidentiality | A test prints `AWS_SECRET_ACCESS_KEY=…` to stdout. | `redact_and_cap` replaces it before the tail is stored in the evidence pack. |
 | Q6 | Honesty | An operator asks for the "success rate" of a cell with `n = 4`. | The UI shows `n=4`, point, Wilson interval (wide), and the route `calibrate (n=4 < 10)`; no rate is shown without `n` and the interval. |
@@ -530,8 +530,9 @@ vocabulary changes the instrument (§7.4).
 - `pyproject.toml` layers contract marks not-yet-existing packages optional (parenthesised);
   each package's landing PR must remove its parentheses.
 - Reference sandbox images ship for python, node and go (`deploy/sandbox/`, proven from
-  inside by CI); a repository's dependencies are still the operator's extension of one, and a
-  JVM image waits on the Maven runner's docker branch (`deploy/sandbox/README.md` §6).
+  inside by CI **[measured — CI `sandbox-images` job on PR #44, run 35666266465, 2026-09-22: `tests/test_sandbox_images_docker.py`, 8 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, 41 passed / 0 skipped; hadolint on each Dockerfile in the same job; apparatus 2.2]**); a
+  repository's dependencies are still the operator's extension of one, and a JVM image waits
+  on the Maven runner's docker branch (`deploy/sandbox/README.md` §6) **[aspiration]**.
 
 ---
 

@@ -67,10 +67,10 @@ process — the egress sidecar — and only for the hosts on the allowlist.
 | Control | Implementation | Status |
 |---|---|---|
 | No network | `--network=none` on every test run; only an explicit dependency-install phase may request `--network=bridge`, and it still carries every other cap | [measured] `tests/test_execution.py` asserts the argv flag-by-flag |
-| Immutable root + worktree | `--read-only`, worktree bind-mounted `readonly`; writable scratch only at declared paths (`target/`, `.pytest_scratch`) and tmpfs `/tmp` with `nosuid,nodev` (`noexec` — Docker's implicit default on a tmpfs — except for a command whose toolchain runs the binaries it builds there: the Go runner declares `Command.exec_tmp`, so `go test` can exec its test binaries; `nosuid,nodev` and every other flag hold, and the tmpfs dies with the container) | [measured] `tests/test_execution.py` asserts both tmpfs shapes; `tests/test_sandbox_images_docker.py` proves read-only root, read-only worktree and writable `/tmp` from inside each shipped image |
+| Immutable root + worktree | `--read-only`, worktree bind-mounted `readonly`; writable scratch only at declared paths (`target/`, `.pytest_scratch`) and tmpfs `/tmp` with `noexec,nosuid,nodev` stated on the argv. **The one exception:** `exec` in place of `noexec` for a command whose toolchain runs the binaries it builds there — the Go runner declares `Command.exec_tmp` so `go test` can exec its test binaries; `nosuid,nodev` and every other flag hold, and the tmpfs dies with the container. The exception is **per toolchain** (a runner declares it in its `command()`), never per repository: no `RepoConfig` key, `runner_opts` or run request can set it | [measured] `tests/test_execution.py` asserts both tmpfs shapes token by token (`noexec` present / `exec` absent for an ordinary command, the reverse for `exec_tmp`) and that nothing else in the argv differs; `tests/test_sandbox_images_docker.py::test_tmp_is_noexec_unless_the_runner_declares_exec_tmp` reads `/proc/mounts` inside each shipped image and tries to run a script written under `/tmp` (`noexec` + `Permission denied` for the python and node runners' commands; `exec` + it runs only for the Go runner's, which is the only runner whose `command()` declares `exec_tmp`) — 3/3 images locally (colima, Docker 29.5.2, 2026-09-22), in CI's `sandbox-images` job from this commit; the read-only root, read-only worktree and writable `/tmp` proofs: 8 tests × 3 images, CI run 35666266465, apparatus 2.2 |
 | Least privilege | `--cap-drop=ALL`, `--security-opt no-new-privileges`, non-root `--user=65534:65534` (root refused at construction) | [measured] |
 | Resource caps | `--memory`, `--cpus`, `--pids-limit`, `--stop-timeout`; wall-clock timeout returns `rc=124` and is graded as a failure, never a pass | [measured] |
-| Fail closed | No docker binary, unreachable daemon, root user, docker-socket or `$HOME` mount request, or a launch failure (exit 125) raise `SandboxUnavailable`; the **run stops** and is recorded `failed`. The product never degrades to in-process execution when the sandbox was requested. `--pull=never`: an image absent from the daemon's store is a launch failure, never a registry pull at run time | [measured] `tests/test_execution.py`, `tests/test_sandbox_docker.py` (skipped without a daemon), `tests/test_sandbox_images_docker.py` (an absent image is `SandboxUnavailable` against a real daemon) |
+| Fail closed | No docker binary, unreachable daemon, root user, docker-socket or `$HOME` mount request, or a launch failure (exit 125) raise `SandboxUnavailable`; the **run stops** and is recorded `failed`. The product never degrades to in-process execution when the sandbox was requested. `--pull=never`: an image absent from the daemon's store is a launch failure, never a registry pull at run time | [measured] `tests/test_execution.py`, `tests/test_sandbox_docker.py` (skipped without a daemon), `tests/test_sandbox_images_docker.py` (an absent image is `SandboxUnavailable` against a real daemon; CI run 35666266465) |
 | Host environment isolation | `LocalExecutor` (development only) passes through an explicit allowlist of variables (`PATH`, toolchain caches); operator secrets are proven absent inside the child | [measured] `test_execution.py::…env…` |
 
 **Residual risk:** container escape via the kernel. Mitigation is the standard one — keep the
@@ -80,13 +80,19 @@ hostile repositories. This is documented, not implemented.
 **The images.** `deploy/sandbox/Dockerfile.{python,node,go}` are the reference sandbox
 images: each `FROM` pinned by the multi-arch index digest, the toolchain and the test runner
 only (pytest hash-pinned; Go copied onto a slim base without gcc or git), `USER 65534:65534`,
-OCI labels, hadolint-clean; CI's `sandbox-images` job builds each on every pull request and
-proves the controls above from inside it through the real runner of that language
-(`tests/test_sandbox_images_docker.py`). The worker reads the same `CRB_SANDBOX__EXECUTOR` /
-`CRB_SANDBOX__IMAGE` the API reports — until 2026-09-21 it read only its short forms, so a
+OCI labels, hadolint-clean **[measured — `tests/test_sandbox_images_docker.py` reads `USER`
+and the six labels from each image's config; hadolint in CI]**. CI's `sandbox-images` job
+builds each on every pull request and proves the controls above from inside it through the
+real runner of that language **[measured — 8 tests × 3 images: uid 65534 by default and
+under the executor, `/usr` + `/work` read-only from inside, `/tmp` writable, a network probe
+fails through the runner, an absent image is `SandboxUnavailable`, qualify + grade clean;
+CI run 35666266465, 2026-09-22, 41 passed / 0 skipped with the sandbox and sealed-builder
+suites on the python image; apparatus 2.2]**. The worker reads the same `CRB_SANDBOX__EXECUTOR`
+/ `CRB_SANDBOX__IMAGE` the API reports — until 2026-09-21 it read only its short forms, so a
 compose / Helm worker ran `local` while `/settings` said `docker` — and a repository's own
-`sandbox_image` wins over the deployment default. Selection, extension and the re-pin
-cadence: `deploy/sandbox/README.md`.
+`sandbox_image` wins over the deployment default **[measured — `tests/test_worker.py`
+`test_settings_from_args_env_fallbacks`, `test_docker_settings_resolution`]**. Selection,
+extension and the re-pin cadence: `deploy/sandbox/README.md`.
 
 ### 3.2 Builder containment — `crb.builders.base`
 

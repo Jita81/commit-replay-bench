@@ -262,12 +262,21 @@ Registry credentials likewise live in those files; every step tail is passed thr
 **Sandbox images**: start from the shipped reference set —
 [`deploy/sandbox/`](../deploy/sandbox/README.md): `crb-sandbox-python` (pytest),
 `crb-sandbox-node` (`node --test`), `crb-sandbox-go`, each digest-pinned, running as user
-`65534` with a read-only root and proven from inside by CI — and extend one per repository
+`65534` with a read-only root and proven from inside by CI **[measured — CI `sandbox-images` job on PR #44, run 35666266465, 2026-09-22: `tests/test_sandbox_images_docker.py`, 8 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, 41 passed / 0 skipped; hadolint on each Dockerfile in the same job; apparatus 2.2]** — and extend one per repository
 (or per toolchain) with the repository's dependencies when its tests need more than the
-runner. Under docker, setup does not run — the image must already contain what setup would
-have installed (the `node_modules` a host setup installed in the clone is visible to the
-container through the read-only worktree mount; a host venv, module cache or `~/.m2` is
-not). Name the image in the repository's `sandbox_image` (it wins) or the deployment's
+runner. Under docker, setup does not run (`BaseRunner.sandbox_refusal`: setup is a host
+phase and fails closed with `SETUP_SANDBOX_REFUSED` when the executor is `docker`), so the
+image must already contain what setup would have installed — and nothing a host setup
+installed is visible inside: the sandbox mounts only the trial worktree, read-only, at
+`/work`, and a trial worktree's `node_modules` is a **symlink to the host clone's**
+(`Workspace._post_create`), which dangles inside the container; a host venv, module cache
+or `~/.m2` is likewise absent. Bake the dependencies into a derived image
+([`deploy/sandbox/README.md` §4](../deploy/sandbox/README.md) — `npm ci` of the lockfile
+under `/opt/app` and `runner_opts.env: {NODE_PATH: /opt/app/node_modules}`; hash-pinned
+test requirements for Python; `GOMODCACHE` for Go) **[measured — a `node_modules` symlink
+to a host directory reads `No such file or directory` from inside `crb-sandbox-node`
+under `DockerExecutor`, n = 1 probe, colima / Docker 29.5.2, 2026-09-22; apparatus
+2.2]**. Name the image in the repository's `sandbox_image` (it wins) or the deployment's
 `CRB_SANDBOX__IMAGE` (the default for repositories that name none); the worker never pulls,
 so it must be in the daemon's store. A JVM reference image is not shipped — the Maven
 runner cannot resolve plugins offline under docker yet (README §6); JVM repositories run
@@ -604,9 +613,10 @@ the verification.
 
 **Fail closed means the run STOPS.** If Docker is missing, the daemon is unreachable, the
 image is not set, the configured user is root, a forbidden mount is requested, or
-`docker run` fails to launch (exit 125), `crb` raises `SandboxUnavailable` and the run's
-status becomes `blocked`. **No test is run on the host as a fallback**, and no verdict is
-recorded for the affected tasks.
+`docker run` fails to launch (exit 125), `crb` raises `SandboxUnavailable` and the run is
+recorded `failed` with the error `sandbox unavailable: <cause>` (the job store's terminal
+status — there is no `blocked` status). **No test is run on the host as a fallback**, and no
+verdict is recorded for the affected tasks.
 
 What to do:
 
@@ -614,8 +624,8 @@ What to do:
 2. `crb repo probe <repo>` — proves the image and the toolchain.
 3. Check the run's status message; it names the cause (`docker binary not found`,
    `daemon not reachable`, `refusing to run untrusted tests as root`, `refusing to mount …`).
-4. Fix the cause and **re-run**; the worker (P4) resumes blocked runs. Tasks that were
-   never graded have no rows — nothing needs correcting in the ledger.
+4. Fix the cause and **re-run** (a `failed` run is terminal; start a new one). Tasks that
+   were never graded have no rows — nothing needs correcting in the ledger.
 
 Where to look first: `GET /api/v1/health` — the `sandbox` probe (on the worker, or a
 one-process deployment) says whether the daemon answers, and the `worker` probe says

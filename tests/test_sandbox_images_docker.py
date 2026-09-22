@@ -350,6 +350,47 @@ def test_root_and_worktree_are_read_only_and_tmp_is_not(executor: DockerExecutor
     assert tmp.ok and tmp.stdout.strip() == "scratch", tmp.combined
 
 
+_TMP_PROBE = (
+    "sh",
+    "-c",
+    # the mount line, then try to RUN a script written under /tmp
+    "grep ' /tmp ' /proc/mounts; printf '#!/bin/sh\\necho ran\\n' > /tmp/probe.sh"
+    " && chmod +x /tmp/probe.sh && /tmp/probe.sh",
+)
+
+
+def _tmp_mount_opts(combined: str) -> set[str]:
+    """The option set of the ``/tmp`` line in ``/proc/mounts`` (``exec`` is the absence
+    of ``noexec`` there — the kernel prints only the restrictive flags)."""
+    line = next(ln for ln in combined.splitlines() if " /tmp " in ln)
+    return set(line.split()[3].split(","))
+
+
+def test_tmp_is_noexec_unless_the_runner_declares_exec_tmp(
+    lang: Lang, trial: Workspace, runner: BaseRunner, executor: DockerExecutor
+):
+    """The tmpfs at ``/tmp`` is ``noexec,nosuid,nodev`` for an ordinary command — the
+    kernel's own mount table says so and a script written there is refused — and ``exec``
+    (``nosuid,nodev`` still held) only for a command whose runner declares
+    ``Command.exec_tmp``, which is the Go runner's ``go test`` and nothing else: the
+    exception is per toolchain, never per repository."""
+    plain = executor.run(Command(_TMP_PROBE, trial.root, timeout=60))
+    opts = _tmp_mount_opts(plain.combined)
+    assert {"noexec", "nosuid", "nodev"} <= opts, plain.combined
+    assert "Permission denied" in plain.combined and "ran" not in plain.stdout, plain.combined
+
+    declared = runner.command(
+        trial.root, runner.target_scope((lang.net.path,)), executor=executor, timeout=60
+    )
+    assert declared.exec_tmp is (lang.name == "go"), (lang.name, declared.exec_tmp)
+    if not declared.exec_tmp:
+        return
+    go = executor.run(Command(_TMP_PROBE, trial.root, timeout=60, exec_tmp=declared.exec_tmp))
+    opts = _tmp_mount_opts(go.combined)
+    assert "noexec" not in opts and {"nosuid", "nodev"} <= opts, go.combined
+    assert go.ok and go.stdout.rstrip().endswith("ran"), go.combined
+
+
 def test_network_is_off(lang: Lang, trial, task: TaskSpec, runner: BaseRunner, executor):
     """A test asserting ``example.com:443`` is reachable FAILS through the language's runner,
     attributed to exactly that id (the parser saw a real failure, not a harness error)."""

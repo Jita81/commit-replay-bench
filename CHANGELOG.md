@@ -33,8 +33,13 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   otherwise, so `go test` could not exec the test binaries it builds under `/tmp` — the Go
   runner had never run against a daemon. `Command.exec_tmp` (the Go runner declares it)
   mounts the sandbox's tmpfs `rw,exec,nosuid,nodev` for that toolchain alone; every other
-  flag holds (ADR-0005 amendment, SECURITY.md §3.1). `--pull=never` on every sandbox
-  `docker run`: the documentation always said the worker never pulls, and now it cannot.
+  command's tmpfs now says `noexec` on the argv instead of inheriting it from the runtime;
+  every other flag holds; the exception is per toolchain, never per repository (ADR-0005
+  amendment, SECURITY.md §3.1). Proven from inside: `/proc/mounts` in each shipped image
+  carries `noexec` for an ordinary command and drops it only for the Go runner's, and a
+  script written under `/tmp` is refused / runs accordingly
+  (`tests/test_sandbox_images_docker.py`). `--pull=never` on every sandbox `docker run`:
+  the documentation always said the worker never pulls, and now it cannot.
 - **Fixed: the worker ignored the deployment's sandbox keys.** compose, Helm and
   DEPLOYMENT.md set `CRB_SANDBOX__EXECUTOR` / `CRB_SANDBOX__IMAGE`; the API read them, the
   worker read only `CRB_EXECUTOR` / `CRB_SANDBOX_IMAGE` and defaulted to `local` — a
@@ -46,7 +51,18 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 - Docs: DEPLOYMENT.md §2.1 / §3.1 / §3.4, deploy/README.md §3 and §8, OPERATOR.md §2.1,
   SECURITY.md §3.1 and §5 (the images are measured; verdicts under the docker posture are
   still pending — the measurement gap stays open), ARCHITECTURE.md §9.3,
-  docs/reviews/2026-09-17-enterprise-front-end.md §9 (F42 part 1 shipped, part 2 pending).
+  docs/reviews/2026-09-17-enterprise-front-end.md §9 (F42 part 1 shipped, part 2 pending;
+  F52 SHA-pinning every Action repo-wide, from CodeRabbit on PR #44). Corrected on review:
+  a sandbox that cannot be provided ends the run `failed` (`sandbox unavailable: …`) — the
+  job store has no `blocked` status, and OPERATOR §7, DEPLOYMENT §3.4, deploy/README,
+  compose, Helm and ARCHITECTURE §9 now say the word the worker records; under docker a
+  host setup's `node_modules` is NOT visible inside the sandbox (the worktree's link to the
+  clone dangles in the container) — OPERATOR §2.1 and `Dockerfile.node` now say so and
+  point at the derived-image recipe (deploy/sandbox/README.md §4); claim tags with n /
+  method / apparatus on every sandbox-image statement. `tests/conftest_langs.py`: a
+  `docker image inspect` that raises after the daemon probe goes through the warm-up policy
+  (skip locally, fail under strict warm-up) instead of erroring the test
+  (`tests/test_conftest_langs.py`).
 
 ### 2026-09-21 — a locked-out administrator has a way back in (F23)
 

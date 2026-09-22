@@ -146,7 +146,7 @@ worker:
     accessMode: ReadWriteOnce
   sandbox:
     # How the worker reaches a Docker daemon for sandbox containers. READ docs/DEPLOYMENT.md §3.4.
-    #   none        no daemon → executor fails CLOSED (runs `blocked`). Safe default.
+    #   none        no daemon → executor fails CLOSED (runs `failed`, `sandbox unavailable`). Safe default.
     #   dind        docker:dind sidecar in the pod (privileged container; the daemon and every
     #               sandbox live inside the pod's cgroup; nothing touches the node's runtime).
     #   hostSocket  hostPath mount of the node's docker.sock (root-equivalent on the node —

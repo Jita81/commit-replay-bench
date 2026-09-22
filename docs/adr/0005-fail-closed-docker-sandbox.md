@@ -32,7 +32,7 @@ inspection of AthenaClaude `origin/main`, 2026-09-13]`.
      --user=65534:65534
      --cap-drop=ALL --security-opt no-new-privileges
      --read-only
-     --tmpfs /tmp:rw,nosuid,nodev,size=<512m>   (rw,exec,nosuid,nodev,… only when Command.exec_tmp — see amendment 2026-09-21)
+     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=<512m>   (rw,exec,nosuid,nodev,… only when Command.exec_tmp — see amendment 2026-09-21)
      --mount type=bind,src=<worktree>,dst=/work,readonly
      [--mount type=bind,src=<worktree>/<writable_path>,dst=/work/<writable_path>]   per declared writable path
      [--mount type=bind,src=<host>,dst=<inside>,readonly]                            per extra_ro_mount
@@ -85,21 +85,36 @@ denied`, found by the first reference-image smoke, `tests/test_sandbox_images_do
 
 Decision: `Command.exec_tmp` (default `False`) — a runner declares that its toolchain runs
 what it builds under `/tmp`; the executor then mounts `/tmp:rw,exec,nosuid,nodev,size=…`.
-The Go runner declares it. Python and Node keep the implicit `noexec`. `nosuid` and `nodev`
-hold in both shapes, as do every other flag; a test process is arbitrary code under every
-one of these executors already, so `noexec` on scratch was defence-in-depth against nothing
-the image's own interpreter could not do — but it stays where it costs nothing. The
+The Go runner declares it, in its own `command()`; the declaration is **per toolchain, never
+per repository** — no `RepoConfig` key, `runner_opts` entry or run request reaches it, so a
+hostile repository cannot ask for an exec-mountable scratch. Every other command mounts
+`/tmp:rw,noexec,nosuid,nodev,size=…`
+— `noexec` now stated on the argv rather than inherited from the runtime's default, so the
+control does not depend on which daemon is behind the socket. `nosuid` and `nodev` hold in
+both shapes, as do every other flag; a test process is arbitrary code under every one of
+these executors already, so `noexec` on scratch is defence-in-depth against nothing the
+image's own interpreter could not do — but it stays wherever it costs nothing. The
 documented control (SECURITY.md §3.1) was always `nosuid,nodev`; the argv now says exactly
-what it does. The builder container (ADR-0012, `crb.builders.container`) has the same
+what it does **[measured — `tests/test_execution.py` asserts both tmpfs shapes token by
+token (n = 2 tests); `tests/test_sandbox_images_docker.py` reads `/proc/mounts` inside each
+shipped image and tries to run a script written under `/tmp` — `noexec` and `Permission
+denied` for an ordinary command on every image, `exec` and the script runs only for the
+command the Go runner declares (`test_tmp_is_noexec_unless_the_runner_declares_exec_tmp`,
+3/3 images locally, colima / Docker 29.5.2, 2026-09-22; in CI's `sandbox-images` job from
+this commit) — and proves `go test` runs and `/usr` stays read-only from inside the shipped
+Go image (8 tests × 3 images, CI run 35666266465); apparatus 2.2]**. The builder container (ADR-0012, `crb.builders.container`) has the same
 implicit `noexec` on its tmpfs and will need the same declaration before a Go builder image
 can run its own tests inside the cell — a follow-up, not changed here.
 
 Also added: `--pull=never`. The documentation always said the worker never pulls; `docker
 run` pulls a missing image by default. An absent image is now a launch failure (exit 125,
-`No such image`) → `SandboxUnavailable`, proven against a daemon in the same suite.
+`No such image`) → `SandboxUnavailable` **[measured — `test_an_absent_image_fails_closed_without_a_pull`
+against a real daemon, same suite]**.
 
 The reference images this argv runs are `deploy/sandbox/Dockerfile.{python,node,go}`
-(`deploy/sandbox/README.md`), built and proven from inside by CI on every pull request.
+(`deploy/sandbox/README.md`), built and proven from inside by CI on every pull request
+**[measured — CI run 35666266465, 2026-09-22, `sandbox-images` job: 41 passed, 0 skipped
+(24 image tests + the sandbox and sealed-builder suites on the python image)]**.
 
 ## Alternatives considered
 

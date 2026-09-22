@@ -165,8 +165,9 @@ host directory exposed through `extra_ro_mounts`) and set `runner_opts.gomodcach
 worktree is read-only, so a module the sum file does not cover fails the build, attributed
 to the trial. cgo: `apt-get install gcc libc6-dev` in the derived image and
 `runner_opts.cgo: "1"`. Note the runner sets
-`Command.exec_tmp` — the sandbox's tmpfs is mounted `exec` for Go alone, because `go test`
-compiles each test binary under `/tmp` and runs it; `nosuid,nodev` still hold.
+`Command.exec_tmp` — the sandbox's tmpfs is mounted `exec` for Go alone (every other
+command's is `noexec`), because `go test` compiles each test binary under `/tmp` and runs
+it; `nosuid,nodev` still hold.
 
 **Another toolchain** (JVM, Rust) — copy the shape: a digest-pinned base, the toolchain and
 the runner only, caches under `/tmp`, `USER 65534:65534`, the labels; then add the
