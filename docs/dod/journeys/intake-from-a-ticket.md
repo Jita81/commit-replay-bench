@@ -17,8 +17,9 @@ updated: 2026-09-22
 Jira second) and the product treats that as the request to manufacture: it reads the ticket,
 tells the ticket what is missing before any spend, registers it as the backlog item when the
 gaps close, delivers the pull request, and moves the ticket when the pull request is merged.
-Nothing is typed twice: the ticket is the backlog item, the column is the consent gate. No
-screen or guide says this in the product's own words yet — see G-335.
+Nothing is typed twice: the ticket is the backlog item, the column is the consent gate. The
+product says so in its own words on `/factory/intake` (the About block and the journey
+eyebrow), in ONBOARDING-A-REPO step 9, in OPERATOR §11 and in ADR-0017.
 
 **Entry → exit.** Entry: a ticket enters the watched column on the enterprise's board, on a
 repository whose listener an operator switched on. Exit: the ticket carries the product's
