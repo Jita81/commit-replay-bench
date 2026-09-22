@@ -5,7 +5,9 @@ Navigation
 What it is:   Tests for the GitHub App client and its routes: the app JWT is RS256 over
               the app id with a ten-minute life; installation tokens are minted with the
               JWT, cached, and refreshed near expiry; installations and repositories are
-              read with the right credential; GitHub's refusals become ``GitHubAppError``.
+              read with the right credential; a pull request's state is read with the
+              installation token and reads as merged / closed / open (B-9 / F30);
+              GitHub's refusals become ``GitHubAppError``.
               The routes: unconfigured = 404 ``github_app_not_configured`` (and ``GET
               /github/app`` says ``configured: false`` rather than 404); the setup callback
               verifies the installation with the app's credential before recording it;
@@ -52,6 +54,9 @@ from crb.server.app import API_PREFIX
 from crb.server.auth import issue_github_setup_state
 from crb.server.github_app import (
     DELIVERY_PERMISSIONS,
+    PR_CLOSED,
+    PR_MERGED,
+    PR_OPEN,
     GitHubApp,
     GitHubAppError,
     permissions_allow_delivery,
@@ -119,14 +124,54 @@ REPOS = {
 }
 
 
+def pull_request_api(
+    number: int, state: str, *, full_name: str = "acme/Calc", merged_by: str = "paul"
+) -> dict[str, Any]:
+    """GitHub's ``GET /repos/{owner}/{name}/pulls/{number}`` shape for one of the three
+    fates the sync reads: ``open``, ``merged`` (closed + merged) or ``closed`` (without
+    merging). An OPEN pull request carries a ``merge_commit_sha`` too — GitHub's test
+    merge — which must never read as a merge."""
+    url = f"https://github.com/{full_name}/pull/{number}"
+    base: dict[str, Any] = {
+        "number": number,
+        "html_url": url,
+        "state": "open",
+        "merged": False,
+        "merged_at": None,
+        "merge_commit_sha": "f" * 40,
+        "merged_by": None,
+        "closed_at": None,
+        "head": {"sha": "a" * 40, "ref": f"crb/I-{number}"},
+        "base": {"ref": "main"},
+    }
+    if state == PR_MERGED:
+        base.update(
+            state="closed",
+            merged=True,
+            merged_at="2026-09-19T17:02:11Z",
+            merge_commit_sha="e0fefb2" + "0" * 33,
+            merged_by={"login": merged_by, "type": "User"},
+            closed_at="2026-09-19T17:02:11Z",
+        )
+    elif state == PR_CLOSED:
+        base.update(state="closed", merge_commit_sha=None, closed_at="2026-09-20T09:00:00Z")
+    return base
+
+
 class FakeGitHub:
-    """A minimal GitHub: records every request; serves installations, tokens, repos."""
+    """A minimal GitHub: records every request; serves installations, tokens, repos, and
+    pull requests (``pulls[(full_name_lower, number)]`` — absent = 404)."""
 
     def __init__(self, public_key: Any) -> None:
         self.public_key = public_key
         self.calls: list[tuple[str, str, dict[str, str]]] = []
         self.tokens_minted = 0
         self.installations: list[dict[str, Any]] = [INSTALLATION, INSTALLATION_RW]
+        self.pulls: dict[tuple[str, int], dict[str, Any]] = {
+            ("acme/calc", 7): pull_request_api(7, PR_OPEN),
+            ("acme/calc", 8): pull_request_api(8, PR_MERGED),
+            ("acme/calc", 9): pull_request_api(9, PR_CLOSED),
+        }
         self.moved: set[str] = set()  # lower-cased ``owner/name`` that answer 301
         #: lower-cased ``owner/name`` whose 301 carries a NON-object JSON body (a gateway's
         #: answer, not GitHub's ``{"message"}`` shape)
@@ -170,6 +215,13 @@ class FakeGitHub:
         if path == "/installation/repositories":
             assert bearer.startswith("ghs_token_"), "repositories need an installation token"
             return httpx.Response(200, json=REPOS)
+        if path.startswith("/repos/") and "/pulls/" in path:
+            assert bearer.startswith("ghs_token_"), "a pull request needs an installation token"
+            full, _, num = path.removeprefix("/repos/").partition("/pulls/")
+            pr = self.pulls.get((full.lower(), int(num)))
+            if pr is None:
+                return httpx.Response(404, json={"message": "Not Found"})
+            return httpx.Response(200, json=pr)
         if path.startswith("/repos/"):
             assert bearer.startswith("ghs_token_")
             full = path.removeprefix("/repos/")
@@ -306,6 +358,48 @@ def test_github_refusals_become_errors_with_status_and_redacted_message(
         assert e3.value.status == 502
         with pytest.raises(GitHubAppError, match=r"empty response|malformed response"):
             odd.installation(77)
+
+
+def test_pull_request_state_is_read_with_the_installation_token(
+    keypair: tuple[str, Any],
+) -> None:
+    """B-9 / F30: the three fates a delivered pull request can have, as GitHub reports them,
+    read with the installation's token (never the app JWT) and folded into one word."""
+    pem, public = keypair
+    gh = FakeGitHub(public)
+    app = GitHubApp(settings_for(pem), httpx.Client(transport=gh.transport()))
+    open_ = app.pull_request(78, "acme/Calc", 7)
+    assert (open_.outcome, open_.state, open_.merged, open_.number) == (PR_OPEN, "open", False, 7)
+    assert open_.merge_commit_sha == "" and open_.merged_by == "" and open_.merged_at == ""
+    assert open_.head_sha == "a" * 40 and open_.html_url.endswith("/pull/7")
+    merged = app.pull_request(78, "acme/Calc", 8)
+    assert (merged.outcome, merged.merged_by, merged.merged_at) == (
+        PR_MERGED,
+        "paul",
+        "2026-09-19T17:02:11Z",
+    )
+    assert merged.merge_commit_sha.startswith("e0fefb2") and merged.closed_at
+    closed = app.pull_request(78, "acme/Calc", 9)
+    assert (closed.outcome, closed.merged, closed.merge_commit_sha) == (PR_CLOSED, False, "")
+    assert closed.closed_at == "2026-09-20T09:00:00Z" and closed.merged_by == ""
+    # one token mint for the three reads; every read went under it, with the api version
+    assert gh.tokens_minted == 1
+    reads = [c for c in gh.calls if "/pulls/" in c[1]]
+    assert [c[1] for c in reads] == [
+        "/repos/acme/Calc/pulls/7",
+        "/repos/acme/Calc/pulls/8",
+        "/repos/acme/Calc/pulls/9",
+    ]
+    assert all(c[2]["authorization"].startswith("Bearer ghs_token_78_") for c in reads)
+    # refusals: a PR GitHub does not have, a malformed name, a number that is not one
+    with pytest.raises(GitHubAppError, match="GitHub 404") as e:
+        app.pull_request(78, "acme/Calc", 404)
+    assert e.value.status == 404
+    with pytest.raises(GitHubAppError, match="not an owner/name"):
+        app.pull_request(78, "../rate_limit", 7)
+    with pytest.raises(GitHubAppError, match="not a pull request number"):
+        app.pull_request(78, "acme/Calc", 0)
+    assert not [c for c in gh.calls if c[1].endswith("/pulls/0")]
 
 
 def test_suggest_config_maps_github_language_to_ours() -> None:

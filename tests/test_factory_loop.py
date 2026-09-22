@@ -980,6 +980,35 @@ def test_full_loop_on_frozen_backlog(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     assert sum(1 for e in rig.evidence.events() if e.kind == fe.EV_BACKLOG_FROZEN) == 1
 
 
+def test_run_backlog_works_the_latest_evolution_of_each_item(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """F32: a frozen backlog with a registered evolution — ``I-1b`` supersedes ``I-1`` —
+    is worked through ``Backlog.ordered()``: the loop attempts the evolution, never the
+    superseded original, the freeze it records is the FROZEN items' (the evolution is
+    chained on top, and the record still verifies), and the item's outcome is the
+    evolution's."""
+    from dataclasses import replace as dc_replace
+
+    rig = _rig(pyrepo, tmp_path)
+    original = multiply_item()
+    evolved = dc_replace(
+        original, id="I-1b", title="Add multiply to calc (strengthened oracle)", supersedes="I-1"
+    )
+    backlog = Backlog(items=(original,), repo="pyrepo").freeze().evolve(evolved)
+    assert backlog.verify() and backlog.superseded_ids() == {"I-1"}
+    outcomes = rig.loop().run_backlog(
+        backlog,
+        authored={"I-1b": authored_multiply()},
+        expected_hash=backlog.backlog_hash,
+    )
+    assert [(o.item_id, o.status) for o in outcomes] == [("I-1b", fl.STATUS_ACCEPTED)]
+    evs = rig.evidence.events()
+    assert evs[0].kind == fe.EV_BACKLOG_FROZEN and evs[0].payload["item_ids"] == ["I-1"]
+    assert not rig.evidence.events_for("I-1") and rig.evidence.events_for("I-1b")
+    assert rig.evidence.verify() == len(evs)
+
+
 def test_horizon_checkpoint_is_ledgered(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     rig = _rig(pyrepo, tmp_path)
     ev = rig.loop().checkpoint(

@@ -898,6 +898,12 @@ class CapabilityCellOut(BaseModel):
     apparatus_versions: list[str]
     belt_set: str
     belt_sets: list[str]
+    #: B-9 / F30 — pull requests the factory opened from items in this cell, and how many
+    #: of them a person merged. COUNTS from the factory evidence chain (no rate, no
+    #: interval: a merge is a human decision, not a measurement of the builder); a key
+    #: field that is not projected sums over its values.
+    n_delivered: int = 0
+    n_merged: int = 0
 
     @field_validator("verification_tier")
     @classmethod

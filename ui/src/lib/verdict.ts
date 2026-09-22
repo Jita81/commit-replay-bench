@@ -232,6 +232,8 @@ export const ACTION_HELP: Record<string, string> = {
   'run.abandoned': 'The run was given up after its worker stopped answering too many times.',
   'repo.clone.start': 'The repository is being cloned; credentials are never written to the log.',
   'repo.clone.done': 'The clone finished at the recorded head commit.',
+  'repo.fetch.start': 'The clone is being brought up to date with the repository’s default branch before anything is built.',
+  'repo.fetch.done': 'The default branch moved from the recorded before commit to the after commit; an error here refuses the run so nothing is built on a stale base.',
   'probe.start': 'The known-green test scope is being run to prove the toolchain works here.',
   'probe.done': 'The probe finished; green means the toolchain can run this repository’s tests.',
   // prep — the environment before any attempt
@@ -317,6 +319,7 @@ export const ACTION_HELP: Record<string, string> = {
   'rework.start': 'The item went back for another build after a review finding.',
   'rework.refused': 'The reviewer asked for a stronger test and none could be had: no rebuild against the same test; the item goes to a person.',
   'horizon.checkpoint': 'The factory recorded a checkpoint of the whole backlog’s state.',
+  'outcomes.synced': 'Each delivered pull request’s state was read from GitHub; a merge or a close is recorded once on the item’s chain.',
   // audit traces — out-of-band records, never rendered in the log but named for completeness
   'repo.created': 'The repository was registered.',
   'repo.updated': 'The repository’s configuration was changed; the diff is recorded.',
