@@ -286,6 +286,8 @@ gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/requir
  "walkthrough (browser, live stack, tier 1)",
  "ui-unit (tsc -b + vitest, the hint ratchet included)",
  "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
+ "dod (every route, journey, stream and the product carry a definition of done; evidence resolves; the gap analysis is current)",
+ "claims (every quantified sentence on a covered page carries its tag; a [measured] one carries n, method and apparatus)",
  "sandbox-images (build + hadolint + smoke each reference sandbox image)"]}
 JSON
 ```
@@ -295,7 +297,10 @@ them; `GET …/protection` first to confirm the set has not moved). Until then t
 verdict is visible on every pull request but advisory. The same holds for the two UI jobs
 `ui-unit` and `ui-smoke`, added to the list above: they run the type-check, the vitest suites
 (the hint ratchet and the native-`title=` allowlist among them) and the mocked browser smoke
-on every pull request, and they block a merge only once their contexts are in this set.
+on every pull request, and they block a merge only once their contexts are in this set. The
+same holds for `dod` and `claims`, also added to the list above: the definition-of-done record
+and the claim-tag rule are gates in the workflow and advisory on a branch until an
+administrator sends this call.
 
 ## 4. Azure
 

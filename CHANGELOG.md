@@ -8,8 +8,96 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
-### 2026-09-22 — the claim-tag rule became a gate, and two wrong claims were corrected
+### 2026-09-22 — the work arrives from the board, and the gates that watch the gates
 
+- **Work arrives from the team's own board (stream I; ADR-0017, DL-051).** A person moves a
+  ticket into ONE watched column on their own Azure DevOps or Jira board, and the ticket **is**
+  the backlog item — nothing is typed twice. `src/crb/intake/` holds one `TrackerClient`
+  protocol of six verbs (`entered`, `read`, `comment`, `label`, `transition`, `link`) with
+  `ado.py` and `jira.py` adapters on stdlib + `httpx` and no vendor SDK, so the non-goals (the
+  product never edits another ticket field, never creates a ticket, never reads a column it was
+  not pointed at) are enforced by the size of the protocol rather than by a rule somebody
+  remembers. `draft.py` turns the ticket into a draft `BacklogItem` — every mapping states its
+  rule, and the capability classifier serves its confidence and says `unclassified` rather than
+  routing money at a guess. `feedback.py` leaves ONE comment, idempotent by a hidden HTML
+  marker, carrying the readiness gate's open questions with the line that closes each, the
+  cell's route with its `n`, its Wilson interval and its apparatus — and, for a cell nobody has
+  measured, saying so instead of quoting a zero — plus one of `crb:needs-info` /
+  `crb:ready` / `crb:not-deliverable` / `crb:queued`. `server/intake.py` is the listener:
+  `(tracker, key, revision)` is the idempotency key and it lives on the factory's hash chain,
+  so a restart never double-comments, an edited ticket comes back as an **evolution** that
+  supersedes the old item, and a registration arriving while a factory run holds the backlog
+  hash is queued rather than refused with a 409 the listener has nobody to hand.
+- **Off by default, twice.** An admin configures the connection (`CRB_INTAKE__*` on the API and
+  the worker) and stores the credential in the product's own secret store (`tracker_token`,
+  read back as a fingerprint and `set_at`, never a value); an operator then switches the
+  listener on **per repository**, and the switch is stored with who threw it and when. Refused
+  when no tracker is configured, enforced at the API and again in the worker.
+- **New:** the route `/factory/intake?repo=` (the listener, the connection with no secret in
+  it, the last read, and every ticket with its draft, its label, its open questions and the
+  comment verbatim, with three acts each naming its outcome or the server's own advice on a
+  stop); `GET /factory/{repo}/intake`, `POST /factory/{repo}/intake/poll` and
+  `PUT /factory/{repo}/intake` (operator), and `POST /factory/{repo}/backlog/evolutions`; an
+  `intake` line on `/health` and `crb doctor` that contacts no tracker; eight `intake.*` events
+  on the repository's chain and six published stop reasons with a way forward each; a
+  SECURITY §2 egress row and OPERATOR §11.
+- **Proof.** `tests/test_intake_*.py` and `tests/test_server_routes_intake.py` against a fake
+  `TrackerClient`, and the tier-1 walkthrough spec `ui/e2e/walkthrough/12-intake.spec.ts`
+  driving a file-backed fake tracker behind `CRB_ENABLE_FAKE_TRACKER=1`. **No real Azure
+  DevOps or Jira is contacted by any test or by CI** [measured — `tests/test_intake_adapters.py`,
+  n = 27 requests, every one answered by an `httpx.MockTransport`; apparatus 2.2].
+- **The factory can write its own failing test (stream T; DL-050).** Forward mode has no
+  held-out test, so nothing is built until one failing test exists — and the served worker
+  built its `FactorySpec` with no `test_author` at all, so every item nobody had hand-written
+  an oracle for stopped `no_oracle` and waited for a person. The loop's test-first path was
+  built, tested and unreachable on a real deployment. `src/crb/factory/author.py` adds a
+  `TestAuthor` on any OpenAI-compatible endpoint, shown the item, its facts, the repository's
+  test layout and one or two of its own tests for style; a reply it cannot parse, or one naming
+  a path the repository does not call a test, is re-asked with the reason and then refused.
+- **New setting:** `CRB_FACTORY__TEST_AUTHOR` (API *and* worker; empty by default, which is why
+  such an item still stops `no_oracle`), spelled as a rung — `builder:model[:provider]`, the
+  builder half a **registered** builder name — with the per-run override `POST /runs
+  {test_author}`; `none` in either place declines one. The invariant: **the author rung and the
+  build rung are never the same rung.** No new refusal was invented — the loop already applies
+  `assert_distinct_identity` to every rung when a spec is built, so a deployment configured
+  that way fails before anything is built or paid for, and the rung spelling is what gives that
+  refusal a closed label space to compare. What it deliberately does not catch (the same model
+  under a different registered builder name — a different process) is written down rather than
+  papered over. Nothing the author writes is trusted: the RED proof runs it at the base and
+  requires attributable failing ids, and belt 1 re-checks every test byte after the build.
+- A stopped item's `way_forward` now carries the superseding item **already drafted** from the
+  item that stopped and the stop's own reason — for an `oracle_needs_strengthening` verdict,
+  the reviewer's weak-oracle finding, read where the test is strengthened. Proof:
+  `tests/test_factory_author.py`, `tests/test_worker_test_author.py`, and
+  `tests/test_server_routes_factory.py::test_a_weak_oracle_stop_serves_the_superseding_item_pre_filled`.
+  Docs: OPERATOR §10, the API factory rows and the `author.*` event vocabulary.
+- **The UI's own gates run in CI, and nothing explains itself by hover alone (stream E).**
+  Two new blocking jobs: `ui-unit` (`npm ci`, `npm run typecheck`, `npx vitest run` — the hint
+  ratchet, the native-`title=` allowlist and every screen suite) and `ui-smoke` (the mocked
+  Playwright spec over the built bundle). Until now those ran only when somebody remembered
+  them. `testTimeout`/`hookTimeout` are 20 s so a shared runner can meet them [measured — the
+  full vitest suite run twice on an 8-core laptop while the walkthrough held the other cores:
+  18 then 24 tests failed, every one "Test timed out in 5000ms", and all passed when the same
+  files ran alone; method: `npx vitest run` twice, then the failing files alone; apparatus 2.2].
+- **Every route is now keyboard- and phone-checked**, not `/results` and `/factory` alone: the
+  `11-screens` keyboard pass and the 375-px `scrollWidth <= innerWidth` assertion run on all of
+  them, and an unknown address is in the route list, so the 404 is captured, hint-sampled and
+  axe-swept per persona at both widths like any other screen. The new assertion earned its keep
+  twice on its first runs: `/help/docs/OPERATOR` scrolled sideways at 375 px [measured —
+  scrollWidth 763 at innerWidth 375; method: the `11-screens` assertion, tier-1 run 2026-09-22;
+  apparatus 2.2], caused by an 87-character unbroken token in inline `code` that nothing wrapped
+  — `.prose-doc` now breaks words while a fenced block stays exempt and copyable — and the
+  11-column grade table on `/tasks/:repo/:taskId` [measured — scrollWidth 981 at innerWidth 375;
+  same method], which belongs to the page that owns it and is recorded against **G-292** in the
+  spec's `SIDEWAYS_SCROLL_RATCHET`, a list that may only shrink.
+- **The last native `title=` tooltips are retired and the per-file allowlist is EMPTY.**
+  `ShortId` puts the rest of a shortened id or hash in the accessible text, `/learn`'s
+  strengthening table shows an item's description as a second line under the id, and the
+  ratchet's `TITLE_RE` now names react-router's `Link`/`NavLink`, which spread onto an `<a>` —
+  a hole that was hiding three more escaped cells. `/login`, `/help`, `/help/docs/:name` and the
+  catch-all have `SCREENS` entries, fixtures and `MIN_HINTS` floors, so every route `App.tsx`
+  declares is enforced rather than skipped by name. One sentence under the sign-in form names
+  who resets a password or reactivates an account.
 - **A claim carries its tag or CI fails (`claims`).** `scripts/claims_check.py` reads the
   pages on its allowlist (today `README.md` and `docs/RELEASING.md`), finds the sentences
   that quantify something — a percentage, or a cardinal qualifying a plural noun — and fails
@@ -33,6 +121,12 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 - **Definition of done:** `product.claims.21` keeps its `partial` — the gate is real but
   covers two pages — and its gap is now **G-605**: the pages still ungated, one page per
   change. G-603 is closed.
+- **Merging the four streams closed two more criteria between them.**
+  `intake-from-a-ticket.recovery.24` (no oracle / weak oracle) is **met**: stream T built the
+  test-author rung and stream I made the ticket ask for the acceptance test, and each was the
+  other's remaining half. `manufacture-and-deliver.automation.15` is **met** for the same
+  reason — the backlog no longer arrives by hand. G-901, G-902 and G-904 are closed, and
+  stream I's time-cost gap is renumbered **G-928** (stream E landed first and owns G-926).
 
 ### 2026-09-21 — shippable: every element explains itself; users can recover; the loop closes on a merge
 

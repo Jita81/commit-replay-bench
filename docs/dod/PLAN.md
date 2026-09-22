@@ -25,10 +25,10 @@ they are the enterprise's on-ramp: a ticket moves into a column and the product 
 
 | stream | gaps closed | what ships |
 |---|---|---|
-| **I — intake** | G-900, G-901, G-332, G-902, G-333, G-334, G-335, G-336, G-903, G-337 | `intake` settings block + tracker secret; `src/crb/intake/{ado,jira}.py` behind one `TrackerClient` protocol; a worker poll with an idempotency key; the readiness-comment renderer (missing slots + the cell's route, n, interval); freeze-from-ticket; the outcome → ticket-state mapping; `GET /factory/{repo}/intake` and the `/factory/intake` screen, hinted and ratcheted; fake-tracker tests; `12-intake.spec.ts`; an ADR, API rows, an OPERATOR section, a SECURITY egress row |
-| **T — the test author** | G-904 | the served worker wires a test-author rung behind the same refusal that stops a rung authoring its own oracle, so a value-gap item no longer stops `no_oracle`; the superseding item offered pre-filled on a weak-oracle verdict |
-| **E — evidence & explanation** | G-910, G-905, G-909, G-906, G-921, G-917, G-918 | the UI gates run in CI (`tsc -b`, vitest, the ratchet, the mocked smoke spec — 7 criteria); the 11-screens keyboard pass and the 375-px `scrollWidth` check cover every route, not two (11 criteria); `/login`, `/help`, `/help/docs/:name` and `*` get a `SCREENS` entry and a `MIN_HINTS` floor, so the ratchet stops skipping four shell screens (5); the last six native `title=` tooltips are retired (6); `/` is visited by a test (4); `/login` says who resets a password and the 404 is axe-swept (4+) |
-| **C — claims** | G-603 | `scripts/claims_check.py` + a `claims` CI job: every public claim in README, SECURITY, DEPLOYMENT, OPERATOR, the reviews and the book carries a permitted tag, and a `[measured]` one carries n, method and apparatus; the two wrong claims on `main` corrected (README's "eleven jobs"; RELEASING's `[aspiration]` ruleset) |
+| **I — intake** | closed: G-900, G-901, G-332, G-902, G-333, G-334, G-335, G-336, G-903, G-337 · opened: G-928 (the time from column entry to pull request, and the £ per ticket, are not measured — that needs a timed pass on a real column, which costs model spend this wave deliberately did not make) | `intake` settings block + tracker secret; `src/crb/intake/{ado,jira}.py` behind one `TrackerClient` protocol; a worker poll with an idempotency key; the readiness-comment renderer (missing slots + the cell's route, n, interval); freeze-from-ticket; the outcome → ticket-state mapping; `GET /factory/{repo}/intake` and the `/factory/intake` screen, hinted and ratcheted; fake-tracker tests; `12-intake.spec.ts`; an ADR, API rows, an OPERATOR section, a SECURITY egress row |
+| **T — the test author** | closed: G-904 | the served worker wires a test-author rung behind the same refusal that stops a rung authoring its own oracle, so a value-gap item no longer stops `no_oracle`; the superseding item offered pre-filled on a weak-oracle verdict |
+| **E — evidence & explanation** | closed: G-910, G-906, G-921, G-918, G-287 · partly: G-905 (6 of 11 — the per-screen keyboard steps are not done), G-917 (3 of 4), G-909 (3 of 5) · opened: G-926 (the four shell screens carry no About block), G-927 (two sign-in stops still have no way forward) · measured, not fixed: G-292 | the UI gates run in CI (`tsc -b`, vitest, the ratchet, the mocked smoke spec — 7 criteria); the 11-screens keyboard pass and the 375-px `scrollWidth` check cover every route, not two (11 criteria); `/login`, `/help`, `/help/docs/:name` and `*` get a `SCREENS` entry and a `MIN_HINTS` floor, so the ratchet stops skipping four shell screens (5); the last six native `title=` tooltips are retired (6); `/` is visited by a test (4); `/login` says who resets a password and the 404 is axe-swept (4+) |
+| **C — claims** | closed: G-603 · opened: G-605 | `scripts/claims_check.py` + a `claims` CI job: every quantified sentence on a covered page carries one of `[measured]` / `[hypothesis]` / `[aspiration]` / `[gap]`, and a `[measured]` one carries n, method and apparatus; the two wrong claims on `main` corrected (README's "eleven jobs"; RELEASING's `[aspiration]` ruleset). The allowlist is **two pages** — `README.md` and `docs/RELEASING.md` — not the six kinds of page this row first named: SECURITY, DEPLOYMENT, OPERATOR, ARCHITECTURE, the reviews and the book are still ungated, which is G-605 and why `product.claims.21` stays `partial` |
 
 **Stream E rides with this wave because its gaps have the highest fan-out in the whole tree — G-910 and G-905 alone
 close 18 criteria **[measured — n = 2 gaps, method: the `blocks` column of `docs/dod/GAP-ANALYSIS.md`
@@ -38,6 +38,14 @@ streams own.**
 **Done when:** a ticket moved into a watched column on a test project produces a gap comment
 on that ticket, and a ticket with a testable acceptance criterion produces a pull request on
 the customer's repository with the link posted back — walked by `12-intake.spec.ts`.
+
+**What the wave actually proved.** The first half is walked end to end: `12-intake.spec.ts`
+drives a file-backed fake tracker through column → one marked comment → edit → re-read →
+registered and `crb:queued` → the item on the Factory screen, and proves a re-read of an
+unchanged column writes nothing. The second half — a real pull request from a ticket — is
+**not** proved here: the wave made no model or builder API call by design, so the author rung,
+the delivery path and the outcome mapping are proved against fakes at the unit level and the
+priced end-to-end pass is still owed. That, and the time and cost per ticket, is G-928.
 
 ## Wave 2 — the product proposes the next action
 

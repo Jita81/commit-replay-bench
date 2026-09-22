@@ -26,8 +26,9 @@ abstract cells, never code.
 > repository since 2026-09-16 with **CI green on `main`** — every job in
 > [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request, and
 > branch protection requires the ten checks on its required list before anything merges;
-> every other job — `sbom`, `sandbox-images` and each gate added since, this wave's `dod`
-> and `claims` among them — runs on every pull request but is not on that list, which only
+> every other job — `sbom`, `sandbox-images` and each gate added since, this wave's `dod`,
+> `claims`, `ui-unit` and `ui-smoke` among them — runs on every pull request but is not on
+> that list, which only
 > an administrator of the repository can change
 > **[measured 2026-09-22 — the required-checks list read once from the repository setting
 > (`gh api …/branches/main/protection`) against the workflow's job keys, n = 1 reading;
