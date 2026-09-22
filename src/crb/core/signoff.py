@@ -47,12 +47,15 @@ enforced by :func:`check_signable` (the first failing clause, as
   they read. Never overridable: an approver must have read at least one accepted
   diff in the cell (review §7 item 6).
 * ``same_actor``                     — the two-person rule (``signoff-policy.v3``, F7b,
-  DL-047): the approver is the actor of the attested row or of the run that produced
-  it, OR the only person behind every accepted row of the cell (no independent
-  evidence exists). Never overridable. The caller passes the actors it resolved
-  (``attested_actors`` / ``cell_actors``; the API always does, from ``Grade.actor``
-  and ``Run.actor``); a caller that resolved none (``None`` for both) leaves the clause
-  silent, and an actor that is not a person (:func:`is_person_actor`: the empty actor,
+  DL-047, ADR-0016): the approver is refused when they are the actor of the attested row
+  (``Grade.actor``), the actor of the run that produced it (``Run.actor``), or the only
+  person behind the cell's accepted evidence (no independent evidence exists). Never
+  overridable. A policy clause, not an apparatus move: ``APPARATUS_VERSION`` stays 2.2 and
+  the seam an audit reads is ``policy_version`` / ``schema`` on the record (ADR-0016).
+  The caller passes the actors it resolved (``attested_actors`` / ``cell_actors``; the
+  API always does, from ``Grade.actor`` and ``Run.actor``); a caller that resolved none
+  (``None`` for both) leaves the clause silent, and an actor that is not a person
+  (:func:`is_person_actor`: the empty actor,
   ``system…``, ``worker…``, ``cli:…``, ``service:…``, ``import``) never counts —
   "a human signed the cell" can now answer "a different human from the one who ran it".
 
@@ -131,7 +134,8 @@ How:          ``JsonlSignoffLedger.append`` → ``check_signable`` (first failin
               (``key_matches`` on the cell pattern) → ``CapabilityCell.with_tier``.
 Layer:        core — docs/ARCHITECTURE.md#54-a-sign-off-refused-with-409-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0003-one-routing-rule.md,
-              docs/adr/0015-signoffs-expire-with-the-apparatus.md
+              docs/adr/0015-signoffs-expire-with-the-apparatus.md,
+              docs/adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md
 Works with:   src/crb/core/capability.py (the cell and the tiers it may reach),
               src/crb/core/routing.py (the decision and the controls verdict a sign-off is
               judged on), src/crb/server/routes/signoffs.py (the write boundary that holds

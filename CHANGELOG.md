@@ -43,6 +43,15 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   verifying), `tests/test_server_routes_signoffs.py::TestTwoPersonRule` (409 at write, the
   preview, a second approver signing, `verifier_kind` `local` / `oidc` served and
   hash-covered).
+- **ADR-0016** — the two-person rule is a policy clause, not an apparatus move:
+  `APPARATUS_VERSION` stays `2.2` (bumping it would stale every current sign-off for a
+  change that touched no grade — ADR-0015 §4); the seam an audit reads is `policy_version`
+  (`v2` → `v3`) and `schema` (`crb.signoff.v3`), hash-covered and served on every read, so a
+  pre-v3 record stays valid and is identifiable. Backlog F53: list active pre-v3 sign-offs
+  in the Decisions inbox as "signed before the two-person rule". The rule is stated in one
+  sentence, identically, in ONBOARDING-A-REPO, OPERATOR §5, API.md, SECURITY.md §3.4,
+  EVIDENCE-AND-CLAIMS §6a and the §9 F7b row; SECURITY.md's two `[measured]` claims carry
+  n, method and apparatus; DL-047 sits after DL-046 (append-only order).
 
 ### 2026-09-21 — a locked-out administrator has a way back in (F23)
 

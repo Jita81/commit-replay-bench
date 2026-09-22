@@ -125,12 +125,13 @@ Sign-off is a **policy decision refused at write** (signoff-policy v3,
 [EVIDENCE-AND-CLAIMS §6a](EVIDENCE-AND-CLAIMS.md)): the cell must have `n ≥ 10`, the rule
 must say `deliver`, the controls must have passed with 0 escapes, the oracle must be
 measured and ≥ 0.80, the approver must **attest to one accepted row they read**, and the
-approver must be a **second person** — not the account that queued the run behind that
-row, and not the only person behind the cell (`same_actor`; the operator who ran steps
+approver must be a **second person**: the approver is refused when they are the actor of the
+attested row (`Grade.actor`), the actor of the run that produced it (`Run.actor`), or the
+only person behind the cell's accepted evidence (`same_actor`; the operator who ran steps
 4–6 cannot sign their own result, whatever their role). Anything else is a 409 with every
 failing clause listed, shown on the Sign-off page before you try. A sign-off is a
-hash-chained row that records who signed and what kind of account it was; it is revoked
-by a newer row, never deleted.
+hash-chained row that records who signed and what kind of account it was; it is revoked by a
+newer row, never deleted.
 
 ## Step 8 — Forward mode (when a cell is trusted)
 

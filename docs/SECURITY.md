@@ -270,23 +270,38 @@ a ticket or a shell history again (review 2026-09-13, action #9).
 - Roles are an ascending ladder `viewer < operator < approver < admin`; every mutating route
   names its minimum role; `/health` and `/metrics` are unauthenticated and must be bound to
   an internal interface. [measured] RBAC matrix in `tests/test_server_app.py`
-- **Two-person rule, enforced at write** (`signoff-policy.v3`, F7b, DL-047): the API refuses
-  a sign-off (`409 signoff_refused` / `same_actor`) when the approver is the actor of the
-  attested row or of the run that produced it, or the only person behind every accepted row
-  of the cell — the person who produced the evidence can never be the person who signs it.
-  Non-person actors (the worker, `cli:<os user>`, `service:…`, the census importer, the empty
-  actor) never count as a second person. The clause has no `CRB_SIGNOFF__*` knob and cannot
-  be relaxed (`require_independent_verifier` may only be `true`; anything else is `503
-  signoff_policy_invalid`), the preview shows it to the would-be approver before they try,
-  and the record stamps `require_independent_verifier: true` so an audit reads that the rule
-  was in force. A separate operator and approver account is therefore not a deployment
-  convention but a precondition for any sign-off. [measured]
-  `tests/test_server_routes_signoffs.py::TestTwoPersonRule`, `tests/test_signoff.py`
+- **Two-person rule, enforced at write** (`signoff-policy.v3`, F7b, DL-047, ADR-0016):
+  `409 signoff_refused` / `same_actor` — the approver is refused when they are the actor of
+  the attested row (`Grade.actor`), the actor of the run that produced it (`Run.actor`), or
+  the only person behind the cell's accepted evidence — the person who produced the evidence
+  can never be the person who signs it. Non-person actors (the worker, `cli:<os user>`,
+  `service:…`, the census importer, the empty actor) never count as a second person. The
+  clause has no `CRB_SIGNOFF__*` knob and cannot be relaxed (`require_independent_verifier`
+  may only be `true`; anything else is `503 signoff_policy_invalid`), the preview shows it
+  to the would-be approver before they try, and the record stamps
+  `require_independent_verifier: true` so an audit reads that the rule was in force. A
+  separate operator and approver account is therefore not a deployment convention but a
+  precondition for any sign-off. [measured — n = 14 tests under apparatus 2.2: 6 in
+  `tests/test_server_routes_signoffs.py::TestTwoPersonRule` drive `POST /signoffs` and
+  `GET /signoffs/preview` through the API against a seeded ledger (refused on the attested
+  row's run actor; refused as the only person behind the cell; a second approver signs the
+  same cell; the seeded operator/approver split signs; the preview names the refusal
+  first), and 8 in `tests/test_signoff.py` exercise `same_actor_refusal` /
+  `is_person_actor` in the core (each of the three grounds, non-person actors never
+  count, the clause is last and not lifted by a relaxed policy, the ledger write boundary
+  refuses, the silent case when no actors were resolved); pass/fail, not a rate]
 - **Who signed is on the record** (F34): every sign-off carries `verifier_kind` — `local`
   or `oidc`, stamped from the signing account's issuer under the hash; `service` is reserved
   for a delegated, non-person signature and no write path of this API mints it, so a
   delegated signature can never read as a person's. Rows written before the field carry
-  `""`, never a guessed kind. [measured] `tests/test_server_routes_signoffs.py`
+  `""`, never a guessed kind. [measured — n = 4 tests under apparatus 2.2: 3 in
+  `tests/test_signoff.py` (a `crb.signoff.v3` record round-trips and hashes with the kind;
+  a v2 record with no kind still verifies and serves `""`, and flipping a stored kind to
+  `service` breaks its hash; `verifier_kind_for_issuer` maps the local issuer → `local`
+  and any other → `oidc`, refusing an empty issuer) and 1 in
+  `tests/test_server_routes_signoffs.py::TestTwoPersonRule` (an identity-provider session
+  signs and the served record reads `oidc`); the seed's `local` stamp is also asserted on
+  every write and preview in that file; pass/fail, not a rate]
 
 ### 3.5 Evidence integrity — `crb.core.ledger`, `crb.store`
 

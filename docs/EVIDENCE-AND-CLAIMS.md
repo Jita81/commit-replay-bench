@@ -169,10 +169,11 @@ Since `signoff-policy.v1` (DL-014) a sign-off is a *policy decision refused at w
 `signoff-policy: adjust`, DL-016) keeps every number and adds one clause: **the cell's oracle
 strength must be measured**, not merely "≥ 0.80 when measured"; `signoff-policy.v3`
 (2026-09-21, DL-047, F7b) keeps every number and adds the **two-person rule**: the approver
-is not the actor of the attested row or of the run that produced it, and is not the only
-person behind the cell's accepted rows — enforced by the write boundary on the actors the
-ledger records (`Grade.actor`, `Run.actor`), never by convention. A signed cell therefore
-licenses exactly this claim shape:
+is refused when they are the actor of the attested row (`Grade.actor`), the actor of the run
+that produced it (`Run.actor`), or the only person behind the cell's accepted evidence —
+enforced by the write boundary on the actors the ledger records, never by convention
+(ADR-0016: a policy clause, not an apparatus move). A signed cell therefore licenses exactly
+this claim shape:
 
 > "Under apparatus V, cell C of repo R (n, point, Wilson lower — all ≥ the published
 > bar: n ≥ 10, point ≥ 0.90, lower ≥ 0.80, false-Q1 = 0, route `deliver`) was signed off
