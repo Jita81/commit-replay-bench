@@ -36,9 +36,9 @@ ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
 Works with:   src/crb/server/worker.py (under test), src/crb/store/jobs.py (the queue),
               src/crb/builders/adapter.py (the build path), src/crb/server/reaper.py (the
               reaper the loop drives), src/crb/core/oracle/controls.py
-              (the controls run kind), tests/fixtures/pyrepo.py, tests/test_worker_label.py,
+              (the controls run kind), tests/fixtures/pyrepo.py (the repository fixture),
               tests/test_worker_clone.py and tests/test_worker_budget_ladder.py (the same
-              harness for one kind or seam each)
+              harness for one kind or seam each; so are the other test_worker_*.py files)
 Tested by:    tests/test_worker.py
 Touch when:   a run kind is added (``stage_for``, a run case here and the queue's
               ``RUN_KINDS``); a new way for a run to end must decide ``failed`` vs
@@ -1586,6 +1586,24 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     h.enqueue("factory", ladder_json=["fake:m0"], params_json={"backlog_hash": "f" * 64})
     stale = h.run_one()
     assert stale.status == STATUS_FAILED and "backlog changed since" in stale.error
+    # an evolution registered between enqueue and claim moves only the evolutions chain
+    # (the frozen hash stays): the pin covers that chain too, so the run fails closed
+    # rather than work an item the person who queued it never saw (verifier 2026-09-22)
+    from dataclasses import replace as dc_replace
+
+    active = home.load_backlog()
+    assert active is not None
+    h.enqueue(
+        "factory",
+        ladder_json=["fake:m0"],
+        params_json={"backlog_hash": active.backlog_hash, "evolutions_hash": ""},
+    )
+    home.register_evolution(
+        dc_replace(_item, id=f"{_item.id}-v2", supersedes=_item.id), actor="tester"
+    )
+    evolved = h.run_one()
+    assert evolved.status == STATUS_FAILED and "backlog evolved since" in evolved.error
+    assert "re-queue" in evolved.error
     # no backlog → the run fails closed with the instruction
     home2 = FactoryHome(h.home, "nope")
     assert home2.load_backlog() is None

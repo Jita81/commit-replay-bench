@@ -18,7 +18,8 @@
  *               `slugify()` produces (with GitHub's `-1`, `-2` suffixes for repeats) so the
  *               docs' own `#anchors` and the screens' `readMore` links resolve; wraps every
  *               table in a focusable, labelled scroll region (`div.table-scroll`, WCAG 2.1.1)
- *               so a wide table scrolls without losing its row/column semantics.
+ *               so a wide table scrolls without losing its row/column semantics, and makes
+ *               every code block a focusable, labelled region for the same reason.
  * How:          A line-based block parser (`parseMarkdown`) then a small inline tokeniser for
  *               code / strong / em / links, both pure; no dependency (the UI has no kit by
  *               design).
@@ -295,7 +296,9 @@ function renderBlocks(blocks: Block[], slugs: Slugs, keyPrefix: string): ReactNo
       case 'paragraph':
         return createElement('p', { key }, ...renderInline(b.text, `${key}.`))
       case 'code':
-        return createElement('pre', { key }, createElement('code', b.lang ? { 'data-lang': b.lang } : {}, b.text))
+        // a wide code block scrolls sideways (index.css): focusable, so the keyboard can reach
+        // the scroll (WCAG 2.1.1 — axe scrollable-region-focusable on /help/docs/OPERATOR)
+        return createElement('pre', { key, tabIndex: 0, role: 'region', 'aria-label': b.lang ? `Code: ${b.lang}` : 'Code' }, createElement('code', b.lang ? { 'data-lang': b.lang } : {}, b.text))
       case 'quote':
         return createElement('blockquote', { key }, ...renderInline(b.text, `${key}.`))
       case 'rule':

@@ -79,6 +79,20 @@ Honesty properties
   run (:meth:`Worker._load_repo`): https/ssh only, credentials redacted from every
   event and error, ``repo.clone.start`` / ``repo.clone.done`` on the run's trace,
   the path persisted so no later run clones again.
+* **Fetch before a build on the base (F39).** Before a ``factory`` run on a repository
+  with a URL — and before a ``replay`` / ``blind`` / ``mine`` on one linked through the
+  GitHub App — the worker fetches the row's URL and fast-forwards the clone's default
+  branch to the remote's (:meth:`Worker._fetch_default_branch`): ``repo.fetch.start`` /
+  ``repo.fetch.done`` carry the before / after shas. A fetch that fails, or a local
+  default branch that cannot fast-forward, REFUSES the run (``FetchRefused``, the run
+  ends ``failed`` with the reason) rather than build on a stale base; the RED proof and
+  the build base are then the remote's current default branch, and a factory run's
+  apparatus carries ``base_sha``.
+* **The merge outcome comes back as evidence (B-9 / F30).** A factory run on a linked
+  repository first reads every delivered pull request's state through the installation
+  token and records ``delivery.merged`` / ``delivery.closed`` (at most closed then merged
+  per PR) on the item's chain (``factory.outcomes.synced`` on the trace); a sync that cannot read never fails
+  the run.
 * **Builder config is recorded.** ``params.builder_config`` (from ``POST /runs``)
   is passed to every builder as constructor overrides AND stamped into the run's
   apparatus (``extra.builder_config``) so a row's method can be read back.
@@ -98,7 +112,9 @@ What it does: Polls the job queue, claims one run, dispatches by kind (setup, pr
               grade rows through the append-only ledger with the run's labels stamped,
               records the apparatus, and marks the run succeeded / failed / cancelled
               honestly (all-attempts-errored is a failure; a provider outage streak stops
-              the run; a harness error on one mined candidate skips it). Checks in to the
+              the run; a harness error on one mined candidate skips it). Fetches and
+              fast-forwards the clone's default branch before a factory run (refusing the
+              run when it cannot) and syncs delivered pull requests' outcomes first. Checks in to the
               ``workers`` table every ``heartbeat_s`` (idle or not, with the reaper's
               pending count) and records every worker-side metric, including deliveries
               by outcome and real installation-token mints. Reaps a container whose kill
@@ -110,18 +126,20 @@ How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (g
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0012-builder-in-a-sealed-container.md
-Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finish),
-              src/crb/store/models.py (``WorkerRow`` — the check-in row the health probe
-              reads), src/crb/observability/metrics.py (the recorders, ``record_event`` on
+Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finish; the
+              check-in row the health probe reads is ``WorkerRow`` in src/crb/store/models.py),
+              src/crb/observability/metrics.py (the recorders, ``record_event`` on
               the emitter's metering sink, ``crb_queue_depth`` on check-in),
               src/crb/core/run.py (a replay's task loop), src/crb/builders/adapter.py (the
               build function, ladder, pre-flight), src/crb/core/mine.py (mining; the oracle
               and controls kinds call their core modules the same way),
-              src/crb/factory/loop.py (forward mode — its files live in
-              src/crb/server/factory_state.py), src/crb/server/reaper.py (the durable
+              src/crb/server/factory_state.py (forward mode's files and ``sync_outcomes``,
+              which runs first; the loop itself is src/crb/factory/loop.py),
+              src/crb/server/github_app.py (installation tokens for clone, fetch,
+              delivery and the pull-request read), src/crb/server/reaper.py (the durable
               queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
-              tests/test_worker_clone.py, tests/test_store_jobs.py,
+              tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_observability_metrics.py
 Touch when:   a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
@@ -139,6 +157,7 @@ import json
 import logging
 import os
 import socket
+import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -212,7 +231,7 @@ from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.testfirst import AuthoredTest
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
-from crb.server.factory_state import FactoryHome
+from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
@@ -264,6 +283,18 @@ _STAGE_FOR_PREFIX: dict[str, str] = {
     "probe": "system",
     "setup": "prep",
 }
+
+
+#: Wall clock for one ``git fetch`` of the default branch before a run.
+DEFAULT_FETCH_TIMEOUT_S = 10 * 60
+#: Run kinds that fetch the default branch first on a repository LINKED through the
+#: GitHub App (a ``factory`` run fetches on any repository with a URL).
+FETCH_KINDS_LINKED: frozenset[str] = frozenset({KIND_REPLAY, KIND_BLIND, KIND_MINE})
+
+
+class FetchRefused(RuntimeError):
+    """The clone could not be brought up to date with the remote's default branch, so the
+    run is refused rather than built on a stale base (F39)."""
 
 
 def stage_for(action: str) -> str:
@@ -843,7 +874,7 @@ class Worker:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
                     raise ValueError(f"unknown run kind {run.kind!r}")
-                config, git = self._load_repo(run.repo, emitter)
+                config, git = self._load_repo(run.repo, emitter, kind=run.kind)
                 ctx = RunContext(run=run, emitter=emitter, config=config, git=git)
                 status, counts, error = handler(ctx)
         except SandboxUnavailable as exc:
@@ -943,14 +974,27 @@ class Worker:
             return None
         return _InstallationProvider(self._github_app(), installation, remote)
 
-    def _load_repo(self, name: str, emitter: Emitter | None = None) -> tuple[RepoConfig, GitRepo]:
+    def _fetch_before(self, kind: str, cfg: Mapping[str, Any], url: str) -> bool:
+        """Whether a run of ``kind`` fetches first (F39): a factory run on any repository
+        with a URL; a replay / blind / mine on one linked through the GitHub App."""
+        if not url:
+            return False
+        if kind == KIND_FACTORY:
+            return True
+        return kind in FETCH_KINDS_LINKED and self._github_installation(cfg) is not None
+
+    def _load_repo(
+        self, name: str, emitter: Emitter | None = None, *, kind: str = ""
+    ) -> tuple[RepoConfig, GitRepo]:
         """The repo's config and clone. A row with a ``url`` but no usable clone
         (``clone_path`` empty or not a git repository) is cloned once into
         ``<home>/repos/<name>`` — full history, ``--no-tags``, 30-minute wall clock,
         URL policy-checked and redacted — and the path is persisted on the row and
         in ``config_json["path"]`` so every later run finds it. ``repo.clone.start`` /
         ``repo.clone.done`` (stage ``system``) carry the redacted URL, the duration and
-        the head sha on the run's trace when ``emitter`` is given."""
+        the head sha on the run's trace when ``emitter`` is given. An EXISTING clone is
+        fetched and fast-forwarded first when ``kind`` asks for it
+        (:meth:`_fetch_before`); a fresh clone is already at the remote's head."""
         with self.factory() as s:
             row = s.get(Repo, name)
         if row is None:
@@ -962,7 +1006,10 @@ class Worker:
         clone = row.clone_path or config.path
         url = str(row.url or config.url or "").strip()
         if clone and GitRepo(clone).is_repo():
-            return config, GitRepo(clone)
+            git = GitRepo(clone)
+            if self._fetch_before(kind, cfg, url):
+                self._fetch_default_branch(name, cfg, git, url, emitter)
+            return config, git
         if not url:
             if not clone:
                 raise LookupError(f"repo {name!r} has no clone path")
@@ -1006,6 +1053,152 @@ class Worker:
                 head=head,
             )
         return RepoConfig.from_dict(row.name, {**cfg, "path": str(dest)}), GitRepo(dest)
+
+    def _fetch_default_branch(
+        self,
+        name: str,
+        cfg: Mapping[str, Any],
+        git: GitRepo,
+        url: str,
+        emitter: Emitter | None = None,
+    ) -> str:
+        """F39: ``git fetch`` the row's URL into ``refs/remotes/origin/<default>`` and
+        fast-forward the clone's default branch to it; returns the sha the branch is now
+        at. The default branch is the link's (``config_json.github.default_branch``), else
+        the clone's ``origin/HEAD``, else the branch the clone is on. A linked repository
+        fetches with the installation token in the environment (never argv, never on
+        disk — as the clone does). ``repo.fetch.start`` / ``repo.fetch.done`` carry the
+        redacted URL, the branch and the before / after shas. Any failure — the remote
+        unreachable, the branch gone, a local default branch that has commits the remote
+        does not (no fast-forward) — is a :class:`FetchRefused`: the run must not build,
+        prove RED or open a pull request on a base the remote has moved past."""
+        safe_url = redact_url(url)
+        started = time.monotonic()
+        link = dict(cfg.get("github") or {})
+        branch = str(link.get("default_branch") or "").strip()
+        if not branch:
+            head = git.run("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+            branch = head.stdout.strip().removeprefix("origin/") if head.ok else ""
+        if not branch:
+            cur = git.run("rev-parse", "--abbrev-ref", "HEAD")
+            branch = cur.stdout.strip() if cur.ok and cur.stdout.strip() != "HEAD" else ""
+        auth_header = self._github_auth_header(cfg, url)
+        if emitter is not None:
+            emitter.emit(
+                "system",
+                "repo.fetch.start",
+                url=safe_url,
+                branch=branch,
+                dest=str(git.path),
+                github_app=bool(auth_header),
+            )
+
+        def refuse(why: str) -> FetchRefused:
+            exc = FetchRefused(
+                f"repo {name!r}: the clone could not be brought up to date with {safe_url} "
+                f"({why}) — the run is refused so it does not build on a stale base. "
+                f"Bring the clone's {branch or 'default'} branch back onto the remote's "
+                "history by hand, or clear the repository's clone path in its configuration "
+                "so the next run clones afresh"
+            )
+            if emitter is not None:
+                emitter.error(
+                    "system",
+                    "repo.fetch.done",
+                    exc,
+                    url=safe_url,
+                    branch=branch,
+                    dest=str(git.path),
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                )
+            return exc
+
+        if not branch:
+            raise refuse("no default branch is known for the clone")
+        before_res = git.run("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}")
+        before = before_res.stdout.strip() if before_res.ok else ""
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+        if auth_header:
+            env.update(
+                {
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": "http.extraheader",
+                    "GIT_CONFIG_VALUE_0": auth_header,
+                }
+            )
+        argv = [
+            git.git_binary,
+            "-C",
+            str(git.path),
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "--prune",
+            url,
+            f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+        ]
+        try:
+            p = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=DEFAULT_FETCH_TIMEOUT_S,
+                check=False,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise refuse(f"fetch timed out after {DEFAULT_FETCH_TIMEOUT_S}s") from exc
+        if p.returncode != 0:
+            stderr = redact_and_cap((p.stderr or "").replace(url, safe_url), max_chars=300)
+            raise refuse(f"git fetch failed rc={p.returncode}: {stderr}")
+        after_res = git.run(
+            "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}"
+        )
+        if not after_res.ok:
+            raise refuse(f"the remote has no branch {branch!r}")
+        after = after_res.stdout.strip()
+        cur = git.run("rev-parse", "--abbrev-ref", "HEAD")
+        on_branch = cur.ok and cur.stdout.strip() == branch
+        fast_forwarded = False
+        if not before:
+            # the clone has no local default branch (it was cloned on another one, or the
+            # link's default branch was renamed): create it at the remote's head
+            co = git.run("checkout", "--quiet", "-B", branch, f"refs/remotes/origin/{branch}")
+            if not co.ok:
+                raise refuse(
+                    f"cannot create {branch!r}: {redact_and_cap(co.stderr, max_chars=200)}"
+                )
+            fast_forwarded = True
+        else:
+            if not on_branch:
+                co = git.run("checkout", "--quiet", branch)
+                if not co.ok:
+                    raise refuse(
+                        f"cannot check out {branch!r}: {redact_and_cap(co.stderr, max_chars=200)}"
+                    )
+            if before != after:
+                # fast-forward ONLY: a local commit the remote lacks is a refusal, never a
+                # merge or a reset the product did on its own
+                ff = git.run("merge", "--ff-only", "--quiet", f"refs/remotes/origin/{branch}")
+                if not ff.ok:
+                    raise refuse(
+                        f"local {branch!r} at {before[:12]} cannot fast-forward to the remote's "
+                        f"{after[:12]}: {redact_and_cap(ff.stderr, max_chars=200)}"
+                    )
+                fast_forwarded = True
+        if emitter is not None:
+            emitter.emit(
+                "system",
+                "repo.fetch.done",
+                url=safe_url,
+                branch=branch,
+                dest=str(git.path),
+                before=before,
+                after=after,
+                fast_forwarded=fast_forwarded,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+        return after
 
     def _set_probe(self, name: str, status: str, detail: str) -> None:
         with self.factory() as s:
@@ -1665,6 +1858,17 @@ class Worker:
                 f"backlog changed since this run was queued: pinned {pinned[:16]}…, "
                 f"active {backlog.backlog_hash[:16]}… — re-queue against the active backlog"
             )
+        # An evolution moves only the evolutions chain (the frozen hash stays), so the
+        # same window admits an item the person who queued the run never saw: the API
+        # stamps that chain too and the pin is checked on both (a run queued before the
+        # stamp existed carries no key and is not held to it).
+        if "evolutions_hash" in p and str(p["evolutions_hash"] or "") != backlog.evolutions_hash:
+            pinned_ev = str(p["evolutions_hash"] or "")
+            raise ValueError(
+                "backlog evolved since this run was queued: pinned evolutions chain "
+                f"{pinned_ev[:16] or '(none)'}…, active {backlog.evolutions_hash[:16] or '(none)'}… "
+                "— re-queue so the run works the items you can see"
+            )
         ladder = self._ladder(ctx)
         budget = self._budget(ctx)
         rungs = trial_labels_for(ladder, budget)
@@ -1692,10 +1896,13 @@ class Worker:
         self._stamp(
             ctx,
             backlog_hash=backlog.backlog_hash,
-            items=len(backlog.items),
+            items=len(backlog.ordered()),
             deliver=bool(p.get("deliver", False)),
             budget=budget.to_dict(),
             ladder=[r.label for r in ladder.rungs],
+            # F39 — the base every RED proof and build of this run starts from (the
+            # default branch as fetched, or the clone's head when nothing was fetched)
+            base_sha=ctx.git.rev_parse("HEAD"),
         )
         # delivery through the GitHub App: the linked installation's token pushes the branch
         # and opens the pull request against the repository's default branch (ADR-0014);
@@ -1705,6 +1912,10 @@ class Worker:
             cfg_json = dict(row.config_json or {}) if row is not None else {}
         link = dict(cfg_json.get("github") or {})
         remote = str(ctx.config.url or "")
+        # B-9 / F30 — before any build: each delivered pull request's fate, read through
+        # the installation token, onto the item's chain (at most closed then merged per
+        # PR); never fails the run
+        self._sync_outcomes(ctx, home, cfg_json, remote)
         creds = self._delivery_credentials(cfg_json, remote) if remote else None
         api_base = self.settings.github.api_url if creds is not None else "https://api.github.com"
 
@@ -1743,7 +1954,7 @@ class Worker:
             keep_workspaces=bool(retain.get("worktrees", False)),
         )
         loop = FactoryLoop(spec, ctx.git, emitter=ctx.emitter)
-        total = len(backlog.items)
+        total = len(backlog.ordered())
         counts: dict[str, Any] = {"items": total, "done": 0, "accepted": 0, "by_status": {}}
         ctx.counts.update(counts)
         self._progress(ctx, 0, total)
@@ -1772,6 +1983,46 @@ class Worker:
         if self._cancelled(ctx):
             return STATUS_CANCELLED, counts, ""
         return STATUS_SUCCEEDED, counts, ""
+
+    def _sync_outcomes(
+        self, ctx: RunContext, home: FactoryHome, cfg: Mapping[str, Any], remote: str
+    ) -> None:
+        """The outcome sync at the start of a factory run (B-9 / F30): for a repository
+        linked through the GitHub App on the app's own host, read every delivered pull
+        request whose fate can still change (``outcomes_pending`` — no outcome yet, or
+        closed; a merge is terminal) and record ``delivery.merged`` / ``delivery.closed``
+        (at most closed then merged per PR). No token is minted when nothing is pending.
+        ``factory.outcomes.synced`` carries the report (``skipped`` with the reason when
+        the repository cannot be read; ``status: error`` when the token could not be
+        minted). Nothing here can fail the run."""
+        installation = self._github_installation(cfg)
+        full_name = str(dict(cfg.get("github") or {}).get("full_name") or "")
+        if installation is None or not full_name or not self._github_host_ok(remote):
+            ctx.emit(
+                "factory",
+                "outcomes.synced",
+                status=StepStatus.SKIPPED,
+                reason="not linked through the GitHub App on its own host",
+            )
+            return
+        if not outcomes_pending(home):
+            ctx.emit("factory", "outcomes.synced", checked=0, merged=0, closed=0, open=0, errors=[])
+            return
+        app = self._github_app()
+        try:
+            app.installation_token(installation)
+        except GitHubAppError as exc:
+            ctx.emitter.error("factory", "outcomes.synced", exc, checked=0)
+            return
+        report = sync_outcomes(
+            home, lambda n: app.pull_request(installation, full_name, n), actor=ctx.run.actor
+        )
+        ctx.emit(
+            "factory",
+            "outcomes.synced",
+            status=StepStatus.ERROR if report.errors else StepStatus.OK,
+            **report.to_dict(),
+        )
 
     def _run_controls(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
         tasks = self._select_tasks(ctx)

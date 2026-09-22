@@ -39,6 +39,7 @@ import { BeltPills } from '../../components/BeltPills'
 import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
+import { Hint } from '../../components/Hint'
 import { JsonView } from '../../components/JsonView'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
@@ -69,28 +70,43 @@ export function TaskDetailPage() {
 
   const columns = useMemo<Column<GradeRow>[]>(
     () => [
-      { key: 'created', header: 'Created', sortValue: (r) => r.created, cell: (r) => <span className="text-xs text-on-surface-muted">{fmtDate(r.created)}</span> },
-      { key: 'run', header: 'Run', mono: true, sortValue: (r) => r.run_id, cell: (r) => (r.run_id ? <Link to={`/runs/${encodeURIComponent(r.run_id)}`}>{shortId(r.run_id, 8)}</Link> : '—') },
-      { key: 'trial', header: 'Trial', mono: true, sortValue: (r) => r.trial, cell: (r) => `${r.mode} · ${r.trial || 'r1'}` },
-      { key: 'builder', header: 'Builder', mono: true, sortValue: (r) => r.builder, cell: (r) => (r.builder ? `${r.builder}${r.model ? ` · ${r.model}` : ''}` : '—') },
+      { key: 'created', header: 'Created', hint: 'col.task.created', sortValue: (r) => r.created, cell: (r) => <span className="text-xs text-on-surface-muted">{fmtDate(r.created)}</span> },
+      { key: 'run', header: 'Run', hint: 'col.task.run', mono: true, sortValue: (r) => r.run_id, cell: (r) => (r.run_id ? <Link to={`/runs/${encodeURIComponent(r.run_id)}`}>{shortId(r.run_id, 8)}</Link> : '—') },
+      { key: 'trial', header: 'Trial', hint: 'col.task.trial', mono: true, sortValue: (r) => r.trial, cell: (r) => `${r.mode} · ${r.trial || 'r1'}` },
+      { key: 'builder', header: 'Builder', hint: 'col.task.builder', mono: true, sortValue: (r) => r.builder, cell: (r) => (r.builder ? `${r.builder}${r.model ? ` · ${r.model}` : ''}` : '—') },
       {
         key: 'clean',
         header: 'Clean',
+        hint: 'col.task.clean',
         sortValue: (r) => Number(r.clean),
-        cell: (r) => (r.clean ? <Pill tone="green" glyph="✓" size="xs" label="Clean">clean</Pill> : r.disqualified ? <Pill tone="amber" glyph="⊘" size="xs" label={`Disqualified: ${r.dq_reason}`}>DQ</Pill> : <Pill tone="red" glyph="✗" size="xs" label={r.error || 'Not clean'}>no</Pill>),
+        cell: (r) =>
+          r.clean ? (
+            <Pill tone="green" glyph="✓" size="xs" label="Clean" hint="pill.task.clean" tabStop={false}>
+              clean
+            </Pill>
+          ) : r.disqualified ? (
+            <Pill tone="amber" glyph="⊘" size="xs" label={`Disqualified: ${r.dq_reason}`} hint="pill.task.clean" tabStop={false}>
+              DQ
+            </Pill>
+          ) : (
+            <Pill tone="red" glyph="✗" size="xs" label={r.error || 'Not clean'} hint="pill.task.clean" tabStop={false}>
+              no
+            </Pill>
+          ),
       },
-      { key: 'belts', header: 'Belts', cell: (r) => <BeltPills belts={beltsOf(r)} beltSet={r.belt_set} showNames={false} /> },
-      { key: 'cost', header: 'Cost', numeric: true, sortValue: (r) => r.cost_usd, cell: (r) => fmtUsd(r.cost_usd) },
-      { key: 'latency', header: 'Latency', numeric: true, sortValue: (r) => r.latency_s, cell: (r) => fmtSeconds(r.latency_s) },
-      { key: 'prov', header: 'Provenance', cell: (r) => <Provenance apparatus={r.apparatus_version} beltSet={r.belt_set} provenance={r.provenance} />, hideBelowMd: true },
+      { key: 'belts', header: 'Belts', hint: 'col.task.belts', cell: (r) => <BeltPills belts={beltsOf(r)} beltSet={r.belt_set} showNames={false} /> },
+      { key: 'cost', header: 'Cost', hint: 'col.task.cost_latency', numeric: true, sortValue: (r) => r.cost_usd, cell: (r) => fmtUsd(r.cost_usd) },
+      { key: 'latency', header: 'Latency', hint: 'col.task.cost_latency', numeric: true, sortValue: (r) => r.latency_s, cell: (r) => fmtSeconds(r.latency_s) },
+      { key: 'prov', header: 'Provenance', hint: 'col.task.provenance', cell: (r) => <Provenance apparatus={r.apparatus_version} beltSet={r.belt_set} provenance={r.provenance} />, hideBelowMd: true },
       {
         key: 'review',
         header: 'Review',
+        hint: 'col.task.review',
         sortValue: (r) => standing.get(r.row_hash)?.verdict ?? '',
         cell: (r) => {
           const rev = standing.get(r.row_hash)
           return rev ? (
-            <button type="button" className="inline-flex" onClick={() => setOpen({ pack: rev.evidence_pack_hash || r.evidence_pack_hash, row: r.row_hash })} title={rev.statement} data-testid="row-review">
+            <button type="button" className="inline-flex" onClick={() => setOpen({ pack: rev.evidence_pack_hash || r.evidence_pack_hash, row: r.row_hash })} data-testid="row-review">
               <VerdictPill verdict={rev.verdict} />
             </button>
           ) : (
@@ -103,6 +119,7 @@ export function TaskDetailPage() {
       {
         key: 'pack',
         header: 'Evidence',
+        hint: 'col.task.evidence',
         cell: (r) =>
           r.evidence_pack_hash ? (
             <button type="button" className="font-mono text-xs text-primary underline-offset-2 hover:underline" onClick={() => setOpen({ pack: r.evidence_pack_hash, row: r.row_hash })} title={r.evidence_pack_hash}>
@@ -135,42 +152,56 @@ export function TaskDetailPage() {
               )}
               <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                 <div>
-                  <dt className="label">{isFactory(t.spec) ? 'Factory item' : 'Commit'}</dt>
+                  <Hint as="dt" id="tile.task.id" className="label">
+                    {isFactory(t.spec) ? 'Factory item' : 'Commit'}
+                  </Hint>
                   <dd className="font-mono text-xs">{t.spec.task_id}</dd>
                 </div>
                 <div>
-                  <dt className="label">Authored</dt>
+                  <Hint as="dt" id="tile.task.authored" className="label">
+                    Authored
+                  </Hint>
                   <dd>{fmtDate(t.spec.authored)}</dd>
                 </div>
                 <div>
-                  <dt className="label">Target tests</dt>
+                  <Hint as="dt" id="tile.task.target_tests" className="label">
+                    Target tests
+                  </Hint>
                   <dd className="font-mono text-xs">{t.spec.target_tests.join(', ') || '—'}</dd>
                 </div>
                 <div>
-                  <dt className="label">Belt scope</dt>
+                  <Hint as="dt" id="tile.task.belt_scope" className="label">
+                    Belt scope
+                  </Hint>
                   <dd className="font-mono text-xs">{t.spec.belt_scope.length ? t.spec.belt_scope.join(', ') : 'BARE'}</dd>
                 </div>
                 <div>
-                  <dt className="label">Test files</dt>
+                  <Hint as="dt" id="tile.task.files" className="label">
+                    Test files
+                  </Hint>
                   <dd className="font-mono text-xs">{t.spec.test_files.join(', ')}</dd>
                 </div>
                 <div>
-                  <dt className="label">Source files</dt>
+                  <Hint as="dt" id="tile.task.files" className="label">
+                    Source files
+                  </Hint>
                   <dd className="font-mono text-xs">{t.spec.src_files.join(', ')}</dd>
                 </div>
                 <div>
-                  <dt className="label">RED-checked · gold</dt>
+                  <Hint as="dt" id="tile.task.red_gold" className="label">
+                    RED-checked · gold
+                  </Hint>
                   <dd>
                     {t.spec.red_checked ? '✓ RED at parent' : '— not checked'} · {t.spec.gold_clean === null ? 'gold unchecked' : t.spec.gold_clean ? '✓ gold clean' : `✗ gold failed (${t.spec.gold_note})`}
                   </dd>
                 </div>
               </dl>
-              <details className="mt-3 text-xs">
+              <Hint as="details" id="tile.task.full_spec" className="mt-3 text-xs">
                 <summary className="cursor-pointer text-on-surface-muted">Full spec</summary>
                 <div className="mt-2">
                   <JsonView value={t.spec} label="Task spec" />
                 </div>
-              </details>
+              </Hint>
             </Card>
             <Card padded={false} title="Grade rows">
               <DataTable rows={t.grades} columns={columns} rowKey={(r) => r.row_id} caption="Grade rows for this task" dense initialSort={{ key: 'created', dir: 'desc' }} empty={<EmptyState compact title="Not graded yet" reason={isFactory(t.spec) ? 'The factory has not built this item yet.' : 'No run has replayed this task.'} />} />

@@ -16,7 +16,10 @@
  *               anyone for a token: the deployment's app mints its own. Repositories already
  *               connected are marked and cannot be connected twice; a repository GitHub
  *               reports no language for asks for one; the link select offers only rows with
- *               no GitHub link; the operator role gates both acts, as the API does.
+ *               no GitHub link; the operator role gates both acts, as the API does. Every
+ *               field, pill, paging button and act in the dialog is a hint trigger
+ *               (`field.github.*`, `pill.github.repo_flags`, `button.github.*`,
+ *               `link.github.install`) so the flow explains itself on hover, focus and tap.
  * How:          `useGitHubApp` (configured? installations?), `useSyncGitHubInstallations`,
  *               `useGitHubRepos(installation, q, page)`, then `useConnectGitHubRepo` (new) or
  *               `useLinkRepoToGitHub` (existing, over `useAllRepos` filtered to
@@ -27,6 +30,7 @@
  * Works with:   ui/src/screens/Connect/ConnectPage.tsx (opens it), ui/src/api/hooks.ts
  *               (`useConnectGitHubRepo`, `useLinkRepoToGitHub`, `useAllRepos`),
  *               ui/src/api/types.ts (`RepoSummary.github_full_name`),
+ *               ui/src/components/Hint.tsx + ui/src/help/hints.ts (the triggers and copy),
  *               src/crb/server/routes/github.py (the routes), docs/GITHUB-APP.md
  * Tested by:    ui/src/screens/Connect/GitHubConnectDialog.test.tsx
  * Touch when:   the connect body grows a field (mirror `ConnectRequest`); the link body
@@ -41,6 +45,7 @@ import { Dialog } from '../../components/Dialog'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextField } from '../../components/Field'
+import { Hint } from '../../components/Hint'
 import { Pill } from '../../components/Pill'
 import { useAuth } from '../../lib/auth'
 
@@ -148,12 +153,12 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
         ) : (
           <>
             {onUseUrl && (
-              <Button variant="ghost" onClick={onUseUrl}>
+              <Button variant="ghost" hint="button.github.use_url" onClick={onUseUrl}>
                 Connect by URL instead
               </Button>
             )}
             <Button onClick={onClose}>Cancel</Button>
-            <Button variant="filled" disabled={!picked || !ready || !can('operator') || pending} onClick={submit}>
+            <Button variant="filled" hint="button.github.connect" disabled={!picked || !ready || !can('operator') || pending} onClick={submit}>
               {mode === 'link' ? 'Link' : 'Connect'}
             </Button>
           </>
@@ -166,13 +171,13 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
           glyph="⎇"
           title="The GitHub App is not configured on this deployment"
           reason="An admin registers the app once (docs/GITHUB-APP.md: app id + private key in the environment), then an org admin installs it on the repositories it may see. Until then, connect by URL."
-          action={onUseUrl ? <Button onClick={onUseUrl}>Connect by URL</Button> : undefined}
+          action={onUseUrl ? <Button hint="button.github.use_url" onClick={onUseUrl}>Connect by URL</Button> : undefined}
         />
       )}
       {app.data?.configured && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-end gap-3">
-            <SelectField label="Installation (the organisation that installed the app)" value={installation} onChange={(e) => { setInstallation(Number(e.target.value)); setPage(1); setPicked(null) }} className="min-w-[24ch]">
+            <SelectField label="Installation (the organisation that installed the app)" hint="field.github.installation" value={installation} onChange={(e) => { setInstallation(Number(e.target.value)); setPage(1); setPicked(null) }} className="min-w-[24ch]">
               {installations.length === 0 && <option value={0}>— none on record —</option>}
               {installations.map((i) => (
                 <option key={i.id} value={i.id}>
@@ -182,14 +187,14 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
               ))}
             </SelectField>
             {can('operator') && (
-              <Button size="sm" disabled={sync.isPending} onClick={syncAndSelect}>
+              <Button size="sm" hint="button.github.sync" disabled={sync.isPending} onClick={syncAndSelect}>
                 Sync installations
               </Button>
             )}
             {app.data.install_url && (
-              <a className="text-sm" href={app.data.install_url} target="_blank" rel="noreferrer">
+              <Hint as="a" id="link.github.install" className="text-sm" href={app.data.install_url} target="_blank" rel="noreferrer">
                 Install the app on another organisation ↗
-              </a>
+              </Hint>
             )}
           </div>
           {sync.isError && <ErrorState compact error={sync.error} />}
@@ -217,7 +222,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
           )}
           {installation > 0 && (
             <>
-              <TextField label="Find a repository" placeholder="owner/name" value={q} onChange={(e) => { setQ(e.target.value); setPage(1) }} />
+              <TextField label="Find a repository" hint="field.github.search" placeholder="owner/name" value={q} onChange={(e) => { setQ(e.target.value); setPage(1) }} />
               {repos.isPending && <p className="text-sm text-on-surface-muted">Loading repositories…</p>}
               {repos.isError && <ErrorState compact error={repos.error} onRetry={() => void repos.refetch()} />}
               {repos.data && repos.data.items.length === 0 && (
@@ -241,11 +246,19 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
                           onClick={() => pick(r)}
                         >
                           <span className="font-mono text-xs">{r.full_name}</span>
-                          {r.private && <Pill tone="muted" size="xs">private</Pill>}
+                          {r.private && (
+                            <Pill tone="muted" size="xs" hint="pill.github.repo_flags">
+                              private
+                            </Pill>
+                          )}
                           {r.language && <span className="text-xs text-on-surface-muted">{r.language}</span>}
-                          {r.archived && <Pill tone="muted" size="xs">archived</Pill>}
+                          {r.archived && (
+                            <Pill tone="muted" size="xs" hint="pill.github.repo_flags">
+                              archived
+                            </Pill>
+                          )}
                           {r.connected_as && (
-                            <Pill tone="green" size="xs" glyph="✓">
+                            <Pill tone="green" size="xs" glyph="✓" hint="pill.github.repo_flags">
                               connected as {r.connected_as}
                             </Pill>
                           )}
@@ -257,10 +270,10 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
               )}
               {repos.data && (repos.data.has_more || page > 1) && (
                 <div className="flex gap-2 text-xs">
-                  <Button size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                  <Button size="sm" hint="button.github.page" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                     Previous
                   </Button>
-                  <Button size="sm" disabled={!repos.data.has_more} onClick={() => setPage((p) => p + 1)}>
+                  <Button size="sm" hint="button.github.page" disabled={!repos.data.has_more} onClick={() => setPage((p) => p + 1)}>
                     Next
                   </Button>
                 </div>
@@ -270,7 +283,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
           {picked && (
             <div role="radiogroup" aria-label="How to connect" className="grid gap-2 sm:grid-cols-2">
               {MODES.map((m) => (
-                <label key={m.id} className={`flex cursor-pointer items-start gap-2 rounded-[var(--radius-control)] border px-3 py-2 text-sm ${mode === m.id ? 'border-primary bg-primary-container' : 'border-border'}`}>
+                <Hint as="label" id="field.github.mode" key={m.id} className={`flex cursor-pointer items-start gap-2 rounded-[var(--radius-control)] border px-3 py-2 text-sm ${mode === m.id ? 'border-primary bg-primary-container' : 'border-border'}`}>
                   <input type="radio" name="github-connect-mode" value={m.id} checked={mode === m.id} onChange={() => {
                       setMode(m.id)
                       // a failed attempt's alert describes the other form: clear it
@@ -281,13 +294,13 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
                     <span className="block font-semibold">{m.title}</span>
                     <span className="block text-xs text-on-surface-muted">{m.note}</span>
                   </span>
-                </label>
+                </Hint>
               ))}
             </div>
           )}
           {picked && mode === 'link' && (
             <div className="space-y-2 rounded-[var(--radius-control)] border border-border p-3" data-testid="github-link-existing">
-              <SelectField label="Existing repository" value={existing} onChange={(e) => setExisting(e.target.value)} hint={allRepos.isPending ? 'Loading repositories…' : unlinked.length === 0 && allRepos.data ? 'Every repository already has a GitHub link.' : 'Only repositories with no GitHub link are listed.'}>
+              <SelectField label="Existing repository" hint="field.github.existing" value={existing} onChange={(e) => setExisting(e.target.value)} description={allRepos.isPending ? 'Loading repositories…' : unlinked.length === 0 && allRepos.data ? 'Every repository already has a GitHub link.' : 'Only repositories with no GitHub link are listed.'}>
                 <option value="">— choose —</option>
                 {unlinked.map((r) => (
                   <option key={r.name} value={r.name}>
@@ -303,8 +316,8 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
           )}
           {picked && mode === 'new' && (
             <div className="grid gap-3 rounded-[var(--radius-control)] border border-border p-3 sm:grid-cols-3" data-testid="github-connect-confirm">
-              <TextField label="Name in crb" value={name} onChange={(e) => setName(e.target.value)} hint="lowercase; the ledger key" />
-              <SelectField label="Language" value={language} onChange={(e) => setLanguage(e.target.value as Language | '')} error={language ? undefined : 'GitHub reports no language — choose one'}>
+              <TextField label="Name in crb" hint="field.github.name" value={name} onChange={(e) => setName(e.target.value)} description="lowercase; the ledger key" />
+              <SelectField label="Language" hint="field.github.language" value={language} onChange={(e) => setLanguage(e.target.value as Language | '')} error={language ? undefined : 'GitHub reports no language — choose one'}>
                 <option value="">— choose —</option>
                 {LANGUAGES.map((l) => (
                   <option key={l} value={l}>
@@ -312,7 +325,7 @@ export function GitHubConnectDialog({ open, onClose, onConnected, initialInstall
                   </option>
                 ))}
               </SelectField>
-              <SelectField label="Test runner" value={runner} onChange={(e) => setRunner(e.target.value as Runner | '')} hint="the probe verifies it">
+              <SelectField label="Test runner" hint="field.github.runner" value={runner} onChange={(e) => setRunner(e.target.value as Runner | '')} description="the probe verifies it">
                 <option value="">— default —</option>
                 {RUNNERS.map((r) => (
                   <option key={r} value={r}>

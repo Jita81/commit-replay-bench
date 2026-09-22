@@ -5,7 +5,8 @@
  * Navigation
  * ----------
  * What it is:   `mockApi` (a `fetch` double that dispatches on `${METHOD} ${path}`), `json` /
- *               `envelope` response builders, `PRINCIPAL` (an approver) and `renderApp`.
+ *               `envelope` response builders, `PRINCIPAL` (an approver), `renderApp` and
+ *               `expectHintOpens` (hover a trigger, the bubble opens with the registry text).
  * What it does: Lets a screen test answer the API contract exactly — a body per route, or a
  *               handler that inspects the request — and records every call so a test can
  *               assert on the body a mutation sent. An unmatched call answers a 404
@@ -18,19 +19,22 @@
  * ADRs:         none
  * Works with:   ui/src/api/client.ts (the fetch calls this intercepts), ui/src/lib/auth.tsx
  *               (`AuthProvider` — `/auth/me` is usually mocked with `PRINCIPAL`),
- *               ui/src/main.tsx (the provider stack this mirrors),
- *               ui/src/screens/Capability/CapabilityPage.test.tsx
- *               (a typical consumer)
+ *               ui/src/main.tsx (the provider stack this mirrors), ui/src/help/hints.ts
+ *               (`hintText` — what `expectHintOpens` asserts), ui/src/components/Hint.tsx
+ *               (the bubble it finds through `aria-describedby`),
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx (a typical consumer)
  * Tested by:    every `*.test.tsx` under ui/src/screens (they all render through this)
  * Touch when:   the API prefix or the provider stack changes; never for a new repository.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, type RenderOptions } from '@testing-library/react'
+import { render, waitFor, type RenderOptions } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { ReactElement, ReactNode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { vi } from 'vitest'
-import { AuthProvider } from '../lib/auth'
+import { expect, vi } from 'vitest'
 import type { Principal } from '../api/types'
+import { hintText, type HintId } from '../help/hints'
+import { AuthProvider } from '../lib/auth'
 
 /** A default signed-in approver; override `role` per test to exercise RBAC. */
 export const PRINCIPAL: Principal = { id: 'u1', display_name: 'Ada', email: 'ada@example.org', role: 'approver', issuer: 'local' }
@@ -78,6 +82,21 @@ interface Opts extends Omit<RenderOptions, 'wrapper'> {
 }
 
 /** Render inside QueryClient + MemoryRouter + AuthProvider; `/auth/me` is mocked unless `me` is null. */
+/**
+ * Hover `trigger` (an element carrying `data-hint`) and assert its bubble — found through
+ * `aria-describedby`, so a caller's own description is skipped — opens with the registry
+ * sentence for `id`. The one hover-opens assertion every on-ramp screen test shares.
+ */
+export async function expectHintOpens(trigger: Element, id: HintId): Promise<HTMLElement> {
+  await userEvent.hover(trigger)
+  const ids = (trigger.getAttribute('aria-describedby') ?? '').split(' ')
+  const tip = ids.map((i) => document.getElementById(i)).find((el) => el?.getAttribute('role') === 'tooltip')
+  if (!tip) throw new Error(`no role=tooltip referenced from aria-describedby on the ${id} trigger`)
+  await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
+  expect(tip).toHaveTextContent(hintText(id))
+  return tip
+}
+
 export function renderApp(ui: ReactElement, opts: Opts = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } })
   const route = opts.route ?? '/'

@@ -12,15 +12,16 @@
  *               reader knows the figure blends instruments — the UI shows the fact, it does
  *               not hide it by averaging.
  * How:          Normalise the inputs to lists → pick tone / glyph (imported muted, mixed amber,
- *               measured primary) → a `Pill` with a full sentence plus the versions in mono.
+ *               measured primary) → a `Pill` with a full sentence plus the versions in mono,
+ *               and the hint `provenance.<measured|imported|mixed>` derived from the same state.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
- * Works with:   ui/src/api/types.ts (`ApparatusStamp`, `GradeRow.provenance`,
+ * Works with:   ui/src/help/hints.ts (`provenance.*`), ui/src/api/types.ts (`ApparatusStamp`, `GradeRow.provenance`,
  *               `CapabilityCell.apparatus_versions`), ui/src/screens/Runs/EvidenceDrawer.tsx
  *               (a pack's stamp), ui/src/screens/Capability/CapabilityPage.tsx and
  *               ui/src/screens/Signoff/SignoffPage.tsx (a cell's versions),
  *               ui/src/screens/Ledger/LedgerPage.tsx (per row)
- * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx and
+ * Tested by:    ui/src/help/hints-ratchet.test.tsx (the hint contract), ui/src/screens/Capability/CapabilityPage.test.tsx and
  *               ui/src/screens/Runs/RunDetailPage.test.tsx (`data-testid="provenance"` as
  *               rendered), ui/e2e/walkthrough/05-replay-fake.spec.ts
  * Touch when:   `APPARATUS_VERSION` is bumped (src/crb/core/version.py) — nothing changes here,
@@ -66,6 +67,7 @@ export function Provenance({ apparatus, beltSet, provenance, policy, className =
         tone={imported ? 'muted' : mixed ? 'amber' : 'primary'}
         glyph={imported ? '⇣' : mixed ? '⚠' : '✦'}
         size="xs"
+        hint={imported ? 'provenance.imported' : mixed ? 'provenance.mixed' : 'provenance.measured'}
         label={`Provenance: ${provenance ?? 'measured'}; apparatus ${apps.join(', ') || 'unknown'}${belts.length ? `; belt set ${belts.join(', ')}` : ''}${mixed ? '; mixed apparatus' : ''}`}
       >
         {imported ? provenance : mixed ? 'mixed' : 'measured'}

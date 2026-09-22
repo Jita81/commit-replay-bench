@@ -86,7 +86,8 @@ describe('TaskDetailPage', () => {
     renderApp(<TaskDetailPage />, { route: `/tasks/alpha/${TASK_ID}`, path: '/tasks/:repo/:taskId' })
     expect(await screen.findByText('Add a divide helper')).toBeInTheDocument()
     expect(screen.getByText('Commit')).toBeInTheDocument()
-    expect(screen.queryByText(/factory item/i)).toBeNull()
+    // the hint bubbles are always in the DOM (hidden): only the page's own copy is asserted
+    expect(screen.queryByText(/factory item/i, { ignore: '[role="tooltip"]' })).toBeNull()
     expect(screen.getByText(/^One replayable commit: its spec/)).toBeInTheDocument()
   })
 })

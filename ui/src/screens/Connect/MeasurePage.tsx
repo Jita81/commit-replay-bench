@@ -21,7 +21,12 @@
  *               the posture is the real sandbox mode, and nothing is queued until the red
  *               button. A reader without the operator role is told so under the title and
  *               sees the choices as read-only lists — nothing a role cannot act on is shown
- *               as a control.
+ *               as a control. Every element a reader meets — the back link, the kicker, the
+ *               in-flight banner's lead line, each radio and checkbox (or its read-only row),
+ *               the gold-clean cap note, every "Before you start" row, the "Every knob" link
+ *               and the red button — is a hint trigger (`link.measure.*`, `nav.measure.kicker`,
+ *               `banner.measure.inflight`, `field.measure.*`, `stat.measure.*`,
+ *               `summary.measure.*`, `button.measure.start`).
  * How:          `useRepo` (+ `last_run` → `useRun`, polled, for the in-flight banner),
  *               `useCapabilityMap` (cost_usd_mean over measured cells), `useHealth` (sandbox
  *               posture and the builder), `builderChoice` (ui/src/lib/builder.ts) for the
@@ -31,11 +36,14 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
  * Works with:   ui/src/lib/builder.ts (`builderChoice`, shared with the Factory),
- *               ui/src/components/govuk.tsx, ui/src/components/Layout.tsx (`journeyEyebrow`),
- *               ui/src/components/Help.tsx (`DocLink`), ui/src/screens/Connect/ConnectPage.tsx
- *               (the walk that lands here), ui/src/screens/Runs/RunNewDialog.tsx (the full
- *               form for an operator who wants every knob), src/crb/server/routes/runs.py
- * Tested by:    ui/src/screens/Connect/MeasurePage.test.tsx
+ *               ui/src/components/govuk.tsx (SummaryList, WarningButton, BackLink),
+ *               ui/src/components/Layout.tsx (`journeyEyebrow`), ui/src/help/hints.ts (the
+ *               `*.measure.*` copy; the trigger is `Hint`), ui/src/components/Help.tsx
+ *               (`DocLink`), ui/src/screens/Connect/ConnectPage.tsx (the walk that lands here),
+ *               ui/src/screens/Runs/RunNewDialog.tsx (the full form for an operator who wants
+ *               every knob), src/crb/server/routes/runs.py (the request it submits)
+ * Tested by:    ui/src/screens/Connect/MeasurePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
+ *               (every element resolves to a registry id)
  * Touch when:   the run request grows a field the walk should expose.
  */
 
@@ -45,6 +53,7 @@ import { useCapabilityMap, useCreateRun, useHealth, useRepo, useRun } from '../.
 import { NOT_YET_MEASURED } from '../../api/types'
 import { ErrorState } from '../../components/ErrorState'
 import { DocLink } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { journeyEyebrow } from '../../components/Layout'
 import { BackLink, Kicker, Lede, NotificationBanner, PageTitle, SummaryList, WarningButton, type SummaryRow } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
@@ -128,6 +137,7 @@ export function MeasurePage() {
   const retention = !worktrees && !transcripts ? 'Nothing retained — grades and hashes only' : `${[worktrees && 'worktrees', transcripts && 'transcripts'].filter(Boolean).join(' and ')} kept until deleted`
   const estimate: SummaryRow = {
     key: 'Estimated cost',
+    hint: 'stat.measure.estimate',
     value: (
       <>
         {usd(lo)} to {usd(hi)} for {runLimit} attempts
@@ -158,9 +168,13 @@ export function MeasurePage() {
 
   return (
     <>
-      <BackLink to={`/connect/${encodeURIComponent(name)}`}>Back to the walk for {name}</BackLink>
+      <Hint id="link.measure.back">
+        <BackLink to={`/connect/${encodeURIComponent(name)}`}>Back to the walk for {name}</BackLink>
+      </Hint>
       <div>
-        <Kicker>{journeyEyebrow(pathname, 'task 5 of 8 · this step spends money')}</Kicker>
+        <Hint id="nav.measure.kicker">
+          <Kicker>{journeyEyebrow(pathname, 'task 5 of 8 · this step spends money')}</Kicker>
+        </Hint>
       </div>
       <PageTitle>Measure {name}</PageTitle>
       {!operator && (
@@ -171,7 +185,7 @@ export function MeasurePage() {
       {repo.isError && <ErrorState error={repo.error} onRetry={() => void repo.refetch()} />}
       {inFlight && (
         <NotificationBanner title="Important">
-          <p className="m-0 mb-2 font-bold">
+          <Hint as="p" id="banner.measure.inflight" className="m-0 mb-2 font-bold">
             A measurement is already {active.data?.status === 'queued' ? 'queued' : 'running'} for {name}.
             {active.data && (
               <>
@@ -180,7 +194,7 @@ export function MeasurePage() {
                 {active.data.progress.total > 0 ? `${active.data.progress.done} of ${active.data.progress.total} attempts made` : 'no attempt made yet'}; {usd(active.data.cost_usd)} spent so far.
               </>
             )}
-          </p>
+          </Hint>
           <p className="m-0 mb-2">
             <Link to={`/runs/${encodeURIComponent(activeId)}`}>Open the run</Link> · <Link to={`/connect/${encodeURIComponent(name)}`}>Back to the walk</Link>
           </p>
@@ -191,20 +205,20 @@ export function MeasurePage() {
       <div className="mb-8 max-w-[44em]">
         {operator ? (
           LIMITS.map((l) => (
-            <label key={l.n} className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
+            <Hint as="label" id="field.measure.attempts" key={l.n} className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
               <input type="radio" name="limit" className="h-6 w-6 accent-[var(--trust)]" checked={limit === l.n} onChange={() => setLimit(l.n)} />
               <span>{l.n} attempts</span>
               <span className="text-on-surface-muted">{l.note}</span>
-            </label>
+            </Hint>
           ))
         ) : (
           // nothing a role cannot act on is shown as a control: the choices as a read-only list
-          <SummaryList label="How many attempts" rows={LIMITS.map((l) => ({ key: `${l.n} attempts`, value: `${l.note}${l.n === limit ? ' (the default)' : ''}` }))} />
+          <SummaryList label="How many attempts" rows={LIMITS.map((l) => ({ key: `${l.n} attempts`, value: `${l.note}${l.n === limit ? ' (the default)' : ''}`, hint: 'field.measure.attempts' }))} />
         )}
         {gold > 0 && gold < limit && (
-          <p className="m-0 mt-2 text-[16px] text-on-surface-muted">
+          <Hint as="p" id="stat.measure.gold_cap" className="m-0 mt-2 text-[16px] text-on-surface-muted">
             {name} has {gold} gold-clean tasks, so this run makes {gold} attempts (one per task).
-          </p>
+          </Hint>
         )}
         {repo.data && gold === 0 && (
           <p className="m-0 mt-2 text-[16px] font-bold text-status-red" data-testid="no-gold">
@@ -217,21 +231,21 @@ export function MeasurePage() {
       <div className="mb-8 max-w-[44em]">
         {operator ? (
           <>
-            <label className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
+            <Hint as="label" id="field.measure.retain_worktrees" className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
               <input type="checkbox" className="h-6 w-6 accent-[var(--trust)]" checked={worktrees} onChange={(e) => setWorktrees(e.target.checked)} />
               <span>Keep worktrees for failed attempts</span>
-            </label>
-            <label className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
+            </Hint>
+            <Hint as="label" id="field.measure.retain_transcripts" className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
               <input type="checkbox" className="h-6 w-6 accent-[var(--trust)]" checked={transcripts} onChange={(e) => setTranscripts(e.target.checked)} />
               <span>Keep builder transcripts</span>
-            </label>
+            </Hint>
           </>
         ) : (
           <SummaryList
             label="Retention"
             rows={[
-              { key: 'Worktrees for failed attempts', value: 'not kept unless the operator chooses to' },
-              { key: 'Builder transcripts', value: 'not kept unless the operator chooses to' },
+              { key: 'Worktrees for failed attempts', value: 'not kept unless the operator chooses to', hint: 'field.measure.retain_worktrees' },
+              { key: 'Builder transcripts', value: 'not kept unless the operator chooses to', hint: 'field.measure.retain_transcripts' },
             ]}
           />
         )}
@@ -242,11 +256,21 @@ export function MeasurePage() {
           rows={[
             // the estimate gives way to the banner while a run is in flight: no second spend is priced
             ...(inFlight ? [] : [estimate]),
-            { key: 'Builder', value: choice ? choice.label : 'No builder is configured on this deployment — an admin adds a provider key (Settings), or use the full run form', changeTo: '/runs', changeLabel: 'Every knob' },
+            {
+              key: 'Builder',
+              hint: 'summary.measure.builder',
+              value: choice ? choice.label : 'No builder is configured on this deployment — an admin adds a provider key (Settings), or use the full run form',
+              // the door to the full run form, with its own hint (a summary row's Change slot cannot carry one)
+              note: (
+                <Hint as={Link} id="link.measure.every_knob" to="/runs" className="underline">
+                  Every knob<span className="sr-only"> — the full run form</span>
+                </Hint>
+              ),
+            },
             // honest until F5b (a per-run cap summed over attempts) lands: the request carries no cap
-            { key: 'Budget cap', value: 'No spend cap on this run yet. Each attempt is capped on turns, tool calls and wall clock; you can cancel at any point and attempts already made are still charged.' },
-            { key: 'Retention', value: retention },
-            { key: 'Posture', value: posture },
+            { key: 'Budget cap', hint: 'summary.measure.budget_cap', value: 'No spend cap on this run yet. Each attempt is capped on turns, tool calls and wall clock; you can cancel at any point and attempts already made are still charged.' },
+            { key: 'Retention', hint: 'summary.measure.retention', value: retention },
+            { key: 'Posture', hint: 'summary.measure.posture', value: posture },
           ]}
         />
         {inFlight ? (
@@ -255,7 +279,7 @@ export function MeasurePage() {
           <>
             <p className="mb-4 mt-6 text-[19px] leading-[1.47]">You can cancel the run at any point. Attempts already made are still charged.</p>
             {operator && (
-              <WarningButton onClick={start} disabled={create.isPending || !repo.data || !choice || gold === 0}>
+              <WarningButton hint="button.measure.start" onClick={start} disabled={create.isPending || !repo.data || !choice || gold === 0}>
                 Start the run — estimated {usd(lo)} to {usd(hi)}
               </WarningButton>
             )}

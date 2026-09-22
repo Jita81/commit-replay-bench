@@ -146,7 +146,7 @@ Works with:   src/crb/core/capability.py (the cell and the tiers it may reach),
               (notes and statements are redacted at write)
 Tested by:    tests/test_signoff.py, tests/test_server_routes_signoffs.py, tests/test_capability.py
 Touch when:   never for a new repository (run ``controls`` and ``oracle`` runs so its cells
-              become signable — docs/OPERATOR.md#5-sign-off-p4); relaxing a threshold is a
+              become signable — docs/OPERATOR.md#5-sign-off); relaxing a threshold is a
               deployment setting (``CRB_SIGNOFF__*`` within ``POLICY_BOUNDS``), never an
               edit here; adding a clause or a snapshot field bumps ``SIGNOFF_POLICY_VERSION``
               / ``SIGNOFF_SCHEMA``, freezes the previous body's field tuple so the old body

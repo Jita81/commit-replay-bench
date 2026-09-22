@@ -169,7 +169,7 @@ describe('stepsFor — an item the factory has not touched', () => {
     expect(servedSteps.map((x) => [x.id, x.status])).toEqual(steps.map((x) => [x.id, x.status]))
     expect(servedSteps[0]!.detail).toContain('after the review')
     expect(servedSteps[4]!.detail).toBe('accept with edit — the reviewer asked for a stronger test')
-    expect(refusalSentence(served)).toBe('The review found the test too weak to rebuild against: the reviewer found the oracle weak (statement deleted) and this deployment has no test author. Strengthen the test and freeze a revised backlog with a superseding item (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.')
+    expect(refusalSentence(served)).toBe('The review found the test too weak to rebuild against: the reviewer found the oracle weak (statement deleted) and this deployment has no test author. To bring it back into the factory, strengthen the test and register an evolution that supersedes this item (the frozen hash stays; the old chain is kept); or open the change by hand and mark the item done in the next backlog.')
   })
 
   it('a build that ran and was not clean is the failure, spelled out', () => {
@@ -201,7 +201,7 @@ describe('stepsFor — every refusal carries its reason (J-FAC-4)', () => {
     expect(stepsFor(red)[1]).toMatchObject({ status: 'failed', detail: 'RED proof refused — the authored test passed at the parent, so it proves nothing: the authored test passed at the parent.' })
     const human = task({ status: 'routed_human', route_hint: 'human', refusal: { step: 'readiness', reason: 'a value gap (expected response shape) is not signed and routes test-first', reason_code: '', measured_route: '' } })
     expect(stepsFor(human)[0]).toMatchObject({ status: 'failed', detail: 'Routed to a person — a value gap (expected response shape) is not signed and routes test-first.' })
-    expect(refusalSentence(human)).toBe('This item goes to a person: a value gap (expected response shape) is not signed and routes test-first. To bring it back into the factory, add the fact and freeze a revised backlog (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.')
+    expect(refusalSentence(human)).toBe('This item goes to a person: a value gap (expected response shape) is not signed and routes test-first. To bring it back into the factory, add the fact and register an evolution that supersedes this item (the frozen hash stays; the old chain is kept); or open the change by hand and mark the item done in the next backlog.')
     const blocked = task({ status: 'blocked_on_dependency', refusal: { step: 'dependency', reason: 'waiting on I-1', reason_code: '', measured_route: '' } })
     expect(refusalSentence(blocked)).toBe('Waiting on I-1, which has not been accepted yet.')
     expect(refusalSentence(task({}))).toBe('')
@@ -301,7 +301,7 @@ describe('FactoryPage — the shipped contract', () => {
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
     await screen.findByTestId('before-you-start')
     const { default: userEvent } = await import('@testing-library/user-event')
-    await userEvent.click(screen.getByText(/Use a different builder/))
+    await userEvent.click(screen.getByText(/Use a different builder/, { selector: 'summary' }))
     await userEvent.type(screen.getByLabelText('Builder'), 'fixture_gold')
     await userEvent.type(screen.getByLabelText('Model'), 'gold')
     await userEvent.click(screen.getByRole('button', { name: /^Run the factory/ }))
@@ -370,7 +370,7 @@ describe('FactoryPage — the shipped contract', () => {
     const row2 = screen.getByTestId('factory-item-I-2')
     expect(within(row2).queryByRole('button', { name: 'Evidence' })).not.toBeInTheDocument()
     expect(row2).toHaveTextContent('Goes to a person')
-    expect(row2).toHaveTextContent('This item goes to a person: a value gap (expected response shape) is not signed and routes test-first. To bring it back into the factory, add the fact and freeze a revised backlog')
+    expect(row2).toHaveTextContent('This item goes to a person: a value gap (expected response shape) is not signed and routes test-first. To bring it back into the factory, add the fact and register an evolution that supersedes this item (the frozen hash stays; the old chain is kept)')
     // the way forward opens the freeze dialog prefilled from the active backlog
     await userEvent.click(within(row2).getByRole('button', { name: 'Freeze a revised backlog…' }))
     const form = await screen.findByTestId('backlog-form')

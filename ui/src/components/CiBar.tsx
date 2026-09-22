@@ -10,14 +10,17 @@
  *               and carries them in its `aria-label` — the bar is never the only carrier of
  *               the value; non-finite inputs are clamped to 0 rather than drawn as `NaN`.
  * How:          Clamp to [0, 1] → rects positioned as fractions of `width` → `<title>` and
- *               `aria-label` from `fmtPct`.
+ *               `aria-label` from `fmtPct`; the `<svg>` is a `<Hint id="chart.ci_bar">` so
+ *               hover / focus / tap explain the band, the mark and the ticks (the `<title>`
+ *               stays: it is the accessible name).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/src/lib/format.ts (`fmtPct`), ui/src/screens/Capability/CapabilityPage.tsx
+ * Works with:   ui/src/lib/format.ts (`fmtPct`), ui/src/components/Hint.tsx (the trigger),
+ *               ui/src/help/hints.ts (`chart.ci_bar`), ui/src/screens/Capability/CapabilityPage.tsx
  *               and ui/src/screens/Routing/RoutingPage.tsx (a bar per cell next to the interval
  *               text), ui/src/screens/Signoff/SignoffPage.tsx (the evidence tiles),
  *               ui/src/api/types.ts (`RoutingPolicy` — where the tick values come from)
- * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx and
+ * Tested by:    ui/src/help/hints-ratchet.test.tsx (the hint contract), ui/src/screens/Capability/CapabilityPage.test.tsx and
  *               ui/src/screens/Routing/RoutingPage.test.tsx (rendered per cell,
  *               `data-testid="ci-bar"`)
  * Touch when:   the routing policy gains a threshold worth a tick
@@ -27,6 +30,7 @@
  *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
  */
 import { fmtPct } from '../lib/format'
+import { Hint } from './Hint'
 
 interface CiBarProps {
   point: number
@@ -54,7 +58,9 @@ export function CiBar({ point, low, high, n, minPoint, minCiLow, width = 96, pro
   const label = `point ${fmtPct(p)}, 95% CI ${fmtPct(l)} to ${fmtPct(h)}, n = ${n}${provenance ? `, ${provenance}` : ''}`
   const hgt = 10
   return (
-    <svg
+    <Hint
+      as="svg"
+      id="chart.ci_bar"
       role="img"
       aria-label={label}
       width={width}
@@ -73,6 +79,6 @@ export function CiBar({ point, low, high, n, minPoint, minCiLow, width = 96, pro
       {typeof minCiLow === 'number' && (
         <line x1={minCiLow * width} x2={minCiLow * width} y1={0} y2={hgt} stroke="var(--muted)" strokeDasharray="2 1" />
       )}
-    </svg>
+    </Hint>
   )
 }

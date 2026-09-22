@@ -42,6 +42,7 @@ import { Card } from '../../components/Card'
 import { CiBar } from '../../components/CiBar'
 import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
@@ -64,42 +65,56 @@ function PolicyCard({ policy, controls }: { policy: RoutingPolicyWithControls; c
     <Card title="Policy in force" eyebrow={`${policy.version}${policy.controls_version ? ` + ${policy.controls_version}` : ''}`} actions={<ControlsPill verdict={controls} />}>
       <dl className="num grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-5">
         <div>
-          <dt className="label">min n</dt>
+          <Hint as="dt" id="policy.routing.min_n" className="label">
+            min n
+          </Hint>
           <dd>{fmtInt(policy.min_n)}</dd>
         </div>
         <div>
-          <dt className="label">min point</dt>
+          <Hint as="dt" id="policy.routing.min_point" className="label">
+            min point
+          </Hint>
           <dd>{fmtPct(policy.min_point, 0)}</dd>
         </div>
         <div>
-          <dt className="label">min Wilson lower</dt>
+          <Hint as="dt" id="policy.routing.min_ci_low" className="label">
+            min Wilson lower
+          </Hint>
           <dd>{fmtPct(policy.min_ci_low, 0)}</dd>
         </div>
         <div>
-          <dt className="label">min oracle strength</dt>
+          <Hint as="dt" id="policy.routing.min_oracle" className="label">
+            min oracle strength
+          </Hint>
           <dd>{fmtRatio(policy.min_oracle_strength)}</dd>
         </div>
         <div>
-          <dt className="label">granularize sizes</dt>
+          <Hint as="dt" id="policy.routing.granularize" className="label">
+            granularize sizes
+          </Hint>
           <dd className="font-mono text-xs">{policy.granularize_sizes.join(', ') || '—'}</dd>
         </div>
         {policy.controls_version && (
           <>
             <div>
-              <dt className="label">min controls constructible</dt>
+              <Hint as="dt" id="policy.routing.min_controls_share" className="label">
+                min controls constructible
+              </Hint>
               <dd>{fmtPct(policy.min_controls_share, 0)}</dd>
             </div>
             <div>
-              <dt className="label">max controls escapes</dt>
+              <Hint as="dt" id="policy.routing.max_escapes" className="label">
+                max controls escapes
+              </Hint>
               <dd>{fmtInt(policy.max_controls_escapes)}</dd>
             </div>
           </>
         )}
       </dl>
-      <p className="mt-3 text-xs text-on-surface-muted" data-testid="policy-rule">
+      <Hint as="p" id="tile.routing.rule" className="mt-3 text-xs text-on-surface-muted" data-testid="policy-rule">
         The one rule: <em>deliver</em> iff n ≥ {policy.min_n} ∧ point ≥ {fmtPct(policy.min_point, 0)} ∧ Wilson-lower ≥ {fmtPct(policy.min_ci_low, 0)} ∧ false-Q1 = 0 ∧ (oracle strength ≥ {fmtRatio(policy.min_oracle_strength)} when measured)
         {policy.controls_version ? <> ∧ negative controls passed ∧ ≥ {fmtPct(policy.min_controls_share, 0)} of control rows constructible ∧ escapes ≤ {fmtInt(policy.max_controls_escapes)}</> : null}. Any false-Q1 ⇒ <em>do not ship</em>; XL ⇒ <em>granularize</em>; a FAILED controls gate, a weak oracle or an escaped control ⇒ <em>human</em>; controls unmeasured or thin ⇒ <em>calibrate</em>; otherwise <em>calibrate</em>. The all-rows point routes; the model rate on fair attempts is shown beside it, never instead of it.
-      </p>
+      </Hint>
     </Card>
   )
 }
@@ -116,20 +131,22 @@ export function RoutingPage() {
 
   const columns = useMemo<Column<Decision>[]>(
     () => [
-      { key: 'cell', header: 'Cell', mono: true, sortValue: (d) => cellLabel(d.cell), cell: (d) => cellLabel(d.cell) },
-      { key: 'route', header: 'Route', sortValue: (d) => ROUTES.indexOf(d.route), cell: (d) => <VerdictPill route={d.route} reason={d.reason} size="xs" /> },
+      { key: 'cell', header: 'Cell', hint: 'col.routing.cell', mono: true, sortValue: (d) => cellLabel(d.cell), cell: (d) => cellLabel(d.cell) },
+      { key: 'route', header: 'Route', hint: 'col.routing.route', sortValue: (d) => ROUTES.indexOf(d.route), cell: (d) => <VerdictPill route={d.route} reason={d.reason} size="xs" /> },
       {
         key: 'code',
         header: 'Why',
+        hint: 'col.routing.code',
         mono: true,
         sortValue: (d) => d.reason_code ?? '',
         cell: (d) => (d.reason_code ? <ReasonCode code={d.reason_code} /> : <span className="text-xs text-on-surface-muted">—</span>),
       },
-      { key: 'n', header: 'n', numeric: true, sortValue: (d) => d.n, cell: (d) => fmtInt(d.n) },
-      { key: 'point', header: 'Point', numeric: true, sortValue: (d) => d.point, cell: (d) => fmtPct(d.point) },
+      { key: 'n', header: 'n', hint: 'col.routing.n', numeric: true, sortValue: (d) => d.n, cell: (d) => fmtInt(d.n) },
+      { key: 'point', header: 'Point', hint: 'col.routing.point', numeric: true, sortValue: (d) => d.point, cell: (d) => fmtPct(d.point) },
       {
         key: 'model',
         header: 'Model rate · split',
+        hint: 'col.routing.model_split',
         sortValue: (d) => d.model_point ?? -1,
         cell: (d) =>
           d.failure_split ? (
@@ -142,15 +159,15 @@ export function RoutingPage() {
           ),
         hideBelowMd: true,
       },
-      { key: 'ci_low', header: 'Wilson lower', numeric: true, sortValue: (d) => d.ci_low, cell: (d) => fmtPct(d.ci_low) },
+      { key: 'ci_low', header: 'Wilson lower', hint: 'col.routing.ci_low', numeric: true, sortValue: (d) => d.ci_low, cell: (d) => fmtPct(d.ci_low) },
       // The server's own asymmetric Wilson interval (`ci_high` is served beside the
       // `ci_low` that routes) with the apparatus + belt-set provenance in the label — never
       // an upper bound mirrored from the lower one (CodeRabbit on PR #6).
-      { key: 'bar', header: 'Interval', cell: (d) => <CiBar point={d.point} low={d.ci_low} high={d.ci_high} n={d.n} width={80} provenance={`apparatus ${d.apparatus_versions?.join('/') || '—'} · belts ${d.belt_sets?.join('/') || '—'}`} />, hideBelowMd: true },
-      { key: 'fq1', header: 'false-Q1', numeric: true, sortValue: (d) => d.false_q1, cell: (d) => <span className={d.false_q1 > 0 ? 'font-semibold text-status-red' : ''}>{d.false_q1}{d.false_q1 > 0 ? ' ✗' : ''}</span> },
-      { key: 'oracle', header: 'Oracle', numeric: true, sortValue: (d) => d.oracle_strength ?? -1, cell: (d) => fmtRatio(d.oracle_strength), hideBelowMd: true },
-      { key: 'reason', header: 'Reason', sortValue: (d) => d.reason, cell: (d) => <span className="text-xs text-on-surface-muted">{d.reason}</span> },
-      { key: 'policy', header: 'Policy', mono: true, cell: (d) => d.policy_version, hideBelowMd: true },
+      { key: 'bar', header: 'Interval', hint: 'col.routing.interval', cell: (d) => <CiBar point={d.point} low={d.ci_low} high={d.ci_high} n={d.n} width={80} provenance={`apparatus ${d.apparatus_versions?.join('/') || '—'} · belts ${d.belt_sets?.join('/') || '—'}`} />, hideBelowMd: true },
+      { key: 'fq1', header: 'false-Q1', hint: 'col.routing.false_q1', numeric: true, sortValue: (d) => d.false_q1, cell: (d) => <span className={d.false_q1 > 0 ? 'font-semibold text-status-red' : ''}>{d.false_q1}{d.false_q1 > 0 ? ' ✗' : ''}</span> },
+      { key: 'oracle', header: 'Oracle', hint: 'col.routing.oracle', numeric: true, sortValue: (d) => d.oracle_strength ?? -1, cell: (d) => fmtRatio(d.oracle_strength), hideBelowMd: true },
+      { key: 'reason', header: 'Reason', hint: 'col.routing.reason', sortValue: (d) => d.reason, cell: (d) => <span className="text-xs text-on-surface-muted">{d.reason}</span> },
+      { key: 'policy', header: 'Policy', hint: 'col.routing.policy', mono: true, cell: (d) => d.policy_version, hideBelowMd: true },
     ],
     [],
   )
@@ -175,7 +192,7 @@ export function RoutingPage() {
                 {ROUTES.map((route) => {
                   const d = routeDisplay(route)
                   const n = counts.get(route) ?? 0
-                  return <StatTile key={route} label={d.label} value={fmtInt(n)} n={total} apparatus={`cells routed ${route} · ${r.policy.version}`} tone={n ? d.tone : undefined} />
+                  return <StatTile key={route} label={d.label} hint="stat.routing.route_count" value={fmtInt(n)} n={total} apparatus={`cells routed ${route} · ${r.policy.version}`} tone={n ? d.tone : undefined} />
                 })}
               </div>
               <Card padded={false} title="Decisions">
@@ -187,7 +204,7 @@ export function RoutingPage() {
                   initialSort={{ key: 'route', dir: 'asc' }}
                   empty={
                     can('operator') ? (
-                      <EmptyState title="No decisions yet" reason="A decision exists per measured cell. Run a replay to populate the ledger." action={<LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=replay`}>Start a replay run</LinkButton>} />
+                      <EmptyState title="No decisions yet" reason="A decision exists per measured cell. Run a replay to populate the ledger." action={<LinkButton to={`/runs?repo=${encodeURIComponent(repo)}&new=replay`} hint="button.capability.start_replay">Start a replay run</LinkButton>} />
                     ) : (
                       <EmptyState title="No decisions yet" reason="A decision exists per measured cell; an operator starts a replay run to populate the ledger." />
                     )

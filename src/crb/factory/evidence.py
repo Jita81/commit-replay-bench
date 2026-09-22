@@ -17,6 +17,14 @@ Two invariants live here rather than in the loop, so no caller can skip them:
   build already exists.
 * **Nothing secret.** Every string in a payload passes through
   :mod:`crb.core.redact` at construction.
+* **At most closed, then merged, per pull request.**
+  :meth:`FactoryEvidence.record_delivery_outcome` appends ``delivery.merged`` /
+  ``delivery.closed`` for a pull request at most once per STATE, and only in the order
+  GitHub allows: a ``closed`` PR can be reopened and merged by a person, so ``merged``
+  after ``closed`` is a real transition and is recorded (newest wins in every fold);
+  ``merged`` is terminal, so nothing follows it; the same state twice returns the event
+  already there and appends nothing (B-9 / F30 — an outcome sync may run on every factory
+  run and by hand, and the record must not grow with the number of syncs).
 
 Persistence is behind the :class:`FactoryStore` protocol; :class:`JsonlFactoryStore`
 is the stdlib reference. The database store is a later workstream.
@@ -25,12 +33,13 @@ Navigation
 ----------
 What it is:   The factory evidence ledger — one hash-chained event per governed step, and
               the home of the verdict-before-edit invariant.
-What it does: Appends ``FactoryEvent`` rows (freeze, sign-off, readiness, route, RED proof,
-              build, delivery opened / updated / refused, verdict, edit, checkpoint,
-              outcome) through a typed front
+What it does: Appends ``FactoryEvent`` rows (freeze, evolution, sign-off, readiness, route,
+              RED proof, build, delivery opened / updated / refused / merged / closed,
+              verdict, edit, checkpoint, outcome) through a typed front
               door; redacts every payload string at construction; refuses to record an edit
-              for a build with no verdict, and refuses a verdict that claims to precede an
-              edit already on the record; ``verify`` proves the chain.
+              for a build with no verdict, refuses a verdict that claims to precede an
+              edit already on the record, and records a pull request's outcome at most
+              once; ``verify`` proves the chain.
 How:          ``FactoryEvidence.record_*`` → ``FactoryStore.append`` (``JsonlFactoryStore``
               fsyncs a line per event; ``MemoryFactoryStore`` for tests) → ``chained`` with
               the previous ``row_hash``; ``verify_events`` re-walks.
@@ -41,9 +50,11 @@ Works with:   src/crb/factory/loop.py (calls a ``record_*`` at every arrow),
               src/crb/factory/review.py (``record_verdict`` before returning; ``permit_edit``),
               src/crb/core/ledger.py (``GENESIS_HASH``, ``LedgerIntegrityError`` — the shared
               chain vocabulary), src/crb/core/redact.py (the payload scrub),
-              src/crb/server/factory_state.py (folds the events into the task view),
+              src/crb/server/factory_state.py (folds the events into the task view; runs
+              the outcome sync that calls ``record_delivery_outcome``),
               src/crb/server/routes/factory.py (serves the chain)
-Tested by:    tests/test_factory_review.py, tests/test_factory_loop.py
+Tested by:    tests/test_factory_review.py, tests/test_factory_loop.py,
+              tests/test_factory_outcomes.py
 Touch when:   never for a new repository; adding a governed step means a new ``EV_*`` kind,
               a ``record_*`` method, and a call from the loop — all in one change (an
               unknown kind is refused at construction).
@@ -85,6 +96,8 @@ EV_BUILD = "build.graded"
 EV_DELIVERY = "delivery.opened"
 EV_DELIVERY_UPDATED = "delivery.updated"
 EV_DELIVERY_REFUSED = "delivery.refused"
+EV_DELIVERY_MERGED = "delivery.merged"
+EV_DELIVERY_CLOSED = "delivery.closed"
 EV_VERDICT = "review.verdict"
 EV_EDIT = "edit.permitted"
 EV_CHECKPOINT = "horizon.checkpoint"
@@ -101,11 +114,20 @@ EVENT_KINDS: tuple[str, ...] = (
     EV_DELIVERY,
     EV_DELIVERY_UPDATED,
     EV_DELIVERY_REFUSED,
+    EV_DELIVERY_MERGED,
+    EV_DELIVERY_CLOSED,
     EV_VERDICT,
     EV_EDIT,
     EV_CHECKPOINT,
     EV_ITEM_OUTCOME,
 )
+#: The two ways a delivered pull request ends; the sync records exactly one of them.
+OUTCOME_MERGED = "merged"
+OUTCOME_CLOSED = "closed"
+OUTCOME_KINDS: dict[str, str] = {
+    OUTCOME_MERGED: EV_DELIVERY_MERGED,
+    OUTCOME_CLOSED: EV_DELIVERY_CLOSED,
+}
 
 #: How each horizon level is verified (the T9 horizon ladder, §2).
 VERIFICATION_MODES: dict[str, str] = {
@@ -393,6 +415,43 @@ class FactoryEvidence:
     def record_delivery_refused(self, item_id: str, reason: str, **extra: Any) -> FactoryEvent:
         return self.append(EV_DELIVERY_REFUSED, item_id, reason=reason, **extra)
 
+    def record_delivery_outcome(
+        self,
+        item_id: str,
+        *,
+        state: str,
+        pr_number: int,
+        pr_url: str = "",
+        merged_at: str = "",
+        merged_by: str = "",
+        merge_sha: str = "",
+        closed_at: str = "",
+    ) -> tuple[FactoryEvent, bool]:
+        """The pull request's fate, read back from GitHub: ``state`` is ``merged`` or
+        ``closed``. Returns ``(event, recorded)``: ``recorded`` is False — and the event is
+        the one already on the chain — when this PR's newest outcome is already ``state``,
+        or is ``merged`` (terminal: a merge is never followed by anything). ``merged``
+        after ``closed`` IS recorded: a person can reopen a closed pull request and merge
+        it, and the chain must say so (idempotent per state; at most two outcomes per PR)."""
+        kind = OUTCOME_KINDS.get(state)
+        if kind is None:
+            raise ValueError(f"state must be one of {tuple(OUTCOME_KINDS)}, got {state!r}")
+        existing = self.outcome_for(item_id, pr_number)
+        if existing is not None and existing.kind in (kind, EV_DELIVERY_MERGED):
+            return existing, False
+        ev = self.append(
+            kind,
+            item_id,
+            state=state,
+            pr_number=int(pr_number),
+            pr_url=pr_url,
+            merged_at=merged_at,
+            merged_by=merged_by,
+            merge_sha=merge_sha,
+            closed_at=closed_at,
+        )
+        return ev, True
+
     def record_verdict(self, verdict: Mapping[str, Any]) -> FactoryEvent:
         """Record a review verdict. Refuses a verdict that claims to precede an edit
         when an edit for the same build (pack hash) is already on the record."""
@@ -458,6 +517,18 @@ class FactoryEvidence:
             if not pack_hash or e.payload.get("pack_hash") == pack_hash
         ]
 
+    def outcome_for(self, item_id: str, pr_number: int) -> FactoryEvent | None:
+        """The NEWEST outcome event (``delivery.merged`` / ``delivery.closed``) recorded
+        for this item's pull request ``pr_number``, or ``None`` (a closed-then-merged PR
+        answers the merge)."""
+        found: FactoryEvent | None = None
+        for e in self.events_for(item_id):
+            if e.kind in (EV_DELIVERY_MERGED, EV_DELIVERY_CLOSED) and int(
+                e.payload.get("pr_number", 0) or 0
+            ) == int(pr_number):
+                found = e
+        return found
+
     def signed_gaps(self, item_id: str) -> dict[str, FactoryEvent]:
         """Mirror of the gap ledger: latest sign-off event per slot (revoked dropped)."""
         out: dict[str, FactoryEvent] = {}
@@ -478,6 +549,8 @@ __all__ = [
     "EV_BUILD",
     "EV_CHECKPOINT",
     "EV_DELIVERY",
+    "EV_DELIVERY_CLOSED",
+    "EV_DELIVERY_MERGED",
     "EV_DELIVERY_REFUSED",
     "EV_DELIVERY_UPDATED",
     "EV_EDIT",
@@ -489,6 +562,9 @@ __all__ = [
     "EV_ROUTE",
     "EV_VERDICT",
     "FACTORY_EVIDENCE_SCHEMA",
+    "OUTCOME_CLOSED",
+    "OUTCOME_KINDS",
+    "OUTCOME_MERGED",
     "VERIFICATION_MODES",
     "FactoryEvent",
     "FactoryEvidence",

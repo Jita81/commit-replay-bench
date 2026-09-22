@@ -42,6 +42,8 @@ Works with:   src/crb/core/capability.py (``build_capability_map``, ``Capability
               ``oracle_by_task`` — the one source shared with sign-off),
               src/crb/server/routes/signoffs.py (``load_signoff_records`` for the overlay),
               src/crb/server/schemas_capability.py (the response shapes),
+              src/crb/server/factory_state.py (``delivery_counts`` — the factory chain's
+              pull requests per cell, served as ``n_delivered`` / ``n_merged``),
               ui/src/screens/Capability (the map screen),
               docs/API.md#capability-routing-forecast-sign-off
 Tested by:    tests/test_server_routes_capability.py, tests/test_server_routes_signoffs.py
@@ -56,7 +58,7 @@ Claims:       A ``deliver`` cell here is the routing rule's output over measured
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from fastapi import APIRouter, Query
 from sqlalchemy.orm import Session
@@ -76,7 +78,8 @@ from crb.core.signoff import apply_signoffs_to_map
 from crb.core.spec import SIZE_TIER_NAMES
 from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import ViewerDep
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
+from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
+from crb.server.factory_state import DeliveryCounts, FactoryHome, delivery_counts_matching
 from crb.server.routes.oracle import latest_controls_verdict, oracle_by_task, verdict_dict
 from crb.server.routes.repos import cached_profile, get_repo_or_404
 from crb.server.routes.signoffs import load_signoff_records
@@ -198,11 +201,20 @@ def split_out(c: CapabilityCell) -> FailureSplitOut:
     )
 
 
-def cell_out(c: CapabilityCell) -> CapabilityCellSplitOut:
-    """A MEASURED cell as the API serves it: key, stats, decision, split, tier, apparatus."""
+def cell_out(
+    c: CapabilityCell, deliveries: Mapping[tuple[str, str], DeliveryCounts] | None = None
+) -> CapabilityCellSplitOut:
+    """A MEASURED cell as the API serves it: key, stats, decision, split, tier, apparatus —
+    and, from the factory evidence chain, how many pull requests were delivered from the
+    cell and how many merged (B-9 / F30; counts, never a rate)."""
     assert c.stats is not None and c.decision is not None  # only measured cells are serialised
     s = c.stats
+    n_delivered, n_merged = delivery_counts_matching(
+        deliveries or {}, c.key.capability_class, c.key.size
+    )
     return CapabilityCellSplitOut(
+        n_delivered=n_delivered,
+        n_merged=n_merged,
         **c.key.to_dict(),
         label=c.label,
         n=s.n,
@@ -280,6 +292,7 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
+    settings: SettingsDep,
     repo: str = Query(min_length=1, max_length=64),
     by: str | None = Query(default=None, max_length=128),
     mode: str = Query(default="sighted", pattern="^(sighted|blind|all)$"),
@@ -292,6 +305,7 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
     controls = latest_controls_verdict(db, repo)
     cmap, n_signoffs = signed_map(rows, projection, db, repo, controls=controls)
     cells = [c for c in cmap.cells if c.measured]
+    deliveries = FactoryHome(settings.home, repo).delivery_counts()
     by_route = {route: len(cs) for route, cs in cmap.by_route().items()}
     # total_cells = the grid the projection spans over values SEEN in the rows, so the UI
     # can say "12 of 20 measured" without inventing cells the repo never produces.
@@ -306,7 +320,7 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
         sizes=_distinct(rows, "size"),
         languages=_distinct(rows, "language"),
         models=_distinct(rows, "model"),
-        cells=[cell_out(c) for c in cells],
+        cells=[cell_out(c, deliveries) for c in cells],
         summary=CapabilitySummary(
             trusted_autonomy_coverage=tac,
             earned_coverage=earned,

@@ -795,7 +795,9 @@ class FactoryLoop:
         """All-comers: every active item is attempted or explicitly routed, in
         dependency order. The backlog must be frozen and verify; the freeze is
         recorded once. An item whose dependency was not accepted is recorded as
-        blocked, never silently skipped."""
+        blocked, never silently skipped — the dependency resolved through the
+        backlog's supersession chain, so its latest evolution is what must have been
+        accepted."""
         if not backlog.frozen or not backlog.verify(expected_hash):
             raise BacklogError("backlog must be frozen and verify against its hash before a run")
         ev = self.spec.evidence
@@ -813,7 +815,12 @@ class FactoryLoop:
         for item in backlog.ordered():
             if stop is not None and stop():
                 break
-            unmet = [d for d in item.depends_on if d in outcomes and not outcomes[d].accepted]
+            # a dependency names the id as registered; what was worked may be the latest
+            # evolution of it (``Backlog.resolve``) — the block check follows the same
+            # supersession chain ``ordered()`` sorted by, so a failed evolution of a
+            # dependency blocks the dependant under the evolution's id
+            deps = [backlog.resolve(d) for d in item.depends_on]
+            unmet = [d for d in deps if d in outcomes and not outcomes[d].accepted]
             if unmet:
                 ev.record_item_outcome(item.id, status=STATUS_BLOCKED, blocked_on=unmet)
                 self._emit("item.blocked", item.id, status=StepStatus.SKIPPED, blocked_on=unmet)

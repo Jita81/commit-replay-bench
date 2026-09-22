@@ -12,21 +12,25 @@
  *               numbers; that the "waiting on a person" panel offers the act only to the role
  *               that can take it; that a replay in flight is announced with its progress; that
  *               the page defaults to the most recently updated repository; that a loading map
- *               says so; and that a controls/oracle 404 renders "not run" / "not scored",
- *               never an alert.
+ *               says so; that a controls/oracle 404 renders "not run" / "not scored",
+ *               never an alert; and that every tile, header, cell, pill and button carries
+ *               a hint, with the false-Q1 tile opening on hover with the registry copy.
  * How:          `mockApi` + `renderApp` at `/results?repo=alpha`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Results/ResultsPage.tsx (under test),
  *               ui/src/components/RepoPicker.tsx (`defaultToLatest`),
- *               ui/src/components/StatTile.tsx (the tile anatomy asserted)
+ *               ui/src/components/StatTile.tsx (the tile anatomy asserted),
+ *               ui/src/help/hints.ts (the copy the hover test expects),
+ *               ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx
  * Touch when:   a headline fact or the deliver wording changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
+import { unhinted } from '../../help/hints-collector'
+import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
 import { ResultsPage } from './ResultsPage'
 
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22', reason_code: 'deliver', verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }
@@ -212,5 +216,22 @@ describe('ResultsPage', () => {
     expect(screen.getByText('not scored')).toBeInTheDocument()
     expect(screen.getByText('Nothing measured yet')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('every tile, map header and cell, pill and door carries a hint; the false-Q1 tile opens on hover with the registry copy', async () => {
+    mockApi(ROUTES)
+    const { container } = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument())
+    expect(unhinted(container)).toEqual([])
+    for (const id of ['field.shared.repo_picker', 'stat.results.controls', 'stat.results.oracle_strength', 'stat.results.route_deliver', 'stat.results.route_human', 'col.map.class', 'col.map.size', 'map.cell.route', 'map.cell.n', 'map.cell.interval', 'map.cell.signoff', 'map.cell.not_measured', 'stat.results.cost_per_attempt', 'banner.results.no_throughput', 'button.results.routing', 'pill.results.decision_kind', 'button.results.decision_act', 'button.results.all_decisions']) {
+      expect(container.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
+    }
+    // a cell's numbers opt out of the tab order (the grid is not 300 tab stops); the route tag keeps it
+    const cell = screen.getByTestId('cell-bug.fix-XS')
+    expect(cell.querySelector('[data-hint="map.cell.n"]')).not.toHaveAttribute('tabindex')
+    expect(cell.querySelector('[data-hint="map.cell.route"]')).toHaveAttribute('tabindex', '0')
+    const tile = container.querySelector('[data-hint="stat.results.false_q1"]')!
+    expect(tile).toHaveAttribute('tabindex', '0')
+    await expectHintOpens(tile, 'stat.results.false_q1')
   })
 })

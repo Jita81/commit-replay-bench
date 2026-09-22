@@ -7,20 +7,23 @@
  * What it is:   Component tests for `StatTile`.
  * What it does: Pins that a measured tile shows the value, `n =` with thousands separators,
  *               the interval text and the apparatus line; that an unmeasured tile (`—`, n = 0)
- *               is muted with no fabricated zero and no `NaN` / `Infinity` / `undefined`; and
- *               that a non-finite `n` still renders without `NaN`.
+ *               is muted with no fabricated zero and no `NaN` / `Infinity` / `undefined`; that
+ *               a non-finite `n` still renders without `NaN`; that `footer` renders the
+ *               visible line and `hint` makes the tile root the trigger (`data-hint` on the
+ *               element that carries the test id, `data-component="stat-tile"` either way).
  * How:          Testing Library render; assertions on the tile's text content and the muted
  *               class.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/components/StatTile.tsx (the code under test), ui/src/lib/format.ts
- *               (the guards whose output is asserted)
+ *               (the guards whose output is asserted), ui/src/help/hints.ts (the hint text)
  * Tested by:    ui/src/components/StatTile.test.tsx
  * Touch when:   the tile gains a line (e.g. a belt set) — assert it here so no variant can
  *               drop it.
  */
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { HINTS } from '../help/hints'
 import { StatTile } from './StatTile'
 
 describe('StatTile', () => {
@@ -60,5 +63,22 @@ describe('StatTile', () => {
   it('never renders NaN when given a non-finite n', () => {
     render(<StatTile label="X" value="1" n={Number.NaN} apparatus="a" data-testid="tile" />)
     expect(screen.getByTestId('tile').textContent).not.toContain('NaN')
+  })
+
+  it('footer is the visible line under the evidence; hint makes the tile itself the trigger', () => {
+    render(<StatTile label="False-Q1" value="0" n={12} apparatus="a" hint="stat.results.false_q1" footer="must be zero; refused at write" data-testid="tile" />)
+    const tile = screen.getByTestId('tile')
+    expect(tile).toHaveAttribute('data-hint', 'stat.results.false_q1')
+    expect(tile).toHaveAttribute('data-component', 'stat-tile')
+    expect(tile).toHaveAttribute('tabindex', '0')
+    expect(tile).toHaveAccessibleDescription(HINTS['stat.results.false_q1'])
+    expect(tile.textContent).toContain('must be zero; refused at write')
+  })
+
+  it('without a hint the tile is a plain div the ratchet can still find', () => {
+    render(<StatTile label="X" value="1" n={1} apparatus="a" data-testid="tile" />)
+    const tile = screen.getByTestId('tile')
+    expect(tile).not.toHaveAttribute('data-hint')
+    expect(tile).toHaveAttribute('data-component', 'stat-tile')
   })
 })

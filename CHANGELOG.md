@@ -8,6 +8,86 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-21 — shippable: every element explains itself; users can recover; the loop closes on a merge
+
+- **Every element explains itself (hover, focus and tap — one registry, one ratchet).** A
+  person on any screen can rest the mouse on, tab to, or tap any element they meet — every
+  stat tile, number, pill, tag, column header, field, button, link, gate clause, task item,
+  summary row, banner and kicker — and read one plain-English sentence saying what it is and
+  what its value means; the same sentence is listed under *About this screen → Elements on
+  this screen* and is announced by a screen reader (`aria-describedby`). Hover is never the
+  only way (DL-048). The mechanism: `<Hint id>` (`ui/src/components/Hint.tsx` — opens on
+  mouse-over after 150 ms, on keyboard focus and on a touch `pointerdown`; Escape closes and
+  stops there; a `role="tooltip"` bubble, portalled, never a tab stop inside a control, never
+  a link; a `crb:help` event for telemetry), the registry `ui/src/help/hints.ts` (661 ids
+  from the inventory, `HintId`, `MIN_HINTS` per route; `hints.test.ts` lints length, the full
+  stop, no links and term use), and every shared component taking `hint?: HintId` (StatTile,
+  Pill, DataTable columns, buttons, fields, GateBanner criteria, govuk Tag / TaskItem /
+  SummaryRow / StartButton / WarningButton); VerdictPill, BeltPills, Provenance, CiBar,
+  FailureSplit, ModelPointLine, ControlsPill and CellRoutePill derive their own ids. The
+  shell — every nav entry, the health pill, the role chip, Help, theme, Sign out, the
+  stop-condition banner, the footer — is hinted.
+- **The on-ramp screens (H1):** `/login`, `/home`, `/connect`, `/connect/:name`,
+  `/connect/:name/measure`, `/results`, `/decisions`, `/signoff` — 152 inventory rows wired.
+  The sign-off attestation statement is rendered under its row instead of a hover-only
+  `title` (a governance record is never hover-only); Measure's "Every knob" door is a hinted
+  note line; the map's column and row headers, route tag and every cell line carry
+  `col.map.*` / `map.cell.*` with the numbers out of the tab order. One test per screen
+  asserts the sample hint opens on hover with the registry copy and `unhinted()` is empty.
+- **The factory, deployment and instrument screens (H2):** `/factory`, `/posture`, `/repos`,
+  `/repos/:name` (all four tabs), `/runs` (+ Start a run), `/runs/:id` (+ the live log and
+  the evidence drawer's Pack, Patch and Review tabs), `/tasks/:repo/:taskId`, `/capability`
+  (+ the open cell detail), `/routing`, `/oracle`, `/learn`, `/ledger`, `/settings` (viewer
+  and admin) and `/help` — 436 elements. Native `title=` attributes on those screens are
+  retired where a hint stands (LiveLog 4→3, Factory 2→1, RepoDetail 2→1, EvidenceDrawer 7→6,
+  Oracle / RepoConfigTab / RunNewDialog / Sign-off → 0). Opening an evidence pack moves focus
+  into the drawer and returns it to the opener on close (WCAG 2.4.3), so one Escape closes it.
+- **The ratchet (`ui/src/help/hints-ratchet.test.tsx`)** reads every `<Route path>` in
+  `App.tsx` and requires a `SCREENS` entry — rendered per role under its fixtures, every
+  element resolved to a registry id, at least `MIN_HINTS[route]` hinted — for all 21 routes
+  (`hints-ratchet.onramp.tsx`, `hints-ratchet.instrument.tsx` with the deeper states: tabs,
+  dialogs, the drawer); the `ALLOWLIST` of routes not yet wired is **empty**; the per-file
+  `title=` count only goes down. The tier-1 walkthrough's `11-screens` opens a sample of
+  five hints on every route × persona × width (hover at 1280, touch at 375), asserts the
+  bubble is a full sentence with no link, runs axe WCAG 2.1 AA with the bubble open and
+  closes it with Escape; a keyboard pass on `/results` proves focus opens and Tab closes.
+- **Users can recover (F23, merged from main via #42):** password set / change, deactivate
+  with a last-admin guard, sessions revoked on change, and the break-glass `crb users` CLI;
+  **the operating envelope (F36–F41, F44, F47, F25, #43):** the `/health` `migrations` probe,
+  no probe serving an exception, `crb doctor` coverage, the temporary-home guard, SQLite
+  backup and restore, `docs/RELEASING.md`, the release main-provenance check and the viewer
+  secrets projection — each carried here unchanged; the `/signoff` help anchor follows the
+  operator guide's renamed heading (`OPERATOR#5-sign-off`).
+- **The loop closes on a merge (L — F39, B-9/F30, F32; DL-049).** *Fetch before a run:*
+  every factory run (and a replay / blind / mine on a repository linked through the GitHub
+  App) fetches the row's URL and fast-forwards the clone's default branch first —
+  `repo.fetch.start` / `repo.fetch.done` carry the before / after shas, a factory run's
+  apparatus carries `base_sha` — and a fetch that fails or a branch that cannot fast-forward
+  refuses the run with a plain reason (`FetchRefused`; never a build on a stale base, never
+  a merge or reset the product did on its own). *The merge outcome as evidence:* at the start
+  of every factory run, or on demand via `POST /factory/{repo}/outcomes/sync` (operator),
+  each delivered pull request whose fate can still change is read through the installation
+  token and recorded as `delivery.merged` / `delivery.closed` on the item's chain — at most
+  closed, then merged, per PR: a merge is terminal and never read again; a closed one is
+  read again because a person can reopen and merge it; a repeated state appends nothing
+  (`FactoryEvidence.record_delivery_outcome` is idempotent per state; the one predicate both
+  the worker and the route ask before minting a token is `outcomes_pending`); the task view
+  serves `outcome` (state, PR, merged_at, merged_by, merge_sha, synced_at), the backlog
+  serves `outcomes` (delivered / merged / closed / open — the fact Home's task 8 reads), the
+  capability map's cell serves `n_delivered` / `n_merged` (counts, no interval). *Evolutions
+  over the frozen backlog:* `POST /factory/{repo}/backlog/evolutions` registers a new item
+  chained onto the frozen hash with `supersedes`, refused while a run is active, recorded as
+  `backlog.evolved`; the task view shows the superseded item above its evolution, `GET
+  …/backlog` lists `evolutions` + `evolutions_hash`, and a run works the latest evolution of
+  each item. Tests: `tests/test_worker_fetch.py` (fast-forward, an unreachable remote, a
+  diverged branch, a clone left on another branch, the linked-only rule) and
+  `tests/test_factory_outcomes.py` (the FakeGitHub pull-request shapes — open / merged /
+  closed, GHES `merged: null` — outcome idempotency at the ledger, the sync route: 409 until
+  linked, 502 on a dead token, per-PR errors retried; the evolutions chain end to end;
+  delivery counts per cell). Docs: API.md rows, GITHUB-APP.md §5, ADR-0014 clauses 6–7.
+- Gates on the merged branch: ruff, ruff format, mypy, `code_map --check`, `tsc -b`, vitest,
+  the full pytest, and the tier-1 walkthrough (55 specs incl. `10-factory` and `11-screens`).
+
 ### 2026-09-21 — reference sandbox images, built and proven by CI (F42 part 1)
 
 - **`deploy/sandbox/Dockerfile.{python,node,go}`** — the images the fail-closed sandbox

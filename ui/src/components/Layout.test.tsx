@@ -8,8 +8,8 @@
  * What it does: Pins the four steps (Connection, Baseline, Decisions, Factory), the eyebrow
  *               grammar (`Journey · 2 of 4 · Baseline`, an optional sub, `Journey · start` on
  *               Home, empty for an instrument route), that the top bar and footer link to
- *               /help for a viewer, and that the About block renders once under the page
- *               content.
+ *               /help for a viewer with hints and no hover title, and that the About block
+ *               renders once under the page content.
  * How:          Pure calls for the helper; the shell rendered as a layout route with one
  *               child screen for the chrome.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -79,10 +79,23 @@ describe('Layout', () => {
     renderShell('/results', '/results', <h1>Baseline</h1>)
     await waitFor(() => expect(screen.getByTestId('user-chip')).toBeInTheDocument())
     const banner = screen.getByRole('banner')
-    expect(within(banner).getByRole('link', { name: 'Help' })).toHaveAttribute('href', '/help')
+    const help = within(banner).getByRole('link', { name: 'Help' })
+    expect(help).toHaveAttribute('href', '/help')
+    // explained by a hint, never a hover-only title
+    expect(help).toHaveAttribute('data-hint', 'nav.help')
+    expect(help).not.toHaveAttribute('title')
+    expect(within(banner).getByRole('button', { name: /Switch theme/ })).not.toHaveAttribute('title')
+    expect(within(banner).getByRole('link', { name: 'Baseline' })).toHaveAttribute('data-hint', 'nav.baseline')
     const footer = screen.getByRole('contentinfo')
-    expect(within(footer).getByRole('link', { name: 'Help' })).toHaveAttribute('href', '/help')
-    expect(within(footer).getByRole('link', { name: 'Glossary' })).toHaveAttribute('href', '/help#terms')
+    const footerHelp = within(footer).getByRole('link', { name: 'Help' })
+    const footerGlossary = within(footer).getByRole('link', { name: 'Glossary' })
+    expect(footerHelp).toHaveAttribute('href', '/help')
+    expect(footerGlossary).toHaveAttribute('href', '/help#terms')
+    // two links, two sentences: a shared id would give Glossary the Help description and
+    // collapse the About block's shell list to one entry
+    expect(footerHelp).toHaveAttribute('data-hint', 'nav.footer_help')
+    expect(footerGlossary).toHaveAttribute('data-hint', 'nav.footer_glossary')
+    expect(footerGlossary.getAttribute('data-hint')).not.toBe(footerHelp.getAttribute('data-hint'))
     const main = screen.getByRole('main')
     expect(within(main).getAllByTestId('about-this-screen')).toHaveLength(1)
     expect(main).toHaveTextContent('This is the baseline the factory runs on.')

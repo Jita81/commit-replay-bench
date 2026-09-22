@@ -19,8 +19,9 @@
  *               a ceiling nothing enforces). While
  *               a factory run is active the chain polls and a banner names the run and the
  *               item in hand (J-FAC-5 / J-TEL-9). A built item opens its evidence (F15); a
- *               stopped item says the way forward, and a revised backlog starts from the
- *               active one (J-FAC-15). Every act goes through the API under its role; the
+ *               stopped item says the way forward — an evolution that supersedes it, the
+ *               route the API serves as `way_forward` (DL-049) — and the freeze form for a
+ *               revised backlog (a new hash) starts from the active one (J-FAC-15). Every act goes through the API under its role; the
  *               chain (`/factory/{repo}/evidence`) is the record, and this screen renders the
  *               folded view of it (`task_views`).
  * How:          `useRepoParam({ defaultToLatest: true })` (as the Baseline: reached from the
@@ -44,10 +45,10 @@
  *               `FactoryBacklog`), ui/src/lib/builder.ts (`builderChoice`, shared with
  *               Measure), ui/src/components/RepoPicker.tsx (`defaultToLatest`, as the
  *               Baseline), ui/src/screens/Runs/EvidenceDrawer.tsx (the pack view an item
- *               row opens), src/crb/server/routes/factory.py (the shapes, documented under
- *               "Factory" in the API doc), src/crb/server/factory_state.py (`task_views`,
- *               the fold of the factory loop's chain this screen renders),
- *               src/crb/factory/loop.py (the process itself),
+ *               row opens), src/crb/server/routes/factory.py (the shapes — `way_forward`
+ *               included — documented under "Factory" in the API doc),
+ *               src/crb/server/factory_state.py (`task_views`, the fold of the factory
+ *               loop's chain this screen renders; the loop itself is src/crb/factory/loop.py),
  *               ui/src/screens/Decisions/decisions.ts (the inbox rows that link here)
  * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx, ui/e2e/walkthrough/10-factory.spec.ts
  * Touch when:   a step or a stop status is added to the loop (add it to `stepsFor` and the
@@ -66,10 +67,12 @@ import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextArea, TextField } from '../../components/Field'
 import { DocLink, Term } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { Details, NotificationBanner, SummaryList, WarningButton } from '../../components/govuk'
+import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
 import { builderChoice } from '../../lib/builder'
 import { fmtDate, fmtInt, kOfN, shortId } from '../../lib/format'
@@ -83,6 +86,16 @@ interface Step {
   title: string
   status: StepStatus
   detail: string
+}
+
+/** The hint for each of the six step cards — what the step is and what its state tells the reader. */
+const STEP_HINT: Record<Step['id'], HintId> = {
+  readiness: 'step.factory.readiness',
+  red: 'step.factory.red',
+  build: 'step.factory.build',
+  delivery: 'step.factory.delivery',
+  review: 'step.factory.review',
+  outcome: 'step.factory.outcome',
 }
 
 const STEP_DISPLAY: Record<StepStatus, { tone: Tone; glyph: string; label: string }> = {
@@ -308,16 +321,19 @@ export function stepsFor(t: FactoryTask): Step[] {
  */
 export function refusalSentence(t: FactoryTask): string {
   const r = t.refusal
-  const forward = 'To bring it back into the factory, add the fact and freeze a revised backlog (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.'
+  // DL-049: a frozen backlog does not change, it evolves — the way forward is an evolution
+  // that supersedes this item (the frozen hash stays; the old chain is kept), which the API
+  // serves as `way_forward`; freezing a revised backlog (a new hash) is the heavier path
+  const evolve = (fix: string) => `To bring it back into the factory, ${fix} and register an evolution that supersedes this item (the frozen hash stays; the old chain is kept); or open the change by hand and mark the item done in the next backlog.`
   if (r?.step === 'dependency') return `${r.reason.replace(/^waiting on /, 'Waiting on ')}, which has not been accepted yet.`
-  if (r?.step === 'readiness') return `This item goes to a person: ${r.reason}. ${forward}`
+  if (r?.step === 'readiness') return `This item goes to a person: ${r.reason}. ${evolve('add the fact')}`
   if (t.status === 'oracle_needs_strengthening' || r?.step === 'review')
-    return `The review found the test too weak to rebuild against${t.outcome_reason || r?.reason ? `: ${findingOf(t.outcome_reason || r?.reason || '')}` : ''}. Strengthen the test and freeze a revised backlog with a superseding item (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.`
-  if (r?.step === 'red') return `The factory could not prove the test: ${r.reason}. ${forward.replace('add the fact', 'author a test that fails today')}`
+    return `The review found the test too weak to rebuild against${t.outcome_reason || r?.reason ? `: ${findingOf(t.outcome_reason || r?.reason || '')}` : ''}. ${evolve('strengthen the test')}`
+  if (r?.step === 'red') return `The factory could not prove the test: ${r.reason}. ${evolve('author a test that fails today')}`
   if (t.status === 'rejected' || t.status === 'rework_exhausted')
-    return `The review said ${t.review_verdict?.replace(/_/g, ' ') ?? t.status.replace(/_/g, ' ')}. Read the evidence, then either open the change by hand or freeze a revised backlog with the fact the review asked for (a new hash, the old chain stays).`
+    return `The review said ${t.review_verdict?.replace(/_/g, ' ') ?? t.status.replace(/_/g, ' ')}. Read the evidence, then ${evolve('add the fact the review asked for').replace(/^To bring it back into the factory, /, '')}`
   if (t.status === 'no_oracle' || t.status === 'not_red')
-    return `No failing test proves this item${r ? `: ${r.reason}` : ''}. Author a test that fails today and freeze a revised backlog (a new hash, the old chain stays); or open the change by hand and mark the item done in the next backlog.`
+    return `No failing test proves this item${r ? `: ${r.reason}` : ''}. ${evolve('author a test that fails today')}`
   return ''
 }
 
@@ -461,7 +477,7 @@ export function FactoryPage() {
             actions={
               can('operator') ? (
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => openFreeze(null)} disabled={activeRun !== null}>
+                  <Button size="sm" onClick={() => openFreeze(null)} disabled={activeRun !== null} hint="button.factory.freeze">
                     Freeze a backlog…
                   </Button>
                 </div>
@@ -481,7 +497,7 @@ export function FactoryPage() {
                   }
                   action={
                     can('operator') ? (
-                      <Button variant="filled" onClick={() => openFreeze(null)}>
+                      <Button variant="filled" onClick={() => openFreeze(null)} hint="button.factory.freeze">
                         Freeze a backlog…
                       </Button>
                     ) : undefined
@@ -494,13 +510,17 @@ export function FactoryPage() {
             {backlog.data && (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Pill tone={backlog.data.frozen_at ? 'primary' : 'amber'} glyph={backlog.data.frozen_at ? '❄' : '○'} size="xs" label={backlog.data.frozen_at ? `Frozen at ${fmtDate(backlog.data.frozen_at)}` : 'Not frozen'}>
+                  <Pill tone={backlog.data.frozen_at ? 'primary' : 'amber'} glyph={backlog.data.frozen_at ? '❄' : '○'} size="xs" label={backlog.data.frozen_at ? `Frozen at ${fmtDate(backlog.data.frozen_at)}` : 'Not frozen'} hint="pill.factory.frozen">
                     {backlog.data.frozen_at ? 'frozen' : 'not frozen'}
                   </Pill>
-                  <span className="font-mono text-xs" title={backlog.data.hash}>
-                    hash {shortId(backlog.data.hash, 16)}
-                  </span>
-                  <span className="text-xs text-on-surface-muted">{fmtInt(backlog.data.items.length)} items</span>
+                  <Hint id="stat.factory.hash">
+                    <span className="font-mono text-xs" title={backlog.data.hash}>
+                      hash {shortId(backlog.data.hash, 16)}
+                    </span>
+                  </Hint>
+                  <Hint id="stat.factory.items_count" className="text-xs text-on-surface-muted">
+                    {fmtInt(backlog.data.items.length)} items
+                  </Hint>
                 </div>
                 {activeRun && <ActiveRunBanner run={activeRun} tasks={tasks.data ?? []} canCancel={can('operator')} />}
                 {!activeRun && lastRun && <LastRunLine run={lastRun} />}
@@ -552,22 +572,22 @@ function ActiveRunBanner({ run, tasks, canCancel }: { run: Run; tasks: FactoryTa
   const item = queued ? null : kOfN(done, total)
   return (
     <NotificationBanner title="Factory run in progress" className="mb-0">
-      <p className="m-0" data-testid="factory-active-run">
+      <Hint as="p" id="banner.factory.active_run" className="m-0" data-testid="factory-active-run">
         Factory run {shortId(run.id)} is working the backlog{item ? ` — item ${item}` : ''} ({phrase}).
         {run.cost_usd > 0 ? ` ${usd(run.cost_usd)} so far.` : ''}
         {run.started ? ` Started ${fmtDate(run.started)}.` : ''}{' '}
-        <LinkButton size="sm" to={`/runs/${run.id}`}>
+        <LinkButton size="sm" to={`/runs/${run.id}`} hint="button.factory.open_run">
           Open the run
         </LinkButton>
         {canCancel && (
           <>
             {' '}
-            <Button size="sm" onClick={() => cancel.mutate(run.id)} disabled={cancel.isPending || cancel.isSuccess}>
+            <Button size="sm" onClick={() => cancel.mutate(run.id)} disabled={cancel.isPending || cancel.isSuccess} hint="button.factory.cancel">
               {cancel.isSuccess ? 'Cancelling…' : 'Cancel the run'}
             </Button>
           </>
         )}
-      </p>
+      </Hint>
       {canCancel && <p className="mb-0 mt-2 text-[16px] text-on-surface-muted">Cancelling stops the loop after the item in hand. Items already built are still charged.</p>}
       {cancel.isError && <ErrorState compact error={cancel.error} />}
     </NotificationBanner>
@@ -584,14 +604,14 @@ function LastRunLine({ run }: { run: Run }) {
   const items = typeof d.items === 'number' ? d.items : null
   const accepted = typeof d.accepted === 'number' ? d.accepted : null
   return (
-    <p className="m-0 text-sm text-on-surface-muted" data-testid="factory-last-run">
+    <Hint as="p" id="stat.factory.last_run" className="m-0 text-sm text-on-surface-muted" data-testid="factory-last-run">
       Factory run {shortId(run.id)} {run.status}
       {items !== null && accepted !== null ? ` — ${accepted} of ${items} items accepted${parts.length ? `, ${parts.join(', ')}` : ''}` : ''}
       {run.finished ? ` · ${fmtDate(run.finished)}` : ''} ·{' '}
-      <LinkButton size="sm" to={`/runs/${run.id}`}>
+      <LinkButton size="sm" to={`/runs/${run.id}`} hint="link.factory.last_run">
         run {shortId(run.id)}
       </LinkButton>
-    </p>
+    </Hint>
   )
 }
 
@@ -663,14 +683,16 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
       <h3 className="mb-3 mt-0 text-base font-bold">Before you run</h3>
       <SummaryList
         rows={[
-          { key: 'Builder', value: builderRow },
+          { key: 'Builder', value: builderRow, hint: 'summary.factory.builder' },
           {
             key: 'Items',
+            hint: 'summary.factory.items',
             value: `${worked} of ${total} will be worked${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell that routes deliver`,
             note: 'Readiness is assessed again at the run; an item with an unsigned structural gap is refused before any spend.',
           },
           {
             key: 'Estimated cost',
+            hint: 'stat.factory.estimate',
             value:
               worked === 0 ? (
                 'nothing — no item can be worked'
@@ -686,55 +708,59 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           },
           {
             key: 'Delivery',
+            hint: 'summary.factory.delivery',
             value: !canDeliver ? 'not linked — no pull request' : deliver ? `on — a clean build in a deliver cell ${target}.` : `off — built and graded locally only. When on, a clean build in a deliver cell ${target}.`,
             note: !canDeliver ? delivery.reason : undefined,
           },
           {
             key: 'Budget cap',
+            hint: 'summary.factory.budget_cap',
             value: 'no spend cap yet — the builder’s ladder caps turns, tool calls and wall clock per attempt',
           },
         ]}
         label="Before you run"
       />
       <div className="mt-3 space-y-2 text-sm">
-        <label className="flex items-start gap-2">
+        <Hint as="label" id="field.factory.deliver" className="flex items-start gap-2">
           <input type="checkbox" className="mt-1" checked={deliver && canDeliver} disabled={!canDeliver} onChange={(e) => setDeliver(e.target.checked)} />
           <span>
             Open pull requests where the map routes <code>deliver</code>
             {tasks && (
-              <span className="block text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
+              <Hint id="stat.factory.deliverable" className="block text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
                 {deliverable} of {tasks.length} items sit in a cell that routes <code>deliver</code> today; the rest are built and withheld under the current route
-              </span>
+              </Hint>
             )}
           </span>
-        </label>
+        </Hint>
         {deliver && canDeliver && canOverride && (
-          <label className="flex items-start gap-2">
+          <Hint as="label" id="field.factory.override" className="flex items-start gap-2">
             <input type="checkbox" className="mt-1" checked={override} onChange={(e) => setOverride(e.target.checked)} />
             <span>
               Override the route gate (approver)
               <span className="block text-xs text-on-surface-muted">Recorded on the evidence chain as your override of the route gate, under your name.</span>
             </span>
-          </label>
+          </Hint>
         )}
-        <Details summary="Use a different builder" className="mb-0 mt-2 text-sm">
-          <p className="m-0 mb-2 text-xs text-on-surface-muted">
-            The factory has no full run form: name a registered builder here (as the run form's Builder field) when the deployment's default is not the one you mean. Blank = the builder above.
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <TextField label="Builder" value={ownBuilder} onChange={(e) => setOwnBuilder(e.target.value)} hint="a registered builder name" />
-            <TextField label="Model" value={ownModel} onChange={(e) => setOwnModel(e.target.value)} hint="optional — the builder's default when blank" />
-          </div>
-        </Details>
+        <Hint as="div" id="details.factory.own_builder">
+          <Details summary="Use a different builder" className="mb-0 mt-2 text-sm">
+            <p className="m-0 mb-2 text-xs text-on-surface-muted">
+              The factory has no full run form: name a registered builder here (as the run form's Builder field) when the deployment's default is not the one you mean. Blank = the builder above.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TextField label="Builder" value={ownBuilder} onChange={(e) => setOwnBuilder(e.target.value)} description="a registered builder name" hint="field.factory.own_builder" />
+              <TextField label="Model" value={ownModel} onChange={(e) => setOwnModel(e.target.value)} description="optional — the builder's default when blank" hint="field.factory.own_model" />
+            </div>
+          </Details>
+        </Hint>
       </div>
       <p className="mb-3 mt-3 text-sm">You can cancel the run at any point. Items already built are still charged.</p>
       <div className="flex flex-wrap items-center gap-3" data-testid="factory-run-controls">
-        <WarningButton onClick={startRun} disabled={!startable}>
+        <WarningButton onClick={startRun} disabled={!startable} hint="button.factory.run">
           {/* an estimate, never a promised cap: the request carries no spend cap (F5b), as the Budget cap row above says */}
           {worked > 0 && (measured || own || choice) ? `Run the factory — estimated ${usd(lo)} to ${usd(hi)}` : 'Run the factory'}
         </WarningButton>
         {run.data && (
-          <LinkButton size="sm" to={`/runs/${run.data.id}`}>
+          <LinkButton size="sm" to={`/runs/${run.data.id}`} hint="button.factory.started_run">
             run {shortId(run.data.id)}
           </LinkButton>
         )}
@@ -769,36 +795,40 @@ function ItemRow({
   return (
     <li id={`item-${t.id}`} className={`py-3 ${focused ? 'rounded-[var(--radius-control)] bg-primary-container/30 px-2' : ''}`} data-testid={`factory-item-${t.id}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-xs text-on-surface-muted">{t.id}</span>
+        <Hint id="item.factory.id" tabStop={false} className="font-mono text-xs text-on-surface-muted">
+          {t.id}
+        </Hint>
         <span className="font-semibold">{t.title}</span>
-        <span className="font-mono text-xs text-on-surface-muted">
+        <Hint id="item.factory.cell" tabStop={false} className="font-mono text-xs text-on-surface-muted">
           {t.capability_class} · {t.size} · {t.kind}
-        </span>
+        </Hint>
         <CellRoutePill t={t} />
-        <span className="ml-auto text-xs" title="item status" data-testid={`item-status-${t.id}`}>
+        <Hint id="item.factory.status" className="ml-auto text-xs" data-testid={`item-status-${t.id}`}>
           {statusLabel(t)}
-        </span>
+        </Hint>
         {t.run_id && (
-          <LinkButton size="sm" to={`/runs/${t.run_id}`}>
+          <LinkButton size="sm" to={`/runs/${t.run_id}`} hint="button.factory.item_run">
             run {shortId(t.run_id)}
           </LinkButton>
         )}
         {t.pack_hash && (
-          <Button size="sm" onClick={() => onEvidence(t.pack_hash ?? '', t.row_hash ?? '')} data-testid={`evidence-${t.id}`}>
+          <Button size="sm" onClick={() => onEvidence(t.pack_hash ?? '', t.row_hash ?? '')} data-testid={`evidence-${t.id}`} hint="button.factory.evidence">
             Evidence
           </Button>
         )}
         {t.pr_url && (
-          <a href={t.pr_url} className="text-xs" target="_blank" rel="noreferrer">
+          <Hint as="a" id="link.factory.pr" href={t.pr_url} className="text-xs" target="_blank" rel="noreferrer">
             PR ↗
-          </a>
+          </Hint>
         )}
       </div>
       {sentence && (
         <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] border border-border bg-surface p-2 text-sm" data-testid={`refusal-${t.id}`}>
-          <p className="m-0 flex-1 basis-[28em]">{sentence}</p>
+          <Hint as="p" id="banner.factory.refusal" className="m-0 flex-1 basis-[28em]">
+            {sentence}
+          </Hint>
           {canFreeze && (
-            <Button size="sm" onClick={onFreeze}>
+            <Button size="sm" onClick={onFreeze} hint="button.factory.freeze_revised">
               Freeze a revised backlog…
             </Button>
           )}
@@ -807,7 +837,7 @@ function ItemRow({
       {narrow && (
         // J-FAC-14 — at phone width one line says where the item is; the six cards wait behind a Details
         <p className="m-0 mt-2 flex flex-wrap items-center gap-1.5 text-xs" data-testid={`steps-compact-${t.id}`}>
-          <Pill tone={STEP_DISPLAY[current.status].tone} glyph={STEP_DISPLAY[current.status].glyph} size="xs" label={`${current.title}: ${STEP_DISPLAY[current.status].label}`}>
+          <Pill tone={STEP_DISPLAY[current.status].tone} glyph={STEP_DISPLAY[current.status].glyph} size="xs" label={`${current.title}: ${STEP_DISPLAY[current.status].label}`} hint="pill.factory.step_current">
             {STEP_DISPLAY[current.status].label}
           </Pill>
           <span className="font-semibold">{current.title}</span>
@@ -836,15 +866,16 @@ function StepGrid({ t, steps }: { t: FactoryTask; steps: Step[] }) {
       {steps.map((s) => {
         const d = STEP_DISPLAY[s.status]
         return (
-          <li key={s.id} className="min-w-0 rounded-[var(--radius-control)] border border-border p-2" data-testid={`step-${t.id}-${s.id}`}>
+          // the card is the tab stop (what the step is); the state pill, six per item, opens on hover and tap only
+          <Hint as="li" key={s.id} id={STEP_HINT[s.id]} className="min-w-0 rounded-[var(--radius-control)] border border-border p-2" data-testid={`step-${t.id}-${s.id}`}>
             <div className="flex flex-wrap items-center gap-1.5">
-              <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`${s.title}: ${d.label}`}>
+              <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`${s.title}: ${d.label}`} hint="pill.factory.step_state" tabStop={false}>
                 {d.label}
               </Pill>
               <span className="text-xs font-semibold leading-tight">{s.title}</span>
             </div>
             <div className="mt-1 break-words text-[11px] leading-snug text-on-surface-muted">{s.detail}</div>
-          </li>
+          </Hint>
         )
       })}
     </ol>
@@ -870,7 +901,7 @@ function GapForm({ repo, task: t }: { repo: string; task: FactoryTask }) {
     >
       {/* a select is as wide as its longest option (the catalogue's question): the label must be
           allowed to shrink (min-w-0) and the select to fill it, or the page scrolls sideways at 375 px */}
-      <label className="min-w-0 flex-1 basis-[30ch] text-xs">
+      <Hint as="label" id="field.factory.gap" className="min-w-0 flex-1 basis-[30ch] text-xs">
         Gap
         <select className="mt-1 block w-full rounded border border-border bg-surface px-1 py-1 text-xs" value={slot} onChange={(e) => setSlot(e.target.value)}>
           {t.dor_gaps.map((g) => (
@@ -879,16 +910,17 @@ function GapForm({ repo, task: t }: { repo: string; task: FactoryTask }) {
             </option>
           ))}
         </select>
-      </label>
+      </Hint>
       <TextField
         label="Your answer (the structural fact)"
+        hint="field.factory.gap_answer"
         value={answer}
         onChange={(e) => setAnswer(e.target.value)}
         className="min-w-[24ch] flex-1"
         required
-        hint={question ? `${question} As a reviewer could check it, for example “GET /v1/orders/{id}”.` : 'The structural fact, as a reviewer could check it.'}
+        description={question ? `${question} As a reviewer could check it, for example “GET /v1/orders/{id}”.` : 'The structural fact, as a reviewer could check it.'}
       />
-      <Button type="submit" size="sm" variant="filled" disabled={sign.isPending || !answer.trim()}>
+      <Button type="submit" size="sm" variant="filled" disabled={sign.isPending || !answer.trim()} hint="button.factory.sign_gap">
         Sign the gap
       </Button>
       {sign.isError && <ErrorState compact error={sign.error} />}
@@ -917,7 +949,7 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
   const r = t.cell_route
   if (!r || !r.route) {
     return (
-      <Pill tone="muted" glyph="○" size="xs" label={`Cell ${t.capability_class} × ${t.size} is not measured on this repository: delivery would be withheld`} data-testid={`cell-route-${t.id}`}>
+      <Pill tone="muted" glyph="○" size="xs" label={`Cell ${t.capability_class} × ${t.size} is not measured on this repository: delivery would be withheld`} hint="factory.cell_route.unmeasured" data-testid={`cell-route-${t.id}`}>
         not measured · withheld
       </Pill>
     )
@@ -927,17 +959,17 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
   return (
     <>
       {r.deliverable ? (
-        <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver — ${prov}: a clean build may open a pull request`} data-testid={`cell-route-${t.id}`}>
+        <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver — ${prov}: a clean build may open a pull request`} hint="factory.cell_route.deliverable" data-testid={`cell-route-${t.id}`}>
           routes deliver
         </Pill>
       ) : (
-        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: delivery would be withheld — ${r.reason}`} data-testid={`cell-route-${t.id}`}>
+        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: delivery would be withheld — ${r.reason}`} hint="factory.cell_route.withheld" data-testid={`cell-route-${t.id}`}>
           routes {r.route} · withheld
         </Pill>
       )}
-      <span className="font-mono text-[11px] text-on-surface-muted" aria-hidden data-testid={`cell-route-${t.id}-prov`}>
+      <Hint id="item.factory.cell_prov" tabStop={false} className="font-mono text-[11px] text-on-surface-muted" aria-hidden data-testid={`cell-route-${t.id}-prov`}>
         {prov}
-      </span>
+      </Hint>
     </>
   )
 }
@@ -1067,11 +1099,11 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
       width="lg"
       footer={
         <>
-          <Button variant="ghost" onClick={() => setMode(mode === 'form' ? 'json' : 'form')}>
+          <Button variant="ghost" onClick={() => setMode(mode === 'form' ? 'json' : 'form')} hint="button.factory.freeze_mode">
             {mode === 'form' ? 'Advanced: paste JSON instead' : 'Back to the form'}
           </Button>
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="filled" disabled={register.isPending || (mode === 'form' && !formValid)} onClick={submit}>
+          <Button variant="filled" disabled={register.isPending || (mode === 'form' && !formValid)} onClick={submit} hint="button.factory.freeze_submit">
             Freeze {mode === 'form' ? `${items.length} item${items.length === 1 ? '' : 's'}` : ''}
           </Button>
         </>
@@ -1086,12 +1118,13 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
         <>
           <TextArea
             label="Backlog JSON"
+            hint="field.factory.backlog_json"
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={12}
             className="font-mono text-xs"
             error={parseError || undefined}
-            hint={
+            description={
               <>
                 Shape as the API's Factory section: items[] with id, title, capability_class, size_estimate, structural_facts; optional authored tests. See{' '}
                 <DocLink to="ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted">Forward mode</DocLink>.
@@ -1109,32 +1142,32 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
               <fieldset key={i} className="m-0 rounded-[var(--radius-control)] border border-border p-3" data-testid={`backlog-item-${i}`}>
                 <legend className="px-1 text-xs font-semibold text-on-surface-muted">Item {i + 1}</legend>
                 <div className="grid gap-3 sm:grid-cols-[10ch_1fr]">
-                  <TextField label="Id" required value={d.id} onChange={(e) => update(i, { id: e.target.value })} hint="letters, digits, . _ -" />
-                  <TextField label="Title" required value={d.title} onChange={(e) => update(i, { title: e.target.value })} />
+                  <TextField label="Id" required value={d.id} onChange={(e) => update(i, { id: e.target.value })} description="letters, digits, . _ -" hint="field.factory.item_id" />
+                  <TextField label="Title" required value={d.title} onChange={(e) => update(i, { title: e.target.value })} hint="field.factory.item_title" />
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-4">
-                  <SelectField label="Class" value={d.capability_class} onChange={(e) => update(i, { capability_class: e.target.value, facts: {} })}>
+                  <SelectField label="Class" hint="field.factory.item_class" value={d.capability_class} onChange={(e) => update(i, { capability_class: e.target.value, facts: {} })}>
                     {(cat?.classes ?? [{ capability_class: d.capability_class, slots: [] }]).map((c) => (
                       <option key={c.capability_class} value={c.capability_class}>
                         {c.capability_class}
                       </option>
                     ))}
                   </SelectField>
-                  <SelectField label="Size" value={d.size_estimate} onChange={(e) => update(i, { size_estimate: e.target.value })}>
+                  <SelectField label="Size" hint="field.factory.item_size" value={d.size_estimate} onChange={(e) => update(i, { size_estimate: e.target.value })}>
                     {(cat?.sizes ?? ['XS', 'S', 'M', 'L', 'XL']).map((sz) => (
                       <option key={sz} value={sz}>
                         {sz}
                       </option>
                     ))}
                   </SelectField>
-                  <SelectField label="Kind" value={d.kind} onChange={(e) => update(i, { kind: e.target.value })}>
+                  <SelectField label="Kind" hint="field.factory.item_kind" value={d.kind} onChange={(e) => update(i, { kind: e.target.value })}>
                     {(cat?.kinds ?? ['code']).map((k) => (
                       <option key={k} value={k}>
                         {k}
                       </option>
                     ))}
                   </SelectField>
-                  <SelectField label="Level" value={d.level} onChange={(e) => update(i, { level: e.target.value })}>
+                  <SelectField label="Level" hint="field.factory.item_level" value={d.level} onChange={(e) => update(i, { level: e.target.value })}>
                     {(cat?.levels ?? ['L1']).map((l) => (
                       <option key={l} value={l}>
                         {l}
@@ -1143,7 +1176,7 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
                   </SelectField>
                 </div>
                 <div className="mt-3">
-                  <TextArea label="Description" rows={2} value={d.description} onChange={(e) => update(i, { description: e.target.value })} hint="What and why, as the issue would say it. Never a diff." />
+                  <TextArea label="Description" hint="field.factory.item_description" rows={2} value={d.description} onChange={(e) => update(i, { description: e.target.value })} description="What and why, as the issue would say it. Never a diff." />
                 </div>
                 {slots.length > 0 && (
                   <div className="mt-3 space-y-2" data-testid={`backlog-item-${i}-facts`}>
@@ -1151,19 +1184,20 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
                     {slots.map((sl) => (
                       <TextField
                         key={sl.name}
+                        hint="field.factory.item_fact"
                         label={`${sl.question}${sl.kind === 'structural' ? '' : ' (value — optional)'}`}
                         value={d.facts[sl.name] ?? ''}
                         onChange={(e) => setFact(i, sl.name, e.target.value)}
-                        hint={sl.kind === 'structural' ? `structural · ${sl.name} — empty = a gap the run stops on` : `value · ${sl.name} — routes, never blocks`}
+                        description={sl.kind === 'structural' ? `structural · ${sl.name} — empty = a gap the run stops on` : `value · ${sl.name} — routes, never blocks`}
                       />
                     ))}
                   </div>
                 )}
                 {slots.length === 0 && cat && <p className="mt-3 text-xs text-on-surface-muted">{d.capability_class} declares no structural facts: the run assesses readiness from the description alone.</p>}
                 <div className="mt-3 flex flex-wrap items-end gap-3">
-                  <TextField label="Depends on" value={d.depends_on} onChange={(e) => update(i, { depends_on: e.target.value })} hint="item ids, comma-separated" className="min-w-[20ch]" />
+                  <TextField label="Depends on" hint="field.factory.item_depends" value={d.depends_on} onChange={(e) => update(i, { depends_on: e.target.value })} description="item ids, comma-separated" className="min-w-[20ch]" />
                   {items.length > 1 && (
-                    <Button size="sm" variant="ghost" onClick={() => setItems((xs) => xs.filter((_, j) => j !== i))}>
+                    <Button size="sm" variant="ghost" onClick={() => setItems((xs) => xs.filter((_, j) => j !== i))} hint="button.factory.item_remove">
                       Remove item
                     </Button>
                   )}
@@ -1171,7 +1205,7 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
               </fieldset>
             )
           })}
-          <Button size="sm" onClick={() => setItems((xs) => [...xs, emptyItem(nextId(xs), cat)])}>
+          <Button size="sm" onClick={() => setItems((xs) => [...xs, emptyItem(nextId(xs), cat)])} hint="button.factory.item_add">
             Add another item
           </Button>
         </div>

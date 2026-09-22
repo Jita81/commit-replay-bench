@@ -34,6 +34,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useGitHubApp, useHealth, useLedgerVerify, useSettings, useVersion } from '../../api/hooks'
 import { DocLink, Term } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { InsetText, Kicker, PageTitle, SummaryList, type SummaryRow } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
 
@@ -46,7 +47,10 @@ function NextStep({ children, admin, doc }: { children: ReactNode; admin: boolea
       {admin ? (
         <>
           {' '}
-          · <Link to="/settings">Settings</Link>
+          ·{' '}
+          <Hint as={Link} id="link.posture.settings" to="/settings">
+            Settings
+          </Hint>
         </>
       ) : null}
     </span>
@@ -80,9 +84,10 @@ export function PosturePage() {
     {
       name: 'Build and apparatus',
       rows: [
-        { key: 'Version', value: version.data ? `crb ${version.data.crb}` : '…' },
+        { key: 'Version', hint: 'summary.posture.version', value: version.data ? `crb ${version.data.crb}` : '…' },
         {
           key: <Term id="apparatus">Apparatus</Term>,
+          hint: 'summary.posture.apparatus',
           value: version.data ? (
             <>
               {version.data.apparatus} · <Term id="belt">belt set</Term> v5 · routing {version.data.policy}
@@ -91,8 +96,8 @@ export function PosturePage() {
             '…'
           ),
         },
-        { key: 'Policies in force', value: `${version.data?.policy ?? '…'} (routing) · signoff-policy.v3` },
-        { key: 'Licence', value: 'Apache-2.0' },
+        { key: 'Policies in force', hint: 'summary.posture.policies', value: `${version.data?.policy ?? '…'} (routing) · signoff-policy.v3` },
+        { key: 'Licence', hint: 'summary.posture.licence', value: 'Apache-2.0' },
       ],
     },
     {
@@ -100,6 +105,7 @@ export function PosturePage() {
       rows: [
         {
           key: 'Sign-in',
+          hint: 'summary.posture.sign_in',
           value: !version.data ? (
             '…'
           ) : version.data.oidc_enabled ? (
@@ -113,10 +119,11 @@ export function PosturePage() {
             </>
           ),
         },
-        { key: 'Roles', value: 'viewer · operator · approver · admin' },
-        { key: 'Separation of duties', value: 'Enforced at write: the API refuses a sign-off (409 same_actor) when the approver queued the run that produced the attested row, or is the only person behind the cell — never overridable by any setting; every record says what kind of account signed (verifier_kind)' },
+        { key: 'Roles', hint: 'summary.posture.roles', value: 'viewer · operator · approver · admin' },
+        { key: 'Separation of duties', hint: 'summary.posture.separation', value: 'Enforced at write: the API refuses a sign-off (409 same_actor) when the approver queued the run that produced the attested row, or is the only person behind the cell — never overridable by any setting; every record says what kind of account signed (verifier_kind)' },
         {
           key: 'Source control',
+          hint: 'summary.posture.source_control',
           value: !gh.data ? (
             gh.isError ? (
               'GitHub App status unavailable'
@@ -141,6 +148,7 @@ export function PosturePage() {
       rows: [
         {
           key: 'Test executor',
+          hint: 'summary.posture.executor',
           value: !executorKnown ? (
             '…'
           ) : executor === 'docker' ? (
@@ -158,10 +166,11 @@ export function PosturePage() {
             </>
           ),
         },
-        { key: 'Builder posture', value: s ? adminOnly(s.raw?.builder?.executor ? `${s.raw.builder.executor}${s.raw.builder.egress_network ? ` · egress ${s.raw.builder.egress_network}` : ''}` : 'not reported by this deployment') : adminOnly(undefined) },
-        { key: 'Toolchains', value: probeText('toolchains') },
+        { key: 'Builder posture', hint: 'summary.posture.builder', value: s ? adminOnly(s.raw?.builder?.executor ? `${s.raw.builder.executor}${s.raw.builder.egress_network ? ` · egress ${s.raw.builder.egress_network}` : ''}` : 'not reported by this deployment') : adminOnly(undefined) },
+        { key: 'Toolchains', hint: 'summary.posture.toolchains', value: probeText('toolchains') },
         {
           key: 'Worker',
+          hint: 'summary.posture.worker',
           // the worker probe's own sentence (queued runs, last check-in, a stopped worker):
           // degraded, never a 503 — the API pod's readiness is not the worker's liveness
           value: (
@@ -178,15 +187,16 @@ export function PosturePage() {
             </>
           ),
         },
-        { key: 'Secrets', value: 'Read from the environment or mounted files; never persisted, never returned by the API' },
+        { key: 'Secrets', hint: 'summary.posture.secrets', value: 'Read from the environment or mounted files; never persisted, never returned by the API' },
       ],
     },
     {
       name: 'Delivery',
       rows: [
-        { key: 'Writes', value: 'a branch named by the item and one pull request against the repository’s default branch; the factory never writes to the default branch' },
+        { key: 'Writes', hint: 'summary.posture.writes', value: 'a branch named by the item and one pull request against the repository’s default branch; the factory never writes to the default branch' },
         {
           key: 'Permissions',
+          hint: 'summary.posture.permissions',
           value: !gh.data ? (
             '…'
           ) : !gh.data.configured ? (
@@ -210,17 +220,18 @@ export function PosturePage() {
             </>
           ),
         },
-        { key: 'Route gate', value: `a pull request opens only for a cell the capability map routes deliver under ${version.data?.policy ?? '…'}` },
-        { key: 'Override', value: 'an approver may override the gate for one run; the override is an event on the chain naming the approver and the route it overrode' },
-        { key: 'Credentials', value: 'installation tokens minted per push, never stored' },
+        { key: 'Route gate', hint: 'summary.posture.route_gate', value: `a pull request opens only for a cell the capability map routes deliver under ${version.data?.policy ?? '…'}` },
+        { key: 'Override', hint: 'summary.posture.override', value: 'an approver may override the gate for one run; the override is an event on the chain naming the approver and the route it overrode' },
+        { key: 'Credentials', hint: 'summary.posture.credentials', value: 'installation tokens minted per push, never stored' },
       ],
     },
     {
       name: 'Data and audit',
       rows: [
-        { key: 'Raw retention', value: 'Zero by default. Worktrees and transcripts are opt-in per run.' },
+        { key: 'Raw retention', hint: 'summary.posture.retention', value: 'Zero by default. Worktrees and transcripts are opt-in per run.' },
         {
           key: 'Ledger',
+          hint: 'summary.posture.ledger',
           value: !verify.data ? (
             probeText('ledger')
           ) : verify.data.ok ? (
@@ -234,8 +245,8 @@ export function PosturePage() {
             </>
           ),
         },
-        { key: 'Append-only triggers', value: probeText('append_only') },
-        { key: 'Export', value: 'JSONL export and evidence packs by hash' },
+        { key: 'Append-only triggers', hint: 'summary.posture.append_only', value: probeText('append_only') },
+        { key: 'Export', hint: 'summary.posture.export', value: 'JSONL export and evidence packs by hash' },
       ],
     },
   ]

@@ -17,18 +17,25 @@
  *               policy versions — the one place internals appear, because an auditor needs
  *               the provenance of what they are reading — and links to Help and the glossary.
  *               `journeyEyebrow(pathname, sub?)` derives `Journey · 2 of 4 · Baseline` from
- *               the four steps so no screen hand-types its position.
+ *               the four steps so no screen hand-types its position. Every element of the
+ *               chrome — each nav entry (`nav.*`), the health pill, the role chip, Help, the
+ *               theme toggle, Sign out, the stop-condition banner, the footer's version line
+ *               and links — is a `<Hint>` trigger, so the shell explains itself on hover,
+ *               focus and tap on every screen; no native `title` remains.
  * How:          `useAuth` for the principal, `useHealth` / `useVersion` for the chrome facts,
- *               `useLogout` then navigate to `/login`; a skip link precedes the header.
+ *               `useLogout` then navigate to `/login`; a skip link precedes the header; each
+ *               `JOURNEY` / `INSTRUMENT` entry names its hint id.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/App.tsx (mounts this under `RequireAuth`), ui/src/components/Help.tsx
+ * Works with:   ui/src/App.tsx (mounts this under `RequireAuth`), ui/src/components/Hint.tsx
+ *               (the trigger), ui/src/help/hints.ts (`nav.*`, `pill.shell.*`, `button.shell.*`,
+ *               `banner.shell.stop_condition`), ui/src/components/Help.tsx
  *               (`AboutThisScreen`, mounted once here), ui/src/components/PageHeader.tsx
  *               (defaults its eyebrow to `journeyEyebrow`), ui/src/lib/auth.tsx (the
  *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`),
- *               ui/src/lib/theme.ts (the toggle), ui/src/lib/verdict.ts (`probeDisplay` for
- *               the health pill), ui/src/screens/Login/LoginPage.tsx (uses `BRAND`)
- * Tested by:    ui/src/components/Layout.test.tsx (the steps, the eyebrow, Help, the About
+ *               ui/src/lib/verdict.ts (`probeDisplay` for the health pill)
+ * Tested by:    ui/src/help/hints-ratchet.test.tsx (every element of the
+ *               shell carries a hint), ui/src/components/Layout.test.tsx (the steps, the eyebrow, Help, the About
  *               block), ui/e2e/smoke.spec.ts (the shell renders the nav),
  *               ui/e2e/walkthrough/01-login.spec.ts
  *               (the role chip reads the bootstrap admin's role), ui/src/test/utils.tsx
@@ -40,8 +47,10 @@ import { NavLink, Outlet, matchPath, useNavigate } from 'react-router'
 import { useHealth, useLogout, useVersion } from '../api/hooks'
 import { useAuth } from '../lib/auth'
 import { useTheme } from '../lib/theme'
+import type { HintId } from '../help/hints'
 import { Button } from './Button'
 import { AboutThisScreen } from './Help'
+import { Hint } from './Hint'
 import { Pill } from './Pill'
 import { probeDisplay } from '../lib/verdict'
 import { useDecisionCount } from '../screens/Decisions/useDecisionCount'
@@ -59,13 +68,13 @@ export const BRAND = 'Commit Replay Bench'
  * list, the sign-off form and the map grid stay routable, reached from the journey (the
  * Connection page lists repositories; Decisions and the map link to the sign-off form).
  */
-const JOURNEY: Array<{ to: string; label: string; badge?: boolean }> = [
-  { to: '/home', label: 'Home' },
-  { to: '/connect', label: 'Connection' },
-  { to: '/results', label: 'Baseline' },
-  { to: '/decisions', label: 'Decisions', badge: true },
-  { to: '/factory', label: 'Factory' },
-  { to: '/posture', label: 'Deployment' },
+const JOURNEY: Array<{ to: string; label: string; hint: HintId; badge?: boolean }> = [
+  { to: '/home', label: 'Home', hint: 'nav.home' },
+  { to: '/connect', label: 'Connection', hint: 'nav.connect' },
+  { to: '/results', label: 'Baseline', hint: 'nav.baseline' },
+  { to: '/decisions', label: 'Decisions', hint: 'nav.decisions', badge: true },
+  { to: '/factory', label: 'Factory', hint: 'nav.factory' },
+  { to: '/posture', label: 'Deployment', hint: 'nav.posture' },
 ]
 /**
  * The four journey STEPS the eyebrow counts (Home is the start; Deployment is a review page,
@@ -104,14 +113,14 @@ export function journeyEyebrow(pathname: string, sub?: string): string {
   return parts.join(' · ')
 }
 
-const INSTRUMENT: Array<{ to: string; label: string; role: 'viewer' | 'operator' | 'admin' }> = [
-  { to: '/runs', label: 'Runs', role: 'operator' },
-  { to: '/capability', label: 'Map grid', role: 'operator' },
-  { to: '/routing', label: 'Routes', role: 'operator' },
-  { to: '/oracle', label: 'Oracle', role: 'operator' },
-  { to: '/learn', label: 'Learn', role: 'operator' },
-  { to: '/ledger', label: 'Ledger', role: 'viewer' },
-  { to: '/settings', label: 'Settings', role: 'admin' },
+const INSTRUMENT: Array<{ to: string; label: string; role: 'viewer' | 'operator' | 'admin'; hint: HintId }> = [
+  { to: '/runs', label: 'Runs', role: 'operator', hint: 'nav.runs' },
+  { to: '/capability', label: 'Map grid', role: 'operator', hint: 'nav.capability' },
+  { to: '/routing', label: 'Routes', role: 'operator', hint: 'nav.routing' },
+  { to: '/oracle', label: 'Oracle', role: 'operator', hint: 'nav.oracle' },
+  { to: '/learn', label: 'Learn', role: 'operator', hint: 'nav.learn' },
+  { to: '/ledger', label: 'Ledger', role: 'viewer', hint: 'nav.ledger' },
+  { to: '/settings', label: 'Settings', role: 'admin', hint: 'nav.settings' },
 ]
 
 /** Sun / moon / half-disc for the theme toggle; the glyph is decorative, the `aria-label` carries the state. */
@@ -148,7 +157,7 @@ export function Layout() {
             {/* the gaps and the role pill are tighter below sm so pill · role · help · theme · sign out is ONE row at 375 px */}
             <div className="ml-auto flex flex-wrap items-center justify-end gap-x-2.5 gap-y-2 text-[16px] sm:gap-x-4">
               {h && (
-                <Pill tone={h.tone} glyph={h.glyph} size="xs" label={`Instrument health: ${h.label}`}>
+                <Pill tone={h.tone} glyph={h.glyph} size="xs" label={`Instrument health: ${h.label}`} hint="pill.shell.health">
                   {h.label}
                 </Pill>
               )}
@@ -156,23 +165,28 @@ export function Layout() {
                 <span className="inline-flex items-center gap-2.5 sm:gap-3" data-testid="user-chip">
                   {/* the name is a courtesy the role pill does not need: below sm it goes, so the cluster stays on one row at 375 px and "Sign out" is never a third header row */}
                   <span className="hidden sm:inline">{me.display_name || me.email}</span>
-                  <span className="label rounded-[4px] bg-on-primary px-1.5 py-1 text-[12px] font-bold uppercase tracking-[.05em] text-primary sm:px-2 sm:text-[13px]">{me.role}</span>
+                  <Hint id="pill.shell.role" data-component="pill" className="label rounded-[4px] bg-on-primary px-1.5 py-1 text-[12px] font-bold uppercase tracking-[.05em] text-primary sm:px-2 sm:text-[13px]">
+                    {me.role}
+                  </Hint>
                 </span>
               )}
               {/* a compact icon, not a word: the footer carries the written Help · Glossary links on every screen */}
-              <NavLink
+              <Hint
+                as={NavLink}
+                id="nav.help"
                 to="/help"
                 aria-label="Help"
-                title="Help: glossary and guides"
                 className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-on-primary text-[15px] font-bold text-on-primary no-underline"
               >
                 <span aria-hidden>?</span>
-              </NavLink>
-              <Button size="sm" variant="ghost" className="text-on-primary" onClick={cycle} aria-label={`Theme: ${theme}. Switch theme`} title={`Theme: ${theme}`}>
+              </Hint>
+              <Button size="sm" variant="ghost" className="text-on-primary" onClick={cycle} aria-label={`Theme: ${theme}. Switch theme`} hint="button.shell.theme">
                 <span aria-hidden>{THEME_GLYPH[theme]}</span>
               </Button>
               {me && (
-                <button
+                <Hint
+                  as="button"
+                  id="button.shell.sign_out"
                   type="button"
                   className="bg-transparent p-0 text-[16px] text-on-primary underline"
                   onClick={() =>
@@ -182,7 +196,7 @@ export function Layout() {
                   }
                 >
                   Sign out
-                </button>
+                </Hint>
               )}
             </div>
           </div>
@@ -191,9 +205,11 @@ export function Layout() {
           <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap px-5 p-0">
             {JOURNEY.map((n) => (
               <li key={n.to}>
-                <NavLink
+                <Hint
+                  as={NavLink}
+                  id={n.hint}
                   to={n.to}
-                  className={({ isActive }) =>
+                  className={({ isActive }: { isActive: boolean }) =>
                     `flex items-center gap-2 border-b-4 px-4 py-3.5 text-[16px] leading-tight text-on-primary no-underline hover:bg-[#002265] ${
                       isActive ? 'border-on-primary font-bold' : 'border-transparent'
                     }`
@@ -201,7 +217,7 @@ export function Layout() {
                 >
                   {n.label}
                   {n.badge && <DecisionsBadge />}
-                </NavLink>
+                </Hint>
               </li>
             ))}
           </ul>
@@ -213,16 +229,18 @@ export function Layout() {
             </li>
             {instrument.map((n) => (
               <li key={n.to}>
-                <NavLink
+                <Hint
+                  as={NavLink}
+                  id={n.hint}
                   to={n.to}
-                  className={({ isActive }) =>
+                  className={({ isActive }: { isActive: boolean }) =>
                     `inline-flex h-8 items-center rounded-[4px] px-2.5 text-xs no-underline ${
                       isActive ? 'bg-primary-container font-bold text-primary' : 'text-on-surface-muted hover:bg-surface-highest hover:text-on-surface'
                     }`
                   }
                 >
                   {n.label}
-                </NavLink>
+                </Hint>
               </li>
             ))}
           </ul>
@@ -236,19 +254,19 @@ export function Layout() {
       <footer className="border-t border-border px-5 py-3 text-center text-[11px] text-on-surface-muted">
         {BRAND}
         {version.data && (
-          <span className="num font-mono">
+          <Hint id="nav.version_line" className="num font-mono">
             {' '}
             · crb {version.data.crb} · apparatus {version.data.apparatus} · policy {version.data.policy}
-          </span>
+          </Hint>
         )}
         {' · '}
-        <NavLink to="/help" className="underline">
+        <Hint as={NavLink} id="nav.footer_help" to="/help" className="underline">
           Help
-        </NavLink>
+        </Hint>
         {' · '}
-        <NavLink to="/help#terms" className="underline">
+        <Hint as={NavLink} id="nav.footer_glossary" to="/help#terms" className="underline">
           Glossary
-        </NavLink>
+        </Hint>
       </footer>
     </div>
   )
@@ -259,9 +277,9 @@ function DecisionsBadge() {
   const n = useDecisionCount()
   if (n === null) return null
   return (
-    <span className="inline-block rounded-[10px] bg-on-primary px-[7px] py-[5px] text-[14px] font-bold leading-none text-primary-deep" aria-label={`${n} decisions waiting`}>
+    <Hint id="nav.decisions_count" tabStop={false} className="inline-block rounded-[10px] bg-on-primary px-[7px] py-[5px] text-[14px] font-bold leading-none text-primary-deep" aria-label={`${n} decisions waiting`}>
       {n}
-    </span>
+    </Hint>
   )
 }
 
@@ -278,7 +296,10 @@ function StopConditionBanner() {
   return (
     <div className="bg-status-red text-on-primary" role="alert">
       <div className="mx-auto max-w-[1400px] px-5 py-4 text-[19px] leading-[1.47]">
-        <strong>Delivery halted — {falseQ1} false-Q1 row{falseQ1 === 1 ? '' : 's'} on the ledger.</strong> Nothing measured is evidence until it is investigated. No policy setting can override this.{' '}
+        <Hint as="strong" id="banner.shell.stop_condition">
+          Delivery halted — {falseQ1} false-Q1 row{falseQ1 === 1 ? '' : 's'} on the ledger.
+        </Hint>{' '}
+        Nothing measured is evidence until it is investigated. No policy setting can override this.{' '}
         <NavLink to="/ledger" className="font-bold text-on-primary">
           Investigate in the ledger
         </NavLink>

@@ -13,11 +13,13 @@
  *               Home's 8 tasks and the back-link names the walk (J-HEL-7, J-ONR-13), that a
  *               repository with no gold-clean task points at stage 3 of the walk, and that a
  *               replay already queued or running replaces the red button with a banner naming
- *               the run — never a second spend (J-ONR-4).
+ *               the run — never a second spend (J-ONR-4); and that every field, row and the
+ *               button carry a hint, with the attempts radio opening on hover.
  * How:          `mockApi` + `renderApp` with `path` for `useParams`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
- * Works with:   ui/src/screens/Connect/MeasurePage.tsx
+ * Works with:   ui/src/screens/Connect/MeasurePage.tsx, ui/src/help/hints.ts (the copy the
+ *               hover test expects), ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Connect/MeasurePage.test.tsx
  * Touch when:   the run request or the estimate changes.
  */
@@ -25,7 +27,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PRINCIPAL, json, mockApi, renderApp } from '../../test/utils'
+import { unhinted } from '../../help/hints-collector'
+import { PRINCIPAL, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { MeasurePage } from './MeasurePage'
 
 const REPO = { name: 'cobra', language: 'go', runner: 'go', url: 'https://github.com/spf13/cobra', clone_path: '', probe: { status: 'ok', run_id: 'r', checked: 'x', detail: '' }, task_counts: { total: 36, standard: 30, hard: 6, gold_clean: 32, gold_failed: 4, unchecked: 0 }, last_run: null, created: '', updated: '', config: {} }
@@ -141,5 +144,26 @@ describe('MeasurePage', () => {
     expect(screen.queryByRole('button', { name: /Start the run/ })).not.toBeInTheDocument()
     expect(screen.getByTestId('before-you-start')).not.toHaveTextContent('Estimated cost')
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  it('every radio, checkbox, summary row, link and the red button carry a hint; the attempts radio opens on hover with the registry copy', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': { ...REPO, task_counts: { ...REPO.task_counts, gold_clean: 12 } },
+      'GET /capability-map': MAP,
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: 'configured: claude_code_cli', data: { anthropic: false, claude_code_cli: true } }] },
+    })
+    const { container } = renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    await waitFor(() => expect(screen.getByRole('button', { name: /Start the run/ })).toHaveAttribute('data-hint', 'button.measure.start'))
+    expect(unhinted(container)).toEqual([])
+    for (const id of ['link.measure.back', 'nav.measure.kicker', 'field.measure.retain_worktrees', 'field.measure.retain_transcripts', 'stat.measure.gold_cap', 'stat.measure.estimate', 'summary.measure.builder', 'link.measure.every_knob', 'summary.measure.budget_cap', 'summary.measure.retention', 'summary.measure.posture']) {
+      expect(container.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
+    }
+    // the radio's label is the trigger: the input keeps the tab stop, and focusing it opens the same bubble
+    const radio = screen.getByLabelText(/10 attempts/)
+    const label = radio.closest('[data-hint="field.measure.attempts"]')!
+    expect(label).not.toHaveAttribute('tabindex')
+    await expectHintOpens(label, 'field.measure.attempts')
+    expect(screen.getByRole('link', { name: /Every knob/ })).toHaveAttribute('href', '/runs')
   })
 })

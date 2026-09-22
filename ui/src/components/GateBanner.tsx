@@ -9,16 +9,21 @@
  *               only when every criterion is `true`, CLOSED (amber) while one is `false`,
  *               PENDING while one is `null`, and REFUSED (red) only when the server refused
  *               (a 409). Each row carries a glyph and a screen-reader word as well as its
- *               colour; `data-state` exposes the verdict to tests.
+ *               colour; `data-state` exposes the verdict to tests. A criterion's `hint` (a
+ *               registry id) makes its label the hover / focus / tap trigger for what the
+ *               row checks; the section carries `data-component="gate"` so the ratchet can
+ *               require one on every row.
  * How:          Count failing / pending criteria → pick tone, glyph and state → a `<section>`
  *               labelled by its heading with the action slot and the rows.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
- * Works with:   ui/src/screens/Signoff/SignoffPage.tsx (the policy clauses as criteria; a 409
+ * Works with:   ui/src/components/Hint.tsx (the row trigger), ui/src/help/hints.ts (`gate.*`
+ *               ids), ui/src/screens/Signoff/SignoffPage.tsx (the policy clauses as criteria; a 409
  *               as `refused`), ui/src/screens/Ledger/LedgerPage.tsx (chain intact, false-Q1 =
  *               0), ui/src/screens/Oracle/OraclePage.tsx (the controls verdict),
  *               ui/src/components/ErrorState.tsx (what a refusal outside a gate looks like)
- * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx (CLOSED / REFUSED / OPEN states),
+ * Tested by:    ui/src/help/hints-ratchet.test.tsx (the hint contract),
+ *               ui/src/screens/Signoff/SignoffPage.test.tsx (CLOSED / REFUSED / OPEN states),
  *               ui/e2e/walkthrough/08-signoff.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (the ledger gate OPEN)
  * Touch when:   a gate gains a criterion — add the row at the call site, not here; never for a
@@ -27,6 +32,8 @@
  *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
  */
 import type { ReactNode } from 'react'
+import type { HintId } from '../help/hints'
+import { Hint } from './Hint'
 
 /** One check-row; `null` = not yet evaluated (pending), so a gate is never green before its data arrived. */
 export interface GateCriterion {
@@ -34,6 +41,8 @@ export interface GateCriterion {
   /** true = satisfied, false = failed, null = not yet evaluated. */
   ok: boolean | null
   detail?: ReactNode
+  /** What this row checks and what failing it means — a registry id; the ratchet requires one on every row. */
+  hint?: HintId
 }
 
 interface GateBannerProps {
@@ -74,6 +83,7 @@ export function GateBanner({ title, criteria, action, refused, eyebrow, ...rest 
   return (
     <section
       data-testid={rest['data-testid'] ?? 'gate-banner'}
+      data-component="gate"
       data-state={state}
       aria-labelledby="gate-title"
       className={`rounded-[var(--radius-card)] border-2 px-5 py-4 ${tone}`}
@@ -104,7 +114,13 @@ export function GateBanner({ title, criteria, action, refused, eyebrow, ...rest 
               </span>
               <span className="sr-only">{sr}:</span>
               <span className="min-w-0">
-                <span className="font-semibold text-on-surface">{c.label}</span>
+                {c.hint ? (
+                  <Hint id={c.hint} className="font-semibold text-on-surface">
+                    {c.label}
+                  </Hint>
+                ) : (
+                  <span className="font-semibold text-on-surface">{c.label}</span>
+                )}
                 {c.detail && <span className="num block text-xs text-on-surface-muted">{c.detail}</span>}
               </span>
             </li>

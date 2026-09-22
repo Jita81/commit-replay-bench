@@ -32,6 +32,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Runner } from '../../api/types'
 import { Button } from '../../components/Button'
 import { SelectField, TextArea, TextField } from '../../components/Field'
+import { Hint } from '../../components/Hint'
 import { formatJsonObject, parseJsonObject } from '../../lib/jsonObject'
 import { KeyValueEditor, ListEditor } from './ListEditors'
 import { sameJson } from './repoConfigModel'
@@ -133,7 +134,7 @@ export function RunnerOptsEditor({ runner, value, onChange, errors = {}, onJsonE
             'Pick a runner to see its options.'
           )}
         </div>
-        <div role="group" aria-label="Editor view" className="inline-flex overflow-hidden rounded-[var(--radius-control)] border border-border">
+        <Hint as="div" id="field.repo_config.runner_view" role="group" aria-label="Editor view" className="inline-flex overflow-hidden rounded-[var(--radius-control)] border border-border">
           {(['form', 'json'] as const).map((m) => (
             <button
               key={m}
@@ -146,12 +147,13 @@ export function RunnerOptsEditor({ runner, value, onChange, errors = {}, onJsonE
               {m === 'form' ? 'Form' : 'Raw JSON'}
             </button>
           ))}
-        </div>
+        </Hint>
       </div>
 
       {mode === 'json' ? (
         <TextArea
           label={jsonLabel}
+          hint="field.repo_config.runner_json"
           value={text}
           onChange={(e) => onText(e.target.value)}
           rows={jsonRows}
@@ -160,7 +162,7 @@ export function RunnerOptsEditor({ runner, value, onChange, errors = {}, onJsonE
           className="font-mono text-xs"
           placeholder={jsonPlaceholder}
           error={jsonError}
-          hint="The whole runner_opts object, as stored. Edits apply as you type once the JSON parses; switch back to Form to see them key by key."
+          description="The whole runner_opts object, as stored. Edits apply as you type once the JSON parses; switch back to Form to see them key by key."
           data-testid="runner-opts-json"
         />
       ) : (
@@ -179,7 +181,7 @@ export function RunnerOptsEditor({ runner, value, onChange, errors = {}, onJsonE
                       {JSON.stringify(value[k])}
                     </span>
                     {!disabled && (
-                      <Button size="sm" onClick={() => setKey(k, undefined)} aria-label={`Remove ${k}`} data-testid={`runner-opts-extra-remove-${k}`}>
+                      <Button size="sm" onClick={() => setKey(k, undefined)} aria-label={`Remove ${k}`} data-testid={`runner-opts-extra-remove-${k}`} hint="button.repo_config.runner_remove">
                         Remove
                       </Button>
                     )}
@@ -205,9 +207,10 @@ function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec;
       return (
         <TextField
           label={spec.label}
+          hint="field.repo_config.runner_opt"
           value={asText(value)}
           placeholder={spec.placeholder}
-          hint={hint}
+          description={hint}
           error={error}
           disabled={disabled}
           spellCheck={false}
@@ -220,9 +223,10 @@ function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec;
       return (
         <TextField
           label={spec.label}
+          hint="field.repo_config.runner_opt"
           value={asText(value)}
           placeholder={spec.placeholder}
-          hint={hint}
+          description={hint}
           error={error}
           disabled={disabled}
           inputMode="numeric"
@@ -236,7 +240,7 @@ function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec;
       )
     case 'bool':
       return (
-        <SelectField label={spec.label} value={asBool(value)} hint={hint} error={error} disabled={disabled} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value === 'true')} data-testid={testid}>
+        <SelectField label={spec.label} hint="field.repo_config.runner_opt" value={asBool(value)} description={hint} error={error} disabled={disabled} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value === 'true')} data-testid={testid}>
           <option value="">(default: {spec.defaultBool ? 'true' : 'false'})</option>
           <option value="true">true</option>
           <option value="false">false</option>
@@ -244,7 +248,7 @@ function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec;
       )
     case 'choice':
       return (
-        <SelectField label={spec.label} value={asText(value)} hint={hint} error={error} disabled={disabled} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} data-testid={testid}>
+        <SelectField label={spec.label} hint="field.repo_config.runner_opt" value={asText(value)} description={hint} error={error} disabled={disabled} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} data-testid={testid}>
           <option value="">(default)</option>
           {(spec.options ?? []).map((o) => (
             <option key={o} value={o}>
@@ -256,7 +260,7 @@ function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec;
     case 'list':
       return (
         <div className="sm:col-span-2">
-          <ListEditor label={spec.label} values={asList(value)} placeholder={spec.placeholder} hint={hint} error={error} disabled={disabled} testid={testid} onChange={(vs) => onChange(vs.length ? vs : undefined)} addLabel="Add item" />
+          <ListEditor label={spec.label} values={asList(value)} placeholder={spec.placeholder} hint={hint} hintId="field.repo_config.runner_opt" error={error} disabled={disabled} testid={testid} onChange={(vs) => onChange(vs.length ? vs : undefined)} addLabel="Add item" />
         </div>
       )
     case 'env':
@@ -266,6 +270,7 @@ function OptControl({ spec, value, error, disabled, onChange }: { spec: OptSpec;
             label={spec.label}
             entries={asEnv(value)}
             hint={hint}
+            hintId="field.repo_config.runner_opt"
             error={error}
             disabled={disabled}
             testid={testid}

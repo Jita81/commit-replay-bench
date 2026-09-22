@@ -1,5 +1,6 @@
 /**
- * 11-screens — every route × persona × width, captured, and the About block on every one.
+ * 11-screens — every route × persona × width, captured, the About block on every one, and the
+ * hints: a sample opens on hover (or tap at phone width), axe stays clean with one open.
  *
  * Runs after 01–09 so the stack carries the data they produced. For each persona (viewer /
  * operator / approver / admin) it visits every route at desktop (1280×900) and phone
@@ -8,6 +9,16 @@
  * `<CRB_E2E_OUTPUT_DIR>/screens/`, and asserts that every authenticated route except the
  * help pages renders the "About this screen" block (`data-testid="about-this-screen"`) —
  * the one help mechanism, mounted once in the shell, must reach every screen for every role.
+ * On every route it also samples up to five hinted elements (`data-hint`: first, last and
+ * three evenly spaced), opens each one's bubble — hover at desktop width, a touch
+ * `pointerdown` at phone width, where no hover exists — asserts the `role="tooltip"` the element's
+ * `aria-describedby` names becomes visible with a full sentence, runs axe (WCAG 2.1 AA)
+ * with the bubble open, and closes it with Escape. One keyboard pass per persona at 1280
+ * tabs through the first twenty focusable elements of /results and asserts that focusing a
+ * hinted one shows its bubble and tabbing away hides it. One dialog pass (the operator at
+ * 1280) opens "Add a repository" and asserts a field's bubble paints above the modal's top
+ * layer (`elementFromPoint`), closes on the first keystroke, and that one Escape closes the
+ * bubble but not the dialog.
  *
  * Accounts: the viewer / operator / approver are created through the API as the admin
  * (POST /users, CSRF double-submit) if missing. Their passwords are STABLE per stack
@@ -26,20 +37,30 @@
  *               through the form, visits every route, saves a full-page screenshot under
  *               `<CRB_E2E_OUTPUT_DIR>/screens/`, asserts the About block is present on
  *               every route that is not /help and, at 375 px, that the top bar is at most
- *               two rows (a wrapped "Sign out" is a phone-width defect). It changes no data;
- *               the fixture context goes into the test's annotations, never stdout.
+ *               two rows (a wrapped "Sign out" is a phone-width defect); opens a sample of
+ *               the route's hints (hover, or a touch pointerdown at 375 px) and asserts each bubble shows and axe stays
+ *               clean with it open; tabs through /results at 1280 for the keyboard path;
+ *               opens the Add-a-repository dialog once (operator, 1280) for the top-layer,
+ *               typing and Escape checks a jsdom test cannot make. It
+ *               changes no data; the fixture context goes into the test's annotations, never
+ *               stdout.
  * How:          Playwright; `signIn` from support.ts; the routes list is built from the
- *               primary repo, the run and the task found through the API as the admin.
+ *               primary repo, the run and the task found through the API as the admin;
+ *               `AxeBuilder` with the WCAG tags; the bubble is found through the trigger's
+ *               `aria-describedby`, never by text, so the spec needs no import from src.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/e2e/walkthrough/support.ts (`env`, `signIn`, `primary`),
  *               ui/src/components/Help.tsx (the About block this asserts),
- *               ui/src/components/Layout.tsx (mounts it once), ui/src/App.tsx (the routes
- *               this list must cover), ui/e2e/walkthrough/README.md (the spec table)
+ *               ui/src/components/Hint.tsx (the `data-hint` triggers and `role="tooltip"`
+ *               bubbles this opens), ui/src/components/Layout.tsx (mounts the About block
+ *               once; its nav is always in the sample), ui/src/App.tsx (the routes this list
+ *               must cover), ui/e2e/walkthrough/README.md (the spec table)
  * Tested by:    ui/e2e/walkthrough/11-screens.spec.ts (this file; run by scripts/walkthrough.sh)
  * Touch when:   a screen is added (add its route and slug to `routes()`); a persona is added.
  */
-import { test as base, expect, type Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
+import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { env, personaPassword, primary, signIn } from './support'
@@ -133,6 +154,114 @@ async function shot(page: Page, persona: string, slug: string, width: number): P
   await page.screenshot({ path, fullPage: true, animations: 'disabled' })
 }
 
+const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
+
+/** Up to `k` indexes out of `n`: the first, the last and the rest evenly spaced. */
+function sample(n: number, k: number): number[] {
+  if (n <= k) return Array.from({ length: n }, (_, i) => i)
+  const out = new Set<number>()
+  for (let i = 0; i < k; i += 1) out.add(Math.round((i * (n - 1)) / (k - 1)))
+  return Array.from(out).sort((a, b) => a - b)
+}
+
+/** The `role="tooltip"` a hinted element's `aria-describedby` names (the last id: a field lists its description first). */
+async function bubbleOf(page: Page, el: Locator): Promise<Locator> {
+  const ids = ((await el.getAttribute('aria-describedby')) ?? '').split(' ').filter(Boolean)
+  expect(ids.length, 'a hinted element carries aria-describedby').toBeGreaterThan(0)
+  return page.locator(`#${ids[ids.length - 1]!.replace(/([:.])/g, '\\$1')}`)
+}
+
+/**
+ * A hint inside a modal dialog: a native `<dialog>` opened with `showModal()` paints in the
+ * browser's top layer, above any z-index, so a bubble portalled to `<body>` is invisible
+ * there even though `toBeVisible()` and jsdom say otherwise (verifier, 2026-09-22). This
+ * opens "Add a repository", hovers the Name field, and asserts with `elementFromPoint` — which
+ * honours the top layer — that the bubble is what paints at its own centre; then that the
+ * first keystroke closes it (so it does not cover the next field), and that one Escape with
+ * a bubble open closes the bubble and NOT the dialog (the typed value survives).
+ */
+async function dialogHints(page: Page, where: string): Promise<void> {
+  await page.goto('/repos')
+  await settle(page)
+  await page.getByRole('button', { name: 'Add repo' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Add a repository' })
+  await expect(dialog).toBeVisible()
+  expect(await dialog.evaluate((d) => d.matches(':modal')), `${where}: the dialog is modal (top layer)`).toBe(true)
+  const name = dialog.getByLabel(/^Name/)
+  await name.hover()
+  const tip = await bubbleOf(page, name)
+  await expect(tip, `${where}: the Name field's hint did not open on hover`).toBeVisible({ timeout: 1000 })
+  await expect(tip).toHaveCSS('opacity', '1')
+  const painted = await tip.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return { onTop: hit === el || el.contains(hit), inDialog: el.closest('dialog') !== null }
+  })
+  expect(painted.inDialog, `${where}: the bubble is portalled into the dialog, not <body>`).toBe(true)
+  expect(painted.onTop, `${where}: the dialog paints over the bubble (elementFromPoint at the bubble's centre is not the bubble)`).toBe(true)
+  // typing closes it: the bubble sat under the field, over the next label — and a pointer
+  // over the field while typing does not bring it back
+  await name.focus()
+  await page.keyboard.type('probe')
+  await expect(tip, `${where}: the first keystroke did not close the field's hint`).toBeHidden()
+  await expect(name).toHaveValue('probe')
+  await page.mouse.move(0, 0)
+  await name.hover()
+  await page.waitForTimeout(250)
+  await expect(tip, `${where}: the hint came back over the next field while typing`).toBeHidden()
+  // Tab to the next field: its bubble opens on focus; one Escape closes that bubble and
+  // NOT the dialog (the typed value survives); a second Escape, with nothing open, closes it
+  await page.keyboard.press('Tab')
+  const next = page.locator(':focus')
+  const nextTip = await bubbleOf(page, next.locator('xpath=ancestor-or-self::*[@data-hint][1]'))
+  await expect(nextTip, `${where}: the next field's hint did not open on focus`).toBeVisible({ timeout: 1000 })
+  await page.keyboard.press('Escape')
+  await expect(nextTip).toBeHidden()
+  await expect(dialog, `${where}: Escape with a hint open also closed the dialog`).toBeVisible()
+  await expect(name).toHaveValue('probe')
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+}
+
+/**
+ * Open a sample of the route's hints — hover at desktop width, a touch pointerdown at phone
+ * width, where no hover exists — and assert each bubble shows a full sentence, axe stays
+ * clean with it open, and Escape closes it.
+ */
+async function hintSample(page: Page, where: string, width: number): Promise<void> {
+  const hinted = page.locator('[data-hint]')
+  const n = await hinted.count()
+  expect(n, `${where}: no hinted element`).toBeGreaterThan(0)
+  for (const i of sample(n, 5)) {
+    const el = hinted.nth(i)
+    const id = await el.getAttribute('data-hint')
+    if (!(await el.isVisible())) continue // a hidden-below-md column header at 375 px
+    await el.scrollIntoViewIfNeeded()
+    // the scroll event that scrollIntoView queues lands on the next frame and would close a
+    // bubble that opened before it (a bubble closes on scroll by design): let it pass first
+    await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))))
+    // a phone has no hover: the touch path is the `pointerdown` a tap begins with, dispatched
+    // on the trigger itself — a full tap would also click, and a hinted nav link or table row
+    // would navigate away from the route under test
+    if (width === 375) await el.dispatchEvent('pointerdown', { pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true })
+    else await el.hover()
+    const tip = await bubbleOf(page, el)
+    await expect(tip, `${where}: hint ${id} did not open on ${width === 375 ? 'tap' : 'hover'}`).toBeVisible({ timeout: 1000 })
+    await expect(tip).toHaveAttribute('role', 'tooltip')
+    // let the 120 ms fade finish: axe samples the blended colour of a half-faded bubble as a contrast failure
+    await expect(tip).toHaveCSS('opacity', '1')
+    const text = (await tip.textContent()) ?? ''
+    expect(text.length, `${where}: hint ${id} is too short to explain anything`).toBeGreaterThanOrEqual(40)
+    expect(text.trim().endsWith('.'), `${where}: hint ${id} is not a sentence`).toBe(true)
+    expect(await tip.locator('a').count(), `${where}: hint ${id} contains a link`).toBe(0)
+    const a11y = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
+    expect(a11y.violations, `${where}: axe with hint ${id} open: ${JSON.stringify(a11y.violations, null, 2)}`).toEqual([])
+    await page.keyboard.press('Escape')
+    await expect(tip, `${where}: hint ${id} did not close on Escape`).toBeHidden()
+    if (width === 375) await page.mouse.move(0, 0)
+  }
+}
+
 test.describe('11-screens: every route × persona × width, with the About block', () => {
   test('accounts exist and the run / task anchors are known (admin, via the API)', async ({ page, request }) => {
     await signIn(page)
@@ -200,7 +329,30 @@ test.describe('11-screens: every route × persona × width, with the About block
           } else {
             await expect(about, `${persona} @ ${vp.width} ${r.path}: the help pages carry no About block`).toHaveCount(0)
           }
+          await hintSample(page, `${persona} @ ${vp.width} ${r.path}`, vp.width)
         }
+        if (vp.width === 1280) {
+          // the keyboard path: focus shows a hinted control's bubble, Tab away hides it
+          await page.goto('/results')
+          await settle(page)
+          let shown = 0
+          let previous: Locator | null = null
+          for (let i = 0; i < 20; i += 1) {
+            await page.keyboard.press('Tab')
+            if (previous) await expect(previous, `${persona} @ 1280 /results: the hint stayed open after Tab moved on`).toBeHidden()
+            previous = null
+            const active = page.locator(':focus')
+            if ((await active.count()) === 0) break
+            const trigger = active.locator('xpath=ancestor-or-self::*[@data-hint][1]')
+            if ((await trigger.count()) === 0) continue
+            const tip = await bubbleOf(page, trigger)
+            await expect(tip, `${persona} @ 1280 /results: focus did not open the hint on tab stop ${i + 1}`).toBeVisible({ timeout: 1000 })
+            shown += 1
+            previous = tip
+          }
+          expect(shown, `${persona} @ 1280 /results: no hinted element among the first 20 tab stops`).toBeGreaterThan(0)
+        }
+        if (vp.width === 1280 && persona === 'operator') await dialogHints(page, `${persona} @ 1280 /repos`)
         await page.context().clearCookies()
       })
     }

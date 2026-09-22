@@ -11,13 +11,15 @@
  *               sighted", a wide interval "—" + "interval too wide"; and that the licence
  *               sentence names repo, apparatus, belt set, gate, n, class × size, rate with
  *               interval, builder/model (EVIDENCE-AND-CLAIMS §7), approver and date, and says
- *               nothing about anything else.
+ *               nothing about anything else; and that every header and every line of a cell
+ *               carries a hint, with the numbers out of the tab order and the route tag in it.
  * How:          Pure renders over hand-built cells and sign-offs.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Results/MapTable.tsx (renders the behaviour tested here),
  *               ui/src/api/types.ts (`signoffScopeMatches`, the scope rule the sign-off state follows),
- *               ui/src/screens/Results/ResultsPage.tsx (mounts the table and the licence sentence)
+ *               ui/src/screens/Results/ResultsPage.tsx (mounts the table and the licence sentence),
+ *               ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Results/MapTable.test.tsx
  * Touch when:   a cell line or the sentence's qualifiers change.
  */
@@ -26,6 +28,7 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import type { CapabilityCell, CapabilityMap, Signoff } from '../../api/types'
+import { unhinted } from '../../help/hints-collector'
 import { MapTable, licenseSentence, signStateOf } from './MapTable'
 
 function cell(over: Partial<CapabilityCell>): CapabilityCell {
@@ -71,6 +74,24 @@ describe('MapTable', () => {
     expect(due.querySelector('a')).toHaveAttribute('href', '/signoff?repo=cobra&cell=refactor%7CXS')
     expect(screen.getByTestId('cell-refactor-S')).toHaveTextContent('sign-off stale')
     expect(signStateOf(cells[5]!, signoffs).state).toBe('stale')
+  })
+
+  it('every column header and every line of a cell carries a hint; the numbers stay out of the tab order, the route tag in it', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <MapTable map={MAP([cell({}), cell({ size: 'XL', n: 0, route: 'granularize', reason_code: 'granularize' })])} signoffs={[]} repo="cobra" />
+      </MemoryRouter>,
+    )
+    expect(unhinted(container)).toEqual([])
+    expect(Array.from(container.querySelectorAll('th[scope="col"] [data-hint]')).map((th) => th.getAttribute('data-hint'))).toEqual(['col.map.class', 'col.map.size', 'col.map.size', 'col.map.size', 'col.map.size', 'col.map.size'])
+    const measured = screen.getByTestId('cell-bug.fix-XS')
+    expect(Array.from(measured.querySelectorAll('[data-hint]')).map((el) => el.getAttribute('data-hint'))).toEqual(['map.cell.route', 'map.cell.n', 'map.cell.point', 'map.cell.interval', 'map.cell.apparatus', 'map.cell.signoff'])
+    expect(measured.querySelector('[data-hint="map.cell.route"]')).toHaveAttribute('tabindex', '0')
+    expect(measured.querySelector('[data-hint="map.cell.point"]')).not.toHaveAttribute('tabindex')
+    expect(screen.getByTestId('cell-bug.fix-XL').querySelector('[data-hint]')).toHaveAttribute('data-hint', 'map.cell.granularize')
+    expect(screen.getByTestId('cell-bug.fix-L').querySelector('[data-hint]')).toHaveAttribute('data-hint', 'map.cell.not_measured')
+    // a class row header explains the class without a tab stop of its own
+    expect(container.querySelector('th[scope="row"] [data-hint="col.map.class"]')).not.toHaveAttribute('tabindex')
   })
 
   it('a reader who cannot sign sees "sign-off due" as plain text, never as an action', () => {

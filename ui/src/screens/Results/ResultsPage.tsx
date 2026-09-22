@@ -19,7 +19,12 @@
  *               and a queued replay says it is waiting, with no attempt number. A
  *               reader is offered only the acts their role can take (Decisions' rule): a
  *               viewer reads, and sees who acts. Reached without `?repo=`, the screen chooses
- *               the most recently updated repository itself.
+ *               the most recently updated repository itself. Every element a reader meets —
+ *               the in-flight banner's line, each tile, the map's headers and cells, the
+ *               licence heading, the throughput callout, every door button and each
+ *               decision's kind pill and act — is a hint trigger (`stat.results.*`,
+ *               `banner.results.*`, `button.results.*`, `pill.results.decision_kind`), so
+ *               what a number counts and what its value means opens on hover, focus and tap.
  * How:          `useRepoParam({ defaultToLatest })` + `RepoPicker`; `useCapabilityMap`
  *               (summary + cells), `useOracleControls`, `useOracle`, `useSignoffs`,
  *               `useFactoryTasks` → `decisionsFor` for the "waiting on a person" panel;
@@ -31,10 +36,11 @@
  *               ui/src/screens/Decisions/decisions.ts (the rows and the role rule reused
  *               here), ui/src/components/RepoPicker.tsx (`defaultToLatest`),
  *               ui/src/components/StatTile.tsx (the tile anatomy), ui/src/components/Help.tsx
- *               (`Term` on the route tiles), ui/src/screens/Capability/CapabilityPage.tsx
- *               (the full grid), ui/src/screens/Connect/ConnectPage.tsx (the walk that leads
- *               here), docs/EVIDENCE-AND-CLAIMS.md (what a number may be said to mean)
- * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx
+ *               (`Term` on the route tiles), ui/src/help/hints.ts (the `stat.results.*` copy;
+ *               the trigger is `Hint`), ui/src/screens/Capability/CapabilityPage.tsx
+ *               (the full grid), docs/EVIDENCE-AND-CLAIMS.md (what a number may be said to mean)
+ * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
+ *               (every element resolves to a registry id)
  * Touch when:   a headline fact is added to the map summary; the wording of what `deliver`
  *               means changes (EVIDENCE-AND-CLAIMS §6 first).
  */
@@ -48,11 +54,13 @@ import { LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { StatTile } from '../../components/StatTile'
 import { Term } from '../../components/Help'
+import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
 import { kOfN } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
@@ -61,8 +69,14 @@ import { InsetText, NotificationBanner, WarningCallout } from '../../components/
 import { MapTable, licenseSentence } from './MapTable'
 
 const CONTROLS_TONE: Record<string, Tone> = { passed: 'green', failed: 'red', thin: 'amber', escaped: 'red', unmeasured: 'muted' }
-/** The four routes the rule produces, as tiles — each label is a term with its definition. */
+/** The four routes the rule produces, as tiles — each label is a term with its definition, each tile a hint. */
 const ROUTE_TILES = ['deliver', 'calibrate', 'granularize', 'human'] as const
+const ROUTE_TILE_HINT: Record<(typeof ROUTE_TILES)[number], HintId> = {
+  deliver: 'stat.results.route_deliver',
+  calibrate: 'stat.results.route_calibrate',
+  granularize: 'stat.results.route_granularize',
+  human: 'stat.results.route_human',
+}
 
 function pct(x: number): string {
   return `${(x * 100).toFixed(0)}%`
@@ -146,13 +160,13 @@ export function ResultsPage() {
         <>
           {replayRunning && (
             <NotificationBanner title={replayQueued ? 'A measurement is queued' : 'A measurement is running'}>
-              <p className="m-0">
+              <Hint as="p" id="banner.results.replay_running" className="m-0">
                 {replayQueued
                   ? `A measurement is waiting for a worker${(run.data?.progress?.done ?? 0) > 0 ? ` — ${run.data?.progress?.done} attempt(s) were graded before it went back to the queue` : '; nothing has been graded yet'}.`
                   : `A measurement is running${replayProgress ? `: attempt ${replayProgress}, $${(run.data?.cost_usd ?? 0).toFixed(2)} spent so far` : ''}.`}{' '}
                 The numbers on this page change as each attempt is graded.{' '}
                 <Link to={`/runs/${encodeURIComponent(activeReplayId)}`}>Open the run</Link>
-              </p>
+              </Hint>
             </NotificationBanner>
           )}
           <Card title="Is the instrument trustworthy here?" eyebrow="the gates every number below stands under">
@@ -163,7 +177,8 @@ export function ResultsPage() {
                 n={controls.data?.n_rows ?? null}
                 apparatus={controls.data ? controlsApparatus(controls.data.apparatus) : 'seven deliberate cheats the grader must catch'}
                 tone={verdict ? CONTROLS_TONE[verdict.state] : 'muted'}
-                hint={controls.data ? `${controls.data.violations} violations · ${controls.data.escapes} escapes · ${controls.data.not_constructible} not constructible` : verdict ? undefined : 'run the controls from Connect'}
+                hint="stat.results.controls"
+                footer={controls.data ? `${controls.data.violations} violations · ${controls.data.escapes} escapes · ${controls.data.not_constructible} not constructible` : verdict ? undefined : 'run the controls from Connect'}
                 data-testid="tile-negative-controls"
               />
               <StatTile
@@ -173,14 +188,15 @@ export function ResultsPage() {
                 ci={null}
                 apparatus={oracleApparatus}
                 tone={oracleMean === null ? 'muted' : oracleBar !== null && oracleMean >= oracleBar ? 'green' : 'amber'}
-                hint="no interval: a mean of per-task scores, not a rate"
+                hint="stat.results.oracle_strength"
+                footer="no interval: a mean of per-task scores, not a rate"
                 data-testid="tile-oracle-strength"
               />
-              <StatTile label="False-Q1" value={String(map.data.summary.false_q1_total)} n={map.data.summary.n_total} apparatus={apparatus} tone={map.data.summary.false_q1_total === 0 ? 'green' : 'red'} hint="must be zero; refused at write" />
+              <StatTile label="False-Q1" value={String(map.data.summary.false_q1_total)} n={map.data.summary.n_total} apparatus={apparatus} tone={map.data.summary.false_q1_total === 0 ? 'green' : 'red'} hint="stat.results.false_q1" footer="must be zero; refused at write" />
             </div>
           </Card>
 
-          <Card title="What may the builder be trusted to do?" eyebrow="the routes, with n" actions={<LinkButton size="sm" to={`/capability?${q}`}>Open the full map</LinkButton>}>
+          <Card title="What may the builder be trusted to do?" eyebrow="the routes, with n" actions={<LinkButton size="sm" to={`/capability?${q}`} hint="button.results.full_map">Open the full map</LinkButton>}>
             {measured.length === 0 ? (
               <EmptyState compact glyph="◌" title="Nothing measured yet" reason="A first sighted replay puts rows on the map." action={<LinkButton size="sm" to={`/connect/${encodeURIComponent(repo)}`}>Back to the walk</LinkButton>} />
             ) : (
@@ -194,6 +210,7 @@ export function ResultsPage() {
                       n={byRoute[r]?.n ?? 0}
                       apparatus={`${byRoute[r]?.cells ?? 0} of ${measured.length} measured cells`}
                       tone={r === 'deliver' ? 'green' : r === 'human' ? 'amber' : 'muted'}
+                      hint={ROUTE_TILE_HINT[r]}
                     />
                   ))}
                 </div>
@@ -207,28 +224,32 @@ export function ResultsPage() {
                 <MapTable map={map.data} signoffs={signoffs.data?.items ?? []} repo={repo} canSign={can('approver')} />
                 {licence && (
                   <InsetText>
-                    <h3 className="m-0 mb-2 text-[19px] font-bold leading-[1.4]">What this licenses you to say</h3>
+                    <Hint as="h3" id="banner.results.licence" className="m-0 mb-2 text-[19px] font-bold leading-[1.4]">
+                      What this licenses you to say
+                    </Hint>
                     <p className="m-0" data-testid="licence-sentence">{licence}</p>
                   </InsetText>
                 )}
                 <h3 className="mb-3 text-[24px] font-bold leading-[1.3]">Economics</h3>
                 <div className="mb-4 grid gap-3 sm:grid-cols-4">
-                  <StatTile label="Cost per attempt" value={economics.perAttempt === null ? '—' : `$${economics.perAttempt.toFixed(2)}`} n={economics.n} apparatus="a mean of builder-reported $ over cells with a known cost, current apparatus — no interval yet: the API serves the mean only" />
-                  <StatTile label="Cost per clean attempt" value={economics.perClean === null ? '—' : `$${economics.perClean.toFixed(2)}`} n={economics.clean} apparatus={`${economics.clean} clean of ${economics.n} — the same mean divided by the clean rate; no interval`} />
-                  <StatTile label="Latency per attempt" value={economics.latency === null ? '—' : `${Math.floor(Math.round(economics.latency) / 60)}m ${Math.round(economics.latency) % 60}s`} n={economics.n} apparatus="a mean over cells with a known latency — no interval yet: the API serves the mean only" />
-                  <StatTile label="Clean rate" value={economics.n ? pct(economics.clean / economics.n) : '—'} n={economics.n} apparatus="all attempts, all cells — never a routing input" />
+                  <StatTile label="Cost per attempt" value={economics.perAttempt === null ? '—' : `$${economics.perAttempt.toFixed(2)}`} n={economics.n} apparatus="a mean of builder-reported $ over cells with a known cost, current apparatus — no interval yet: the API serves the mean only" hint="stat.results.cost_per_attempt" />
+                  <StatTile label="Cost per clean attempt" value={economics.perClean === null ? '—' : `$${economics.perClean.toFixed(2)}`} n={economics.clean} apparatus={`${economics.clean} clean of ${economics.n} — the same mean divided by the clean rate; no interval`} hint="stat.results.cost_per_clean" />
+                  <StatTile label="Latency per attempt" value={economics.latency === null ? '—' : `${Math.floor(Math.round(economics.latency) / 60)}m ${Math.round(economics.latency) % 60}s`} n={economics.n} apparatus="a mean over cells with a known latency — no interval yet: the API serves the mean only" hint="stat.results.latency" />
+                  <StatTile label="Clean rate" value={economics.n ? pct(economics.clean / economics.n) : '—'} n={economics.n} apparatus="all attempts, all cells — never a routing input" hint="stat.results.clean_rate" />
                 </div>
-                <WarningCallout title="No throughput headline">
-                  The ledger records neither human hours nor merge outcomes yet, so cost per accepted change cannot be shown here honestly. What is shown is cost per clean attempt, which is measured.
-                </WarningCallout>
+                <Hint as="div" id="banner.results.no_throughput">
+                  <WarningCallout title="No throughput headline">
+                    The ledger records neither human hours nor merge outcomes yet, so cost per accepted change cannot be shown here honestly. What is shown is cost per clean attempt, which is measured.
+                  </WarningCallout>
+                </Hint>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <LinkButton size="sm" to={`/routing?${q}`}>
+                  <LinkButton size="sm" to={`/routing?${q}`} hint="button.results.routing">
                     Every route with its reason
                   </LinkButton>
-                  <LinkButton size="sm" to={`/oracle?${q}`}>
+                  <LinkButton size="sm" to={`/oracle?${q}`} hint="button.results.oracle">
                     Oracle and controls
                   </LinkButton>
-                  <LinkButton size="sm" to={`/ledger?${q}`}>
+                  <LinkButton size="sm" to={`/ledger?${q}`} hint="button.results.ledger">
                     The ledger
                   </LinkButton>
                 </div>
@@ -236,7 +257,7 @@ export function ResultsPage() {
             )}
           </Card>
 
-          <Card title="Waiting on a person" eyebrow={`${decisions.length} for this repository`} actions={<LinkButton size="sm" to="/decisions">All decisions</LinkButton>}>
+          <Card title="Waiting on a person" eyebrow={`${decisions.length} for this repository`} eyebrowHint="stat.results.waiting_count" actions={<LinkButton size="sm" to="/decisions" hint="button.results.all_decisions">All decisions</LinkButton>}>
             {decisions.length === 0 ? (
               <EmptyState compact glyph="✓" title="Nothing is waiting on a person here" />
             ) : (
@@ -246,12 +267,12 @@ export function ResultsPage() {
                   const allowed = d.role === 'viewer' || can(d.role)
                   return (
                     <li key={`${d.kind}-${i}`} className="flex flex-wrap items-center gap-2 py-2 text-sm">
-                      <Pill tone={d.kind === 'signoff_due' ? 'primary' : d.kind === 'do_not_ship' ? 'red' : 'amber'} size="xs">
+                      <Pill tone={d.kind === 'signoff_due' ? 'primary' : d.kind === 'do_not_ship' ? 'red' : 'amber'} size="xs" hint="pill.results.decision_kind">
                         {KIND_LABEL[d.kind]}
                       </Pill>
                       <span className="min-w-0 flex-1">{d.title}</span>
                       <span className="text-right">
-                        <LinkButton size="sm" to={d.href}>
+                        <LinkButton size="sm" to={d.href} hint="button.results.decision_act">
                           {allowed ? d.act : 'Read'}
                         </LinkButton>
                         {!allowed && <span className="block text-[13px] text-on-surface-muted">{d.role} acts</span>}

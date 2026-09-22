@@ -13,11 +13,14 @@
  *               "operator" (J-ONR-15); that a running measurement renders the in-flight
  *               panel from the polled run — attempts, spend, started, Cancel with a confirm
  *               that posts the cancel (J-ONR-5) — and a queued run reads "Queued" with its
- *               place in the line (J-TEL-6).
+ *               place in the line (J-TEL-6); and that every element on both screens carries
+ *               a hint, with a stage-summary pill and a stage title opening on hover.
  * How:          `mockApi` + `renderApp` with `path` set so `useParams` resolves.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/screens/Connect/ConnectPage.tsx (under test), connection.ts
+ * Works with:   ui/src/screens/Connect/ConnectPage.tsx (under test), connection.ts,
+ *               ui/src/help/hints.ts (the copy the hover tests expect),
+ *               ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Connect/ConnectPage.test.tsx
  * Touch when:   a stage or its action changes.
  */
@@ -25,7 +28,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
+import { unhinted } from '../../help/hints-collector'
+import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { ConnectPage, ConnectRepoPage } from './ConnectPage'
 
 const REPO = {
@@ -100,6 +104,40 @@ describe('ConnectPage', () => {
     expect(screen.queryByRole('link', { name: 'Continue' })).not.toBeInTheDocument()
     // the repository link is still the door to the walk
     expect(screen.getByRole('link', { name: 'alpha' })).toHaveAttribute('href', '/connect/alpha')
+  })
+
+  it('every column header, pill and button on the list carries a hint; the stage-summary pill opens on hover with the registry copy', async () => {
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'operator' }, 'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 }, 'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] } })
+    const { container } = renderApp(<ConnectPage />, { route: '/connect' })
+    await waitFor(() => expect(screen.getByRole('table', { name: 'Connected repositories' })).toBeInTheDocument())
+    expect(unhinted(container)).toEqual([])
+    expect(container.querySelectorAll('th[scope="col"] [data-hint^="col.connect."]').length).toBe(5)
+    expect(screen.getByRole('button', { name: 'Connect by URL' })).toHaveAttribute('data-hint', 'button.connect.url')
+    expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute('data-hint', 'button.connect.row_action')
+    const pill = container.querySelector('[data-hint="pill.connect.stage_summary"]')!
+    await expectHintOpens(pill, 'pill.connect.stage_summary')
+  })
+
+  it('every stage title, status pill, detail line and action on the walk carries a hint; the oracle stage title opens on hover', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'running', finished: null } },
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 4 } },
+      'GET /runs/r9': RUN,
+    })
+    const { container } = renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    await waitFor(() => expect(screen.getByTestId('in-flight')).toBeInTheDocument())
+    expect(unhinted(container)).toEqual([])
+    for (const id of ['stage.walk.register', 'stage.walk.probe', 'stage.walk.mine', 'stage.walk.oracle', 'stage.walk.controls', 'stage.walk.measure', 'pill.walk.stage_status', 'stat.walk.stage_detail', 'button.walk.configuration', 'button.walk.baseline', 'stat.walk.inflight_progress', 'stat.walk.inflight_spend', 'link.walk.inflight_open', 'button.walk.cancel']) {
+      expect(container.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
+    }
+    // the title holds a Term button: the wrapper is not a second tab stop, and hovering it explains the stage
+    const title = screen.getByTestId('stage-oracle').querySelector('[data-hint="stage.walk.oracle"]')!
+    expect(within(title as HTMLElement).getByRole('button', { name: 'Oracle strength' })).toBeInTheDocument()
+    expect(title).not.toHaveAttribute('tabindex')
+    await expectHintOpens(title, 'stage.walk.oracle')
   })
 
   it('the per-repository walk: six stages, statuses from the API, the operator runs the next one', async () => {

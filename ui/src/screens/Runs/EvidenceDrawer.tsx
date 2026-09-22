@@ -22,6 +22,8 @@
  *               `useRetainedStatus`
  *               says what is reachable; the patch query is enabled only once the tab was
  *               opened (so the hash is of bytes the reviewer actually loaded); Esc closes.
+ *               Opening moves focus to the dialog (so the opener's hint bubble closes and
+ *               the first Esc reaches the drawer); closing returns it to the opener.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
  *               docs/adr/0011-repo-lint-belt.md
@@ -33,7 +35,8 @@
  *               page opens it the same way), src/crb/core/evidence.py (the pack's shape and
  *               `verify_pack`)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx (Patch tab: verified / redacted /
- *               unavailable; row resolution from the task),
+ *               unavailable; row resolution from the task; focus moves in on open and back
+ *               to the opener on close),
  *               ui/src/screens/Runs/RunDetailPage.test.tsx
  *               (the drawer opens with belts and the verified badge),
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts,
@@ -45,15 +48,17 @@
  *               whether the change is mergeable
  *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useEvidence, useTask } from '../../api/hooks'
 import type { EvidencePack, LintRun, TestRun } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
 import { Button } from '../../components/Button'
 import { ErrorState } from '../../components/ErrorState'
+import { Hint } from '../../components/Hint'
 import { JsonView } from '../../components/JsonView'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
+import type { HintId } from '../../help/hints'
 import { fmtDate, fmtInt, fmtSeconds, fmtUsd, shortId } from '../../lib/format'
 import { parseUnifiedDiff, useRetainedPatch, useRetainedStatus, useRetainedTranscript, useReviews, type RetainedPatch } from './contract'
 import { ReviewPanel, VerdictPill } from './ReviewPanel'
@@ -73,11 +78,13 @@ interface Props {
 /** The four tabs. */
 export type DrawerTab = 'pack' | 'patch' | 'transcript' | 'review'
 
-/** A titled block of the pack view. */
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/** A titled block of the pack view; the heading is the hint's trigger. */
+function Section({ title, hint, children }: { title: string; hint: HintId; children: React.ReactNode }) {
   return (
     <section className="space-y-2">
-      <h3 className="label">{title}</h3>
+      <h3 className="label">
+        <Hint id={hint}>{title}</Hint>
+      </h3>
       {children}
     </section>
   )
@@ -117,7 +124,7 @@ function LintRunTail({ run }: { run: LintRun | null }) {
     <details className="rounded-[var(--radius-control)] border border-border bg-surface-high" data-testid="lint-run">
       <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-xs">
         <span className="font-semibold">Lint run (belt 5)</span>
-        <Pill tone={tone} glyph={glyph} size="xs" label={`Lint run (belt 5, ${run.detected}): ${word}`}>
+        <Pill tone={tone} glyph={glyph} size="xs" label={`Lint run (belt 5, ${run.detected}): ${word}`} hint="pill.evidence.lint_run">
           {word}
         </Pill>
         <span className="num text-on-surface-muted">
@@ -157,7 +164,7 @@ function TestRunTail({ label, run }: { label: string; run: TestRun | null }) {
     <details className="rounded-[var(--radius-control)] border border-border bg-surface-high">
       <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-xs">
         <span className="font-semibold">{label}</span>
-        <Pill tone={tone} glyph={glyph} size="xs" label={`${label}: ${label2}`}>
+        <Pill tone={tone} glyph={glyph} size="xs" label={`${label}: ${label2}`} hint="pill.evidence.test_run">
           {label2}
         </Pill>
         <span className="num text-on-surface-muted">
@@ -194,27 +201,35 @@ function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean })
       </p>
       <div className="flex flex-wrap items-center gap-2">
         {g.clean ? (
-          <Pill tone="green" glyph="✓" label="Grade: clean — all four belts held">clean</Pill>
+          <Pill tone="green" glyph="✓" label="Grade: clean — all four belts held" hint="pill.evidence.grade">
+            clean
+          </Pill>
         ) : g.disqualified ? (
-          <Pill tone="amber" glyph="⊘" label={`Grade: disqualified — ${g.dq_reason}`}>disqualified</Pill>
+          <Pill tone="amber" glyph="⊘" label={`Grade: disqualified — ${g.dq_reason}`} hint="pill.evidence.grade">
+            disqualified
+          </Pill>
         ) : (
-          <Pill tone="red" glyph="✗" label="Grade: not clean">not clean</Pill>
+          <Pill tone="red" glyph="✗" label="Grade: not clean" hint="pill.evidence.grade">
+            not clean
+          </Pill>
         )}
         {verified ? (
-          <Pill tone="primary" glyph="✦" label="Pack hash verified against its canonical body" data-testid="pack-verified">
+          <Pill tone="primary" glyph="✦" label="Pack hash verified against its canonical body" data-testid="pack-verified" hint="pill.evidence.verified">
             verified
           </Pill>
         ) : (
-          <Pill tone="red" glyph="✗" label="Pack hash does NOT verify — evidence untrusted" data-testid="pack-unverified">
+          <Pill tone="red" glyph="✗" label="Pack hash does NOT verify — evidence untrusted" data-testid="pack-unverified" hint="pill.evidence.verified">
             hash mismatch
           </Pill>
         )}
-        <span className="font-mono text-[11px] text-on-surface-muted" title={pack.pack_hash}>
-          {shortId(pack.pack_hash, 16)}
-        </span>
+        <Hint id="stat.evidence.hash">
+          <span className="font-mono text-[11px] text-on-surface-muted" title={pack.pack_hash}>
+            {shortId(pack.pack_hash, 16)}
+          </span>
+        </Hint>
       </div>
 
-      <Section title="Spec">
+      <Section title="Spec" hint="tile.evidence.spec">
         <KV
           rows={[
             ['task', <span className="font-mono text-xs" title={pack.task.task_id}>{shortId(pack.task.task_id)}</span>],
@@ -231,7 +246,7 @@ function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean })
         />
       </Section>
 
-      <Section title="Belts">
+      <Section title="Belts" hint="tile.evidence.belts">
         <BeltPills belts={g} size="sm" />
         {g.error && <p className="text-xs text-status-red">error: {g.error}</p>}
         {g.dq_reason && <p className="text-xs text-status-amber">disqualified: {g.dq_reason}</p>}
@@ -253,7 +268,7 @@ function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean })
         </div>
       </Section>
 
-      <Section title="Diff">
+      <Section title="Diff" hint="tile.evidence.diff">
         {g.diff ? (
           <KV
             rows={[
@@ -268,7 +283,7 @@ function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean })
         )}
       </Section>
 
-      <Section title="Builder">
+      <Section title="Builder" hint="tile.evidence.builder">
         {b ? (
           <KV
             rows={[
@@ -287,7 +302,7 @@ function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean })
         )}
       </Section>
 
-      <Section title="Apparatus">
+      <Section title="Apparatus" hint="tile.evidence.apparatus">
         <Provenance apparatus={pack.apparatus.apparatus_version} policy={pack.apparatus.policy_version || null} />
         <KV
           rows={[
@@ -304,7 +319,7 @@ function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean })
         />
       </Section>
 
-      <Section title="Full pack">
+      <Section title="Full pack" hint="tile.evidence.json">
         <JsonView value={pack} label="Evidence pack" />
       </Section>
     </div>
@@ -326,21 +341,21 @@ export function PatchView({ patch, pack }: { patch: RetainedPatch; pack: Evidenc
     <div className="space-y-4" data-testid="patch-view" data-state={patch.matches ? 'verified' : 'mismatch'}>
       <div className="flex flex-wrap items-center gap-2">
         {patch.matches ? (
-          <Pill tone="primary" glyph="✦" label="Served patch hashes to the pack's diff_sha256" data-testid="patch-verified">
+          <Pill tone="primary" glyph="✦" label="Served patch hashes to the pack's diff_sha256" data-testid="patch-verified" hint="pill.evidence.patch_verified">
             hash matches pack
           </Pill>
         ) : (
-          <Pill tone="amber" glyph="⚠" label="Served patch does NOT hash to the pack's diff_sha256" data-testid="patch-mismatch">
+          <Pill tone="amber" glyph="⚠" label="Served patch does NOT hash to the pack's diff_sha256" data-testid="patch-mismatch" hint="pill.evidence.patch_verified">
             hash mismatch
           </Pill>
         )}
         {patch.redacted && (
-          <Pill tone="amber" glyph="⊘" size="xs" label="Secret-shaped content was redacted before serving" data-testid="patch-redacted">
+          <Pill tone="amber" glyph="⊘" size="xs" label="Secret-shaped content was redacted before serving" data-testid="patch-redacted" hint="pill.evidence.patch_flags">
             redacted
           </Pill>
         )}
         {patch.truncated && (
-          <Pill tone="amber" glyph="…" size="xs" label="The patch was capped at 1 MiB" data-testid="patch-truncated">
+          <Pill tone="amber" glyph="…" size="xs" label="The patch was capped at 1 MiB" data-testid="patch-truncated" hint="pill.evidence.patch_flags">
             truncated
           </Pill>
         )}
@@ -381,9 +396,9 @@ export function PatchView({ patch, pack }: { patch: RetainedPatch; pack: Evidenc
             <span className="num text-status-green">+{f.additions}</span>
             <span className="num text-status-red">−{f.deletions}</span>
             {f.excluded && (
-              <span className="text-on-surface-muted" title="Not in the pack's diff.files (e.g. the overlaid oracle): shown, not counted">
+              <Hint id="tile.evidence.patch_excluded" tabStop={false} className="text-on-surface-muted">
                 (not counted)
-              </span>
+              </Hint>
             )}
           </li>
         ))}
@@ -457,7 +472,9 @@ function TranscriptView({ rowHash }: { rowHash: string }) {
 function Tab({ id, active, onClick, children, testId }: { id: DrawerTab; active: DrawerTab; onClick: (t: DrawerTab) => void; children: React.ReactNode; testId: string }) {
   const on = id === active
   return (
-    <button
+    <Hint
+      as="button"
+      id="tab.evidence"
       type="button"
       role="tab"
       aria-selected={on}
@@ -467,7 +484,7 @@ function Tab({ id, active, onClick, children, testId }: { id: DrawerTab; active:
       className={`-mb-px border-b-2 px-3 py-2 text-xs font-semibold ${on ? 'border-primary text-primary' : 'border-transparent text-on-surface-muted hover:text-on-surface'}`}
     >
       {children}
-    </button>
+    </Hint>
   )
 }
 
@@ -476,6 +493,7 @@ export function EvidenceDrawer({ packHash, onClose, rowHash: rowHashProp }: Prop
   const q = useEvidence(packHash ?? '')
   const [tab, setTab] = useState<DrawerTab>('pack')
   const [patchOpened, setPatchOpened] = useState(false)
+  const asideRef = useRef<HTMLElement>(null)
   useEffect(() => {
     if (!packHash) return
     setTab('pack')
@@ -486,6 +504,17 @@ export function EvidenceDrawer({ packHash, onClose, rowHash: rowHashProp }: Prop
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [packHash, onClose])
+  // A modal takes focus on open (WCAG 2.4.3): the dialog itself, so the opener — a hinted
+  // button whose bubble opened on its focus — loses focus, its bubble closes and the first
+  // Escape reaches this drawer. On close, focus returns to the opener.
+  useEffect(() => {
+    if (!packHash) return
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    asideRef.current?.focus()
+    return () => {
+      if (opener && opener.isConnected) opener.focus()
+    }
+  }, [packHash])
 
   // Resolve the row when the opener did not pass it: the task's grade row whose pack this is.
   const pack = q.data?.pack
@@ -511,11 +540,13 @@ export function EvidenceDrawer({ packHash, onClose, rowHash: rowHashProp }: Prop
     <div className="fixed inset-0 z-40" role="presentation">
       <button type="button" aria-label="Close evidence" className="absolute inset-0 bg-black/40" onClick={onClose} />
       <aside
+        ref={asideRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="evidence-title"
         data-testid="evidence-drawer"
-        className="absolute right-0 top-0 flex h-full w-[min(760px,100vw)] flex-col border-l border-border bg-surface-container shadow-[var(--shadow-card)]"
+        className="absolute right-0 top-0 flex h-full w-[min(760px,100vw)] flex-col border-l border-border bg-surface-container shadow-[var(--shadow-card)] outline-none"
       >
         <header className="flex items-center justify-between border-b border-border px-5 py-3">
           <div>

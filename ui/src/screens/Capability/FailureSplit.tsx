@@ -11,25 +11,40 @@
  *               harness) and how many were disqualified. Zero counts stay visible so "no
  *               harness errors" is a statement; the model point is always smaller and beside
  *               the all-rows point, never instead of it.
+ *               Each kind, the model point and the controls pill is a hover / focus / tap
+ *               trigger for what it means (`kind.<key>`, `stat.shared.model_rate`,
+ *               `controls.<state>`), derived here so no screen writes them; no native `title`
+ *               remains.
  * How:          `KIND_DISPLAY` fixes the order and wording; counts come straight from the
- *               cell's `failure_split`; `controlsDisplay` gives the pill its state.
+ *               cell's `failure_split`; `controlsDisplay` gives the pill its state; `<Hint>`
+ *               wraps each element with the id derived from its key or state.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Capability/contract.ts (`KIND_DISPLAY`, `controlsDisplay`, the
- *               types), ui/src/screens/Capability/CapabilityPage.tsx and
+ *               types), ui/src/components/Hint.tsx (the trigger), ui/src/help/hints.ts
+ *               (`kind.*`, `controls.*`, `stat.shared.model_rate`),
+ *               ui/src/screens/Capability/CapabilityPage.tsx and
  *               ui/src/screens/Routing/RoutingPage.tsx (a split per cell / decision),
  *               ui/src/screens/Runs/RunDetailPage.tsx (a run's split tiles),
  *               ui/src/screens/Signoff/SignoffPage.tsx (the evidence an approver sees),
  *               ui/src/components/Pill.tsx
- * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx (`kind-*`, `model-point`,
+ * Tested by:    ui/src/help/hints-ratchet.test.tsx (the hint contract), ui/src/screens/Capability/CapabilityPage.test.tsx (`kind-*`, `model-point`,
  *               `controls-*` test ids), ui/src/screens/Routing/RoutingPage.test.tsx
  * Touch when:   a failure kind is added — one row in `KIND_DISPLAY`
  *               (ui/src/screens/Capability/contract.ts); never for a new repository.
  */
+import { Hint } from '../../components/Hint'
 import { Pill } from '../../components/Pill'
+import { HINTS, type HintId } from '../../help/hints'
 import { fmtInt, fmtPct } from '../../lib/format'
 import { TONE_TEXT } from '../../lib/verdict'
 import { KIND_DISPLAY, controlsDisplay, type ControlsVerdict, type FailureSplit } from './contract'
+
+/** `controls.<state>` for a verdict the registry knows; a state from a newer server reads as unmeasured. */
+export function controlsHint(state: string): HintId {
+  const id = `controls.${state}`
+  return id in HINTS ? (id as HintId) : 'controls.unmeasured'
+}
 
 /**
  * The failure split — `red · budget · protocol · harness · DQ` — shown wherever a
@@ -43,10 +58,10 @@ export function FailureSplitPills({ split, size = 'xs', ...rest }: { split: Fail
       {KIND_DISPLAY.map((k) => {
         const n = split[k.key] ?? 0
         return (
-          <span key={k.key} title={k.long} data-testid={`kind-${k.key}`} className={`inline-flex items-baseline gap-0.5 ${size === 'xs' ? 'text-[10px]' : 'text-xs'} ${n > 0 ? TONE_TEXT[k.tone] : 'text-on-surface-muted'}`}>
+          <Hint key={k.key} id={`kind.${k.key}`} data-component="pill" data-testid={`kind-${k.key}`} className={`inline-flex items-baseline gap-0.5 ${size === 'xs' ? 'text-[10px]' : 'text-xs'} ${n > 0 ? TONE_TEXT[k.tone] : 'text-on-surface-muted'}`}>
             <span>{k.short}</span>
             <span className={n > 0 ? 'font-semibold' : ''}>{fmtInt(n)}</span>
-          </span>
+          </Hint>
         )
       })}
     </span>
@@ -82,11 +97,10 @@ export function ModelPointLine({
   const cls = size === 'xs' ? 'text-[10px]' : 'text-xs'
   const interval = modelPoint !== null && ciLow !== null && ciHigh !== null ? ` [${fmtPct(ciLow, 0)}–${fmtPct(ciHigh, 0)}]` : ''
   const app = apparatus.length ? ` · apparatus ${apparatus.join(', ')}` : ''
-  const title = `clean / (clean + builder red): the model's rate where it got a fair, finished attempt — diagnostic, never the routing input.${interval ? ` Wilson 95% interval${interval}.` : ''}${app}`
   return (
-    <span className={`num ${cls} text-on-surface-muted`} data-testid="model-point" title={title} aria-label={`model rate ${modelPoint === null ? 'unmeasured' : fmtPct(modelPoint, 0)}, ${fmtInt(clean)} of ${fmtInt(modelN)}${interval}${app}`}>
+    <Hint id="stat.shared.model_rate" className={`num ${cls} text-on-surface-muted`} data-testid="model-point" aria-label={`model rate ${modelPoint === null ? 'unmeasured' : fmtPct(modelPoint, 0)}, ${fmtInt(clean)} of ${fmtInt(modelN)}${interval}${app}`}>
       model {modelPoint === null ? '—' : fmtPct(modelPoint, 0)} <span>({fmtInt(clean)}/{fmtInt(modelN)}{interval})</span>
-    </span>
+    </Hint>
   )
 }
 
@@ -95,7 +109,7 @@ export function ControlsPill({ verdict, size = 'sm', reason, minShare }: { verdi
   const d = controlsDisplay(verdict, minShare)
   const state = verdict?.measured ? verdict.state : 'unmeasured'
   return (
-    <Pill tone={d.tone} glyph={d.glyph} size={size} label={reason ? `${d.describe} ${reason}` : d.describe} data-testid={`controls-${state}`}>
+    <Pill tone={d.tone} glyph={d.glyph} size={size} label={reason ? `${d.describe} ${reason}` : d.describe} hint={controlsHint(state)} data-testid={`controls-${state}`}>
       {d.label}
     </Pill>
   )

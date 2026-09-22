@@ -84,4 +84,10 @@ describe('BeltPills', () => {
     expect(screen.getByTestId('belt-target_green').textContent).toContain('pass')
     expect(screen.getByTestId('belt-source_changed').textContent).toContain('fail')
   })
+
+  it('each pill carries its belt’s hint, derived from the belt name', () => {
+    render(<BeltPills belts={{ tests_unmodified: true, target_green: false, no_new_failures: true, source_changed: true, repo_lint_clean: null }} beltSet="v5" />)
+    expect(screen.getByTestId('belt-target_green')).toHaveAttribute('data-hint', 'belt.target_green')
+    expect(screen.getByTestId('belt-repo_lint_clean')).toHaveAttribute('data-hint', 'belt.repo_lint_clean')
+  })
 })

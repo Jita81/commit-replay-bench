@@ -18,19 +18,23 @@
  *               run reads "item k of n" (J-ONR-2); that an App with no installation is
  *               "Incomplete" and no App with a URL repository "Optional"; that the degraded
  *               sandbox is an "Important" banner linking to Deployment (J-HEL-5), and that
- *               the cost statement and "Why two people" are present.
+ *               the cost statement and "Why two people" are present; and that every
+ *               element carries a hint whose copy opens on hover (the task-5 status tag).
  * How:          `mockApi` + `renderApp`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/screens/Home/HomePage.tsx, ui/src/screens/Connect/connection.ts,
- *               ui/src/api/hooks.ts (`useActiveRun`, `useSignoffs`)
+ *               ui/src/api/hooks.ts (`useActiveRun`, `useSignoffs`), ui/src/help/hints.ts
+ *               (the copy the hover test expects), ui/src/help/hints-collector.ts
+ *               (`unhinted`)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx
  * Touch when:   a task or its evidence source changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
+import { unhinted } from '../../help/hints-collector'
+import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
 import { HomePage, factoryStatusFor } from './HomePage'
 
 const REPO = {
@@ -235,5 +239,33 @@ describe('HomePage', () => {
     expect(screen.queryByRole('region', { name: 'Important' })).not.toBeInTheDocument()
     // the first press goes to choosing a repository, never to an empty Decisions
     expect(screen.getByRole('link', { name: 'Continue to task 2: Choose a repository' })).toHaveAttribute('href', '/connect')
+  })
+
+  it('every task tag, the kicker, the summary, the banner and Continue carry a hint; the Measure tag opens on hover with the registry copy', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
+      'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': REPO,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+      'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'degraded', detail: 'docker not reachable', data: {} }] },
+      'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /factory/alpha/tasks': [],
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+    })
+    const { container } = renderApp(<HomePage />, { route: '/home' })
+    await waitFor(() => expect(screen.getByText('You have completed 3 of 8 tasks.')).toHaveAttribute('data-hint', 'stat.home.completed'))
+    expect(unhinted(container)).toEqual([])
+    for (const id of ['stat.home.kicker', 'banner.home.sandbox', 'button.home.continue', 'task.home.connect_github', 'task.home.deliver']) {
+      expect(container.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
+    }
+    // the status tag sits inside the task's link: the link is the tab stop, the tag is the trigger
+    const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    const tag = rows[4]!.querySelector('[data-hint="task.home.measure"]')!
+    expect(tag).not.toHaveAttribute('tabindex')
+    await expectHintOpens(tag, 'task.home.measure')
   })
 })

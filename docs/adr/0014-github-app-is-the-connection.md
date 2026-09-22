@@ -62,6 +62,31 @@ The product's needs are small and separable: measurement needs `Metadata: read` 
    *(Amended 2026-09-17 after review of PR #31.)*
 5. **Connect by URL stays** for trials and for repositories outside GitHub; nothing about it
    changed.
+6. **The clone is brought up to date before the factory builds on it, and a fetch that fails
+   refuses the run.** Before a `factory` run on any repository with a URL — and before a
+   `replay` / `blind` / `mine` on a linked one — the worker fetches the row's URL (with the
+   installation token in the environment, exactly as the clone does) and fast-forwards the
+   clone's default branch to the remote's; `repo.fetch.done` carries the before and after
+   shas and the run's apparatus carries `base_sha`. A remote that cannot be reached, or a
+   local default branch that cannot fast-forward, ends the run `failed` with the reason
+   before any RED proof or build: the product never builds, proves RED or opens a pull
+   request on a base the remote has moved past, and never merges or resets a clone on its
+   own. *(Added 2026-09-22 — F39, after the B-1b review found the second cobra run would
+   have built on a base without PR #2.)*
+7. **The merge outcome comes back as evidence — at most closed, then merged, per pull
+   request.** The same installation token reads each delivered pull request whose fate
+   can still change (`GET /pulls/{n}`) at the start of every factory run and on `POST
+   /factory/{repo}/outcomes/sync`; a merged or closed pull request is recorded on the
+   item's chain as `delivery.merged` / `delivery.closed` (merged by whom, when, into which
+   sha). A merge is terminal: the evidence ledger refuses anything after it and the sync
+   never reads it again. A closed pull request is read again — a person can reopen and
+   merge it, and that one transition is a second row, newest-wins in every fold — while a
+   repeated state is refused, so the record never grows with the number of syncs. A merge
+   is a human act: the capability map's cell carries it as counts (`n_delivered`,
+   `n_merged`), never as a rate or an interval, and it never enters the routing rule.
+   Webhooks stay off (the app is registered with the webhook inactive); polling at the
+   start of a run is the read. *(Added 2026-09-22 — B-9 / F30; the once-per-PR wording
+   corrected the same day, after review — see DL-049.)*
 
 ## Consequences
 

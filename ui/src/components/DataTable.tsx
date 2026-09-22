@@ -7,27 +7,38 @@
  * What it does: Renders rows through per-column cell renderers with client-side sorting
  *               (`sortValue`), numeric right-alignment with tabular numerals, `hideBelowMd`
  *               columns, keyboard-operable clickable rows, `<th scope="col">` + `aria-sort`, a
- *               required caption, and a designed empty slot — a table is never blank.
+ *               required caption, and a designed empty slot — a table is never blank. A
+ *               column's `hint` (a registry id — the ratchet requires one on every column with
+ *               a header) makes the header the hover / focus / tap trigger for what the
+ *               column holds: the sort button on a sortable column, a focusable span on an
+ *               unsortable one.
  * How:          `useMemo` sorts a copy of `rows` with one `compare` (nulls last, numbers /
  *               booleans numerically, else locale string compare); the header button toggles
- *               asc / desc; the empty node fills one full-width cell.
+ *               asc / desc; the empty node fills one full-width cell; `<Hint>` renders the
+ *               header content when the column carries an id.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/components/EmptyState.tsx (the `empty` slot),
+ * Works with:   ui/src/components/Hint.tsx (the header trigger), ui/src/help/hints.ts
+ *               (`col.*` ids), ui/src/components/EmptyState.tsx (the `empty` slot),
  *               ui/src/screens/Runs/RunDetailPage.tsx
  *               (a typical column set with sort accessors), ui/src/screens/Ledger/LedgerPage.tsx
  *               and ui/src/screens/Repos/ReposPage.tsx (dense list screens)
- * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx,
+ * Tested by:    ui/src/help/hints-ratchet.test.tsx (the hint contract),
+ *               ui/src/screens/Runs/RunDetailPage.test.tsx,
  *               ui/src/screens/Routing/RoutingPage.test.tsx
  *               and ui/src/screens/Signoff/SignoffPage.test.tsx (rows and captions as rendered),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe: headers, captions)
  * Touch when:   a screen needs a column type the descriptor lacks; never for a new repository.
  */
 import { useMemo, useState, type ReactNode } from 'react'
+import type { HintId } from '../help/hints'
+import { Hint } from './Hint'
 
 export interface Column<T> {
   key: string
   header: ReactNode
+  /** What this column holds and how to read it — a registry id; the ratchet requires one on every column with a header. */
+  hint?: HintId
   /** Cell renderer. */
   cell: (row: T) => ReactNode
   /** Sort accessor; omit to make the column unsortable. */
@@ -68,6 +79,22 @@ function compare(a: unknown, b: unknown): number {
   return String(a).localeCompare(String(b))
 }
 
+/** The sort button of a sortable column — the hint trigger when the column carries an id. */
+function HeaderButton({ hint, onClick, className, children }: { hint: HintId | undefined; onClick: () => void; className: string; children: ReactNode }) {
+  if (hint) {
+    return (
+      <Hint as="button" id={hint} type="button" onClick={onClick} className={className}>
+        {children}
+      </Hint>
+    )
+  }
+  return (
+    <button type="button" onClick={onClick} className={className}>
+      {children}
+    </button>
+  )
+}
+
 /**
  * Sortable, sticky-header table with numeric right-alignment and tabular
  * numerals. Proper <th scope="col"> headers, aria-sort on the active column,
@@ -103,8 +130,9 @@ export function DataTable<T>({
 
   const pad = dense ? 'px-2 py-1.5' : 'px-3 py-2'
 
+  // the scroll region is focusable: a wide table scrolls sideways at phone width (WCAG 2.1.1, axe scrollable-region-focusable)
   return (
-    <div className="overflow-auto rounded-[var(--radius-control)] border border-border" style={{ maxHeight }}>
+    <div className="overflow-auto rounded-[var(--radius-control)] border border-border" style={{ maxHeight }} tabIndex={0} role="region" aria-label={caption}>
       <table className="w-full border-collapse text-[13px]">
         <caption className={captionVisible ? 'px-3 py-2 text-left text-xs text-on-surface-muted' : 'sr-only'}>{caption}</caption>
         <thead className="sticky top-0 z-10 bg-surface-high">
@@ -122,16 +150,14 @@ export function DataTable<T>({
                   className={`${pad} label border-b border-border text-left ${c.numeric ? 'text-right' : ''} ${c.hideBelowMd ? 'hidden md:table-cell' : ''}`}
                 >
                   {sortable ? (
-                    <button
-                      type="button"
-                      onClick={() => toggle(c.key)}
-                      className={`inline-flex items-center gap-1 rounded px-0.5 hover:text-on-surface ${c.numeric ? 'flex-row-reverse' : ''}`}
-                    >
+                    <HeaderButton hint={c.hint} onClick={() => toggle(c.key)} className={`inline-flex items-center gap-1 rounded px-0.5 hover:text-on-surface ${c.numeric ? 'flex-row-reverse' : ''}`}>
                       <span>{c.header}</span>
                       <span aria-hidden className="text-[9px]">
                         {active ? (sort?.dir === 'asc' ? '▲' : '▼') : '⇅'}
                       </span>
-                    </button>
+                    </HeaderButton>
+                  ) : c.hint ? (
+                    <Hint id={c.hint}>{c.header}</Hint>
                   ) : (
                     c.header
                   )}

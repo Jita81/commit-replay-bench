@@ -41,6 +41,7 @@ import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
+import { Hint } from '../../components/Hint'
 import { JsonView } from '../../components/JsonView'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
@@ -73,13 +74,13 @@ function ProbeResult({ runId, repo }: { runId: string; repo: RepoDetail }) {
   if (!r || !terminal) {
     return (
       <div className="flex flex-wrap items-center gap-2 text-sm" role="status" data-testid="repo-config-probe-result" data-outcome="pending">
-        <Pill tone="primary" glyph="●" label={`Probe: ${r?.status ?? 'queued'}`}>
+        <Pill tone="primary" glyph="●" label={`Probe: ${r?.status ?? 'queued'}`} hint="pill.repo_config.probe_result">
           {r?.status ?? 'queued'}
         </Pill>
         <span className="text-on-surface-muted">The probe runs the configured scope through the runner; this follows the run until it ends.</span>
-        <Link to={`/runs/${runId}`} className="font-mono text-xs">
+        <Hint as={Link} id="link.repo.probe_run" to={`/runs/${runId}`} className="font-mono text-xs">
           run {shortId(runId, 8)}
-        </Link>
+        </Hint>
       </div>
     )
   }
@@ -87,15 +88,15 @@ function ProbeResult({ runId, repo }: { runId: string; repo: RepoDetail }) {
   const reason = green ? summaryLine(repo.probe.detail) || 'green' : r.error || `run ${r.status}`
   return (
     <div className="flex flex-wrap items-start gap-2 text-sm" role="status" data-testid="repo-config-probe-result" data-outcome={green ? 'green' : 'red'}>
-      <Pill tone={green ? 'green' : 'red'} glyph={green ? '✓' : '✗'} label={green ? 'Probe: green' : 'Probe: failed'}>
+      <Pill tone={green ? 'green' : 'red'} glyph={green ? '✓' : '✗'} label={green ? 'Probe: green' : 'Probe: failed'} hint="pill.repo_config.probe_result">
         {green ? 'Probe green' : 'Probe failed'}
       </Pill>
       <span className={`min-w-0 whitespace-pre-wrap break-words ${green ? 'text-on-surface' : 'text-status-red'}`} data-testid="repo-config-probe-reason">
         {reason}
       </span>
-      <Link to={`/runs/${runId}`} className="font-mono text-xs">
+      <Hint as={Link} id="link.repo.probe_run" to={`/runs/${runId}`} className="font-mono text-xs">
         run {shortId(runId, 8)}
-      </Link>
+      </Hint>
     </div>
   )
 }
@@ -112,7 +113,7 @@ function fieldsOf(ev: StepEvent): string[] {
 function AuditTrail({ name }: { name: string }) {
   const events = useRepoEvents(name, { limit: 50 })
   return (
-    <Card title="Audit trail" eyebrow="who changed what · append-only system events">
+    <Card title={<Hint id="tile.repo_config.audit">Audit trail</Hint>} eyebrow="who changed what · append-only system events">
       <div data-testid="repo-config-audit">
         <QueryBoundary query={events} loading="Loading the audit trail…">
           {(page) =>
@@ -138,7 +139,7 @@ function AuditTrail({ name }: { name: string }) {
                       {fields.length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-1" data-testid="repo-config-audit-fields">
                           {fields.map((f) => (
-                            <Pill key={f} tone="primary" size="xs" label={`Changed: ${f}`}>
+                            <Pill key={f} tone="primary" size="xs" label={`Changed: ${f}`} hint="pill.repo_config.changed" tabStop={false}>
                               {f}
                             </Pill>
                           ))}
@@ -146,7 +147,9 @@ function AuditTrail({ name }: { name: string }) {
                       )}
                       {diff !== undefined && diff !== null && typeof diff === 'object' && Object.keys(diff as object).length > 0 && (
                         <details className="mt-1 text-xs">
-                          <summary className="cursor-pointer text-on-surface-muted">Diff (redacted at write)</summary>
+                          <Hint as="summary" id="details.repo_config.diff" className="cursor-pointer text-on-surface-muted">
+                            Diff (redacted at write)
+                          </Hint>
                           <div className="mt-1">
                             <JsonView value={diff} initiallyOpen collapseBelow={4} label={`Diff for event ${ev.seq}`} />
                           </div>
@@ -247,13 +250,13 @@ export function RepoConfigTab({ repo }: { repo: RepoDetail }) {
         actions={
           authLoading ? null : editable ? (
             <>
-              <Button size="sm" onClick={reset} disabled={!dirty || update.isPending} data-testid="repo-config-reset">
+              <Button size="sm" onClick={reset} disabled={!dirty || update.isPending} data-testid="repo-config-reset" hint="button.repo_config.reset">
                 Discard changes
               </Button>
-              <Button size="sm" onClick={runProbe} disabled={probe.isPending || dirty} title={dirty ? 'Save first: the probe runs the STORED configuration' : undefined} data-testid="repo-config-probe-run">
+              <Button size="sm" onClick={runProbe} disabled={probe.isPending || dirty} data-testid="repo-config-probe-run" hint="button.repo_config.probe">
                 {probe.isPending ? 'Enqueuing…' : 'Run probe'}
               </Button>
-              <Button size="sm" type="submit" form="repo-config-form" variant="filled" disabled={!canSave} data-testid="repo-config-save">
+              <Button size="sm" type="submit" form="repo-config-form" variant="filled" disabled={!canSave} data-testid="repo-config-save" hint="button.repo_config.save">
                 {update.isPending ? 'Saving…' : 'Save changes'}
               </Button>
             </>
@@ -275,7 +278,7 @@ export function RepoConfigTab({ repo }: { repo: RepoDetail }) {
                   Saved <span className="font-mono text-xs">{toast.fields.join(', ')}</span> — recorded as a redacted diff in the audit trail.
                 </span>
                 {editable && (
-                  <Button size="sm" variant="filled" onClick={runProbe} disabled={probe.isPending} data-testid="repo-config-toast-probe">
+                  <Button size="sm" variant="filled" onClick={runProbe} disabled={probe.isPending} data-testid="repo-config-toast-probe" hint="button.repo_config.probe">
                     {probe.isPending ? 'Enqueuing…' : 'Run probe now'}
                   </Button>
                 )}
@@ -297,7 +300,7 @@ export function RepoConfigTab({ repo }: { repo: RepoDetail }) {
           )}
         </form>
       </Card>
-      <Card title="Stored configuration" eyebrow="as the API returns it (RepoConfig.to_dict)">
+      <Card title={<Hint id="tile.repo_config.stored">Stored configuration</Hint>} eyebrow="as the API returns it (RepoConfig.to_dict)">
         <JsonView value={saved.config} initiallyOpen label="Repository configuration" />
       </Card>
       <AuditTrail name={repo.name} />

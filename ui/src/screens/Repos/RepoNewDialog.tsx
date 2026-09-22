@@ -159,7 +159,7 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" form="repo-new-form" variant="filled" disabled={!valid || create.isPending}>
+          <Button type="submit" form="repo-new-form" variant="filled" disabled={!valid || create.isPending} hint="button.repo_new.submit">
             {create.isPending ? 'Adding…' : 'Add repo'}
           </Button>
         </>
@@ -168,13 +168,14 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
       <form id="repo-new-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
         <TextField
           label="Name"
+          hint="field.repo_new.name"
           required
           value={name}
           onChange={(e) => setName(e.target.value.trim())}
-          hint="Lowercase ledger key, e.g. sqlalchemy"
+          description="Lowercase ledger key, e.g. sqlalchemy"
           error={name && !nameOk ? 'Lowercase letters, digits, . _ - only' : undefined}
         />
-        <SelectField label="Preset" value={preset} onChange={(e) => applyPreset(e.target.value)} hint={presetInfo?.description ?? 'Fills the layout fields for a well-known project shape; every field stays editable'}>
+        <SelectField label="Preset" hint="field.repo_new.preset" value={preset} onChange={(e) => applyPreset(e.target.value)} description={presetInfo?.description ?? 'Fills the layout fields for a well-known project shape; every field stays editable'}>
           <option value="">(none — fill the layout by hand)</option>
           {REPO_PRESETS.map((p) => (
             <option key={p.id} value={p.id}>
@@ -182,14 +183,14 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
             </option>
           ))}
         </SelectField>
-        <SelectField label="Language" required value={language} onChange={(e) => changeLanguage(e.target.value as Language)}>
+        <SelectField label="Language" hint="field.repo_new.language" required value={language} onChange={(e) => changeLanguage(e.target.value as Language)}>
           {LANGUAGES.map((l) => (
             <option key={l} value={l}>
               {l}
             </option>
           ))}
         </SelectField>
-        <SelectField label="Runner" value={runner} onChange={(e) => setRunner(e.target.value as Runner | '')} hint={`Default: ${DEFAULT_RUNNER[language]}. Runners for ${language}: ${runnersFor(language).join(', ')}`}>
+        <SelectField label="Runner" hint="field.repo_new.runner" value={runner} onChange={(e) => setRunner(e.target.value as Runner | '')} description={`Default: ${DEFAULT_RUNNER[language]}. Runners for ${language}: ${runnersFor(language).join(', ')}`}>
           <option value="">(default for language)</option>
           {runnersFor(language).map((r) => (
             <option key={r} value={r}>
@@ -197,32 +198,33 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
             </option>
           ))}
         </SelectField>
-        <SelectField label="Source" value={source} onChange={(e) => setSource(e.target.value as Source)} hint={source === 'url' ? 'The worker clones it (full history) on the repo’s first run' : 'An existing git clone on the server host'}>
+        <SelectField label="Source" hint="field.repo_new.source" value={source} onChange={(e) => setSource(e.target.value as Source)} description={source === 'url' ? 'The worker clones it (full history) on the repo’s first run' : 'An existing git clone on the server host'}>
           <option value="url">Git URL (https / ssh)</option>
           <option value="clone_path">Local clone path (on the server)</option>
         </SelectField>
         <TextField
           label={source === 'clone_path' ? 'Clone path' : 'Git URL'}
+          hint="field.repo_new.location"
           required
           value={location}
           onChange={(e) => setLocation(e.target.value)}
           placeholder={source === 'clone_path' ? '/srv/repos/sqlalchemy' : 'https://github.com/org/repo.git'}
           error={locationError}
         />
-        <TextField label="Source prefix" value={srcPrefix} onChange={(e) => setSrcPrefix(e.target.value)} placeholder="src/" hint="A file is source if it starts here (empty = anything outside the test prefix)" />
-        <TextField label="Test prefix" value={testPrefix} onChange={(e) => setTestPrefix(e.target.value)} placeholder="tests/" hint="A file is a test if it starts here (Go/Rust use their conventions)" />
-        <TextField label="Extension" value={ext} onChange={(e) => setExt(e.target.value)} placeholder=".py" hint="Default: by language" />
-        <SelectField label="Belt scope" value={beltPolicy} onChange={(e) => setBeltPolicy(e.target.value as BeltPolicy)} hint={BELT_HELP[beltPolicy]}>
+        <TextField label="Source prefix" hint="field.repo_new.src_prefix" value={srcPrefix} onChange={(e) => setSrcPrefix(e.target.value)} placeholder="src/" description="A file is source if it starts here (empty = anything outside the test prefix)" />
+        <TextField label="Test prefix" hint="field.repo_new.test_prefix" value={testPrefix} onChange={(e) => setTestPrefix(e.target.value)} placeholder="tests/" description="A file is a test if it starts here (Go/Rust use their conventions)" />
+        <TextField label="Extension" hint="field.repo_new.ext" value={ext} onChange={(e) => setExt(e.target.value)} placeholder=".py" description="Default: by language" />
+        <SelectField label="Belt scope" hint="field.repo_new.belt_scope" value={beltPolicy} onChange={(e) => setBeltPolicy(e.target.value as BeltPolicy)} description={BELT_HELP[beltPolicy]}>
           <option value="TARGET_ONLY">TARGET_ONLY</option>
           <option value="AFFECTED_DIRS">AFFECTED_DIRS</option>
           <option value="BARE">BARE</option>
           <option value="LIST">Explicit scopes…</option>
         </SelectField>
         {beltPolicy === 'LIST' && (
-          <TextField label="Belt scopes" required value={beltList} onChange={(e) => setBeltList(e.target.value)} placeholder="tests/, tests/acceptance/" error={beltList ? beltListError : undefined} hint="Comma-separated runner scopes" />
+          <TextField label="Belt scopes" hint="field.repo_new.belt_list" required value={beltList} onChange={(e) => setBeltList(e.target.value)} placeholder="tests/, tests/acceptance/" error={beltList ? beltListError : undefined} description="Comma-separated runner scopes" />
         )}
-        <TextField label="Probe scope" value={probe} onChange={(e) => setProbe(e.target.value)} placeholder="tests/test_smoke.py" hint="A known-green test scope to prove the toolchain (repo-specific; never filled by a preset)" />
-        <TextField label="Sandbox image" value={sandboxImage} onChange={(e) => setSandboxImage(e.target.value)} placeholder="ghcr.io/org/repo-toolchain:2026-09" hint="Container image with toolchain + deps; the docker executor fails closed without one" />
+        <TextField label="Probe scope" hint="field.repo_new.probe" value={probe} onChange={(e) => setProbe(e.target.value)} placeholder="tests/test_smoke.py" description="A known-green test scope to prove the toolchain (repo-specific; never filled by a preset)" />
+        <TextField label="Sandbox image" hint="field.repo_new.sandbox_image" value={sandboxImage} onChange={(e) => setSandboxImage(e.target.value)} placeholder="ghcr.io/org/repo-toolchain:2026-09" description="Container image with toolchain + deps; the docker executor fails closed without one" />
         <div className="sm:col-span-2">
           <RunnerOptsEditor
             runner={effectiveRunner}

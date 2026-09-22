@@ -1215,6 +1215,10 @@ export interface FactoryTask {
   pr_url: string | null
   review_verdict: string | null
   last_event: string
+  /** The next action the API serves for a stopped item (a readiness / red / review stop, a rejected or
+   *  rework-exhausted verdict, no oracle): `POST` an evolution to `route` with `supersedes` = this item.
+   *  `null` while the item is not stopped or is already superseded. */
+  way_forward?: { action: 'register_evolution'; route: string; supersedes: string } | null
   /** The newest refusal since the item's last readiness pass; `null` = not refused. (The
    * server always sends these five; optional so a mock built before J-FAC-4 still types.) */
   refusal?: FactoryRefusal | null

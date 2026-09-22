@@ -9,11 +9,23 @@ recorded before any edit — :mod:`crb.factory.loop`). This module serves its re
   written under ``CRB_HOME`` with the freeze recorded in the evidence chain; optional
   operator-authored oracles per item. Refused (409) while a ``factory`` run for the repo
   is queued or running — the hash a run verifies against must not move under it.
-* ``GET /factory/{repo}/backlog`` — the active frozen backlog (404 when none), with the
-  delivery pre-flight (``delivery``): whether a run could open a pull request for this
-  repository, by the same rule the worker's credentials follow (J-FAC-3).
+* ``GET /factory/{repo}/backlog`` — the active frozen backlog (404 when none), its
+  evolutions, the delivery pre-flight (``delivery``: whether a run could open a pull
+  request for this repository, by the same rule the worker's credentials follow —
+  J-FAC-3) and the outcomes summary (``outcomes``: pull requests delivered / merged /
+  closed / open — what Home's task 8 reads).
+* ``POST /factory/{repo}/backlog/evolutions`` (operator) — register an evolution (F32): a
+  NEW item chained onto the frozen hash, optionally superseding one; the frozen record
+  never changes. Same authored-oracle handling and the same active-run refusal as
+  registration.
 * ``GET /factory/{repo}/tasks`` — every item's latest state, folded from the evidence,
-  with every refusal's reason and the newest build's ids (J-FAC-4 / F15).
+  with every refusal's reason, the newest build's ids (J-FAC-4 / F15), the pull request's
+  outcome (B-9 / F30), the item's place in its supersession chain (F32) and, for an item
+  the loop stopped, ``way_forward`` — the evolutions route that supersedes it.
+* ``POST /factory/{repo}/outcomes/sync`` (operator) — read each delivered pull request's
+  state through the installation token and record ``delivery.merged`` /
+  ``delivery.closed`` — at most closed then merged per PR (the worker does the same at
+  the start of every factory run).
 * ``POST /factory/{repo}/tasks/{id}/signoff-gap`` (approver) — sign one structural
   gap: appended to the hash-chained gap ledger and echoed into the evidence chain.
   Value slots cannot be signed (the DoR gate refuses them by design).
@@ -25,28 +37,33 @@ and the worker); this module never builds anything.
 Navigation
 ----------
 What it is:   The API over the factory's per-repo state (``FactoryHome``).
-What it does: Registers/freezes backlogs, serves the task view and the evidence chain,
-              records approver gap sign-offs; every write is append-only and hashed.
+What it does: Registers/freezes backlogs and their evolutions, serves the task view and
+              the evidence chain, records approver gap sign-offs, syncs delivered pull
+              requests' outcomes; every write is append-only and hashed.
 How:          Thin FastAPI handlers → ``crb.server.factory_state.FactoryHome`` →
-              ``crb.factory`` dataclasses; role gates from ``crb.server.auth``.
+              ``crb.factory`` dataclasses; role gates from ``crb.server.auth``; the sync
+              builds a request-scoped ``GitHubApp`` over the installation on record.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/server/factory_state.py (the state), src/crb/factory/backlog.py (item
               validation + hash), src/crb/factory/readiness.py (slots, sign), src/crb/server/worker.py
               (the ``factory`` run kind that consumes the backlog; ``_delivery_credentials`` is
               the rule ``_delivery_preflight`` mirrors), src/crb/server/routes/github.py (the
-              installation record the pre-flight reads), docs/API.md (the contract),
+              installation record the pre-flight reads), src/crb/server/github_app.py
+              (``pull_request`` — the outcome sync's reader), docs/API.md (the contract),
               ui/src/screens/Factory/FactoryPage.tsx (the screen)
-Tested by:    tests/test_server_routes_factory.py
+Tested by:    tests/test_server_routes_factory.py, tests/test_factory_outcomes.py
 Touch when:   a factory record gains a field the UI needs (extend TaskView + FactoryTask in
               ui/src/api/types.ts together); a new write path (keep it append-only, role-gated).
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -54,14 +71,19 @@ from sqlalchemy import select
 from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.routing import ROUTE_DELIVER
 from crb.core.spec import SIZE_TIER_NAMES
-from crb.factory.backlog import KINDS, LEVELS, BacklogError, BacklogItem
+from crb.factory.backlog import KINDS, LEVELS, BacklogError, BacklogFrozen, BacklogItem
 from crb.factory.evidence import verify_events
 from crb.factory.readiness import CATALOGUE, SLOT_VALUE, sign, slots_for
 from crb.factory.testfirst import AuthoredTest
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
-from crb.server.factory_state import FactoryHome
-from crb.server.github_app import permissions_allow_delivery
+from crb.server.factory_state import (
+    FactoryHome,
+    OutcomeSyncReport,
+    outcomes_pending,
+    sync_outcomes,
+)
+from crb.server.github_app import GitHubApp, GitHubAppError, permissions_allow_delivery
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
@@ -107,6 +129,20 @@ class BacklogRegisterIn(BaseModel):
     authored: dict[str, AuthoredTestIn] = Field(default_factory=dict)
 
 
+class EvolutionItemIn(BacklogItemIn):
+    """An evolution: a backlog item plus the id it supersedes ("" = a pure amendment)."""
+
+    supersedes: str = Field(default="", max_length=64)
+
+
+class EvolutionRegisterIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item: EvolutionItemIn
+    #: the evolution's operator-authored oracle (the superseded item's stays on record)
+    authored: AuthoredTestIn | None = None
+
+
 class BacklogItemOut(BaseModel):
     id: str
     title: str
@@ -120,6 +156,9 @@ class BacklogItemOut(BaseModel):
     #: What and why, as the operator wrote it — served so a revised backlog can start
     #: from the active one (J-FAC-15).
     description: str = ""
+    #: F32 — the item this evolution replaced, and the evolution that replaced this item.
+    supersedes: str = ""
+    superseded_by: str = ""
 
 
 class DeliveryPreflightOut(BaseModel):
@@ -140,6 +179,18 @@ class DeliveryPreflightOut(BaseModel):
     account_login: str = ""
 
 
+class OutcomesSummaryOut(BaseModel):
+    """Pull requests the factory delivered on this repository and how they ended —
+    COUNTS (a merge is a human act, never a rate). ``merged > 0`` is the fact Home's task 8
+    reads as "the loop closed once". ``last_synced`` is the newest outcome's record time."""
+
+    delivered: int = 0
+    merged: int = 0
+    closed: int = 0
+    open: int = 0
+    last_synced: str = ""
+
+
 class FactoryBacklogOut(BaseModel):
     repo: str
     hash: str
@@ -147,6 +198,37 @@ class FactoryBacklogOut(BaseModel):
     items: list[BacklogItemOut]
     #: J-FAC-3 — where a run would deliver, or why it cannot.
     delivery: DeliveryPreflightOut = DeliveryPreflightOut()
+    #: F32 — every evolution in registration order (superseded ones included) and the
+    #: chain hash over them ("" when none).
+    evolutions: list[BacklogItemOut] = []
+    evolutions_hash: str = ""
+    #: B-9 / F30 — delivered pull requests by outcome.
+    outcomes: OutcomesSummaryOut = OutcomesSummaryOut()
+
+
+class DeliveryOutcomeOut(BaseModel):
+    """The newest delivered pull request's fate (``factory_state.DeliveryOutcome``)."""
+
+    state: str
+    pr_number: int
+    pr_url: str
+    merged_at: str = ""
+    merged_by: str = ""
+    merge_sha: str = ""
+    closed_at: str = ""
+    synced_at: str = ""
+
+
+class OutcomeSyncOut(BaseModel):
+    """What one sync did (``factory_state.OutcomeSyncReport``) plus the outcomes summary
+    after it."""
+
+    checked: int
+    merged: int
+    closed: int
+    open: int
+    errors: list[str]
+    outcomes: OutcomesSummaryOut
 
 
 class CellRouteOut(BaseModel):
@@ -176,6 +258,15 @@ class RefusalOut(BaseModel):
     reason: str
     reason_code: str = ""
     measured_route: str = ""
+
+
+class WayForwardOut(BaseModel):
+    """The next action the API serves for a stopped item: register an evolution that
+    supersedes it (F32) — ``route`` is the path to POST to, ``supersedes`` the item id."""
+
+    action: str = "register_evolution"
+    route: str
+    supersedes: str
 
 
 class FactoryTaskOut(BaseModel):
@@ -208,6 +299,44 @@ class FactoryTaskOut(BaseModel):
     row_hash: str = ""
     #: F28 — the cell's route before the run (absent fields = not measured).
     cell_route: CellRouteOut = CellRouteOut()
+    #: B-9 / F30 — the newest delivered pull request's fate; null = nothing delivered.
+    outcome: DeliveryOutcomeOut | None = None
+    #: F32 — the supersession chain: what this item replaced / what replaced it.
+    supersedes: str = ""
+    superseded_by: str = ""
+    #: The served link for a stopped item (a readiness / red / review refusal, a rejected
+    #: or rework-exhausted verdict, no oracle): the evolutions route that supersedes it.
+    #: null while the item is not stopped or already superseded.
+    way_forward: WayForwardOut | None = None
+
+
+#: The statuses whose way forward is a superseding evolution (the loop stopped the item
+#: for a reason a revised item answers); a dependency block or a delivery refusal is not.
+_STOPPED_STATUSES = frozenset(
+    {
+        "not_ready",
+        "not_red",
+        "no_oracle",
+        "oracle_needs_strengthening",
+        "rejected",
+        "rework_exhausted",
+    }
+)
+_STOPPED_STEPS = frozenset({"readiness", "red", "review"})
+
+
+def _way_forward(repo: str, view: Mapping[str, Any]) -> WayForwardOut | None:
+    """The evolutions route as the next action, for an item the loop stopped and no
+    evolution has replaced yet; ``None`` otherwise."""
+    if view.get("superseded_by"):
+        return None
+    refusal = view.get("refusal") or {}
+    stopped = view.get("status") in _STOPPED_STATUSES or refusal.get("step") in _STOPPED_STEPS
+    if not stopped:
+        return None
+    return WayForwardOut(
+        route=f"/factory/{repo}/backlog/evolutions", supersedes=str(view.get("id", ""))
+    )
 
 
 class CatalogueSlotOut(BaseModel):
@@ -271,6 +400,12 @@ class FactoryEvidenceOut(BaseModel):
 
 def _home(settings: Any, repo: str) -> FactoryHome:
     return FactoryHome(settings.home, repo)
+
+
+def _github_client() -> httpx.Client:
+    """The request-scoped HTTP client the outcome sync talks to GitHub with (tests replace
+    it with a ``MockTransport`` client)."""
+    return httpx.Client(timeout=20.0)
 
 
 def _active_factory_run(db: Any, repo: str) -> Run | None:
@@ -364,27 +499,69 @@ def _backlog_out(home: FactoryHome, delivery: DeliveryPreflightOut) -> FactoryBa
     if backlog is None:
         return None
     authored = home.authored()
+    superseded_by = backlog.superseded_by()
+
+    def item_out(i: BacklogItem) -> BacklogItemOut:
+        return BacklogItemOut(
+            id=i.id,
+            title=i.title,
+            kind=i.kind,
+            capability_class=i.capability_class,
+            size=i.size_estimate,
+            level=i.level,
+            depends_on=list(i.depends_on),
+            structural_facts=list(i.structural_facts),
+            has_authored_test=i.id in authored,
+            description=i.description,
+            supersedes=i.supersedes,
+            superseded_by=superseded_by.get(i.id, ""),
+        )
+
     return FactoryBacklogOut(
         repo=home.repo,
         hash=backlog.backlog_hash,
         frozen_at=backlog.frozen_at or None,
         delivery=delivery,
-        items=[
-            BacklogItemOut(
-                id=i.id,
-                title=i.title,
-                kind=i.kind,
-                capability_class=i.capability_class,
-                size=i.size_estimate,
-                level=i.level,
-                depends_on=list(i.depends_on),
-                structural_facts=list(i.structural_facts),
-                has_authored_test=i.id in authored,
-                description=i.description,
-            )
-            for i in backlog.ordered()
-        ],
+        items=[item_out(i) for i in backlog.ordered()],
+        evolutions=[item_out(e) for e in backlog.evolutions],
+        evolutions_hash=backlog.evolutions_hash,
+        outcomes=OutcomesSummaryOut(**home.outcomes_summary()),
     )
+
+
+def _refuse_if_run_active(db: Any, repo: str) -> None:
+    active = _active_factory_run(db, repo)
+    if active is not None:
+        raise ApiError(
+            409,
+            "factory_run_active",
+            f"a factory run ({active.id}) is {active.status} on {repo!r}: the backlog it "
+            "verifies against cannot change under it — cancel it or wait",
+        )
+
+
+def _item_from(it: BacklogItemIn, *, supersedes: str = "") -> BacklogItem:
+    if it.kind not in KINDS:
+        raise ApiError(422, "validation_error", f"item {it.id!r}: kind must be one of {KINDS}")
+    if it.level not in LEVELS:
+        raise ApiError(422, "validation_error", f"item {it.id!r}: level must be one of {LEVELS}")
+    try:
+        return BacklogItem(
+            id=it.id,
+            title=it.title,
+            kind=it.kind,
+            description=it.description,
+            acceptance_criteria=tuple(it.acceptance_criteria),
+            capability_class=it.capability_class,
+            size_estimate=it.size_estimate,
+            structural_facts=tuple(it.structural_facts),
+            depends_on=tuple(it.depends_on),
+            level=it.level,
+            labels=dict(it.labels),
+            supersedes=supersedes,
+        )
+    except (BacklogError, ValueError) as exc:
+        raise ApiError(422, "validation_error", str(exc)) from exc
 
 
 # --- routes ----------------------------------------------------------------------------
@@ -443,42 +620,13 @@ def register_backlog(
     repo: str, body: BacklogRegisterIn, operator: OperatorDep, db: DbDep, settings: SettingsDep
 ) -> FactoryBacklogOut:
     row = get_repo_or_404(db, repo)
-    active = _active_factory_run(db, repo)
-    if active is not None:
-        raise ApiError(
-            409,
-            "factory_run_active",
-            f"a factory run ({active.id}) is {active.status} on {repo!r}: the backlog it "
-            "verifies against cannot change under it — cancel it or wait",
-        )
-    for it in body.items:
-        if it.kind not in KINDS:
-            raise ApiError(422, "validation_error", f"item {it.id!r}: kind must be one of {KINDS}")
-        if it.level not in LEVELS:
-            raise ApiError(
-                422, "validation_error", f"item {it.id!r}: level must be one of {LEVELS}"
-            )
+    _refuse_if_run_active(db, repo)
+    items = [_item_from(it) for it in body.items]
     unknown = sorted(set(body.authored) - {it.id for it in body.items})
     if unknown:
         raise ApiError(422, "validation_error", f"authored tests for unknown items: {unknown}")
     home = _home(settings, repo)
     try:
-        items = [
-            BacklogItem(
-                id=it.id,
-                title=it.title,
-                kind=it.kind,
-                description=it.description,
-                acceptance_criteria=tuple(it.acceptance_criteria),
-                capability_class=it.capability_class,
-                size_estimate=it.size_estimate,
-                structural_facts=tuple(it.structural_facts),
-                depends_on=tuple(it.depends_on),
-                level=it.level,
-                labels=dict(it.labels),
-            )
-            for it in body.items
-        ]
         authored = {
             item_id: AuthoredTest(path=t.path, content=t.content, author=f"operator:{operator.id}")
             for item_id, t in body.authored.items()
@@ -490,6 +638,114 @@ def register_backlog(
     out = _backlog_out(home, _delivery_preflight(db, settings, row))
     assert out is not None and out.hash == backlog.backlog_hash
     return out
+
+
+@router.post(
+    "/factory/{repo}/backlog/evolutions",
+    response_model=FactoryBacklogOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
+    summary="Register an EVOLUTION onto the frozen backlog: a new item, optionally superseding one (the frozen record never changes)",
+)
+def register_evolution(
+    repo: str, body: EvolutionRegisterIn, operator: OperatorDep, db: DbDep, settings: SettingsDep
+) -> FactoryBacklogOut:
+    """F32: the only way a frozen backlog changes. The new item is chained onto the frozen
+    hash (``Backlog.evolve``), recorded as ``backlog.evolved``, and its authored oracle
+    (if any) is stored beside the others; the superseded item stays in the record and
+    the task view shows it as superseded. **409 ``factory_run_active``** while a run is
+    queued or running; **409 ``item_exists``** / **409 ``already_superseded``** for a
+    frozen-record violation; 422 for a malformed item or an unknown ``supersedes``."""
+    row = get_repo_or_404(db, repo)
+    _refuse_if_run_active(db, repo)
+    home = _home(settings, repo)
+    if home.load_backlog() is None:
+        raise ApiError(404, "not_found", f"no backlog registered for {repo!r}")
+    item = _item_from(body.item, supersedes=body.item.supersedes)
+    try:
+        # the oracle is validated BEFORE the evolution is written (the same order as
+        # register_backlog): a repo-escaping path or blank content is a 422 and the chain
+        # gains nothing — never an evolution persisted without its oracle and a 500
+        authored = (
+            {
+                item.id: AuthoredTest(
+                    path=body.authored.path,
+                    content=body.authored.content,
+                    author=f"operator:{operator.id}",
+                )
+            }
+            if body.authored is not None
+            else {}
+        )
+        evolved = home.register_evolution(item, actor=operator.id)
+    except BacklogFrozen as exc:
+        raise ApiError(409, exc.code, str(exc)) from exc
+    except (BacklogError, ValueError) as exc:
+        raise ApiError(422, "validation_error", str(exc)) from exc
+    if authored:
+        home.save_authored(authored, merge=True)
+    out = _backlog_out(home, _delivery_preflight(db, settings, row))
+    assert out is not None and out.evolutions_hash == evolved.evolutions_hash
+    return out
+
+
+@router.post(
+    "/factory/{repo}/outcomes/sync",
+    response_model=OutcomeSyncOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 502: _ERR},
+    summary="Read each delivered pull request's state from GitHub and record delivery.merged / delivery.closed (at most closed then merged per PR)",
+)
+def sync_delivery_outcomes(
+    repo: str, operator: OperatorDep, db: DbDep, settings: SettingsDep
+) -> OutcomeSyncOut:
+    """B-9 / F30: the merge outcome back as evidence. Reads through the installation token
+    of the repository's link (**409 ``outcome_sync_unavailable``** with the pre-flight's
+    reason when the repository is not linked, the app is not configured, the URL is off
+    the app's host, or the installation is missing / suspended); a token that cannot be
+    minted is **502 ``github_error``**; a single pull request that cannot be read is an
+    entry in ``errors`` and is retried by the next sync. Records nothing for a pull
+    request still open; a closed one is read again (a person can reopen and merge it —
+    ``merged`` after ``closed`` is recorded once); a merged one is never read again."""
+    row = get_repo_or_404(db, repo)
+    home = _home(settings, repo)
+    if home.load_backlog() is None:
+        raise ApiError(404, "not_found", f"no backlog registered for {repo!r}")
+    pre = _delivery_preflight(db, settings, row)
+    if pre.reason_code not in ("ok", "read_only") or pre.installation_id is None:
+        raise ApiError(
+            409,
+            "outcome_sync_unavailable",
+            f"the outcome of a delivered pull request can only be read through the GitHub "
+            f"App installation the repository is linked to. {pre.reason}",
+        )
+    installation_id, full_name = pre.installation_id, pre.full_name
+    if not outcomes_pending(home):
+        # nothing whose fate can still change (every delivery merged, or none delivered):
+        # no token is minted for an empty sync — a closed one IS pending (see the helper)
+        report = OutcomeSyncReport()
+    else:
+        client = _github_client()
+        try:
+            app = GitHubApp(settings.github, client)
+            try:
+                app.installation_token(installation_id)  # a dead credential is ONE 502
+            except GitHubAppError as exc:
+                raise ApiError(
+                    502,
+                    "github_error",
+                    f"GitHub refused: {exc.message}" if exc.status else exc.message,
+                    detail={"github_status": exc.status},
+                ) from exc
+            report = sync_outcomes(
+                home,
+                lambda n: app.pull_request(installation_id, full_name, n),
+                actor=operator.id,
+            )
+        finally:
+            client.close()
+    return OutcomeSyncOut(
+        **report.to_dict(), outcomes=OutcomesSummaryOut(**home.outcomes_summary())
+    )
 
 
 @router.get(
@@ -523,6 +779,7 @@ def list_tasks(
                 **d,
                 run_id=run_by_row.get(v.row_id, ""),
                 cell_route=routes.get(f"{v.capability_class}|{v.size}", CellRouteOut()),
+                way_forward=_way_forward(repo, d),
             )
         )
     return out

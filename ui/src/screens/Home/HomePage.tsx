@@ -23,6 +23,11 @@
  *               (sponsor, auditor) gets the same list read as a progress report — "Where
  *               this deployment is" — not as their to-do list; a measurement in flight
  *               reads "In progress", and the baseline opens as soon as any row exists.
+ *               Every element a reader meets — the kicker, the sandbox banner's lead line,
+ *               the "n of 8" summary, each task's status tag and Continue — is a hint
+ *               trigger (`stat.home.*`, `banner.home.sandbox`, `task.home.*`,
+ *               `button.home.continue`), so what a status means is one hover, focus or
+ *               tap away and listed in the About block.
  * How:          `useGitHubApp`, `useAllRepos`, the chosen repository (`?repo=` or the most
  *               recently updated) → `useRepo` + `useOracle` + `useOracleControls` +
  *               `useCapabilityMap` → `stagesFor`; `useSignoffs` for task 6; `useUsers`
@@ -31,18 +36,23 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none (DL-042, DL-044)
  * Works with:   ui/src/components/govuk.tsx (TaskList, NotificationBanner, InsetText),
+ *               ui/src/help/hints.ts (the `task.home.*` copy; the trigger is `Hint`),
  *               ui/src/api/hooks.ts (`useActiveRun`, `useSignoffs`),
- *               ui/src/screens/Connect/connection.ts, ui/src/screens/Connect/ConnectPage.tsx,
- *               ui/src/screens/Results/ResultsPage.tsx, ui/src/screens/Factory/FactoryPage.tsx,
+ *               ui/src/screens/Connect/connection.ts (the connection state each task reads),
+ *               ui/src/screens/Connect/ConnectPage.tsx, ui/src/screens/Results/ResultsPage.tsx,
+ *               ui/src/screens/Factory/FactoryPage.tsx (where the tasks lead),
  *               ui/src/screens/Posture/PosturePage.tsx (the health banner's target)
- * Tested by:    ui/src/screens/Home/HomePage.test.tsx
- * Touch when:   a task is added to the walk (connection.ts first).
+ * Tested by:    ui/src/screens/Home/HomePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
+ *               (every element resolves to a registry id)
+ * Touch when:   a task is added to the walk (connection.ts first; its `task.home.*` hint in
+ *               hints.ts second).
  */
 
 import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFactoryTasks, useGitHubApp, useHealth, useOracle, useOracleControls, useRepo, useSignoffs, useUsers } from '../../api/hooks'
 import { isApiError } from '../../api/client'
+import { Hint } from '../../components/Hint'
 import { InsetText, Kicker, Lede, NotificationBanner, PageTitle, StartButton, type TagTone, TaskList, type TaskItem } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
 import { kOfN } from '../../lib/format'
@@ -159,17 +169,17 @@ export function HomePage() {
   const item = progress ? kOfN(progress.done, progress.total) : null
   const factoryLabel = factoryStatus === 'running' && item ? `In progress — item ${item}` : FACTORY_LABEL[factoryStatus]
   const tasks: TaskItem[] = [
-    { num: 1, name: 'Connect GitHub', status: ghStatus.status, tone: ghStatus.tone, to: '/connect' },
-    { num: 2, name: 'Choose a repository', status: hasRepo ? 'Completed' : 'Incomplete', tone: hasRepo ? 'pale' : 'blue', to: '/connect' },
-    { num: 3, name: 'Confirm its shape', status: stage('probe') === 'done' ? 'Completed' : hasRepo ? LABEL[stage('probe') ?? 'todo'] : 'Cannot start yet', tone: stage('probe') === 'done' ? 'pale' : hasRepo ? TONE[stage('probe') ?? 'todo'] : 'grey', to: chosen ? `/repos/${encodeURIComponent(chosen)}` : '/connect' },
-    { num: 4, name: 'Prove the instrument (£0)', status: LABEL[proveStatus], tone: TONE[proveStatus], to: walk },
-    { num: 5, name: 'Measure — spends money', status: measured ? 'Completed' : measuring ? 'In progress' : proveDone ? 'Incomplete' : 'Cannot start yet', tone: measured ? 'pale' : measuring || proveDone ? 'blue' : 'grey', to: measuring && chosen ? `/connect/${encodeURIComponent(chosen)}` : chosen ? `/connect/${encodeURIComponent(chosen)}/measure` : '/connect' },
-    { num: 6, name: 'Read the baseline', status: baselineActed ? 'Completed' : anyRows ? 'Incomplete' : 'Cannot start yet', tone: baselineActed ? 'pale' : anyRows ? 'blue' : 'grey', to: `/results${q}` },
+    { num: 1, name: 'Connect GitHub', status: ghStatus.status, tone: ghStatus.tone, to: '/connect', hint: 'task.home.connect_github' },
+    { num: 2, name: 'Choose a repository', status: hasRepo ? 'Completed' : 'Incomplete', tone: hasRepo ? 'pale' : 'blue', to: '/connect', hint: 'task.home.choose_repo' },
+    { num: 3, name: 'Confirm its shape', status: stage('probe') === 'done' ? 'Completed' : hasRepo ? LABEL[stage('probe') ?? 'todo'] : 'Cannot start yet', tone: stage('probe') === 'done' ? 'pale' : hasRepo ? TONE[stage('probe') ?? 'todo'] : 'grey', to: chosen ? `/repos/${encodeURIComponent(chosen)}` : '/connect', hint: 'task.home.confirm_shape' },
+    { num: 4, name: 'Prove the instrument (£0)', status: LABEL[proveStatus], tone: TONE[proveStatus], to: walk, hint: 'task.home.prove_instrument' },
+    { num: 5, name: 'Measure — spends money', status: measured ? 'Completed' : measuring ? 'In progress' : proveDone ? 'Incomplete' : 'Cannot start yet', tone: measured ? 'pale' : measuring || proveDone ? 'blue' : 'grey', to: measuring && chosen ? `/connect/${encodeURIComponent(chosen)}` : chosen ? `/connect/${encodeURIComponent(chosen)}/measure` : '/connect', hint: 'task.home.measure' },
+    { num: 6, name: 'Read the baseline', status: baselineActed ? 'Completed' : anyRows ? 'Incomplete' : 'Cannot start yet', tone: baselineActed ? 'pale' : anyRows ? 'blue' : 'grey', to: `/results${q}`, hint: 'task.home.read_baseline' },
     // only an admin can invite; everyone else reads a state (not an instruction), is not sent
-    // to a page that refuses them, and gets the hint under the list
-    { num: 7, name: 'Invite an approver', status: approverKnown === true ? 'Completed' : approverKnown === false ? 'Incomplete' : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey', to: can('admin') ? '/settings' : '/posture' },
+    // to a page that refuses them, and gets the note under the list
+    { num: 7, name: 'Invite an approver', status: approverKnown === true ? 'Completed' : approverKnown === false ? 'Incomplete' : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey', to: can('admin') ? '/settings' : '/posture', hint: 'task.home.invite_approver' },
     // the destination (DL-044): the factory delivers a change under the baseline the walk earned
-    { num: 8, name: 'Deliver your first change', status: factoryLabel, tone: FACTORY_TONE[factoryStatus], to: chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory' },
+    { num: 8, name: 'Deliver your first change', status: factoryLabel, tone: FACTORY_TONE[factoryStatus], to: chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory', hint: 'task.home.deliver' },
   ]
   const completed = tasks.filter((t) => t.status === 'Completed').length
   // the operator's next press: the first task they can act on now; all done → the factory
@@ -178,7 +188,9 @@ export function HomePage() {
 
   return (
     <>
-      <Kicker>{chosen ? `${chosen} · ${measured ? 'measured' : measuring ? 'measuring' : 'trial'}` : 'no repository yet'}</Kicker>
+      <Hint id="stat.home.kicker">
+        <Kicker>{chosen ? `${chosen} · ${measured ? 'measured' : measuring ? 'measuring' : 'trial'}` : 'no repository yet'}</Kicker>
+      </Hint>
       <PageTitle>{operator ? 'Get started' : 'Where this deployment is'}</PageTitle>
       {!operator && (
         <Lede className="mb-4">
@@ -187,14 +199,16 @@ export function HomePage() {
       )}
       {sandbox && sandbox.status !== 'ok' && (
         <NotificationBanner title="Important">
-          <p className="m-0 mb-2 font-bold">The sandbox probe is {sandbox.status} on this host.</p>
+          <Hint as="p" id="banner.home.sandbox" className="m-0 mb-2 font-bold">
+            The sandbox probe is {sandbox.status} on this host.
+          </Hint>
           <p className="m-0">
             Anything measured now is a development reading, not evidence. <Link to="/posture">See the deployment's health</Link>.
           </p>
         </NotificationBanner>
       )}
       <div className="max-w-[44em]">
-        <TaskList tasks={tasks} completed={completed} summary={operator ? undefined : `The operators have completed ${completed} of ${tasks.length} tasks.`} />
+        <TaskList tasks={tasks} completed={completed} summary={<Hint id="stat.home.completed">{operator ? `You have completed ${completed} of ${tasks.length} tasks.` : `The operators have completed ${completed} of ${tasks.length} tasks.`}</Hint>} />
         {approverKnown !== true && !can('admin') && (
           <p className="m-0 mt-2 text-[16px] text-on-surface-muted">
             <strong>Task 7.</strong> Only an admin can add users. Ask your admin to add someone with the approver role in Settings.
@@ -209,9 +223,9 @@ export function HomePage() {
         The operator who queues the runs cannot be the approver who signs the result off: the API refuses a sign-off (<code>same_actor</code>) from the person who queued the run behind the attested row, or who is the only person behind the cell — no setting can waive it. Sign-off also needs the approver role and an attestation naming the diff they read — task 7 is not optional before a cell can be signed.
       </Lede>
       {operator ? (
-        <StartButton to={nextTask?.to ?? (chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory')}>{nextTask ? `Continue to task ${nextTask.num}: ${nextTask.name}` : 'Continue to the factory'}</StartButton>
+        <StartButton to={nextTask?.to ?? (chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory')} hint="button.home.continue">{nextTask ? `Continue to task ${nextTask.num}: ${nextTask.name}` : 'Continue to the factory'}</StartButton>
       ) : (
-        <StartButton to={anyRows ? `/results${q}` : '/decisions'}>{anyRows && chosen ? `Continue to the baseline for ${chosen}` : 'Continue to Decisions'}</StartButton>
+        <StartButton to={anyRows ? `/results${q}` : '/decisions'} hint="button.home.continue">{anyRows && chosen ? `Continue to the baseline for ${chosen}` : 'Continue to Decisions'}</StartButton>
       )}
     </>
   )

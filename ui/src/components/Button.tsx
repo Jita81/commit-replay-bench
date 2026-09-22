@@ -9,20 +9,29 @@
  *               hit target at `md`, a visible focus ring from the global styles, and
  *               `type="button"` by default so a button inside a form never submits it by
  *               accident. Hover states keep AA contrast in every theme (a filled button
- *               darkens; it never fades — WCAG 1.4.3 applies to the hovered state too).
+ *               darkens; it never fades — WCAG 1.4.3 applies to the hovered state too). With
+ *               `hint` (a registry id) the button is the hover / focus / tap trigger for what
+ *               pressing it does; the click always goes through. A filled or submit button
+ *               carries `data-primary` so the ratchet can require a hint on every primary
+ *               action.
  * How:          `buttonClasses(variant, size)` composes the Tailwind classes; each wrapper
- *               spreads the rest of its props onto the native element.
+ *               spreads the rest of its props onto the native element, through `<Hint as>`
+ *               when it carries an id.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/index.css (the tokens and the focus ring), ui/src/components/Dialog.tsx
+ * Works with:   ui/src/components/Hint.tsx (the trigger), ui/src/help/hints.ts (`button.*`
+ *               ids), ui/src/index.css (the tokens and the focus ring), ui/src/components/Dialog.tsx
  *               (close button), ui/src/components/ErrorState.tsx (retry),
  *               ui/src/screens/Ledger/LedgerPage.tsx (`AnchorButton` for the export URLs)
- * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe on every screen), and
+ * Tested by:    ui/src/help/hints-ratchet.test.tsx (the hint contract), ui/src/components/Hint.test.tsx
+ *               (the click goes through), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe on every screen), and
  *               every screen test that clicks a button by role
  * Touch when:   a variant or size is added; never for a new repository.
  */
 import type { ButtonHTMLAttributes, AnchorHTMLAttributes } from 'react'
 import { Link, type LinkProps } from 'react-router'
+import type { HintId } from '../help/hints'
+import { Hint } from './Hint'
 
 export type ButtonVariant = 'filled' | 'outlined' | 'ghost' | 'danger'
 export type ButtonSize = 'sm' | 'md'
@@ -51,29 +60,46 @@ export function buttonClasses(variant: ButtonVariant = 'outlined', size: ButtonS
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
+  /** What pressing it does — a registry id; required by the ratchet on every primary (filled / submit) button. */
+  hint?: HintId
+}
+
+/** `data-primary` marks the buttons the ratchet requires a hint on: filled, or a form's submit. */
+function primary(variant: ButtonVariant, type?: string): '' | undefined {
+  return variant === 'filled' || type === 'submit' ? '' : undefined
 }
 
 /** A `<button>`; `type="button"` unless told otherwise, so a button inside a form does not submit it. */
-export function Button({ variant = 'outlined', size = 'md', className = '', type = 'button', ...rest }: ButtonProps) {
-  return <button type={type} className={`${buttonClasses(variant, size)} ${className}`} {...rest} />
+export function Button({ variant = 'outlined', size = 'md', className = '', type = 'button', hint, id, ...rest }: ButtonProps) {
+  const cls = `${buttonClasses(variant, size)} ${className}`
+  if (hint) return <Hint as="button" id={hint} elementId={id} type={type} className={cls} data-primary={primary(variant, type)} {...rest} />
+  return <button id={id} type={type} className={cls} data-primary={primary(variant, type)} {...rest} />
 }
 
 interface LinkButtonProps extends LinkProps {
   variant?: ButtonVariant
   size?: ButtonSize
+  /** Where it goes and why — a registry id; required by the ratchet on a filled link. */
+  hint?: HintId
 }
 
 /** A router `<Link>` styled as a button (in-app navigation that reads as an action). */
-export function LinkButton({ variant = 'outlined', size = 'md', className = '', ...rest }: LinkButtonProps) {
-  return <Link className={`${buttonClasses(variant, size)} ${className}`} {...rest} />
+export function LinkButton({ variant = 'outlined', size = 'md', className = '', hint, id, ...rest }: LinkButtonProps) {
+  const cls = `${buttonClasses(variant, size)} ${className}`
+  if (hint) return <Hint as={Link} id={hint} elementId={id} className={cls} data-primary={primary(variant)} {...rest} />
+  return <Link id={id} className={cls} data-primary={primary(variant)} {...rest} />
 }
 
 interface AnchorButtonProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   variant?: ButtonVariant
   size?: ButtonSize
+  /** What the download is — a registry id. */
+  hint?: HintId
 }
 
 /** A plain anchor styled as a button — for API download URLs (export). */
-export function AnchorButton({ variant = 'outlined', size = 'md', className = '', ...rest }: AnchorButtonProps) {
-  return <a className={`${buttonClasses(variant, size)} ${className}`} {...rest} />
+export function AnchorButton({ variant = 'outlined', size = 'md', className = '', hint, id, ...rest }: AnchorButtonProps) {
+  const cls = `${buttonClasses(variant, size)} ${className}`
+  if (hint) return <Hint as="a" id={hint} elementId={id} className={cls} data-primary={primary(variant)} {...rest} />
+  return <a id={id} className={cls} data-primary={primary(variant)} {...rest} />
 }

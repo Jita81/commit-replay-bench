@@ -74,7 +74,7 @@ export function GitHubAppCard() {
       eyebrow="the enterprise connection · no tokens handed over"
       actions={
         app.data?.configured && can('operator') ? (
-          <Button size="sm" disabled={sync.isPending} onClick={() => sync.mutate()}>
+          <Button size="sm" disabled={sync.isPending} onClick={() => sync.mutate()} hint="button.settings.github_sync">
             Sync installations
           </Button>
         ) : undefined
@@ -83,13 +83,18 @@ export function GitHubAppCard() {
       {app.isError && <ErrorState error={app.error} onRetry={() => void app.refetch()} />}
       {app.data && !app.data.configured && (
         <p className="m-0 text-sm text-on-surface-body" data-testid="github-app-status">
-          <Pill tone="muted" size="xs">not configured</Pill> Set <code>CRB_GITHUB__APP_ID</code> and <code>CRB_GITHUB__PRIVATE_KEY</code> (or <code>_FILE</code>) on the API and the worker, then organisations install the app on selected repositories. Guide: <DocLink to="GITHUB-APP#2-register-the-app-once-per-deployment">Register the GitHub App</DocLink>.
+          <Pill tone="muted" size="xs" hint="pill.settings.github_configured">
+            not configured
+          </Pill>{' '}
+          Set <code>CRB_GITHUB__APP_ID</code> and <code>CRB_GITHUB__PRIVATE_KEY</code> (or <code>_FILE</code>) on the API and the worker, then organisations install the app on selected repositories. Guide: <DocLink to="GITHUB-APP#2-register-the-app-once-per-deployment">Register the GitHub App</DocLink>.
         </p>
       )}
       {app.data?.configured && (
         <div className="space-y-2 text-sm" data-testid="github-app-status">
           <div className="flex flex-wrap items-center gap-2">
-            <Pill tone="green" size="xs" glyph="✓">configured</Pill>
+            <Pill tone="green" size="xs" glyph="✓" hint="pill.settings.github_configured">
+              configured
+            </Pill>
             <span className="font-mono text-xs">{app.data.app_slug}</span>
             <span className="font-mono text-xs text-on-surface-muted">{app.data.api_url}</span>
             {app.data.install_url && (
@@ -106,8 +111,14 @@ export function GitHubAppCard() {
                 <li key={i.id} className="flex flex-wrap items-center gap-2 py-1.5">
                   <span className="font-semibold">{i.account_login}</span>
                   <span className="text-xs text-on-surface-muted">{i.account_type} · {i.repository_selection === 'all' ? 'all repositories' : 'selected repositories'}</span>
-                  <Pill tone={i.can_deliver ? 'primary' : 'muted'} size="xs">{i.can_deliver ? 'can deliver' : 'read-only'}</Pill>
-                  {i.suspended && <Pill tone="red" size="xs">uninstalled</Pill>}
+                  <Pill tone={i.can_deliver ? 'primary' : 'muted'} size="xs" hint="pill.settings.installation">
+                    {i.can_deliver ? 'can deliver' : 'read-only'}
+                  </Pill>
+                  {i.suspended && (
+                    <Pill tone="red" size="xs" hint="pill.settings.installation">
+                      uninstalled
+                    </Pill>
+                  )}
                   <span className="num ml-auto font-mono text-[11px] text-on-surface-muted">#{i.id}</span>
                   {!i.can_deliver && <ReadOnlyNote installation={i} />}
                 </li>

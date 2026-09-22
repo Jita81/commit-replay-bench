@@ -19,20 +19,27 @@
  *               (or "not evaluated" for belt 5), never a fail. Every sentence says what the
  *               policy licenses — deliver and a strong oracle license a branch and pull request
  *               under review, never a merge (docs/EVIDENCE-AND-CLAIMS.md §7) — and the human
- *               route names all three causes the rule has. `actionHelp` explains a live-log
- *               line to a reader who has not read the loop's source, falling back to a generic
- *               sentence for an action this version does not know.
+ *               route names all three causes the rule has. Every `Display` a screen renders as
+ *               a pill also carries its `hint` — the registry id of the hover / focus / tap
+ *               explanation (`route.<route>`, `run.status`, `probe.status`, `oracle.band`,
+ *               `oracle.gate`, `tier.verification`) — so a screen writes `hint={d.hint}` and
+ *               never a shared-vocabulary id by hand; `beltHint(name)` gives a belt's.
+ *               `actionHelp` explains a live-log line to a reader who has not read the loop's
+ *               source, falling back to a generic sentence for an action this version does not
+ *               know.
  * How:          One `Record<Value, Display>` per vocabulary with a lookup function that falls
- *               back to the muted default; `ACTION_HELP` is keyed by the full action string,
- *               grouped by stage in source order.
+ *               back to the muted default (an unknown route reads `route.not_yet_measured`, an
+ *               unknown belt `belt.tests_unmodified`); `ACTION_HELP` is keyed by the full
+ *               action string, grouped by stage in source order.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0011-repo-lint-belt.md
- * Works with:   ui/src/components/Pill.tsx (renders a `Display`), ui/src/components/VerdictPill.tsx
+ * Works with:   ui/src/components/Pill.tsx (renders a `Display`), ui/src/help/hints.ts (the
+ *               ids `hint` names), ui/src/components/VerdictPill.tsx
  *               (route / status pills), ui/src/components/BeltPills.tsx (`beltDisplay`,
- *               `BELT_LABELS`), ui/src/components/LiveLog.tsx (`actionHelp` on each row),
+ *               `BELT_LABELS`, `beltHint`), ui/src/components/LiveLog.tsx (`actionHelp` on each row),
  *               ui/src/api/types.ts (the vocabularies these tables cover),
  *               ui/src/index.css (the tone tokens the classes name)
- * Tested by:    ui/src/lib/verdict.test.ts (the copy and every action), ui/src/components/VerdictPill.test.tsx,
+ * Tested by:    ui/src/lib/verdict.test.ts (the copy, every hint id and every action), ui/src/components/VerdictPill.test.tsx,
  *               ui/src/components/BeltPills.test.tsx
  * Touch when:   a route, run status, belt, band or tier is added on the server (an apparatus or
  *               policy change with its ADR) — add the row here and the type in
@@ -42,6 +49,7 @@
 
 import type { CellVerdict, OracleBand, OracleGate, ProbeStatus, RunStatus, StepStatus, VerificationTier } from '../api/types'
 import { NOT_YET_MEASURED } from '../api/types'
+import { HINTS, type HintId } from '../help/hints'
 
 /** The seven colour families the tokens define; `muted` is the "no claim" tone (unmeasured, not recorded). */
 export type Tone = 'green' | 'amber' | 'red' | 'primary' | 'blue' | 'violet' | 'muted'
@@ -53,6 +61,8 @@ export interface Display {
   glyph: string
   /** Screen-reader sentence, e.g. "Route: deliver — auto-deliver as a branch + PR". */
   describe: string
+  /** The hint registry id a pill of this state opens on hover / focus / tap; absent only for the live log's per-line status. */
+  hint?: HintId
 }
 
 /** Tailwind classes per tone: soft fill + strong ink, AA on both themes. */
@@ -79,31 +89,31 @@ export const TONE_TEXT: Record<Tone, string> = {
 
 /** The five routes of ADR-0003 plus `NOT_YET_MEASURED`, which is the ABSENCE of a cell — muted, never zero. */
 const ROUTE_DISPLAY: Record<CellVerdict, Display> = {
-  deliver: { label: 'Deliver', tone: 'green', glyph: '✓', describe: 'Route: deliver — the factory may open a branch and pull request under review; never a claim the change is safe to merge' },
-  calibrate: { label: 'Calibrate', tone: 'primary', glyph: '◐', describe: 'Route: calibrate — not enough evidence yet, or under the bar; more attempts or the controls run can change it' },
-  granularize: { label: 'Granularize', tone: 'blue', glyph: '⋮', describe: 'Route: granularize — split before attempting' },
-  human: { label: 'Human', tone: 'amber', glyph: '☺', describe: 'Route: human — a green cannot license delivery here: the tests are too weak, the controls gate failed, or a cheat graded clean' },
-  do_not_ship: { label: 'Do not ship', tone: 'red', glyph: '✗', describe: 'Route: do not ship — false-Q1 in cell, evidence untrusted' },
-  [NOT_YET_MEASURED]: { label: 'Not yet measured', tone: 'muted', glyph: '·', describe: 'Not yet measured — no evidence for this cell' },
+  deliver: { hint: 'route.deliver', label: 'Deliver', tone: 'green', glyph: '✓', describe: 'Route: deliver — the factory may open a branch and pull request under review; never a claim the change is safe to merge' },
+  calibrate: { hint: 'route.calibrate', label: 'Calibrate', tone: 'primary', glyph: '◐', describe: 'Route: calibrate — not enough evidence yet, or under the bar; more attempts or the controls run can change it' },
+  granularize: { hint: 'route.granularize', label: 'Granularize', tone: 'blue', glyph: '⋮', describe: 'Route: granularize — split before attempting' },
+  human: { hint: 'route.human', label: 'Human', tone: 'amber', glyph: '☺', describe: 'Route: human — a green cannot license delivery here: the tests are too weak, the controls gate failed, or a cheat graded clean' },
+  do_not_ship: { hint: 'route.do_not_ship', label: 'Do not ship', tone: 'red', glyph: '✗', describe: 'Route: do not ship — false-Q1 in cell, evidence untrusted' },
+  [NOT_YET_MEASURED]: { hint: 'route.not_yet_measured', label: 'Not yet measured', tone: 'muted', glyph: '·', describe: 'Not yet measured — no evidence for this cell' },
 }
 
 /** A route (or absence) → its display; an unknown string is shown raw in muted `?`, never mapped to a known route. */
 export function routeDisplay(route: CellVerdict | string | null | undefined): Display {
   if (!route) return ROUTE_DISPLAY[NOT_YET_MEASURED]
-  return ROUTE_DISPLAY[route as CellVerdict] ?? { label: route, tone: 'muted', glyph: '?', describe: `Route: ${route}` }
+  return ROUTE_DISPLAY[route as CellVerdict] ?? { hint: 'route.not_yet_measured', label: route, tone: 'muted', glyph: '?', describe: `Route: ${route}` }
 }
 
 const RUN_STATUS_DISPLAY: Record<RunStatus, Display> = {
-  queued: { label: 'Queued', tone: 'muted', glyph: '…', describe: 'Status: queued' },
-  running: { label: 'Running', tone: 'primary', glyph: '●', describe: 'Status: running' },
-  succeeded: { label: 'Succeeded', tone: 'green', glyph: '✓', describe: 'Status: succeeded' },
-  failed: { label: 'Failed', tone: 'red', glyph: '✗', describe: 'Status: failed' },
-  cancelled: { label: 'Cancelled', tone: 'amber', glyph: '⊘', describe: 'Status: cancelled' },
+  queued: { hint: 'run.status', label: 'Queued', tone: 'muted', glyph: '…', describe: 'Status: queued' },
+  running: { hint: 'run.status', label: 'Running', tone: 'primary', glyph: '●', describe: 'Status: running' },
+  succeeded: { hint: 'run.status', label: 'Succeeded', tone: 'green', glyph: '✓', describe: 'Status: succeeded' },
+  failed: { hint: 'run.status', label: 'Failed', tone: 'red', glyph: '✗', describe: 'Status: failed' },
+  cancelled: { hint: 'run.status', label: 'Cancelled', tone: 'amber', glyph: '⊘', describe: 'Status: cancelled' },
 }
 
 /** A run status → its display. */
 export function runStatusDisplay(status: RunStatus | string): Display {
-  return RUN_STATUS_DISPLAY[status as RunStatus] ?? { label: status, tone: 'muted', glyph: '?', describe: `Status: ${status}` }
+  return RUN_STATUS_DISPLAY[status as RunStatus] ?? { hint: 'run.status', label: status, tone: 'muted', glyph: '?', describe: `Status: ${status}` }
 }
 
 const STEP_STATUS_DISPLAY: Record<StepStatus, Display> = {
@@ -120,53 +130,53 @@ export function stepStatusDisplay(status: StepStatus | string): Display {
 }
 
 const PROBE_DISPLAY: Record<ProbeStatus | 'not_probed', Display> = {
-  ok: { label: 'OK', tone: 'green', glyph: '✓', describe: 'Probe: ok' },
-  degraded: { label: 'Degraded', tone: 'amber', glyph: '⚠', describe: 'Probe: degraded' },
-  down: { label: 'Down', tone: 'red', glyph: '✗', describe: 'Probe: down' },
-  skipped: { label: 'Skipped', tone: 'muted', glyph: '–', describe: 'Probe: skipped for this process role (never lowers the aggregate)' },
-  not_probed: { label: 'Not probed', tone: 'muted', glyph: '·', describe: 'Probe: not yet run' },
+  ok: { hint: 'probe.status', label: 'OK', tone: 'green', glyph: '✓', describe: 'Probe: ok' },
+  degraded: { hint: 'probe.status', label: 'Degraded', tone: 'amber', glyph: '⚠', describe: 'Probe: degraded' },
+  down: { hint: 'probe.status', label: 'Down', tone: 'red', glyph: '✗', describe: 'Probe: down' },
+  skipped: { hint: 'probe.status', label: 'Skipped', tone: 'muted', glyph: '–', describe: 'Probe: skipped for this process role (never lowers the aggregate)' },
+  not_probed: { hint: 'probe.status', label: 'Not probed', tone: 'muted', glyph: '·', describe: 'Probe: not yet run' },
 }
 
 /** A health / repo probe status → its display; `skipped` never lowers the aggregate. */
 export function probeDisplay(status: ProbeStatus | 'not_probed' | string): Display {
-  return PROBE_DISPLAY[status as ProbeStatus] ?? { label: status, tone: 'muted', glyph: '?', describe: `Probe: ${status}` }
+  return PROBE_DISPLAY[status as ProbeStatus] ?? { hint: 'probe.status', label: status, tone: 'muted', glyph: '?', describe: `Probe: ${status}` }
 }
 
 const BAND_DISPLAY: Record<OracleBand, Display> = {
-  strong: { label: 'Strong', tone: 'green', glyph: '✓', describe: 'Oracle strength: strong — the tests notice a wrong patch; clears the deliver bar' },
-  adequate: { label: 'Adequate', tone: 'primary', glyph: '◐', describe: 'Oracle strength: adequate — clears the bar; every change still goes to review' },
-  weak: { label: 'Weak', tone: 'amber', glyph: '⚠', describe: 'Oracle strength: weak — a green is low confidence; the cell routes to a human' },
-  unscoreable: { label: 'Unscoreable', tone: 'muted', glyph: '·', describe: 'Oracle strength: unscoreable — no mutants' },
+  strong: { hint: 'oracle.band', label: 'Strong', tone: 'green', glyph: '✓', describe: 'Oracle strength: strong — the tests notice a wrong patch; clears the deliver bar' },
+  adequate: { hint: 'oracle.band', label: 'Adequate', tone: 'primary', glyph: '◐', describe: 'Oracle strength: adequate — clears the bar; every change still goes to review' },
+  weak: { hint: 'oracle.band', label: 'Weak', tone: 'amber', glyph: '⚠', describe: 'Oracle strength: weak — a green is low confidence; the cell routes to a human' },
+  unscoreable: { hint: 'oracle.band', label: 'Unscoreable', tone: 'muted', glyph: '·', describe: 'Oracle strength: unscoreable — no mutants' },
 }
 
 /** An oracle-strength band → its display. */
 export function bandDisplay(band: OracleBand | string): Display {
-  return BAND_DISPLAY[band as OracleBand] ?? { label: band, tone: 'muted', glyph: '?', describe: `Oracle band: ${band}` }
+  return BAND_DISPLAY[band as OracleBand] ?? { hint: 'oracle.band', label: band, tone: 'muted', glyph: '?', describe: `Oracle band: ${band}` }
 }
 
 /** The API's enum values stay (`auto_ship`); the words say what the policy licenses — a branch and PR under review, never a merge. */
 const GATE_DISPLAY: Record<OracleGate, Display> = {
-  auto_ship: { label: 'Clears the bar', tone: 'green', glyph: '✓', describe: 'Gate: clears the oracle bar for deliver — a branch and pull request under review, never a merge' },
-  human_review: { label: 'Review-gated', tone: 'amber', glyph: '☺', describe: 'Gate: review-gated — a green needs a person’s review before anything is opened' },
-  needs_human: { label: 'Needs a human', tone: 'red', glyph: '✗', describe: 'Gate: needs a human — the tests are too weak for a green to mean anything' },
+  auto_ship: { hint: 'oracle.gate', label: 'Clears the bar', tone: 'green', glyph: '✓', describe: 'Gate: clears the oracle bar for deliver — a branch and pull request under review, never a merge' },
+  human_review: { hint: 'oracle.gate', label: 'Review-gated', tone: 'amber', glyph: '☺', describe: 'Gate: review-gated — a green needs a person’s review before anything is opened' },
+  needs_human: { hint: 'oracle.gate', label: 'Needs a human', tone: 'red', glyph: '✗', describe: 'Gate: needs a human — the tests are too weak for a green to mean anything' },
 }
 
 /** An oracle gate (what a clean grade licenses) → its display. */
 export function gateDisplay(gate: OracleGate | string): Display {
-  return GATE_DISPLAY[gate as OracleGate] ?? { label: gate, tone: 'muted', glyph: '?', describe: `Gate: ${gate}` }
+  return GATE_DISPLAY[gate as OracleGate] ?? { hint: 'oracle.gate', label: gate, tone: 'muted', glyph: '?', describe: `Gate: ${gate}` }
 }
 
 const TIER_DISPLAY: Record<Exclude<VerificationTier, ''>, Display> = {
-  'human-verified': { label: 'Human-verified', tone: 'green', glyph: '✓', describe: 'Verification tier: human-verified' },
-  'ab-confirmed': { label: 'A/B-confirmed', tone: 'green', glyph: '✓', describe: 'Verification tier: A/B-confirmed' },
-  'automated-pass': { label: 'Automated pass', tone: 'amber', glyph: '◐', describe: 'Verification tier: automated pass — asserted, not yet earned' },
-  untrusted: { label: 'Untrusted', tone: 'red', glyph: '✗', describe: 'Verification tier: untrusted' },
+  'human-verified': { hint: 'tier.verification', label: 'Human-verified', tone: 'green', glyph: '✓', describe: 'Verification tier: human-verified' },
+  'ab-confirmed': { hint: 'tier.verification', label: 'A/B-confirmed', tone: 'green', glyph: '✓', describe: 'Verification tier: A/B-confirmed' },
+  'automated-pass': { hint: 'tier.verification', label: 'Automated pass', tone: 'amber', glyph: '◐', describe: 'Verification tier: automated pass — asserted, not yet earned' },
+  untrusted: { hint: 'tier.verification', label: 'Untrusted', tone: 'red', glyph: '✗', describe: 'Verification tier: untrusted' },
 }
 
 /** A verification tier → its display, or `null` for the empty tier (no pill is rendered). */
 export function tierDisplay(tier: VerificationTier | string): Display | null {
   if (!tier) return null
-  return TIER_DISPLAY[tier as Exclude<VerificationTier, ''>] ?? { label: tier, tone: 'muted', glyph: '?', describe: `Tier: ${tier}` }
+  return TIER_DISPLAY[tier as Exclude<VerificationTier, ''>] ?? { hint: 'tier.verification', label: tier, tone: 'muted', glyph: '?', describe: `Tier: ${tier}` }
 }
 
 /** Belt names → short labels for pills. */
@@ -178,12 +188,19 @@ export const BELT_LABELS: Record<string, { short: string; long: string }> = {
   repo_lint_clean: { short: 'B5 lint', long: "Belt 5 — repo's own lint clean" },
 }
 
+/** `belt.<name>` for a belt the registry knows; a belt from a newer apparatus reads belt 1's, never nothing. */
+export function beltHint(name: string): HintId {
+  const id = `belt.${name}`
+  return id in HINTS ? (id as HintId) : 'belt.tests_unmodified'
+}
+
 /** A belt value → its display: `true` held, `false` failed, `null` not recorded (belt 5: not evaluated — no linter configured). A missing belt is NEVER rendered as failed. */
 export function beltDisplay(value: boolean | null | undefined, name?: string): Display {
-  if (value === true) return { label: 'pass', tone: 'green', glyph: '✓', describe: 'held' }
-  if (value === false) return { label: 'fail', tone: 'red', glyph: '✗', describe: 'failed' }
-  if (name === 'repo_lint_clean') return { label: 'n/a', tone: 'muted', glyph: '—', describe: 'not evaluated — no linter configured for this repository' }
-  return { label: 'n/a', tone: 'muted', glyph: '—', describe: 'not recorded' }
+  const hint = beltHint(name ?? '')
+  if (value === true) return { hint, label: 'pass', tone: 'green', glyph: '✓', describe: 'held' }
+  if (value === false) return { hint, label: 'fail', tone: 'red', glyph: '✗', describe: 'failed' }
+  if (name === 'repo_lint_clean') return { hint, label: 'n/a', tone: 'muted', glyph: '—', describe: 'not evaluated — no linter configured for this repository' }
+  return { hint, label: 'n/a', tone: 'muted', glyph: '—', describe: 'not recorded' }
 }
 
 /**
@@ -215,6 +232,8 @@ export const ACTION_HELP: Record<string, string> = {
   'run.abandoned': 'The run was given up after its worker stopped answering too many times.',
   'repo.clone.start': 'The repository is being cloned; credentials are never written to the log.',
   'repo.clone.done': 'The clone finished at the recorded head commit.',
+  'repo.fetch.start': 'The clone is being brought up to date with the repository’s default branch before anything is built.',
+  'repo.fetch.done': 'The default branch moved from the recorded before commit to the after commit; an error here refuses the run so nothing is built on a stale base.',
   'probe.start': 'The known-green test scope is being run to prove the toolchain works here.',
   'probe.done': 'The probe finished; green means the toolchain can run this repository’s tests.',
   // prep — the environment before any attempt
@@ -300,6 +319,7 @@ export const ACTION_HELP: Record<string, string> = {
   'rework.start': 'The item went back for another build after a review finding.',
   'rework.refused': 'The reviewer asked for a stronger test and none could be had: no rebuild against the same test; the item goes to a person.',
   'horizon.checkpoint': 'The factory recorded a checkpoint of the whole backlog’s state.',
+  'outcomes.synced': 'Each delivered pull request’s state was read from GitHub; a merge or a close is recorded once on the item’s chain.',
   // audit traces — out-of-band records, never rendered in the log but named for completeness
   'repo.created': 'The repository was registered.',
   'repo.updated': 'The repository’s configuration was changed; the diff is recorded.',

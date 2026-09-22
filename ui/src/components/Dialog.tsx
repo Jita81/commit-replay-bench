@@ -5,14 +5,18 @@
  * ----------
  * What it is:   The `Dialog` primitive the two "new …" forms open in.
  * What it does: Opens and closes a native `<dialog>` from an `open` prop, keeps the heading as
- *               its accessible name, routes Esc through `onClose`, and unmounts its content
- *               while closed so form state resets per opening. No portal library.
+ *               its accessible name, routes Esc through `onClose` (an Esc that closes an open
+ *               hint bubble is default-prevented by `Hint` and never reaches here), and
+ *               unmounts its content while closed so form state resets per opening. A modal
+ *               dialog paints in the browser's top layer, so `Hint` portals its bubble into
+ *               the dialog rather than `<body>`. No portal library.
  * How:          A `useEffect` calls `showModal()` / `close()` to track `open`; jsdom has no
  *               `showModal`, so the effect falls back to the `open` attribute there.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/screens/Repos/RepoNewDialog.tsx and ui/src/screens/Runs/RunNewDialog.tsx
- *               (the two consumers), ui/src/components/Button.tsx (the close button)
+ *               (the two consumers), ui/src/components/Button.tsx (the close button),
+ *               ui/src/components/Hint.tsx (portals its bubble into the open dialog)
  * Tested by:    ui/src/screens/Repos/RepoNewDialog.test.tsx,
  *               ui/src/screens/Runs/RunNewDialog.test.tsx,
  *               ui/e2e/walkthrough/02-repo-onboard.spec.ts (the real modal in Chromium)
