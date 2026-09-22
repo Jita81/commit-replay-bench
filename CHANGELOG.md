@@ -85,6 +85,75 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 - Gates on the merged branch: ruff, ruff format, mypy, `code_map --check`, `tsc -b`, vitest,
   the full pytest, and the tier-1 walkthrough (55 specs incl. `10-factory` and `11-screens`).
 
+### 2026-09-21 — reference sandbox images, built and proven by CI (F42 part 1)
+
+- **`deploy/sandbox/Dockerfile.{python,node,go}`** — the images the fail-closed sandbox
+  runs a repository's tests in, so "what do I run?" no longer answers "build one yourself":
+  each `FROM` pinned by the multi-arch index digest, the toolchain and the test runner only
+  (pytest 9.1.1 hash-pinned via `python-requirements.txt`; Node 22.19.0 with `node --test`;
+  Go 1.26.8 copied onto a slim base of the same Debian release — 477 MB on disk against the
+  official image's 1.2 GB), `USER 65534:65534`, OCI labels, `HOME` and every cache under the
+  executor's tmpfs, hadolint-clean. `deploy/sandbox/README.md`: build / tag / push, the keys
+  that select an image, extending one for a repository's dependencies, the re-pin cadence.
+  A JVM image is deliberately not shipped — the Maven runner's docker branch cannot resolve
+  plugins offline yet (README §6).
+- **CI `sandbox-images` job** — hadolint + `docker buildx build` (GHA layer cache, no push)
+  of each image, then the smoke that matters: `tests/test_sandbox_images_docker.py` runs
+  each language's fixture repository through `DockerExecutor` on the image just built (uid
+  65534 by default and under the executor, `/usr` and `/work` read-only from inside while
+  `/tmp` is writable, a network probe FAILS through the language's runner, an absent image is
+  `SandboxUnavailable`, qualify + grade clean with the host worktree untouched, labels), and
+  the sandbox + sealed-builder suites on the python image. `CRB_TEST_SANDBOX_IMAGE` /
+  `CRB_TEST_SANDBOX_IMAGE_<LANG>` name a present image to test; the `test` job deselects the
+  `sandbox_images` marker (the images are built once, there).
+- **Found by the first smoke, fixed:** Docker mounts a `--tmpfs` `noexec` unless told
+  otherwise, so `go test` could not exec the test binaries it builds under `/tmp` — the Go
+  runner had never run against a daemon. `Command.exec_tmp` (the Go runner declares it)
+  mounts the sandbox's tmpfs `rw,exec,nosuid,nodev` for that toolchain alone; every other
+  command's tmpfs now says `noexec` on the argv instead of inheriting it from the runtime;
+  every other flag holds; the exception is per toolchain, never per repository (ADR-0005
+  amendment, SECURITY.md §3.1). Proven from inside: `/proc/mounts` in each shipped image
+  carries `noexec` for an ordinary command and drops it only for the Go runner's, and a
+  script written under `/tmp` is refused / runs accordingly
+  (`tests/test_sandbox_images_docker.py`). `--pull=never` on every sandbox `docker run`:
+  the documentation always said the worker never pulls, and now it cannot.
+- **Fixed: the worker ignored the deployment's sandbox keys.** compose, Helm and
+  DEPLOYMENT.md set `CRB_SANDBOX__EXECUTOR` / `CRB_SANDBOX__IMAGE`; the API read them, the
+  worker read only `CRB_EXECUTOR` / `CRB_SANDBOX_IMAGE` and defaulted to `local` — a
+  compose / Helm worker ran untrusted tests on the host while `/settings` reported
+  `docker`. The worker now reads the deployment keys (short forms still honoured when they
+  are absent), and a repository's own `sandbox_image` wins over the deployment default
+  (`docker_settings_for`), as DEPLOYMENT.md §2.1 always said — the default silently
+  overrode it, which is wrong the moment two toolchains share a worker.
+- Docs: DEPLOYMENT.md §2.1 / §3.1 / §3.4, deploy/README.md §3 and §8, OPERATOR.md §2.1,
+  SECURITY.md §3.1 and §5 (the images are measured; verdicts under the docker posture are
+  still pending — the measurement gap stays open), ARCHITECTURE.md §9.3,
+  docs/reviews/2026-09-17-enterprise-front-end.md §9 (F42 part 1 shipped, part 2 pending;
+  F52 SHA-pinning every Action repo-wide, from CodeRabbit on PR #44). Corrected on review:
+  a sandbox that cannot be provided ends the run `failed` (`sandbox unavailable: …`) — the
+  job store has no `blocked` status, and OPERATOR §7, DEPLOYMENT §3.4, deploy/README,
+  compose, Helm and ARCHITECTURE §9 now say the word the worker records; under docker a
+  host setup's `node_modules` is NOT visible inside the sandbox (the worktree's link to the
+  clone dangles in the container) — OPERATOR §2.1 and `Dockerfile.node` now say so and
+  point at the derived-image recipe (deploy/sandbox/README.md §4); claim tags with n /
+  method / apparatus on every sandbox-image statement. `tests/conftest_langs.py`: a
+  `docker image inspect` that raises after the daemon probe goes through the warm-up policy
+  (skip locally, fail under strict warm-up) instead of erroring the test
+  (`tests/test_conftest_langs.py`).
+- Second review round (adversarial verifier): the three sandbox Dockerfiles strip every
+  setuid/setgid bit the Debian bases ship (`su`, `mount`, `passwd` …, 11 files per image →
+  0), proven from inside as uid 65534 (`test_no_setuid_or_setgid_binary_in_the_image`);
+  the absent-image test now pins the daemon's no-pull wording (`No such image`) so losing
+  `--pull=never` fails it rather than passing on the registry's `pull access denied`;
+  a missing daemon is a skip on *every* call under strict warm-up too — the daemon reason
+  is no longer memoised against the image tag, where a later caller re-raised it as a
+  failure (`tests/test_conftest_langs.py`); `Dockerfile.go`'s header shows the argv the
+  Go command really gets (`exec` on the tmpfs) and its true size (477 MB); every
+  `[measured]` sandbox-image tag names the run that executed on which head (a document can
+  never cite a run of its own commit) with the local count on images built from the tree;
+  `sandbox-images` is declared blocking in `ci.yml` and DEPLOYMENT §3.4 gives the
+  branch-protection call that makes it so (a repository setting, for the administrator).
+
 ### 2026-09-21 — the two-person rule is enforced at write; every sign-off says who signed (F7b, F34)
 
 - **`same_actor` — the fourth non-overridable clause** (`signoff-policy.v3`, DL-047). `POST

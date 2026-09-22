@@ -258,6 +258,7 @@ def test_command_shape(runner: BaseRunner, executor: LocalExecutor, tmp_path: Pa
     assert "-count=1" in cmd.env["GOFLAGS"]
     assert cmd.env["GOTOOLCHAIN"] == "local"
     assert cmd.env["CGO_ENABLED"] == "0"
+    assert cmd.exec_tmp is True  # go test execs the binaries it builds under /tmp
     bare = runner.command(tmp_path, BARE, executor=executor, timeout=60)
     assert bare.argv[-1] == "./..."
 

@@ -13,14 +13,19 @@ What it does: Maps test files to their packages (Go addresses packages, not file
               host's, parses the event stream into ``<package>::<Test>`` ids, warms the module
               cache in setup and detects ``gofmt`` for belt 5.
 How:          ``target_scope``: directory of each test file → ``./pkg``. ``command``: env
-              (``-count=1``, ``GOTOOLCHAIN=local``, ``CGO_ENABLED``) → ``go test -json``.
-              ``parse``: one JSON event per line; ``Action == "fail"`` with a ``Test`` name.
+              (``-count=1``, ``GOTOOLCHAIN=local``, ``CGO_ENABLED``; the caches under ``/tmp``
+              and ``Command.exec_tmp`` under docker, because ``go test`` execs the binaries it
+              builds there) → ``go test -json``. ``parse``: one JSON event per line;
+              ``Action == "fail"`` with a ``Test`` name.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0011-repo-lint-belt.md
+ADRs:         docs/adr/0011-repo-lint-belt.md, docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/core/runners/base.py (the contract), src/crb/core/lint.py (``go_plan``),
-              src/crb/core/execution.py (``Executor.tool``), src/crb/core/spec.py
-              (``BELT_AFFECTED_DIRS`` is reinterpreted here), src/crb/core/runners/__init__.py
-Tested by:    tests/test_runners_go.py, tests/test_runners_parsers.py, tests/test_runners_setup.py
+              src/crb/core/execution.py (``Executor.tool``; ``exec_tmp`` on the sandbox's
+              tmpfs), src/crb/core/spec.py (``BELT_AFFECTED_DIRS`` is reinterpreted here),
+              src/crb/core/runners/__init__.py, deploy/sandbox/Dockerfile.go (the reference
+              image this command runs in)
+Tested by:    tests/test_runners_go.py, tests/test_runners_parsers.py, tests/test_runners_setup.py,
+              tests/test_sandbox_images_docker.py
 Touch when:   a Go repository needs cgo, a pinned ``go`` binary or a module cache path —
               set ``runner_opts`` (``cgo``, ``go``, ``gofmt``, ``gomodcache``; docs/OPERATOR.md);
               a change to how packages are addressed needs a parser/scope test.
@@ -134,8 +139,15 @@ class GoRunner(BaseRunner):
             env["GOCACHE"] = "/tmp/gocache"
             env["GOMODCACHE"] = str(self.opts.get("gomodcache", "/tmp/gomod"))
             env["GOFLAGS"] = "-count=1 -mod=mod"
+        # go test compiles each package's test binary into its temp dir and execs it:
+        # under the sandbox that is the tmpfs /tmp, which must therefore be exec-mountable.
         return Command(
-            (go, "test", "-json", *pkgs), root, env=env, timeout=timeout, writable_paths=writable
+            (go, "test", "-json", *pkgs),
+            root,
+            env=env,
+            timeout=timeout,
+            writable_paths=writable,
+            exec_tmp=True,
         )
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:

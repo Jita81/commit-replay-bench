@@ -146,7 +146,8 @@ services:
       <<: *crb-env
       # `docker` (default) = tests run in child containers with --network=none --read-only
       # --cap-drop=ALL --user 65534. WITHOUT the socket mount below the executor fails CLOSED:
-      # runs become `blocked`, nothing runs on the host, no verdict is recorded (OPERATOR.md §7).
+      # runs end `failed` (`sandbox unavailable: …`), nothing runs on the host, no verdict is
+      # recorded (OPERATOR.md §7).
       # `local` runs untrusted repository tests inside THIS container — development only.
       CRB_SANDBOX__EXECUTOR: ${CRB_SANDBOX__EXECUTOR:-docker}
       CRB_SANDBOX__IMAGE: ${CRB_SANDBOX__IMAGE:-}

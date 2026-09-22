@@ -301,13 +301,42 @@ mirrors in the tools' own files under the worker's `HOME`, never in `runner_opts
 Registry credentials likewise live in those files; every step tail is passed through
 `crb.core.redact` before it is stored, but keep secrets out of the repository itself.
 
-**Sandbox images** are yours to build: one image per repository (or per toolchain) with
-the language runtime, the test runner and the repository's dependencies pre-installed,
-runnable as user `65534` with a read-only root. Under docker, setup does not run — the
-image must already contain what setup would have installed (the `node_modules` a host
-setup installed in the clone is visible to the container through the read-only worktree
-mount; a host venv, module cache or `~/.m2` is not). No reference sandbox image ships
-yet; build one per language from the repository's own toolchain.
+**Sandbox images**: start from the shipped reference set —
+[`deploy/sandbox/`](../deploy/sandbox/README.md): `crb-sandbox-python` (pytest),
+`crb-sandbox-node` (`node --test`), `crb-sandbox-go`, each digest-pinned, running as user
+`65534` with a read-only root and proven from inside by CI **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]** — and extend one per repository
+(or per toolchain) with the repository's dependencies when its tests need more than the
+runner. Under docker, setup does not run (`BaseRunner.sandbox_refusal`: setup is a host
+phase and fails closed with `SETUP_SANDBOX_REFUSED` when the executor is `docker`), so the
+image must already contain what setup would have installed — and nothing a host setup
+installed is visible inside: the sandbox mounts only the trial worktree, read-only, at
+`/work`, and a trial worktree's `node_modules` is a **symlink to the host clone's**
+(`Workspace._post_create`), which dangles inside the container; a host venv, module cache
+or `~/.m2` is likewise absent by construction — `DockerExecutor.build_argv` binds only the
+worktree (read-only, at `/work`) and tmpfs where the runner declared it, nothing else from
+the host **[measured — `tests/test_execution.py::test_docker_build_argv_has_every_hardening_flag`
+and `::test_docker_build_argv_network_writable_paths_extra_mounts_and_cwd` pin the argv
+token by token; apparatus 2.2]**. Bake the dependencies into a derived image
+([`deploy/sandbox/README.md` §4](../deploy/sandbox/README.md) — `npm ci` of the lockfile
+under `/opt/app` and `runner_opts.env: {NODE_PATH: /opt/app/node_modules}`; hash-pinned
+test requirements for Python; `GOMODCACHE` for Go) **[measured — the symlink claim only: a `node_modules` symlink
+to a host directory reads `No such file or directory` from inside `crb-sandbox-node`
+under `DockerExecutor`, n = 1 probe, colima / Docker 29.5.2, 2026-09-22; apparatus
+2.2]**; the derived-image recipe itself is the README's and is **[hypothesis]** until a
+repository is measured on one. Name the image in the repository's `sandbox_image` (it wins) or the deployment's
+`CRB_SANDBOX__IMAGE` (the default for repositories that name none); the worker never pulls,
+so it must be in the daemon's store. A JVM reference image is not shipped — the Maven
+runner cannot resolve plugins offline under docker yet (README §6), so under the compose /
+Helm default (`CRB_SANDBOX__EXECUTOR=docker`) a JVM run fails closed rather than falling
+back. The executor is chosen **per run, never per repository**: a run request's `executor`
+field (`POST /runs`, one of the known executors) wins, else the worker's
+`CRB_SANDBOX__EXECUTOR` / `--executor` applies to every run it handles; to measure a JVM
+repository today, submit its runs with `executor: local` (or on a worker started `local`),
+and the row's apparatus stamp carries the executor it ran under
+**[measured — by inspection of `src/crb/server/worker.py`: `_executor` reads
+`ctx.params.get("executor") or self.settings.executor` and `_stamp` writes
+`executor: <its describe()>` into the run's `apparatus_json`; `tests/test_worker.py` pins that a
+run's `apparatus_json` carries the runner and the executor it ran on; apparatus 2.2]**.
 
 ### 2.1a Packaging-metadata tests (`dist_info_stubs`)
 The harness imports the repository's code from the worktree on `PYTHONPATH` and uninstalls
@@ -649,9 +678,12 @@ the verification.
 
 **Fail closed means the run STOPS.** If Docker is missing, the daemon is unreachable, the
 image is not set, the configured user is root, a forbidden mount is requested, or
-`docker run` fails to launch (exit 125), `crb` raises `SandboxUnavailable` and the run's
-status becomes `blocked`. **No test is run on the host as a fallback**, and no verdict is
-recorded for the affected tasks.
+`docker run` fails to launch (exit 125 — the daemon's own launch-failure status, observed
+for an absent image by `tests/test_sandbox_images_docker.py::test_an_absent_image_fails_closed_without_a_pull`
+against colima / Docker 29.5.2), `crb` raises `SandboxUnavailable` and the run is
+recorded `failed` with the error `sandbox unavailable: <cause>` (the job store's terminal
+status — there is no `blocked` status). **No test is run on the host as a fallback**, and no
+verdict is recorded for the affected tasks.
 
 What to do:
 
@@ -659,8 +691,8 @@ What to do:
 2. `crb repo probe <repo>` — proves the image and the toolchain.
 3. Check the run's status message; it names the cause (`docker binary not found`,
    `daemon not reachable`, `refusing to run untrusted tests as root`, `refusing to mount …`).
-4. Fix the cause and **re-run**; the worker resumes blocked runs. Tasks that were
-   never graded have no rows — nothing needs correcting in the ledger.
+4. Fix the cause and **re-run** (a `failed` run is terminal; start a new one). Tasks that
+   were never graded have no rows — nothing needs correcting in the ledger.
 
 Where to look first: `GET /api/v1/health` — the `sandbox` probe (on the worker, or a
 one-process deployment) says whether the daemon answers, and the `worker` probe says

@@ -20,7 +20,7 @@
 #   * runs as uid 10001, no shell for the user, no setuid helpers installed;
 #   * the docker CLI is present (client ONLY — no daemon). The worker needs a daemon socket to
 #     create sandbox containers; mounting it is an explicit opt-in in compose / Helm values,
-#     never a default. Without it the executor fails CLOSED (runs become `blocked`);
+#     never a default. Without it the executor fails CLOSED (runs end `failed`, `sandbox unavailable`);
 #   * base images are pinned by exact tag; nothing is `latest`. Re-pin via the ARGs below.
 #   * secrets arrive ONLY through the environment at run time (CRB_SECRET_KEY, CRB_DATABASE_URL,
 #     model API keys); nothing secret is baked into a layer.

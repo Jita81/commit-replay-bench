@@ -116,6 +116,7 @@ markers = [
   "live: needs live model credentials (skipped in CI)",
   "slow: long-running end-to-end test",
   "network: needs outbound network access (the dependency-install phase)",
+  "sandbox_images: builds and smokes the shipped reference sandbox images (deploy/sandbox); CI runs these in the sandbox-images job",
 ]
 
 [tool.coverage.run]

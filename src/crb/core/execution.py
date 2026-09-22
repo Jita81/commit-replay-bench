@@ -8,7 +8,8 @@ an :class:`Executor`. The executor decides *where* it runs:
   environment (no inherited secrets) and process-group kill on timeout.
 * :class:`DockerExecutor` — ``docker run`` with the full hardening set:
   ``--network=none``, read-only root and worktree, tmpfs scratch only where the
-  runner declared it, ``--cap-drop=ALL``, ``no-new-privileges``, non-root user,
+  runner declared it (``exec`` on it only for a toolchain that declared
+  ``Command.exec_tmp``), ``--cap-drop=ALL``, ``no-new-privileges``, non-root user,
   cpu / memory / pid caps. It **fails closed**: no docker binary, no daemon, a
   root user, or a launch failure raise :class:`SandboxUnavailable` — we never
   degrade to running untrusted repository tests in-process.
@@ -67,7 +68,8 @@ Tested by:    tests/test_execution.py, tests/test_sandbox_docker.py,
               tests/test_builders_container.py, tests/test_builders_container_docker.py
 Touch when:   never for a new repository (its image, memory and cpu limits are
               ``DockerSettings`` from the repo / deployment config; a toolchain that must
-              write somewhere declares ``writable_paths`` in its runner); loosening any
+              write somewhere declares ``writable_paths`` in its runner, one that must run
+              what it builds under ``/tmp`` declares ``exec_tmp``); loosening any
               flag in ``build_argv`` is a security decision — docs/SECURITY.md#31-sandboxed-test-execution--crbcoreexecutiondockerexecutor
               and ADR-0005 must change with it.
 """
@@ -192,6 +194,10 @@ class Command:
     ``root`` is the worktree on the host; ``cwd_rel`` is where to run relative to it.
     ``writable_paths`` are root-relative paths the command needs to write (build
     caches, ``target/``…); a sandboxed executor mounts tmpfs there and nothing else.
+    ``exec_tmp`` says the toolchain must RUN what it writes under ``/tmp`` — Go compiles
+    every test binary into its temp dir and execs it — so the sandbox's tmpfs is mounted
+    ``exec``; the default mounts it ``noexec`` (``nosuid,nodev`` hold either way). A runner
+    declares it for its toolchain, never per repository.
     """
 
     argv: tuple[str, ...]
@@ -201,6 +207,7 @@ class Command:
     timeout: int = DEFAULT_TIMEOUT_S
     writable_paths: tuple[str, ...] = ()
     network: bool = False
+    exec_tmp: bool = False
 
     def __post_init__(self) -> None:
         if not self.argv:
@@ -467,6 +474,8 @@ class DockerExecutor:
             self.docker,
             "run",
             "--rm",
+            # never a registry pull at run time: an absent image is exit 125 → SandboxUnavailable
+            "--pull=never",
             "--network=bridge" if cmd.network else "--network=none",
             f"--memory={s.memory}",
             f"--cpus={s.cpus}",
@@ -477,7 +486,9 @@ class DockerExecutor:
             "no-new-privileges",
             "--read-only",
             "--tmpfs",
-            f"/tmp:rw,nosuid,nodev,size={s.tmp_size}",
+            # noexec is stated, not left to the runtime's default: only a toolchain that runs
+            # the binaries it builds there (Go) declares Command.exec_tmp; nosuid/nodev stay.
+            f"/tmp:rw,{'exec' if cmd.exec_tmp else 'noexec'},nosuid,nodev,size={s.tmp_size}",
         ]
         # the worktree is read-only inside: the builder edits it BEFORE grading, the
         # tests only read it; a test that writes into the tree fails, never mutates it

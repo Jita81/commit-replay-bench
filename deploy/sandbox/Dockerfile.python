@@ -1,0 +1,78 @@
+# syntax=docker/dockerfile:1.7
+#
+# Commit Replay Bench (crb) — reference SANDBOX image: Python (pytest runner).
+#
+# What runs in it: a repository's tests, one `docker run` per test command, driven by
+# `crb.core.execution.DockerExecutor` (the grader's probe / qualify / grade path). It is NOT
+# the product image (deploy/Dockerfile) and NOT the builder image (deploy/Dockerfile.builder).
+#
+# What it contains — the toolchain and the test runner the pytest runner invokes, nothing
+# else: CPython 3.12 from the pinned base, plus `pytest` and its resolved dependencies at
+# exact versions with sha256 hashes (python-requirements.txt). No git, no compiler, no
+# shell tricks, nothing that listens. A repository whose tests need more (its own
+# dependencies, `ruff` for belt 5) extends this image — deploy/sandbox/README.md §4.
+#
+# Build from deploy/sandbox (the context holds only the requirements file):
+#
+#     docker build -f deploy/sandbox/Dockerfile.python -t crb-sandbox-python:local deploy/sandbox
+#
+# then select it per repository (`sandbox_image` on the RepoConfig) or as the deployment
+# default: CRB_SANDBOX__IMAGE=crb-sandbox-python:local (Helm: config.CRB_SANDBOX__IMAGE).
+# The worker never pulls: the image must be present in the host daemon's store.
+#
+# How the worker runs it (crb.core.execution.DockerExecutor.build_argv — asserted flag by
+# flag in tests/test_execution.py; proven from inside against a daemon in
+# tests/test_sandbox_images_docker.py):
+#
+#     docker run --rm --network=none --memory=2g --cpus=2 --pids-limit=512
+#       --user=65534:65534 --cap-drop=ALL --security-opt no-new-privileges --read-only
+#       --tmpfs /tmp:rw,noexec,nosuid,nodev,size=512m
+#       --mount type=bind,src=<worktree>,dst=/work,readonly
+#       --mount type=bind,src=<worktree>/.pytest_scratch,dst=/work/.pytest_scratch   (rw)
+#       --env PYTHONPATH=/work --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0
+#       --env HOME=/tmp --env CI=1 --env NO_COLOR=1 --workdir /work
+#       crb-sandbox-python:local python -m pytest -q --no-header -rfE -p no:cacheprovider …
+#
+# Security posture (docs/SECURITY.md §3.1):
+#   * The base is pinned BY DIGEST (the multi-arch index, so amd64 and arm64 resolve the same
+#     bytes); a rebuild without editing the FROM line reproduces the same base. Re-pin by
+#     editing the line — deploy/sandbox/README.md §5 has the cadence.
+#   * Runs as uid 65534 (nobody) by default; the worker passes --user=65534:65534 as well,
+#     and DockerSettings refuses root at construction.
+#   * Works with a read-only root: everything the runner writes goes to the tmpfs /tmp the
+#     executor provides (HOME, pytest's temporary files) or to the declared writable path.
+#   * Nothing secret is baked in; nothing listens; no docker client, no package manager
+#     invocation after the one install below; no setuid/setgid binary — the base's su,
+#     mount, passwd and friends have the bits stripped (inert anyway under --cap-drop=ALL and
+#     no-new-privileges; stripped so the image needs neither to hold).
+
+FROM python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
+
+LABEL org.opencontainers.image.title="Commit Replay Bench sandbox: python" \
+      org.opencontainers.image.description="Reference test sandbox: CPython 3.12 + pytest, uid 65534, read-only-root compatible" \
+      org.opencontainers.image.vendor="Automated Agile" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.source="https://github.com/Jita81/commit-replay-bench" \
+      org.opencontainers.image.documentation="https://github.com/Jita81/commit-replay-bench/blob/main/deploy/sandbox/README.md"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HOME=/tmp
+
+COPY python-requirements.txt /opt/crb/python-requirements.txt
+
+# --require-hashes: every wheel is checked against python-requirements.txt, so the image is
+# the same bytes on every rebuild from this base. /work is the worktree mount point.
+RUN set -eu; \
+    pip install --no-cache-dir --require-hashes --root-user-action=ignore \
+        -r /opt/crb/python-requirements.txt; \
+    find / -xdev -perm /6000 -type f -exec chmod a-s '{}' +; \
+    mkdir -p /work; chmod 0755 /work; \
+    python -m pytest --version
+
+WORKDIR /work
+USER 65534:65534
+ENTRYPOINT []
+CMD ["python", "-m", "pytest", "--version"]
