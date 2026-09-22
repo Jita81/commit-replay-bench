@@ -1,9 +1,15 @@
-# Operator guide (skeleton)
+# Operator guide
 
-*For the person who installs, configures and runs `crb` inside an organisation's tenant.*
-This is a skeleton for phases P1–P2; the full runbook (deployment, DPIA support, air-gap
-guidance, incident procedures) lands in P7. Where a command or screen is not yet built, it
-is marked with the phase that delivers it.
+*For the person who installs, configures and runs `crb` inside an organisation's tenant —
+the tech lead's first afternoon, and the runbook after it.* It covers the day-2 work:
+installing and checking the instrument, connecting and configuring a repository, running a
+sweep, reading the capability map, signing a cell off, exporting and verifying the ledger,
+what happens when the sandbox is unavailable, and the stop conditions. Installing the
+product itself (image, Helm, Azure, backup, upgrade, go-live) is the
+[Deployment guide](DEPLOYMENT.md); the GitHub connection is [GITHUB-APP](GITHUB-APP.md);
+what a number may be claimed to mean is [EVIDENCE-AND-CLAIMS](EVIDENCE-AND-CLAIMS.md).
+Every screen in the UI ends with an *About this screen* block and every element carries a
+hint; this guide is the same material in one place, with the commands.
 
 Read alongside: [README](../README.md) · [ARCHITECTURE](ARCHITECTURE.md) ·
 [EVIDENCE-AND-CLAIMS](EVIDENCE-AND-CLAIMS.md) · [ADR-0005 (sandbox)](adr/0005-fail-closed-docker-sandbox.md).
@@ -14,9 +20,10 @@ deployment with no egress reads the same text the build was made from (DL-046). 
 screen ends with an *About this screen* block: its purpose, the next step for your role,
 what the numbers mean and where the terms are defined.
 
-Contents: [1 Install](#1-install) · [2 Configure a repository](#2-configure-a-repository) ·
+Contents: [1 Install](#1-install) · [1.1 Check the installation](#11-check-the-installation-crb-doctor) ·
+[2 Configure a repository](#2-configure-a-repository) ·
 [3 Run a sweep](#3-run-a-sweep) · [4 Read the capability map](#4-read-the-capability-map) ·
-[5 Sign off](#5-sign-off-p4) · [6 Export the ledger](#6-export-and-verify-the-ledger) ·
+[5 Sign off](#5-sign-off) · [6 Export the ledger](#6-export-and-verify-the-ledger) ·
 [7 When the sandbox is unavailable](#7-when-the-sandbox-is-unavailable) · [8 Stop conditions](#8-stop-conditions) ·
 [9 Users](#9-users)
 
@@ -34,12 +41,45 @@ uv pip install -e '.[dev]' --python .venv/bin/python        # CLI + core
 # builder extras as needed: '.[openai]' (Azure OpenAI / Cerebras / local), '.[claude]'
 ```
 
-Model credentials are read from the environment (or the vault integration in P4); they are
-never written to configuration files, evidence packs or logs. `crb` redacts common secret
-shapes from every stored string as defence in depth, but do not put live secrets in
-repositories under measurement.
+Model credentials are read from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`CEREBRAS_API_KEY`, the Azure pair) or, for the Claude Code login token, from the
+owner-only secrets store (§3.0.1); they are never written to configuration files, evidence
+packs or logs. `crb` redacts common secret shapes from every stored string as defence in
+depth, but do not put live secrets in repositories under measurement.
 
-Server, worker and UI (`crb serve`, `crb worker`) land in P4–P5.
+The server, the worker and the UI are `crb serve` and `crb worker` (the `[server]` extra;
+the UI is built into `ui/dist` or shipped in the image). Where they live — a laptop, one
+VM, Compose or Kubernetes — and where their data must **not** live (a temporary directory)
+is [DEPLOYMENT §1](DEPLOYMENT.md#1-deployment-shapes).
+
+### 1.1 Check the installation (`crb doctor`)
+
+```bash
+crb doctor            # one line per check: ok / warn / fail (skip = does not apply), and the fix
+crb doctor --live     # also one no-tool Haiku turn on the stored Claude Code token; never otherwise
+crb doctor --json     # the same report in the /health vocabulary (ok / degraded / down / skipped)
+```
+
+Run it on the API host and on the worker host after installing, after changing any
+`CRB_*` variable, and whenever a run sits `queued`. It exits 1 only on a `fail`. The lines:
+
+| Line | What it checks | `fail` means |
+|---|---|---|
+| `toolchains` | `git`, `python3`, `go`, `node`, `mvn`, `cargo` on PATH | `git` missing (the others are `warn`) |
+| `sandbox` | the Docker daemon answers | no daemon: sandboxed runs fail closed ([§7](#7-when-the-sandbox-is-unavailable)) |
+| `builders` | which builder credentials / CLIs are configured (names, never values) | — (`warn` when none) |
+| `claude_code` | where an `auth: cli` login would come from (env, secrets file `…xxxx`, keychain, none), the CLI's version; with `--live`, the real probe | the secrets file is group/world readable |
+| `settings` | the server would start with this environment (`CRB_SECRET_KEY`, bootstrap password, `CRB_HOME`, …) | the first refusal, in the server's own words |
+| `home` | `CRB_HOME` is a persistent path, and the secrets directory is mode `0700` and owned by the user running `crb` | a temporary `CRB_HOME` in `prod` (`warn` in `dev`); a group-readable secrets directory, or one another user owns (the store refuses both) |
+| `github_app` | the app is configured, the key file is readable and parses, GitHub answers `/app/installations`, how many installations can deliver | half configured, an unreadable or malformed key, GitHub refusing (`skip` when not configured; `warn` with no installation yet) |
+| `database` | the store answers and is initialised, every append-only trigger is present and they fire (an UPDATE on `grades` is refused) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
+| `migrations` | the store's Alembic revision is the code's head — the same reading as `/health`, whose contract is [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id (`crb doctor` runs in the operator's own terminal, so its `migrations` line shows the driver's error type and message — there is no unauthenticated reader to protect; only its `sandbox` and `worker` lines share `/health`'s fixed sentence) | the `down` states: behind, ahead, empty or an older unversioned schema, or cannot be read — `crb migrate` (or the log). `warn` only for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps it) |
+| `worker` | the workers' check-ins (the `workers` table), the queue depth and running runs' heartbeats, as `/health` reads them | `warn` when no worker has checked in yet, one stopped checking in (named, with its age), runs are queued and no worker is alive, or a running run's heartbeat is stale (an idle queue with a live worker is `ok`) |
+| `ui` | the built UI the API serves and the help bundle in it (one non-empty chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
+
+`/health` on the running API answers the same questions from inside the process
+([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)); `crb doctor` is for the host, before
+and between runs.
 
 ## 2. Configure a repository
 
@@ -264,7 +304,8 @@ the language runtime, the test runner and the repository's dependencies pre-inst
 runnable as user `65534` with a read-only root. Under docker, setup does not run — the
 image must already contain what setup would have installed (the `node_modules` a host
 setup installed in the clone is visible to the container through the read-only worktree
-mount; a host venv, module cache or `~/.m2` is not). P7 ships reference images.
+mount; a host venv, module cache or `~/.m2` is not). No reference sandbox image ships
+yet; build one per language from the repository's own toolchain.
 
 ### 2.1a Packaging-metadata tests (`dist_info_stubs`)
 The harness imports the repository's code from the worktree on `PYTHONPATH` and uninstalls
@@ -428,7 +469,7 @@ stops or fails its health wait (see `DATA-RETENTION.md`).
 
 ```bash
 crb mine  myrepo --pool standard --target 25       # RED-check, baseline, gold-check; writes tasks
-crb grade myrepo --builder editblock --mode sighted --budget-usd 5   # P2: editblock; P3: openai_agent, claude_code
+crb grade myrepo --builder editblock --mode sighted --budget-usd 5   # builders: editblock, openai_agent, claude_code
 crb ledger stats --repo myrepo
 ```
 
@@ -467,7 +508,7 @@ threat model. Wherever the worker runs, `claude` must be on its `PATH`.
 
 **Check it:** `crb doctor` prints a `claude_code` line —
 `auth: env | secrets file (…xxxx) | keychain | none`, the CLI version and the secrets
-directory; `crb doctor --verify` also runs the login probe (one no-tool Haiku turn:
+directory; `crb doctor --live` also runs the login probe (one no-tool Haiku turn:
 `verify: ok (2.1s)` or `verify: invalid … authentication failed (HTTP 401)`). Run it on
 the **worker** host with the worker's environment — that is the resolution a build sees.
 The UI's **Verify** button runs the same probe on the **API** host with the stored token
@@ -482,7 +523,7 @@ schedule — the token is long-lived):
    worker.
 3. Revoke the old token: `claude auth logout` on the machine that minted it, or from the
    Anthropic console. Confirm with `crb doctor` (the fingerprint changed) and, if you
-   kept the old value anywhere, `crb doctor --verify` against it must now say `invalid`.
+   kept the old value anywhere, `crb doctor --live` against it must now say `invalid`.
 4. **Remove** it (Settings, or `DELETE /settings/secrets/claude-code-token`) when the
    evaluation is over — `auth: cli` is a developer/evaluation mode; production runs use
    `ANTHROPIC_API_KEY` on the worker and never read the file.
@@ -551,7 +592,7 @@ assertion.
 
 ## 4. Read the capability map
 
-`crb ledger stats` (CLI) and the Capability Map screen (P5) show, per cell
+`crb ledger stats` (CLI) and the Capability Map screen show, per cell
 `(class × size × language × builder × model × provider)`:
 
 | Column | Read it as |
@@ -560,7 +601,7 @@ assertion.
 | `point` | clean / n |
 | `ci_low – ci_high` | Wilson 95% interval — **the** number to quote |
 | `false_q1` | must be **0**; anything else is a stop condition (§8) |
-| `oracle_strength_mean` | hygiene-adjusted mutant kill-rate (P2) or **not measured** |
+| `oracle_strength_mean` | hygiene-adjusted mutant kill-rate (§3.1) or **not measured** |
 | `cost_usd_mean`, `latency_s_mean` | economics per trial |
 | `apparatus_versions` | if more than one, the rows are from different instruments and are shown separately |
 | `route` + reason | `deliver` / `calibrate` / `granularize` / `human` / `do_not_ship` — see [ADR-0003](adr/0003-one-routing-rule.md) |
@@ -570,7 +611,7 @@ Rules of reading: a cell at `n < 10` is `calibrate` whatever its point estimate;
 automate" — see [EVIDENCE-AND-CLAIMS §6](EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity).
 Never quote a point without its interval and its `n`.
 
-## 5. Sign off (P4)
+## 5. Sign off
 
 An **approver** signs off a cell for a route in the Sign-off screen (or `POST /api/v1/signoffs`).
 The server re-derives the cell's statistics and applies the routing rule:
@@ -586,7 +627,7 @@ Sign-offs are revoked by a new row, never by deleting one.
 
 ```bash
 crb ledger verify                          # walks the hash chain; exit 1 and the row number on any break
-crb ledger export --repo myrepo -o myrepo.jsonl   # P2; chain preserved; legacy rows keep belt_set=v3-legacy
+crb ledger export --repo myrepo -o myrepo.jsonl   # chain preserved; legacy rows keep belt_set=v3-legacy
 ```
 
 For an audit: export, run `crb ledger verify` on the export, and record the last
@@ -607,7 +648,7 @@ What to do:
 2. `crb repo probe <repo>` — proves the image and the toolchain.
 3. Check the run's status message; it names the cause (`docker binary not found`,
    `daemon not reachable`, `refusing to run untrusted tests as root`, `refusing to mount …`).
-4. Fix the cause and **re-run**; the worker (P4) resumes blocked runs. Tasks that were
+4. Fix the cause and **re-run**; the worker resumes blocked runs. Tasks that were
    never graded have no rows — nothing needs correcting in the ledger.
 
 Where to look first: `GET /api/v1/health` — the `sandbox` probe (on the worker, or a

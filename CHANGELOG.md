@@ -8,6 +8,48 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-21 — the operating envelope: what the platform team is told is true (F36–F41, F44, F47, F25)
+
+- **`/health` gains a `migrations` probe** — the contract is stated once, in
+  [API.md — The `migrations` probe](docs/API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. The go-live checklist now
+  points at a check that proves what it says (F36).
+- **No probe on `/health` serves an exception** (CWE-209 — the route is unauthenticated): every
+  read — `db`, `migrations`, `append_only`, `ledger`, `worker`, and the `sandbox`, `toolchains`
+  and `builders` probes — runs under one guard, `crb.observability.probes.run_probe`; a read
+  that raises is `down` with the one fixed detail `<probe> could not be read — see the API
+  log, request id <id>` and `data: {}`, and the exception is logged under that id (the
+  `X-Request-ID` the response echoes). Before, `db`, `append_only`, `ledger` and `worker`
+  served `<ExceptionType>: <message>` — for PostgreSQL that is host, user and DSN. `crb
+  doctor`'s lines render the same sentence without an id.
+- **`crb doctor`** checks the GitHub App (configured, key readable, an installation reachable
+  when configured), the Claude Code token store (a live turn only with `--live`), the
+  database (initialised, every append-only trigger present, an UPDATE refused — the same
+  reading as `/health`), the migration head, the worker heartbeat, the docs bundle in
+  `ui/dist` (one non-empty chunk per guide) and where `CRB_HOME` and the secrets directory
+  live (mode 0700 and owned by the current user) — each a labelled ok/warn/fail/skip line
+  with the fix (F38).
+- **A deployment never lives under an OS temp directory**: settings refuse in prod and warn in
+  dev when `CRB_HOME` resolves under `/tmp`, `/private/tmp`, `/var/folders` or `$TMPDIR`
+  (`CRB_ALLOW_TEMP_HOME` overrides for a knowing trial); DEPLOYMENT.md says why (F37).
+- **Backup and restore (SQLite)** — quiesce, `sqlite3 .backup`, the tar of `home/evidence`,
+  `home/events`, `home/factory`, `home/secrets`, `home/transcripts`; the proof reads the copy
+  with sqlite3 and `crb ledger verify` (F44).
+- **docs/RELEASING.md** — how a release is cut (version, CHANGELOG section, tag, the image
+  release.yml builds and signs, the chart) (F40). The version moves in the release commit
+  itself (RELEASING §2), not here: the tree stays `2.0.0a1` until `2.0.0b1` is cut; the
+  chart's own `version` is now the SemVer form of the package version (`2.0.0-a1`) and
+  `tests/test_version_consistency.py` pins all four numbers plus that rule
+  (`test_chart_version_is_the_semver_form_of_the_package_version`). OPERATOR.md's front matter describes the
+  product as it is, with the phase markers gone (F41); dangling cross-references resolved
+  (F47).
+- **`GET /settings/secrets` serves viewers `{name, present}` only** — a distinct
+  `SecretPresenceOut` item model, so no empty `fingerprint` / `set_at` / `set_by` keys reach a
+  viewer (F25).
+- Tests: `tests/test_settings_home_guard.py`, `tests/test_cli_doctor.py`,
+  `tests/test_server_system.py` (migrations probe; every raising probe serves the fixed
+  detail and logs under the request id, through the route and at the function),
+  `tests/test_store_migrate.py`, `tests/test_version_consistency.py` (chart version).
+
 ### 2026-09-21 — a locked-out administrator has a way back in (F23)
 
 - **`PUT /users/{id}/password`** (admin), **`PUT /users/me/password`** (any local account,
@@ -1202,6 +1244,6 @@ Apparatus version **2.0**.
 - The v1 (June 2026) implementation (`src/commit_replay_bench/*`, SEARCH/REPLACE-only
   generator, host-only pytest harness). Its last commit is tagged `v1.0.0-legacy`.
 
-[Unreleased]: https://github.com/Jita81/commit-replay-bench/compare/2.0.0a1-rc1...reboot/v2
+[Unreleased]: https://github.com/Jita81/commit-replay-bench/compare/v2.0.0a1...main
 [2.0.0a1]: https://github.com/Jita81/commit-replay-bench/compare/v1.0.0-legacy...2.0.0a1-rc1
 [2.0.0a0]: https://github.com/Jita81/commit-replay-bench/compare/v1.0.0-legacy...v2.0.0a0
