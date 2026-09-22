@@ -20,7 +20,7 @@
  *               a factory run is active the chain polls and a banner names the run and the
  *               item in hand (J-FAC-5 / J-TEL-9). A built item opens its evidence (F15); a
  *               stopped item says the way forward — an evolution that supersedes it, the
- *               route the API serves as `way_forward` (DL-048) — and the freeze form for a
+ *               route the API serves as `way_forward` (DL-049) — and the freeze form for a
  *               revised backlog (a new hash) starts from the active one (J-FAC-15). Every act goes through the API under its role; the
  *               chain (`/factory/{repo}/evidence`) is the record, and this screen renders the
  *               folded view of it (`task_views`).
@@ -321,7 +321,7 @@ export function stepsFor(t: FactoryTask): Step[] {
  */
 export function refusalSentence(t: FactoryTask): string {
   const r = t.refusal
-  // DL-048: a frozen backlog does not change, it evolves — the way forward is an evolution
+  // DL-049: a frozen backlog does not change, it evolves — the way forward is an evolution
   // that supersedes this item (the frozen hash stays; the old chain is kept), which the API
   // serves as `way_forward`; freezing a revised backlog (a new hash) is the heavier path
   const evolve = (fix: string) => `To bring it back into the factory, ${fix} and register an evolution that supersedes this item (the frozen hash stays; the old chain is kept); or open the change by hand and mark the item done in the next backlog.`

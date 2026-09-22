@@ -414,6 +414,8 @@ export const HINTS = {
     'The published rule routes this cell deliver. A sign-off never changes a route, so a cell routed elsewhere cannot be signed.',
   'gate.signoff.attestation':
     'You have named one accepted row and affirmed you read its diff. This clause cannot be relaxed: the attestation is hash-chained with the sign-off.',
+  'gate.signoff.second_person':
+    'The two-person rule: the server refuses your sign-off if you queued the run that produced the attested row, or if you are the only person behind the cell. No setting can relax it; the refusal code is same_actor.',
   'button.signoff.sign':
     'Record the attestation. The server re-checks every clause at write and refuses if any fails; a refusal records nothing.',
   'tile.signoff.refusal':
@@ -465,7 +467,9 @@ export const HINTS = {
   'pill.signoff.status':
     'Active counts now; stale lifts nothing until re-signed; invalidated means the cell now has a false-Q1 row; superseded means a later attestation covers the same scope; revoked was withdrawn, with who and when.',
   'col.signoff.approver':
-    'The named person who signed. Separation of duties: the operator who queued the runs should not appear here.',
+    'The named person who signed, with the kind of account they signed from. The server refused this record at write if that person had produced the evidence themselves.',
+  'pill.signoff.verifier_kind':
+    'The kind of account that signed: local (a password account on this deployment), oidc (your identity provider), or service (a delegated signature, which never reads as a person). Records written before this was stamped say so.',
   'col.signoff.signed':
     'When the attestation was recorded on the ledger. Newest first by default.',
   'col.signoff.evidence':
@@ -617,7 +621,7 @@ export const HINTS = {
   'summary.posture.roles':
     'The four roles and what each may do: read, start runs, sign cells, administer.',
   'summary.posture.separation':
-    'The policy that the operator who queues runs is not the approver who signs them, and whether the server enforces it at write yet.',
+    'The two-person rule and how it is enforced: the server refuses a sign-off whose approver produced the evidence, so an operator who queued the runs cannot also sign them.',
   'summary.posture.source_control':
     'Whether the GitHub App is registered, how many installations it has, and that its tokens are minted per use and never stored.',
   'summary.posture.executor':

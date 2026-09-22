@@ -1094,6 +1094,10 @@ class SignoffOut(BaseModel):
     #: stays the stable user id the hash chain covers (a name may change, an id may not).
     #: Empty when the account no longer exists.
     approver_name: str = ""
+    #: The kind of account that signed (F34): ``oidc`` | ``local`` | ``service`` (reserved —
+    #: a delegated signature, never minted by this API); ``""`` on a row written before the
+    #: field existed. Hash-covered on new rows; a service signature can never read as a person's.
+    verifier_kind: str = ""
     created: str
     revoked: bool
     revoked_by: str | None

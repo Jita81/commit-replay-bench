@@ -46,6 +46,7 @@ const ADRS: Array<[string, string]> = [
   ['0013', 'An external reviewer’s verdict is recorded and advisory'],
   ['0014', 'The GitHub App is the connection'],
   ['0015', 'A sign-off expires with the apparatus'],
+  ['0016', 'The two-person rule is a policy clause, not an apparatus move'],
 ]
 
 export function HelpPage() {

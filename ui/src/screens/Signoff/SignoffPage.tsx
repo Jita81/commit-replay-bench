@@ -13,9 +13,14 @@
  *               below already explain every clause with observed vs threshold.
  * What it does: Shows the bar before the approver tries: the preview's refusals become the
  *               gate's check-rows with observed vs threshold, and non-overridable clauses
- *               (false-Q1, oracle unmeasured, attestation missing) are marked so; the action
- *               is disabled until the preview says `signable` AND the approver has named a
- *               row, ticked "I have read this accepted diff" and written a statement. A 409
+ *               (false-Q1, oracle unmeasured, attestation missing, same actor) are marked so —
+ *               the *Signed by a second person* row is pending (○), not satisfied, until a row
+ *               is named, because the attested row is judged only then; the action is
+ *               disabled until the preview says `signable` AND the approver has named a
+ *               row, ticked "I have read this accepted diff" and written a statement. Every
+ *               recorded sign-off carries a `verifier_kind` tag next to the approver (local
+ *               account / identity provider / service — delegated, not a person / kind not
+ *               recorded) with its meaning on hover. A 409
  *               from the POST renders as a REFUSED gate with the clauses (the false-Q1 floor
  *               points at the ledger); a pre-policy record is listed honestly without a
  *               fabricated snapshot; an approver can revoke. A reader without the approver
@@ -114,6 +119,7 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
       { label: 'Negative controls passed', ok: null, hint: 'gate.signoff.controls' },
       { label: 'Route = deliver', ok: null, hint: 'gate.signoff.route' },
       { label: 'Accepted row read and affirmed', ok: null, hint: 'gate.signoff.attestation' },
+      { label: 'Signed by a second person', ok: null, hint: 'gate.signoff.second_person' },
     ]
   }
   const fam = new Set(preview.refusals.map((r) => refusalFamily(r.code)))
@@ -141,7 +147,27 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
     },
     { label: 'Route = deliver', ok: !fam.has('route_not_deliver'), detail: `${preview.route.route}${preview.route.reason_code ? ` (${preview.route.reason_code})` : ''}`, hint: 'gate.signoff.route' },
     { label: 'Accepted row read and affirmed', ok: !fam.has('attestation_missing') && attested, detail: preview.attestation ? `${shortId(preview.attestation.reviewed_row_hash)} · ${preview.attestation.subject || preview.attestation.reviewed_task_id}` : 'pick a row below and tick “I have read this accepted diff”', hint: 'gate.signoff.attestation' },
+    {
+      label: 'Signed by a second person',
+      hint: 'gate.signoff.second_person',
+      // a refusal is a fact either way; a pass is only a fact once the row is named — until
+      // then the preview has judged the cell's evidence (ground 2), not the attested row
+      ok: fam.has('same_actor') ? false : preview.attestation ? true : null,
+      detail: fam.has('same_actor') ? 'you produced this evidence — a second approver must sign; non-overridable' : preview.attestation ? 'you did not queue the run behind the attested row, and someone else is behind the cell' : 'someone else is behind the cell; the attested row is judged once you name the row you read',
+    },
   ]
+}
+
+/** The kind of account that signed (F34, hash-covered) as a tag with its meaning on hover; `""` is a row written before the field existed. */
+const VERIFIER_KIND_DISPLAY: Record<string, { text: string; label: string }> = {
+  local: { text: 'local account', label: 'Signed by a local (password) account of this deployment — verifier_kind: local' },
+  oidc: { text: 'identity provider', label: 'Signed by an account an identity provider owns (OIDC) — verifier_kind: oidc' },
+  service: { text: 'service — delegated, not a person', label: 'Signed by a delegated service signature, not a person — verifier_kind: service (reserved; this API never mints it)' },
+}
+function VerifierKindTag({ kind }: { kind: string | undefined }) {
+  const d = kind ? VERIFIER_KIND_DISPLAY[kind] : undefined
+  if (!d) return <Pill tone="muted" size="xs" hint="pill.signoff.verifier_kind" tabStop={false} label="This record was written before the kind of the signing account was recorded (pre-F34); it is not known" data-testid="verifier-kind">kind not recorded</Pill>
+  return <Pill tone={kind === 'service' ? 'amber' : 'muted'} size="xs" hint="pill.signoff.verifier_kind" tabStop={false} label={d.label} data-testid="verifier-kind">{d.text}</Pill>
 }
 
 /** Every failing clause with its code, one-line meaning, observed vs threshold and the non-overridable mark. */
@@ -321,7 +347,18 @@ export function SignoffPage() {
             <Pill tone="muted" glyph="○" size="xs" label="Superseded by a later attestation on the same scope" hint="pill.signoff.status">superseded</Pill>
           ),
       },
-      { key: 'approver', header: 'Approver', sortValue: (s) => approverName(s), cell: (s) => approverName(s), hint: 'col.signoff.approver' },
+      {
+        key: 'approver',
+        header: 'Approver',
+        hint: 'col.signoff.approver',
+        sortValue: (s) => approverName(s),
+        cell: (s) => (
+          <span className="inline-flex flex-wrap items-center gap-1.5" data-testid="signoff-row-approver">
+            {approverName(s)}
+            <VerifierKindTag kind={s.verifier_kind} />
+          </span>
+        ),
+      },
       { key: 'created', header: 'Signed', sortValue: (s) => s.created, cell: (s) => <span className="text-xs text-on-surface-muted">{fmtDate(s.created)}</span>, hint: 'col.signoff.signed' },
       {
         key: 'evidence',
@@ -572,7 +609,7 @@ export function SignoffPage() {
                       rows={[
                         { key: 'Cell', value: <><code>{cellLabel(create.data.cell)}</code> on {create.data.repo}, route {create.data.route.route || '—'}</> },
                         { key: 'Row hash', value: <code className="break-all">{create.data.row_hash}</code> },
-                        { key: 'Attested by', value: `${approverName(create.data)} at ${create.data.created}` },
+                        { key: 'Attested by', value: <>{approverName(create.data)} <VerifierKindTag kind={create.data.verifier_kind} /> at {create.data.created}</> },
                         { key: 'Policy', value: <><code>{create.data.policy_version}</code> · apparatus {create.data.evidence.apparatus_versions.join(', ') || '—'}</> },
                       ]}
                     />

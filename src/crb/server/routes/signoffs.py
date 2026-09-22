@@ -5,7 +5,7 @@ the previous sign-off's ``row_hash``; ``row_hash`` = SHA-256 of the canonical JS
 of the row minus ``row_hash``). A revocation is a new row with ``revoke=True`` for
 the same scope; the latest row per ``(repo, scope)`` wins.
 
-A sign-off is a policy decision, refused at write (``signoff-policy.v2``,
+A sign-off is a policy decision, refused at write (``signoff-policy.v3``,
 :mod:`crb.core.signoff`). ``POST /signoffs``:
 
 1. counts the cell's **false-Q1** in SQL over the STORED belts (the same predicate
@@ -19,21 +19,32 @@ A sign-off is a policy decision, refused at write (``signoff-policy.v2``,
    per-task reduction ``/oracle/{repo}`` serves, averaged over the cell's scored tasks;
    ``None`` when no task of the cell has been scored);
 3. resolves the approver's **attestation** — the accepted row they name must exist in
-   the ledger, belong to this cell and be ``clean`` (else **422**);
+   the ledger, belong to this cell and be ``clean`` (else **422**) — and the **actors
+   behind the evidence** for the two-person rule: the attested row's ``Grade.actor`` and
+   its run's ``Run.actor`` (:func:`resolve_attestation`), and the same for EVERY accepted
+   row of the measured cell (:func:`cell_actors`);
 4. applies the policy (:func:`crb.core.signoff.evaluate_signoff`): a thin cell, a
    controls gate that failed / was never run / let a control escape / was thin, an
    **unmeasured** oracle (``oracle_unmeasured``, never overridable since v2), a weak
-   oracle, a route other than ``deliver``, or a missing attestation → **409
-   signoff_refused** with ``detail.code``, ``detail.thresholds`` and ``detail.observed``
-   plus every failing clause; nothing is written and the refusal is recorded as a
-   ``system/signoff.refused`` event;
+   oracle, a route other than ``deliver``, a missing attestation, or ``same_actor``
+   (never overridable since v3): the approver is refused when they are the actor of the
+   attested row (``Grade.actor``), the actor of the run that produced it (``Run.actor``),
+   or the only person behind the cell's accepted evidence; non-person actors — the
+   worker, ``cli:…``, ``import`` — never count (the core's ``is_person_actor`` decides)
+   → **409 signoff_refused** with ``detail.code``, ``detail.thresholds`` and
+   ``detail.observed`` plus every failing clause; nothing is written and the refusal is
+   recorded as a ``system/signoff.refused`` event;
 5. stamps the whole decision (n, point, Wilson lower, false-Q1, oracle strength, route +
    reason code, controls verdict / run / k of N / escapes, the policy and its thresholds,
-   the attestation) into the row, hash-covered.
+   the attestation, and the signing account's ``verifier_kind`` — ``local`` | ``oidc``
+   from the approver's issuer; ``service`` is reserved, never minted here) into the row,
+   hash-covered.
 
 ``GET /signoffs/preview`` runs steps 1–4 without writing and answers what the record
-WOULD carry and every refusal that would apply, plus the cell's accepted rows the
-approver may name — the UI shows the bar before the approver tries.
+WOULD carry and every refusal that would apply — ``same_actor`` included, judged for the
+VIEWER as the would-be approver, so the sentence "you queued the run that produced this
+row — a second approver must sign" shows before anyone tries — plus the cell's accepted
+rows the approver may name.
 
 At read, every listed attestation carries ``current_false_q1`` and ``active`` (latest
 for its scope, not revoked, and the cell's CURRENT false-Q1 is 0); the capability /
@@ -49,28 +60,35 @@ is served with the version it was signed under; its chain still verifies.
 Navigation
 ----------
 What it is:   The ``/signoffs`` route module — human attestations of a cell under
-              ``signoff-policy.v2``, refused at write, on their own hash chain.
+              ``signoff-policy.v3``, refused at write, on their own hash chain.
 What it does: ``POST`` runs the five steps of the module docstring: the false-Q1 floor over
               the STORED belts (409, non-overridable) → the cell routed under the repo's
               latest controls verdict and task-level oracle strength → the approver's
-              attestation resolved to an accepted row of THIS cell → the policy's clauses
-              (409 ``signoff_refused`` with every failing clause, recorded as an event) →
-              the whole decision stamped into the row and chained. ``preview`` runs steps
-              1–4 without writing; a revocation is a new row; at read every attestation
-              says whether it is still ``active`` (latest, not revoked, false-Q1 still 0).
+              attestation resolved to an accepted row of THIS cell, plus the actors behind
+              that row and behind every accepted row of the cell → the policy's clauses,
+              the two-person rule among them (409 ``signoff_refused`` with every failing
+              clause, recorded as an event) → the whole decision, ``verifier_kind``
+              included, stamped into the row and chained. ``preview`` runs steps 1–4
+              without writing; a revocation is a new row; at read every attestation says
+              whether it is still ``active`` (latest, not revoked, false-Q1 still 0) and
+              what kind of account signed it.
 How:          ``_floor`` → ``cell_rows`` (sighted, current apparatus) → ``measured_cell`` +
-              ``cell_oracle_strength`` → ``resolve_attestation`` → ``evaluate_signoff`` →
-              ``stamp_evidence`` → ``_lock`` / ``_chain_and_add`` → ``signoff.created``.
+              ``cell_oracle_strength`` → ``resolve_attestation`` + ``cell_actors`` (``Grade.actor``,
+              ``Run.actor``) → ``evaluate_signoff`` → ``stamp_evidence`` → ``_lock`` /
+              ``_chain_and_add`` → ``signoff.created``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0003-one-routing-rule.md,
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/core/signoff.py (the policy, ``SignoffRecord``, ``evaluate_signoff``,
-              ``stamp_evidence``), src/crb/core/capability.py (``measure_cell``,
+              ``stamp_evidence``, ``verifier_kind_for_issuer``; its ``is_person_actor`` decides
+              personhood — this module only gathers actors),
+              src/crb/server/auth.py (``Principal.issuer`` — what ``verifier_kind`` is
+              stamped from), src/crb/core/capability.py (``measure_cell``,
               ``task_oracle_strength``), src/crb/server/routes/oracle.py
               (``latest_controls_verdict`` / ``oracle_by_task`` — shared with the map),
               src/crb/server/routes/capability.py (overlays ``load_signoff_records``),
-              src/crb/server/schemas_signoff.py (the v2 shapes), src/crb/store/models.py
-              (``Signoff``), ui/src/screens/Signoff,
+              src/crb/server/schemas_signoff.py (the v3 shapes), src/crb/store/models.py
+              (``Signoff``, ``Grade.actor``, ``Run.actor``), ui/src/screens/Signoff,
               docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity (§6a)
 Tested by:    tests/test_server_routes_signoffs.py, tests/test_server_routes_capability.py
 Touch when:   never for a new repository; relaxing a threshold is deployment configuration
@@ -121,6 +139,7 @@ from crb.core.signoff import (
     REFUSAL_FALSE_Q1,
     SIGNOFF_SCHEMA,
     SIGNOFF_SCHEMA_V1,
+    SIGNOFF_SCHEMA_V2,
     Attestation,
     SignoffPolicy,
     SignoffRecord,
@@ -129,11 +148,12 @@ from crb.core.signoff import (
     evaluate_signoff,
     resolve_oracle_strength,
     stamp_evidence,
+    verifier_kind_for_issuer,
 )
 from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepStatus
 from crb.server.auth import ApproverDep, ViewerDep
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope
+from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal
 from crb.server.routes.grades import grade_to_dict
 from crb.server.routes.oracle import (
     latest_controls_verdict,
@@ -158,7 +178,7 @@ from crb.server.schemas_signoff import (
     SignoffRouteOut,
     SignoffWithPolicyOut,
 )
-from crb.store.models import Grade, Repo, Signoff, Task, User
+from crb.store.models import Grade, Repo, Run, Signoff, Task, User
 
 router = APIRouter(tags=["signoffs"])
 _ERR = {"model": ErrorEnvelope}
@@ -187,6 +207,8 @@ _ATT_TASK = "attestation_reviewed_task_id"
 _ATT_ROW = "attestation_reviewed_row_hash"
 _ATT_STATEMENT = "attestation_statement"
 _ATT_AT = "attestation_at"
+# crb.signoff.v3 (F34): the kind of account that signed (absent on rows written before).
+_VERIFIER_KIND = "verifier_kind"
 
 #: Envelope codes: the floor keeps its historical code; every policy clause is one.
 CODE_FALSE_Q1 = "false_q1_refused"
@@ -349,12 +371,20 @@ def _attestation_of(cj: dict[str, str]) -> Attestation | None:
     )
 
 
+def _schema_of(cj: dict[str, str]) -> str:
+    """The record schema a stored row was written under, read from the keys it carries:
+    ``verifier_kind`` → v3, a policy snapshot → v2, neither → v1 (never assumed)."""
+    if _VERIFIER_KIND in cj:
+        return SIGNOFF_SCHEMA
+    return SIGNOFF_SCHEMA_V2 if _POLICY_VERSION in cj else SIGNOFF_SCHEMA_V1
+
+
 def to_record(row: Signoff) -> SignoffRecord:
     """The :class:`~crb.core.signoff.SignoffRecord` view of a stored row (for the overlay).
-    A row written before the policy comes back as a ``crb.signoff.v1`` record."""
+    A row written before the policy comes back as a ``crb.signoff.v1`` record, one written
+    before F34 as ``crb.signoff.v2`` with ``verifier_kind: ""``."""
     cj = dict(row.cell_json or {})
     scope = scope_of(row)
-    v2 = _POLICY_VERSION in cj
     return SignoffRecord(
         repo=row.repo,
         capability_class=scope.capability_class,
@@ -385,7 +415,8 @@ def to_record(row: Signoff) -> SignoffRecord:
         controls_total=_int(cj.get(_CTL_TOTAL, 0)),
         controls_escapes=_int(cj.get(_CTL_ESCAPES, 0)),
         attestation=_attestation_of(cj) if not row.revoke else None,
-        schema=SIGNOFF_SCHEMA if v2 else SIGNOFF_SCHEMA_V1,
+        verifier_kind=str(cj.get(_VERIFIER_KIND, "") or ""),
+        schema=_schema_of(cj),
         record_id=row.signoff_id,
         prev_hash=row.prev_hash,
         row_hash=row.row_hash,
@@ -547,6 +578,59 @@ def accepted_rows(
     ]
 
 
+#: ``IN`` lists are chunked under SQLite's default 999-parameter ceiling.
+_IN_CHUNK = 500
+
+
+def run_actors(session: Session, run_ids: Iterable[str]) -> dict[str, str]:
+    """``run_id → Run.actor`` for the runs the store knows; a historical, CLI or census row
+    may name a run that has no row here, and such a run has no actor."""
+    ids = sorted({r for r in run_ids if r})
+    out: dict[str, str] = {}
+    for i in range(0, len(ids), _IN_CHUNK):
+        q = select(Run.id, Run.actor).where(Run.id.in_(ids[i : i + _IN_CHUNK]))
+        out.update({str(rid): str(actor or "") for rid, actor in session.execute(q)})
+    return out
+
+
+def cell_actors(session: Session, rows: Sequence[GradeRow]) -> frozenset[str]:
+    """Every actor behind the cell's ACCEPTED rows (clean, not disqualified): each row's
+    own ``actor`` and the ``actor`` of the run that produced it — the second ground of the
+    two-person rule (:func:`crb.core.signoff.same_actor_refusal`). The core decides which
+    of them are people; this only gathers them, non-person strings included."""
+    accepted = [r for r in rows if r.clean and not r.disqualified]
+    by_run = run_actors(session, (r.run_id for r in accepted))
+    return frozenset({r.actor for r in accepted} | {by_run.get(r.run_id, "") for r in accepted})
+
+
+@dataclass(frozen=True)
+class ResolvedAttestation:
+    """The approver's attestation resolved against the ledger: the core record's
+    ``attestation``, the graded task's ``subject`` for display, and — for the two-person
+    rule — the ``actors`` behind the row (its own ``Grade.actor`` and its run's
+    ``Run.actor``) with the ``run_id`` that produced it (``""`` when the row names none)
+    and that run's ``run_actor`` on its own (``""`` when the store knows no such run), so
+    a caller can tell WHICH half of ``actors`` is the run's before naming the run in a
+    refusal (:func:`attested_run_id_for`)."""
+
+    attestation: Attestation
+    subject: str
+    actors: frozenset[str]
+    run_id: str
+    run_actor: str
+
+
+def attested_run_id_for(attested: ResolvedAttestation | None, approver: str) -> str:
+    """The run id the ``same_actor`` sentence may name for ``approver``: the attested row's
+    run only when ``approver`` is that run's actor — "queued run X, which produced the
+    attested row" must be true of the person it is said to. When the row's OWN
+    ``Grade.actor`` is the approver (a ``crb grade --actor`` row, a run the store never
+    saw), ``""``: the core then states the ground without a run."""
+    if attested is None or not attested.run_id:
+        return ""
+    return attested.run_id if attested.run_actor == approver else ""
+
+
 def _attestation_422(msg: str) -> ApiError:
     """A 422 located at ``body.attestation.reviewed_row_hash``."""
     return ApiError(
@@ -567,11 +651,11 @@ def _attestation_422(msg: str) -> ApiError:
 
 def resolve_attestation(
     session: Session, repo: str, scope: CellKey, att: AttestationIn
-) -> tuple[Attestation, str]:
+) -> ResolvedAttestation:
     """The approver's attestation with ``reviewed_task_id`` resolved from the ledger,
-    plus the task's subject. 422 unless the row exists, is this repo's, sits in the
-    cell and is an ACCEPTED row (clean, not disqualified) — an approver can only
-    attest to a diff the instrument accepted."""
+    plus the task's subject and the actors behind the row. 422 unless the row exists, is
+    this repo's, sits in the cell and is an ACCEPTED row (clean, not disqualified) — an
+    approver can only attest to a diff the instrument accepted."""
     g = session.execute(
         select(Grade).where(Grade.row_hash == att.reviewed_row_hash)
     ).scalar_one_or_none()
@@ -593,14 +677,18 @@ def resolve_attestation(
             "an approver attests to a diff the instrument accepted"
         )
     subject = _subjects(session, repo, [g.task_id]).get(g.task_id, "")
-    return (
-        Attestation(
+    run_actor = run_actors(session, [g.run_id]).get(g.run_id, "")
+    return ResolvedAttestation(
+        attestation=Attestation(
             reviewed_task_id=g.task_id,
             reviewed_row_hash=g.row_hash,
             statement=att.statement,
             at=utc_now_iso(),
         ),
-        subject,
+        subject=subject,
+        actors=frozenset({str(g.actor or ""), run_actor}),
+        run_id=str(g.run_id or ""),
+        run_actor=run_actor,
     )
 
 
@@ -683,6 +771,7 @@ def signoff_out(
         note=row.note,
         approver=row.verifier,
         approver_name=_display_name(session, row.verifier),
+        verifier_kind=str(cj.get(_VERIFIER_KIND, "") or ""),
         created=row.created,
         revoked=revocation is not None,
         revoked_by=revocation.verifier if revocation is not None else None,
@@ -697,7 +786,7 @@ def signoff_out(
         evidence=_evidence(row),
         prev_hash=row.prev_hash,
         row_hash=row.row_hash,
-        schema=SIGNOFF_SCHEMA if _POLICY_VERSION in cj else SIGNOFF_SCHEMA_V1,
+        schema=_schema_of(cj),
         policy_version=str(cj.get(_POLICY_VERSION, "") or ""),
         policy_thresholds=_thresholds_of(cj),
         route=SignoffRouteOut(
@@ -796,16 +885,46 @@ def _refuse(
     )
 
 
+#: The envelope code when the signing account's ``users.issuer`` is blank — a defect of the
+#: users table (no product path writes one), not of the request; nothing is written.
+CODE_ISSUER_MISSING = "account_issuer_missing"
+
+
+def verifier_kind_of(principal: Principal) -> str:
+    """The ``verifier_kind`` ``principal`` stamps (:func:`verifier_kind_for_issuer`), or a
+    **503 account_issuer_missing** envelope when its issuer is blank — the core fails
+    closed with a ``ValueError``; here that becomes a diagnosed answer naming the account
+    to repair, never a 500, and never a guessed kind. Called before any lock is taken."""
+    try:
+        return verifier_kind_for_issuer(principal.issuer)
+    except ValueError as exc:
+        raise ApiError(
+            503,
+            CODE_ISSUER_MISSING,
+            f"account {principal.id} has no issuer; verifier_kind cannot be stamped — "
+            "repair the users row",
+            detail={"user": principal.id},
+        ) from exc
+
+
 def _record_from(
-    repo: str, cell: dict[str, str], *, verifier: str, tier: str, note: str
+    repo: str,
+    cell: dict[str, str],
+    *,
+    verifier: str,
+    verifier_kind: str,
+    tier: str,
+    note: str,
 ) -> SignoffRecord:
     """The unstamped core record for a request body; the core's own validation errors
-    become 409 (a refusal) or 422 (a malformed scope)."""
+    become 409 (a refusal) or 422 (a malformed scope). ``verifier_kind`` is what the
+    caller derived from the signing account's issuer (:func:`verifier_kind_for_issuer`)."""
     try:
         return SignoffRecord(
             repo=repo,
             capability_class=cell["capability_class"],
             verifier=verifier,
+            verifier_kind=verifier_kind,
             size=cell.get("size", WILDCARD),
             language=cell.get("language", WILDCARD),
             builder=cell.get("builder", WILDCARD),
@@ -952,7 +1071,14 @@ def preview_signoff(
             msg,
             detail={"errors": [{"loc": ["query", "cell"], "msg": msg, "type": "value_error"}]},
         ) from exc
-    record = _record_from(repo, cell_in, verifier=viewer.id, tier="human-verified", note="")
+    record = _record_from(
+        repo,
+        cell_in,
+        verifier=viewer.id,
+        verifier_kind=verifier_kind_of(viewer),
+        tier="human-verified",
+        note="",
+    )
     scope = record.scope()
     fq1, bad_ids = cell_false_q1(db, repo, scope)
     if fq1 > 0:
@@ -975,6 +1101,7 @@ def preview_signoff(
     oracle = cell_oracle_strength(db, repo, rows, by_task=by_task)
     strength = resolve_oracle_strength(cell, oracle_strength=oracle.strength)
     attestation_out: AttestationOut | None = None
+    attested: ResolvedAttestation | None = None
     if reviewed_row_hash:
         try:
             att_in = AttestationIn(
@@ -982,9 +1109,11 @@ def preview_signoff(
             )
         except ValidationError as exc:
             raise _attestation_422(exc.errors()[0]["msg"] if exc.errors() else str(exc)) from exc
-        att, subject = resolve_attestation(db, repo, scope, att_in)
-        record = replace(record, attestation=att)
-        attestation_out = AttestationOut(**att.to_dict(), subject=subject)
+        attested = resolve_attestation(db, repo, scope, att_in)
+        record = replace(record, attestation=attested.attestation)
+        attestation_out = AttestationOut(**attested.attestation.to_dict(), subject=attested.subject)
+    # the two-person rule is judged for the viewer as the would-be approver, so the
+    # refusal shows BEFORE they try (the POST resolves the same actors)
     refusals = evaluate_signoff(
         record,
         cell,
@@ -992,6 +1121,9 @@ def preview_signoff(
         oracle_strength=oracle.strength,
         policy=policy,
         repo=repo,
+        attested_actors=None if attested is None else attested.actors,
+        cell_actors=cell_actors(db, rows),
+        attested_run_id=attested_run_id_for(attested, viewer.id),
     )
     stamped = (
         stamp_evidence(
@@ -1079,7 +1211,12 @@ def create_signoff(
         raise ApiError(404, "not_found", f"no repo {body.repo!r}")
     policy = effective_policy()
     record = _record_from(
-        body.repo, body.cell, verifier=approver.id, tier=body.tier, note=body.note
+        body.repo,
+        body.cell,
+        verifier=approver.id,
+        verifier_kind=verifier_kind_of(approver),
+        tier=body.tier,
+        note=body.note,
     )
     scope = record.scope()
 
@@ -1092,10 +1229,12 @@ def create_signoff(
     by_task = oracle_by_task(db, body.repo)
     cell = measured_cell(rows, scope, controls, by_task)
     oracle = cell_oracle_strength(db, body.repo, rows, by_task=by_task)
-    # 3. The attestation: the named row must be an accepted row of THIS cell.
+    # 3. The attestation: the named row must be an accepted row of THIS cell — and the
+    #    actors behind it and behind every accepted row, for the two-person rule.
+    attested: ResolvedAttestation | None = None
     if body.attestation is not None:
-        att, _subject = resolve_attestation(db, body.repo, scope, body.attestation)
-        record = replace(record, attestation=att)
+        attested = resolve_attestation(db, body.repo, scope, body.attestation)
+        record = replace(record, attestation=attested.attestation)
     # 4. The policy.
     refusals = evaluate_signoff(
         record,
@@ -1104,6 +1243,9 @@ def create_signoff(
         oracle_strength=oracle.strength,
         policy=policy,
         repo=body.repo,
+        attested_actors=None if attested is None else attested.actors,
+        cell_actors=cell_actors(db, rows),
+        attested_run_id=attested_run_id_for(attested, approver.id),
     )
     if refusals:
         first = refusals[0]
@@ -1156,6 +1298,7 @@ def create_signoff(
         _ATT_ROW: stamped.attestation.reviewed_row_hash,
         _ATT_STATEMENT: stamped.attestation.statement,
         _ATT_AT: stamped.attestation.at,
+        _VERIFIER_KIND: stamped.verifier_kind,
     }
     _lock(db)
     row = _chain_and_add(
@@ -1193,6 +1336,7 @@ def create_signoff(
             "oracle_scored": oracle.scored,
             "oracle_tasks": oracle.tasks,
             "reviewed_row_hash": stamped.attestation.reviewed_row_hash,
+            "verifier_kind": stamped.verifier_kind,
             "row_hash": row.row_hash,
         },
     )
@@ -1203,7 +1347,7 @@ def create_signoff(
 @router.post(
     "/signoffs/{signoff_id}/revoke",
     response_model=SignoffWithPolicyOut,
-    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR},
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 503: _ERR},
     summary="Withdraw an attestation (appends a revocation row; never edits)",
 )
 def revoke_signoff(
@@ -1214,7 +1358,8 @@ def revoke_signoff(
 ) -> SignoffWithPolicyOut:
     """Append a revocation row for the attestation's scope; the original row is untouched
     and is returned with ``revoked: true``. The body's ``note`` — the reason — is required
-    (422 without one), the same rule the UI applies."""
+    (422 without one), the same rule the UI applies. The revocation row carries the
+    revoker's ``verifier_kind`` too (who withdrew trust is as auditable as who gave it)."""
     row = db.execute(
         select(Signoff).where(Signoff.signoff_id == signoff_id, Signoff.revoke.is_(False))
     ).scalar_one_or_none()
@@ -1224,13 +1369,14 @@ def revoke_signoff(
     if _revocation_for(row, all_rows) is not None:
         raise ApiError(409, "already_revoked", f"attestation {signoff_id!r} is already revoked")
     note = body.note
+    kind = verifier_kind_of(approver)  # a diagnosed 503 before the lock, never a 500 under it
     _lock(db)
     revocation = _chain_and_add(
         db,
         Signoff(
             signoff_id=uuid.uuid4().hex,
             repo=row.repo,
-            cell_json=scope_of(row).to_dict(),
+            cell_json={**scope_of(row).to_dict(), _VERIFIER_KIND: kind},
             tier=row.tier,
             verifier=approver.id,
             note=redact(note),
@@ -1262,11 +1408,15 @@ def revoke_signoff(
 __all__ = [
     "ACCEPTED_ROWS_LIMIT",
     "CODE_FALSE_Q1",
+    "CODE_ISSUER_MISSING",
     "CODE_POLICY_INVALID",
     "CODE_REFUSED",
     "FALSE_Q1_PREDICATE",
     "CellOracle",
+    "ResolvedAttestation",
     "accepted_rows",
+    "attested_run_id_for",
+    "cell_actors",
     "cell_false_q1",
     "cell_oracle_strength",
     "cell_rows",
@@ -1276,10 +1426,12 @@ __all__ = [
     "measured_cell",
     "resolve_attestation",
     "router",
+    "run_actors",
     "scope_of",
     "signoff_body",
     "signoff_hash",
     "signoff_out",
     "to_record",
+    "verifier_kind_of",
     "verify_signoff_rows",
 ]

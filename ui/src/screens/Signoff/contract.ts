@@ -1,10 +1,13 @@
 /**
  * The B7 additions to the sign-off contract (docs/API.md, review §5 play 06 / §7 item 6):
- * a sign-off is a policy decision refused at write (`signoff-policy.v2`), previewed
+ * a sign-off is a policy decision refused at write (`signoff-policy.v3`), previewed
  * before the approver tries, and recorded with the approver's attestation that they
  * read one specific accepted row of the cell. v2 (2026-09-14) adds the non-relaxable
  * `oracle_unmeasured` clause: the cell's oracle strength must be MEASURED (a task-level
- * mutation score on the cell's tasks), not merely "≥ 0.80 when measured".
+ * mutation score on the cell's tasks), not merely "≥ 0.80 when measured". v3 (2026-09-21,
+ * F7b) adds the non-relaxable `same_actor` clause — the two-person rule, enforced by the
+ * API at write: the person who queued the run that produced the attested row, or the only
+ * person behind every accepted row of the cell, cannot sign it.
  *
  * Lives beside the screen (not in `api/types.ts` / `api/hooks.ts`, which another
  * workstream owns in this wave) — fold it in when the wave merges. Every field here is
@@ -63,9 +66,10 @@ export type RefusalCode =
   | 'oracle_weak'
   | `route_not_deliver:${ReasonCode | 'unrouted' | 'unknown'}`
   | 'attestation_missing'
+  | 'same_actor'
 
 /** The policy this reading was written against; the server's `policy_version` is what is displayed. */
-export const SIGNOFF_POLICY_VERSION = 'signoff-policy.v2'
+export const SIGNOFF_POLICY_VERSION = 'signoff-policy.v3'
 
 /** `SignoffPolicy.to_dict()` — the bar in force (defaults or the deployment's relaxed values). */
 export interface SignoffPolicy {
@@ -82,6 +86,8 @@ export interface SignoffPolicy {
   /** v2: always `true` — there is no knob; the server answers 503 to any attempt to set one. */
   require_oracle_measured: boolean
   require_attestation: boolean
+  /** v3: the two-person rule — always `true`, no knob (503 to any attempt to set one). */
+  require_independent_verifier: boolean
 }
 
 /** `SignoffRefusal.to_dict()` — one failing clause, observed vs threshold. */
@@ -279,6 +285,7 @@ export const REFUSAL_DISPLAY: Record<string, string> = {
   oracle_weak: 'oracle too weak to license auto-delivery',
   route_not_deliver: 'the routing rule does not say deliver',
   attestation_missing: 'name the accepted row you read and affirm it — no policy can waive this',
+  same_actor: 'you produced this evidence — you queued the run that graded the attested row, or every accepted row in the cell is yours; a second approver must sign; no policy can waive this',
 }
 
 /** A refusal's threshold / observed values, rendered as the approver reads them. */

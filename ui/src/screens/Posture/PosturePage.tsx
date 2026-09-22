@@ -96,7 +96,7 @@ export function PosturePage() {
             '…'
           ),
         },
-        { key: 'Policies in force', hint: 'summary.posture.policies', value: `${version.data?.policy ?? '…'} (routing) · signoff-policy.v2` },
+        { key: 'Policies in force', hint: 'summary.posture.policies', value: `${version.data?.policy ?? '…'} (routing) · signoff-policy.v3` },
         { key: 'Licence', hint: 'summary.posture.licence', value: 'Apache-2.0' },
       ],
     },
@@ -120,7 +120,7 @@ export function PosturePage() {
           ),
         },
         { key: 'Roles', hint: 'summary.posture.roles', value: 'viewer · operator · approver · admin' },
-        { key: 'Separation of duties', hint: 'summary.posture.separation', value: 'Sign-off needs the approver role and an attestation naming the diff read; keeping operator and approver on two people is the deployment’s policy (not enforced at write yet — backlog F7b)' },
+        { key: 'Separation of duties', hint: 'summary.posture.separation', value: 'Enforced at write: the API refuses a sign-off (409 same_actor) when the approver queued the run that produced the attested row, or is the only person behind the cell — never overridable by any setting; every record says what kind of account signed (verifier_kind)' },
         {
           key: 'Source control',
           hint: 'summary.posture.source_control',

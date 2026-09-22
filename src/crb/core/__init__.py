@@ -28,7 +28,7 @@ The engine is deliberately small and mechanical:
 * :mod:`crb.core.run`       — the run orchestrator (prep → build → grade → ledger).
 * :mod:`crb.core.capability`— capability map, change profile, trusted autonomy coverage.
 * :mod:`crb.core.forecast`  — ex-ante build forecast and readiness punch-list.
-* :mod:`crb.core.signoff`   — human attestations (a policy decision, refused at write: false-Q1, thin cell, controls, route, attestation).
+* :mod:`crb.core.signoff`   — human attestations (a policy decision, refused at write: false-Q1, thin cell, controls, oracle, route, attestation, the two-person rule).
 * :mod:`crb.core.federated` — abstract-cell export (allowlist, k-anonymity). Export only.
 * :mod:`crb.core.legacy`    — importers for the census and Athena ledgers.
 * :mod:`crb.core.secrets_file` — owner-only secrets at rest (0700 dir / 0600 files,
