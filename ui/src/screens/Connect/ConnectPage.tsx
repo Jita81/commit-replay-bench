@@ -23,7 +23,13 @@
  *               it is answered. Every door to /results is named "Baseline", as the nav
  *               names it, and opens /results (a measured row's button; an unmeasured row's
  *               reads "Continue" and opens the walk); at phone width the repository link
- *               is the row's door to the walk.
+ *               is the row's door to the walk. Every element a reader meets — the two
+ *               connect buttons, each column header, the stage-summary pill and row action,
+ *               each stage's title, status pill, "spends" pill, detail line, run link and
+ *               action, and the in-flight panel's counters and Cancel — is a hint trigger
+ *               (`button.connect.*`, `col.connect.*`, `pill.connect.*`, `stage.walk.*`,
+ *               `pill.walk.*`, `stat.walk.*`, `link.walk.*`, `button.walk.*`) so what each
+ *               shows opens on hover, focus and tap and is listed in the About block.
  * How:          `useAllRepos` → the table; `useRepo` + `useOracle` + `useOracleControls` +
  *               `useCapabilityMap` (+ the polled `useRun` while a stage runs, and
  *               `useQueuedRuns` only for an older server that sends no `queue_position`)
@@ -35,10 +41,12 @@
  * ADRs:         none
  * Works with:   ui/src/screens/Connect/connection.ts (the derivation), ui/src/api/hooks.ts
  *               (`useRun`, `useQueuedRuns`, `useCancelRun`), ui/src/components/Help.tsx
- *               (`Term`), ui/src/screens/Repos/* (registration and config live there; this
+ *               (`Term`), ui/src/components/Hint.tsx + ui/src/help/hints.ts (the triggers
+ *               and their copy), ui/src/screens/Repos/* (registration and config live there; this
  *               screen links to them), ui/src/screens/Results/ResultsPage.tsx (the baseline,
  *               where the walk ends), docs/ONBOARDING-A-REPO.md (the same steps for the CLI)
- * Tested by:    ui/src/screens/Connect/ConnectPage.test.tsx
+ * Tested by:    ui/src/screens/Connect/ConnectPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
+ *               (every element on /connect and /connect/:name resolves to a registry id)
  * Touch when:   a stage is added (connection.ts first); the API grows a GitHub App install
  *               flow (replace the URL field with the installation's repository picker).
  */
@@ -60,11 +68,13 @@ import {
 } from '../../api/hooks'
 import { isApiError } from '../../api/client'
 import type { RepoSummary, Run } from '../../api/types'
+import type { HintId } from '../../help/hints'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { Term } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { useAuth } from '../../lib/auth'
@@ -73,7 +83,7 @@ import type { Tone } from '../../lib/verdict'
 import { RepoNewDialog } from '../Repos/RepoNewDialog'
 import { RunNewDialog } from '../Runs/RunNewDialog'
 import { GitHubConnectDialog } from './GitHubConnectDialog'
-import { type Stage, type StageStatus, stageComplete, stageSummary, stagesFor } from './connection'
+import { type Stage, type StageId, type StageStatus, stageComplete, stageSummary, stagesFor } from './connection'
 
 const STATUS_DISPLAY: Record<StageStatus, { label: string; tone: Tone; glyph: string }> = {
   done: { label: 'Done', tone: 'green', glyph: '✓' },
@@ -88,23 +98,37 @@ const STATUS_DISPLAY: Record<StageStatus, { label: string; tone: Tone; glyph: st
 /** A queued run is not in progress: nothing has started and nothing has been spent. */
 const QUEUED_DISPLAY = { label: 'Queued', tone: 'muted' as Tone, glyph: '…' }
 
-/** The stage title with its term one click away (titles are plain strings in connection.ts). */
+/** What each stage proves and costs — the hint on its title. */
+const STAGE_HINT: Record<StageId, HintId> = {
+  register: 'stage.walk.register',
+  probe: 'stage.walk.probe',
+  mine: 'stage.walk.mine',
+  oracle: 'stage.walk.oracle',
+  controls: 'stage.walk.controls',
+  measure: 'stage.walk.measure',
+}
+
+/** The stage title with its term one click away (titles are plain strings in connection.ts) and its hint on hover. */
 function StageTitle({ stage }: { stage: Stage }) {
   if (stage.id === 'oracle') {
     return (
-      <span className="font-semibold">
+      <Hint id={STAGE_HINT.oracle} className="font-semibold">
         <Term id="oracle_strength">Oracle strength</Term> scored
-      </span>
+      </Hint>
     )
   }
   if (stage.id === 'controls') {
     return (
-      <span className="font-semibold">
+      <Hint id={STAGE_HINT.controls} className="font-semibold">
         <Term id="negative_controls">Negative controls</Term> passed
-      </span>
+      </Hint>
     )
   }
-  return <span className="font-semibold">{stage.title}</span>
+  return (
+    <Hint id={STAGE_HINT[stage.id]} className="font-semibold">
+      {stage.title}
+    </Hint>
+  )
 }
 
 /** "14:05" — the wall-clock time a run started, for the in-flight panel. */
@@ -144,10 +168,10 @@ export function ConnectPage() {
         actions={
           can('operator') ? (
             <div className="flex flex-wrap gap-2">
-              <Button variant={ghConfigured ? 'filled' : 'outlined'} onClick={() => setGhOpen(true)}>
+              <Button variant={ghConfigured ? 'filled' : 'outlined'} hint="button.connect.github" onClick={() => setGhOpen(true)}>
                 Connect from GitHub
               </Button>
-              <Button variant={ghConfigured ? 'outlined' : 'filled'} onClick={() => setNewOpen(true)}>
+              <Button variant={ghConfigured ? 'outlined' : 'filled'} hint="button.connect.url" onClick={() => setNewOpen(true)}>
                 Connect by URL
               </Button>
             </div>
@@ -167,7 +191,7 @@ export function ConnectPage() {
             glyph="⎇"
             title="No repository connected yet"
             reason="Connect one to start the walk: register, probe, mine, oracle, controls, then a first measurement."
-            action={can('operator') ? <Button variant="filled" onClick={() => (ghConfigured ? setGhOpen(true) : setNewOpen(true))}>Connect a repository</Button> : undefined}
+            action={can('operator') ? <Button variant="filled" hint="button.connect.empty_connect" onClick={() => (ghConfigured ? setGhOpen(true) : setNewOpen(true))}>Connect a repository</Button> : undefined}
           />
         )}
         {repos.data && repos.data.items.length > 0 && (
@@ -175,12 +199,22 @@ export function ConnectPage() {
             <table className="w-full text-sm" aria-label="Connected repositories">
               <thead>
                 <tr className="text-left text-xs text-on-surface-muted">
-                  <th className="py-2 pr-4 font-medium">Repository</th>
-                  <th className="py-2 pr-4 font-medium">Language</th>
-                  <th className="py-2 pr-4 font-medium">Tasks</th>
-                  <th className="py-2 pr-4 font-medium">Next stage</th>
-                  <th className="py-2 pr-4 font-medium">Last run</th>
-                  <th className="hidden py-2 font-medium sm:table-cell"></th>
+                  <th scope="col" className="py-2 pr-4 font-medium">
+                    <Hint id="col.connect.repository">Repository</Hint>
+                  </th>
+                  <th scope="col" className="py-2 pr-4 font-medium">
+                    <Hint id="col.connect.language">Language</Hint>
+                  </th>
+                  <th scope="col" className="py-2 pr-4 font-medium">
+                    <Hint id="col.connect.tasks">Tasks</Hint>
+                  </th>
+                  <th scope="col" className="py-2 pr-4 font-medium">
+                    <Hint id="col.connect.next_stage">Next stage</Hint>
+                  </th>
+                  <th scope="col" className="py-2 pr-4 font-medium">
+                    <Hint id="col.connect.last_run">Last run</Hint>
+                  </th>
+                  <th scope="col" className="hidden py-2 font-medium sm:table-cell"></th>
                 </tr>
               </thead>
               <tbody>
@@ -245,7 +279,7 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
         {repo.task_counts.total} · {repo.task_counts.gold_clean} <Term id="gold_clean">gold-clean</Term>
       </td>
       <td className="py-2 pr-4">
-        <Pill tone={d.tone} glyph={d.glyph} size="xs">
+        <Pill tone={d.tone} glyph={d.glyph} size="xs" hint="pill.connect.stage_summary">
           {s.label}
         </Pill>
       </td>
@@ -255,11 +289,11 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
       {/* below sm the column is off-canvas in the scrolling table: the repository link in column one is the row's action there */}
       <td className="hidden py-2 text-right sm:table-cell">
         {stageComplete(s.status) ? (
-          <LinkButton size="sm" to={`/results?repo=${encodeURIComponent(repo.name)}`}>
+          <LinkButton size="sm" to={`/results?repo=${encodeURIComponent(repo.name)}`} hint="button.connect.row_action">
             Baseline
           </LinkButton>
         ) : (
-          <LinkButton size="sm" to={`/connect/${encodeURIComponent(repo.name)}`}>
+          <LinkButton size="sm" to={`/connect/${encodeURIComponent(repo.name)}`} hint="button.connect.row_action">
             Continue
           </LinkButton>
         )}
@@ -346,10 +380,10 @@ export function ConnectRepoPage() {
         }
         actions={
           <div className="flex gap-2">
-            <LinkButton size="sm" to={`/repos/${encodeURIComponent(name)}`}>
+            <LinkButton size="sm" to={`/repos/${encodeURIComponent(name)}`} hint="button.walk.configuration">
               Configuration
             </LinkButton>
-            <LinkButton size="sm" variant={allDone ? 'filled' : 'outlined'} to={`/results?repo=${encodeURIComponent(name)}`}>
+            <LinkButton size="sm" variant={allDone ? 'filled' : 'outlined'} to={`/results?repo=${encodeURIComponent(name)}`} hint="button.walk.baseline">
               Baseline
             </LinkButton>
           </div>
@@ -370,22 +404,24 @@ export function ConnectRepoPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <StageTitle stage={s} />
-                      <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`${s.title}: ${d.label}`}>
+                      <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`${s.title}: ${d.label}`} hint="pill.walk.stage_status">
                         {d.label}
                       </Pill>
                       {s.spends && !stageComplete(s.status) && (
-                        <Pill tone="amber" size="xs" glyph="$">
+                        <Pill tone="amber" size="xs" glyph="$" hint="pill.walk.spends">
                           spends model budget
                         </Pill>
                       )}
                     </div>
                     <p className="mt-1 mb-1 max-w-[70ch] text-sm text-on-surface-body">{s.why}</p>
                     <p className="m-0 text-xs text-on-surface-muted">
-                      {s.detail}
+                      {s.detail && <Hint id="stat.walk.stage_detail">{s.detail}</Hint>}
                       {s.runId && !live && (
                         <>
                           {' · '}
-                          <Link to={`/runs/${s.runId}`}>open run</Link>
+                          <Hint as={Link} id="link.walk.open_run" to={`/runs/${s.runId}`}>
+                            open run
+                          </Hint>
                         </>
                       )}
                     </p>
@@ -393,7 +429,7 @@ export function ConnectRepoPage() {
                   </div>
                   <div className="text-right">
                     {canAct && s.runKind && can('operator') && (
-                      <Button size="sm" variant={s.spends ? 'outlined' : 'filled'} disabled={busy} onClick={() => act(s)}>
+                      <Button size="sm" variant={s.spends ? 'outlined' : 'filled'} hint="button.walk.run_stage" disabled={busy} onClick={() => act(s)}>
                         {s.status === 'failed' ? 'Retry' : s.runKind === 'replay' ? 'Measure…' : 'Run'}
                       </Button>
                     )}
@@ -442,7 +478,7 @@ function InFlight({ run, stage, canCancel, cancelling, onCancel }: { run: Run; s
   // old counts while it waits): the status is checked before the number is read
   const progress = run.status === 'queued' ? null : kOfN(done, total)
   const head = run.status === 'queued' ? 'Waiting for a worker' : progress ? `${unit} ${progress}` : stage.id === 'measure' ? 'First attempt starting' : 'Running'
-  const spend = stage.spends ? ` · $${run.cost_usd.toFixed(2)} spent so far` : ''
+  const spend = stage.spends ? `$${run.cost_usd.toFixed(2)} spent so far` : ''
   const started = run.started ? ` · started ${clock(run.started)}` : ''
   const next =
     stage.id === 'measure'
@@ -453,19 +489,26 @@ function InFlight({ run, stage, canCancel, cancelling, onCancel }: { run: Run; s
       {/* the line that changes every poll is a polite live region; the link and Cancel stay outside it */}
       <p className="m-0" role="status">
         <span className="num font-mono">
-          {head}
-          {spend}
+          <Hint id="stat.walk.inflight_progress">{head}</Hint>
+          {spend && (
+            <>
+              {' · '}
+              <Hint id="stat.walk.inflight_spend">{spend}</Hint>
+            </>
+          )}
           {started}.
         </span>{' '}
         {next}
       </p>
       <p className="m-0 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <Link to={`/runs/${run.id}`}>Open the run</Link>
+        <Hint as={Link} id="link.walk.inflight_open" to={`/runs/${run.id}`}>
+          Open the run
+        </Hint>
         {run.cancel_requested ? (
           <span className="text-on-surface-muted">Cancel requested — the worker stops between {stage.id === 'measure' ? 'attempts' : 'tasks'}.</span>
         ) : (
           canCancel && (
-            <Button size="sm" variant="outlined" disabled={cancelling} onClick={onCancel}>
+            <Button size="sm" variant="outlined" hint="button.walk.cancel" disabled={cancelling} onClick={onCancel}>
               Cancel the run
             </Button>
           )

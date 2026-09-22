@@ -14,13 +14,16 @@
  *               repositories with no GitHub link, posts `{installation_id, full_name}` to
  *               `/repos/{name}/github-link` and selects that repository; and that the
  *               Connect screen opens the picker on `?installation=` (the setup callback's
- *               landing).
+ *               landing); and that every field, pill and act in the dialog carries a hint,
+ *               with the installation select's opening on hover with the registry copy.
  * How:          `mockApi` + `renderApp`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0014-github-app-is-the-connection.md
  * Works with:   ui/src/screens/Connect/GitHubConnectDialog.tsx (the component under test),
  *               ui/src/screens/Settings/GitHubAppCard.tsx (the admin's view of the same `/github/app`),
  *               ui/src/test/utils.tsx (`mockApi` / `renderApp` — the fake API these tests answer from),
+ *               ui/src/help/hints.ts (the copy the hover test expects),
+ *               ui/src/help/hints-collector.ts (`unhinted`),
  *               src/crb/server/routes/github.py (the routes whose shapes the mocks mirror)
  * Tested by:    ui/src/screens/Connect/GitHubConnectDialog.test.tsx
  * Touch when:   the connect body or the picker row changes.
@@ -29,6 +32,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { hintText } from '../../help/hints'
+import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { GitHubAppCard } from '../Settings/GitHubAppCard'
 import { ConnectPage } from './ConnectPage'
@@ -143,9 +148,10 @@ describe('GitHubConnectDialog', () => {
     await userEvent.click(within(modes).getByRole('radio', { name: /Link to an existing repository/ }))
     // while the repository list is still loading the empty select says so — not "nothing to link"
     const select = screen.getByLabelText(/Existing repository/)
-    expect(select).toHaveAccessibleDescription('Loading repositories…')
+    // the description line first, then the field's hint (the same text a hover shows)
+    expect(select).toHaveAccessibleDescription(`Loading repositories… ${hintText('field.github.existing')}`)
     releaseRepos(json({ items: [repo('cobra', null)], total: 1, limit: 500, offset: 0 }))
-    await waitFor(() => expect(select).toHaveAccessibleDescription('Only repositories with no GitHub link are listed.'))
+    await waitFor(() => expect(select).toHaveAccessibleDescription(`Only repositories with no GitHub link are listed. ${hintText('field.github.existing')}`))
     // the long clone URL wraps rather than widening the dialog at phone width
     expect(screen.getByText(CALC.clone_url, { selector: 'code' })).toHaveClass('break-all')
     // a refused link is an alert with the API's words …
@@ -156,6 +162,29 @@ describe('GitHubConnectDialog', () => {
     await userEvent.click(within(modes).getByRole('radio', { name: /Register as a new repository/ }))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByTestId('github-connect-confirm')).toBeInTheDocument()
+  })
+
+  it('every field, pill, paging button and act carries a hint; the installation select opens on hover with the registry copy', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': APP,
+      'GET /github/installations/77/repositories': { ...PAGE, has_more: true },
+      'GET /repos': { items: [], total: 0, limit: 500, offset: 0 },
+    })
+    const { baseElement } = renderApp(<GitHubConnectDialog open onClose={() => undefined} onConnected={() => undefined} onUseUrl={() => undefined} />)
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Repositories' })).toBeInTheDocument())
+    await userEvent.click(within(screen.getByRole('list', { name: 'Repositories' })).getByRole('button', { name: /acme\/Calc/ }))
+    await waitFor(() => expect(screen.getByTestId('github-connect-confirm')).toBeInTheDocument())
+    // the dialog is portalled: collect from the document, not the render container
+    expect(unhinted(baseElement)).toEqual([])
+    for (const id of ['field.github.installation', 'button.github.sync', 'link.github.install', 'field.github.search', 'pill.github.repo_flags', 'button.github.page', 'field.github.mode', 'field.github.name', 'field.github.language', 'field.github.runner', 'button.github.connect', 'button.github.use_url']) {
+      expect(baseElement.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
+    }
+    const root = baseElement.querySelector('[data-hint="field.github.installation"]')!
+    await userEvent.hover(root)
+    const tip = document.getElementById(root.getAttribute('aria-describedby')!)!
+    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
+    expect(tip).toHaveTextContent(hintText('field.github.installation'))
   })
 
   it('the Connect screen opens the picker on ?installation= (the setup callback lands there)', async () => {

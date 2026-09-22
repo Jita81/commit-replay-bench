@@ -10,18 +10,24 @@
  *               acts, on the stale rows too; that the evidence line's reason code is a term
  *               with its meaning beside it and the kicker names the apparatus as a term;
  *               that a repository with no factory backlog (404) contributes no factory rows
- *               and no error; and the empty state when nothing waits.
+ *               and no error; the empty state when nothing waits; and that every pill, tag,
+ *               evidence line and button carries a hint, with the count pill opening on hover.
  * How:          `mockApi` + `renderApp`; the map mock has one `deliver` cell (unsigned) and
  *               one `human` cell.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/src/screens/Decisions/DecisionsPage.tsx (under test), decisions.ts
+ * Works with:   ui/src/screens/Decisions/DecisionsPage.tsx (under test), decisions.ts,
+ *               ui/src/help/hints.ts (the copy the hover test expects),
+ *               ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx
  * Touch when:   a row kind or its verb changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { hintText } from '../../help/hints'
+import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
 import { DecisionsPage } from './DecisionsPage'
 
@@ -141,5 +147,31 @@ describe('DecisionsPage', () => {
     expect(screen.getByText('Nothing measured yet')).toBeInTheDocument()
     expect(screen.getByText(/alpha is connected but no capability map exists yet/)).toBeInTheDocument()
     expect(screen.queryByText('No repository connected')).toBeNull()
+  })
+
+  it('every kicker, pill, tag, evidence line, act and stale row carries a hint; the count pill opens on hover with the registry copy', async () => {
+    // the stale sign-off is on another cell, so the deliver cell stays "sign-off due" (an Attest act) beside it
+    const stale = { id: 's1', repo: 'alpha', cell: { capability_class: 'bug.fix', size: 'M' }, revoked: false, active: false, stale: true, apparatus_current: '2.2', approver: 'u9', approver_name: 'Grace', created: '2026-09-01T10:00:00Z', evidence: { n: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, apparatus_versions: ['2.1'] } }
+    mockApi({
+      'GET /auth/me': PRINCIPAL, // approver
+      'GET /version': { crb: '0', apparatus: '2.2', policy: 'routing.v1' },
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
+      'GET /capability-map': map('alpha', [CELL, HUMAN]),
+      'GET /signoffs': { items: [stale], total: 1, limit: 50, offset: 0 },
+      'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+    })
+    const { container } = renderApp(<DecisionsPage />, { route: '/decisions' })
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Stale sign-offs' })).toBeInTheDocument())
+    await waitFor(() => expect(container.querySelector('[data-hint="stat.decisions.apparatus"]')).not.toBeNull())
+    expect(unhinted(container)).toEqual([])
+    for (const id of ['stat.decisions.count', 'pill.decisions.kind', 'stat.decisions.evidence', 'button.decisions.act', 'button.decisions.read', 'tile.decisions.stale', 'button.decisions.resign']) {
+      expect(container.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
+    }
+    const pill = screen.getByText(/waiting across/).closest('[data-hint]')!
+    expect(pill).toHaveAttribute('data-hint', 'stat.decisions.count')
+    await userEvent.hover(pill)
+    const tip = document.getElementById(pill.getAttribute('aria-describedby')!)!
+    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
+    expect(tip).toHaveTextContent(hintText('stat.decisions.count'))
   })
 })

@@ -15,7 +15,12 @@
  *               no row says "not measured · no attempt sighted" on a pale ground and never
  *               a number — the honest state, not a fabricated cell.
  *               `licenseSentence` renders "What this licenses you to say" for a signed cell,
- *               with every qualifier the claims policy demands.
+ *               with every qualifier the claims policy demands. Every element in the grid is
+ *               a hint trigger: the column headers (`col.map.class`, `col.map.size`), the
+ *               class row headers, and in each cell the route tag, n, point, interval,
+ *               apparatus and the sign-off line (`map.cell.*`); the per-cell numbers opt out
+ *               of the tab order (`tabStop={false}` — a 50-cell grid is not 300 tab stops)
+ *               while the route tag keeps it, so a keyboard reader still lands on every cell.
  * What it does: Puts the sign-off state where the reader's eye already is — on the cell —
  *               so "which cells are signed, due or stale" needs no second screen; and gives
  *               the governance reader the exact sentence they may quote.
@@ -24,7 +29,8 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Results/ResultsPage.tsx (mounts it, passes `can('approver')`),
- *               ui/src/components/govuk.tsx (Tag), ui/src/screens/Decisions/decisions.ts (the
+ *               ui/src/components/govuk.tsx (Tag), ui/src/components/Hint.tsx +
+ *               ui/src/help/hints.ts (the triggers and copy), ui/src/screens/Decisions/decisions.ts (the
  *               same sign-off state rules), ui/src/lib/auth.tsx (`can` — the role rule),
  *               docs/EVIDENCE-AND-CLAIMS.md §6 (the permitted claim shape)
  * Tested by:    ui/src/screens/Results/MapTable.test.tsx
@@ -34,6 +40,7 @@
 import { Link } from 'react-router'
 import { approverName, type CapabilityCell, type CapabilityMap, NOT_YET_MEASURED, type Signoff, signoffScopeMatches } from '../../api/types'
 import type { ControlsVerdict } from '../Capability/contract'
+import { Hint } from '../../components/Hint'
 import { Tag, type TagTone } from '../../components/govuk'
 
 export type SignState = 'signed' | 'due' | 'stale' | 'none'
@@ -73,10 +80,12 @@ export function MapTable({ map, signoffs, repo, canSign = false }: { map: Capabi
       <table className="w-full min-w-[820px] border-collapse" aria-label={`Capability map for ${repo}`}>
         <thead>
           <tr>
-            <th className="border-b-2 border-on-surface py-3 pr-2 text-left text-[16px] font-bold leading-[1.5]">Class</th>
+            <th scope="col" className="border-b-2 border-on-surface py-3 pr-2 text-left text-[16px] font-bold leading-[1.5]">
+              <Hint id="col.map.class">Class</Hint>
+            </th>
             {sizes.map((sz) => (
-              <th key={sz} className="border-b-2 border-on-surface px-2 py-3 text-left text-[16px] font-bold leading-[1.5]">
-                {sz}
+              <th key={sz} scope="col" className="border-b-2 border-on-surface px-2 py-3 text-left text-[16px] font-bold leading-[1.5]">
+                <Hint id="col.map.size">{sz}</Hint>
               </th>
             ))}
           </tr>
@@ -85,7 +94,9 @@ export function MapTable({ map, signoffs, repo, canSign = false }: { map: Capabi
           {classes.map((cls) => (
             <tr key={cls}>
               <th scope="row" className="border-b border-border py-3 pr-2 text-left align-top font-mono text-[16px] font-normal leading-[1.5]">
-                {cls}
+                <Hint id="col.map.class" tabStop={false}>
+                  {cls}
+                </Hint>
               </th>
               {sizes.map((sz) => {
                 const c = byKey.get(`${cls}|${sz}`)
@@ -96,12 +107,16 @@ export function MapTable({ map, signoffs, repo, canSign = false }: { map: Capabi
                     <td key={sz} className={`border-b border-l border-border px-2 py-3 align-top ${granular ? '' : 'bg-surface-high'}`} data-testid={`cell-${cls}-${sz}`}>
                       {granular ? (
                         <>
-                          <Tag tone="grey">granularize</Tag>
+                          <Tag tone="grey" hint="map.cell.granularize">
+                            granularize
+                          </Tag>
                           <div className="mt-1.5 text-[14px] leading-[1.4] text-on-surface-muted">{sz} is split first</div>
                         </>
                       ) : (
                         <>
-                          <span className="inline-block text-[13px] font-bold uppercase leading-tight tracking-[.04em]">not measured</span>
+                          <Hint id="map.cell.not_measured" tabStop={false} className="inline-block text-[13px] font-bold uppercase leading-tight tracking-[.04em]">
+                            not measured
+                          </Hint>
                           <div className="mt-1.5 text-[14px] leading-[1.4] text-on-surface-muted">no attempt sighted</div>
                         </>
                       )}
@@ -119,22 +134,30 @@ export function MapTable({ map, signoffs, repo, canSign = false }: { map: Capabi
                         : c.reason_code || ''
                 return (
                   <td key={sz} className="border-b border-l border-border px-2 py-3 align-top" data-testid={`cell-${cls}-${sz}`}>
-                    <Tag tone={ROUTE_TONE[c.route] ?? 'grey'}>{c.route.replace(/_/g, ' ')}</Tag>
-                    <div className="mt-1.5 text-[15px] leading-[1.45]">
+                    <Tag tone={ROUTE_TONE[c.route] ?? 'grey'} hint="map.cell.route">
+                      {c.route.replace(/_/g, ' ')}
+                    </Tag>
+                    <Hint as="div" id="map.cell.n" tabStop={false} className="mt-1.5 text-[15px] leading-[1.45]">
                       n={c.n}
                       {c.n_tasks !== undefined ? ` on ${c.n_tasks} tasks` : ''}
-                    </div>
-                    <div className="text-[15px] font-bold leading-[1.45]">{c.ci_high - c.ci_low > 0.6 ? '—' : pct(c.point)}</div>
-                    <div className="text-[14px] leading-[1.4] text-on-surface-muted">{c.ci_high - c.ci_low > 0.6 ? 'interval too wide' : `[${pct(c.ci_low)}, ${pct(c.ci_high)}]`}</div>
+                    </Hint>
+                    <Hint as="div" id="map.cell.point" tabStop={false} className="text-[15px] font-bold leading-[1.45]">
+                      {c.ci_high - c.ci_low > 0.6 ? '—' : pct(c.point)}
+                    </Hint>
+                    <Hint as="div" id="map.cell.interval" tabStop={false} className="text-[14px] leading-[1.4] text-on-surface-muted">
+                      {c.ci_high - c.ci_low > 0.6 ? 'interval too wide' : `[${pct(c.ci_low)}, ${pct(c.ci_high)}]`}
+                    </Hint>
                     {/* every rendered number carries its apparatus — the reader can tell which instrument produced it */}
-                    <div className="font-mono text-[12px] leading-[1.4] text-on-surface-muted">app {c.apparatus_versions.join(', ') || '—'}</div>
-                    <div className="text-[14px] leading-[1.4] text-on-surface-muted">
+                    <Hint as="div" id="map.cell.apparatus" tabStop={false} className="font-mono text-[12px] leading-[1.4] text-on-surface-muted">
+                      app {c.apparatus_versions.join(', ') || '—'}
+                    </Hint>
+                    <Hint as="div" id="map.cell.signoff" tabStop={false} className="text-[14px] leading-[1.4] text-on-surface-muted">
                       {sign.state === 'due' && canSign ? (
                         <Link to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${c.capability_class}|${c.size}`)}`}>{last}</Link>
                       ) : (
                         last
                       )}
-                    </div>
+                    </Hint>
                   </td>
                 )
               })}

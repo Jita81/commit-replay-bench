@@ -16,8 +16,11 @@
  *               record is listed without a fabricated snapshot next to a policy record;
  *               that the header says in two sentences what the screen is for and keeps the
  *               refusal clauses behind a Details; that a viewer gets the gate, the evidence
- *               and the attestations but never the form; and that with no repository the
- *               exit is Connect, never the legacy repository list.
+ *               and the attestations but never the form; that with no repository the
+ *               exit is Connect, never the legacy repository list; and that every element
+ *               a viewer or an approver meets carries a hint (no native `title` remains;
+ *               the attestation statement is shown under its row), with the false-Q1 gate
+ *               clause opening on hover with the registry copy.
  * How:          `mockApi` with capability, preview and sign-off fixtures; `userEvent` picks
  *               the cell and row, ticks the affirmation and submits; assertions on the
  *               `signoff-*` / `refusal-*` / `attest-*` test ids and the gate's `data-state`.
@@ -25,7 +28,8 @@
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Signoff/SignoffPage.tsx and ui/src/screens/Signoff/contract.ts
  *               (the code under test), ui/src/components/GateBanner.tsx (the states asserted),
- *               ui/src/test/utils.tsx
+ *               ui/src/test/utils.tsx, ui/src/help/hints.ts (the copy the hover test expects),
+ *               ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx
  * Touch when:   a refusal clause is added — add a preview fixture that lists it and assert
  *               its gate row and clause.
@@ -33,6 +37,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { hintText } from '../../help/hints'
+import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import type { CapabilityMapWithControls, ControlsVerdict } from '../Capability/contract'
 import { SignoffPage } from './SignoffPage'
@@ -549,5 +555,48 @@ describe('SignoffPage (signoff-policy.v2)', () => {
     expect(table.textContent).toContain('pre-policy record')
     expect(within(table).getAllByTestId('signoff-row-policy')).toHaveLength(1)
     expect(within(table).getAllByTestId('signoff-row-attestation')).toHaveLength(1)
+  })
+
+  it('every gate clause, refusal, tile, block, field, column and status pill carries a hint for a viewer and an approver; the false-Q1 clause opens on hover; the statement is shown, not a title', async () => {
+    const routes = {
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': MAP,
+      'GET /signoffs': { items: [SIGNED], total: 1, limit: 50, offset: 0 },
+      'GET /signoffs/preview': preview(),
+    }
+    mockApi({ ...routes, 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
+    const first = renderApp(<SignoffPage />, { route: '/signoff?repo=r&cell=bug.fix%7CS' })
+    await screen.findByTestId('signoff-evidence')
+    await waitFor(() => expect(screen.getByRole('table', { name: 'Sign-offs for r' })).toHaveTextContent('active'))
+    expect(unhinted(first.container)).toEqual([])
+    for (const id of ['details.signoff.why_refused', 'gate.signoff.banner', 'gate.signoff.measured', 'gate.signoff.false_q1', 'gate.signoff.thin_cell', 'gate.signoff.controls', 'gate.signoff.oracle', 'gate.signoff.route', 'gate.signoff.attestation', 'tile.signoff.refusal', 'pill.signoff.non_overridable', 'stat.signoff.point', 'stat.signoff.ci_low', 'stat.signoff.false_q1', 'stat.signoff.oracle', 'tile.signoff.controls', 'tile.signoff.route', 'tile.signoff.failure_split', 'field.signoff.cell_read', 'col.signoff.cell', 'col.signoff.status', 'pill.signoff.status', 'col.signoff.attestation', 'field.shared.repo_picker']) {
+      expect(first.container.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
+    }
+    // the statement is the governance record: visible under the row, never a hover-only title
+    expect(screen.getByTestId('signoff-row-attestation')).toHaveTextContent('I read the diff.')
+    expect(first.container.querySelectorAll('[title]').length).toBe(0)
+    const clause = first.container.querySelector('[data-hint="gate.signoff.false_q1"]')!
+    await userEvent.hover(clause)
+    const tip = document.getElementById(clause.getAttribute('aria-describedby')!)!
+    await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
+    expect(tip).toHaveTextContent(hintText('gate.signoff.false_q1'))
+    first.unmount()
+    vi.unstubAllGlobals()
+
+    mockApi({ ...routes, 'GET /auth/me': PRINCIPAL })
+    const { container } = renderApp(<SignoffPage />, { route: '/signoff?repo=r&cell=bug.fix%7CS' })
+    await screen.findByTestId('signoff-evidence')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument())
+    await userEvent.selectOptions(screen.getByLabelText(/^Accepted row/), ROW)
+    await waitFor(() => expect(screen.getByTestId('read-the-diff')).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
+    await waitFor(() => expect(screen.getByTestId('revoke-confirm')).toBeInTheDocument())
+    expect(unhinted(container)).toEqual([])
+    for (const id of ['button.signoff.sign', 'banner.signoff.not_meaning', 'field.signoff.cell', 'tile.signoff.cell_summary', 'field.signoff.accepted_row', 'field.signoff.read_affirmation', 'tile.signoff.read_diff', 'button.signoff.task', 'button.signoff.run', 'field.signoff.statement', 'field.signoff.note', 'button.signoff.revoke', 'field.signoff.revoke_reason', 'button.signoff.revoke_confirm']) {
+      expect(container.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
+    }
+    // the affirmation's label is the trigger; the checkbox keeps the tab stop and lists the bubble in its description
+    const box = screen.getByTestId('attest-read')
+    expect(box.closest('[data-hint]')).toHaveAttribute('data-hint', 'field.signoff.read_affirmation')
   })
 })

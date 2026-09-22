@@ -76,7 +76,7 @@ export function RepoPicker({ value, onChange }: { value: string; onChange: (name
   const names = repos.data?.items.map((r) => r.name) ?? []
   const known = value && !names.includes(value) ? [value, ...names] : names
   return (
-    <InlineSelect label="Repo" value={value} onChange={(e) => onChange(e.target.value)} data-testid="repo-picker">
+    <InlineSelect label="Repo" hint="field.shared.repo_picker" value={value} onChange={(e) => onChange(e.target.value)} data-testid="repo-picker">
       <option value="">{repos.isLoading ? 'Loading…' : known.length ? 'Choose a repo' : 'No repos yet'}</option>
       {known.map((n) => (
         <option key={n} value={n}>
