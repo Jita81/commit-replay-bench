@@ -206,7 +206,7 @@ export function HomePage() {
       </InsetText>
       <h2 className="mb-4 text-[32px] font-bold leading-[1.25]">Why two people</h2>
       <Lede className="mb-4">
-        The operator who queues the runs should not be the approver who signs the result off. Sign-off needs the approver role and an attestation naming the diff they read; keeping the two roles on two people is how a deployment shows separation of duties — task 7 is not optional before a cell can be signed.
+        The operator who queues the runs cannot be the approver who signs the result off: the API refuses a sign-off (<code>same_actor</code>) from the person who queued the run behind the attested row, or who is the only person behind the cell — no setting can waive it. Sign-off also needs the approver role and an attestation naming the diff they read — task 7 is not optional before a cell can be signed.
       </Lede>
       {operator ? (
         <StartButton to={nextTask?.to ?? (chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory')}>{nextTask ? `Continue to task ${nextTask.num}: ${nextTask.name}` : 'Continue to the factory'}</StartButton>

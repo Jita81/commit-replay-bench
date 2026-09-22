@@ -7,16 +7,22 @@ the write-boundary refusal (→ HTTP 409 at the API), the scope rules and — si
 clauses, the operator-adjustable bounds, the v2 snapshot and the v1-record tolerance.
 ``signoff-policy.v2`` (2026-09-14, the fable-decider's ``signoff-policy: adjust``)
 adds the third non-overridable clause: the cell's oracle strength must be MEASURED
-(``oracle_unmeasured``), not merely "≥ 0.80 when measured".
+(``oracle_unmeasured``), not merely "≥ 0.80 when measured". ``signoff-policy.v3``
+(2026-09-21, F7b + F34) adds the fourth: the two-person rule (``same_actor`` — the
+approver is never the person who produced the evidence, judged on the actors the caller
+resolved through ``is_person_actor``) and stamps the signing account's kind
+(``verifier_kind``) into a ``crb.signoff.v3`` record while a v2 chain keeps verifying.
 
 Navigation
 ----------
 What it is:   The sign-off ledger's test suite — human attestations that are append-only,
               hash-chained, revocable and never able to lift a false-Q1 cell.
 What it does: Pins the record's required fields and redaction, the policy decision under
-              ``signoff-policy.v2`` — every refusal code, the non-overridable clauses (false-Q1
-              first, ``oracle_unmeasured``, attestation missing), the operator-adjustable bounds
-              from the environment, the v1-record tolerance — the chain and its tamper detection,
+              ``signoff-policy.v3`` — every refusal code, the non-overridable clauses (false-Q1
+              first, ``oracle_unmeasured``, attestation missing, ``same_actor``), the
+              operator-adjustable bounds from the environment, the v1- and v2-record
+              tolerance, ``verifier_kind`` and ``is_person_actor`` — the chain and its tamper
+              detection,
               that a write refuses a false-Q1, unmeasured, thin or scope-mismatched cell, that
               apply elevates only the matching cell and never downgrades or changes the route,
               and that a revoked record does not elevate.
@@ -118,6 +124,7 @@ def _signoff(
     tier: str = cap.TIER_HUMAN_VERIFIED,
     note: str = "reviewed evidence",
     attested: bool = True,
+    verifier_kind: str = "",
     **scope: str,
 ) -> so.SignoffRecord:
     return so.SignoffRecord(
@@ -125,6 +132,7 @@ def _signoff(
         capability_class=cls,
         size=size,
         verifier=verifier,
+        verifier_kind=verifier_kind,
         verified_at="2026-06-05T01:00:00+00:00",
         note=note,
         revoked=revoked,
@@ -182,11 +190,12 @@ def test_attestation_requires_row_task_and_statement_and_redacts() -> None:
     assert so.Attestation.from_dict(att.to_dict()) == att
 
 
-def test_record_roundtrip_and_hash_v2() -> None:
-    rec = _signoff().chained("0" * 64)
+def test_record_roundtrip_and_hash_v3() -> None:
+    rec = _signoff(verifier_kind="local").chained("0" * 64)
     assert rec.schema == so.SIGNOFF_SCHEMA and rec.verify_hash()
     d = json.loads(json.dumps(rec.to_dict()))
     assert d["attestation"]["reviewed_row_hash"] == ROW_HASH  # nested, hashed
+    assert d["verifier_kind"] == "local" and d["schema"] == "crb.signoff.v3"
     again = so.SignoffRecord.from_dict(d)
     assert again == rec and again.verify_hash()
     assert rec.key() == ("todo", "*", "frontend.component.add", "*", "*", "*", "*", "*")
@@ -231,10 +240,88 @@ def test_policy_v1_record_still_verifies_and_reads_as_v1() -> None:
     assert again.policy_version == "signoff-policy.v1"
     assert "require_oracle_measured" not in again.policy_thresholds
     assert again.oracle_strength_at_signoff is None  # what it saw: unmeasured, under v1
-    # a v2 record chains after it (the version is data on the record, not a constant)
+    # a v3 record chains after it (the version is data on the record, not a constant)
     nxt = so.stamp_evidence(_signoff(), _signable_cell(), controls=PASSED).chained(rec.row_hash)
-    assert nxt.policy_version == "signoff-policy.v2"
+    assert nxt.policy_version == "signoff-policy.v3"
     assert so.verify_signoff_chain([rec, nxt]) == 2
+
+
+def test_v2_record_still_verifies_and_reads_as_v2_with_no_verifier_kind() -> None:
+    """A ``crb.signoff.v2`` record (signed under ``signoff-policy.v2``, before F7b / F34)
+    keeps its hash after this module learned ``verifier_kind``: its body is the frozen v2
+    tuple, its kind reads back as ``""`` — never guessed — and a v3 record chains after it."""
+    from crb.core.evidence import canonical_json, sha256_text
+
+    v2_thresholds = {
+        k: v
+        for k, v in so.DEFAULT_SIGNOFF_POLICY.thresholds().items()
+        if k != "require_independent_verifier"
+    }
+    v2 = so.SignoffRecord(
+        repo="todo",
+        capability_class="frontend.component.add",
+        verifier="alice@x.com",
+        n_at_signoff=16,
+        point_at_signoff=1.0,
+        ci_low_at_signoff=0.806,
+        oracle_strength_at_signoff=0.9,
+        policy_version=so.SIGNOFF_POLICY_VERSION_V2,
+        policy_thresholds=v2_thresholds,
+        route_at_signoff="deliver",
+        route_reason_code="deliver",
+        controls_verdict="passed",
+        attestation=_attestation(),
+        schema=so.SIGNOFF_SCHEMA_V2,
+        record_id="b" * 32,
+        prev_hash="0" * 64,
+    )
+    # the hash a v2 writer produced: canonical JSON of exactly the v2 fields
+    body = {k: v for k, v in v2.to_dict().items() if k not in ("row_hash", "verifier_kind")}
+    assert set(body) == set(so._V2_BODY_FIELDS)
+    stored = {**v2.to_dict(), "row_hash": sha256_text(canonical_json(body))}
+    del stored["verifier_kind"]  # a v2 writer never wrote the key
+    rec = so.SignoffRecord.from_dict(json.loads(json.dumps(stored)))
+    assert rec.schema == "crb.signoff.v2" and rec.verifier_kind == ""
+    assert rec.verify_hash() and so.verify_signoff_chain([rec]) == 1
+    assert "require_independent_verifier" not in rec.policy_thresholds
+    # the same fields under the v3 schema hash differently: the kind is now covered
+    assert not so.SignoffRecord.from_dict({**stored, "schema": so.SIGNOFF_SCHEMA}).verify_hash()
+    nxt = so.stamp_evidence(
+        _signoff(verifier_kind=so.VERIFIER_KIND_OIDC), _signable_cell(), controls=PASSED
+    ).chained(rec.row_hash)
+    assert nxt.schema == "crb.signoff.v3" and nxt.verifier_kind == "oidc"
+    assert so.verify_signoff_chain([rec, nxt]) == 2
+    # v3 covers the kind: flip it and the row no longer verifies
+    flipped = so.SignoffRecord.from_dict({**nxt.to_dict(), "verifier_kind": "service"})
+    assert not flipped.verify_hash()
+
+
+def test_verifier_kind_is_closed_and_derived_from_the_issuer() -> None:
+    """``verifier_kind`` ∈ {oidc, local, service} or ``""`` (pre-F34); the local issuer →
+    ``local``, any identity provider → ``oidc``, ``service`` is never derived (reserved),
+    and an empty issuer is refused rather than guessed."""
+    from crb.server.auth import LOCAL_ISSUER
+
+    assert so.VERIFIER_KINDS == ("oidc", "local", "service")
+    assert so.verifier_kind_for_issuer(LOCAL_ISSUER) == "local"
+    assert so.verifier_kind_for_issuer("https://login.microsoftonline.com/t/v2.0") == "oidc"
+    with pytest.raises(ValueError, match="issuer"):
+        so.verifier_kind_for_issuer("")
+    assert _signoff(verifier_kind="local").verifier_kind == "local"
+    assert _signoff(verifier_kind="service").verifier_kind == "service"
+    with pytest.raises(ValueError, match="verifier_kind must be one of"):
+        _signoff(verifier_kind="robot")
+
+
+def test_is_person_actor_is_the_one_vocabulary() -> None:
+    """A person is a non-empty actor that is not a non-person prefix: the worker, the
+    system, the CLI (``cli:<os user>``), a service and the census importer never count."""
+    assert so.is_person_actor("a" * 32) and so.is_person_actor("alice@x.com")
+    for actor in ("", "  ", "worker-1", "worker", "system", "system:reaper", "cli:paul"):
+        assert not so.is_person_actor(actor), actor
+    for actor in ("service:factory", "import", "importer"):
+        assert not so.is_person_actor(actor), actor
+    assert so.NON_PERSON_ACTOR_PREFIXES == ("system", "worker", "cli:", "service:", "import")
 
 
 def test_v1_record_still_verifies_and_loads_with_defaults() -> None:
@@ -280,11 +367,12 @@ def test_v1_record_still_verifies_and_loads_with_defaults() -> None:
 
 
 def test_policy_defaults_are_the_published_ones() -> None:
-    """signoff-policy.v2 keeps every v1 number (DL-014) and adds the measured-oracle
-    clause as a stamped, non-relaxable switch."""
+    """signoff-policy.v3 keeps every v1 number (DL-014), the v2 measured-oracle clause and
+    adds the two-person rule as a stamped, non-relaxable switch."""
     p = so.DEFAULT_SIGNOFF_POLICY
-    assert p.policy_version == "signoff-policy.v2" == so.SIGNOFF_POLICY_VERSION
+    assert p.policy_version == "signoff-policy.v3" == so.SIGNOFF_POLICY_VERSION
     assert so.SIGNOFF_POLICY_VERSION_V1 == "signoff-policy.v1"
+    assert so.SIGNOFF_POLICY_VERSION_V2 == "signoff-policy.v2"
     assert p.thresholds() == {
         "n_min": 10,
         "require_route_deliver": True,
@@ -294,12 +382,19 @@ def test_policy_defaults_are_the_published_ones() -> None:
         "min_oracle_strength": 0.8,
         "require_oracle_measured": True,
         "require_attestation": True,
+        "require_independent_verifier": True,
     }
     assert not p.relaxed
     d = p.to_dict()
-    assert d["non_overridable"] == ["false_q1", "oracle_unmeasured", "attestation_missing"]
+    assert d["non_overridable"] == [
+        "false_q1",
+        "oracle_unmeasured",
+        "attestation_missing",
+        "same_actor",
+    ]
     assert d["bounds"]["n_min"] == [1, 10_000]
     assert "require_oracle_measured" not in so.POLICY_BOUNDS  # a switch with no knob
+    assert "require_independent_verifier" not in so.POLICY_BOUNDS
 
 
 def test_policy_bounds_and_non_relaxable_attestation() -> None:
@@ -307,6 +402,8 @@ def test_policy_bounds_and_non_relaxable_attestation() -> None:
         so.SignoffPolicy(require_attestation=False)
     with pytest.raises(ValueError, match="require_oracle_measured cannot be relaxed"):
         so.SignoffPolicy(require_oracle_measured=False)
+    with pytest.raises(ValueError, match="require_independent_verifier cannot be relaxed"):
+        so.SignoffPolicy(require_independent_verifier=False)
     with pytest.raises(ValueError, match="n_min=0 outside"):
         so.SignoffPolicy(n_min=0)
     with pytest.raises(ValueError, match=r"min_constructible_share=1\.5 outside"):
@@ -328,6 +425,7 @@ def test_policy_from_env_parses_relaxes_and_fails_closed() -> None:
             "CRB_SIGNOFF__REQUIRE_CONTROLS_PASSED": "off",
             "CRB_SIGNOFF__REQUIRE_ATTESTATION": "yes",
             "CRB_SIGNOFF__REQUIRE_ORACLE_MEASURED": "true",
+            "CRB_SIGNOFF__REQUIRE_INDEPENDENT_VERIFIER": "on",
             "CRB_SIGNOFF__UNKNOWN": "ignored",
         }
     )
@@ -335,10 +433,13 @@ def test_policy_from_env_parses_relaxes_and_fails_closed() -> None:
     assert p.min_oracle_strength == 0.7
     assert not p.require_route_deliver and not p.require_controls_passed
     assert p.require_attestation and p.require_oracle_measured and p.relaxed
+    assert p.require_independent_verifier
     with pytest.raises(ValueError, match="cannot be relaxed"):
         so.SignoffPolicy.from_env({"CRB_SIGNOFF__REQUIRE_ATTESTATION": "0"})
     with pytest.raises(ValueError, match="require_oracle_measured cannot be relaxed"):
         so.SignoffPolicy.from_env({"CRB_SIGNOFF__REQUIRE_ORACLE_MEASURED": "false"})
+    with pytest.raises(ValueError, match="require_independent_verifier cannot be relaxed"):
+        so.SignoffPolicy.from_env({"CRB_SIGNOFF__REQUIRE_INDEPENDENT_VERIFIER": "no"})
     with pytest.raises(ValueError, match="not an integer"):
         so.SignoffPolicy.from_env({"CRB_SIGNOFF__N_MIN": "ten"})
     with pytest.raises(ValueError, match="not a boolean"):
@@ -586,6 +687,209 @@ def test_refusal_attestation_missing_is_last_and_not_overridable() -> None:
         so.SignoffPolicy(require_attestation=False)
 
 
+# ---------------------------------------------------------------------------
+# policy: the two-person rule (signoff-policy.v3, F7b)
+# ---------------------------------------------------------------------------
+
+ALICE = "alice@x.com"  # the verifier ``_signoff`` names
+BOB = "b" * 32  # another person: a user id
+
+
+def _same(refusals: tuple[so.SignoffRefusal, ...]) -> so.SignoffRefusal:
+    (r,) = [r for r in refusals if r.code == "same_actor"]
+    return r
+
+
+def test_same_actor_is_silent_when_the_caller_resolved_no_actors() -> None:
+    """``None`` for both inputs = the caller evaluated none (a core-only caller); the
+    clause does not fire — every other test in this module runs that way."""
+    cell = _signable_cell()
+    assert so.evaluate_signoff(_signoff(), cell, controls=PASSED, repo="todo") == ()
+    assert (
+        so.evaluate_signoff(
+            _signoff(), cell, controls=PASSED, repo="todo", attested_actors=None, cell_actors=None
+        )
+        == ()
+    )
+
+
+def test_same_actor_fires_on_the_attested_row_actor_and_names_the_row() -> None:
+    cell = _signable_cell()
+    refusals = so.evaluate_signoff(
+        _signoff(),
+        cell,
+        controls=PASSED,
+        repo="todo",
+        attested_actors={ALICE, "worker-1"},
+        cell_actors={ALICE, BOB, "worker-1"},  # independent evidence exists — ground 1 still fires
+    )
+    assert _codes(refusals) == ["same_actor"]
+    r = _same(refusals)
+    assert not r.overridable and r.threshold == "a second person" and r.observed == ALICE
+    assert f"approver {ALICE!r} produced the attested row {ROW_HASH[:12]}…" in r.message
+    assert "task 0000000000000000" in r.message and "a second approver must sign" in r.message
+    # ... and the approver reads the sentence as its own when the caller can name the run
+    named = _same(
+        so.evaluate_signoff(
+            _signoff(),
+            cell,
+            controls=PASSED,
+            repo="todo",
+            attested_actors={ALICE},
+            cell_actors={BOB},
+            attested_run_id="deadbeefcafe0000",
+        )
+    )
+    assert "queued run deadbeef, which produced the attested row" in named.message
+
+
+def test_same_actor_fires_on_the_run_actor_behind_the_attested_row() -> None:
+    """The row's own actor is the worker; the RUN that produced it was queued by the
+    verifier — the caller passes both, the clause fires on the run's."""
+    cell = _signable_cell()
+    refusals = so.evaluate_signoff(
+        _signoff(),
+        cell,
+        controls=PASSED,
+        repo="todo",
+        attested_actors={"worker-1", ALICE},
+        cell_actors={"worker-1", ALICE, BOB},
+    )
+    assert _codes(refusals) == ["same_actor"]
+    # a different person behind the attested row: silent, even though the verifier is
+    # among the cell's actors
+    assert (
+        so.evaluate_signoff(
+            _signoff(),
+            cell,
+            controls=PASSED,
+            repo="todo",
+            attested_actors={"worker-1", BOB},
+            cell_actors={"worker-1", ALICE, BOB},
+        )
+        == ()
+    )
+
+
+def test_same_actor_fires_when_every_person_behind_the_cell_is_the_verifier() -> None:
+    """Ground 2: the attested row is nobody's (a historical row with no run), but every
+    person in the cell is the verifier — no independent evidence exists."""
+    cell = _signable_cell()
+    refusals = so.evaluate_signoff(
+        _signoff(),
+        cell,
+        controls=PASSED,
+        repo="todo",
+        attested_actors={"worker-1", ""},
+        cell_actors={"worker-1", "", ALICE},
+    )
+    r = _same(refusals)
+    assert _codes(refusals) == ["same_actor"] and r.observed == ALICE and not r.overridable
+    assert "only person behind every accepted row" in r.message
+    assert "no independent evidence exists" in r.message
+    # one other person anywhere in the cell is independent evidence
+    assert (
+        so.evaluate_signoff(
+            _signoff(),
+            cell,
+            controls=PASSED,
+            repo="todo",
+            attested_actors={"worker-1", ""},
+            cell_actors={"worker-1", "", ALICE, BOB},
+        )
+        == ()
+    )
+    # ground 2 alone, with no attestation resolved (``None``) and a cell of one person
+    refusals = so.evaluate_signoff(
+        _signoff(), cell, controls=PASSED, repo="todo", attested_actors=None, cell_actors={ALICE}
+    )
+    assert _codes(refusals) == ["same_actor"]
+
+
+def test_same_actor_never_counts_a_non_person_actor() -> None:
+    """The worker, the system, ``cli:…``, ``service:…``, ``import`` and the empty actor
+    are nobody: a cell produced entirely by them is silent on ground 2 (there is no
+    person to be the same as), and an empty cell_actors is silent too."""
+    cell = _signable_cell()
+    for actors in (
+        set(),
+        {""},
+        {"worker-1", "system", "cli:paul", "service:factory", "import"},
+    ):
+        assert (
+            so.evaluate_signoff(
+                _signoff(),
+                cell,
+                controls=PASSED,
+                repo="todo",
+                attested_actors={"worker-1"},
+                cell_actors=actors,
+            )
+            == ()
+        ), actors
+    # a verifier that is itself a non-person string can never be anyone's "same actor"
+    assert (
+        so.evaluate_signoff(
+            _signoff(verifier="cli:paul"),
+            cell,
+            controls=PASSED,
+            repo="todo",
+            attested_actors={"cli:paul"},
+            cell_actors={"cli:paul"},
+        )
+        == ()
+    )
+
+
+def test_same_actor_is_last_and_not_liftable_by_a_relaxed_policy() -> None:
+    """Every numeric knob at its most permissive bound and both route / controls
+    switches off: ``same_actor`` still fires, after ``attestation_missing``; there is
+    no policy that drops it (construction refuses ``require_independent_verifier=False``)."""
+    thin = _cell(_rows(4, 4), controls=None, capability_class="frontend.component.add", size="S")
+    relaxed = so.SignoffPolicy(
+        n_min=1,
+        require_route_deliver=False,
+        require_controls_passed=False,
+        max_controls_escapes=100,
+        min_constructible_share=0.0,
+        min_oracle_strength=0.0,
+    )
+    assert relaxed.relaxed
+    refusals = so.evaluate_signoff(
+        _signoff(attested=False),
+        thin,
+        policy=relaxed,
+        repo="todo",
+        attested_actors=None,
+        cell_actors={ALICE},
+    )
+    assert _codes(refusals) == ["attestation_missing", "same_actor"]
+    with pytest.raises(so.SignoffRefused) as ei:
+        so.check_signable(
+            _signoff(), _signable_cell(), controls=PASSED, repo="todo", attested_actors={ALICE}
+        )
+    assert ei.value.code == "same_actor" and ei.value.observed == ALICE
+    with pytest.raises(ValueError, match="require_independent_verifier cannot be relaxed"):
+        so.SignoffPolicy(require_independent_verifier=False)
+
+
+def test_same_actor_refuses_at_the_ledger_write_boundary(tmp_path: Path) -> None:
+    led = so.JsonlSignoffLedger(tmp_path / "s.jsonl")
+    cell = _signable_cell()
+    with pytest.raises(so.SignoffRefused, match="a second approver must sign") as ei:
+        led.append(_signoff(), cell, repo="todo", controls=PASSED, attested_actors={ALICE})
+    assert ei.value.code == "same_actor" and not (tmp_path / "s.jsonl").exists()
+    rec = led.append(
+        _signoff(verifier=BOB, verifier_kind="oidc"),
+        cell,
+        repo="todo",
+        controls=PASSED,
+        attested_actors={ALICE},
+        cell_actors={ALICE, "worker-1"},
+    )
+    assert rec.verifier == BOB and rec.verifier_kind == "oidc" and led.verify() == 1
+
+
 def test_check_signable_raises_the_first_clause_with_all_attached() -> None:
     cell = _cell(_rows(2, 2), controls=None, capability_class="frontend.component.add", size="S")
     with pytest.raises(so.SignoffRefused) as ei:
@@ -610,7 +914,14 @@ def test_refusal_code_vocabulary_is_closed() -> None:
         so.SignoffRefusal("made_up", "x")
     assert so.SignoffRefusal("route_not_deliver:ci_low_below_bar", "x").overridable
     assert not so.SignoffRefusal("oracle_unmeasured", "x").overridable
-    assert so.NON_OVERRIDABLE_REFUSALS == ("false_q1", "oracle_unmeasured", "attestation_missing")
+    assert not so.SignoffRefusal("same_actor", "x").overridable
+    assert so.NON_OVERRIDABLE_REFUSALS == (
+        "false_q1",
+        "oracle_unmeasured",
+        "attestation_missing",
+        "same_actor",
+    )
+    assert so.REFUSAL_CODES[-1] == "same_actor"  # the last clause evaluated
 
 
 # ---------------------------------------------------------------------------
@@ -625,9 +936,11 @@ def test_stamp_evidence_records_the_whole_decision() -> None:
     assert rec.ci_low_at_signoff == pytest.approx(0.806, abs=1e-3)
     assert rec.false_q1_at_signoff == 0 and rec.apparatus_version == APPARATUS_VERSION
     assert rec.oracle_strength_at_signoff == pytest.approx(ORACLE)  # the rows' own
-    assert rec.policy_version == "signoff-policy.v2"
+    assert rec.policy_version == "signoff-policy.v3"
     assert rec.policy_thresholds == so.DEFAULT_SIGNOFF_POLICY.thresholds()
     assert rec.policy_thresholds["require_oracle_measured"] is True
+    assert rec.policy_thresholds["require_independent_verifier"] is True
+    assert rec.verifier_kind == ""  # the caller's to stamp (the API does); never guessed
     # the caller's measurement is what gets stamped when given; unmeasured stays None
     assert (
         so.stamp_evidence(_signoff(), cell, oracle_strength=0.85).oracle_strength_at_signoff == 0.85
@@ -668,7 +981,7 @@ def test_append_load_roundtrip(tmp_path: Path) -> None:
     # evidence snapshot stamped from the live cell
     assert a.n_at_signoff == 16 and a.point_at_signoff == 1.0 and a.false_q1_at_signoff == 0
     assert a.apparatus_version == APPARATUS_VERSION  # stamped from the instrument, never a literal
-    assert a.policy_version == "signoff-policy.v2" and a.controls_verdict == "passed"
+    assert a.policy_version == "signoff-policy.v3" and a.controls_verdict == "passed"
     assert a.oracle_strength_at_signoff == pytest.approx(ORACLE)
     assert loaded[0].attestation == _attestation()
     # chained
@@ -775,7 +1088,7 @@ def test_write_refuses_thin_cell_unmeasured_controls_and_no_attestation(tmp_path
     assert ei.value.code == "oracle_unmeasured"
     assert not (tmp_path / "s.jsonl").exists()  # nothing written by any refusal
     rec = led.append(_signoff(), unscored, repo="todo", controls=PASSED, oracle_strength=0.88)
-    assert rec.oracle_strength_at_signoff == 0.88 and rec.policy_version == "signoff-policy.v2"
+    assert rec.oracle_strength_at_signoff == 0.88 and rec.policy_version == "signoff-policy.v3"
     assert led.verify() == 1
 
 

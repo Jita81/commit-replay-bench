@@ -16,7 +16,7 @@ matches a cell when every pattern field equals the cell's field or is ``"*"``;
 a projected cell (``"*"`` in its own key) is matched only by a pattern that is
 at least as wide — a Python-only attestation never lifts a class-wide cell.
 
-A sign-off is a policy decision, refused at write (``signoff-policy.v2``)
+A sign-off is a policy decision, refused at write (``signoff-policy.v3``)
 --------------------------------------------------------------------------
 The 2026-09-13 critical-friend review (§5 play 06, §7 item 6) found that the
 sign-off accepted thin cells and never showed the approver the negative-controls
@@ -46,6 +46,18 @@ enforced by :func:`check_signable` (the first failing clause, as
 * ``attestation_missing``            — the approver has not named the accepted row
   they read. Never overridable: an approver must have read at least one accepted
   diff in the cell (review §7 item 6).
+* ``same_actor``                     — the two-person rule (``signoff-policy.v3``, F7b,
+  DL-047, ADR-0016): the approver is refused when they are the actor of the attested row
+  (``Grade.actor``), the actor of the run that produced it (``Run.actor``), or the only
+  person behind the cell's accepted evidence (no independent evidence exists). Never
+  overridable. A policy clause, not an apparatus move: ``APPARATUS_VERSION`` stays 2.2 and
+  the seam an audit reads is ``policy_version`` / ``schema`` on the record (ADR-0016).
+  The caller passes the actors it resolved (``attested_actors`` / ``cell_actors``; the
+  API always does, from ``Grade.actor`` and ``Run.actor``); a caller that resolved none
+  (``None`` for both) leaves the clause silent, and an actor that is not a person
+  (:func:`is_person_actor`: the empty actor,
+  ``system…``, ``worker…``, ``cli:…``, ``service:…``, ``import``) never counts —
+  "a human signed the cell" can now answer "a different human from the one who ran it".
 
 The cell's oracle strength is resolved in one place (:func:`resolve_oracle_strength`):
 the caller's ``oracle_strength`` (the server passes the mean of the latest task-level
@@ -56,12 +68,24 @@ route: the route stays the capability map's, so the two can never disagree.
 
 A deployment may relax the numeric thresholds and the two ``require_*`` route /
 controls switches (:meth:`SignoffPolicy.from_env`, bounds in :data:`POLICY_BOUNDS`);
-it can never relax ``false_q1``, ``require_oracle_measured`` or
-``require_attestation`` (no ``CRB_SIGNOFF__*`` knob exists for them; setting one to
-anything but true is a configuration error, not a lower bar). The thresholds in force
-are stamped into every record (``policy_thresholds``) so an audit reads the bar the
+it can never relax ``false_q1``, ``require_oracle_measured``, ``require_attestation``
+or ``require_independent_verifier`` (no ``CRB_SIGNOFF__*`` knob exists for them; setting
+one to anything but true is a configuration error, not a lower bar). The thresholds in
+force are stamped into every record (``policy_thresholds``) so an audit reads the bar the
 approver actually cleared, not today's — a ``signoff-policy.v1`` record (no
-``require_oracle_measured`` threshold) still verifies and is served as signed under v1.
+``require_oracle_measured`` threshold) or a ``signoff-policy.v2`` one (no
+``require_independent_verifier``) still verifies and is served as signed under its own
+version.
+
+Who signed — the account kind (``verifier_kind``, F34)
+--------------------------------------------------------
+``crb.signoff.v3`` records carry ``verifier_kind`` ∈ ``oidc`` | ``local`` | ``service``
+(:data:`VERIFIER_KINDS`), stamped by the write boundary from the account that signed
+(:func:`verifier_kind_for_issuer`: the local-accounts issuer → ``local``, any identity
+provider → ``oidc``). ``service`` is RESERVED for a delegated, non-person signature; no
+write path mints it today, so a record that says ``service`` was written by something
+other than this product's API and must be read as such. A record read back from before
+F34 carries ``""`` — never a guessed kind.
 
 Cardinal invariant, enforced in BOTH directions
 -----------------------------------------------
@@ -82,9 +106,11 @@ Withdrawing trust never needs evidence, a verdict or an attestation.
 Schema
 ------
 ``crb.signoff.v1`` records (written before the policy) hash the original ten
-snapshot fields only; ``crb.signoff.v2`` records hash everything. :meth:`SignoffRecord.body`
-is schema-aware so an old chain still verifies after this module learned the new
-fields, and :meth:`SignoffRecord.from_dict` tolerates either shape.
+snapshot fields only; ``crb.signoff.v2`` records hash the policy snapshot and the
+attestation (:data:`_V2_BODY_FIELDS`, frozen); ``crb.signoff.v3`` records hash
+everything, ``verifier_kind`` included. :meth:`SignoffRecord.body` is schema-aware so an
+old chain still verifies after this module learned the new fields, and
+:meth:`SignoffRecord.from_dict` tolerates every shape.
 
 Navigation
 ----------
@@ -94,11 +120,13 @@ What it is:   The sign-off ledger — the separate append-only, hash-chained rec
               the read-time overlay that lifts a cell's verification tier.
 What it does: Refuses an attestation on a false-Q1 cell, a thin cell, an unmeasured or
               failed controls gate, an unmeasured or weak oracle, a route other than
-              ``deliver``, or without the approver naming the accepted row they read;
-              stamps the evidence and the thresholds the approver actually cleared into the
-              record; lifts tiers only for cells whose CURRENT false-Q1 is 0, so a later
-              defect silently withdraws the trust. A revocation is another append and
-              always writes.
+              ``deliver``, without the approver naming the accepted row they read, or by
+              the person who produced the evidence (``same_actor`` — the two-person rule,
+              judged on the actors the caller resolved through ``is_person_actor``);
+              stamps the evidence, the thresholds the approver actually cleared and the
+              signing account's kind (``verifier_kind``) into the record; lifts tiers only
+              for cells whose CURRENT false-Q1 is 0, so a later defect silently withdraws
+              the trust. A revocation is another append and always writes.
 How:          ``JsonlSignoffLedger.append`` → ``check_signable`` (first failing clause →
               ``SignoffRefused``, HTTP 409) → ``stamp_evidence`` (cell stats, route, controls,
               ``resolve_oracle_strength``, policy) → chain + fsync; readers call
@@ -106,20 +134,26 @@ How:          ``JsonlSignoffLedger.append`` → ``check_signable`` (first failin
               (``key_matches`` on the cell pattern) → ``CapabilityCell.with_tier``.
 Layer:        core — docs/ARCHITECTURE.md#54-a-sign-off-refused-with-409-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0003-one-routing-rule.md,
-              docs/adr/0015-signoffs-expire-with-the-apparatus.md
+              docs/adr/0015-signoffs-expire-with-the-apparatus.md,
+              docs/adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md
 Works with:   src/crb/core/capability.py (the cell and the tiers it may reach),
               src/crb/core/routing.py (the decision and the controls verdict a sign-off is
               judged on), src/crb/server/routes/signoffs.py (the write boundary that holds
-              the ledger and checks the attested row is clean), src/crb/store/models.py (the
-              append-only ``signoffs`` table), src/crb/core/evidence.py (canonical JSON,
-              sha256), src/crb/core/redact.py (notes and statements are redacted at write)
+              the ledger, checks the attested row is clean, resolves the actors behind the
+              evidence and stamps ``verifier_kind`` from the account's issuer),
+              src/crb/store/models.py (the append-only ``signoffs`` table),
+              src/crb/core/evidence.py (canonical JSON, sha256), src/crb/core/redact.py
+              (notes and statements are redacted at write)
 Tested by:    tests/test_signoff.py, tests/test_server_routes_signoffs.py, tests/test_capability.py
 Touch when:   never for a new repository (run ``controls`` and ``oracle`` runs so its cells
               become signable — docs/OPERATOR.md#5-sign-off-p4); relaxing a threshold is a
               deployment setting (``CRB_SIGNOFF__*`` within ``POLICY_BOUNDS``), never an
               edit here; adding a clause or a snapshot field bumps ``SIGNOFF_POLICY_VERSION``
-              / ``SIGNOFF_SCHEMA``, keeps the old body hashing byte-identical, and updates
-              docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2.
+              / ``SIGNOFF_SCHEMA``, freezes the previous body's field tuple so the old body
+              hashes byte-identical, and updates
+              docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2;
+              a new non-person actor vocabulary (a new CLI / service prefix) is ONE edit to
+              ``NON_PERSON_ACTOR_PREFIXES``.
 Claims:       A signed cell licenses exactly the claim shape in
               docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2
               — a tier, never a route, a point or an interval.
@@ -130,7 +164,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -151,9 +185,11 @@ from crb.core.routing import ROUTE_DELIVER, ControlsVerdict, RouteDecision
 from crb.core.version import APPARATUS_VERSION
 
 SIGNOFF_SCHEMA_V1 = "crb.signoff.v1"
-SIGNOFF_SCHEMA = "crb.signoff.v2"
+SIGNOFF_SCHEMA_V2 = "crb.signoff.v2"
+SIGNOFF_SCHEMA = "crb.signoff.v3"
 SIGNOFF_POLICY_VERSION_V1 = "signoff-policy.v1"
-SIGNOFF_POLICY_VERSION = "signoff-policy.v2"
+SIGNOFF_POLICY_VERSION_V2 = "signoff-policy.v2"
+SIGNOFF_POLICY_VERSION = "signoff-policy.v3"
 
 #: Earned-tier precedence when several active attestations match one cell.
 _TIER_RANK: dict[str, int] = {TIER_HUMAN_VERIFIED: 1, TIER_AB_CONFIRMED: 2}
@@ -181,6 +217,56 @@ _V1_BODY_FIELDS: tuple[str, ...] = (
     "record_id",
     "prev_hash",
 )
+#: The v2 hashed body: v1 plus the policy snapshot and the attestation — FROZEN, so a
+#: ``crb.signoff.v2`` chain keeps verifying after v3 added ``verifier_kind``.
+_V2_BODY_FIELDS: tuple[str, ...] = (
+    *_V1_BODY_FIELDS,
+    "ci_low_at_signoff",
+    "oracle_strength_at_signoff",
+    "policy_version",
+    "policy_thresholds",
+    "route_at_signoff",
+    "route_reason_code",
+    "controls_verdict",
+    "controls_run_id",
+    "controls_k",
+    "controls_total",
+    "controls_escapes",
+    "attestation",
+)
+
+# --- who signed: the account kind (F34) ---------------------------------------------------
+VERIFIER_KIND_OIDC = "oidc"
+VERIFIER_KIND_LOCAL = "local"
+VERIFIER_KIND_SERVICE = "service"  # reserved: a delegated, non-person signature; never minted
+VERIFIER_KINDS: tuple[str, ...] = (VERIFIER_KIND_OIDC, VERIFIER_KIND_LOCAL, VERIFIER_KIND_SERVICE)
+#: The issuer local accounts carry (``crb.server.auth.LOCAL_ISSUER`` — pinned equal by test).
+_LOCAL_ISSUER = "local"
+
+
+def verifier_kind_for_issuer(issuer: str) -> str:
+    """The account kind a ``User.issuer`` stamps on a record: ``local`` for the local-accounts
+    issuer, ``oidc`` for any identity provider. ``service`` is never derived here (reserved).
+    An empty issuer is an invariant violation of the users table, not a kind — fail closed."""
+    if not issuer or not issuer.strip():
+        raise ValueError("verifier_kind needs the signing account's issuer")
+    return VERIFIER_KIND_LOCAL if issuer.strip() == _LOCAL_ISSUER else VERIFIER_KIND_OIDC
+
+
+# --- who acted: person or not (the two-person rule's vocabulary) --------------------------
+#: Actor strings that are not a person, prefix-matched: the worker and the system
+#: (``worker-1``, ``system``), the CLI (``cli:<os user>``), a service (``service:…``) and the
+#: census importer (``import``). A human account's actor is its 32-hex user id, which can
+#: never start with any of these; the empty actor (a CLI-graded row with no ``--actor``) is
+#: nobody. ONE place — every caller goes through :func:`is_person_actor`.
+NON_PERSON_ACTOR_PREFIXES: tuple[str, ...] = ("system", "worker", "cli:", "service:", "import")
+
+
+def is_person_actor(actor: str) -> bool:
+    """True when ``actor`` names a human account — non-empty and not a non-person prefix."""
+    a = actor.strip()
+    return bool(a) and not a.startswith(NON_PERSON_ACTOR_PREFIXES)
+
 
 # --- refusal codes (the vocabulary of SignoffRefused.code / a preview) -------------------
 REFUSAL_FALSE_Q1 = "false_q1"
@@ -194,6 +280,7 @@ REFUSAL_ORACLE_UNMEASURED = "oracle_unmeasured"
 REFUSAL_ORACLE_WEAK = "oracle_weak"
 REFUSAL_ROUTE_NOT_DELIVER = "route_not_deliver"  # emitted as ``route_not_deliver:<reason_code>``
 REFUSAL_ATTESTATION_MISSING = "attestation_missing"
+REFUSAL_SAME_ACTOR = "same_actor"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_FALSE_Q1,
     REFUSAL_SCOPE_MISMATCH,
@@ -206,12 +293,15 @@ REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_ORACLE_WEAK,
     REFUSAL_ROUTE_NOT_DELIVER,
     REFUSAL_ATTESTATION_MISSING,
+    REFUSAL_SAME_ACTOR,
 )
-#: Clauses no deployment setting can switch off (``signoff-policy.v2`` added the oracle one).
+#: Clauses no deployment setting can switch off (``signoff-policy.v2`` added the oracle one,
+#: ``signoff-policy.v3`` the two-person rule).
 NON_OVERRIDABLE_REFUSALS: tuple[str, ...] = (
     REFUSAL_FALSE_Q1,
     REFUSAL_ORACLE_UNMEASURED,
     REFUSAL_ATTESTATION_MISSING,
+    REFUSAL_SAME_ACTOR,
 )
 
 
@@ -293,11 +383,12 @@ _FALSE = frozenset({"0", "false", "no", "off"})
 @dataclass(frozen=True)
 class SignoffPolicy:
     """The bar an attestation must clear. Defaults are the published ones (DL-014;
-    ``signoff-policy.v2`` keeps every number and adds the measured-oracle clause).
+    ``signoff-policy.v2`` keeps every number and adds the measured-oracle clause;
+    ``signoff-policy.v3`` keeps every number and adds the two-person rule).
 
-    ``require_attestation`` and ``require_oracle_measured`` are fields so the record
-    can say they were in force; neither can be ``False`` — construction refuses it,
-    as does :meth:`from_env`.
+    ``require_attestation``, ``require_oracle_measured`` and
+    ``require_independent_verifier`` are fields so the record can say they were in
+    force; none can be ``False`` — construction refuses it, as does :meth:`from_env`.
     """
 
     n_min: int = 10
@@ -308,6 +399,7 @@ class SignoffPolicy:
     min_oracle_strength: float = 0.80
     require_oracle_measured: bool = True
     require_attestation: bool = True
+    require_independent_verifier: bool = True
     policy_version: str = SIGNOFF_POLICY_VERSION
 
     def __post_init__(self) -> None:
@@ -317,6 +409,11 @@ class SignoffPolicy:
             raise ValueError(
                 f"require_oracle_measured cannot be relaxed ({SIGNOFF_POLICY_VERSION}): an "
                 "unmeasured oracle is the 'green proves correctness' claim §7 forbids"
+            )
+        if not self.require_independent_verifier:
+            raise ValueError(
+                f"require_independent_verifier cannot be relaxed ({SIGNOFF_POLICY_VERSION}): "
+                "the person who produced the evidence cannot be the person who signs it"
             )
         for name, (lo, hi) in POLICY_BOUNDS.items():
             v = getattr(self, name)
@@ -336,6 +433,7 @@ class SignoffPolicy:
             "min_oracle_strength": self.min_oracle_strength,
             "require_oracle_measured": self.require_oracle_measured,
             "require_attestation": self.require_attestation,
+            "require_independent_verifier": self.require_independent_verifier,
         }
 
     @property
@@ -360,9 +458,9 @@ class SignoffPolicy:
         ``<prefix>MIN_CONSTRUCTIBLE_SHARE``, ``<prefix>MIN_ORACLE_STRENGTH``,
         ``<prefix>REQUIRE_ROUTE_DELIVER``, ``<prefix>REQUIRE_CONTROLS_PASSED``. Unset →
         the default; a value outside :data:`POLICY_BOUNDS`, a non-number, or an attempt
-        to set ``<prefix>REQUIRE_ATTESTATION`` / ``<prefix>REQUIRE_ORACLE_MEASURED`` to
-        anything but true → ``ValueError`` (fail closed: a misconfigured bar is not a
-        lower bar)."""
+        to set ``<prefix>REQUIRE_ATTESTATION`` / ``<prefix>REQUIRE_ORACLE_MEASURED`` /
+        ``<prefix>REQUIRE_INDEPENDENT_VERIFIER`` to anything but true → ``ValueError``
+        (fail closed: a misconfigured bar is not a lower bar)."""
         source = os.environ if env is None else env
         kw: dict[str, Any] = {}
 
@@ -389,6 +487,7 @@ class SignoffPolicy:
             "require_controls_passed",
             "require_oracle_measured",
             "require_attestation",
+            "require_independent_verifier",
         ):
             raw = _get(name)
             if raw is None:
@@ -488,6 +587,9 @@ class SignoffRecord:
     controls_total: int = 0
     controls_escapes: int = 0
     attestation: Attestation | None = None
+    # v3 (F34) — the kind of account that signed: one of ``VERIFIER_KINDS``, ``""`` on a
+    # record read back from before the field existed (never guessed).
+    verifier_kind: str = ""
     schema: str = SIGNOFF_SCHEMA
     record_id: str = ""
     prev_hash: str = ""
@@ -500,6 +602,11 @@ class SignoffRecord:
             raise ValueError("an attestation must name a capability_class")
         if not self.verifier:
             raise ValueError("verifier is required (who signed, or who revoked)")
+        if self.verifier_kind and self.verifier_kind not in VERIFIER_KINDS:
+            raise ValueError(
+                f"verifier_kind must be one of {VERIFIER_KINDS} (or '' on a pre-F34 record), "
+                f"got {self.verifier_kind!r}"
+            )
         if self.tier not in EARNED_TIERS:
             raise ValueError(f"tier must be one of {EARNED_TIERS}, got {self.tier!r}")
         # the one clause that holds even on a record rebuilt from disk: a stored
@@ -560,13 +667,15 @@ class SignoffRecord:
 
     # --- hashing ------------------------------------------------------------------
     def body(self) -> dict[str, Any]:
-        """Everything hashed: the v1 fields for a ``crb.signoff.v1`` record (so an old
-        chain still verifies), every field but ``row_hash`` otherwise."""
-        names = (
-            _V1_BODY_FIELDS
-            if self.schema == SIGNOFF_SCHEMA_V1
-            else tuple(k for k in self.__dataclass_fields__ if k != "row_hash")
-        )
+        """Everything hashed: the v1 fields for a ``crb.signoff.v1`` record, the frozen v2
+        tuple for a ``crb.signoff.v2`` one (so an old chain still verifies), every field but
+        ``row_hash`` otherwise."""
+        if self.schema == SIGNOFF_SCHEMA_V1:
+            names = _V1_BODY_FIELDS
+        elif self.schema == SIGNOFF_SCHEMA_V2:
+            names = _V2_BODY_FIELDS
+        else:
+            names = tuple(k for k in self.__dataclass_fields__ if k != "row_hash")
         out: dict[str, Any] = {}
         for k in names:
             v = getattr(self, k)
@@ -597,8 +706,8 @@ class SignoffRecord:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> SignoffRecord:
-        """Tolerates a v1 record (no policy / attestation fields → their defaults) and a
-        v2 one; unknown keys are ignored."""
+        """Tolerates a v1 record (no policy / attestation fields → their defaults), a v2
+        one (no ``verifier_kind`` → ``""``) and a v3 one; unknown keys are ignored."""
         kw = {k: d[k] for k in cls.__dataclass_fields__ if k in d}
         att = kw.get("attestation")
         kw["attestation"] = Attestation.from_dict(att) if isinstance(att, Mapping) else None
@@ -686,6 +795,57 @@ def _controls_state(c: ControlsVerdict | None, policy: SignoffPolicy) -> str:
 # ---------------------------------------------------------------------------
 
 
+def same_actor_refusal(
+    record: SignoffRecord,
+    cell: CapabilityCell,
+    *,
+    attested_actors: Collection[str] | None,
+    cell_actors: Collection[str] | None,
+    attested_run_id: str = "",
+) -> SignoffRefusal | None:
+    """The two-person rule on the actors the caller resolved, or ``None`` when it holds.
+
+    Ground 1 — the verifier is among ``attested_actors`` (the actor of the row the
+    attestation names, and the actor of the run that produced it). Ground 2 —
+    ``cell_actors`` (every accepted row of the cell and their runs) names at least one
+    person, and every person it names is the verifier: nobody else's evidence exists.
+    Non-person actors never count (:func:`is_person_actor`); ``None`` for both means the
+    caller resolved nothing and the clause is silent. ``attested_run_id`` only names the
+    run in the sentence — the API has it, a core-only caller may not.
+    """
+    who = record.verifier
+    if not is_person_actor(who):  # a non-person verifier is nobody's second person
+        return None
+    if attested_actors is not None and who in {a for a in attested_actors if is_person_actor(a)}:
+        att = record.attestation
+        row = f" {att.reviewed_row_hash[:12]}… (task {att.reviewed_task_id})" if att else ""
+        produced = (
+            f"queued run {attested_run_id[:8]}, which produced the attested row{row}"
+            if attested_run_id
+            else f"produced the attested row{row} — as its actor, or the actor of the run "
+            "that graded it"
+        )
+        return SignoffRefusal(
+            REFUSAL_SAME_ACTOR,
+            f"approver {who!r} {produced}: the person who produced the evidence cannot sign "
+            "it — a second approver must sign (cannot be relaxed)",
+            threshold="a second person",
+            observed=who,
+        )
+    if cell_actors is not None:
+        people = {a for a in cell_actors if is_person_actor(a)}
+        if people and people <= {who}:
+            return SignoffRefusal(
+                REFUSAL_SAME_ACTOR,
+                f"approver {who!r} is the only person behind every accepted row of cell "
+                f"{cell.label!r} (their own runs produced them all): no independent evidence "
+                "exists — a second approver must sign (cannot be relaxed)",
+                threshold="a second person",
+                observed=who,
+            )
+    return None
+
+
 def evaluate_signoff(
     record: SignoffRecord,
     cell: CapabilityCell,
@@ -695,6 +855,9 @@ def evaluate_signoff(
     oracle_strength: float | None = None,
     policy: SignoffPolicy = DEFAULT_SIGNOFF_POLICY,
     repo: str = WILDCARD,
+    attested_actors: Collection[str] | None = None,
+    cell_actors: Collection[str] | None = None,
+    attested_run_id: str = "",
 ) -> tuple[SignoffRefusal, ...]:
     """Every clause of ``policy`` that ``record`` fails against ``cell``, in the order
     the module docstring publishes. Empty ⇒ signable.
@@ -703,7 +866,10 @@ def evaluate_signoff(
     (``None`` = the caller evaluated none, which the policy reads as *unmeasured*);
     ``oracle_strength`` is the caller's measurement of the cell's oracle (see
     :func:`resolve_oracle_strength`; ``None`` = it found none, and the cell falls
-    back to what its decision / rows carry — *unmeasured* when nothing does).
+    back to what its decision / rows carry — *unmeasured* when nothing does);
+    ``attested_actors`` / ``cell_actors`` are the actors the caller resolved for the
+    two-person rule (see :func:`same_actor_refusal`; ``None`` for both = none resolved,
+    the clause is silent — the API always resolves them).
     A false-Q1 cell or a scope mismatch is returned alone — nothing else about such
     a cell matters. A revocation never fails (withdrawing trust needs no evidence).
     """
@@ -848,6 +1014,17 @@ def evaluate_signoff(
                 observed="",
             )
         )
+
+    if policy.require_independent_verifier:
+        same = same_actor_refusal(
+            record,
+            cell,
+            attested_actors=attested_actors,
+            cell_actors=cell_actors,
+            attested_run_id=attested_run_id,
+        )
+        if same is not None:
+            out.append(same)
     return tuple(out)
 
 
@@ -860,6 +1037,9 @@ def check_signable(
     oracle_strength: float | None = None,
     policy: SignoffPolicy = DEFAULT_SIGNOFF_POLICY,
     repo: str = WILDCARD,
+    attested_actors: Collection[str] | None = None,
+    cell_actors: Collection[str] | None = None,
+    attested_run_id: str = "",
 ) -> None:
     """Raise :class:`SignoffRefused` (the first failing clause, all of them attached)
     unless ``record`` may be written against ``cell`` under ``policy``.
@@ -874,6 +1054,9 @@ def check_signable(
         oracle_strength=oracle_strength,
         policy=policy,
         repo=repo,
+        attested_actors=attested_actors,
+        cell_actors=cell_actors,
+        attested_run_id=attested_run_id,
     )
     if refusals:
         first = refusals[0]
@@ -929,13 +1112,15 @@ class JsonlSignoffLedger:
         controls: ControlsVerdict | None = None,
         oracle_strength: float | None = None,
         policy: SignoffPolicy = DEFAULT_SIGNOFF_POLICY,
+        attested_actors: Collection[str] | None = None,
+        cell_actors: Collection[str] | None = None,
     ) -> SignoffRecord:
         """Check, stamp, chain and append. Returns the chained record.
 
         ``cell`` is the live cell the human reviewed; it is required for an
         attestation (the write boundary applies ``policy`` against it, the repo's
-        ``controls`` verdict and the caller's ``oracle_strength`` measurement) and
-        optional for a revocation.
+        ``controls`` verdict, the caller's ``oracle_strength`` measurement and the
+        actors it resolved for the two-person rule) and optional for a revocation.
         """
         if not record.revoked:
             if cell is None:
@@ -952,6 +1137,8 @@ class JsonlSignoffLedger:
                 oracle_strength=oracle_strength,
                 policy=policy,
                 repo=repo,
+                attested_actors=attested_actors,
+                cell_actors=cell_actors,
             )
             record = stamp_evidence(
                 record, cell, controls=controls, oracle_strength=oracle_strength, policy=policy
