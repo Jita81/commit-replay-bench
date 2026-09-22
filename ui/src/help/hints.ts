@@ -1253,7 +1253,7 @@ export const HINTS = {
   'stat.learn.no_scores':
     'Held cells whose tasks have no mutation score yet, so the escaped mutants cannot be listed. Run an oracle run to fill them.',
   'col.learn_strengthen.item':
-    'The proposed test-writing item and its title.',
+    'The proposed test-writing item: its id, the test it would add, and its title.',
   'col.learn_strengthen.cell':
     'The class and size the item would strengthen.',
   'col.learn_strengthen.reason':
@@ -1410,6 +1410,10 @@ export const HINTS = {
     'The guide section that says more about this term.',
   'link.help.guide':
     'Open this bundled guide; its sections are what the Read more links point at.',
+  'link.help.back':
+    'Return to the glossary and the list of guides, at the place this guide is listed.',
+  'link.help.index':
+    'Open the glossary and the list of bundled guides, to find the one you meant.',
   'button.notfound.home':
     'Return to Home, the start of the journey, with the navigation intact.',
 } as const satisfies Record<string, string>
@@ -1487,6 +1491,14 @@ export const MIN_HINTS: Record<string, number> = {
   '/ledger': 26,
   // a viewer's Settings (health, the login card read-only, the GitHub App); the admin's configuration and users are held by the ratchet's variants
   '/settings': 11,
+  // the four shell screens: signed out, the help pages and an unknown address. They carry few
+  // elements, so the floor is small — but it is a floor, and the ratchet no longer skips them
+  // by name (G-909): both login fields, both sign-in buttons; a Read more and a guide link;
+  // the guide's way back; the 404's one way out.
+  '/login': 4,
+  '/help': 2,
+  '/help/docs/:name': 1,
+  '*': 1,
 }
 
 /** The text for an id; the union type makes a typo a compile error, so this can never be undefined. */

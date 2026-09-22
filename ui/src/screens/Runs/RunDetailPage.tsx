@@ -59,6 +59,7 @@ import { LiveLog } from '../../components/LiveLog'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
+import { ShortId } from '../../components/ShortId'
 import { StatTile } from '../../components/StatTile'
 import { useAuth } from '../../lib/auth'
 import { fmtDate, fmtInt, fmtPct, fmtSeconds, fmtUsd, shortId, wilson } from '../../lib/format'
@@ -241,7 +242,7 @@ function TaskTable({ runId, poll, onOpenPack }: { runId: string; poll: boolean; 
   const tasks = useRunTasks(runId, { poll })
   const columns = useMemo<Column<RunTaskRow>[]>(
     () => [
-      { key: 'task', header: 'Task', hint: 'col.run_tasks.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <span title={t.task_id}>{shortId(t.task_id)}</span> },
+      { key: 'task', header: 'Task', hint: 'col.run_tasks.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <ShortId value={t.task_id} /> },
       { key: 'class', header: 'Class', hint: 'col.run_tasks.cell', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
       { key: 'size', header: 'Size', hint: 'col.run_tasks.cell', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
       { key: 'trials', header: 'Trials', hint: 'col.run_tasks.trials', numeric: true, sortValue: (t) => t.trials, cell: (t) => fmtInt(t.trials) },

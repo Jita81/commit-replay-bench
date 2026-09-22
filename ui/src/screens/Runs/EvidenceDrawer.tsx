@@ -58,6 +58,7 @@ import { Hint } from '../../components/Hint'
 import { JsonView } from '../../components/JsonView'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
+import { ShortId } from '../../components/ShortId'
 import type { HintId } from '../../help/hints'
 import { fmtDate, fmtInt, fmtSeconds, fmtUsd, shortId } from '../../lib/format'
 import { parseUnifiedDiff, useRetainedPatch, useRetainedStatus, useRetainedTranscript, useReviews, type RetainedPatch } from './contract'
@@ -136,9 +137,12 @@ function LintRunTail({ run }: { run: LintRun | null }) {
         {run.note && !run.error && <p className="text-xs text-on-surface-muted">{run.note}</p>}
         {run.steps.map((s, i) => (
           <div key={`${s.tool}-${i}`} className="space-y-1">
-            <div className="font-mono text-[11px]" title={s.argv.join(' ')}>
+            <div className="font-mono text-[11px]">
               {s.tool}: rc {s.rc}{s.timed_out ? ' (timed out)' : ''} · {s.files.length ? `${s.files.length} file(s)` : 'repo-wide'}
             </div>
+            {/* the exact command, on the page rather than in a hover-only tooltip: an auditor
+                reading an evidence pack needs to see what was run (G-906, DL-048) */}
+            <div className="break-all font-mono text-[10px] text-on-surface-muted">{s.argv.join(' ')}</div>
             <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-surface-container p-2 font-mono text-[11px] leading-4 text-on-surface-body">{s.tail || '(no output tail)'}</pre>
           </div>
         ))}
@@ -176,7 +180,7 @@ function TestRunTail({ label, run }: { label: string; run: TestRun | null }) {
         {run.failing.length > 0 && (
           <ul className="m-0 list-none p-0 font-mono text-[11px]">
             {run.failing.slice(0, 30).map((f) => (
-              <li key={f} className="truncate" title={f}>
+              <li key={f} className="truncate">
                 {f}
               </li>
             ))}
@@ -223,16 +227,14 @@ function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean })
           </Pill>
         )}
         <Hint id="stat.evidence.hash">
-          <span className="font-mono text-[11px] text-on-surface-muted" title={pack.pack_hash}>
-            {shortId(pack.pack_hash, 16)}
-          </span>
+          <ShortId value={pack.pack_hash} n={16} className="font-mono text-[11px] text-on-surface-muted" />
         </Hint>
       </div>
 
       <Section title="Spec" hint="tile.evidence.spec">
         <KV
           rows={[
-            ['task', <span className="font-mono text-xs" title={pack.task.task_id}>{shortId(pack.task.task_id)}</span>],
+            ['task', <ShortId value={pack.task.task_id} className="font-mono text-xs" />],
             ['subject', pack.task.subject],
             ['class · size · pool', <span className="font-mono text-xs">{pack.task.capability_class} · {pack.task.size} · {pack.task.pool}</span>],
             ['language', pack.task.language || '—'],
@@ -274,7 +276,7 @@ function PackBody({ pack, verified }: { pack: EvidencePack; verified: boolean })
             rows={[
               ['files', <span className="font-mono text-xs">{g.diff.files.join(', ') || '—'}</span>],
               ['+ / −', `${fmtInt(g.diff.additions)} / ${fmtInt(g.diff.deletions)}`],
-              ['sha256', <span className="font-mono text-xs" title={g.diff.diff_sha256}>{shortId(g.diff.diff_sha256, 16)}</span>],
+              ['sha256', <ShortId value={g.diff.diff_sha256} n={16} className="font-mono text-xs" />],
               ['changed files', <span className="font-mono text-xs">{g.changed_files.join(', ') || '—'}</span>],
             ]}
           />
@@ -359,8 +361,8 @@ export function PatchView({ patch, pack }: { patch: RetainedPatch; pack: Evidenc
             truncated
           </Pill>
         )}
-        <span className="font-mono text-[11px] text-on-surface-muted" title={`served ${patch.sha256} · pack ${patch.diffSha256}`}>
-          sha256 {shortId(patch.sha256, 16)}
+        <span className="font-mono text-[11px] text-on-surface-muted">
+          sha256 <ShortId value={patch.sha256} n={16} />
         </span>
       </div>
       {!patch.matches && (

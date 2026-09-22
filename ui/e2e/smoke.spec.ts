@@ -9,9 +9,12 @@
  *               served by `vite preview`.
  * What it does: Pins that the login page renders with the brand, links to the contract's
  *               OIDC start URL and passes axe; that a protected route redirects to `/login`
- *               with `?next=`; that a logged-in shell shows the nav, the user chip with its
- *               role and the ledger gate, and passes axe; and that an unknown route renders
- *               the 404 inside the shell. No server is contacted.
+ *               with `?next=`; that the index route `/` — the address a person types or
+ *               bookmarks — lands on `/login?next=%2F` with no session and on `/home` with
+ *               one (G-921: until this pair existed no test visited `/` at all); that a
+ *               logged-in shell shows the nav, the user chip with its role and the ledger
+ *               gate, and passes axe; and that an unknown route renders the 404 inside the
+ *               shell. No server is contacted.
  * How:          `page.route` intercepts every `/api/v1` request and answers from inline
  *               fixtures (`/auth/me` 401 or a principal, `/ledger/verify`, `/health`,
  *               `/version`); `AxeBuilder` with the WCAG 2.1 AA tags.
@@ -19,11 +22,12 @@
  * ADRs:         none
  * Works with:   ui/playwright.config.ts (builds, serves `dist/` and ignores the walkthrough),
  *               ui/src/screens/Login/LoginPage.tsx and ui/src/components/Layout.tsx (the
- *               screens under test), ui/src/lib/auth.tsx (the redirect), .github/workflows/ci.yml
- *               (runs this in CI)
+ *               screens under test), ui/src/lib/auth.tsx (the redirect and the
+ *               index route's `RequireAuth`), ui/src/App.tsx (the `<Route index>` this
+ *               visits), .github/workflows/ci.yml (the `ui-smoke` job that runs this)
  * Tested by:    ui/e2e/smoke.spec.ts
- * Touch when:   the login page, the shell's nav or the auth redirect changes; never for a
- *               new repository.
+ * Touch when:   the login page, the shell's nav, the index route or the auth redirect
+ *               changes; never for a new repository.
  */
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
@@ -75,15 +79,38 @@ test.describe('login page', () => {
   })
 })
 
+// The index route (`<Route index>` in App.tsx) is the address a person types or bookmarks.
+// It is inside RequireAuth and redirects to /home, so it has two answers — and until this
+// pair existed no test visited `/` at all (the login spec asserts the LoginPage default,
+// which is a different line of code).
+test.describe('the index route', () => {
+  test('signed out, / lands on /login?next=%2F', async ({ page }) => {
+    await mockApi(page, false)
+    await page.goto('/')
+    await expect(page).toHaveURL(/\/login\?next=%2F$/)
+    await expect(page.getByRole('heading', { level: 1, name: 'Commit Replay Bench' })).toBeVisible()
+  })
+
+  test('signed in, / lands on /home inside the shell', async ({ page }) => {
+    await mockApi(page, true)
+    await page.goto('/')
+    await expect(page).toHaveURL(/\/home$/)
+    await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible()
+  })
+})
+
 test.describe('shell', () => {
   test('logged-in shell shows the nav, user chip with role, and the ledger gate; axe clean', async ({ page }) => {
     await mockApi(page, true)
     await page.goto('/ledger')
     await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible()
     // an approver sees the journey and, of the instrument row, only the ledger
-    for (const label of ['Home', 'Connection', 'Baseline', 'Decisions', 'Factory', 'Deployment', 'Ledger']) {
+    for (const label of ['Home', 'Connection', 'Baseline', 'Factory', 'Deployment', 'Ledger']) {
       await expect(page.getByRole('link', { name: label, exact: true })).toBeVisible()
     }
+    // Decisions carries the waiting-count badge, so its accessible name is the label and the
+    // count ("Decisions0" with nothing connected) — not the bare word
+    await expect(page.getByRole('link', { name: /^Decisions/ })).toBeVisible()
     await expect(page.getByTestId('user-chip')).toContainText('approver')
     await expect(page.getByTestId('ledger-gate')).toHaveAttribute('data-state', 'OPEN')
     await expect(page.getByRole('link', { name: 'Export JSONL' })).toHaveAttribute('href', '/api/v1/ledger/export?format=jsonl')

@@ -10,6 +10,15 @@
 #             and a [measured] one carries its n, its method and its apparatus version
 #   layers    import-linter: crb.core is stdlib-only; layers depend downward only
 #   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
+#   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
+#             The hint ratchet, the native-`title=` allowlist and every screen suite run
+#             there, so a hint-registry, a copy or a type regression fails a build instead of
+#             waiting for someone to run the gates by hand before a release. Both UI jobs
+#             always run and are blocking; their contexts belong in main's required status
+#             checks alongside `container` (docs/DEPLOYMENT.md §3.4 names the call)
+#   ui-smoke  the mocked Playwright smoke spec (ui/e2e/smoke.spec.ts) over the built bundle:
+#             the axe sweep of /login, the index redirect signed in and signed out, and the
+#             end-to-end 404. No server and no model — `page.route` answers every API call
 #   security  gitleaks (secrets in history) + pip-audit on the resolved environment
 #   sbom      CycloneDX SBOM of the resolved environment, uploaded as an artifact
 #   test-postgres  the store suite (tests/test_store_*.py) against a real PostgreSQL 16 service
@@ -215,6 +224,65 @@ jobs:
         with:
           name: coverage-py${{ matrix.python }}
           path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ui-unit:
+    name: ui-unit (tsc -b + vitest, the hint ratchet included)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install the UI
+        working-directory: ui
+        run: npm ci --no-audit --no-fund --legacy-peer-deps
+      - name: Types (tsc -b)
+        working-directory: ui
+        run: npm run typecheck
+      - name: Unit tests (vitest — screens, help registry, hint ratchet, title= allowlist)
+        working-directory: ui
+        run: npx vitest run
+
+  ui-smoke:
+    # quoted: an unquoted YAML scalar may not contain ": "
+    name: "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install the UI + Playwright Chromium (with system deps)
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund --legacy-peer-deps
+          npx playwright install --with-deps chromium
+      - name: Smoke (ui/e2e/smoke.spec.ts — the config builds the bundle and serves it)
+        working-directory: ui
+        env:
+          CI: "1"
+        run: npx playwright test
+      - name: Upload the Playwright report + traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
+        with:
+          name: ui-smoke-playwright-report
+          path: |
+            ui/playwright-report
+            ui/test-results
           if-no-files-found: ignore
           retention-days: 7
 

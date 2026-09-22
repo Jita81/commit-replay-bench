@@ -8,7 +8,8 @@
  * What it does: Pins that the card eyebrows are plain phrases, not playbook numbers
  *               (J-HEL-17); that each report opens with one sentence saying what a person does
  *               with it and that stale, oracle strength and apparatus are terms that open
- *               inline; and that the page keeps no write affordance.
+ *               inline; that a strengthening item's description is text in the table rather
+ *               than a hover-only `title=` (G-287); and that the page keeps no write affordance.
  * How:          `mockApi` with three empty reports; `renderApp` at `/learn?repo=…`.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -53,5 +54,33 @@ describe('LearnPage', () => {
     expect(screen.getAllByRole('button', { name: /^apparatus/ }).length).toBeGreaterThanOrEqual(1)
     // read-only by design: no form, no submit
     expect(document.querySelector('form')).toBeNull()
+  })
+
+  it('a strengthening item shows its description as text, not as a hover-only title (G-287)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 },
+      'GET /learn/refusals': REFUSALS,
+      'GET /learn/strengthen': {
+        ...STRENGTHEN,
+        cells_flagged: ['cond_logic/M'],
+        items: [
+          {
+            id: 'alpha-strengthen-1',
+            title: 'Cover the branch the mutant survived',
+            description: 'Add a test that fails when the comparison is inverted.',
+            capability_class: 'cond_logic',
+            labels: { cell: 'cond_logic/M', reason_code: 'weak_oracle', oracle_strength: '0.61', threshold: '0.80', escaped: '3' },
+          },
+        ],
+      } satisfies StrengthenReport,
+      'GET /learn/remeasure': REMEASURE,
+    })
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const description = await screen.findByText('Add a test that fails when the comparison is inverted.')
+    expect(description).toBeVisible()
+    // a keyboard or touch reader can reach it: it is in the table, not on a `title=`
+    expect(description.closest('table')).not.toBeNull()
+    expect(document.querySelector('[title]')).toBeNull()
   })
 })

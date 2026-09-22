@@ -14,7 +14,9 @@
  *               without pulling the ratchet's suite into its own run.
  * How:          A selector table (`REQUIRED`); the trigger may be the element itself, an
  *               ancestor (a field's root) or a descendant (a header's sort button, a
- *               criterion's label); a column header with no text carries nothing to explain.
+ *               criterion's label); a column header with no text carries nothing to explain;
+ *               and anything inside `[data-prose]` — a bundled guide's rendered Markdown — is
+ *               the help text itself, so it is not held to the registry.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/help/hints.ts (`HINTS` — the ids that resolve), ui/src/components/Hint.tsx
@@ -57,6 +59,10 @@ export function unhinted(root: ParentNode): string[] {
       if (kind === 'column header' && !(el.textContent ?? '').trim()) continue
       // a card eyebrow is a number only when it starts with one ("2 waiting"); a descriptive eyebrow is prose
       if (kind === 'count eyebrow' && !/^\d/.test((el.textContent ?? '').trim())) continue
+      // a bundled guide's own Markdown (`[data-prose]`, ui/src/screens/Help/DocPage.tsx) IS the
+      // explanation: its table headers and links are the guide author's prose, not product
+      // elements the registry could write a sentence about
+      if (el.closest('[data-prose]')) continue
       // the trigger is the element itself, an ancestor (a field's root) or a descendant (a header's sort button, a criterion's label)
       const wrapper = el.closest('[data-hint]') ?? el.querySelector('[data-hint]')
       const id = wrapper?.getAttribute('data-hint') ?? ''

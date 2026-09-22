@@ -45,6 +45,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
 import { QueryBoundary } from '../../components/QueryBoundary'
+import { ShortId } from '../../components/ShortId'
 import { fmtDate, fmtSeconds, fmtUsd, shortId } from '../../lib/format'
 import { useReviews, type Review } from './contract'
 import { EvidenceDrawer } from './EvidenceDrawer'
@@ -122,8 +123,8 @@ export function TaskDetailPage() {
         hint: 'col.task.evidence',
         cell: (r) =>
           r.evidence_pack_hash ? (
-            <button type="button" className="font-mono text-xs text-primary underline-offset-2 hover:underline" onClick={() => setOpen({ pack: r.evidence_pack_hash, row: r.row_hash })} title={r.evidence_pack_hash}>
-              {shortId(r.evidence_pack_hash, 10)}
+            <button type="button" className="font-mono text-xs text-primary underline-offset-2 hover:underline" onClick={() => setOpen({ pack: r.evidence_pack_hash, row: r.row_hash })}>
+              <ShortId value={r.evidence_pack_hash} n={10} />
             </button>
           ) : (
             <span className="text-xs text-on-surface-muted">no pack</span>

@@ -18,7 +18,9 @@ import tailwindcss from '@tailwindcss/vite'
  *   is readable through `/@fs/` should the dev server ever be exposed beyond localhost.
  * - Build: static assets land in `ui/dist`; the server serves them behind
  *   the same origin as the API in production.
- * - Test: vitest with jsdom; `src/test/setup.ts` installs jest-dom matchers.
+ * - Test: vitest with jsdom; `src/test/setup.ts` installs jest-dom matchers; the per-test
+ *   timeout is raised from vitest's 5 s default because the `ui-unit` CI job is blocking and
+ *   runs on a slower shared runner than a developer's machine (see `test.testTimeout` below).
  */
 const apiOrigin = process.env.CRB_API_ORIGIN ?? 'http://127.0.0.1:8000'
 
@@ -55,5 +57,16 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     css: false,
+    // vitest's default is 5 s, which is a per-test budget the suite's `userEvent` cases do not
+    // meet on a loaded machine: typing into a controlled React form re-renders on every
+    // keystroke, and the dialog suites type whole JSON bodies. [measured] n = 56 files, the
+    // full suite run twice on an 8-core Mac while the walkthrough held the other cores: 18
+    // then 24 tests failed, every one "Test timed out in 5000ms", and all 44 of them passed
+    // when the same five files ran alone (method: `npx vitest run` twice, then the failing
+    // files alone; apparatus 2.2, 2026-09-22). The `ui-unit` CI job is blocking and runs on a
+    // two-core shared runner, slower than that, so the default would fail green work. 20 s is
+    // a real ceiling — a test that hangs still fails — not a way to let a slow screen through.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 })

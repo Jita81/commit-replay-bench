@@ -71,6 +71,7 @@ import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
+import { ShortId } from '../../components/ShortId'
 import { Details, NotificationBanner, SummaryList, WarningButton } from '../../components/govuk'
 import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
@@ -514,8 +515,8 @@ export function FactoryPage() {
                     {backlog.data.frozen_at ? 'frozen' : 'not frozen'}
                   </Pill>
                   <Hint id="stat.factory.hash">
-                    <span className="font-mono text-xs" title={backlog.data.hash}>
-                      hash {shortId(backlog.data.hash, 16)}
+                    <span className="font-mono text-xs" data-testid="factory-backlog-hash">
+                      hash <ShortId value={backlog.data.hash} n={16} />
                     </span>
                   </Hint>
                   <Hint id="stat.factory.items_count" className="text-xs text-on-surface-muted">

@@ -38,6 +38,7 @@ import { ErrorState } from '../../components/ErrorState'
 import { TextArea, TextField } from '../../components/Field'
 import { Pill } from '../../components/Pill'
 import { Hint } from '../../components/Hint'
+import { ShortId } from '../../components/ShortId'
 import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
 import { fmtDate, shortId } from '../../lib/format'
@@ -340,7 +341,7 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
                     </Pill>
                   )}
                   <span className="text-on-surface-muted">
-                    {r.reviewer} · {fmtDate(r.created)} · <span className="font-mono" title={r.row_hash}>{shortId(r.row_hash, 10)}</span>
+                    {r.reviewer} · {fmtDate(r.created)} · <ShortId value={r.row_hash} n={10} className="font-mono" />
                   </span>
                 </div>
                 <p className="mt-1 text-on-surface-body">{r.statement}</p>
@@ -361,8 +362,8 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
                   </ul>
                 )}
                 {r.patch_sha256_reviewed && (
-                  <div className="mt-1 font-mono text-[10px] text-on-surface-muted" title={r.patch_sha256_reviewed}>
-                    attested patch {shortId(r.patch_sha256_reviewed, 16)}
+                  <div className="mt-1 font-mono text-[10px] text-on-surface-muted">
+                    attested patch <ShortId value={r.patch_sha256_reviewed} n={16} />
                   </div>
                 )}
               </li>

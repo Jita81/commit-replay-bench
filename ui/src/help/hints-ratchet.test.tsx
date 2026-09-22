@@ -34,7 +34,9 @@
  * Works with:   ui/src/help/hints.ts (`HINTS`, `MIN_HINTS`, `SHARED_IDS`),
  *               ui/src/help/hints-collector.ts (`unhinted`),
  *               ui/src/help/hints-ratchet.onramp.tsx (the on-ramp routes' entries and
- *               fixtures), ui/src/help/hints-ratchet.instrument.tsx (`INSTRUMENT_SCREENS`
+ *               fixtures), ui/src/help/hints-ratchet.shell.tsx (`SHELL_SCREENS`: /login,
+ *               /help, /help/docs/:name and the catch-all — the four the ratchet used to
+ *               skip by name), ui/src/help/hints-ratchet.instrument.tsx (`INSTRUMENT_SCREENS`
  *               and `INSTRUMENT_VARIANTS`: the factory, deployment and instrument routes'
  *               entries and their deeper states — tabs, dialogs, the evidence drawer),
  *               ui/src/components/Hint.tsx (the `data-hint` the collector looks for),
@@ -72,6 +74,7 @@ import { PRINCIPAL, mockApi, renderApp } from '../test/utils'
 import { unhinted } from './hints-collector'
 import { INSTRUMENT_SCREENS, INSTRUMENT_VARIANTS } from './hints-ratchet.instrument'
 import { ONRAMP_SCREENS } from './hints-ratchet.onramp'
+import { SHELL_SCREENS } from './hints-ratchet.shell'
 import { HINTS, MIN_HINTS, SHARED_IDS } from './hints'
 
 // ─── the per-route table ──────────────────────────────────────────────────────────────────
@@ -96,7 +99,7 @@ interface ScreenEntry {
  * Example:
  *   '/results': { route: '/results?repo=r', path: '/results', element: <ResultsPage />, api: RESULTS_API, roles: ['viewer', 'approver'] },
  */
-const SCREENS: Record<string, ScreenEntry> = { ...ONRAMP_SCREENS, ...INSTRUMENT_SCREENS }
+const SCREENS: Record<string, ScreenEntry> = { ...ONRAMP_SCREENS, ...INSTRUMENT_SCREENS, ...SHELL_SCREENS }
 
 /**
  * Routes not yet wired. Empty since the shippable wave: every route the shell serves is in
@@ -118,31 +121,30 @@ function hinted(root: ParentNode): number {
 
 /**
  * Native `title=` per file (a hover-only attribute nothing on touch or a keyboard can reach):
- * the maximum each file may carry. Kept: the full value of a shortened id or hash whose
- * visible text is the short form. Retired as hints land: the count only goes down (LiveLog's
- * 4 and TaskDetailPage's 1 are what the tightened `TITLE_RE` — `Hint`, arrow-function props —
- * had been missing, not new attributes).
+ * the maximum each file may carry. The count only ever goes down, and it is now zero —
+ * G-906 retired the last six and G-287 the seventh (`/learn`'s strengthening table put the
+ * item's description on its id; it is a second line under the id now). The full value of a
+ * shortened id or hash is the element's accessible text (`ui/src/components/ShortId.tsx`), a
+ * truncated string is already whole in the DOM, or the value was made visible (the evidence
+ * pack's argv), so hover is never the only way to read anything (DL-048). An entry added here
+ * is a regression: explain the copy some other way instead.
  */
-const TITLE_ALLOWLIST: Record<string, number> = {
-  'components/LiveLog.tsx': 4,
-  'screens/Capability/CapabilityPage.tsx': 1,
-  'screens/Factory/FactoryPage.tsx': 1,
-  'screens/Learn/LearnPage.tsx': 1,
-  'screens/Ledger/LedgerPage.tsx': 1,
-  'screens/Repos/RepoDetail.tsx': 1,
-  'screens/Repos/RunnerOptsEditor.tsx': 1,
-  'screens/Runs/EvidenceDrawer.tsx': 6,
-  'screens/Runs/ReviewPanel.tsx': 2,
-  'screens/Runs/RunDetailPage.tsx': 1,
-  'screens/Runs/TaskDetailPage.tsx': 1,
-}
+const TITLE_ALLOWLIST: Record<string, number> = {}
 
 /**
  * A `title=` on a native element, or on a component that spreads its props onto one (`Hint`
  * included: `<Hint as="button" … title=>` renders the attribute). An arrow-function prop
  * (`onClick={() => …}`) inside the tag does not end the match.
+ *
+ * `Link` and `NavLink` are react-router's, and they spread onto an `<a>`, so a `title=` on one
+ * is as hover-only as a `title=` on an anchor. They were missing from this list until G-906
+ * emptied the allowlist and three `<Link title={fullId}>{shortId(…)}</Link>` cells — two on
+ * Oracle, one on Runs — turned out to be escaping the gate: the very pattern `ShortId`
+ * replaced everywhere else. A component that takes `title` as COPY rather than as an
+ * attribute (`Card`, `EmptyState`, `ErrorState`, `PageHeader`, `Section`, `Dialog`) is not
+ * listed and must not be — it renders a heading, not a tooltip.
  */
-const TITLE_RE = /<(?:a|abbr|button|code|div|img|input|li|p|span|svg|td|th|tr|time|strong|small|em|label|select|textarea|pre|dd|dt|h[1-6]|Button|LinkButton|AnchorButton|Pill|Tag|Hint)\b(?:[^>]|=>)*?\btitle=/g
+const TITLE_RE = /<(?:a|abbr|button|code|div|img|input|li|p|span|svg|td|th|tr|time|strong|small|em|label|select|textarea|pre|dd|dt|h[1-6]|Button|LinkButton|AnchorButton|Link|NavLink|Pill|Tag|Hint)\b(?:[^>]|=>)*?\btitle=/g
 
 const SOURCES = import.meta.glob(['../components/**/*.tsx', '../screens/**/*.tsx', '!**/*.test.tsx'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
@@ -181,7 +183,9 @@ function renderShell(role: Role, falseQ1 = 0) {
 
 describe('hint ratchet: the route table', () => {
   it('every screen route in App.tsx is enforced (SCREENS) or allowlisted — never both, never neither', () => {
-    const routes = Array.from(appSource.matchAll(/<Route\s+path="([^"]+)"/g), (m: RegExpMatchArray) => m[1]!).filter((p) => p !== '/login' && p !== '*' && !p.startsWith('/help'))
+    // every route App.tsx declares, with nothing skipped by name: /login, /help,
+    // /help/docs/:name and the catch-all are enforced like the rest since G-909
+    const routes = Array.from(appSource.matchAll(/<Route\s+path="([^"]+)"/g), (m: RegExpMatchArray) => m[1]!)
     expect(routes.length).toBeGreaterThan(15)
     for (const r of routes) {
       const enforced = r in SCREENS

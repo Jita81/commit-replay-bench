@@ -177,7 +177,7 @@ function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefin
         <VerdictPill route={cell.route} size="xs" reason={cell.reason} />
         <span className="num text-[10px] text-on-surface-muted">n={fmtInt(cell.n)}</span>
       </div>
-      {dim && <span className="truncate font-mono text-[10px] text-on-surface-muted" title={dim}>{dim}</span>}
+      {dim && <span className="truncate font-mono text-[10px] text-on-surface-muted">{dim}</span>}
       <div className="num flex items-baseline gap-1">
         <span className="text-[15px] font-semibold text-on-surface">{fmtPct(cell.point)}</span>
         <span className="text-[10px] text-on-surface-muted">

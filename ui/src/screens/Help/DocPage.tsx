@@ -22,6 +22,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useParams } from 'react-router'
 import { EmptyState } from '../../components/EmptyState'
 import { PageHeader } from '../../components/PageHeader'
+import { Hint } from '../../components/Hint'
 import { BackLink } from '../../components/govuk'
 import { DOC_TITLES, isDocName, loadDoc } from '../../help/docs'
 import { renderMarkdown } from '../../help/markdown'
@@ -58,16 +59,25 @@ export function DocPage() {
     return (
       <>
         <PageHeader eyebrow="Help" title="No guide with that name" />
-        <EmptyState glyph="∅" title="No guide with that name" reason={<span className="font-mono text-xs">{name}</span>} action={<Link to="/help">Glossary and guides</Link>} />
+        <EmptyState
+          glyph="∅"
+          title="No guide with that name"
+          reason={<span className="font-mono text-xs">{name}</span>}
+          action={
+            <Hint as={Link} id="link.help.index" to="/help" className="text-primary underline">
+              Glossary and guides
+            </Hint>
+          }
+        />
       </>
     )
   }
   return (
     <>
-      <BackLink to="/help">Back to glossary and guides</BackLink>
+      <BackLink to="/help" hint="link.help.back">Back to glossary and guides</BackLink>
       <PageHeader eyebrow="Help · guide" title={DOC_TITLES[name].title} purpose={DOC_TITLES[name].blurb} />
       {body?.name === name ? (
-        <article className="prose-doc max-w-[44em]">{body.nodes}</article>
+        <article className="prose-doc max-w-[44em]" data-prose>{body.nodes}</article>
       ) : (
         <p role="status" className="text-on-surface-muted">
           Loading the guide…

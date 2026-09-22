@@ -46,6 +46,7 @@ import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
+import { ShortId } from '../../components/ShortId'
 import { StatTile } from '../../components/StatTile'
 import { useAuth } from '../../lib/auth'
 import { fmtDate, fmtInt, fmtPct, shortId, wilson } from '../../lib/format'
@@ -218,8 +219,8 @@ function TasksTab({ name }: { name: string }) {
   const tasks = useRepoTasks(name, { limit: 500 })
   const columns = useMemo<Column<TaskSpec>[]>(
     () => [
-      { key: 'task_id', header: 'Task', hint: 'col.tasks.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <Link to={`/tasks/${encodeURIComponent(t.repo)}/${t.task_id}`} title={t.task_id}>{shortId(t.task_id)}</Link> },
-      { key: 'subject', header: 'Subject', hint: 'col.tasks.subject', sortValue: (t) => t.subject, cell: (t) => <span className="line-clamp-1" title={t.subject}>{t.subject}</span> },
+      { key: 'task_id', header: 'Task', hint: 'col.tasks.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <Link to={`/tasks/${encodeURIComponent(t.repo)}/${t.task_id}`}><ShortId value={t.task_id} /></Link> },
+      { key: 'subject', header: 'Subject', hint: 'col.tasks.subject', sortValue: (t) => t.subject, cell: (t) => <span className="line-clamp-1">{t.subject}</span> },
       { key: 'class', header: 'Class', hint: 'col.tasks.class', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
       { key: 'size', header: 'Size', hint: 'col.tasks.size', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
       { key: 'pool', header: 'Pool', hint: 'col.tasks.pool', sortValue: (t) => t.pool, cell: (t) => t.pool, hideBelowMd: true },
