@@ -15,7 +15,8 @@
  *               builder's own environment).
  * What it does: Mirrors a contract in which the API never returns a token value — every
  *               response is a `SecretStatus` (presence, at most the last four characters, who
- *               and when) or a `LoginCheck`. The verify call gets a 75 s timeout because the
+ *               and when), a viewer's `SecretPresence` (`{name, present}` only) or a
+ *               `LoginCheck`. The verify call gets a 75 s timeout because the
  *               server-side probe may take up to 60 s.
  * How:          One query keyed `['settings', 'secrets']`; the write hooks invalidate it.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -44,19 +45,31 @@ export const CLAUDE_CODE_TOKEN_PATH = '/settings/secrets/claude-code-token'
 /** The verify probe may take up to 60 s on the server; give the request room. */
 export const VERIFY_TIMEOUT_MS = 75_000
 
-/** `SecretStatus` (docs/API.md "Admin") — presence and provenance, never the value. */
-export interface SecretStatus {
+/** `SecretPresence` (docs/API.md "Admin") — what a viewer is served: exactly `{name, present}`. */
+export interface SecretPresence {
   name: string
   present: boolean
+}
+
+/** `SecretStatus` (docs/API.md "Admin") — presence and provenance, never the value (operator and above). */
+export interface SecretStatus extends SecretPresence {
   /** At most the last four characters of the value; `''` when absent. */
   fingerprint: string
   set_at: string
   set_by: string
 }
 
-/** `GET /settings/secrets`. */
+/** One item of `GET /settings/secrets`: the full status, or a viewer's presence-only copy. */
+export type SecretListItem = SecretStatus | SecretPresence
+
+/** Narrows an item to the full status — false for a viewer's `{name, present}`. */
+export function isSecretStatus(item: SecretListItem): item is SecretStatus {
+  return 'fingerprint' in item
+}
+
+/** `GET /settings/secrets` — a homogeneous list: statuses, or (for a viewer) presence-only items. */
 export interface SecretsStatusList {
-  items: SecretStatus[]
+  items: SecretStatus[] | SecretPresence[]
   /** Where the files live on the API host — admins only, `''` otherwise. */
   secrets_dir: string
 }
@@ -84,9 +97,9 @@ export function useSecrets(enabled = true): UseQueryResult<SecretsStatusList, Ap
   return useQuery({ queryKey: secretsKey, queryFn: () => api<SecretsStatusList>('/settings/secrets'), enabled, retry: false })
 }
 
-/** The Claude Code entry of the list, if any. */
-export function claudeCodeStatus(list: SecretsStatusList | undefined): SecretStatus | undefined {
-  return list?.items.find((s) => s.name === CLAUDE_CODE_TOKEN_NAME)
+/** The Claude Code entry of the list, if any — presence-only for a viewer. */
+export function claudeCodeStatus(list: SecretsStatusList | undefined): SecretListItem | undefined {
+  return (list?.items as SecretListItem[] | undefined)?.find((s) => s.name === CLAUDE_CODE_TOKEN_NAME)
 }
 
 /** `PUT /settings/secrets/claude-code-token` with `{token}`; the value leaves this hook and is never cached. */

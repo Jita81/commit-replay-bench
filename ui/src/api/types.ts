@@ -81,12 +81,32 @@ export interface PageParams {
 /** A health probe's verdict; `skipped` = not applicable in this deployment (e.g. no docker configured). */
 export type ProbeStatus = 'ok' | 'degraded' | 'down' | 'skipped'
 
-/** `crb.observability.probes.ProbeResult.to_dict()` */
+/** `crb.observability.probes.ProbeResult.to_dict()`; `data` is per probe — the `migrations` probe's is a {@link MigrationsHeadStatus}. */
 export interface Probe {
   name: string
   status: ProbeStatus
   detail: string
   data: Record<string, unknown>
+}
+
+/** `crb.store.migrate.HeadStatus.to_dict()` — the `migrations` probe's `data` (a type alias, not an interface: only a type literal is assignable to `Probe.data`'s `Record<string, unknown>`) (docs/API.md#health): where the store stands against the packaged revision chain. */
+export type MigrationsHeadStatus = {
+  /** The applied Alembic revision (comma-joined when the store reports several heads); `null` = no `alembic_version` row (empty or `create_all` store). */
+  database: string | null
+  /** The code's single head revision. */
+  head: string
+  /** True only when `database` IS `head`. */
+  at_head: boolean
+  /** For an unversioned store with crb tables: the revision its fingerprints correspond to; `null` otherwise. */
+  unversioned_at: string | null
+  /** Unversioned store whose schema equals the current models at head — `crb migrate` would only stamp it. */
+  matches_models: boolean
+}
+
+/** The `migrations` probe as served: `Probe` with its `data` typed. */
+export interface MigrationsProbe extends Probe {
+  name: 'migrations'
+  data: MigrationsHeadStatus
 }
 
 /** One worker in the `worker` probe's `data.workers[]` (docs/API.md#health): its check-in age against the staleness it promised. */

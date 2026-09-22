@@ -6,7 +6,11 @@ What it is:   ``/health``, ``/health/live``, ``/metrics``, ``/version`` and the 
               ``/settings`` view's test suite.
 What it does: Pins the health shape and its append-only probe (an UPDATE is proven refused), that
               a false-Q1 row bypassing the ledger is caught, that a stale worker heartbeat is
-              flagged, that health needs no auth; the role-aware sandbox probe (an ``api``
+              flagged, that the ``migrations`` probe is ok at head / degraded for an unstamped
+              ``create_all`` store / down (503, revisions named where applicable) when the
+              store is behind, ahead, empty or an older unversioned schema, that EVERY probe whose read raises serves one FIXED detail naming the
+              request id (the exception logged under that id, never served — CWE-209 on an
+              unauthenticated route), that health needs no auth; the role-aware sandbox probe (an ``api``
               process reports it ``skipped`` and is not degraded by it; ``worker`` and ``all``
               probe it; the gate is at the function); liveness as a database-only probe that
               never touches the sandbox (the A11 container) and ignores a false-Q1 ledger but
@@ -17,9 +21,11 @@ How:          ``create_app`` over a temp SQLite factory with probes patched at t
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/server/routes/system.py (under test), src/crb/observability/probes.py
-              (the probe results), src/crb/observability/metrics.py (``crb_false_q1_total`` must
-              read 0), tests/test_deploy_health_probes.py (the deploy artefacts pointing at these
-              endpoints), docs/API.md (health / metrics), docs/DEPLOYMENT.md
+              (the probe results), src/crb/store/migrate.py (``head_status`` behind the
+              ``migrations`` probe), src/crb/observability/metrics.py (``crb_false_q1_total``
+              must read 0), tests/test_deploy_health_probes.py (the deploy artefacts pointing at
+              these endpoints), docs/API.md (health / metrics), docs/DEPLOYMENT.md (the go-live
+              checklist that points at the ``migrations`` probe)
 Tested by:    tests/test_server_system.py
 Touch when:   a probe is added (its role gating and its degraded / down case; the Helm probes in
               tests/test_deploy_health_probes.py if it changes liveness); a metric series is added.
@@ -29,12 +35,14 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+from alembic import command
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy.orm import Session, sessionmaker
@@ -43,15 +51,32 @@ from crb.core.ledger import BELT_SET_V3_LEGACY
 from crb.core.routing import POLICY_VERSION
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.observability import metrics
-from crb.observability.probes import ProbeResult
+from crb.observability.probes import ProbeResult, failure_detail
 from crb.server.app import API_PREFIX, create_app
-from crb.server.routes.system import ledger_counts, probe_sandbox, process_role
+from crb.server.routes.system import (
+    collect_health,
+    ledger_counts,
+    migrations_result,
+    probe_migrations,
+    probe_sandbox,
+    process_role,
+)
 from crb.server.settings import Settings
+from crb.store import migrate
 from crb.store.db import make_engine, make_session_factory
 from crb.store.models import Grade, Repo, Run, WorkerRow
 
 ROOT_PW = "correct-horse-battery-staple"
-PROBE_NAMES = {"db", "append_only", "ledger", "sandbox", "toolchains", "builders", "worker"}
+PROBE_NAMES = {
+    "db",
+    "migrations",
+    "append_only",
+    "ledger",
+    "sandbox",
+    "toolchains",
+    "builders",
+    "worker",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -355,6 +380,160 @@ class TestHealth:
         worker = _probe(client.get(f"{API_PREFIX}/health").json(), "worker")
         assert worker["status"] == "ok" and worker["data"]["unconfirmed_containers"] == 0
 
+    def test_migrations_probe_is_degraded_for_an_unstamped_create_all_store(
+        self, client: TestClient
+    ) -> None:
+        """The lifespan's ``init_db`` builds a complete schema with no ``alembic_version``:
+        complete, so not 503 — but unstamped until ``crb migrate`` runs, and the detail says so."""
+        r = client.get(f"{API_PREFIX}/health")
+        assert r.status_code == 200
+        m = _probe(r.json(), "migrations")
+        head = migrate.head_revision()
+        assert m["status"] == "degraded"
+        assert m["detail"] == (
+            f"schema matches head {head} but carries no alembic_version (a create_all store) "
+            "— run `crb migrate` to stamp it"
+        )
+        assert m["data"] == {
+            "database": None,
+            "head": head,
+            "at_head": False,
+            "unversioned_at": head,
+            "matches_models": True,
+        }
+
+    def test_migrations_probe_is_ok_at_head_and_down_when_behind(
+        self, tmp_path: Path, factory: sessionmaker[Session]
+    ) -> None:
+        """A migrated store is ``ok`` (``database at <head> = code head``); one stamped behind
+        answers 503 with BOTH revisions and the fix in the detail — a half-migrated database
+        can no longer pass the go-live checklist."""
+        url = f"sqlite:///{tmp_path / 'sys.db'}"
+        migrate.upgrade(url)
+        head = migrate.head_revision()
+        with TestClient(create_app(make_settings(tmp_path), factory)) as c:
+            r = c.get(f"{API_PREFIX}/health")
+            assert r.status_code == 200
+            m = _probe(r.json(), "migrations")
+            assert m["status"] == "ok" and m["detail"] == f"database at {head} = code head"
+            assert m["data"]["database"] == head and m["data"]["at_head"] is True
+
+            command.stamp(migrate.alembic_config(url), migrate.INITIAL_REVISION)
+            r = c.get(f"{API_PREFIX}/health")
+            assert r.status_code == 503
+            body = r.json()
+            assert body["status"] == "down"
+            m = _probe(body, "migrations")
+            assert m["status"] == "down"
+            assert m["detail"] == (
+                f"database at {migrate.INITIAL_REVISION}, code head {head} — run `crb migrate` "
+                "(the migrate Job / `python -m crb.store.migrate upgrade`)"
+            )
+            assert m["data"]["database"] == migrate.INITIAL_REVISION
+            # liveness never reads the migration head: a pod behind stays up to be migrated
+            assert c.get(f"{API_PREFIX}/health/live").status_code == 200
+
+    def test_migrations_result_names_an_empty_and_an_older_store(self) -> None:
+        """The shared renderer (``crb doctor`` uses it too): an empty store and an older
+        release's unversioned schema are ``down`` and name what was found."""
+        empty = migrations_result(migrate.HeadStatus(None, "0006", False))
+        assert empty.status == "down"
+        assert empty.detail.startswith("database not migrated (empty), code head 0006 — run")
+        older = migrations_result(migrate.HeadStatus(None, "0006", False, unversioned_at="0001"))
+        assert older.status == "down"
+        assert "unversioned schema at 0001" in older.detail and "crb migrate" in older.detail
+        ahead = migrations_result(migrate.HeadStatus("0007", "0006", False))
+        assert ahead.status == "down" and "database at 0007, code head 0006" in ahead.detail
+
+    def test_migrations_probe_hides_the_exception_from_the_unauthenticated_route(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """CWE-209: when the head cannot be read the detail is the fixed sentence — never
+        the exception's type or message (a driver error can carry a path, a DSN or SQL) —
+        and the exception goes to the log instead."""
+        secret = "postgresql://crb:hunter2@db.internal/crb — relation alembic_version"
+
+        def _factory() -> Session:
+            raise RuntimeError(secret)
+
+        with caplog.at_level(logging.ERROR, logger="crb.observability.probes"):
+            r = probe_migrations(_factory, request_id="rid-1")  # type: ignore[arg-type]
+        assert r.status == "down"
+        assert r.detail == failure_detail("migrations", "rid-1")
+        assert r.detail == "migrations could not be read — see the API log, request id rid-1"
+        assert "RuntimeError" not in r.detail and "hunter2" not in r.detail
+        assert r.data == {}
+        assert any(
+            rec.message == "migrations probe failed (request_id=rid-1)" and rec.exc_info
+            for rec in caplog.records
+        )
+
+    def test_every_raising_probe_serves_the_fixed_detail_and_logs_under_the_request_id(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The whole ``/health`` body, not one probe: a store that raises reaches ``db``,
+        ``migrations``, ``append_only``, ``ledger`` and ``worker``; a probe module that
+        raises reaches ``sandbox``, ``toolchains`` and ``builders``. Each serves ONE fixed
+        sentence (``<probe> could not be read — see the API log, request id …``) with
+        empty ``data``; the driver message — which for PostgreSQL carries host, user and
+        DSN — appears nowhere in the body and once per probe in the log, with the id."""
+        secret = (
+            'connection to server at "db.internal" failed: FATAL password authentication '
+            'failed for user "crb" (postgresql://crb:hunter2@db.internal/crb)'
+        )
+
+        def _factory() -> Session:
+            raise RuntimeError(secret)
+
+        def _boom(*_: Any, **__: Any) -> ProbeResult:
+            raise OSError("/var/run/docker.sock: permission denied for uid 10001")
+
+        for fn in ("probe_docker", "probe_toolchains", "probe_builders"):
+            monkeypatch.setattr(f"crb.server.routes.system.probes.{fn}", _boom)
+        settings = make_settings(tmp_path, sandbox={"executor": "docker"})
+        with caplog.at_level(logging.ERROR, logger="crb.observability.probes"):
+            body = collect_health(_factory, settings, role="all", request_id="req-42")  # type: ignore[arg-type]
+        assert body["status"] == "down"
+        assert {p["name"] for p in body["probes"]} == PROBE_NAMES
+        for p in body["probes"]:
+            assert p["status"] == "down", p
+            assert p["detail"] == failure_detail(p["name"], "req-42"), p
+            assert p["detail"].endswith("— see the API log, request id req-42"), p
+            assert p["data"] == {}, p
+        served = json.dumps(body)
+        for leak in ("RuntimeError", "OSError", "hunter2", "db.internal", "docker.sock", "FATAL"):
+            assert leak not in served, leak
+        logged = [rec for rec in caplog.records if rec.message.endswith("(request_id=req-42)")]
+        assert sorted(rec.message.split(" probe failed")[0] for rec in logged) == sorted(
+            PROBE_NAMES
+        )
+        assert all(rec.exc_info and getattr(rec, "request_id", "") == "req-42" for rec in logged)
+        assert any("hunter2" in str(rec.exc_info[1]) for rec in logged if rec.exc_info)
+
+    def test_the_route_stamps_the_caller_s_request_id_into_the_fixed_detail(
+        self, client: TestClient
+    ) -> None:
+        """Through HTTP: the id the middleware assigned (or accepted from ``X-Request-ID``)
+        is the one the detail names and the response header echoes, so an operator can
+        find the logged exception; the driver's message is not in the body."""
+        secret = 'FATAL: password authentication failed for user "crb" (host db.internal)'
+
+        def _dead() -> Session:
+            raise RuntimeError(secret)
+
+        client.app.state.session_factory = _dead
+        r = client.get(f"{API_PREFIX}/health", headers={"X-Request-ID": "trace-abc"})
+        assert r.status_code == 503 and r.headers["X-Request-ID"] == "trace-abc"
+        body = r.json()
+        for name in ("db", "migrations", "append_only", "ledger", "worker"):
+            assert _probe(body, name)["detail"] == failure_detail(name, "trace-abc")
+            assert _probe(body, name)["data"] == {}
+        assert "RuntimeError" not in r.text and "db.internal" not in r.text
+        # the id is assigned when the caller sends none — and still named
+        r = client.get(f"{API_PREFIX}/health")
+        rid = r.headers["X-Request-ID"]
+        assert rid and _probe(r.json(), "db")["detail"] == failure_detail("db", rid)
+
     def test_health_needs_no_auth(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/health").status_code == 200
         assert client.get(f"{API_PREFIX}/health/live").status_code == 200
@@ -471,7 +650,9 @@ class TestLiveness:
         assert r.status_code == 503
         body = r.json()
         assert body["status"] == "down" and _probe(body, "db")["status"] == "down"
-        assert "OperationalError" in _probe(body, "db")["detail"]
+        # the same fixed sentence as the deep probe: the driver's message stays in the log
+        assert _probe(body, "db")["detail"] == failure_detail("db", r.headers["X-Request-ID"])
+        assert "OperationalError" not in r.text
 
 
 class TestMetrics:
