@@ -71,7 +71,7 @@ describe('factoryStatusFor', () => {
 describe('HomePage', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('derives the seven tasks from the API and counts the completed ones', async () => {
+  it('derives the eight tasks from the API and counts the completed ones', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'admin' },
       'GET /github/app': { configured: true, app_slug: 'crb', install_url: 'x', api_url: 'y', installations: [{ id: 1, account_login: 'acme', account_type: 'Organization', repository_selection: 'selected', html_url: '', suspended: false, permissions: {}, can_deliver: false, recorded_by: '', updated: '' }] },

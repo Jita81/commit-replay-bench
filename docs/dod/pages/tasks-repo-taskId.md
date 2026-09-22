@@ -1,0 +1,47 @@
+---
+id: dod.page.tasks-repo-taskid
+level: page
+name: Task detail
+scope: /tasks/:repo/:taskId
+parent: dod.journey.manufacture
+children: []
+persons: [viewer, operator, approver, admin]
+owner: ui
+status: partial                # WRITTEN BY THE CHECKER — never by hand
+updated: 2026-09-22
+---
+
+# Task detail
+
+**Purpose.** One replayable commit — or one factory item — with its specification (the failing test, the source files, the belt scope) and every graded trial against it (`help.ts` About copy).
+
+**Entry → exit.** Arrives from a factory item's evidence trail, from the repository's Tasks tab, from a Ledger or Oracle row, or from the Sign-off page's "Task" button on the row an approver is about to attest. The person leaves with the item's spec read, the graded trials listed with their belts, cost, latency, provenance and standing review verdict, and — from any row — the evidence drawer or the run that produced it.
+
+**Non-goals.** It does not rate the cell: a trial is a single attempt and the rate with its n and interval lives on the map. It records no verdict and starts no run; the review is written on `/runs/:id` and the item is worked from `/factory`. It shows no pull request and no merge outcome: the item's delivery chain is on the Factory page.
+
+## Definition of done
+
+| id | category | criterion | evidence | state | gap |
+|---|---|---|---|---|---|
+| tasks-repo-taskid.purpose.1 | PURPOSE | The About block states the page's job in one sentence, and the header says which of the two things this is — a factory item (with its backlog id and where the task id comes from) or a replayed commit | `hint:about:/tasks/:repo/:taskId` · `vitest:ui/src/screens/Runs/TaskDetailPage.test.tsx::"a factory item says so, with its backlog id and where the task id comes from (J-FAC-18)"` · `vitest:ui/src/screens/Runs/TaskDetailPage.test.tsx::"a replayed commit keeps the commit wording"` | met | |
+| tasks-repo-taskid.entry-exit.2 | ENTRY-EXIT | The page is reachable from the row that names the task (repository Tasks tab, Ledger, Oracle, Sign-off) and every grade row's Run column returns to `/runs/:id`; a task that cannot be read says so and offers a retry rather than a blank screen | `route:GET /tasks/{repo}/{task_id}` · `spec:ui/e2e/walkthrough/09-review.spec.ts::"the API serves the review hash-chained"` · `code:ui/src/screens/Runs/TaskDetailPage.tsx::TaskDetailPage` | met | |
+| tasks-repo-taskid.entry-exit.3 | ENTRY-EXIT | The person can get back to the repository (or its Tasks tab) in one click from this page | `absent` | unmet | G-293 |
+| tasks-repo-taskid.truth.4 | TRUTH | Every number on the page is a single trial's own fact, not a rate: each grade row carries its belts, clean state, cost, latency, provenance (apparatus version and belt set) and its evidence pack hash, and the About block says the cell's rate is on the map, not here | `route:GET /tasks/{repo}/{task_id}` · `hint:about:/tasks/:repo/:taskId` · `hint:id:col.task.provenance` · `spec:ui/e2e/walkthrough/09-review.spec.ts::"the API serves the review hash-chained"` | met | |
+| tasks-repo-taskid.truth.5 | TRUTH | The spec block states what the oracle is worth: the RED-at-parent check and the gold-clean check are shown with their result (and the gold note when it failed), never assumed, and the full spec is readable as stored | `hint:id:tile.task.red_gold` · `hint:id:tile.task.full_spec` · `code:ui/src/screens/Runs/TaskDetailPage.tsx::TaskDetailPage` | met | |
+| tasks-repo-taskid.truth.6 | TRUTH | A row with no graded trial says "Not graded yet" with the reason for its kind (the factory has not built the item / no run has replayed the task), rather than an empty table | `vitest:ui/src/screens/Runs/TaskDetailPage.test.tsx::"a factory item says so, with its backlog id and where the task id comes from (J-FAC-18)"` · `code:ui/src/screens/Runs/TaskDetailPage.tsx::TaskDetailPage` | met | |
+| tasks-repo-taskid.actions.7 | ACTIONS | The page's only actions are reads and each names what it opens: the evidence hash opens the drawer on that row's pack, a standing verdict pill opens the same drawer anchored to the review, and an unreviewed row says "not reviewed" instead of offering a control | `route:GET /evidence/{pack_hash}` · `hint:id:col.task.evidence` · `hint:id:col.task.review` · `spec:ui/e2e/walkthrough/09-review.spec.ts::"the API serves the review hash-chained"` | met | |
+| tasks-repo-taskid.explanation.8 | EXPLANATION | Every tile, column and pill carries a hint and the ratchet enforces the route for a viewer with at least 16 hinted elements; one element answers on mouse-over | `hint:ratchet:/tasks/:repo/:taskId` · `hint:about:/tasks/:repo/:taskId` · `vitest:ui/src/help/hints-ratchet.test.tsx::"${pattern} as ${role}: every element carries a resolved hint"` · `vitest:ui/src/help/hints-hover.instrument.test.tsx::"${route}: mouse-over on ${id} opens its bubble with the registry text"` | met | |
+| tasks-repo-taskid.explanation.9 | EXPLANATION | No element on the page explains itself only through a browser tooltip | `absent` | unmet | G-906 |
+| tasks-repo-taskid.evidence.10 | EVIDENCE | The route has unit tests for both kinds of task and is visited live: the review walkthrough opens it to read the recorded verdict, and the screens sweep renders it for every persona at 375 and 1280 with its About block | `vitest:ui/src/screens/Runs/TaskDetailPage.test.tsx::"a factory item says so, with its backlog id and where the task id comes from (J-FAC-18)"` · `vitest:ui/src/screens/Runs/TaskDetailPage.test.tsx::"a replayed commit keeps the commit wording"` · `spec:ui/e2e/walkthrough/09-review.spec.ts::"the API serves the review hash-chained"` · `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` | met | |
+| tasks-repo-taskid.roles.11 | ROLES | The page is a viewer read for every role: `GET /tasks/{repo}/{task_id}`, `GET /reviews` and `GET /evidence/{pack_hash}` are viewer routes, the ratchet declares the route for the viewer role only, and no element on the page writes anything | `route:GET /tasks/{repo}/{task_id}` · `route:GET /evidence/{pack_hash}` · `hint:ratchet:/tasks/:repo/:taskId` · `test:tests/test_server_routes_reviews.py::test_rbac` | met | |
+| tasks-repo-taskid.operations.12 | OPERATIONS | The routes behind the page are API.md rows in the Tasks / grades / evidence section, and a pack the server cannot verify is reported as unverified rather than hidden | `doc:docs/API.md#tasks-grades-evidence` · `route:GET /evidence/{pack_hash}` | met | |
+| tasks-repo-taskid.operations.13 | OPERATIONS | An unknown task has a way forward: it reads as "no such task" with the route back to the repository, rather than an error envelope with a retry that will fail again | `absent` | unmet | G-294 |
+| tasks-repo-taskid.accessibility.14 | ACCESSIBILITY | The route renders for every persona at 375 and 1280 with a hint bubble open and axe (WCAG 2.1 AA) clean on the sampled hints | `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` | partial | G-292 |
+| tasks-repo-taskid.accessibility.15 | ACCESSIBILITY | The route is in the full-page axe sweep with real rows, and the grade table is readable at 375 px without sideways scroll | `absent` | unmet | G-292 |
+| tasks-repo-taskid.non-goals.16 | NON-GOALS | The page states that a trial is a single attempt and the cell's rate is on the map, not here | `hint:about:/tasks/:repo/:taskId` · `vitest:ui/src/components/Help.test.tsx::"says, on each screen whose definition of done quotes it, the sentence that record quotes"` | met | |
+
+## Gaps
+- **G-292** — `/tasks/:repo/:taskId` is not in the 07 axe sweep (which visits Settings, Repos, Runs, Run detail, Capability, Ledger, Sign-off and the journey screens), so only 11-screens' sampled-hint axe covers it and nothing asserts the 11-column grade table at 375 px · add the route to the 07 sweep against a task with real grade rows and assert no sideways scroll at 375 · ui
+- **G-906** — six pages still explain a value with a native `title=` tooltip — the Ledger's task and row-hash cells, the run-detail route, the repository Tasks tab, the capability cell, the Factory backlog hash and the task-detail evidence hash — which no keyboard or touch user can open · render each through the hint layer (DL-048) and empty `TITLE_ALLOWLIST` · ui
+- **G-293** — the page names the repository in the eyebrow as text only and offers no link back to it or to its Tasks tab, so the only way back is the browser · make the eyebrow's repository a link to `/repos/:name` and add a "Back to tasks" link beside the header · ui
+- **G-294** — a task id that does not exist renders the API's error envelope with a retry rather than a named way forward · render a 404 from `GET /tasks/{repo}/{task_id}` as an EmptyState ("no such task in this repository") with a link to the repository's Tasks tab · ui

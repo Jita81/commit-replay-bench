@@ -1,0 +1,57 @@
+---
+id: dod.page.capability
+level: page
+name: Capability map (Map grid)
+scope: /capability
+parent: dod.journey.read-the-map-and-decide
+children: []
+persons: [viewer, operator, approver, admin]
+owner: ui
+status: partial                # WRITTEN BY THE CHECKER — never by hand
+updated: 2026-09-22
+---
+
+# Capability map (Map grid)
+
+**Purpose.** The full map for one repository: one cell per class and size (and, projected,
+language or model) with its rate, interval, false-Q1 count, cost, latency, oracle strength and
+the route the evidence licenses. (`help.ts` About copy; eyebrow `Instrument · Map grid`.)
+
+**Entry → exit.** Arrives from Baseline's "Open the full map" (`?repo=` carried), the
+repository page's next steps, or the instrument nav "Map grid" (operator and above; lands on
+"Choose a repo" because the route does not default to the latest repository). Leaves with one
+cell's full evidence (route, reason, n and n_tasks, point, Wilson interval against the policy
+ticks, model point, failure split, false-Q1, cost, latency, oracle strength, tier) and one
+of: "rows" (`/ledger?repo=&capability_class=&size=`), "routing" (`/routing?repo=`), Export CSV
+(`GET /ledger/export?format=csv&repo=`); with nothing measured, Connect or (operator) Start a
+replay run.
+
+**Non-goals.** No repository-wide rate: the coverage tile is a change-volume-weighted share
+and says it carries no Wilson interval. Cells with more than one apparatus version are shown
+as mixed, never averaged. An empty cell reads "not measured", never 0. Cost and latency are
+means only until the API serves an interval. Nothing is signed or run from this page.
+
+## Definition of done
+
+| id | category | criterion | evidence | state | gap |
+|---|---|---|---|---|---|
+| capability.purpose.1 | PURPOSE | The About block states the page's job in one sentence and the eyebrow reads "Instrument · Map grid"; the page's own purpose line matches it | `hint:about:/capability` · `code:ui/src/screens/Capability/CapabilityPage.tsx::CapabilityPage` | met | |
+| capability.entry-exit.2 | ENTRY-EXIT | With no `?repo=` the empty state leads to Connect; with nothing measured a viewer reads who starts the run and an operator gets the link; the open cell offers "rows" and "routing" with the repository and cell carried | `vitest:ui/src/screens/Capability/CapabilityPage.test.tsx::"shows the designed empty state when no repo is chosen"` · `vitest:ui/src/screens/Capability/CapabilityPage.test.tsx::"a viewer on an unmeasured repo reads who starts the run"` · `hint:id:button.capability.rows` · `hint:id:button.capability.routing` | met | |
+| capability.entry-exit.3 | ENTRY-EXIT | Arriving from the instrument nav with one repository connected lands on that repository's map, as Baseline, Factory and Sign-off do | `absent` | unmet | G-100 |
+| capability.truth.4 | TRUTH | Every measured cell shows route, n, point, the 95% Wilson interval, false-Q1 and its apparatus version in its accessible label; a thin cell (n below 10) routes calibrate whatever its point; an absent cell reads NOT_YET_MEASURED; a false-Q1 cell is red and raises an alert; a legacy belt set is a separate apparatus; the map read refuses with 409 over a false-Q1 row | `spec:ui/e2e/walkthrough/05-replay-fake.spec.ts::"the Capability page: the measured cell carries n, a Wilson interval and route calibrate"` · `vitest:ui/src/screens/Capability/CapabilityPage.test.tsx::"renders NOT_YET_MEASURED for absent cells and a red false-Q1 cell"` · `test:tests/test_server_routes_capability.py::test_thin_cell_calibrates` · `test:tests/test_server_routes_capability.py::test_legacy_cell_is_a_separate_apparatus` · `test:tests/test_server_routes_capability.py::test_false_q1_row_refuses_the_map` · `route:GET /routes?repo=[&by=]` | met | |
+| capability.truth.5 | TRUTH | The summary tiles carry their method: coverage says it is change-volume-weighted with no Wilson interval, measured cells reads k of total with the apparatus, false-Q1 reads the ledger total; the open cell recomputes the Wilson interval and flags any drift from the server's; the controls pill names the verdict state (passed, failed, thin, unmeasured, escaped) | `vitest:ui/src/screens/Capability/CapabilityPage.test.tsx::"shows the failed controls pill, the split and the model point next to the point"` · `vitest:ui/src/screens/Capability/CapabilityPage.test.tsx::"renders unmeasured, thin and escaped verdicts as their own pills"` · `test:tests/test_capability.py::test_tac_unmeasured_cells_are_not_yet_measured` · `hint:id:stat.capability.coverage` · `hint:id:banner.capability.ci_drift` | met | |
+| capability.truth.6 | TRUTH | The open cell's cost and latency tiles carry an interval and the number of attempts with a known cost | `hint:id:stat.capability.cost` · `measured:n = 2 economics fields with no interval served, method: by inspection of src/crb/server/routes/capability.py cell_out, apparatus 2.2` | partial | F35 |
+| capability.actions.7 | ACTIONS | Opening a cell shows its detail card with a close button; the "rows" and "routing" links carry the cell; Export CSV starts a download and the page says so, and says what to do when the export fails | `spec:ui/e2e/walkthrough/05-replay-fake.spec.ts::"the Capability page: the measured cell carries n, a Wilson interval and route calibrate"` · `hint:id:button.capability.export` · `hint:id:button.capability.close` | partial | G-101 |
+| capability.explanation.8 | EXPLANATION | Every tile, header, cell, legend entry and detail line carries a registry hint with no native title; the ratchet enforces the route (viewer, operator) at 28 hinted elements and the open-cell variant at 40; the coverage tile opens on hover with the registry copy | `hint:ratchet:/capability` · `hint:about:/capability` · `vitest:ui/src/help/hints-ratchet.test.tsx::"${v.name} as ${role}: every element carries a resolved hint"` · `vitest:ui/src/help/hints-hover.instrument.test.tsx::"${route}: mouse-over on ${id} opens its bubble with the registry text"` · `vitest:ui/src/screens/Capability/CapabilityPage.test.tsx::"a tile carries no hover titles: its five numbers are described by one legend"` | partial | G-906 |
+| capability.evidence.9 | EVIDENCE | The grid, the empty states, the error envelope, the pills and the split are unit-tested; the server's cell statistics and routing are tested at the route; a tier-1 walkthrough asserts the measured cell's n, Wilson interval and route on the live stack and the route renders for every role at 375 and 1280 with axe clean | `vitest:ui/src/screens/Capability/CapabilityPage.test.tsx::"renders the error envelope honestly when the map fails"` · `test:tests/test_server_routes_capability.py::test_shape_measured_cells_only` · `spec:ui/e2e/walkthrough/05-replay-fake.spec.ts::"the Capability page: the measured cell carries n, a Wilson interval and route calibrate"` · `spec:ui/e2e/walkthrough/07-settings-and-a11y.spec.ts::"Capability, Ledger and Sign-off have no WCAG 2.1 AA violations"` · `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` | met | |
+| capability.roles.10 | ROLES | The map and the export are served to a signed-in viewer (API.md role column); the replay link in the empty state is offered only to an operator; the Export CSV button is offered to the role the About block says it is for | `test:tests/test_server_routes_capability.py::test_viewer_reads` · `vitest:ui/src/screens/Capability/CapabilityPage.test.tsx::"a viewer on an unmeasured repo reads who starts the run"` · `code:src/crb/server/routes/capability.py::capability_map` | partial | G-102 |
+| capability.operations.11 | OPERATIONS | The map read and the export are documented in API.md; the guide says how to read every column and what a stop condition is; `crb_false_q1_total` is recounted on every scrape and `/health`, the alert rule fires on it and the stop-condition banner sits above this page with a way forward | `route:GET /routes?repo=[&by=]` · `code:src/crb/server/routes/capability.py::capability_map` · `doc:docs/OPERATOR.md#4-read-the-capability-map` · `doc:docs/OPERATOR.md#8-stop-conditions` · `doc:docs/DEPLOYMENT.md#92-alert-rules` · `code:src/crb/observability/metrics.py::"crb_false_q1_total"` · `hint:id:banner.shell.stop_condition` | met | |
+| capability.accessibility.12 | ACCESSIBILITY | Renders for every role at 375 (top bar at most two rows) and 1280 with axe WCAG 2.1 AA clean while a hint bubble is open and with a measured cell on screen; the grid scrolls inside a labelled focusable region; a keyboard-only pass opens a cell and its hints; reduced motion is honoured | `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` · `spec:ui/e2e/walkthrough/07-settings-and-a11y.spec.ts::"Capability, Ledger and Sign-off have no WCAG 2.1 AA violations"` · `code:ui/src/index.css::"@media (prefers-reduced-motion: reduce)"` | partial | G-905 |
+| capability.non-goals.13 | NON-GOALS | The About block says an empty cell is not measured, never zero, that mixed apparatus versions are flagged and never averaged, and the coverage tile says it carries no interval | `hint:about:/capability` · `hint:id:stat.capability.coverage` | met | |
+
+## Gaps
+- **G-905** — the 11-screens keyboard pass tabs through `/results` only and the `scrollWidth` check exists for `/factory` only, so `/connect/:name/measure`, `/oracle`, `/capability`, `/decisions`, `/routing`, `/signoff` and `/factory` have no keyboard-only assertion and no "no horizontal scroll at 375" assertion · loop the tab pass and a `scrollWidth <= clientWidth` check over those routes in `11-screens.spec.ts` · ui
+- **G-100** — /capability (and /routing) call `useRepoParam()` without `defaultToLatest`, so the instrument nav lands on "Choose a repo" even when one repository exists; Baseline, Factory and Sign-off default to the latest · pass `{ defaultToLatest: true }` in CapabilityPage and RoutingPage · ui
+- **G-101** — Export CSV is a bare anchor download with no in-page success or failure state · fetch to a blob with a live-region status line ("Exporting…", "Downloaded n rows", or the error envelope with retry) · ui
+- **G-102** — Export CSV renders for every role (no `can()` gate) while help.ts attributes it to the operator · either gate the button with `can('operator')` or correct the About copy to "anyone signed in" · ui
+- **G-906** — six pages still explain a value with a native `title=` tooltip — the Ledger's task and row-hash cells, the run-detail route, the repository Tasks tab, the capability cell, the Factory backlog hash and the task-detail evidence hash — which no keyboard or touch user can open · render each through the hint layer (DL-048) and empty `TITLE_ALLOWLIST` · ui

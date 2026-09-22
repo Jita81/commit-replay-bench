@@ -1,0 +1,52 @@
+---
+id: dod.page.repos-name
+level: page
+name: Repository detail
+scope: /repos/:name
+parent: dod.journey.connect-a-repository
+children: []
+persons: [viewer, operator, approver, admin]
+owner: ui
+status: partial                # WRITTEN BY THE CHECKER — never by hand
+updated: 2026-09-22
+---
+
+# Repository detail
+
+**Purpose.** "The repository as an instrument: its toolchain probe, mined tasks, change
+profile and the configuration that governs how its commits are replayed." (About block,
+`help.ts`; eyebrow `Instrument · Repositories`; four tabs — Overview, Change profile, Tasks,
+Configuration — the tab in the URL as `?tab=`.)
+
+**Entry → exit.** Arrive from a Repos row, from Home task 3 *Confirm its shape*, from the
+walk's *Configuration* button, from the Measure page's no-gold note, or by the `?tab=config`
+deep link. Leave with the shape saved (Configuration → *Save*, then *Run probe now* inline) or
+a probe enqueued (*Probe now* → `/runs/:id`); *Next steps* reach the walk (`/connect/:name`),
+the Factory, the map, the Oracle and Runs; a task row opens `/tasks/:repo/:taskId`. For this
+journey the person leaves with the probe pill reading OK and the runner's own summary.
+
+**Non-goals.** Does not walk the six stages (the walk); does not show run logs (the run
+page); does not show rates with intervals beyond gold-clean (the Baseline); the change
+profile is a census, not a sample, so it carries no interval.
+
+## Definition of done
+
+| id | category | criterion | evidence | state | gap |
+|---|---|---|---|---|---|
+| repos-name.purpose.1 | PURPOSE | The About block states the job in one sentence; the tab in the URL opens on load and a tab click writes it back, so a link to the Configuration tab lands on it | `hint:about:/repos/:name` · `vitest:ui/src/screens/Repos/RepoDetail.test.tsx::"?tab=config opens the Configuration tab"` | met | |
+| repos-name.entry-exit.2 | ENTRY-EXIT | Next steps reach the walk, the Factory, the map, the Oracle and Runs for this repository; Probe now and Start a run land on the run page; an empty Tasks tab offers a mine run; an unknown name shows a Not found state that says what to do | `vitest:ui/src/screens/Repos/RepoDetail.test.tsx::"Next steps reach the Connection walk and the Factory for this repository"` · `spec:ui/e2e/walkthrough/02-repo-onboard.spec.ts::"Probe now → run page: clone, (setup), probe on the live log"` | partial | G-220 |
+| repos-name.truth.3 | TRUTH | The three Overview tiles carry n and apparatus; Gold-clean is a percentage with a Wilson 95% interval over the mined tasks and an apparatus line naming clean, failed and unchecked counts; a tile with n = 0 is a muted dash, never a fabricated zero | `vitest:ui/src/components/StatTile.test.tsx::"always shows value, n, CI and apparatus — never a bare number"` · `vitest:ui/src/components/StatTile.test.tsx::"renders an honest unmeasured tile when n is 0 (muted, dash, no fabricated zero)"` · `code:ui/src/screens/Repos/RepoDetail.tsx::Overview` · `route:GET /repos/{name}` | met | |
+| repos-name.truth.4 | TRUTH | The probe pill reads the probe's own status (not yet run, ok, degraded, down, or the run's status while queued) with the runner's summary as its detail and the run it came from linked; the change profile's shares are exact census fractions and its caption says there is no interval | `spec:ui/e2e/walkthrough/02-repo-onboard.spec.ts::"back on the repo page the probe pill is OK with the runner summary"` · `route:GET /repos/{name}/profile` · `route:GET /repos` | met | |
+| repos-name.actions.5 | ACTIONS | Probe now reads "Enqueuing…" while pending, lands on the run page on 201, and renders a compact error (including 503 queue_unavailable) under the card; Start a run opens the run form and lands on the run page | `spec:ui/e2e/walkthrough/02-repo-onboard.spec.ts::"Probe now → run page: clone, (setup), probe on the live log"` · `route:POST /repos/{name}/probe` · `test:tests/test_server_routes_repos.py::test_enqueues_probe_run` · `test:tests/test_server_routes_repos.py::test_404_and_queue_unavailable` | met | |
+| repos-name.actions.6 | ACTIONS | Configuration: Save is disabled until something changes, sends only the changed fields, and the toast names them and says they were recorded as a redacted diff; inline validation refuses what the API refuses in the API's words; a 422 renders the envelope; Reset restores the stored config | `vitest:ui/src/screens/Repos/RepoConfigTab.test.tsx::"sends ONLY the changed fields, shows the toast, and the audit trail gains the diff event"` · `vitest:ui/src/screens/Repos/RepoConfigTab.test.tsx::"validation mirrors the API: suffix mode needs suffixes, a non-integer cap, a runner option the runner can't read"` · `vitest:ui/src/screens/Repos/RepoConfigTab.test.tsx::"renders the server 422 envelope when the API refuses the config"` · `spec:ui/e2e/walkthrough/repo-config.spec.ts::"Configuration tab: jest shape with extra_args + an explicit belt list"` · `route:PUT /repos/{name}` | met | |
+| repos-name.actions.7 | ACTIONS | Run probe now on the Configuration tab is disabled while the form is dirty (a probe runs the stored config), follows the run inline as a live-region pill, and ends green with the runner's summary or red with the run's error as the reason | `vitest:ui/src/screens/Repos/RepoConfigTab.test.tsx::"Run probe after a save enqueues the probe and reports the terminal result inline"` · `vitest:ui/src/screens/Repos/RepoConfigTab.test.tsx::"a failed probe is red with the run error as the reason"` · `spec:ui/e2e/walkthrough/repo-config.spec.ts::"back to the Python shape with the interpreter pinned"` | met | |
+| repos-name.explanation.8 | EXPLANATION | Every tile, tab, pill, column, button and field carries a hint the ratchet enforces (Overview floor 14; the profile, tasks and config tabs as variants); the gold tile's hint opens on hover; the About block links Configure a repository and Services the oracle needs; the runner-options sub-form offers exactly the keys the runner reads | `hint:ratchet:/repos/:name` · `hint:about:/repos/:name` · `vitest:ui/src/help/hints-hover.instrument.test.tsx::"names one element on every instrument screen"` · `doc:docs/OPERATOR.md#22-services-the-oracle-needs` · `vitest:ui/src/screens/Repos/RepoConfigTab.test.tsx::"switching the language limits the runner and swaps the runner sub-form"` | met | |
+| repos-name.evidence.9 | EVIDENCE | Unit tests cover the tabs, Next steps and eleven Configuration cases; tier-1 walkthroughs register, probe, read the pill back, edit the shape and read the audit trail; the Tasks tab is read after a mine run; 11-screens walks the route for four personas at 375 and 1280 | `vitest:ui/src/screens/Repos/RepoConfigTab.test.tsx::"renders every field from the stored config"` · `spec:ui/e2e/walkthrough/02-repo-onboard.spec.ts::"back on the repo page the probe pill is OK with the runner summary"` · `spec:ui/e2e/walkthrough/repo-config.spec.ts::"the edit persisted"` · `spec:ui/e2e/walkthrough/03-mine.spec.ts::"the repo Tasks tab lists ≥1 task with size / class / gold pills"` · `spec:ui/e2e/walkthrough/11-screens.spec.ts::"every route renders, is captured, and carries About this screen"` | met | |
+| repos-name.roles.10 | ROLES | A viewer reads all four tabs, sees the Configuration form read-only with no Save, Reset or Run probe, and no Probe now or Start a run; the API answers 403 to a viewer on PUT and on the probe; every save is a repo.updated event with actor and redacted diff that the Audit trail card shows | `vitest:ui/src/screens/Repos/RepoConfigTab.test.tsx::"a viewer sees a read-only form and no actions"` · `vitest:ui/src/screens/Repos/RepoDetail.test.tsx::"Next steps reach the Connection walk and the Factory for this repository"` · `spec:ui/e2e/walkthrough/repo-config.spec.ts::"a viewer reads the configuration but cannot edit it"` · `test:tests/test_server_routes_repos.py::test_rbac` · `test:tests/test_server_routes_repos.py::test_update_appends_redacted_diff_event` · `route:GET /repos/{name}/events` | met | |
+| repos-name.operations.11 | OPERATIONS | "Who widened the belt" is answered from the append-only events (Audit trail); a probe with no queue answers 503 and the guide's §7 says what to do; the setup phase's network need and the runner-option keys are in OPERATOR §2.0–§2.1; probe.done events carry the counts the pill reads | `doc:docs/OPERATOR.md#20-connecting-and-configuring-a-repository-from-the-ui` · `doc:docs/OPERATOR.md#21-environment-setup-the-only-network-phase` · `doc:docs/OPERATOR.md#7-when-the-sandbox-is-unavailable` · `test:tests/test_server_routes_repos.py::test_trail_is_newest_first_redacted_and_paginated` · `doc:docs/API.md#event-vocabulary` | met | |
+| repos-name.accessibility.12 | ACCESSIBILITY | axe WCAG 2.1 AA is clean on the Overview with a real probe and on the Configuration tab as a viewer, and at 375 and 1280 with a hint open; the toast and the inline probe result are live regions; the task and subject cells carry no hover-only title text | `spec:ui/e2e/walkthrough/07-settings-and-a11y.spec.ts::"Repos and Runs have no WCAG 2.1 AA violations"` · `spec:ui/e2e/walkthrough/repo-config.spec.ts::"a viewer reads the configuration but cannot edit it"` · `spec:ui/e2e/walkthrough/11-screens.spec.ts::"every route renders, is captured, and carries About this screen"` | partial | G-906 |
+| repos-name.non-goals.13 | NON-GOALS | The About block's numbers line says the change profile weights the coverage figure on the map, so this page is not asked for a capability rate | `hint:about:/repos/:name` · `vitest:ui/src/components/Help.test.tsx::"says, on each screen whose definition of done quotes it, the sentence that record quotes"` | met | |
+
+## Gaps
+- **G-220** — an unknown repository name renders a generic ErrorState ("Not found", retry) with no link back to Connection · give the 404 branch a way forward: "No repository called <name> — open Connection" linking /connect (RepoDetail QueryBoundary error branch) · ui
+- **G-906** — six pages still explain a value with a native `title=` tooltip — the Ledger's task and row-hash cells, the run-detail route, the repository Tasks tab, the capability cell, the Factory backlog hash and the task-detail evidence hash — which no keyboard or touch user can open · render each through the hint layer (DL-048) and empty `TITLE_ALLOWLIST` · ui
