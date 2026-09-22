@@ -27,6 +27,14 @@ Every claim in this repository — README, ADRs, architecture, UI copy — carri
 | `[measured]` | Backed by ledger rows that can be re-derived. | `n`, the method (which belts, which mode, which builder/model), the Wilson interval, the apparatus version, and where the rows are. |
 | `[hypothesis]` | Directionally supported; not confirmed by a pre-registered or replicated measurement. | The evidence so far and what would confirm or falsify it. |
 | `[aspiration]` | Designed for; not demonstrated. | The design (ADR, plan phase). |
+| `[gap]` | Named as missing, so a reader is never left to assume it is there. | What is absent and what would close it. |
+
+**The rule is a gate.** CI's `claims` job runs `scripts/claims_check.py`, which reads the
+pages on its allowlist, finds the sentences that quantify something, and fails when one
+carries no tag — or when a `[measured]` one carries no `n`, no method and no apparatus
+version. It checks the *shape* of the evidence, never whether a figure is sound, and it
+reads only the pages on the allowlist; the script's docstring states both limits and the
+gap analysis names the pages still ungated.
 
 A claim moves from `[hypothesis]` to `[measured]` only by a pre-registered measurement whose
 interval excludes a trivial effect and that has been replicated or independently re-run;

@@ -8,6 +8,32 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-22 — the claim-tag rule became a gate, and two wrong claims were corrected
+
+- **A claim carries its tag or CI fails (`claims`).** `scripts/claims_check.py` reads the
+  pages on its allowlist (today `README.md` and `docs/RELEASING.md`), finds the sentences
+  that quantify something — a percentage, or a cardinal qualifying a plural noun — and fails
+  when one carries none of `[measured]` / `[hypothesis]` / `[aspiration]` / `[gap]`, or when
+  a `[measured]` one carries no `n`, no method or no apparatus version. The heuristic and
+  what it deliberately does not catch (unquantified claims, tables, headings, fenced code, a
+  lead-in ending in a colon, whether a tag is the *right* one, and every page off the
+  allowlist) are stated in the module docstring; `tests/test_claims_check.py` pins both the
+  behaviour and that the covered pages are clean. `[gap]` joins the permitted tags in
+  [EVIDENCE-AND-CLAIMS §1](docs/EVIDENCE-AND-CLAIMS.md#1-claim-tags) — it was already in use
+  in SECURITY — and the README's tag table says so.
+- **The two wrong claims on `main` are corrected.** The README's status line said CI was
+  "eleven jobs, required by branch protection": the required-checks list read from the
+  repository on 2026-09-22 names **ten** checks, and `sbom` and `sandbox-images` run on every
+  pull request without being on it — the line now says that, with its method. `RELEASING` §1
+  tagged the tag-protection ruleset `[aspiration]` as though it were planned; the repository
+  has **no ruleset at all**, so the sentence now says that as a `[gap]`, with the reading
+  that found it, and keeps the workflow's `--require-on origin/main` refusal as the floor.
+  The README's opening no longer counts the belts (the count has moved twice; belt set v5
+  and the definitions in EVIDENCE-AND-CLAIMS §2 carry it instead).
+- **Definition of done:** `product.claims.21` keeps its `partial` — the gate is real but
+  covers two pages — and its gap is now **G-605**: the pages still ungated, one page per
+  change. G-603 is closed.
+
 ### 2026-09-21 — shippable: every element explains itself; users can recover; the loop closes on a merge
 
 - **Every element explains itself (hover, focus and tap — one registry, one ratchet).** A
