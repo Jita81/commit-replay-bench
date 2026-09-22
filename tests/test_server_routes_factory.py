@@ -292,12 +292,74 @@ def test_task_view_folds_an_oracle_needs_strengthening_stop_with_its_reason(env:
     # the API serves the link the stop's sentence points at: the evolutions route,
     # superseding this item (a documented route the response never named was not a
     # served link — verifier on feat/shippable, 2026-09-22)
-    assert t["way_forward"] == {
-        "action": "register_evolution",
-        "route": f"/factory/{ALPHA}/backlog/evolutions",
-        "supersedes": "I-1",
-    }
+    wf = t["way_forward"]
+    assert wf["action"] == "register_evolution"
+    assert wf["route"] == f"/factory/{ALPHA}/backlog/evolutions"
+    assert wf["supersedes"] == "I-1"
     assert env.get(f"/factory/{ALPHA}/evidence").json()["verified"] is True
+
+
+def test_a_weak_oracle_stop_serves_the_superseding_item_pre_filled(env: Env) -> None:
+    """G-904: the way forward is not only a route — it is the superseding item already
+    drafted from the item that stopped and from the reviewer's own finding, so the person
+    strengthening the test reads what was too weak where they will fix it. Nothing is
+    decided: the operator edits the draft and posts it, or does not."""
+    assert _register(env, [ITEM]).status_code == 201
+    ev = FactoryHome(env.settings.home, ALPHA).evidence(actor="worker")
+    ev.record_route(
+        "I-1", ROUTE_HUMAN, REASON, after_verdict="accept_with_edit", finding="weak_oracle"
+    )
+    ev.record_item_outcome(
+        "I-1",
+        status=STATUS_ORACLE_NEEDS_STRENGTHENING,
+        builds=1,
+        verdict="accept_with_edit",
+        delivered=True,
+        reworks=0,
+        error=REASON,
+    )
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    wf = t["way_forward"]
+    # the POST should carry a stronger oracle: this stop was about the test itself
+    assert wf["needs_authored_test"] is True
+    assert wf["what_to_change"].startswith("Strengthen the test")
+    pre = wf["prefill"]
+    # a NEW id the register route will accept, superseding the one that stopped
+    assert pre["id"] == "I-1-v2" and pre["supersedes"] == "I-1"
+    # everything the product already knows is carried, not retyped
+    assert pre["title"] == ITEM["title"] and pre["kind"] == ITEM["kind"]
+    assert pre["capability_class"] == ITEM["capability_class"]
+    assert pre["size_estimate"] == ITEM["size_estimate"]
+    assert pre["structural_facts"] == ITEM["structural_facts"]
+    assert pre["acceptance_criteria"] == ITEM["acceptance_criteria"]
+    assert pre["level"] == "L1" and pre["depends_on"] == []
+    # and the reviewer's finding is in the description, under the item's own words
+    assert pre["description"].startswith(ITEM["description"])
+    assert "Why the last attempt stopped:" in pre["description"] and REASON in pre["description"]
+    # and it stays a body the register route accepts: the description is inside its own limit
+    assert len(pre["description"]) <= 8000
+    # the draft is a body the evolutions route accepts, unedited
+    login(env.client, "operator")
+    assert env.client.post(f"/api/v1{wf['route']}", json={"item": pre}).status_code == 201
+    # once it is superseded the item no longer offers a way forward, and the next draft's
+    # id steps past the one just registered
+    by_id = {x["id"]: x for x in env.get(f"/factory/{ALPHA}/tasks").json()}
+    assert by_id["I-1"]["way_forward"] is None
+    assert by_id["I-1"]["superseded_by"] == "I-1-v2"
+
+
+def test_a_stop_about_the_facts_asks_for_a_fact_not_a_test(env: Env) -> None:
+    """The pre-filled draft says what to change, and that differs by stop: a readiness
+    refusal needs a structural fact, not an oracle."""
+    assert _register(env, [ITEM]).status_code == 201
+    ev = FactoryHome(env.settings.home, ALPHA).evidence(actor="worker")
+    ev.record_route("I-1", ROUTE_HUMAN, "unsigned structural gap: expected_behaviour")
+    ev.record_item_outcome("I-1", status="not_ready", builds=0, error="")
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    wf = t["way_forward"]
+    assert wf["needs_authored_test"] is False
+    assert "structural fact" in wf["what_to_change"]
+    assert "unsigned structural gap" in wf["prefill"]["description"]
 
 
 def test_catalogue_serves_the_classes_their_slots_and_the_vocabularies(env: Env) -> None:

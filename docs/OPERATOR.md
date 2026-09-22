@@ -27,7 +27,7 @@ Contents: [1 Install](#1-install) · [1.1 Check the installation](#11-check-the-
 [3 Run a sweep](#3-run-a-sweep) · [4 Read the capability map](#4-read-the-capability-map) ·
 [5 Sign off](#5-sign-off) · [6 Export the ledger](#6-export-and-verify-the-ledger) ·
 [7 When the sandbox is unavailable](#7-when-the-sandbox-is-unavailable) · [8 Stop conditions](#8-stop-conditions) ·
-[9 Users](#9-users)
+[9 Users](#9-users) · [10 The factory's test author](#10-the-factorys-test-author)
 
 ---
 
@@ -762,3 +762,57 @@ credential: re-activating within the session lifetime (`CRB_SESSION_TTL`, 8 hour
 default) restores the sessions issued before. To contain a suspected compromise, deactivate
 **and** set a new password; the password is what ends the sessions for good. The last
 active admin can never be deactivated, by either door.
+
+## 10. The factory's test author
+
+Forward mode has no held-out test, so nothing can be built until one failing test exists. An
+item whose oracle you pasted in when you registered the backlog has one. An item without one
+stops `no_oracle` and waits for a person — unless this deployment configures a **test-author
+rung**.
+
+Set one variable, on the API *and* the worker:
+
+```
+CRB_FACTORY__TEST_AUTHOR=openai_agent:gpt-oss-120b:cerebras
+```
+
+The spelling is a rung — `builder:model[:provider]` — exactly as you would write a build
+rung, and the builder half must be a registered builder name (`editblock`, `openai_agent`,
+`claude_code`). Empty, or `none`, means no author: that is the default and it is the
+behaviour the product shipped with. One run can override it without changing the
+deployment:
+
+```
+POST /runs {"repo": "cobra", "kind": "factory", "test_author": "editblock:gpt-oss-120b"}
+POST /runs {"repo": "cobra", "kind": "factory", "test_author": "none"}   # this run pays for no authoring
+```
+
+**The author rung and the build rung are never the same rung.** This is the same refusal
+that has always stopped a rung building against a test it wrote itself: when the run's spec
+is built, the author's label is compared with every rung on the ladder, and a match ends the
+run with `SameIdentityError` **before anything is built or paid for**. If the run fails that
+way, choose another rung — the message names the ladder. What the refusal deliberately does
+not catch is the same model under a *different* registered builder name; the label space is
+closed to the registry, so no label can be invented to dodge it, but model-level separation
+is your choice of models, not something the product can enforce. [gap]
+
+Nothing the author writes is taken on trust. The test is written in a throwaway worktree at
+the base (a stray source edit cannot leak out of it), then the ordinary RED proof runs it at
+the base and requires a failure with attributable test ids — green, a timeout or an
+unattributable failure is refused. The proven bytes are staged as a throwaway commit and
+belt 1 re-checks every test byte after the build. A reply the product cannot use (no file,
+an empty file, a path the repository does not call a test) is put back to the model with the
+reason, and after the attempts are spent the item simply has no oracle.
+
+**What you see.** The run's apparatus stamp carries `test_author` (`""` = none), the trace
+carries `factory/author.configured` before any authoring and one `author.attempt` per try
+with the reason a reply could not be used. `GET /settings` (admin) serves the configured
+rung under `raw.factory.test_author` (`none` when there is none); the Settings screen does
+not show it yet. [gap] An item that still stops `no_oracle` with an author configured
+means the author produced nothing usable — read `author.attempt`.
+
+**When the review says the test is too weak.** The loop never rebuilds against an unchanged
+test: the item stops `oracle_needs_strengthening` and the Factory screen offers the
+replacement item already drafted from the item that stopped and from the reviewer's own
+finding. Read the draft, strengthen the test, and register it — the frozen backlog does not
+change, the draft is chained onto it.

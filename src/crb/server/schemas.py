@@ -600,6 +600,12 @@ class RunCreateRequest(BaseModel):
     deliver: bool | None = None
     deliver_override: bool | None = None
     max_rework: int | None = Field(default=None, ge=0, le=5)
+    #: ``factory`` runs only. The rung that writes the failing test for an item nobody
+    #: authored an oracle for — ``builder:model[:provider]``, the same spelling as a build
+    #: rung, or ``none`` for no author. Absent = the deployment's ``CRB_FACTORY__TEST_AUTHOR``.
+    #: The author rung and the build rung are never the same rung: a label that is also on
+    #: this run's ladder is refused before anything is built.
+    test_author: str | None = Field(default=None, max_length=200)
 
     @field_validator("kind")
     @classmethod
