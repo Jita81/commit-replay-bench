@@ -241,7 +241,9 @@ def parse_artefact(path: Path) -> tuple[Artefact, list[str]]:
             crit_id, cat, txt, ev, st, gap = (cells + [""] * 6)[:6]
             criteria.append(Criterion(crit_id, cat, txt, ev.strip("`"), st, gap, n))
         if in_gaps and s.startswith("- **"):
-            m = re.match(r"^- \*\*(G-\d{3})\*\*\s*[—-]\s*(.+)$", s)
+            # the em dash is the grammar the standard declares; a hyphen here reads as a
+            # different list style and the record stops being one shape (CodeRabbit, PR #47)
+            m = re.match("^- \\*\\*(G-\\d{3})\\*\\*\\s*\u2014\\s*(.+)$", s)
             if m:
                 body = m.group(2).strip()
                 gaps[m.group(1)] = body
@@ -479,7 +481,11 @@ def resolve(criterion: Criterion) -> None:
             # resolvable reference, and it must carry what a measured claim carries:
             # n, a method and an apparatus version (docs/dod/STANDARD.md §3).
             low = rest.lower()
-            if not (re.search(r"\bn\s*=", low) and "method" in low and "apparatus" in low):
+            if not (
+                re.search(r"\bn\s*=", low)
+                and "method" in low
+                and re.search(r"apparatus\s+\d+\.\d+", low)
+            ):
                 criterion.unresolved.append(ref)
             continue
         fn = RESOLVERS.get(prefix)

@@ -423,6 +423,33 @@ def test_one_gap_id_is_one_piece_of_work_across_the_tree(
     assert "gap G-001 is defined differently in" in capsys.readouterr().out
 
 
+def test_a_gap_record_needs_the_em_dash_and_measured_needs_an_apparatus_version(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two grammar rules the standard declares and the checker now enforces: a gap record is
+    ``- **G-nnn** \u2014 what \u00b7 change \u00b7 owner`` with an em dash, and a ``measured:``
+    annotation names an apparatus VERSION, not the bare word."""
+    mod, root = tree
+    _write_all(root)
+    page = root / "docs/dod/pages/results.md"
+    good = page.read_text(encoding="utf-8")
+    page.write_text(good.replace("- **G-001** \u2014 ", "- **G-001** - "), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "gap line must be" in capsys.readouterr().out
+    page.write_text(
+        good.replace(
+            "`code:ui/src/App.tsx::App`",
+            "`code:ui/src/App.tsx::App` \u00b7 `measured:n = 1, method: inspection, apparatus`",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    assert mod.main(["--check"]) == 1
+    assert "evidence does not resolve: measured:n = 1, method: inspection, apparatus" in (
+        capsys.readouterr().out
+    )
+
+
 def test_a_code_reference_needs_a_symbol_or_a_quoted_literal_and_measured_needs_its_metadata(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
