@@ -59,7 +59,8 @@ Touch when:   a factory record gains a field the UI needs (extend TaskView + Fac
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import re
+from collections.abc import Iterable, Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -69,6 +70,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from crb.core.capability import PROJECTION_CLASS_SIZE
+from crb.core.redact import redact_and_cap_head
 from crb.core.routing import ROUTE_DELIVER
 from crb.core.spec import SIZE_TIER_NAMES
 from crb.factory.backlog import KINDS, LEVELS, BacklogError, BacklogFrozen, BacklogItem
@@ -260,13 +262,49 @@ class RefusalOut(BaseModel):
     measured_route: str = ""
 
 
+class EvolutionPrefillOut(BaseModel):
+    """The superseding item, pre-filled — the body an operator POSTs to the way forward's
+    ``route``, so the next step is a review of a draft rather than retyping what the
+    product already knows (G-904).
+
+    Every field but ``id`` and ``description`` is the stopped item's own. ``id`` is the
+    next free ``<id>-v<n>`` (the register route refuses an id that exists). ``description``
+    is the stopped item's description followed by what the stop asked for — for a
+    ``oracle_needs_strengthening`` stop, the reviewer's own finding, verbatim, so the
+    person strengthening the test can read what was too weak. Nothing here is a decision:
+    the operator edits it and posts it, or does not.
+    """
+
+    id: str
+    title: str
+    kind: str
+    description: str
+    capability_class: str
+    size_estimate: str
+    structural_facts: list[str]
+    acceptance_criteria: list[str]
+    depends_on: list[str]
+    level: str
+    supersedes: str
+
+
 class WayForwardOut(BaseModel):
     """The next action the API serves for a stopped item: register an evolution that
-    supersedes it (F32) — ``route`` is the path to POST to, ``supersedes`` the item id."""
+    supersedes it (F32) — ``route`` is the path to POST to, ``supersedes`` the item id.
+
+    ``what_to_change`` is one plain sentence naming what must be different about the
+    superseding item for the loop to get further than this stop; ``prefill`` is that item
+    already drafted (``null`` only when the item is not in the backlog the API can read).
+    ``needs_authored_test`` says whether the POST should carry an ``authored`` oracle —
+    true when the stop was about the test itself.
+    """
 
     action: str = "register_evolution"
     route: str
     supersedes: str
+    what_to_change: str = ""
+    needs_authored_test: bool = False
+    prefill: EvolutionPrefillOut | None = None
 
 
 class FactoryTaskOut(BaseModel):
@@ -324,18 +362,109 @@ _STOPPED_STATUSES = frozenset(
 )
 _STOPPED_STEPS = frozenset({"readiness", "red", "review"})
 
+#: Per stopped status: the sentence naming what must be different about the superseding
+#: item, and whether the POST should carry an oracle of its own. A stop about the TEST
+#: needs a stronger test; a stop about the FACTS needs a fact.
+_WHAT_TO_CHANGE: dict[str, tuple[str, bool]] = {
+    "oracle_needs_strengthening": (
+        "Strengthen the test so it fails for the reason the review gave, then register "
+        "this item with the stronger test attached.",
+        True,
+    ),
+    "no_oracle": (
+        "Attach a test that fails on the repository as it stands today: nothing proved this "
+        "item before the change, so there was nothing to build against.",
+        True,
+    ),
+    "not_red": (
+        "Attach a test that fails on the repository as it stands today — the one on record "
+        "did not.",
+        True,
+    ),
+    "not_ready": (
+        "Add the structural fact the readiness gate asked for, as a `slot: text` line.",
+        False,
+    ),
+    "rejected": ("Answer what the review rejected, then register the revised item.", False),
+    "rework_exhausted": (
+        "Answer what the review kept asking for, then register the revised item.",
+        False,
+    ),
+}
+_DEFAULT_WHAT_TO_CHANGE = (
+    "Change what the stop asked for, then register the revised item.",
+    False,
+)
+#: How far the stop's own reason is quoted into the pre-filled description. The HEAD is
+#: kept: a stop's reason is read off its prefix (the finding, then the way forward).
+_REASON_CHARS = 1000
+#: ``BacklogItemIn.description``'s own limit — the draft must be a body the register route
+#: accepts unedited, so the item's words plus the stop's reason are capped to it.
+_DESCRIPTION_CHARS = 8000
 
-def _way_forward(repo: str, view: Mapping[str, Any]) -> WayForwardOut | None:
+
+def _next_item_id(base: str, taken: Iterable[str]) -> str:
+    """``<base>-v2``, ``-v3`` … — the first that is free. The register route refuses an id
+    that exists, so a pre-filled body must not arrive carrying one."""
+    used = set(taken)
+    stem = re.sub(r"-v\d+$", "", base)[:56] or "item"
+    n = 2
+    while f"{stem}-v{n}" in used:
+        n += 1
+    return f"{stem}-v{n}"
+
+
+def _prefill(item: BacklogItem, *, taken: Iterable[str], reason: str) -> EvolutionPrefillOut:
+    """The stopped item, drafted again as its successor, with the stop's own reason in the
+    description — so the person reads what was wrong where they will fix it."""
+    note = (
+        f"\n\nWhy the last attempt stopped: {redact_and_cap_head(reason, max_chars=_REASON_CHARS)}"
+    )
+    return EvolutionPrefillOut(
+        id=_next_item_id(item.id, taken),
+        title=item.title,
+        kind=item.kind,
+        description=(item.description + note).strip()[:_DESCRIPTION_CHARS],
+        capability_class=item.capability_class,
+        size_estimate=item.size_estimate,
+        structural_facts=list(item.structural_facts),
+        acceptance_criteria=list(item.acceptance_criteria),
+        depends_on=list(item.depends_on),
+        level=item.level,
+        supersedes=item.id,
+    )
+
+
+def _way_forward(
+    repo: str,
+    view: Mapping[str, Any],
+    *,
+    item: BacklogItem | None = None,
+    taken: Iterable[str] = (),
+) -> WayForwardOut | None:
     """The evolutions route as the next action, for an item the loop stopped and no
-    evolution has replaced yet; ``None`` otherwise."""
+    evolution has replaced yet; ``None`` otherwise.
+
+    When the item itself can be read (``item``), the superseding item is served
+    pre-filled from it and from the stop's own reason (G-904): on an
+    ``oracle_needs_strengthening`` verdict that reason is the reviewer's weak-oracle
+    finding, so the draft says what was too weak about the test it must strengthen.
+    """
     if view.get("superseded_by"):
         return None
-    refusal = view.get("refusal") or {}
-    stopped = view.get("status") in _STOPPED_STATUSES or refusal.get("step") in _STOPPED_STEPS
+    refusal = dict(view.get("refusal") or {})
+    status = str(view.get("status") or "")
+    stopped = status in _STOPPED_STATUSES or refusal.get("step") in _STOPPED_STEPS
     if not stopped:
         return None
+    what, needs_test = _WHAT_TO_CHANGE.get(status, _DEFAULT_WHAT_TO_CHANGE)
+    reason = str(view.get("outcome_reason") or refusal.get("reason") or "")
     return WayForwardOut(
-        route=f"/factory/{repo}/backlog/evolutions", supersedes=str(view.get("id", ""))
+        route=f"/factory/{repo}/backlog/evolutions",
+        supersedes=str(view.get("id", "")),
+        what_to_change=what,
+        needs_authored_test=needs_test,
+        prefill=_prefill(item, taken=taken, reason=reason) if item is not None else None,
     )
 
 
@@ -759,8 +888,14 @@ def list_tasks(
 ) -> list[FactoryTaskOut]:
     del viewer
     get_repo_or_404(db, repo)
-    views = _home(settings, repo).task_views()
+    home = _home(settings, repo)
+    views = home.task_views()
     routes = _cell_routes(db, factory, repo) if views else {}
+    # G-904 — the stopped item's own record, so its way forward can carry the superseding
+    # item already drafted; ``taken`` keeps that draft's id off one the register route
+    # would refuse. A repository whose backlog has gone serves the way forward without it.
+    backlog = home.load_backlog() if views else None
+    items = {i.id: i for i in (*backlog.items, *backlog.evolutions)} if backlog is not None else {}
     # F15 — the run that produced the newest build, from the ledger row the build event
     # names (the chain carries the row, the row carries the run)
     row_ids = [v.row_id for v in views if v.row_id]
@@ -779,7 +914,7 @@ def list_tasks(
                 **d,
                 run_id=run_by_row.get(v.row_id, ""),
                 cell_route=routes.get(f"{v.capability_class}|{v.size}", CellRouteOut()),
-                way_forward=_way_forward(repo, d),
+                way_forward=_way_forward(repo, d, item=items.get(v.id), taken=items.keys()),
             )
         )
     return out

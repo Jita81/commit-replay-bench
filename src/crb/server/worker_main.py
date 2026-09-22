@@ -77,7 +77,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from crb.core.execution import DockerSettings, SandboxUnavailable
 from crb.observability import metrics
 from crb.observability.logging import configure_logging
-from crb.server.settings import GitHubAppSettings
+from crb.server.settings import FactorySettings, GitHubAppSettings
 from crb.server.worker import Worker, WorkerSettings
 from crb.store.jobs import RUN_KINDS
 
@@ -201,8 +201,10 @@ def settings_from_args(
         stale_after_s=float(args.stale_after),
         kinds=kinds,
         keep_worktrees=bool(args.keep_worktrees),
-        # the same CRB_GITHUB__* / CRB_METRICS_* the API reads (pydantic-settings parses them)
+        # the same CRB_GITHUB__* / CRB_FACTORY__* / CRB_METRICS_* the API reads
+        # (pydantic-settings parses them)
         github=shared.github,
+        factory=shared.factory,
         metrics_enabled=shared.metrics_enabled,
         metrics_host=host,
         metrics_port=int(port),
@@ -210,7 +212,7 @@ def settings_from_args(
 
 
 class _SharedWithApi(BaseSettings):
-    """Just the keys the worker shares with the API — ``CRB_GITHUB__*``, ``CRB_METRICS_ENABLED``,
+    """Just the keys the worker shares with the API — ``CRB_GITHUB__*``, ``CRB_FACTORY__*``, ``CRB_METRICS_ENABLED``,
     ``CRB_METRICS_HOST`` and ``CRB_METRICS_PORT`` — read the way :class:`Settings` reads them (same prefix, same
     nested delimiter) and nothing else: the worker must not fail on an unrelated server
     setting it does not use, and must not START on a malformed GitHub one — a bad
@@ -221,6 +223,7 @@ class _SharedWithApi(BaseSettings):
         env_prefix="CRB_", env_nested_delimiter="__", extra="ignore", case_sensitive=False
     )
     github: GitHubAppSettings = GitHubAppSettings()
+    factory: FactorySettings = FactorySettings()
     metrics_enabled: bool = True
     #: The worker's own exposition bind address (loopback by default, like the API's
     #: ``CRB_BIND_HOST``; a container sets ``0.0.0.0``) and port (the API keeps ``/metrics``
@@ -230,8 +233,8 @@ class _SharedWithApi(BaseSettings):
 
 
 def _shared_settings(env: dict[str, str] | None = None) -> _SharedWithApi:
-    """``CRB_GITHUB__APP_ID`` / ``__PRIVATE_KEY`` / ``__PRIVATE_KEY_FILE`` / ``__API_URL`` …
-    and ``CRB_METRICS_ENABLED`` / ``CRB_METRICS_HOST`` / ``CRB_METRICS_PORT``, read the way the API reads them, so
+    """``CRB_GITHUB__APP_ID`` / ``__PRIVATE_KEY`` / ``__PRIVATE_KEY_FILE`` / ``__API_URL`` …,
+    ``CRB_FACTORY__TEST_AUTHOR`` and ``CRB_METRICS_ENABLED`` / ``CRB_METRICS_HOST`` / ``CRB_METRICS_PORT``, read the way the API reads them, so
     one environment configures both processes. A malformed value raises
     (``pydantic.ValidationError``) and the worker does not start. ``env`` (tests) stands
     in for ``os.environ``."""
@@ -257,6 +260,13 @@ def _keys_for(env: dict[str, str]) -> dict[str, Any]:
     }
     if github:
         out["github"] = github
+    factory = {
+        k.removeprefix("CRB_FACTORY__").lower(): v
+        for k, v in env.items()
+        if k.upper().startswith("CRB_FACTORY__")
+    }
+    if factory:
+        out["factory"] = factory
     return out
 
 

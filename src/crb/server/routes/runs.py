@@ -613,6 +613,7 @@ def create_run(
         "deliver": body.deliver,
         "deliver_override": body.deliver_override,
         "max_rework": body.max_rework,
+        "test_author": body.test_author,
     }
     if body.kind != KIND_FACTORY and any(v is not None for v in factory_only.values()):
         named = sorted(k for k, v in factory_only.items() if v is not None)
@@ -635,6 +636,10 @@ def create_run(
             params["deliver"] = bool(body.deliver)
         if body.max_rework is not None:
             params["max_rework"] = int(body.max_rework)
+        if body.test_author is not None:
+            # G-904 — this run's test-author rung (or ``none``); the worker refuses one
+            # that is also a rung on the ladder before anything is built
+            params["test_author"] = body.test_author.strip()
         if body.deliver_override:
             # the route gate's override is an APPROVER's act, stamped with their identity
             # (external review 2026-09-16 point 36 → DL-038)

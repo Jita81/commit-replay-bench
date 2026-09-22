@@ -556,6 +556,10 @@ export const HINTS = {
     'The pull request the factory opened in the repository, for review under the repository’s own rules.',
   'banner.factory.refusal':
     'Why the loop stopped on this item, from the chain, and the two ways forward: add the fact and register an evolution that supersedes the item, or open the change by hand and mark it done next time.',
+  'banner.factory.what_to_change':
+    'One sentence naming what must be different about the replacement item for the loop to get past this stop: a stronger failing test, or a fact the readiness gate asked for.',
+  'item.factory.prefill':
+    'The replacement item, drafted from the one that stopped and from the reason it stopped. Nothing is registered until an operator posts it; the frozen backlog does not change, the draft is chained onto it.',
   'button.factory.freeze_revised':
     'Open the freeze form prefilled from the active backlog: change what this item needs and keep the rest. This is the heavier path, a new backlog with a new hash; an evolution keeps the frozen hash.',
   'pill.factory.step_current':

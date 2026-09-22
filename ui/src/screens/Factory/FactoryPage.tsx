@@ -20,7 +20,9 @@
  *               a factory run is active the chain polls and a banner names the run and the
  *               item in hand (J-FAC-5 / J-TEL-9). A built item opens its evidence (F15); a
  *               stopped item says the way forward — an evolution that supersedes it, the
- *               route the API serves as `way_forward` (DL-049) — and the freeze form for a
+ *               route the API serves as `way_forward` (DL-049), one sentence naming what must
+ *               be different, and that replacement item already drafted from the stop's own
+ *               reason (G-904) — and the freeze form for a
  *               revised backlog (a new hash) starts from the active one (J-FAC-15). Every act goes through the API under its role; the
  *               chain (`/factory/{repo}/evidence`) is the record, and this screen renders the
  *               folded view of it (`task_views`).
@@ -833,6 +835,7 @@ function ItemRow({
               Freeze a revised backlog…
             </Button>
           )}
+          <PrefilledEvolution t={t} />
         </div>
       )}
       {narrow && (
@@ -857,6 +860,45 @@ function ItemRow({
       {t.dor_gaps.length > 0 && canSign && <GapForm repo={repo} task={t} />}
       {t.dor_gaps.length > 0 && !canSign && <p className="m-0 mt-2 text-xs text-on-surface-muted">An approver signs the structural gap(s); a value gap is never signed — it routes test-first.</p>}
     </li>
+  )
+}
+
+/**
+ * G-904 — the replacement item, already drafted. A stopped item's way forward is not only a
+ * route: the API serves the superseding item pre-filled from the item that stopped and from
+ * the stop's own reason (for a weak-test stop, the review's finding), so the next step is a
+ * read of a draft rather than retyping what the product already knows. Nothing is registered
+ * here — the draft is shown, and the operator posts it from the freeze form or the API.
+ */
+function PrefilledEvolution({ t }: { t: FactoryTask }) {
+  const wf = t.way_forward
+  const pre = wf?.prefill
+  if (!wf || !pre) return null
+  return (
+    <div className="basis-full" data-testid={`prefill-${t.id}`}>
+      <Hint as="p" id="banner.factory.what_to_change" className="m-0 mb-1 text-xs">
+        {wf.what_to_change}
+        {wf.needs_authored_test ? ' Attach the failing test with the item.' : ''}
+      </Hint>
+      <Details summary="The replacement item, drafted" className="mb-0 text-sm">
+        <Hint as="div" id="item.factory.prefill" className="min-w-0">
+          <p className="m-0">
+            <span className="font-mono text-xs">{pre.id}</span> supersedes <span className="font-mono text-xs">{pre.supersedes}</span> · {pre.capability_class} · {pre.size_estimate} · {pre.kind}
+          </p>
+          <p className="m-0 mt-1 font-semibold">{pre.title}</p>
+          <p className="m-0 mt-1 whitespace-pre-wrap break-words text-xs text-on-surface-muted">{pre.description}</p>
+          {pre.structural_facts.length > 0 && (
+            <ul className="m-0 mt-1 list-disc pl-5 text-xs text-on-surface-muted">
+              {pre.structural_facts.map((f) => (
+                <li key={f} className="break-words">
+                  {f}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Hint>
+      </Details>
+    </div>
   )
 }
 

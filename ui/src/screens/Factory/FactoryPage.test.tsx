@@ -243,6 +243,50 @@ describe('FactoryPage — the shipped contract', () => {
     expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('1 of 2 items sit in a cell that routes deliver today')
   })
 
+  it('a stopped item shows what to change and the replacement item already drafted (G-904)', async () => {
+    const reason = 'the reviewer found the oracle weak (the test asserts only that the call returns) and this deployment has no test author: strengthen the test and register a superseding item'
+    const stopped: FactoryTask = {
+      ...TASKS[0]!,
+      status: 'oracle_needs_strengthening',
+      outcome_reason: reason,
+      error: reason,
+      refusal: { step: 'review', reason, reason_code: '', measured_route: '' },
+      way_forward: {
+        action: 'register_evolution',
+        route: '/factory/alpha/backlog/evolutions',
+        supersedes: 'I-1',
+        what_to_change: 'Strengthen the test so it fails for the reason the review gave, then register this item with the stronger test attached.',
+        needs_authored_test: true,
+        prefill: {
+          id: 'I-1-v2',
+          title: 'Multiply',
+          kind: 'code',
+          description: 'calc needs multiply\n\nWhy the last attempt stopped: ' + reason,
+          capability_class: 'bug.fix',
+          size_estimate: 'XS',
+          structural_facts: ['reproduction: x'],
+          acceptance_criteria: ['multiply(3, 4) == 12'],
+          depends_on: [],
+          level: 'L1',
+          supersedes: 'I-1',
+        },
+      },
+    }
+    mockApi(base({ 'GET /factory/alpha/tasks': [stopped, TASKS[1]!] }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const panel = await screen.findByTestId('prefill-I-1')
+    // one sentence saying what must be different, and that this stop needs a test with it
+    expect(panel).toHaveTextContent('Strengthen the test so it fails for the reason the review gave')
+    expect(panel).toHaveTextContent('Attach the failing test with the item.')
+    // the draft itself: a new id superseding the stopped one, the item's own words, and the
+    // reason it stopped — so nothing is retyped and the reader sees what was too weak
+    expect(panel).toHaveTextContent('I-1-v2 supersedes I-1')
+    expect(panel).toHaveTextContent('the test asserts only that the call returns')
+    expect(panel).toHaveTextContent('reproduction: x')
+    // an item that has not stopped offers no draft
+    expect(screen.queryByTestId('prefill-I-2')).not.toBeInTheDocument()
+  })
+
   it('Run the factory posts the builder builderChoice picks, and says the spend first (J-FAC-1/2)', async () => {
     const { calls } = mockApi(base({ 'POST /runs': () => json({ id: 'f'.repeat(32), repo: 'alpha', kind: 'factory', status: 'queued' }, 201) }))
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })

@@ -131,7 +131,9 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               src/crb/observability/metrics.py (the recorders, ``record_event`` on
               the emitter's metering sink, ``crb_queue_depth`` on check-in),
               src/crb/core/run.py (a replay's task loop), src/crb/builders/adapter.py (the
-              build function, ladder, pre-flight), src/crb/core/mine.py (mining; the oracle
+              build function, ladder, pre-flight), src/crb/factory/author.py (the factory
+              run's test-author rung, from ``CRB_FACTORY__TEST_AUTHOR`` or
+              ``params.test_author``), src/crb/core/mine.py (mining; the oracle
               and controls kinds call their core modules the same way),
               src/crb/server/factory_state.py (forward mode's files and ``sync_outcomes``,
               which runs first; the loop itself is src/crb/factory/loop.py),
@@ -140,7 +142,7 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
-              tests/test_observability_metrics.py
+              tests/test_worker_test_author.py, tests/test_observability_metrics.py
 Touch when:   a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
               every run must carry is added (``_RunLedger._stamp``); never for a new
@@ -220,6 +222,7 @@ from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
 from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.core.workspace import Workspace
+from crb.factory.author import author_from_label
 from crb.factory.backlog import BacklogItem
 from crb.factory.delivery import (
     GitCredentials,
@@ -228,7 +231,7 @@ from crb.factory.delivery import (
     github_open_pr_fn,
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
-from crb.factory.testfirst import AuthoredTest
+from crb.factory.testfirst import AuthoredTest, TestAuthor, author_label
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
@@ -236,7 +239,7 @@ from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
-from crb.server.settings import GitHubAppSettings
+from crb.server.settings import FactorySettings, GitHubAppSettings
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
@@ -441,6 +444,10 @@ class WorkerSettings:
     #: The GitHub App this deployment is registered as (``CRB_GITHUB__*``): the worker
     #: mints installation tokens to clone and deliver linked repositories (ADR-0014).
     github: GitHubAppSettings = field(default_factory=GitHubAppSettings)
+    #: The served factory's defaults (``CRB_FACTORY__*``) — today the test-author rung a
+    #: factory run uses when nobody authored an oracle for an item. Empty = no author,
+    #: which is why such an item stops ``no_oracle``.
+    factory: FactorySettings = field(default_factory=FactorySettings)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", Path(self.home).expanduser())
@@ -1840,7 +1847,10 @@ class Worker:
 
         ``params``: the ladder / budget / builder_config of a replay; ``deliver`` (default
         False — a PR needs a credentials provider, absent here, so delivery fails closed
-        as ``delivery_failed`` when asked for); ``max_rework`` (default 1)."""
+        as ``delivery_failed`` when asked for); ``max_rework`` (default 1); ``test_author``
+        (a rung label, or ``none``; default the deployment's ``CRB_FACTORY__TEST_AUTHOR``)
+        — the rung that writes the failing test for an item nobody authored an oracle for,
+        refused when it is a rung on this run's own ladder."""
         run = ctx.run
         p = ctx.params
         home = FactoryHome(self.home, run.repo)
@@ -1875,6 +1885,10 @@ class Worker:
         retain = dict(p.get("retain") or {})
         runner = self._runner(ctx)
         executor = self._executor(ctx)
+        # G-904 — the served worker's test author. Resolved here, BEFORE anything is
+        # stamped or spent, so a rung that is also on the build ladder is refused by
+        # ``FactorySpec``'s existing identity check rather than found half-way through.
+        test_author = self._test_author(ctx, ladder)
         overrides = dict(p.get("builder_config") or {})
         builders: dict[str, Builder] = {}
 
@@ -1900,6 +1914,9 @@ class Worker:
             deliver=bool(p.get("deliver", False)),
             budget=budget.to_dict(),
             ladder=[r.label for r in ladder.rungs],
+            # the author rung, on the run's apparatus stamp: "" reads "no test author",
+            # which is why an item with no operator-authored oracle stops ``no_oracle``
+            test_author=author_label(test_author) if test_author is not None else "",
             # F39 — the base every RED proof and build of this run starts from (the
             # default branch as fetched, or the clone's head when nothing was fetched)
             base_sha=ctx.git.rev_parse("HEAD"),
@@ -1937,6 +1954,7 @@ class Worker:
             ledger=as_run_ledger(run_ledger),
             budget=budget,
             gap_ledger=home.gap_ledger(),
+            test_author=test_author,
             deliver=bool(p.get("deliver", False)),
             creds=creds,
             open_pr_fn=open_pr if creds is not None else None,
@@ -1983,6 +2001,35 @@ class Worker:
         if self._cancelled(ctx):
             return STATUS_CANCELLED, counts, ""
         return STATUS_SUCCEEDED, counts, ""
+
+    def _test_author(self, ctx: RunContext, ladder: EscalationLadder) -> TestAuthor | None:
+        """The run's test author, or ``None`` when this deployment has none.
+
+        The run's ``params.test_author`` wins over the deployment's
+        ``CRB_FACTORY__TEST_AUTHOR``; ``none`` in either place means no author, so a run
+        can decline one a deployment configures. The label is a rung
+        (``builder:model[:provider]``) and its builder must be a registered builder name,
+        because the invariant the loop enforces — **the author rung and the build rung are
+        never the same rung** — is a comparison of rung labels
+        (:func:`crb.factory.testfirst.assert_distinct_identity`, applied to every rung by
+        :class:`~crb.factory.loop.FactorySpec`). Nothing is enforced twice here; this only
+        builds the author so the refusal has a label to compare, and names the ladder in the
+        message when an operator has to choose another rung.
+        """
+        raw = str(ctx.params.get("test_author", "") or "").strip()
+        if not raw:
+            raw = self.settings.factory.test_author.strip()
+        default_provider = str(ctx.run.provider or ctx.params.get("provider") or "")
+        try:
+            author = author_from_label(raw, default_provider=default_provider)
+        except ValueError as exc:
+            raise ValueError(
+                f"test author {raw!r} cannot be used: {exc} "
+                f"(this run's ladder is {[r.label for r in ladder.rungs]})"
+            ) from exc
+        if author is not None:
+            ctx.emit("factory", "author.configured", author=author_label(author))
+        return author
 
     def _sync_outcomes(
         self, ctx: RunContext, home: FactoryHome, cfg: Mapping[str, Any], remote: str
