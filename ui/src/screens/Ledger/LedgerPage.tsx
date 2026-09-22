@@ -44,6 +44,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { GateBanner } from '../../components/GateBanner'
 import { InlineSelect } from '../../components/Field'
 import { Term } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
@@ -86,31 +87,38 @@ export function LedgerPage() {
 
   const columns = useMemo<Column<GradeRow>[]>(
     () => [
-      { key: 'created', header: 'Created', sortValue: (r) => r.created, cell: (r) => <span className="text-xs text-on-surface-muted">{fmtDate(r.created)}</span> },
-      { key: 'repo', header: 'Repo', sortValue: (r) => r.repo, cell: (r) => r.repo },
-      { key: 'task', header: 'Task', mono: true, sortValue: (r) => r.task_id, cell: (r) => <Link to={`/tasks/${encodeURIComponent(r.repo)}/${r.task_id}`} title={r.task_id}>{shortId(r.task_id)}</Link> },
-      { key: 'cell', header: 'Cell', mono: true, sortValue: (r) => `${r.capability_class}|${r.size}`, cell: (r) => `${r.capability_class} · ${r.size}` },
-      { key: 'builder', header: 'Builder', mono: true, sortValue: (r) => r.builder, cell: (r) => (r.builder ? `${r.builder}${r.model ? ` · ${r.model}` : ''}` : '—'), hideBelowMd: true },
-      { key: 'mode', header: 'Mode', sortValue: (r) => r.mode, cell: (r) => <span className="font-mono text-xs">{r.mode} · {r.trial || 'r1'}</span>, hideBelowMd: true },
+      { key: 'created', header: 'Created', hint: 'col.ledger.created', sortValue: (r) => r.created, cell: (r) => <span className="text-xs text-on-surface-muted">{fmtDate(r.created)}</span> },
+      { key: 'repo', header: 'Repo', hint: 'col.ledger.repo', sortValue: (r) => r.repo, cell: (r) => r.repo },
+      { key: 'task', header: 'Task', hint: 'col.ledger.task', mono: true, sortValue: (r) => r.task_id, cell: (r) => <Link to={`/tasks/${encodeURIComponent(r.repo)}/${r.task_id}`} title={r.task_id}>{shortId(r.task_id)}</Link> },
+      { key: 'cell', header: 'Cell', hint: 'col.ledger.cell', mono: true, sortValue: (r) => `${r.capability_class}|${r.size}`, cell: (r) => `${r.capability_class} · ${r.size}` },
+      { key: 'builder', header: 'Builder', hint: 'col.ledger.builder', mono: true, sortValue: (r) => r.builder, cell: (r) => (r.builder ? `${r.builder}${r.model ? ` · ${r.model}` : ''}` : '—'), hideBelowMd: true },
+      { key: 'mode', header: 'Mode', hint: 'col.ledger.mode', sortValue: (r) => r.mode, cell: (r) => <span className="font-mono text-xs">{r.mode} · {r.trial || 'r1'}</span>, hideBelowMd: true },
       {
         key: 'clean',
         header: 'Clean',
+        hint: 'col.ledger.clean',
         sortValue: (r) => Number(r.clean),
         cell: (r) =>
           r.clean ? (
-            <Pill tone="green" glyph="✓" size="xs" label="Clean">clean</Pill>
+            <Pill tone="green" glyph="✓" size="xs" label="Clean" hint="pill.ledger.clean" tabStop={false}>
+              clean
+            </Pill>
           ) : r.disqualified ? (
-            <Pill tone="amber" glyph="⊘" size="xs" label={`Disqualified: ${r.dq_reason}`}>DQ</Pill>
+            <Pill tone="amber" glyph="⊘" size="xs" label={`Disqualified: ${r.dq_reason}`} hint="pill.ledger.clean" tabStop={false}>
+              DQ
+            </Pill>
           ) : (
-            <Pill tone="red" glyph="✗" size="xs" label={r.error ? `Error: ${r.error}` : 'Not clean'}>{r.error ? 'error' : 'no'}</Pill>
+            <Pill tone="red" glyph="✗" size="xs" label={r.error ? `Error: ${r.error}` : 'Not clean'} hint="pill.ledger.clean" tabStop={false}>
+              {r.error ? 'error' : 'no'}
+            </Pill>
           ),
       },
-      { key: 'belts', header: 'Belts', cell: (r) => <BeltPills belts={beltsOf(r)} beltSet={r.belt_set} showNames={false} /> },
-      { key: 'cost', header: 'Cost', numeric: true, sortValue: (r) => r.cost_usd, cell: (r) => fmtUsd(r.cost_usd), hideBelowMd: true },
-      { key: 'latency', header: 'Latency', numeric: true, sortValue: (r) => r.latency_s, cell: (r) => fmtSeconds(r.latency_s), hideBelowMd: true },
-      { key: 'oracle', header: 'Oracle', numeric: true, sortValue: (r) => r.oracle_strength ?? -1, cell: (r) => fmtRatio(r.oracle_strength), hideBelowMd: true },
-      { key: 'prov', header: 'Provenance', cell: (r) => <Provenance apparatus={r.apparatus_version} beltSet={r.belt_set} provenance={r.provenance} />, hideBelowMd: true },
-      { key: 'hash', header: 'Row hash', mono: true, cell: (r) => <span title={r.row_hash}>{shortId(r.row_hash, 10)}</span>, hideBelowMd: true },
+      { key: 'belts', header: 'Belts', hint: 'col.ledger.belts', cell: (r) => <BeltPills belts={beltsOf(r)} beltSet={r.belt_set} showNames={false} /> },
+      { key: 'cost', header: 'Cost', hint: 'col.ledger.cost_latency_oracle', numeric: true, sortValue: (r) => r.cost_usd, cell: (r) => fmtUsd(r.cost_usd), hideBelowMd: true },
+      { key: 'latency', header: 'Latency', hint: 'col.ledger.cost_latency_oracle', numeric: true, sortValue: (r) => r.latency_s, cell: (r) => fmtSeconds(r.latency_s), hideBelowMd: true },
+      { key: 'oracle', header: 'Oracle', hint: 'col.ledger.cost_latency_oracle', numeric: true, sortValue: (r) => r.oracle_strength ?? -1, cell: (r) => fmtRatio(r.oracle_strength), hideBelowMd: true },
+      { key: 'prov', header: 'Provenance', hint: 'col.ledger.provenance', cell: (r) => <Provenance apparatus={r.apparatus_version} beltSet={r.belt_set} provenance={r.provenance} />, hideBelowMd: true },
+      { key: 'hash', header: 'Row hash', hint: 'col.ledger.hash', mono: true, cell: (r) => <span title={r.row_hash}>{shortId(r.row_hash, 10)}</span>, hideBelowMd: true },
     ],
     [],
   )
@@ -126,14 +134,14 @@ export function LedgerPage() {
         actions={
           <>
             <RepoPicker value={repo} onChange={setRepo} />
-            <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=jsonl${exportQs}`)} download>
+            <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=jsonl${exportQs}`)} download hint="button.ledger.export_jsonl">
               Export JSONL
             </AnchorButton>
-            <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=csv${exportQs}`)} download>
+            <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=csv${exportQs}`)} download hint="button.ledger.export_csv">
               Export CSV
             </AnchorButton>
             {can('operator') && (
-              <AnchorButton size="sm" href={apiUrl('/ledger/export/abstract')} download aria-describedby="abstract-export-note">
+              <AnchorButton size="sm" href={apiUrl('/ledger/export/abstract')} download aria-describedby="abstract-export-note" hint="button.ledger.export_abstract">
                 Export abstract
               </AnchorButton>
             )}
@@ -148,22 +156,24 @@ export function LedgerPage() {
 
       <QueryBoundary query={verify} loading="Verifying the hash chain…">
         {(v) => (
-          <GateBanner
-            title="Chain verification"
-            eyebrow="append-only · hash-chained"
-            data-testid="ledger-gate"
-            criteria={[
-              { label: 'Hash chain verifies', ok: v.ok, detail: v.ok ? `${fmtInt(v.rows)} rows, every prev_hash and row_hash match` : `broken at row ${v.broken_at ?? '?'} of ${fmtInt(v.rows)}` },
-              { label: 'false-Q1 total = 0', ok: v.false_q1_total === 0, detail: `false_q1_total = ${v.false_q1_total}` },
-            ]}
-          />
+          <Hint as="div" id="gate.ledger.banner">
+            <GateBanner
+              title="Chain verification"
+              eyebrow="append-only · hash-chained"
+              data-testid="ledger-gate"
+              criteria={[
+                { label: 'Hash chain verifies', ok: v.ok, detail: v.ok ? `${fmtInt(v.rows)} rows, every prev_hash and row_hash match` : `broken at row ${v.broken_at ?? '?'} of ${fmtInt(v.rows)}`, hint: 'gate.ledger.chain' },
+                { label: 'false-Q1 total = 0', ok: v.false_q1_total === 0, detail: `false_q1_total = ${v.false_q1_total}`, hint: 'gate.ledger.false_q1' },
+              ]}
+            />
+          </Hint>
         )}
       </QueryBoundary>
 
       <div className="flex flex-wrap gap-3">
-        <StatTile label="Rows" value={verify.data ? fmtInt(verify.data.rows) : '—'} n={verify.data?.rows ?? 0} apparatus="whole ledger, all repos" />
-        <StatTile label="false-Q1 total" value={verify.data ? String(verify.data.false_q1_total) : '—'} n={verify.data?.rows ?? 0} apparatus="enforced at write; re-checked at read" tone={verify.data ? (verify.data.false_q1_total === 0 ? 'green' : 'red') : undefined} data-testid="tile-false-q1-total" />
-        <StatTile label="Matching rows" value={grades.data ? fmtInt(grades.data.total) : '—'} n={grades.data?.total ?? 0} apparatus="current filters" />
+        <StatTile label="Rows" hint="stat.ledger.rows" value={verify.data ? fmtInt(verify.data.rows) : '—'} n={verify.data?.rows ?? 0} apparatus="whole ledger, all repos" />
+        <StatTile label="false-Q1 total" hint="stat.ledger.false_q1" value={verify.data ? String(verify.data.false_q1_total) : '—'} n={verify.data?.rows ?? 0} apparatus="enforced at write; re-checked at read" tone={verify.data ? (verify.data.false_q1_total === 0 ? 'green' : 'red') : undefined} data-testid="tile-false-q1-total" />
+        <StatTile label="Matching rows" hint="stat.ledger.matching" value={grades.data ? fmtInt(grades.data.total) : '—'} n={grades.data?.total ?? 0} apparatus="current filters" />
       </div>
 
       <Card
@@ -171,17 +181,17 @@ export function LedgerPage() {
         title="Rows"
         actions={
           <>
-            <InlineSelect label="Clean" value={params.get('clean') ?? ''} onChange={(e) => setFilter('clean', e.target.value)}>
+            <InlineSelect label="Clean" hint="field.ledger.clean" value={params.get('clean') ?? ''} onChange={(e) => setFilter('clean', e.target.value)}>
               <option value="">all</option>
               <option value="true">clean</option>
               <option value="false">not clean</option>
             </InlineSelect>
-            <InlineSelect label="Mode" value={params.get('mode') ?? ''} onChange={(e) => setFilter('mode', e.target.value)}>
+            <InlineSelect label="Mode" hint="field.ledger.mode" value={params.get('mode') ?? ''} onChange={(e) => setFilter('mode', e.target.value)}>
               <option value="">all</option>
               <option value="sighted">sighted</option>
               <option value="blind">blind</option>
             </InlineSelect>
-            <InlineSelect label="Size" value={params.get('size') ?? ''} onChange={(e) => setFilter('size', e.target.value)}>
+            <InlineSelect label="Size" hint="field.ledger.size" value={params.get('size') ?? ''} onChange={(e) => setFilter('size', e.target.value)}>
               <option value="">all</option>
               {['XS', 'S', 'M', 'L', 'XL'].map((s) => (
                 <option key={s} value={s}>
@@ -189,7 +199,7 @@ export function LedgerPage() {
                 </option>
               ))}
             </InlineSelect>
-            <label className="inline-flex items-center gap-2 text-xs text-on-surface-muted">
+            <Hint as="label" id="field.ledger.class" className="inline-flex items-center gap-2 text-xs text-on-surface-muted">
               Class
               <input
                 aria-label="Filter by capability class"
@@ -201,8 +211,8 @@ export function LedgerPage() {
                 }}
                 placeholder="e.g. bug.fix"
               />
-            </label>
-            <label className="inline-flex items-center gap-2 text-xs text-on-surface-muted">
+            </Hint>
+            <Hint as="label" id="field.ledger.model" className="inline-flex items-center gap-2 text-xs text-on-surface-muted">
               Model
               <input
                 aria-label="Filter by model"
@@ -213,7 +223,7 @@ export function LedgerPage() {
                   if (e.key === 'Enter') setFilter('model', (e.target as HTMLInputElement).value.trim())
                 }}
               />
-            </label>
+            </Hint>
           </>
         }
       >
@@ -233,16 +243,16 @@ export function LedgerPage() {
                 empty={<EmptyState title="No rows match" reason={repo || params.toString() ? 'Nothing in the ledger matches these filters.' : 'The ledger is empty. Every graded trial appends one row.'} />}
               />
               <div className="flex items-center justify-between px-3 py-2 text-xs text-on-surface-muted">
-                <span className="num">
+                <Hint id="stat.ledger.page" className="num">
                   {page.total === 0 ? '0 rows' : `${fmtInt(page.offset + 1)}–${fmtInt(Math.min(page.offset + page.limit, page.total))} of ${fmtInt(page.total)}`}
-                </span>
+                </Hint>
                 <span className="flex gap-2">
-                  <button type="button" className="rounded px-2 py-1 hover:bg-surface-high disabled:opacity-40" disabled={page.offset === 0} onClick={() => setOffset(Math.max(0, page.offset - page.limit))}>
+                  <Hint as="button" id="button.ledger.page" type="button" className="rounded px-2 py-1 hover:bg-surface-high disabled:opacity-40" disabled={page.offset === 0} onClick={() => setOffset(Math.max(0, page.offset - page.limit))}>
                     ← Newer
-                  </button>
-                  <button type="button" className="rounded px-2 py-1 hover:bg-surface-high disabled:opacity-40" disabled={page.offset + page.limit >= page.total} onClick={() => setOffset(page.offset + page.limit)}>
+                  </Hint>
+                  <Hint as="button" id="button.ledger.page" type="button" className="rounded px-2 py-1 hover:bg-surface-high disabled:opacity-40" disabled={page.offset + page.limit >= page.total} onClick={() => setOffset(page.offset + page.limit)}>
                     Older →
-                  </button>
+                  </Hint>
                 </span>
               </div>
             </>

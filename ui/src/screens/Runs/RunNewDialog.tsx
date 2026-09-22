@@ -42,6 +42,7 @@ import { Button } from '../../components/Button'
 import { Dialog } from '../../components/Dialog'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextArea, TextField } from '../../components/Field'
+import { Hint } from '../../components/Hint'
 import { useAuth } from '../../lib/auth'
 import { formatJsonObject, parseBuilderConfig } from '../../lib/jsonObject'
 
@@ -256,14 +257,14 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" form="run-new-form" variant="filled" disabled={!valid || create.isPending}>
+          <Button type="submit" form="run-new-form" variant="filled" disabled={!valid || create.isPending} hint="button.run_new.queue">
             {create.isPending ? 'Queuing…' : 'Queue run'}
           </Button>
         </>
       }
     >
       <form id="run-new-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
-        <SelectField label="Repo" required value={repo} onChange={(e) => setRepo(e.target.value)} disabled={Boolean(presetRepo)}>
+        <SelectField label="Repo" hint="field.run_new.repo" required value={repo} onChange={(e) => setRepo(e.target.value)} disabled={Boolean(presetRepo)}>
           <option value="">Choose…</option>
           {(repos.data?.items ?? []).map((r) => (
             <option key={r.name} value={r.name}>
@@ -272,7 +273,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
           ))}
           {presetRepo && !repos.data?.items.some((r) => r.name === presetRepo) && <option value={presetRepo}>{presetRepo}</option>}
         </SelectField>
-        <SelectField label="Kind" required value={kind} onChange={(e) => setKind(e.target.value as RunKind)} description={KIND_HELP[kind]}>
+        <SelectField label="Kind" hint="field.run_new.kind" required value={kind} onChange={(e) => setKind(e.target.value as RunKind)} description={KIND_HELP[kind]}>
           {RUN_KINDS.map((k) => (
             <option key={k} value={k}>
               {k}
@@ -281,9 +282,10 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
         </SelectField>
         {needsBuilder && (
           <>
-            <TextField label="Mode" value={mode} readOnly description="Derived from kind: replay = sighted, blind = blind" />
+            <TextField label="Mode" hint="field.run_new.mode" value={mode} readOnly description="Derived from kind: replay = sighted, blind = blind" />
             <TextField
               label="Builder"
+              hint="field.run_new.builder"
               required
               value={builder}
               onChange={(e) => setBuilder(e.target.value)}
@@ -302,6 +304,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
             </datalist>
             <TextField
               label="Model"
+              hint="field.run_new.model"
               value={model}
               onChange={(e) => setModel(e.target.value)}
               list={isClaudeCode ? 'crb-claude-models' : undefined}
@@ -315,21 +318,22 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                 ))}
               </datalist>
             )}
-            <TextField label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="e.g. cerebras" />
+            <TextField label="Provider" hint="field.run_new.provider" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="e.g. cerebras" />
             <TextField
               label="Ladder"
+              hint="field.run_new.ladder"
               value={ladder}
               onChange={(e) => setLadder(e.target.value)}
               error={ladderEmpty ? 'A run needs at least one rung: a label here or a rung below' : undefined}
               description="Comma-separated rung labels; each rung is one attempt (r1 = this builder + model, or builder:model[:provider]). Object rungs below are appended in order."
             />
             {isClaudeCode && (
-              <div className="flex items-start gap-2 rounded-[var(--radius-control)] border border-border bg-surface-container px-3 py-2 sm:col-span-2">
+              <Hint as="div" id="field.run_new.cli_login" className="flex items-start gap-2 rounded-[var(--radius-control)] border border-border bg-surface-container px-3 py-2 sm:col-span-2">
                 <input id="crb-cli-login" type="checkbox" className="mt-0.5" checked={cliLogin} disabled={!cfg.ok} onChange={(e) => toggleCliLogin(e.target.checked)} />
                 <label htmlFor="crb-cli-login" className="text-xs text-on-surface-body">
                   <span className="font-semibold">Use my Claude Code login (dev)</span> — sets <code>{'{"auth": "cli"}'}</code>: the worker runs <code>claude</code> without <code>--bare</code> on the operator’s own subscription login instead of <code>ANTHROPIC_API_KEY</code>. Developer / evaluation only — the target repo’s CLAUDE.md is auto-discovered in this mode (its project settings and hooks are still excluded).
                 </label>
-              </div>
+              </Hint>
             )}
 
             <fieldset className="space-y-2 rounded-[var(--radius-control)] border border-border p-3 sm:col-span-2" data-testid="run-budget">
@@ -343,6 +347,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                   <TextField
                     key={key}
                     label={BUDGET_LABELS[key]}
+                    hint="field.run_new.budget"
                     type="number"
                     min={key === 'max_tokens' || key === 'max_cost_usd' ? 0 : 1}
                     step={key === 'max_cost_usd' ? '0.01' : 1}
@@ -362,14 +367,14 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                 model at an escalating budget is a budget ladder.
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={addRung} disabled={!builder || !identityModel}>
+                <Button size="sm" onClick={addRung} disabled={!builder || !identityModel} hint="button.run_new.add_rung">
                   Add rung
                 </Button>
-                <Button size="sm" onClick={applyBlindSweep} disabled={!builder || !identityModel} title="Replaces the ladder with three rungs of this builder + model at 25, 50 and 100 tool calls">
+                <Button size="sm" onClick={applyBlindSweep} disabled={!builder || !identityModel} hint="button.run_new.sweep">
                   Blind budget sweep 25 → 50 → 100 tool calls
                 </Button>
                 {rungs.length > 0 && (
-                  <Button size="sm" variant="ghost" onClick={() => setRungs([])}>
+                  <Button size="sm" variant="ghost" onClick={() => setRungs([])} hint="button.run_new.clear_rungs">
                     Clear rungs
                   </Button>
                 )}
@@ -386,13 +391,13 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                           {r.wall_clock_s || budget.wall_clock_s || BUDGET_DEFAULTS.wall_clock_s}
                         </span>
                       </div>
-                      <TextField label={`Rung ${i + 1} builder`} required value={r.builder} onChange={(e) => updateRung(i, { builder: e.target.value })} list="crb-builders" />
-                      <TextField label={`Rung ${i + 1} model`} required value={r.model} onChange={(e) => updateRung(i, { model: e.target.value })} />
-                      <TextField label={`Rung ${i + 1} provider`} value={r.provider} onChange={(e) => updateRung(i, { provider: e.target.value })} placeholder="run’s" />
-                      <TextField label={`Rung ${i + 1} tool calls`} type="number" min={1} value={r.max_tool_calls} onChange={(e) => updateRung(i, { max_tool_calls: e.target.value })} placeholder="inherit" />
-                      <TextField label={`Rung ${i + 1} turns`} type="number" min={1} value={r.max_turns} onChange={(e) => updateRung(i, { max_turns: e.target.value })} placeholder="inherit" />
-                      <TextField label={`Rung ${i + 1} wall clock (s)`} type="number" min={1} value={r.wall_clock_s} onChange={(e) => updateRung(i, { wall_clock_s: e.target.value })} placeholder="inherit" />
-                      <Button size="sm" variant="ghost" onClick={() => removeRung(i)} aria-label={`Remove rung ${i + 1}`}>
+                      <TextField label={`Rung ${i + 1} builder`} hint="field.run_new.rung" required value={r.builder} onChange={(e) => updateRung(i, { builder: e.target.value })} list="crb-builders" />
+                      <TextField label={`Rung ${i + 1} model`} hint="field.run_new.rung" required value={r.model} onChange={(e) => updateRung(i, { model: e.target.value })} />
+                      <TextField label={`Rung ${i + 1} provider`} hint="field.run_new.rung" value={r.provider} onChange={(e) => updateRung(i, { provider: e.target.value })} placeholder="run’s" />
+                      <TextField label={`Rung ${i + 1} tool calls`} hint="field.run_new.rung" type="number" min={1} value={r.max_tool_calls} onChange={(e) => updateRung(i, { max_tool_calls: e.target.value })} placeholder="inherit" />
+                      <TextField label={`Rung ${i + 1} turns`} hint="field.run_new.rung" type="number" min={1} value={r.max_turns} onChange={(e) => updateRung(i, { max_turns: e.target.value })} placeholder="inherit" />
+                      <TextField label={`Rung ${i + 1} wall clock (s)`} hint="field.run_new.rung" type="number" min={1} value={r.wall_clock_s} onChange={(e) => updateRung(i, { wall_clock_s: e.target.value })} placeholder="inherit" />
+                      <Button size="sm" variant="ghost" onClick={() => removeRung(i)} aria-label={`Remove rung ${i + 1}`} hint="button.run_new.remove_rung">
                         Remove
                       </Button>
                     </li>
@@ -404,6 +409,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
             <div className="sm:col-span-2">
               <TextArea
                 label="Builder config (JSON, optional)"
+                hint="field.run_new.builder_config"
                 value={builderConfig}
                 onChange={(e) => setBuilderConfig(e.target.value)}
                 rows={4}
@@ -416,18 +422,18 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
             </div>
           </>
         )}
-        <TextField label="Task limit" type="number" min={1} value={limit} onChange={(e) => setLimit(e.target.value)} description="Leave blank for all tasks" />
-        <SelectField label="Pool" value={pool} onChange={(e) => setPool(e.target.value)}>
+        <TextField label="Task limit" hint="field.run_new.limit" type="number" min={1} value={limit} onChange={(e) => setLimit(e.target.value)} description="Leave blank for all tasks" />
+        <SelectField label="Pool" hint="field.run_new.pool" value={pool} onChange={(e) => setPool(e.target.value)}>
           <option value="">all</option>
           <option value="standard">standard</option>
           <option value="hard">hard</option>
         </SelectField>
-        <SelectField label="Executor" value={executor} onChange={(e) => setExecutor(e.target.value)} description="Docker fails closed when unavailable; there is no local fallback">
+        <SelectField label="Executor" hint="field.run_new.executor" value={executor} onChange={(e) => setExecutor(e.target.value)} description="Docker fails closed when unavailable; there is no local fallback">
           <option value="">{serverExecutor ? `server default (${serverExecutor})` : 'server default'}</option>
           <option value="docker">docker (sandboxed)</option>
           <option value="local">local</option>
         </SelectField>
-        <TextField label="Timeout (s)" type="number" min={1} value={timeout} onChange={(e) => setTimeoutS(e.target.value)} description="Per test run; a timeout is a failure, never a pass" />
+        <TextField label="Timeout (s)" hint="field.run_new.timeout" type="number" min={1} value={timeout} onChange={(e) => setTimeoutS(e.target.value)} description="Per test run; a timeout is a failure, never a pass" />
         {create.isError && (
           <div className="sm:col-span-2">
             <ErrorState compact error={create.error} />

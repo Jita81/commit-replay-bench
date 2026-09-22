@@ -18,8 +18,9 @@
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useRuns` and its polling rule), ui/src/api/types.ts
  *               (`Run`, `RUN_KINDS`), ui/src/screens/Runs/RunNewDialog.tsx,
- *               ui/src/screens/Runs/RunDetailPage.tsx (where a row leads; imports `Progress`),
- *               src/crb/server/routes/runs.py
+ *               ui/src/screens/Runs/RunDetailPage.tsx (where a row leads; imports `Progress`
+ *               with its own `hint`), ui/src/components/Hint.tsx (the column, filter, button
+ *               and progress-bar hints), src/crb/server/routes/runs.py
  * Tested by:    ui/src/screens/Runs/RunsPage.test.tsx (the kind filter and the copy name every
  *               kind; ?new= opens the dialog for an operator only), ui/e2e/walkthrough/03-mine.spec.ts (the Runs list shows the run, the
  *               progress bar reports the run's own counts), ui/e2e/walkthrough/06-cancel.spec.ts,
@@ -36,6 +37,8 @@ import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
 import { InlineSelect } from '../../components/Field'
+import { Hint } from '../../components/Hint'
+import type { HintId } from '../../help/hints'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
@@ -50,18 +53,18 @@ const STATUSES: RunStatus[] = ['queued', 'running', 'succeeded', 'failed', 'canc
 /** The kind filter's options: every kind a run can have, not only the kinds the dialog starts (a probe comes from the repo page, a label from the CLI, a factory run from /factory). */
 const KIND_FILTERS: readonly RunKind[] = [...RUN_KINDS, 'probe', 'label', 'factory']
 
-/** Done / total as a bar with `role="progressbar"`; red when failed, green when succeeded. */
-export function Progress({ done, total, status }: { done: number; total: number; status: RunStatus }) {
+/** Done / total as a bar with `role="progressbar"`; red when failed, green when succeeded. `hint` is the list's id by default (dense, no tab stop); the run page passes its own. */
+export function Progress({ done, total, status, hint = 'chart.runs.progress', tabStop = false }: { done: number; total: number; status: RunStatus; hint?: HintId; tabStop?: boolean }) {
   const pct = total > 0 ? done / total : 0
   return (
-    <div className="flex items-center gap-2">
+    <Hint as="div" id={hint} tabStop={tabStop} className="flex items-center gap-2">
       <div className="h-1.5 w-24 overflow-hidden rounded-full bg-surface-highest" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label={`${done} of ${total} tasks`}>
         <div className={`h-full ${status === 'failed' ? 'bg-status-red' : status === 'succeeded' ? 'bg-status-green' : 'bg-primary'}`} style={{ width: `${pct * 100}%` }} />
       </div>
       <span className="num text-xs text-on-surface-muted">
         {fmtInt(done)}/{fmtInt(total)} · {fmtPct(pct, 0)}
       </span>
-    </div>
+    </Hint>
   )
 }
 
@@ -86,28 +89,29 @@ export function RunsPage() {
 
   const columns = useMemo<Column<Run>[]>(
     () => [
-      { key: 'id', header: 'Run', mono: true, sortValue: (r) => r.id, cell: (r) => <Link to={`/runs/${encodeURIComponent(r.id)}`} title={r.id}>{shortId(r.id, 8)}</Link> },
-      { key: 'repo', header: 'Repo', sortValue: (r) => r.repo, cell: (r) => r.repo },
-      { key: 'kind', header: 'Kind', sortValue: (r) => r.kind, cell: (r) => <span className="font-mono text-xs">{r.kind}{r.kind === 'replay' || r.kind === 'blind' ? ` · ${r.mode}` : ''}</span> },
+      { key: 'id', header: 'Run', hint: 'col.runs.id', mono: true, sortValue: (r) => r.id, cell: (r) => <Link to={`/runs/${encodeURIComponent(r.id)}`} title={r.id}>{shortId(r.id, 8)}</Link> },
+      { key: 'repo', header: 'Repo', hint: 'col.runs.repo', sortValue: (r) => r.repo, cell: (r) => r.repo },
+      { key: 'kind', header: 'Kind', hint: 'col.runs.kind', sortValue: (r) => r.kind, cell: (r) => <span className="font-mono text-xs">{r.kind}{r.kind === 'replay' || r.kind === 'blind' ? ` · ${r.mode}` : ''}</span> },
       {
         key: 'status',
         header: 'Status',
+        hint: 'col.runs.status',
         sortValue: (r) => r.status,
         cell: (r) => {
           const d = runStatusDisplay(r.status)
           return (
-            <Pill tone={d.tone} glyph={d.glyph} size="xs" label={d.describe + (r.cancel_requested ? ' (cancel requested)' : '')}>
+            <Pill tone={d.tone} glyph={d.glyph} size="xs" label={d.describe + (r.cancel_requested ? ' (cancel requested)' : '')} hint={d.hint} tabStop={false}>
               <span className={r.status === 'running' ? 'crb-pulse' : ''}>{d.label}</span>
             </Pill>
           )
         },
       },
-      { key: 'progress', header: 'Progress', sortValue: (r) => (r.progress.total ? r.progress.done / r.progress.total : 0), cell: (r) => <Progress done={r.progress.done} total={r.progress.total} status={r.status} /> },
-      { key: 'clean', header: 'Clean', numeric: true, sortValue: (r) => r.counts.clean, cell: (r) => `${fmtInt(r.counts.clean)}/${fmtInt(r.counts.tasks)}` },
-      { key: 'dq', header: 'DQ / err', numeric: true, sortValue: (r) => r.counts.disqualified + r.counts.errors, cell: (r) => `${fmtInt(r.counts.disqualified)} / ${fmtInt(r.counts.errors)}`, hideBelowMd: true },
-      { key: 'builder', header: 'Builder', sortValue: (r) => r.builder, cell: (r) => (r.builder ? <span className="font-mono text-xs">{r.builder}{r.model ? ` · ${r.model}` : ''}</span> : <span className="text-on-surface-muted">—</span>), hideBelowMd: true },
-      { key: 'cost', header: 'Cost', numeric: true, sortValue: (r) => r.cost_usd, cell: (r) => fmtUsd(r.cost_usd), hideBelowMd: true },
-      { key: 'created', header: 'Created', sortValue: (r) => r.created, cell: (r) => <span className="text-xs text-on-surface-muted">{fmtDate(r.created)}</span> },
+      { key: 'progress', header: 'Progress', hint: 'col.runs.progress', sortValue: (r) => (r.progress.total ? r.progress.done / r.progress.total : 0), cell: (r) => <Progress done={r.progress.done} total={r.progress.total} status={r.status} /> },
+      { key: 'clean', header: 'Clean', hint: 'col.runs.clean', numeric: true, sortValue: (r) => r.counts.clean, cell: (r) => `${fmtInt(r.counts.clean)}/${fmtInt(r.counts.tasks)}` },
+      { key: 'dq', header: 'DQ / err', hint: 'col.runs.dq_err', numeric: true, sortValue: (r) => r.counts.disqualified + r.counts.errors, cell: (r) => `${fmtInt(r.counts.disqualified)} / ${fmtInt(r.counts.errors)}`, hideBelowMd: true },
+      { key: 'builder', header: 'Builder', hint: 'col.runs.builder', sortValue: (r) => r.builder, cell: (r) => (r.builder ? <span className="font-mono text-xs">{r.builder}{r.model ? ` · ${r.model}` : ''}</span> : <span className="text-on-surface-muted">—</span>), hideBelowMd: true },
+      { key: 'cost', header: 'Cost', hint: 'col.runs.cost', numeric: true, sortValue: (r) => r.cost_usd, cell: (r) => fmtUsd(r.cost_usd), hideBelowMd: true },
+      { key: 'created', header: 'Created', hint: 'col.runs.created', sortValue: (r) => r.created, cell: (r) => <span className="text-xs text-on-surface-muted">{fmtDate(r.created)}</span> },
     ],
     [],
   )
@@ -121,7 +125,7 @@ export function RunsPage() {
         actions={
           <>
             <RepoPicker value={repo} onChange={setRepo} />
-            <InlineSelect label="Kind" value={kind} onChange={(e) => setFilter('kind', e.target.value)}>
+            <InlineSelect label="Kind" hint="field.runs.kind_filter" value={kind} onChange={(e) => setFilter('kind', e.target.value)}>
               <option value="">all</option>
               {KIND_FILTERS.map((k) => (
                 <option key={k} value={k}>
@@ -129,7 +133,7 @@ export function RunsPage() {
                 </option>
               ))}
             </InlineSelect>
-            <InlineSelect label="Status" value={status} onChange={(e) => setFilter('status', e.target.value)}>
+            <InlineSelect label="Status" hint="field.runs.status_filter" value={status} onChange={(e) => setFilter('status', e.target.value)}>
               <option value="">all</option>
               {STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -138,7 +142,7 @@ export function RunsPage() {
               ))}
             </InlineSelect>
             {can('operator') && (
-              <Button variant="filled" onClick={() => setStarting(true)}>
+              <Button variant="filled" onClick={() => setStarting(true)} hint="button.runs.start">
                 Start run
               </Button>
             )}
@@ -165,7 +169,7 @@ export function RunsPage() {
                         ? 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. Start one here to produce ledger rows; the factory is started from Factory.'
                         : 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. An operator starts a run; it spends model budget. The factory is started from Factory.'
                   }
-                  action={can('operator') ? <Button variant="filled" onClick={() => setStarting(true)}>Start a run</Button> : undefined}
+                  action={can('operator') ? <Button variant="filled" onClick={() => setStarting(true)} hint="button.runs.start">Start a run</Button> : undefined}
                 />
               }
             />

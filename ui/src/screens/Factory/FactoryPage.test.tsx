@@ -301,7 +301,7 @@ describe('FactoryPage — the shipped contract', () => {
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
     await screen.findByTestId('before-you-start')
     const { default: userEvent } = await import('@testing-library/user-event')
-    await userEvent.click(screen.getByText(/Use a different builder/))
+    await userEvent.click(screen.getByText(/Use a different builder/, { selector: 'summary' }))
     await userEvent.type(screen.getByLabelText('Builder'), 'fixture_gold')
     await userEvent.type(screen.getByLabelText('Model'), 'gold')
     await userEvent.click(screen.getByRole('button', { name: /^Run the factory/ }))

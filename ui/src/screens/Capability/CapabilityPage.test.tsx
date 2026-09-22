@@ -127,10 +127,10 @@ describe('CapabilityPage', () => {
     // no hover-only meaning on the numbers (the route pill is the shared Pill's concern)
     expect(within(tile).getByTestId('cell-numbers').querySelectorAll('[title]')).toHaveLength(0)
     expect(within(tile).getByText('92.5%').getAttribute('title')).toBeNull()
-    // the tile is described by the one legend under the grid, which names every number
-    const legendId = tile.getAttribute('aria-describedby')
-    expect(legendId).toBeTruthy()
-    const legend = document.getElementById(legendId!)!
+    // the tile is described by the one legend under the grid, which names every number (and by its hint bubble, appended)
+    const described = tile.getAttribute('aria-describedby')!.split(' ')
+    expect(described).toHaveLength(2)
+    const legend = document.getElementById(described[0]!)!
     expect(legend.textContent).toContain('fQ1')
     expect(legend.textContent).toContain('false-Q1')
     expect(legend.textContent).toContain('oracle strength')

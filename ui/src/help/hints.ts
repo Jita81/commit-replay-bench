@@ -28,7 +28,8 @@
  *               tables whose states the shared ids describe)
  * Tested by:    ui/src/help/hints.test.ts (length, full stop, no links, copy lint),
  *               ui/src/help/hints-ratchet.test.tsx (every element on every enforced route
- *               carries one of these ids)
+ *               carries one of these ids), ui/src/help/hints-hover.instrument.test.tsx (one
+ *               element per instrument screen opens its text on mouse-over)
  * Touch when:   an element is added to a screen (add its id here first; the ratchet fails
  *               until the screen renders it); copy changes meaning only with the apparatus or
  *               policy change that made it wrong.
@@ -493,6 +494,8 @@ export const HINTS = {
     'Stop the loop after the item in hand. Items already built are still charged and stay on the chain.',
   'stat.factory.last_run':
     'What the newest finished factory run did: how many of its items were accepted, and the other outcomes by count, with when it finished.',
+  'link.factory.last_run':
+    'Open the newest finished factory run: its log, its per-item rows and what it cost.',
   'summary.factory.builder':
     'The builder and model the run will use: the deployment’s configured default, or one you name under Use a different builder.',
   'summary.factory.items':
@@ -709,6 +712,8 @@ export const HINTS = {
     'Queue a toolchain probe: the configured known-green scope runs in the sandbox. Costs nothing; it uses the stored configuration.',
   'pill.repo.probe':
     'The result of the last probe with its detail line, when it ran and the run it came from. Degraded works with a caveat; Down means nothing can be measured yet.',
+  'link.repo.probe_run':
+    'The run that made this probe reading; its log shows the command the toolchain ran and what it printed.',
   'button.repo.start_run':
     'Open the full run form for this repository: kind, builder, model, ladder, budget and executor.',
   'button.repo.next_steps':
@@ -753,6 +758,8 @@ export const HINTS = {
     'Every configuration event for this repository (registered, updated, GitHub-linked), append-only, each with who did it and the redacted field diff.',
   'pill.repo_config.changed':
     'A field this event changed; the diff under it shows the old and new value.',
+  'pill.repo_config.probe_result':
+    'The probe run a save offered: queued or running until the worker finishes, then green (the known-green scope passed under the stored configuration) or failed with the runner’s own last line.',
   'tile.repo_config.stored':
     'The configuration exactly as the API returns it.',
   'field.repo_config.language':
@@ -967,6 +974,12 @@ export const HINTS = {
     'Whether the served patch hashes to the diff hash in the pack. A mismatch means the bytes shown are not what was graded.',
   'pill.evidence.patch_flags':
     'Redacted means secret-shaped content was removed before serving; truncated means the patch was capped at 1 MiB.',
+  'pill.evidence.test_run':
+    'How this test run ended: green (every test in the scope passed), red with the runner’s return code, timed out, or a parse error when the runner’s output could not be read. Open it for the failing ids and the redacted output tail.',
+  'pill.evidence.lint_run':
+    'What the repository’s own formatter or linter said about the changed files (belt 5): accepted, rejected, could not run, or not evaluated when none is configured.',
+  'tile.evidence.patch_excluded':
+    'This file is in the served patch but not in the pack’s diff file list, for example the overlaid oracle test; it is shown but not counted in the additions and deletions.',
   'button.review.finding':
     'Mark a finding you saw in the diff: regression, defect, API change or style. The worst finding becomes the verdict.',
   'pill.review.draft_verdict':
@@ -1438,7 +1451,8 @@ export const MIN_HINTS: Record<string, number> = {
   '/factory': 28,
   '/posture': 22,
   '/repos': 8,
-  '/repos/:name': 20,
+  // the Overview tab (the state a reader lands on); the Change profile, Tasks and Configuration tabs are held by the ratchet's variants
+  '/repos/:name': 14,
   '/runs': 13,
   '/runs/:id': 24,
   '/tasks/:repo/:taskId': 16,
@@ -1447,7 +1461,8 @@ export const MIN_HINTS: Record<string, number> = {
   '/oracle': 22,
   '/learn': 26,
   '/ledger': 26,
-  '/settings': 16,
+  // a viewer's Settings (health, the login card read-only, the GitHub App); the admin's configuration and users are held by the ratchet's variants
+  '/settings': 11,
 }
 
 /** The text for an id; the union type makes a typo a compile error, so this can never be undefined. */

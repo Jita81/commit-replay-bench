@@ -32,6 +32,7 @@ import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { ErrorState } from '../../components/ErrorState'
 import { TextField } from '../../components/Field'
+import { Hint } from '../../components/Hint'
 import { DocLink } from '../../components/Help'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
@@ -69,7 +70,7 @@ function StatusLine({ status }: { status: SecretStatus | undefined }) {
   if (!status?.present) {
     return (
       <div className="flex flex-wrap items-center gap-2" data-testid="claude-login-status" data-present="false">
-        <Pill tone="muted" glyph="–" label="Claude Code token: not stored">
+        <Pill tone="muted" glyph="–" label="Claude Code token: not stored" hint="pill.settings.token">
           no token stored
         </Pill>
         <span className="text-xs text-on-surface-muted">
@@ -80,7 +81,7 @@ function StatusLine({ status }: { status: SecretStatus | undefined }) {
   }
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="claude-login-status" data-present="true">
-      <Pill tone="green" glyph="✓" label={`Claude Code token stored, ending ${status.fingerprint}`}>
+      <Pill tone="green" glyph="✓" label={`Claude Code token stored, ending ${status.fingerprint}`} hint="pill.settings.token">
         token stored · <span className="font-mono">…{status.fingerprint}</span>
       </Pill>
       <span className="text-xs text-on-surface-muted" data-testid="claude-login-provenance">
@@ -95,7 +96,7 @@ function CheckResult({ check }: { check: LoginCheck }) {
   const d = CHECK_DISPLAY[check.status] ?? CHECK_DISPLAY.error
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="claude-login-verify-result" data-status={check.status}>
-      <Pill tone={d.tone} glyph={d.glyph} label={`Verify: ${d.label}`}>
+      <Pill tone={d.tone} glyph={d.glyph} label={`Verify: ${d.label}`} hint="pill.settings.verify">
         {d.label}
       </Pill>
       {check.detail && <span className="text-on-surface-muted">{check.detail}</span>}
@@ -168,11 +169,11 @@ function SignInPanel({ onDone }: { onDone: () => void }) {
   return (
     <div className="space-y-3 border-t border-border pt-4" data-testid="claude-signin" data-state={s?.state ?? 'idle'}>
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="filled" onClick={begin} disabled={start.isPending || (Boolean(s) && !LOGIN_TERMINAL.has(s!.state))} data-testid="claude-signin-start">
+        <Button variant="filled" onClick={begin} disabled={start.isPending || (Boolean(s) && !LOGIN_TERMINAL.has(s!.state))} data-testid="claude-signin-start" hint="button.settings.claude_signin">
           {start.isPending ? 'Starting sign-in…' : 'Sign in with your Claude account'}
         </Button>
         {s && !LOGIN_TERMINAL.has(s.state) && (
-          <Button variant="outlined" size="sm" onClick={stop} data-testid="claude-signin-cancel">
+          <Button variant="outlined" size="sm" onClick={stop} data-testid="claude-signin-cancel" hint="button.settings.claude_signin">
             Cancel
           </Button>
         )}
@@ -185,6 +186,7 @@ function SignInPanel({ onDone }: { onDone: () => void }) {
         <form onSubmit={send} className="grid gap-3 sm:grid-cols-[1fr_auto]" aria-label="Paste the sign-in code">
           <TextField
             label="Code from Anthropic"
+            hint="field.settings.claude_code"
             type="password"
             value={code}
             onChange={(e) => setCode(e.target.value)}
@@ -201,7 +203,7 @@ function SignInPanel({ onDone }: { onDone: () => void }) {
             }
           />
           <div className="flex items-end">
-            <Button type="submit" variant="filled" disabled={submit.isPending || s.state === 'exchanging' || !code.trim()} data-testid="claude-signin-submit">
+            <Button type="submit" variant="filled" disabled={submit.isPending || s.state === 'exchanging' || !code.trim()} data-testid="claude-signin-submit" hint="button.settings.claude_signin">
               {submit.isPending || s.state === 'exchanging' ? 'Exchanging…' : 'Finish sign-in'}
             </Button>
           </div>
@@ -219,7 +221,7 @@ function SignInPanel({ onDone }: { onDone: () => void }) {
       )}
       {s && LOGIN_TERMINAL.has(s.state) && (
         <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="claude-signin-result" data-state={s.state}>
-          <Pill tone={s.state === 'done' ? 'green' : s.state === 'failed' ? 'red' : 'muted'} glyph={s.state === 'done' ? '✓' : s.state === 'failed' ? '✕' : '–'} label={`Sign-in ${s.state}`}>
+          <Pill tone={s.state === 'done' ? 'green' : s.state === 'failed' ? 'red' : 'muted'} glyph={s.state === 'done' ? '✓' : s.state === 'failed' ? '✕' : '–'} label={`Sign-in ${s.state}`} hint="pill.settings.signin_state">
             {s.state === 'done' ? `signed in · token stored …${s.fingerprint}` : s.state}
           </Pill>
           {s.detail && <span className="text-on-surface-muted">{s.detail}</span>}
@@ -256,7 +258,7 @@ export function ClaudeCodeLoginCard() {
 
   return (
     <Card title="Claude Code login" eyebrow="claude setup-token · auth: cli">
-      <div className="space-y-4">
+      <Hint as="div" id="tile.settings.claude_login" className="space-y-4">
         <QueryBoundary query={secrets} loading="Loading login status…">
           {(list) => <StatusLine status={claudeCodeStatus(list)} />}
         </QueryBoundary>
@@ -278,6 +280,7 @@ export function ClaudeCodeLoginCard() {
             <form onSubmit={submit} className="grid gap-3 border-t border-border pt-4 sm:grid-cols-[1fr_auto]" aria-label="Save Claude Code token">
               <TextField
                 label="Token"
+                hint="field.settings.token"
                 type="password"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
@@ -288,7 +291,7 @@ export function ClaudeCodeLoginCard() {
                 description="Never shown again after saving; only the last four characters are reported."
               />
               <div className="flex items-end">
-                <Button type="submit" variant="filled" disabled={save.isPending || !token.trim()} data-testid="claude-login-save">
+                <Button type="submit" variant="filled" disabled={save.isPending || !token.trim()} data-testid="claude-login-save" hint="button.settings.token_save">
                   {save.isPending ? 'Saving…' : 'Save token'}
                 </Button>
               </div>
@@ -329,7 +332,7 @@ export function ClaudeCodeLoginCard() {
             Only an admin can save, verify or remove the token.
           </p>
         )}
-      </div>
+      </Hint>
     </Card>
   )
 }

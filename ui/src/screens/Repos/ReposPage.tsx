@@ -51,6 +51,7 @@ export function ReposPage() {
       {
         key: 'name',
         header: 'Repo',
+        hint: 'col.repos.name',
         sortValue: (r) => r.name,
         cell: (r) => (
           <Link to={`/repos/${encodeURIComponent(r.name)}`} className="font-semibold">
@@ -58,33 +59,35 @@ export function ReposPage() {
           </Link>
         ),
       },
-      { key: 'language', header: 'Language', sortValue: (r) => r.language, cell: (r) => <span className="font-mono text-xs">{r.language}{r.runner ? ` · ${r.runner}` : ''}</span> },
+      { key: 'language', header: 'Language', hint: 'col.repos.language', sortValue: (r) => r.language, cell: (r) => <span className="font-mono text-xs">{r.language}{r.runner ? ` · ${r.runner}` : ''}</span> },
       {
         key: 'probe',
         header: 'Probe',
+        hint: 'col.repos.probe',
         sortValue: (r) => r.probe.status,
         cell: (r) => {
           const d = probeDisplay(r.probe.status)
           return (
-            <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`${d.describe}${r.probe.detail ? `: ${r.probe.detail}` : ''}`}>
+            <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`${d.describe}${r.probe.detail ? `: ${r.probe.detail}` : ''}`} hint={d.hint}>
               {d.label}
             </Pill>
           )
         },
       },
-      { key: 'tasks', header: 'Tasks', numeric: true, sortValue: (r) => r.task_counts.total, cell: (r) => fmtInt(r.task_counts.total) },
-      { key: 'gold', header: 'Gold-clean', numeric: true, sortValue: (r) => r.task_counts.gold_clean, cell: (r) => fmtInt(r.task_counts.gold_clean), hideBelowMd: true },
-      { key: 'hard', header: 'Hard pool', numeric: true, sortValue: (r) => r.task_counts.hard, cell: (r) => fmtInt(r.task_counts.hard), hideBelowMd: true },
+      { key: 'tasks', header: 'Tasks', hint: 'col.repos.tasks', numeric: true, sortValue: (r) => r.task_counts.total, cell: (r) => fmtInt(r.task_counts.total) },
+      { key: 'gold', header: 'Gold-clean', hint: 'col.repos.gold', numeric: true, sortValue: (r) => r.task_counts.gold_clean, cell: (r) => fmtInt(r.task_counts.gold_clean), hideBelowMd: true },
+      { key: 'hard', header: 'Hard pool', hint: 'col.repos.hard', numeric: true, sortValue: (r) => r.task_counts.hard, cell: (r) => fmtInt(r.task_counts.hard), hideBelowMd: true },
       {
         key: 'last_run',
         header: 'Last run',
+        hint: 'col.repos.last_run',
         sortValue: (r) => r.last_run?.finished ?? '',
         cell: (r) => {
           if (!r.last_run) return <span className="text-on-surface-muted">—</span>
           const d = runStatusDisplay(r.last_run.status)
           return (
             <span className="inline-flex items-center gap-2">
-              <Pill tone={d.tone} glyph={d.glyph} size="xs" label={d.describe}>
+              <Pill tone={d.tone} glyph={d.glyph} size="xs" label={d.describe} hint={d.hint}>
                 {r.last_run.kind}
               </Pill>
               <span className="text-xs text-on-surface-muted">{fmtDate(r.last_run.finished)}</span>
@@ -104,7 +107,7 @@ export function ReposPage() {
         purpose="Every repository under measurement: its probe status (can the instrument run its tests?), how many replayable commits were mined, and the last run."
         actions={
           can('operator') && (
-            <Button variant="filled" onClick={() => setAdding(true)}>
+            <Button variant="filled" onClick={() => setAdding(true)} hint="button.repos.add">
               Add repo
             </Button>
           )
@@ -124,7 +127,7 @@ export function ReposPage() {
                 <EmptyState
                   title="No repositories yet"
                   reason="A repo is the unit of measurement. Add one, probe its toolchain, then mine its history for replayable commits."
-                  action={can('operator') ? <Button variant="filled" onClick={() => setAdding(true)}>Add the first repo</Button> : <span className="text-xs text-on-surface-muted">Ask an operator to add one.</span>}
+                  action={can('operator') ? <Button variant="filled" onClick={() => setAdding(true)} hint="button.repos.add">Add the first repo</Button> : <span className="text-xs text-on-surface-muted">Ask an operator to add one.</span>}
                 />
               }
             />

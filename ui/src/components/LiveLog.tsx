@@ -21,7 +21,8 @@
  *               `aria-live="polite"`, and the scroll region is focusable (WCAG 2.1.1).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/api/sse.ts (`SseStatus` and the snapshot fields this renders),
+ * Works with:   ui/src/components/Hint.tsx (the stream pill, the two checkboxes, every
+ *               row's status glyph and task link carry a hint), ui/src/api/sse.ts (`SseStatus` and the snapshot fields this renders),
  *               ui/src/api/hooks.ts (`useRunEvents` — the source),
  *               ui/src/screens/Runs/RunDetailPage.tsx
  *               (the only consumer), ui/src/lib/verdict.ts (`stepStatusDisplay`,
@@ -42,6 +43,7 @@ import type { SseStatus } from '../api/sse'
 import { fmtMs, fmtTime, fmtUsd, shortId } from '../lib/format'
 import { TONE_TEXT, actionHelp, stepStatusDisplay, type Display } from '../lib/verdict'
 import { EmptyState } from './EmptyState'
+import { Hint } from './Hint'
 import { Pill } from './Pill'
 
 interface LiveLogProps {
@@ -154,7 +156,7 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
     <div className="space-y-2" data-testid="live-log">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-on-surface-muted">
         <div className="flex items-center gap-2">
-          <Pill tone={s.tone} glyph={s.glyph} size="xs" label={`Stream: ${s.label}`}>
+          <Pill tone={s.tone} glyph={s.glyph} size="xs" label={`Stream: ${s.label}`} hint="pill.run.stream">
             <span className={status === 'open' ? 'crb-pulse' : ''}>{s.label}</span>
           </Pill>
           <span className="num">{total.toLocaleString('en-GB')} events</span>
@@ -171,14 +173,14 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
           )}
         </div>
         <div className="flex items-center gap-3">
-          <label className="inline-flex items-center gap-1.5">
+          <Hint as="label" id="field.run.log_explain" className="inline-flex items-center gap-1.5">
             <input type="checkbox" checked={explain} onChange={(e) => setExplain(e.target.checked)} />
             Explain each row
-          </label>
-          <label className="inline-flex items-center gap-1.5">
+          </Hint>
+          <Hint as="label" id="field.run.log_follow" className="inline-flex items-center gap-1.5">
             <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
             Follow tail
-          </label>
+          </Hint>
         </div>
       </div>
       <div
@@ -221,14 +223,15 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
                     <span className="w-[150px] shrink-0 truncate text-on-surface" title={ev.action}>
                       {ev.action}
                     </span>
-                    <span className={`w-[14px] shrink-0 ${TONE_TEXT[d.tone]}`} title={d.label} aria-label={d.label} role="img">
+                    {/* one glyph per row, hundreds of rows: hover and tap open the hint; the status text is the accessible name */}
+                    <Hint id="pill.run.event_status" tabStop={false} className={`w-[14px] shrink-0 ${TONE_TEXT[d.tone]}`} aria-label={d.label} role="img">
                       {d.glyph}
-                    </span>
+                    </Hint>
                     {ev.task_id ? (
                       onSelectTask ? (
-                        <button type="button" onClick={() => onSelectTask(ev.task_id)} className="w-[84px] shrink-0 text-left text-primary underline-offset-2 hover:underline" title={ev.task_id}>
+                        <Hint as="button" id="link.run.event_task" type="button" onClick={() => onSelectTask(ev.task_id)} className="w-[84px] shrink-0 text-left text-primary underline-offset-2 hover:underline" title={ev.task_id}>
                           {shortId(ev.task_id)}
-                        </button>
+                        </Hint>
                       ) : (
                         <span className="w-[84px] shrink-0 text-on-surface-muted" title={ev.task_id}>
                           {shortId(ev.task_id)}
