@@ -391,7 +391,9 @@ test.describe('08 sign-off policy', () => {
     await expect(table.getByTestId('signoff-row-attestation')).toContainText(rowHash!.slice(0, 10))
     // F34 in the product, not only the API: the row says what kind of account signed, with the meaning on hover
     await expect(table.getByTestId('signoff-row-approver')).toContainText('local account')
-    await expect(table.getByTestId('verifier-kind')).toHaveAttribute('title', /verifier_kind: local/)
+    // the pill's sentence is its accessible name (a native title is never the only way — DL-048); its hint explains the kinds
+    await expect(table.getByTestId('verifier-kind')).toHaveAttribute('aria-label', /verifier_kind: local/)
+    await expect(table.getByTestId('verifier-kind')).toHaveAttribute('data-hint', 'pill.signoff.verifier_kind')
     await expect(table.getByRole('img', { name: 'Active attestation' })).toBeVisible()
 
     // and the API serves the same snapshot, hash-chained
