@@ -88,7 +88,7 @@ export interface TaskItem {
 }
 
 /** GOV.UK task list: "You have completed n of m tasks" and the numbered rows. */
-export function TaskList({ tasks, completed, label = 'Tasks', summary }: { tasks: TaskItem[]; completed: number; label?: string; summary?: string }) {
+export function TaskList({ tasks, completed, label = 'Tasks', summary }: { tasks: TaskItem[]; completed: number; label?: string; summary?: ReactNode }) {
   return (
     <div>
       <p className="m-0 mb-2 text-[19px] leading-[1.47]">

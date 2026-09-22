@@ -22,13 +22,16 @@
  *               element (or a component that spreads onto one) is counted per file and may
  *               not exceed `TITLE_ALLOWLIST` — the count only goes down.
  * How:          `renderApp` / `mockApi` from ui/src/test/utils.tsx; the shell through a
- *               layout route; `unhinted(container)` walks the selectors the mechanism names
- *               and describes each miss (`<th> 'Wilson lower' in table 'Route decisions'`);
- *               sources read with `import.meta.glob(…, { query: '?raw' })`.
+ *               layout route; `unhinted(container)` (ui/src/help/hints-collector.ts, re-exported
+ *               here) walks the selectors the mechanism names and describes each miss
+ *               (`<th> 'Wilson lower' in table 'Route decisions'`); sources read with
+ *               `import.meta.glob(…, { query: '?raw' })`.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/help/hints.ts (`HINTS`, `MIN_HINTS`), ui/src/components/Hint.tsx (the
- *               `data-hint` the collector looks for), ui/src/App.tsx (the route table),
+ * Works with:   ui/src/help/hints.ts (`HINTS`, `MIN_HINTS`), ui/src/help/hints-collector.ts
+ *               (`unhinted`), ui/src/help/hints-ratchet.onramp.tsx (the on-ramp routes'
+ *               entries and fixtures), ui/src/components/Hint.tsx (the `data-hint` the
+ *               collector looks for), ui/src/App.tsx (the route table),
  *               ui/src/components/Layout.tsx (the shell), ui/src/test/utils.tsx (`renderApp`,
  *               `mockApi`, `PRINCIPAL`), ui/src/help/hints.test.ts (the copy lint)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx
@@ -59,6 +62,8 @@ import { StartButton, SummaryList, Tag, TaskList, WarningButton } from '../compo
 import { AuthProvider } from '../lib/auth'
 import { ControlsPill, FailureSplitPills, ModelPointLine } from '../screens/Capability/FailureSplit'
 import { PRINCIPAL, mockApi, renderApp } from '../test/utils'
+import { unhinted } from './hints-collector'
+import { ONRAMP_SCREENS } from './hints-ratchet.onramp'
 import { HINTS, MIN_HINTS } from './hints'
 
 // ─── the per-route table ──────────────────────────────────────────────────────────────────
@@ -83,17 +88,11 @@ interface ScreenEntry {
  * Example:
  *   '/results': { route: '/results?repo=r', path: '/results', element: <ResultsPage />, api: RESULTS_API, roles: ['viewer', 'approver'] },
  */
-const SCREENS: Record<string, ScreenEntry> = {}
+const SCREENS: Record<string, ScreenEntry> = { ...ONRAMP_SCREENS }
 
 /** Routes not yet wired (the build wave's H1/H2 streams remove theirs). A route here has no `SCREENS` entry. */
 const ALLOWLIST: readonly string[] = [
-  '/home',
-  '/connect',
-  '/connect/:name',
-  '/connect/:name/measure',
   '/posture',
-  '/results',
-  '/decisions',
   '/repos',
   '/repos/:name',
   '/runs',
@@ -104,47 +103,14 @@ const ALLOWLIST: readonly string[] = [
   '/oracle',
   '/learn',
   '/ledger',
-  '/signoff',
   '/factory',
   '/settings',
 ]
 
 // ─── the collector ────────────────────────────────────────────────────────────────────────
 
-/** The elements the mechanism requires a hint on — each selector names what a reader meets. */
-const REQUIRED: Array<[string, string]> = [
-  ['[data-component="stat-tile"]', 'tile'],
-  ['[data-component="pill"]', 'pill'],
-  ['th[scope="col"]', 'column header'],
-  ['input:not([type=hidden]), select, textarea', 'field'],
-  ['button[data-primary], a[data-primary]', 'primary button'],
-  ['nav a', 'nav link'],
-  ['[data-component="gate"] li', 'gate criterion'],
-]
-
-/** A one-line description of an element for the failure message. */
-function describe_(el: Element, kind: string): string {
-  const text = (el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)
-  const table = el.closest('table')?.querySelector('caption')?.textContent?.trim()
-  const label = el.id ? el.ownerDocument.querySelector(`label[for="${el.id}"]`)?.textContent?.trim() : undefined
-  return `${kind} <${el.tagName.toLowerCase()}> '${label ?? text}'${table ? ` in table '${table}'` : ''}`
-}
-
-/** Every required element in `root` that does not sit under a `data-hint` the registry knows. */
-export function unhinted(root: ParentNode): string[] {
-  const out: string[] = []
-  for (const [selector, kind] of REQUIRED) {
-    for (const el of Array.from(root.querySelectorAll(selector))) {
-      // a column header whose text is empty carries nothing to explain
-      if (kind === 'column header' && !(el.textContent ?? '').trim()) continue
-      // the trigger is the element itself, an ancestor (a field's root) or a descendant (a header's sort button, a criterion's label)
-      const wrapper = el.closest('[data-hint]') ?? el.querySelector('[data-hint]')
-      const id = wrapper?.getAttribute('data-hint') ?? ''
-      if (!wrapper || !(id in HINTS)) out.push(describe_(el, kind))
-    }
-  }
-  return out
-}
+/** `unhinted(root)` lives in hints-collector.ts so a screen test can import it without this suite; re-exported for the contract. */
+export { unhinted }
 
 /** The count of hinted elements in `root`. */
 function hinted(root: ParentNode): number {
@@ -172,7 +138,6 @@ const TITLE_ALLOWLIST: Record<string, number> = {
   'screens/Runs/ReviewPanel.tsx': 2,
   'screens/Runs/RunDetailPage.tsx': 1,
   'screens/Runs/RunNewDialog.tsx': 1,
-  'screens/Signoff/SignoffPage.tsx': 2,
 }
 
 /** A `title=` on a native element, or on a component that spreads its props onto one. */

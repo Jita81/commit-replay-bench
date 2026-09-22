@@ -14,7 +14,11 @@
  *               and never hides a row a viewer may read — it only changes the verb, on the
  *               stale rows too (a viewer reads; "approver acts"). The one line of evidence
  *               is readable without a guide: the reason code is a term with its meaning
- *               beside it, and the kicker names the apparatus as a term.
+ *               beside it, and the kicker names the apparatus as a term. Every element a
+ *               reader meets — the kicker, the count pill, each row's kind tag, evidence
+ *               line and act or Read button, and each stale row and its button — is a hint
+ *               trigger (`stat.decisions.*`, `pill.decisions.kind`, `button.decisions.*`,
+ *               `tile.decisions.stale`), so what a row means opens on hover, focus and tap.
  * How:          `useAllRepos` → one `<RepoDecisions>` per repository, each with
  *               `useCapabilityMap` + `useSignoffs` + `useFactoryTasks` (a 404 on the factory
  *               = no backlog, no rows); the counts roll up into the header.
@@ -22,11 +26,13 @@
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Decisions/decisions.ts (the derivation, `evidenceStats`),
  *               ui/src/screens/Capability/contract.ts (`REASON_DISPLAY`),
- *               ui/src/components/Help.tsx (`Term`),
+ *               ui/src/components/Help.tsx (`Term`), ui/src/components/Hint.tsx +
+ *               ui/src/help/hints.ts (the triggers and copy),
  *               ui/src/screens/Signoff/SignoffPage.tsx (Attest → the cell preselected),
  *               ui/src/screens/Factory/FactoryPage.tsx (Sign a gap → the item),
  *               ui/src/screens/Routing/RoutingPage.tsx (Read why)
- * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx
+ * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
+ *               (every element resolves to a registry id)
  * Touch when:   a human act is added to the product (decisions.ts first).
  */
 
@@ -37,6 +43,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { Kicker, Lede, PageTitle, SecondaryButton, StartButton, Tag, type TagTone } from '../../components/govuk'
 import { Term } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { Pill } from '../../components/Pill'
 import { useAuth } from '../../lib/auth'
 import { REASON_DISPLAY, type ReasonCode } from '../Capability/contract'
@@ -77,15 +84,15 @@ export function DecisionsPage() {
   return (
     <>
       <div>
-        <Kicker>
-          {apparatus ? (
-            <>
+        {apparatus ? (
+          <Hint id="stat.decisions.apparatus">
+            <Kicker>
               Under <Term id="apparatus">apparatus</Term> {apparatus}
-            </>
-          ) : (
-            ''
-          )}
-        </Kicker>
+            </Kicker>
+          </Hint>
+        ) : (
+          <Kicker>{''}</Kicker>
+        )}
       </div>
       <PageTitle>Your decisions</PageTitle>
       <Lede>
@@ -94,7 +101,7 @@ export function DecisionsPage() {
       {/* the page-level readiness marker the walkthrough's axe sweep waits on: true only when every repository's queries settled */}
       <div className="mb-6" data-testid="decisions-count" data-ready={d.ready ? 'true' : 'false'}>
         {/* the count across repositories: each card's eyebrow carries its own, so the pill names the spread rather than repeating one card's number */}
-        <Pill tone={total > 0 ? 'primary' : 'green'} size="sm" label={`${total} decisions waiting`}>
+        <Pill tone={total > 0 ? 'primary' : 'green'} size="sm" label={`${total} decisions waiting`} hint="stat.decisions.count">
           {d.ready ? `${total} waiting${withRows > 0 ? ` across ${withRows} ${withRows === 1 ? 'repository' : 'repositories'}` : ''}` : 'counting…'}
         </Pill>
       </div>
@@ -118,9 +125,11 @@ export function DecisionsPage() {
                 return (
                   <li key={`${row.kind}-${i}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-6 border-b border-border py-5">
                     <div>
-                      <Tag tone={KIND_TAG[row.kind]}>{KIND_LABEL[row.kind]}</Tag>
+                      <Tag tone={KIND_TAG[row.kind]} hint="pill.decisions.kind">
+                        {KIND_LABEL[row.kind]}
+                      </Tag>
                       <h3 className="mb-1 mt-2 text-[24px] font-bold leading-[1.3]">{row.title}</h3>
-                      <p className="m-0 font-mono text-[16px] leading-[1.5] text-on-surface-muted">
+                      <Hint as="p" id="stat.decisions.evidence" className="m-0 font-mono text-[16px] leading-[1.5] text-on-surface-muted">
                         {evidenceStats(row)}
                         {row.reasonCode && (
                           <>
@@ -129,10 +138,18 @@ export function DecisionsPage() {
                             {row.reasonCode in REASON_DISPLAY && <span className="font-sans"> — {REASON_DISPLAY[row.reasonCode as ReasonCode]}</span>}
                           </>
                         )}
-                      </p>
+                      </Hint>
                     </div>
                     <div className="text-right">
-                      {allowed && row.role !== 'viewer' ? <StartButton to={row.href}>{row.act}</StartButton> : <SecondaryButton to={row.href}>{allowed ? row.act : 'Read'}</SecondaryButton>}
+                      {allowed && row.role !== 'viewer' ? (
+                        <StartButton to={row.href} hint="button.decisions.act">
+                          {row.act}
+                        </StartButton>
+                      ) : (
+                        <SecondaryButton to={row.href} hint="button.decisions.read">
+                          {allowed ? row.act : 'Read'}
+                        </SecondaryButton>
+                      )}
                       {!allowed && <div className="mt-1 text-[13px] text-on-surface-muted">{row.role} acts</div>}
                     </div>
                   </li>
@@ -155,18 +172,20 @@ export function DecisionsPage() {
             {d.stale.map(({ repo, signoff }) => (
               <li key={signoff.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-6 border-b border-border py-5">
                 <div>
-                  <h3 className="mb-1 text-[19px] font-bold leading-[1.4]">
+                  <Hint as="h3" id="tile.decisions.stale" className="mb-1 text-[19px] font-bold leading-[1.4]">
                     <code>
                       {signoff.cell.capability_class} × {signoff.cell.size}
                     </code>{' '}
                     on {repo} — signed at apparatus {signoff.evidence.apparatus_versions.join(', ') || '?'}, now reading at {signoff.apparatus_current || apparatus}
-                  </h3>
+                  </Hint>
                   <p className="m-0 font-mono text-[16px] leading-[1.5] text-on-surface-muted">
                     signed {signoff.created.slice(0, 10)} by {approverName(signoff)} · n={signoff.evidence.n} · {pct(signoff.evidence.point)} [{pct(signoff.evidence.ci_low)}, …]
                   </p>
                 </div>
                 <div className="text-right">
-                  <SecondaryButton to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${signoff.cell.capability_class}|${signoff.cell.size}`)}`}>{can('approver') ? 'Revoke or re-sign' : 'Read'}</SecondaryButton>
+                  <SecondaryButton to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${signoff.cell.capability_class}|${signoff.cell.size}`)}`} hint={can('approver') ? 'button.decisions.resign' : 'button.decisions.read'}>
+                    {can('approver') ? 'Revoke or re-sign' : 'Read'}
+                  </SecondaryButton>
                   {!can('approver') && <div className="mt-1 text-[13px] text-on-surface-muted">approver acts</div>}
                 </div>
               </li>

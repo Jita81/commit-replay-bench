@@ -237,6 +237,8 @@ export const HINTS = {
     'Record the repository and open its walk. Nothing is cloned yet and nothing is written to GitHub.',
   'button.github.use_url':
     'Register by git URL instead, when the App is not configured or the repository is not under an installation.',
+  'link.github.install':
+    'Opens GitHub to install the App on another organisation or account. Come back and press Sync installations once it is installed.',
 
   // ── /connect/:name (screens/Connect/ConnectPage.tsx · ConnectRepoPage)
   'button.walk.configuration':
@@ -466,7 +468,7 @@ export const HINTS = {
   'col.signoff.policy':
     'The sign-off policy version in force, the route and reason code, and the controls verdict with its run, at the moment of signing. Pre-policy record means it was signed before a policy snapshot was recorded.',
   'col.signoff.attestation':
-    'The accepted row the approver affirmed reading, by its hash and subject. Hover shows the statement; it is the governance record.',
+    'The accepted row the approver affirmed reading, by its hash and subject, with the statement they recorded under it. The statement is the governance record.',
   'col.signoff.note':
     'The approver’s optional note on what else they reviewed, recorded verbatim.',
   'button.signoff.revoke':

@@ -12,16 +12,19 @@
  *               error envelope on a wrong password (never a blank form), and returns the user
  *               to the `?next=` path — same-origin paths only, so a crafted link cannot bounce
  *               a session to another host. An already-authenticated visitor is redirected
- *               straight to `next`.
+ *               straight to `next`. Both fields and both sign-in buttons carry a hint
+ *               (`field.login.*`, `button.login.*`) so the form explains itself on hover,
+ *               focus and tap before a person has any role at all.
  * How:          `useAuth` (redirect if logged in) → `useLogin` mutation on submit → the auth
  *               query is seeded with the principal; `safeNext` validates the return path.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/lib/auth.tsx (`RequireAuth` sends people here with `?next=`),
  *               ui/src/api/hooks.ts (`useLogin`), ui/src/components/ErrorState.tsx (the 401
- *               envelope), src/crb/server/routes/auth.py (login and the OIDC start URL),
+ *               envelope), ui/src/help/hints.ts (the `field.login.*` / `button.login.*`
+ *               copy), src/crb/server/routes/auth.py (login and the OIDC start URL),
  *               src/crb/server/auth.py (the session and CSRF cookies the login sets)
- * Tested by:    ui/src/screens/Login/LoginPage.test.tsx (the strapline),
+ * Tested by:    ui/src/screens/Login/LoginPage.test.tsx (the strapline; the hints resolve),
  *               ui/e2e/smoke.spec.ts (renders against a mocked API, OIDC button href, axe),
  *               ui/e2e/walkthrough/01-login.spec.ts (wrong password → envelope; right one →
  *               the role chip)
@@ -76,9 +79,10 @@ export function LoginPage() {
 
         <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">
           <form onSubmit={submit} className="space-y-4" aria-label="Local account sign in">
-            <TextField label="Username" name="username" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} />
+            <TextField label="Username" hint="field.login.username" name="username" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} />
             <TextField
               label="Password"
+              hint="field.login.password"
               name="password"
               type="password"
               autoComplete="current-password"
@@ -93,7 +97,7 @@ export function LoginPage() {
                 title={login.error.status === 401 ? 'Wrong username or password' : undefined}
               />
             )}
-            <Button type="submit" variant="filled" className="w-full" disabled={login.isPending}>
+            <Button type="submit" variant="filled" hint="button.login.submit" className="w-full" disabled={login.isPending}>
               {login.isPending ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
@@ -112,7 +116,7 @@ export function LoginPage() {
                 <span className="h-px flex-1 bg-border" />
               </div>
 
-              <AnchorButton href={apiUrl(`/auth/oidc/start?next=${encodeURIComponent(next)}`)} className="w-full">
+              <AnchorButton href={apiUrl(`/auth/oidc/start?next=${encodeURIComponent(next)}`)} hint="button.login.oidc" className="w-full">
                 Sign in with organisation account
               </AnchorButton>
             </>

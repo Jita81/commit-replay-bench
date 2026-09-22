@@ -22,7 +22,15 @@
  *               role gets the gate, the evidence and the attestations and never the form —
  *               an inset says who can sign and that reading changes nothing. Reached without
  *               `?repo=`, the screen chooses the most recently updated repository itself;
- *               with no repository at all the exit is Connect.
+ *               with no repository at all the exit is Connect. Every element a reader meets
+ *               — the Details, the gate and each of its clauses, each refusal and its
+ *               non-overridable mark, the four evidence tiles and the three evidence blocks,
+ *               every field of the form, the diff block and its two doors, the confirmation
+ *               panel, every column of the attestations table, each status pill and the
+ *               revoke flow — is a hint trigger (`details.signoff.*`, `gate.signoff.*`,
+ *               `tile.signoff.*`, `pill.signoff.*`, `stat.signoff.*`, `field.signoff.*`,
+ *               `button.signoff.*`, `banner.signoff.*`, `col.signoff.*`); no native `title`
+ *               remains (the attestation statement is shown under its row, not on hover).
  * How:          `useCapabilityMapWithControls` lists the measured cells → `useSignoffPreview`
  *               re-fetches as cell / row change (the named row and affirmation reset when the
  *               cell changes) → `criteriaFor(preview)` → `GateBanner`;
@@ -35,12 +43,14 @@
  *               the 409 shape), ui/src/components/GateBanner.tsx (the gate),
  *               ui/src/components/RepoPicker.tsx (`defaultToLatest`),
  *               ui/src/components/Help.tsx (`Term` in the refusal clauses),
+ *               ui/src/components/Hint.tsx + ui/src/help/hints.ts (the triggers and copy),
  *               ui/src/screens/Decisions/DecisionsPage.tsx (Attest → `?cell=` here),
  *               ui/src/screens/Capability/FailureSplit.tsx (the controls pill and the split),
  *               ui/src/api/hooks.ts (`useSignoffs`, `useRevokeSignoff`),
  *               src/crb/server/routes/signoffs.py (the server's decision this screen
  *               previews and submits; the core rule it applies is the policy module it names)
- * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx, ui/e2e/walkthrough/08-signoff.spec.ts
+ * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
+ *               (every element resolves to a registry id), ui/e2e/walkthrough/08-signoff.spec.ts
  *               (a thin cell refused with observed vs threshold; a policy-clearing cell
  *               signed with an attestation), ui/e2e/walkthrough/05-replay-fake.spec.ts
  * Touch when:   a refusal clause or a policy threshold is added (src/crb/core/signoff.py) —
@@ -67,6 +77,7 @@ import { SelectField, TextArea } from '../../components/Field'
 import { GateBanner, type GateCriterion } from '../../components/GateBanner'
 import { ConfirmationPanel, Details, InsetText, SecondaryButton, SummaryList, WarningButton, WarningCallout } from '../../components/govuk'
 import { Term } from '../../components/Help'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
@@ -98,12 +109,12 @@ const cellLabel = (c: Record<string, string>) => [c.capability_class, c.size, c.
 function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, attested: boolean): GateCriterion[] {
   if (!preview) {
     return [
-      { label: 'Cell is measured', ok: null, detail: cellChosen ? 'evaluating…' : 'choose a measured cell' },
-      { label: 'false-Q1 = 0', ok: null },
-      { label: `Evidence meets ${SIGNOFF_POLICY_VERSION}`, ok: null },
-      { label: 'Negative controls passed', ok: null },
-      { label: 'Route = deliver', ok: null },
-      { label: 'Accepted row read and affirmed', ok: null },
+      { label: 'Cell is measured', ok: null, detail: cellChosen ? 'evaluating…' : 'choose a measured cell', hint: 'gate.signoff.measured' },
+      { label: 'false-Q1 = 0', ok: null, hint: 'gate.signoff.false_q1' },
+      { label: `Evidence meets ${SIGNOFF_POLICY_VERSION}`, ok: null, hint: 'gate.signoff.thin_cell' },
+      { label: 'Negative controls passed', ok: null, hint: 'gate.signoff.controls' },
+      { label: 'Route = deliver', ok: null, hint: 'gate.signoff.route' },
+      { label: 'Accepted row read and affirmed', ok: null, hint: 'gate.signoff.attestation' },
     ]
   }
   const fam = new Set(preview.refusals.map((r) => refusalFamily(r.code)))
@@ -114,21 +125,23 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
   const oracle = ev.oracle_strength
   const scored = ev.oracle ? `${ev.oracle.scored} of ${ev.oracle.tasks} task(s) scored` : ''
   return [
-    { label: 'Cell is measured', ok: ev.measured, detail: `n = ${fmtInt(ev.n)}` },
-    { label: 'false-Q1 = 0', ok: !fam.has('false_q1') && ev.false_q1 === 0, detail: `false_q1 = ${ev.false_q1}` },
-    { label: `n ≥ ${p.n_min}`, ok: !fam.has('thin_cell'), detail: `n = ${fmtInt(ev.n)} · point ${fmtPct(ev.point)} · Wilson lower ${fmtPct(ev.ci_low)}` },
+    { label: 'Cell is measured', ok: ev.measured, detail: `n = ${fmtInt(ev.n)}`, hint: 'gate.signoff.measured' },
+    { label: 'false-Q1 = 0', ok: !fam.has('false_q1') && ev.false_q1 === 0, detail: `false_q1 = ${ev.false_q1}`, hint: 'gate.signoff.false_q1' },
+    { label: `n ≥ ${p.n_min}`, ok: !fam.has('thin_cell'), detail: `n = ${fmtInt(ev.n)} · point ${fmtPct(ev.point)} · Wilson lower ${fmtPct(ev.ci_low)}`, hint: 'gate.signoff.thin_cell' },
     {
       label: `Negative controls passed, ≤ ${p.max_controls_escapes} escape(s), ≥ ${fmtPct(p.min_constructible_share, 0)} constructible`,
       ok: !fam.has('controls_unmeasured') && !fam.has('controls_failed') && !fam.has('controls_escapes') && !fam.has('controls_thin'),
       detail: c.measured ? `${cd.label} · ${c.constructible} of ${c.total} · ${c.escapes} escape(s) · run ${shortId(c.run_id)} · ${fmtDate(c.created)}` : 'never run for this repo',
+      hint: 'gate.signoff.controls',
     },
     {
       label: `Oracle strength measured and ≥ ${fmtRatio(p.min_oracle_strength)}`,
       ok: !fam.has('oracle_unmeasured') && !fam.has('oracle_weak'),
       detail: oracle === null ? `unmeasured — no task of this cell has a mutation score (${scored || 'none'}); run an oracle run — non-overridable` : `strength ${fmtRatio(oracle)}${scored ? ` · ${scored}` : ''}`,
+      hint: 'gate.signoff.oracle',
     },
-    { label: 'Route = deliver', ok: !fam.has('route_not_deliver'), detail: `${preview.route.route}${preview.route.reason_code ? ` (${preview.route.reason_code})` : ''}` },
-    { label: 'Accepted row read and affirmed', ok: !fam.has('attestation_missing') && attested, detail: preview.attestation ? `${shortId(preview.attestation.reviewed_row_hash)} · ${preview.attestation.subject || preview.attestation.reviewed_task_id}` : 'pick a row below and tick “I have read this accepted diff”' },
+    { label: 'Route = deliver', ok: !fam.has('route_not_deliver'), detail: `${preview.route.route}${preview.route.reason_code ? ` (${preview.route.reason_code})` : ''}`, hint: 'gate.signoff.route' },
+    { label: 'Accepted row read and affirmed', ok: !fam.has('attestation_missing') && attested, detail: preview.attestation ? `${shortId(preview.attestation.reviewed_row_hash)} · ${preview.attestation.subject || preview.attestation.reviewed_task_id}` : 'pick a row below and tick “I have read this accepted diff”', hint: 'gate.signoff.attestation' },
   ]
 }
 
@@ -138,12 +151,12 @@ function RefusalList({ refusals, testId = 'signoff-refusals' }: { refusals: Sign
   return (
     <ul data-testid={testId} className="mt-3 list-none space-y-1.5 p-0">
       {refusals.map((r) => (
-        <li key={r.code} data-testid={`refusal-${r.code}`} data-code={r.code} className="rounded-[var(--radius-control)] border border-status-red/40 bg-surface-container px-3 py-2 text-sm">
+        <Hint as="li" id="tile.signoff.refusal" key={r.code} data-testid={`refusal-${r.code}`} data-code={r.code} className="rounded-[var(--radius-control)] border border-status-red/40 bg-surface-container px-3 py-2 text-sm">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs font-semibold text-status-red">{r.code}</span>
             <span className="text-on-surface">{REFUSAL_DISPLAY[refusalFamily(r.code)] ?? r.message}</span>
             {!r.overridable && (
-              <Pill tone="red" size="xs" glyph="⛔" label="This clause cannot be relaxed by any deployment setting">
+              <Pill tone="red" size="xs" glyph="⛔" label="This clause cannot be relaxed by any deployment setting" hint="pill.signoff.non_overridable">
                 non-overridable
               </Pill>
             )}
@@ -151,7 +164,7 @@ function RefusalList({ refusals, testId = 'signoff-refusals' }: { refusals: Sign
           <div className="num mt-0.5 text-xs text-on-surface-muted">
             observed <span className="font-semibold text-on-surface">{fmtBound(r.observed)}</span> · threshold <span className="font-semibold text-on-surface">{fmtBound(r.threshold)}</span> — {r.message}
           </div>
-        </li>
+        </Hint>
       ))}
     </ul>
   )
@@ -166,13 +179,13 @@ function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { mi
   return (
     <Card title="What you would be signing" id="signoff-evidence">
       <div className="flex flex-wrap gap-3" data-testid="signoff-evidence">
-        <StatTile label="Pass rate" value={fmtPct(ev.point)} n={ev.n} ci={ev.ci_low === null || ev.ci_high === null ? null : { low: ev.ci_low, high: ev.ci_high }} apparatus={`${fmtInt(ev.clean)} clean of ${fmtInt(ev.n)} eligible · ${apparatus}`} data-testid="signoff-tile-point" />
-        <StatTile label="Wilson lower" value={fmtPct(ev.ci_low)} n={ev.n} apparatus={`the bound the routing rule reads · ${bars ? `≥ ${fmtPct(bars.min_ci_low, 0)} for deliver` : 'bar: see the policy in force'}`} data-testid="signoff-tile-ci-low" />
-        <StatTile label="false-Q1" value={ev.measured ? String(ev.false_q1) : '—'} n={ev.n} apparatus="clean rows with a failed belt — must be 0" tone={ev.false_q1 > 0 ? 'red' : 'green'} data-testid="signoff-tile-false-q1" />
-        <StatTile label="Oracle strength" value={fmtRatio(ev.oracle_strength)} n={ev.oracle?.scored ?? ev.n} apparatus={`mean mutation kill-rate of the cell's tasks' oracles${ev.oracle ? ` · ${ev.oracle.scored} of ${ev.oracle.tasks} task(s) scored` : ''} · unmeasured is a refusal, never a pass`} data-testid="signoff-tile-oracle" />
+        <StatTile label="Pass rate" value={fmtPct(ev.point)} n={ev.n} ci={ev.ci_low === null || ev.ci_high === null ? null : { low: ev.ci_low, high: ev.ci_high }} apparatus={`${fmtInt(ev.clean)} clean of ${fmtInt(ev.n)} eligible · ${apparatus}`} hint="stat.signoff.point" data-testid="signoff-tile-point" />
+        <StatTile label="Wilson lower" value={fmtPct(ev.ci_low)} n={ev.n} apparatus={`the bound the routing rule reads · ${bars ? `≥ ${fmtPct(bars.min_ci_low, 0)} for deliver` : 'bar: see the policy in force'}`} hint="stat.signoff.ci_low" data-testid="signoff-tile-ci-low" />
+        <StatTile label="false-Q1" value={ev.measured ? String(ev.false_q1) : '—'} n={ev.n} apparatus="clean rows with a failed belt — must be 0" tone={ev.false_q1 > 0 ? 'red' : 'green'} hint="stat.signoff.false_q1" data-testid="signoff-tile-false-q1" />
+        <StatTile label="Oracle strength" value={fmtRatio(ev.oracle_strength)} n={ev.oracle?.scored ?? ev.n} apparatus={`mean mutation kill-rate of the cell's tasks' oracles${ev.oracle ? ` · ${ev.oracle.scored} of ${ev.oracle.tasks} task(s) scored` : ''} · unmeasured is a refusal, never a pass`} hint="stat.signoff.oracle" data-testid="signoff-tile-oracle" />
       </div>
       <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-        <div data-testid="signoff-controls" className="space-y-1">
+        <Hint as="div" id="tile.signoff.controls" data-testid="signoff-controls" className="space-y-1">
           <div className="label">Negative controls</div>
           <ControlsPill verdict={c} minShare={preview.policy.min_constructible_share} />
           <p className="num text-xs text-on-surface-muted">
@@ -185,8 +198,8 @@ function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { mi
               'never run — a controls run must pass before anything here can be signed'
             )}
           </p>
-        </div>
-        <div data-testid="signoff-route" className="space-y-1">
+        </Hint>
+        <Hint as="div" id="tile.signoff.route" data-testid="signoff-route" className="space-y-1">
           <div className="label">Route</div>
           <VerdictPill route={preview.route.route} reason={preview.route.reason} />
           <p className="num text-xs text-on-surface-muted">
@@ -194,15 +207,15 @@ function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { mi
             {preview.route.reason_code && ' — '}
             {preview.route.reason}
           </p>
-        </div>
-        <div className="space-y-1 sm:col-span-2">
+        </Hint>
+        <Hint as="div" id="tile.signoff.failure_split" className="space-y-1 sm:col-span-2">
           <div className="label">Failure split</div>
           <div className="flex flex-wrap items-center gap-3">
             {ev.point !== null && ev.ci_low !== null && ev.ci_high !== null && <CiBar point={ev.point} low={ev.ci_low} high={ev.ci_high} n={ev.n} minPoint={bars?.min_point} minCiLow={bars?.min_ci_low} width={140} provenance={apparatus} />}
             <ModelPointLine modelPoint={ev.model_point} modelN={ev.model_n} clean={ev.clean} ciLow={ev.model_ci_low ?? null} ciHigh={ev.model_ci_high ?? null} apparatus={ev.apparatus_versions} size="sm" />
             <FailureSplitPills split={ev.failure_split} size="sm" data-testid="signoff-split" />
           </div>
-        </div>
+        </Hint>
       </div>
     </Card>
   )
@@ -290,29 +303,31 @@ export function SignoffPage() {
 
   const columns = useMemo<Column<SignoffWithPolicy>[]>(
     () => [
-      { key: 'cell', header: 'Cell', mono: true, sortValue: (s) => cellLabel(s.cell), cell: (s) => cellLabel(s.cell) },
+      { key: 'cell', header: 'Cell', mono: true, sortValue: (s) => cellLabel(s.cell), cell: (s) => cellLabel(s.cell), hint: 'col.signoff.cell' },
       {
         key: 'status',
         header: 'Status',
+        hint: 'col.signoff.status',
         sortValue: (s) => (s.revoked ? 3 : s.active ? 0 : s.stale ? 1 : 2),
         cell: (s) =>
           s.revoked ? (
-            <Pill tone="amber" glyph="⊘" size="xs" label={`Revoked by ${s.revoked_by_name || s.revoked_by || '—'} at ${fmtDate(s.revoked_at)}`}>revoked</Pill>
+            <Pill tone="amber" glyph="⊘" size="xs" label={`Revoked by ${s.revoked_by_name || s.revoked_by || '—'} at ${fmtDate(s.revoked_at)}`} hint="pill.signoff.status">revoked</Pill>
           ) : s.active ? (
-            <Pill tone="green" glyph="✓" size="xs" label="Active attestation">active</Pill>
+            <Pill tone="green" glyph="✓" size="xs" label="Active attestation" hint="pill.signoff.status">active</Pill>
           ) : s.stale ? (
-            <Pill tone="amber" glyph="◷" size="xs" label={`Stale: signed at apparatus ${s.evidence.apparatus_versions.join(', ') || '?'}, the deployment now reads at ${s.apparatus_current || '?'} — lifts nothing until re-signed`}>stale</Pill>
+            <Pill tone="amber" glyph="◷" size="xs" label={`Stale: signed at apparatus ${s.evidence.apparatus_versions.join(', ') || '?'}, the deployment now reads at ${s.apparatus_current || '?'} — lifts nothing until re-signed`} hint="pill.signoff.status">stale</Pill>
           ) : s.current_false_q1 > 0 ? (
-            <Pill tone="red" glyph="✗" size="xs" label={`Invalidated: the cell now has false_q1 = ${s.current_false_q1}`}>invalidated</Pill>
+            <Pill tone="red" glyph="✗" size="xs" label={`Invalidated: the cell now has false_q1 = ${s.current_false_q1}`} hint="pill.signoff.status">invalidated</Pill>
           ) : (
-            <Pill tone="muted" glyph="○" size="xs" label="Superseded by a later attestation on the same scope">superseded</Pill>
+            <Pill tone="muted" glyph="○" size="xs" label="Superseded by a later attestation on the same scope" hint="pill.signoff.status">superseded</Pill>
           ),
       },
-      { key: 'approver', header: 'Approver', sortValue: (s) => approverName(s), cell: (s) => approverName(s) },
-      { key: 'created', header: 'Signed', sortValue: (s) => s.created, cell: (s) => <span className="text-xs text-on-surface-muted">{fmtDate(s.created)}</span> },
+      { key: 'approver', header: 'Approver', sortValue: (s) => approverName(s), cell: (s) => approverName(s), hint: 'col.signoff.approver' },
+      { key: 'created', header: 'Signed', sortValue: (s) => s.created, cell: (s) => <span className="text-xs text-on-surface-muted">{fmtDate(s.created)}</span>, hint: 'col.signoff.signed' },
       {
         key: 'evidence',
         header: 'Evidence at signing',
+        hint: 'col.signoff.evidence',
         cell: (s) => (
           <span className="num text-xs" data-testid="signoff-row-evidence">
             n={fmtInt(s.evidence.n)} · {fmtPct(s.evidence.point)} · lower {fmtPct(s.evidence.ci_low)} · fQ1 {s.evidence.false_q1} · oracle {fmtRatio(s.evidence.oracle_strength)}
@@ -323,6 +338,7 @@ export function SignoffPage() {
       {
         key: 'policy',
         header: 'Policy · route · controls',
+        hint: 'col.signoff.policy',
         cell: (s) =>
           s.policy_version ? (
             <span className="num text-xs" data-testid="signoff-row-policy">
@@ -331,31 +347,32 @@ export function SignoffPage() {
               {s.controls.run_id ? ` · run ${shortId(s.controls.run_id)}` : ''}
             </span>
           ) : (
-            <span className="text-xs text-on-surface-muted" title="Signed before signoff-policy.v1: no policy snapshot was recorded">
-              pre-policy record
-            </span>
+            <span className="text-xs text-on-surface-muted">pre-policy record</span>
           ),
         hideBelowMd: true,
       },
       {
         key: 'attestation',
         header: 'Attestation',
+        hint: 'col.signoff.attestation',
         cell: (s) =>
           s.attestation ? (
-            <span className="text-xs" data-testid="signoff-row-attestation" title={s.attestation.statement}>
+            <span className="text-xs" data-testid="signoff-row-attestation">
               <span className="font-mono">{shortId(s.attestation.reviewed_row_hash)}</span> · {s.attestation.subject || shortId(s.attestation.reviewed_task_id)}
+              {/* the statement is the governance record: shown under the row, never hover-only */}
+              <span className="block max-w-[36ch] text-on-surface-muted">{s.attestation.statement}</span>
             </span>
           ) : (
             <span className="text-xs text-on-surface-muted">—</span>
           ),
       },
-      { key: 'note', header: 'Note', cell: (s) => <span className="text-xs text-on-surface-muted">{s.note}</span>, hideBelowMd: true },
+      { key: 'note', header: 'Note', cell: (s) => <span className="text-xs text-on-surface-muted">{s.note}</span>, hideBelowMd: true, hint: 'col.signoff.note' },
       {
         key: 'actions',
         header: '',
         cell: (s) =>
           !s.revoked && can('approver') ? (
-            <Button size="sm" variant="danger" onClick={() => { setRevoking(s); setRevokeReason(''); revoke.reset() }} disabled={revoke.isPending} aria-haspopup="dialog">
+            <Button size="sm" variant="danger" hint="button.signoff.revoke" onClick={() => { setRevoking(s); setRevokeReason(''); revoke.reset() }} disabled={revoke.isPending} aria-haspopup="dialog">
               Revoke
             </Button>
           ) : null,
@@ -380,51 +397,57 @@ export function SignoffPage() {
         purpose="Record that you reviewed this cell’s evidence and read one accepted change. The server refuses a sign-off that does not meet the published policy; a refusal is the gate working, not an error."
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
-      <Details summary="Why a sign-off can be refused" className="mt-4">
-        <p className="mt-0">A sign-off is a policy decision, refused at write. The server refuses when any of these holds:</p>
-        <ul className="mb-0 pl-6">
-          <li>
-            <Term id="false_q1">false-Q1</Term> above zero in the cell — this clause cannot be relaxed;
-          </li>
-          <li>
-            a thin <Term id="cell">cell</Term> — fewer attempts than the policy’s minimum n;
-          </li>
-          <li>
-            a <Term id="negative_controls">negative controls</Term> gate that failed, never ran, or let a <Term id="controls_escape">control escape</Term>;
-          </li>
-          <li>
-            an <Term id="oracle_strength">oracle strength</Term> never measured on the cell’s tasks, or below the bar;
-          </li>
-          <li>
-            a route other than <Term id="deliver">deliver</Term>;
-          </li>
-          <li>no attestation that you read an accepted diff — this clause cannot be relaxed.</li>
-        </ul>
-        <p className="mb-0">
-          The gate below shows every clause with the observed value against the threshold, before you try. A <Term id="signoff">sign-off</Term> lifts the verification tier and never the route.
-        </p>
-      </Details>
+      {/* the Details' summary is a string, so the hint wraps the block; not a tab stop of its own (the summary is) */}
+      <Hint as="div" id="details.signoff.why_refused" tabStop={false}>
+        <Details summary="Why a sign-off can be refused" className="mt-4">
+          <p className="mt-0">A sign-off is a policy decision, refused at write. The server refuses when any of these holds:</p>
+          <ul className="mb-0 pl-6">
+            <li>
+              <Term id="false_q1">false-Q1</Term> above zero in the cell — this clause cannot be relaxed;
+            </li>
+            <li>
+              a thin <Term id="cell">cell</Term> — fewer attempts than the policy’s minimum n;
+            </li>
+            <li>
+              a <Term id="negative_controls">negative controls</Term> gate that failed, never ran, or let a <Term id="controls_escape">control escape</Term>;
+            </li>
+            <li>
+              an <Term id="oracle_strength">oracle strength</Term> never measured on the cell’s tasks, or below the bar;
+            </li>
+            <li>
+              a route other than <Term id="deliver">deliver</Term>;
+            </li>
+            <li>no attestation that you read an accepted diff — this clause cannot be relaxed.</li>
+          </ul>
+          <p className="mb-0">
+            The gate below shows every clause with the observed value against the threshold, before you try. A <Term id="signoff">sign-off</Term> lifts the verification tier and never the route.
+          </p>
+        </Details>
+      </Hint>
 
       {!repo && <EmptyState title="Choose a repository" reason="A sign-off is per repository and per cell." action={<LinkButton to="/connect">Connect a repository</LinkButton>} />}
 
       {repo && (
         <>
-          <GateBanner
-            title={cell ? `Attest ${cell.capability_class} × ${cell.size}` : 'Attest a cell'}
-            eyebrow={`policy ${policyVersion}${relaxed ? ' (relaxed by this deployment)' : ''}`}
-            criteria={criteria}
-            refused={refusal}
-            data-testid="signoff-gate"
-            action={
-              approver ? (
-                <Button type="submit" form="signoff-form" variant="filled" disabled={!signable || !cell || create.isPending || previewFailed}>
-                  {create.isPending ? 'Recording…' : 'Sign off'}
-                </Button>
-              ) : (
-                <span className="text-xs text-on-surface-muted">Requires the approver role{me ? ` (you are ${me.role})` : ''}.</span>
-              )
-            }
-          />
+          {/* the banner's title is a string, so its hint wraps the gate; each clause inside carries its own (innermost wins) */}
+          <Hint as="div" id="gate.signoff.banner" tabStop={false}>
+            <GateBanner
+              title={cell ? `Attest ${cell.capability_class} × ${cell.size}` : 'Attest a cell'}
+              eyebrow={`policy ${policyVersion}${relaxed ? ' (relaxed by this deployment)' : ''}`}
+              criteria={criteria}
+              refused={refusal}
+              data-testid="signoff-gate"
+              action={
+                approver ? (
+                  <Button type="submit" form="signoff-form" variant="filled" hint="button.signoff.sign" disabled={!signable || !cell || create.isPending || previewFailed}>
+                    {create.isPending ? 'Recording…' : 'Sign off'}
+                  </Button>
+                ) : (
+                  <span className="text-xs text-on-surface-muted">Requires the approver role{me ? ` (you are ${me.role})` : ''}.</span>
+                )
+              }
+            />
+          </Hint>
           {cell && refusals.length > 0 && !refusal && (
             <div className="-mt-2" data-testid="signoff-refusal-block">
               <p className="text-xs text-on-surface-muted">The server would refuse this sign-off right now ({refusals.length} clause{refusals.length === 1 ? '' : 's'}):</p>
@@ -446,7 +469,7 @@ export function SignoffPage() {
                 Only an approver can sign. You are signed in as {me?.role ?? 'a viewer'}: you can read the gate, the evidence and the attestations on this page, and nothing here changes because you read it.
               </p>
               <div className="mt-4 max-w-[28em]">
-                <SelectField label="Cell to read" value={cellKey} onChange={(e) => setCellKey(e.target.value)} description={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
+                <SelectField label="Cell to read" hint="field.signoff.cell_read" value={cellKey} onChange={(e) => setCellKey(e.target.value)} description={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
                   <option value="">Choose a measured cell…</option>
                   {measured.map((c) => (
                     <option key={`${c.capability_class}|${c.size}`} value={`${c.capability_class}|${c.size}`}>
@@ -460,15 +483,17 @@ export function SignoffPage() {
 
           {approver && (
             <Card title="Approver form">
-              <WarningCallout title="What your signature does not mean">
-                <ul className="m-0 pl-6">
-                  <li className="mb-2">It does not change the cell's route, its point estimate or its interval.</li>
-                  <li className="mb-2">It does not vouch for any other class, size or repository.</li>
-                  <li>It is invalidated at read if a false-Q1 row later appears in this cell, or when the apparatus changes.</li>
-                </ul>
-              </WarningCallout>
+              <Hint as="div" id="banner.signoff.not_meaning">
+                <WarningCallout title="What your signature does not mean">
+                  <ul className="m-0 pl-6">
+                    <li className="mb-2">It does not change the cell's route, its point estimate or its interval.</li>
+                    <li className="mb-2">It does not vouch for any other class, size or repository.</li>
+                    <li>It is invalidated at read if a false-Q1 row later appears in this cell, or when the apparatus changes.</li>
+                  </ul>
+                </WarningCallout>
+              </Hint>
               <form id="signoff-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
-                <SelectField label="Cell" required value={cellKey} onChange={(e) => setCellKey(e.target.value)} description={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
+                <SelectField label="Cell" hint="field.signoff.cell" required value={cellKey} onChange={(e) => setCellKey(e.target.value)} description={map.isPending ? 'Loading measured cells…' : `${measured.length} measured cell(s)`}>
                   <option value="">Choose a measured cell…</option>
                   {measured.map((c) => (
                     <option key={`${c.capability_class}|${c.size}`} value={`${c.capability_class}|${c.size}`}>
@@ -478,15 +503,16 @@ export function SignoffPage() {
                 </SelectField>
                 <div className="flex items-end">
                   {cell && (
-                    <div className="space-y-1 text-xs">
+                    <Hint as="div" id="tile.signoff.cell_summary" className="space-y-1 text-xs">
                       <VerdictPill route={cell.route} reason={cell.reason} />
                       <p className="text-on-surface-muted">{cell.reason}</p>
                       <Provenance apparatus={cell.apparatus_versions} beltSet={cell.belt_set ?? null} />
-                    </div>
+                    </Hint>
                   )}
                 </div>
                 <SelectField
                   label="Accepted row"
+                  hint="field.signoff.accepted_row"
                   required
                   value={rowHash}
                   onChange={(e) => {
@@ -505,7 +531,7 @@ export function SignoffPage() {
                   ))}
                 </SelectField>
                 <div className="flex items-end">
-                  <label htmlFor={readId} className="flex items-start gap-2 text-sm text-on-surface">
+                  <Hint as="label" id="field.signoff.read_affirmation" htmlFor={readId} className="flex items-start gap-2 text-sm text-on-surface">
                     <input id={readId} type="checkbox" className="mt-0.5" checked={read} disabled={!rowHash} onChange={(e) => setRead(e.target.checked)} data-testid="attest-read" />
                     <span>
                       I have read this accepted diff
@@ -519,7 +545,7 @@ export function SignoffPage() {
                         )}
                       </span>
                     </span>
-                  </label>
+                  </Hint>
                 </div>
                 {rowHash && previewData && (
                   <div className="sm:col-span-2">
@@ -527,10 +553,10 @@ export function SignoffPage() {
                   </div>
                 )}
                 <div className="sm:col-span-2">
-                  <TextArea label="Attestation statement" required rows={2} value={statement} onChange={(e) => setStatement(e.target.value)} description="What you read in that diff and why it is acceptable. Recorded verbatim, append-only, redacted." data-testid="attest-statement" />
+                  <TextArea label="Attestation statement" hint="field.signoff.statement" required rows={2} value={statement} onChange={(e) => setStatement(e.target.value)} description="What you read in that diff and why it is acceptable. Recorded verbatim, append-only, redacted." data-testid="attest-statement" />
                 </div>
                 <div className="sm:col-span-2">
-                  <TextArea label="Note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} description="Optional: what else you reviewed (packs, refusals, the oracle). Recorded verbatim." />
+                  <TextArea label="Note" hint="field.signoff.note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} description="Optional: what else you reviewed (packs, refusals, the oracle). Recorded verbatim." />
                 </div>
                 {create.isError && !refusal && (
                   <div className="sm:col-span-2">
@@ -539,7 +565,9 @@ export function SignoffPage() {
                 )}
                 {create.isSuccess && (
                   <div className="sm:col-span-2" role="status" data-testid="signoff-recorded">
-                    <ConfirmationPanel title="Sign-off recorded" reference={`sgn_${shortId(create.data.row_hash)}`} />
+                    <Hint as="div" id="banner.signoff.recorded">
+                      <ConfirmationPanel title="Sign-off recorded" reference={`sgn_${shortId(create.data.row_hash)}`} />
+                    </Hint>
                     <SummaryList
                       label="What was recorded"
                       rows={[
@@ -582,7 +610,7 @@ export function SignoffPage() {
                   </p>
                 </WarningCallout>
                 <div className="max-w-[44em]">
-                  <TextArea label="Why are you revoking it?" required rows={2} value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)} description="Recorded verbatim on the revocation row, append-only. An auditor reads this next to the attestation it withdraws." data-testid="revoke-reason" />
+                  <TextArea label="Why are you revoking it?" hint="field.signoff.revoke_reason" required rows={2} value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)} description="Recorded verbatim on the revocation row, append-only. An auditor reads this next to the attestation it withdraws." data-testid="revoke-reason" />
                 </div>
                 {revoke.isError && (
                   <div className="mt-3">
@@ -590,7 +618,7 @@ export function SignoffPage() {
                   </div>
                 )}
                 <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <WarningButton type="submit" disabled={revoke.isPending || revokeReason.trim().length === 0}>Revoke sign-off</WarningButton>
+                  <WarningButton type="submit" hint="button.signoff.revoke_confirm" disabled={revoke.isPending || revokeReason.trim().length === 0}>Revoke sign-off</WarningButton>
                   <SecondaryButton onClick={() => { setRevoking(null); revoke.reset() }}>Cancel</SecondaryButton>
                 </div>
               </form>
@@ -616,17 +644,17 @@ function ReadTheDiff({ repo, row }: { repo: string; row: AcceptedRow | undefined
   if (!row) return null
   const pack = evidence.data?.pack
   return (
-    <div className="rounded-[var(--radius-control)] border border-border p-3" data-testid="read-the-diff">
+    <Hint as="div" id="tile.signoff.read_diff" className="rounded-[var(--radius-control)] border border-border p-3" data-testid="read-the-diff">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-bold">Read the diff</span>
         <span className="font-mono text-xs text-on-surface-muted">
           {row.subject || row.task_id} · row {shortId(row.row_hash)} · run {shortId(row.run_id)} · {row.trial} · {row.builder}
           {row.model ? `/${row.model}` : ''}
         </span>
-        <LinkButton size="sm" to={`/tasks/${encodeURIComponent(repo)}/${encodeURIComponent(row.task_id)}`}>
+        <LinkButton size="sm" to={`/tasks/${encodeURIComponent(repo)}/${encodeURIComponent(row.task_id)}`} hint="button.signoff.task">
           The task and every attempt
         </LinkButton>
-        <LinkButton size="sm" to={`/runs/${row.run_id}`}>
+        <LinkButton size="sm" to={`/runs/${row.run_id}`} hint="button.signoff.run">
           The run
         </LinkButton>
       </div>
@@ -642,7 +670,7 @@ function ReadTheDiff({ repo, row }: { repo: string; row: AcceptedRow | undefined
           {pack?.grade.diff ? ` and ${pack.grade.diff.files.length} file(s), +${pack.grade.diff.additions} −${pack.grade.diff.deletions}` : ''}. Read it from the task page, or re-run with worktrees retained.
         </p>
       )}
-    </div>
+    </Hint>
   )
 }
 
