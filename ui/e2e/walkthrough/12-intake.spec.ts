@@ -136,8 +136,17 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
   test('the comment names the cell’s route with its n and interval, read before any build', async () => {
     const text = commentText()
     expect(text).toContain('What we know about work like this')
-    expect(text).toMatch(/not been measured|Route: \*\*/)
-    expect(text).toContain('false-Q1')
+    // Which branch is honest depends on the cell, and BOTH are asserted here, because
+    // demanding a number from a cell nobody has measured is exactly the false reassurance
+    // the floor exists to stop. Unmeasured: say so, and quote nothing — never a zero.
+    // Measured: the route, its n and interval, and what the record says about false-Q1.
+    if (/not been measured/.test(text)) {
+      expect(text).toContain('It says nothing, not zero')
+      expect(text).not.toContain('false-Q1')
+    } else {
+      expect(text).toMatch(/Route: \*\*/)
+      expect(text).toContain('false-Q1')
+    }
     // and the non-goals, so nobody fears a wider edit
     expect(text).toContain('never creates a ticket')
   })
