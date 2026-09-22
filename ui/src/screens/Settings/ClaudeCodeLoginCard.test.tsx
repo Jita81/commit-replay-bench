@@ -11,7 +11,9 @@
  *               buttons, no host path); the paste field is a password input
  *               that is never echoed and is cleared after a save; a shape rejection renders
  *               without the token; Verify shows ok / invalid and the 429 when rate-limited;
- *               Remove returns the status to absent.
+ *               Remove returns the status to absent; the card's hint wraps its heading only
+ *               and Verify / Remove carry their own sentences, so a focus on either opens
+ *               that button's bubble and never the card's.
  * How:          `mockApi` with `SecretsStatusList` / `LoginCheck` fixtures; `userEvent` for
  *               the paste and clicks; assertions that the fake token string is absent from
  *               the DOM after every step.
@@ -25,7 +27,7 @@
  * Touch when:   a status field or a verify outcome is added — extend the fixtures and keep
  *               the "never a value" assertion on every case.
  */
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Principal } from '../../api/types'
@@ -266,5 +268,32 @@ describe('ClaudeCodeLoginCard', () => {
     await screen.findByTestId('claude-login-status')
     await user.click(screen.getByTestId('claude-signin-start'))
     await waitFor(() => expect(screen.getByTestId('claude-signin')).toHaveTextContent("the claude CLI is not on the API host's PATH"))
+  })
+
+  it('the card hint wraps the heading only; Verify and Remove explain themselves, never the card', async () => {
+    setup(ADMIN, { [`GET ${PATH}`]: list(PRESENT) })
+    const verify = await screen.findByTestId('claude-login-verify')
+    const remove = screen.getByTestId('claude-login-remove')
+    const heading = screen.getByText('Claude Code login')
+    expect(heading).toHaveAttribute('data-hint', 'tile.settings.claude_login')
+    expect(heading.closest('h2')).not.toBeNull()
+    expect(heading.contains(verify)).toBe(false)
+    expect(verify).toHaveAttribute('data-hint', 'button.settings.verify_login')
+    expect(remove).toHaveAttribute('data-hint', 'button.settings.remove_token')
+    const open = () => Array.from(document.querySelectorAll('[role="tooltip"][data-open="true"]'))
+    fireEvent.focus(verify)
+    expect(open()).toHaveLength(1)
+    expect(open()[0]).toHaveTextContent('Try the stored token once')
+    expect(open()[0]).not.toHaveTextContent('The builder sign-in')
+    fireEvent.blur(verify, { relatedTarget: remove })
+    fireEvent.focus(remove)
+    expect(open()).toHaveLength(1)
+    expect(open()[0]).toHaveTextContent('Delete the stored token')
+    fireEvent.blur(remove, { relatedTarget: document.body })
+    // a guide link inside the instructions sits under no hint: focusing it opens nothing
+    const guide = screen.getByRole('link', { name: 'Supplying the Claude Code login token' })
+    expect(guide.closest('[data-hint]')).toBeNull()
+    fireEvent.focus(guide)
+    expect(open()).toEqual([])
   })
 })

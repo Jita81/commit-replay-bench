@@ -157,16 +157,19 @@ link over a measured row. The same guard sits under connect.
   commit from the clone under `CRB_HOME/repos/<name>`, and queue the run again.
 - **Outcome sync** (the start of every factory run on a linked repository, and
   `POST /factory/{repo}/outcomes/sync` by an operator): the same token
-  reads each delivered pull request's state (`GET /repos/{owner}/{name}/pulls/{n}`). A
-  merged pull request is recorded on the item's chain as `delivery.merged` (`merged_by`,
-  `merged_at`, `merge_sha`), one closed without merging as `delivery.closed` — once per
-  pull request, never again, whatever a later sync reads. An open pull request records
-  nothing; a pull request GitHub cannot serve is an entry in the sync's `errors` and is
-  retried next time. The trace carries `factory.outcomes.synced {checked, merged, closed,
-  open, errors}`; a repository not linked through the app records the sync as skipped and
-  the run goes on. The task view shows the outcome on the item, the backlog shows the counts
-  (`outcomes`), and the capability map's cell shows `n_delivered` / `n_merged` beside `n` —
-  counts, never a rate: a merge is a person's decision. Webhooks stay off (§2).
+  reads each delivered pull request whose fate can still change (`GET
+  /repos/{owner}/{name}/pulls/{n}`). A merged pull request is recorded on the item's chain
+  as `delivery.merged` (`merged_by`, `merged_at`, `merge_sha`), one closed without merging
+  as `delivery.closed` — at most closed, then merged, per pull request: a merge is
+  terminal (never read again, nothing recorded after it), a closed one is read again
+  because a person can reopen and merge it, and a repeated state appends nothing. An open
+  pull request records nothing; a pull request GitHub cannot serve is an entry in the
+  sync's `errors` and is retried next time. The trace carries `factory.outcomes.synced
+  {checked, merged, closed, open, errors}`; a repository not linked through the app records
+  the sync as skipped and the run goes on. The task view shows the outcome on the item, the
+  backlog shows the counts (`outcomes`), and the capability map's cell shows `n_delivered` /
+  `n_merged` beside `n` — counts, never a rate: a merge is a person's decision. Webhooks
+  stay off (§2).
 - **Delivery** (a factory run with `deliver: true`, after the route gate): the same
   installation's token pushes the `crb/<item>` branch and opens the pull request against the
   repository's default branch — the branch the fetch just brought up to date. If the

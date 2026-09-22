@@ -154,6 +154,8 @@ export const HINTS = {
     'The three versions every claim cites: crb (the software), apparatus (the instrument that graded the rows) and policy (the routing rule). A sign-off made under an older apparatus is stale.',
   'nav.footer_help':
     'The glossary and guides, in words, on every screen.',
+  'nav.footer_glossary':
+    'Every term the screens use, in plain English, with each number’s n, interval and apparatus.',
 
   // ── /login (screens/Login/LoginPage.tsx)
   'field.login.username':
@@ -768,6 +770,8 @@ export const HINTS = {
     'Every configuration event for this repository (registered, updated, GitHub-linked), append-only, each with who did it and the redacted field diff.',
   'pill.repo_config.changed':
     'A field this event changed; the diff under it shows the old and new value.',
+  'details.repo_config.diff':
+    'Opens the old and new value of each field this event changed, as recorded at write with secrets redacted.',
   'pill.repo_config.probe_result':
     'The probe run a save offered: queued or running until the worker finishes, then green (the known-green scope passed under the stored configuration) or failed with the runner’s own last line.',
   'tile.repo_config.stored':
@@ -1358,6 +1362,10 @@ export const HINTS = {
     'Paste a token to store. Never shown again after saving; only its last four characters are reported.',
   'button.settings.token_save':
     'Store the token on the server for the worker to use.',
+  'button.settings.verify_login':
+    'Try the stored token once, through the builder’s own environment, and report whether it was accepted; allowed once every 10 seconds.',
+  'button.settings.remove_token':
+    'Delete the stored token from the server; builders in cli mode stop working until a new one is stored.',
   'pill.settings.signin_state':
     'Where the sign-in flow is: waiting for the code, exchanging it, done or failed.',
   'pill.settings.github_configured':

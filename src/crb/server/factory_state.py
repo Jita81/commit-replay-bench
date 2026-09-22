@@ -28,12 +28,15 @@ Two more things live here because both the API and the worker need them:
   the superseded item as ``superseded`` (with ``superseded_by``) directly above its
   evolution, so the chain reads as it was registered.
 * **The outcome sync** (B-9 / F30): :func:`sync_outcomes` reads every delivered pull
-  request whose fate can still change (no outcome yet, or closed — a person can reopen
-  and merge it) through a caller-supplied reader (the installation token's ``GET
-  /pulls/{n}``) and records ``delivery.merged`` / ``delivery.closed`` — at most closed
-  then merged per PR; a merged one is never read again. It runs at the start of every factory run and on ``POST
-  /factory/{repo}/outcomes/sync``; the capability map reads
-  :meth:`FactoryHome.delivery_counts` for ``n_delivered`` / ``n_merged`` per cell.
+  request whose fate can still change — :func:`outcomes_pending`: no outcome yet, or
+  ``delivery.closed`` (a person can reopen and merge it); ``delivery.merged`` is terminal
+  — through a caller-supplied reader (the installation token's ``GET /pulls/{n}``) and
+  records ``delivery.merged`` / ``delivery.closed`` — at most closed then merged per PR;
+  a merged one is never read again. Both callers (the worker at the start of every
+  factory run, ``POST /factory/{repo}/outcomes/sync``) ask :func:`outcomes_pending`
+  before minting a token, so the "nothing to read" decision and the sync share ONE
+  predicate; the capability map reads :meth:`FactoryHome.delivery_counts` for
+  ``n_delivered`` / ``n_merged`` per cell.
 
 Navigation
 ----------
@@ -327,18 +330,28 @@ class OutcomeSyncReport:
 ReadPrFn = Callable[[int], PullRequest]
 
 
+def outcomes_pending(home: FactoryHome) -> list[DeliveredPr]:
+    """Deliveries whose fate can still change: no outcome yet, or ``delivery.closed`` — a
+    person can reopen a closed pull request and merge it. ``delivery.merged`` is terminal
+    (the ledger refuses anything after a merge), so a merged delivery is never read again.
+    The ONE place this rule lives: :func:`sync_outcomes` iterates it, and both callers
+    ask it before minting an installation token (an empty answer mints nothing)."""
+    return [
+        d for d in home.deliveries() if d.outcome is None or d.outcome.kind != EV_DELIVERY_MERGED
+    ]
+
+
 def sync_outcomes(home: FactoryHome, read_pr: ReadPrFn, *, actor: str) -> OutcomeSyncReport:
-    """Read every delivered pull request whose fate can still change — no outcome on the
-    chain yet, or ``delivery.closed`` (a person can reopen and merge it) — and record
-    ``delivery.merged`` / ``delivery.closed`` for the ones that ended: at most closed then
-    merged per PR (the evidence ledger refuses a repeat of the same state and anything
-    after a merge). A merged PR is never read again; a PR still open records nothing; a
-    read that fails is an entry in ``errors`` and the PR is retried by the next sync."""
+    """Read every delivered pull request whose fate can still change
+    (:func:`outcomes_pending`: no outcome on the chain yet, or ``delivery.closed`` — a
+    person can reopen and merge it) and record ``delivery.merged`` / ``delivery.closed``
+    for the ones that ended: at most closed then merged per PR (the evidence ledger refuses
+    a repeat of the same state and anything after a merge). A merged PR is never read
+    again; a PR still open records nothing; a read that fails is an entry in ``errors``
+    and the PR is retried by the next sync."""
     report = OutcomeSyncReport()
     ev = home.evidence(actor=actor)
-    for d in home.deliveries():
-        if d.outcome is not None and d.outcome.kind == EV_DELIVERY_MERGED:
-            continue  # terminal: never read again, never re-recorded
+    for d in outcomes_pending(home):
         report.checked += 1
         try:
             pr = read_pr(d.pr_number)
@@ -664,5 +677,6 @@ __all__ = [
     "Refusal",
     "TaskView",
     "delivery_counts_matching",
+    "outcomes_pending",
     "sync_outcomes",
 ]

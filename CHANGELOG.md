@@ -19,7 +19,7 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   only way (DL-048). The mechanism: `<Hint id>` (`ui/src/components/Hint.tsx` — opens on
   mouse-over after 150 ms, on keyboard focus and on a touch `pointerdown`; Escape closes and
   stops there; a `role="tooltip"` bubble, portalled, never a tab stop inside a control, never
-  a link; a `crb:help` event for telemetry), the registry `ui/src/help/hints.ts` (652 ids
+  a link; a `crb:help` event for telemetry), the registry `ui/src/help/hints.ts` (661 ids
   from the inventory, `HintId`, `MIN_HINTS` per route; `hints.test.ts` lints length, the full
   stop, no links and term use), and every shared component taking `hint?: HintId` (StatTile,
   Pill, DataTable columns, buttons, fields, GateBanner criteria, govuk Tag / TaskItem /
@@ -66,9 +66,12 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   refuses the run with a plain reason (`FetchRefused`; never a build on a stale base, never
   a merge or reset the product did on its own). *The merge outcome as evidence:* at the start
   of every factory run, or on demand via `POST /factory/{repo}/outcomes/sync` (operator),
-  each delivered pull request's fate is read through the installation token and recorded as
-  `delivery.merged` / `delivery.closed` exactly once per PR on the item's chain
-  (`FactoryEvidence.record_delivery_outcome` is idempotent by construction); the task view
+  each delivered pull request whose fate can still change is read through the installation
+  token and recorded as `delivery.merged` / `delivery.closed` on the item's chain — at most
+  closed, then merged, per PR: a merge is terminal and never read again; a closed one is
+  read again because a person can reopen and merge it; a repeated state appends nothing
+  (`FactoryEvidence.record_delivery_outcome` is idempotent per state; the one predicate both
+  the worker and the route ask before minting a token is `outcomes_pending`); the task view
   serves `outcome` (state, PR, merged_at, merged_by, merge_sha, synced_at), the backlog
   serves `outcomes` (delivered / merged / closed / open — the fact Home's task 8 reads), the
   capability map's cell serves `n_delivered` / `n_merged` (counts, no interval). *Evolutions

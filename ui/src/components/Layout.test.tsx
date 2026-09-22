@@ -87,8 +87,15 @@ describe('Layout', () => {
     expect(within(banner).getByRole('button', { name: /Switch theme/ })).not.toHaveAttribute('title')
     expect(within(banner).getByRole('link', { name: 'Baseline' })).toHaveAttribute('data-hint', 'nav.baseline')
     const footer = screen.getByRole('contentinfo')
-    expect(within(footer).getByRole('link', { name: 'Help' })).toHaveAttribute('href', '/help')
-    expect(within(footer).getByRole('link', { name: 'Glossary' })).toHaveAttribute('href', '/help#terms')
+    const footerHelp = within(footer).getByRole('link', { name: 'Help' })
+    const footerGlossary = within(footer).getByRole('link', { name: 'Glossary' })
+    expect(footerHelp).toHaveAttribute('href', '/help')
+    expect(footerGlossary).toHaveAttribute('href', '/help#terms')
+    // two links, two sentences: a shared id would give Glossary the Help description and
+    // collapse the About block's shell list to one entry
+    expect(footerHelp).toHaveAttribute('data-hint', 'nav.footer_help')
+    expect(footerGlossary).toHaveAttribute('data-hint', 'nav.footer_glossary')
+    expect(footerGlossary.getAttribute('data-hint')).not.toBe(footerHelp.getAttribute('data-hint'))
     const main = screen.getByRole('main')
     expect(within(main).getAllByTestId('about-this-screen')).toHaveLength(1)
     expect(main).toHaveTextContent('This is the baseline the factory runs on.')

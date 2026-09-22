@@ -231,7 +231,7 @@ from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.testfirst import AuthoredTest
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
-from crb.server.factory_state import FactoryHome, sync_outcomes
+from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
@@ -1989,10 +1989,12 @@ class Worker:
     ) -> None:
         """The outcome sync at the start of a factory run (B-9 / F30): for a repository
         linked through the GitHub App on the app's own host, read every delivered pull
-        request whose fate can still change and record ``delivery.merged`` /
-        ``delivery.closed`` (at most closed then merged per PR). ``factory.outcomes.synced`` carries the report (``skipped`` with the
-        reason when the repository cannot be read; ``status: error`` when the token could
-        not be minted). Nothing here can fail the run."""
+        request whose fate can still change (``outcomes_pending`` — no outcome yet, or
+        closed; a merge is terminal) and record ``delivery.merged`` / ``delivery.closed``
+        (at most closed then merged per PR). No token is minted when nothing is pending.
+        ``factory.outcomes.synced`` carries the report (``skipped`` with the reason when
+        the repository cannot be read; ``status: error`` when the token could not be
+        minted). Nothing here can fail the run."""
         installation = self._github_installation(cfg)
         full_name = str(dict(cfg.get("github") or {}).get("full_name") or "")
         if installation is None or not full_name or not self._github_host_ok(remote):
@@ -2003,8 +2005,7 @@ class Worker:
                 reason="not linked through the GitHub App on its own host",
             )
             return
-        pending = [d for d in home.deliveries() if d.outcome is None]
-        if not pending:
+        if not outcomes_pending(home):
             ctx.emit("factory", "outcomes.synced", checked=0, merged=0, closed=0, open=0, errors=[])
             return
         app = self._github_app()

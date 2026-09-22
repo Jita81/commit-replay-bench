@@ -73,16 +73,20 @@ The product's needs are small and separable: measurement needs `Metadata: read` 
    request on a base the remote has moved past, and never merges or resets a clone on its
    own. *(Added 2026-09-22 — F39, after the B-1b review found the second cobra run would
    have built on a base without PR #2.)*
-7. **The merge outcome comes back as evidence, once per pull request.** The same
-   installation token reads each delivered pull request's state (`GET /pulls/{n}`) at the
-   start of every factory run and on `POST /factory/{repo}/outcomes/sync`; a merged or
-   closed pull request is recorded ONCE on the item's chain as `delivery.merged` /
-   `delivery.closed` (merged by whom, when, into which sha) — the evidence ledger refuses
-   a second outcome for the same PR, so the record never grows with the number of syncs. A
-   merge is a human act: the capability map's cell carries it as counts (`n_delivered`,
+7. **The merge outcome comes back as evidence — at most closed, then merged, per pull
+   request.** The same installation token reads each delivered pull request whose fate
+   can still change (`GET /pulls/{n}`) at the start of every factory run and on `POST
+   /factory/{repo}/outcomes/sync`; a merged or closed pull request is recorded on the
+   item's chain as `delivery.merged` / `delivery.closed` (merged by whom, when, into which
+   sha). A merge is terminal: the evidence ledger refuses anything after it and the sync
+   never reads it again. A closed pull request is read again — a person can reopen and
+   merge it, and that one transition is a second row, newest-wins in every fold — while a
+   repeated state is refused, so the record never grows with the number of syncs. A merge
+   is a human act: the capability map's cell carries it as counts (`n_delivered`,
    `n_merged`), never as a rate or an interval, and it never enters the routing rule.
    Webhooks stay off (the app is registered with the webhook inactive); polling at the
-   start of a run is the read. *(Added 2026-09-22 — B-9 / F30.)*
+   start of a run is the read. *(Added 2026-09-22 — B-9 / F30; the once-per-PR wording
+   corrected the same day, after review — see DL-049.)*
 
 ## Consequences
 

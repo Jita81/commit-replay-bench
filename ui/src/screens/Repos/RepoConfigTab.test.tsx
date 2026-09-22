@@ -11,8 +11,11 @@
  *               sends ONLY the changed fields (asserted on the PUT body), shows the toast and
  *               adds the diff event to the trail; that raw JSON round-trips with the form and
  *               a parse error blocks saving; that validation speaks the API's words; that a
- *               422 envelope renders; and that a probe after a save is followed to green or
- *               red with the run's reason.
+ *               422 envelope renders; that a probe after a save is followed to green or
+ *               red with the run's reason; and that the Audit trail and Stored configuration
+ *               cards hint their HEADING only — a focus inside the body (a diff disclosure,
+ *               a JsonView expand button) opens that control's own bubble or nothing, never
+ *               the card's.
  * How:          `mockApi` with the `REPO` fixture, `userEvent` interactions, assertions on
  *               the `repo-config-*` test ids and the recorded request bodies.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -24,7 +27,7 @@
  * Touch when:   a field, a validation message or the audit payload changes — extend the
  *               matching case.
  */
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Principal, RepoDetail, Run, StepEvent } from '../../api/types'
@@ -311,5 +314,42 @@ describe('RepoConfigTab', () => {
     const described = language.getAttribute('aria-describedby')!.split(' ')
     expect(described).toHaveLength(2)
     for (const id of described) expect(document.getElementById(id), id).not.toBeNull()
+  })
+
+  it('the card hints wrap the heading only: a focus inside the body never opens the card’s bubble', async () => {
+    const updated = event(2, 'repo.updated', { fields: ['belt_scope'], diff: { belt_scope: { from: 'changed', to: 'all' } } })
+    mockApi({
+      'GET /auth/me': OPERATOR,
+      [`GET /repos/${REPO.name}/events`]: { items: [updated, event(1, 'repo.created', { config: REPO.config })], total: 2, limit: 50, offset: 0 },
+    })
+    renderApp(<RepoConfigTab repo={REPO} />)
+    await waitFor(() => expect(screen.getAllByTestId('repo-config-audit-event')).toHaveLength(2))
+    const open = () => Array.from(document.querySelectorAll('[role="tooltip"][data-open="true"]'))
+    for (const [id, title] of [
+      ['tile.repo_config.audit', 'Audit trail'],
+      ['tile.repo_config.stored', 'Stored configuration'],
+    ] as const) {
+      const trigger = screen.getByText(title)
+      expect(trigger).toHaveAttribute('data-hint', id)
+      expect(trigger.closest('h2')).not.toBeNull()
+      // the body is a sibling of the heading, not a descendant of the trigger
+      expect(trigger.querySelector('button, details, summary')).toBeNull()
+    }
+    // a JsonView expand / collapse button in the Stored configuration card sits under no
+    // hint: focusing or hovering it opens nothing (before: the card's generic sentence)
+    const stored = screen.getByLabelText('Repository configuration')
+    const toggle = within(stored).getAllByRole('button')[0]!
+    expect(toggle.closest('[data-hint]')).toBeNull()
+    fireEvent.focus(toggle)
+    fireEvent.mouseOver(toggle)
+    expect(open()).toEqual([])
+    // the diff disclosure inside an audit event is its own control with its own sentence
+    const summary = screen.getByText('Diff (redacted at write)')
+    expect(summary).toHaveAttribute('data-hint', 'details.repo_config.diff')
+    expect(summary.closest('[data-testid="repo-config-audit"]')).not.toBeNull()
+    fireEvent.focus(summary)
+    expect(open()).toHaveLength(1)
+    expect(open()[0]).toHaveTextContent('Opens the old and new value')
+    expect(open()[0]).not.toHaveTextContent('Every configuration event')
   })
 })

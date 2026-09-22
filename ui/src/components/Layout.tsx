@@ -264,7 +264,7 @@ export function Layout() {
           Help
         </Hint>
         {' · '}
-        <Hint as={NavLink} id="nav.footer_help" to="/help#terms" className="underline">
+        <Hint as={NavLink} id="nav.footer_glossary" to="/help#terms" className="underline">
           Glossary
         </Hint>
       </footer>

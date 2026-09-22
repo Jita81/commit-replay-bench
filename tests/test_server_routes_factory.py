@@ -16,8 +16,10 @@ What it does: Pins that a backlog registers frozen and hashed with the freeze in
               rule implies (J-FAC-3), that registration is refused while a factory run
               is queued or running, that an evolution chains onto the frozen record and
               the task view shows the supersession chain (F32), and that the outcome sync
-              records each delivered pull request's fate once — task view, backlog summary
-              and capability-map counts agree (B-9 / F30).
+              records each delivered pull request's fate at most closed then merged — a
+              closed-only delivery is read again and its later merge lands; a merged-only
+              one mints no token — task view, backlog summary and capability-map counts
+              agree (B-9 / F30).
 How:          FastAPI TestClient over the seeded SQLite app (``fixtures.server_seed``);
               the factory state is read back through ``FactoryHome`` to check the files.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -831,14 +833,10 @@ def test_outcome_sync_is_refused_until_the_repository_is_linked(env: Env) -> Non
     }
 
 
-def test_outcome_sync_records_each_pull_requests_fate_once(
-    env: Env, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """B-9 / F30 end to end over the API: three delivered pull requests, read through the
-    installation token from a fake GitHub — one merged, one closed, one open — recorded
-    ONCE each on the item's chain; the task view carries ``outcome``, the backlog the
-    summary (task 8's fact), the capability map's cell ``n_delivered`` / ``n_merged``;
-    a second sync reads only what is still open and appends nothing."""
+def _fake_github(env: Env, monkeypatch: pytest.MonkeyPatch, pulls: dict[int, str]) -> Any:
+    """A linked, configured, writable installation whose pulls API is a ``FakeGitHub``
+    serving ``{number: state}`` for ``acme/alpha``; the route's client is routed to it.
+    Returns the fake (``calls``, ``tokens_minted``, ``pulls`` to mutate)."""
     import httpx
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -854,20 +852,36 @@ def test_outcome_sync_records_each_pull_requests_fate_once(
     ).decode()
     gh = FakeGitHub(key.public_key())
     gh.pulls = {
-        ("acme/alpha", 7): pull_request_api(7, "merged", full_name="acme/alpha"),
-        ("acme/alpha", 8): pull_request_api(8, "closed", full_name="acme/alpha"),
-        ("acme/alpha", 9): pull_request_api(9, "open", full_name="acme/alpha"),
+        ("acme/alpha", n): pull_request_api(n, state, full_name="acme/alpha")
+        for n, state in pulls.items()
     }
     monkeypatch.setattr(
         factory_routes, "_github_client", lambda: httpx.Client(transport=gh.transport())
     )
+    _link(env)
+    env.settings.github = GitHubAppSettings(app_id="4242", app_slug="crb", private_key=pem)
+    _installation(env, {"contents": "write", "pull_requests": "write"})
+    return gh
+
+
+def test_outcome_sync_records_each_pull_requests_fate_once(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B-9 / F30 end to end over the API: three delivered pull requests, read through the
+    installation token from a fake GitHub — one merged, one closed, one open — recorded
+    ONCE each on the item's chain; the task view carries ``outcome``, the backlog the
+    summary (task 8's fact), the capability map's cell ``n_delivered`` / ``n_merged``;
+    a second sync reads only what is still open and appends nothing."""
+    import httpx
+
+    from crb.server.routes import factory as factory_routes
+    from test_server_github_app import pull_request_api
+
     deliver = {**ITEM, "id": "D-1", "capability_class": "bug.fix", "size_estimate": "S"}
     other = {**ITEM, "id": "D-2", "capability_class": "bug.fix", "size_estimate": "S"}
     third = {**ITEM, "id": "D-3", "capability_class": "backend.route.add", "size_estimate": "M"}
     assert _register(env, [deliver, other, third]).status_code == 201
-    _link(env)
-    env.settings.github = GitHubAppSettings(app_id="4242", app_slug="crb", private_key=pem)
-    _installation(env, {"contents": "write", "pull_requests": "write"})
+    gh = _fake_github(env, monkeypatch, {7: "merged", 8: "closed", 9: "open"})
     _delivered(env, "D-1", 7)
     _delivered(env, "D-2", 8)
     _delivered(env, "D-3", 9)
@@ -970,3 +984,57 @@ def test_outcome_sync_records_each_pull_requests_fate_once(
     r = env.post(f"/factory/{ALPHA}/outcomes/sync")
     assert r.status_code == 502 and envelope(r)["code"] == "github_error"
     assert "Bad credentials" in envelope(r)["message"]
+
+
+def test_outcome_sync_reads_a_closed_only_delivery_again_and_records_its_merge(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The closed-then-merged rule at the route's own gate: when the ONLY delivered pull
+    request is already recorded ``delivery.closed``, the sync still reads it (a person
+    can reopen and merge it — ``outcomes_pending``), mints the token, and appends
+    ``delivery.merged`` once GitHub says so; when the only delivery is ``merged``, nothing
+    is pending — no token, no read, nothing appended, ``checked: 0``."""
+    from test_server_github_app import pull_request_api
+
+    assert _register(env, [{**ITEM, "id": "D-1"}]).status_code == 201
+    gh = _fake_github(env, monkeypatch, {7: "closed"})
+    _delivered(env, "D-1", 7)
+    login(env.client, "operator")
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 200 and (r.json()["checked"], r.json()["closed"]) == (1, 1)
+    kinds = [e["kind"] for e in env.get(f"/factory/{ALPHA}/evidence").json()["items"]]
+    assert kinds[-1] == "delivery.closed"
+    # every delivery has an outcome — and the closed one is still pending: read again,
+    # still closed, nothing appended
+    gh.calls.clear()
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 200 and (r.json()["checked"], r.json()["closed"]) == (1, 0)
+    assert [c[1] for c in gh.calls if "/pulls/" in c[1]] == ["/repos/acme/alpha/pulls/7"]
+    assert gh.tokens_minted == 2  # one per sync: a closed-only sync still mints and reads
+    n_events = env.get(f"/factory/{ALPHA}/evidence").json()["total"]
+    # a person reopens and merges #7: the next sync appends delivery.merged
+    gh.pulls[("acme/alpha", 7)] = pull_request_api(7, "merged", full_name="acme/alpha")
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 200 and (r.json()["checked"], r.json()["merged"]) == (1, 1)
+    assert gh.tokens_minted == 3
+    items = env.get(f"/factory/{ALPHA}/evidence").json()
+    assert items["total"] == n_events + 1 and items["items"][-1]["kind"] == "delivery.merged"
+    assert items["verified"] is True
+    outcome = {t["id"]: t for t in env.get(f"/factory/{ALPHA}/tasks").json()}["D-1"]["outcome"]
+    assert outcome["state"] == "merged" and outcome["merged_by"] == "paul"
+    assert r.json()["outcomes"] == {
+        "delivered": 1,
+        "merged": 1,
+        "closed": 0,
+        "open": 0,
+        "last_synced": r.json()["outcomes"]["last_synced"],
+    }
+    # merged-only: nothing pending — the route neither mints a token nor reads a PR
+    monkeypatch.setattr(
+        "crb.server.routes.factory._github_client",
+        lambda: (_ for _ in ()).throw(AssertionError("no token is minted for an empty sync")),
+    )
+    r = env.post(f"/factory/{ALPHA}/outcomes/sync")
+    assert r.status_code == 200, r.text
+    assert (r.json()["checked"], r.json()["merged"], r.json()["errors"]) == (0, 0, [])
+    assert env.get(f"/factory/{ALPHA}/evidence").json()["total"] == n_events + 1

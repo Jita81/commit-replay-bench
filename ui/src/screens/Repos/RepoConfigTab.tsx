@@ -113,8 +113,8 @@ function fieldsOf(ev: StepEvent): string[] {
 function AuditTrail({ name }: { name: string }) {
   const events = useRepoEvents(name, { limit: 50 })
   return (
-    <Card title="Audit trail" eyebrow="who changed what · append-only system events">
-      <Hint as="div" id="tile.repo_config.audit" data-testid="repo-config-audit">
+    <Card title={<Hint id="tile.repo_config.audit">Audit trail</Hint>} eyebrow="who changed what · append-only system events">
+      <div data-testid="repo-config-audit">
         <QueryBoundary query={events} loading="Loading the audit trail…">
           {(page) =>
             page.items.length === 0 ? (
@@ -147,7 +147,9 @@ function AuditTrail({ name }: { name: string }) {
                       )}
                       {diff !== undefined && diff !== null && typeof diff === 'object' && Object.keys(diff as object).length > 0 && (
                         <details className="mt-1 text-xs">
-                          <summary className="cursor-pointer text-on-surface-muted">Diff (redacted at write)</summary>
+                          <Hint as="summary" id="details.repo_config.diff" className="cursor-pointer text-on-surface-muted">
+                            Diff (redacted at write)
+                          </Hint>
                           <div className="mt-1">
                             <JsonView value={diff} initiallyOpen collapseBelow={4} label={`Diff for event ${ev.seq}`} />
                           </div>
@@ -160,7 +162,7 @@ function AuditTrail({ name }: { name: string }) {
             )
           }
         </QueryBoundary>
-      </Hint>
+      </div>
     </Card>
   )
 }
@@ -298,10 +300,8 @@ export function RepoConfigTab({ repo }: { repo: RepoDetail }) {
           )}
         </form>
       </Card>
-      <Card title="Stored configuration" eyebrow="as the API returns it (RepoConfig.to_dict)">
-        <Hint as="div" id="tile.repo_config.stored">
-          <JsonView value={saved.config} initiallyOpen label="Repository configuration" />
-        </Hint>
+      <Card title={<Hint id="tile.repo_config.stored">Stored configuration</Hint>} eyebrow="as the API returns it (RepoConfig.to_dict)">
+        <JsonView value={saved.config} initiallyOpen label="Repository configuration" />
       </Card>
       <AuditTrail name={repo.name} />
     </div>

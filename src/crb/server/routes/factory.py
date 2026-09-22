@@ -77,7 +77,12 @@ from crb.factory.readiness import CATALOGUE, SLOT_VALUE, sign, slots_for
 from crb.factory.testfirst import AuthoredTest
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
-from crb.server.factory_state import FactoryHome, OutcomeSyncReport, sync_outcomes
+from crb.server.factory_state import (
+    FactoryHome,
+    OutcomeSyncReport,
+    outcomes_pending,
+    sync_outcomes,
+)
 from crb.server.github_app import GitHubApp, GitHubAppError, permissions_allow_delivery
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
@@ -714,8 +719,9 @@ def sync_delivery_outcomes(
             f"App installation the repository is linked to. {pre.reason}",
         )
     installation_id, full_name = pre.installation_id, pre.full_name
-    if not any(d.outcome is None for d in home.deliveries()):
-        # nothing to read: no token is minted for an empty sync
+    if not outcomes_pending(home):
+        # nothing whose fate can still change (every delivery merged, or none delivered):
+        # no token is minted for an empty sync — a closed one IS pending (see the helper)
         report = OutcomeSyncReport()
     else:
         client = _github_client()

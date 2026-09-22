@@ -44,6 +44,7 @@ from crb.server.factory_state import (
     STATUS_SUPERSEDED_WORD,
     FactoryHome,
     delivery_counts_matching,
+    outcomes_pending,
     sync_outcomes,
 )
 from crb.server.github_app import PR_CLOSED, PR_MERGED, PR_OPEN, GitHubAppError, PullRequest
@@ -193,6 +194,21 @@ def test_outcome_is_recorded_at_most_closed_then_merged_per_pull_request() -> No
 
 
 # --- the sync ------------------------------------------------------------------------------
+
+
+def test_outcomes_pending_is_everything_but_a_merge(home: FactoryHome) -> None:
+    """The one predicate both callers and the sync share: no outcome → pending; closed →
+    pending (a person can reopen and merge); merged → terminal, never read again."""
+    ev = home.evidence(actor="worker")
+    ev.record_delivery(_delivery("I-1", 7))
+    ev.record_delivery(_delivery("I-2", 8))
+    assert [(d.item_id, d.pr_number) for d in outcomes_pending(home)] == [("I-1", 7), ("I-2", 8)]
+    ev.record_delivery_outcome("I-2", state=PR_CLOSED, pr_number=8)
+    assert [(d.item_id, d.pr_number) for d in outcomes_pending(home)] == [("I-1", 7), ("I-2", 8)]
+    ev.record_delivery_outcome("I-1", state=PR_MERGED, pr_number=7)
+    assert [(d.item_id, d.pr_number) for d in outcomes_pending(home)] == [("I-2", 8)]
+    ev.record_delivery_outcome("I-2", state=PR_MERGED, pr_number=8)
+    assert outcomes_pending(home) == []
 
 
 def test_sync_records_merged_and_closed_once_skips_open_and_reports_read_failures(

@@ -269,8 +269,8 @@ export function ClaudeCodeLoginCard() {
   }
 
   return (
-    <Card title="Claude Code login" eyebrow="claude setup-token · auth: cli">
-      <Hint as="div" id="tile.settings.claude_login" className="space-y-4">
+    <Card title={<Hint id="tile.settings.claude_login">Claude Code login</Hint>} eyebrow="claude setup-token · auth: cli">
+      <div className="space-y-4">
         <QueryBoundary query={secrets} loading="Loading login status…">
           {(list) => <StatusLine status={claudeCodeStatus(list)} />}
         </QueryBoundary>
@@ -319,6 +319,7 @@ export function ClaudeCodeLoginCard() {
                 onClick={() => verify.mutate()}
                 disabled={verify.isPending || !claudeCodeStatus(secrets.data)?.present}
                 data-testid="claude-login-verify"
+                hint="button.settings.verify_login"
               >
                 {verify.isPending ? 'Verifying…' : 'Verify login'}
               </Button>
@@ -330,6 +331,7 @@ export function ClaudeCodeLoginCard() {
                 }}
                 disabled={remove.isPending || !claudeCodeStatus(secrets.data)?.present}
                 data-testid="claude-login-remove"
+                hint="button.settings.remove_token"
               >
                 {remove.isPending ? 'Removing…' : 'Remove token'}
               </Button>
@@ -344,7 +346,7 @@ export function ClaudeCodeLoginCard() {
             Only an admin can save, verify or remove the token.
           </p>
         )}
-      </Hint>
+      </div>
     </Card>
   )
 }

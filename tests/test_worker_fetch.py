@@ -267,8 +267,9 @@ def test_factory_run_on_a_linked_repository_syncs_outcomes_through_the_installat
     """B-9 / F30 at the worker, against a fake GitHub: two delivered pull requests, one
     merged and one still open — ``delivery.merged`` lands on the item's chain once, the
     open one records nothing, the trace carries ``outcomes.synced`` with the report, and
-    the second sync reads only the open one. A token that cannot be minted is an error
-    event on the trace, never a failed run."""
+    the second sync reads only the open one; a closed-only chain is still read (and its
+    later merge recorded), a merged-only one mints no token. A token that cannot be
+    minted is an error event on the trace, never a failed run."""
     import httpx
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -347,6 +348,46 @@ def test_factory_run_on_a_linked_repository_syncs_outcomes_through_the_installat
     worker._sync_outcomes(ctx, home, cfg, remote)
     assert [c[1] for c in gh.calls if "/pulls/" in c[1]] == ["/repos/acme/Calc/pulls/8"]
     assert len(home.events()) == n
+    # #8 closes without merging: recorded. Now EVERY delivery has an outcome, and the
+    # closed one is still pending (a person can reopen and merge it): the worker mints
+    # the token and reads it again — never ``checked: 0`` while a closed delivery exists
+    gh.pulls[("acme/calc", 8)] = pull_request_api(8, "closed")
+    worker._sync_outcomes(ctx, home, cfg, remote)
+    assert sink.events[-1].payload["closed"] == 1
+    gh.calls.clear()
+    worker._sync_outcomes(ctx, home, cfg, remote)
+    assert [c[1] for c in gh.calls if "/pulls/" in c[1]] == ["/repos/acme/Calc/pulls/8"]
+    assert sink.events[-1].payload == {
+        "checked": 1,
+        "merged": 0,
+        "closed": 0,
+        "open": 0,
+        "errors": [],
+    }
+    gh.pulls[("acme/calc", 8)] = pull_request_api(8, "merged", merged_by="ada")
+    worker._sync_outcomes(ctx, home, cfg, remote)
+    assert sink.events[-1].payload["merged"] == 1
+    reopened = home.evidence().outcome_for("I-2", 8)
+    assert reopened is not None and reopened.kind == fe.EV_DELIVERY_MERGED
+    assert reopened.payload["merged_by"] == "ada"
+    # both merged: nothing pending — no token minted, no read, checked 0
+    gh.calls.clear()
+    worker._sync_outcomes(ctx, home, cfg, remote)
+    assert gh.calls == [] and sink.events[-1].payload["checked"] == 0
+    # a fresh delivery (#9, open) so the syncs below have something to mint a token for
+    ev.record_delivery(
+        {
+            "item_id": "I-1",
+            "branch": "crb/I-1",
+            "base": "main",
+            "commit_sha": "c" * 40,
+            "pr_url": "https://github.com/acme/Calc/pull/9",
+            "pr_number": 9,
+            "pack_hash": "p" * 64,
+            "body_sha256": "b" * 64,
+        }
+    )
+    gh.pulls[("acme/calc", 9)] = pull_request_api(9, "open")
     # a repository whose URL is off the app's host gets no token — the sync is skipped
     worker._sync_outcomes(ctx, home, cfg, "https://example.invalid/acme/Calc.git")
     assert sink.events[-1].status is StepStatus.SKIPPED
