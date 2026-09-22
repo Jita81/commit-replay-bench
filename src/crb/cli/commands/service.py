@@ -583,6 +583,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 probes.ProbeResult("migrations", probes.DOWN, f"{type(exc).__name__}: {exc}")
             )
         stale_s = settings.worker_heartbeat_stale_s if settings else 120
+        if db.status == probes.OK and settings is not None:
+            from crb.server.routes.system import probe_intake
+
+            # offline by design: it reports what THIS deployment knows about itself
+            # (tracker configured, credential stored, listeners on) and contacts no tracker
+            results.append(probe_intake(factory, settings))
+        else:
+            results.append(
+                probes.ProbeResult(
+                    "intake", probes.DEGRADED, "not checked: the database line failed"
+                )
+            )
         if db.status == probes.OK:
             results.append(probe_worker(factory, stale_s))
         else:

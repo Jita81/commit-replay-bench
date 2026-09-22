@@ -95,6 +95,7 @@ const STEP_OF: Array<{ pattern: string; step: number; sub?: string }> = [
   { pattern: '/decisions', step: 2 },
   { pattern: '/signoff', step: 2, sub: 'sign-off' },
   { pattern: '/factory', step: 3 },
+  { pattern: '/factory/intake', step: 3, sub: 'intake' },
 ]
 
 /**

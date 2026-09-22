@@ -37,6 +37,7 @@ import { HomePage } from './screens/Home/HomePage'
 import { PosturePage } from './screens/Posture/PosturePage'
 import { DecisionsPage } from './screens/Decisions/DecisionsPage'
 import { FactoryPage } from './screens/Factory/FactoryPage'
+import { IntakePage } from './screens/Factory/IntakePage'
 import { DocPage } from './screens/Help/DocPage'
 import { HelpPage } from './screens/Help/HelpPage'
 import { LedgerPage } from './screens/Ledger/LedgerPage'
@@ -90,6 +91,7 @@ export function App() {
           <Route path="/ledger" element={<LedgerPage />} />
           <Route path="/signoff" element={<SignoffPage />} />
           <Route path="/factory" element={<FactoryPage />} />
+          <Route path="/factory/intake" element={<IntakePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/help" element={<HelpPage />} />
           <Route path="/help/docs/:name" element={<DocPage />} />

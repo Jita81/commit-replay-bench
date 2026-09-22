@@ -31,6 +31,7 @@ import type { EventSourceLike } from '../api/sse'
 import type { Role } from '../api/types'
 import { CapabilityPage } from '../screens/Capability/CapabilityPage'
 import { FactoryPage } from '../screens/Factory/FactoryPage'
+import { IntakePage } from '../screens/Factory/IntakePage'
 import { LearnPage } from '../screens/Learn/LearnPage'
 import { LedgerPage } from '../screens/Ledger/LedgerPage'
 import { OraclePage } from '../screens/Oracle/OraclePage'
@@ -284,6 +285,30 @@ const FACTORY_TASKS = [
   { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/alpha/pull/7', review_verdict: 'accept', last_event: 'item.outcome', cell_route: DELIVER, ...UNTOUCHED, task_id: 'c'.repeat(40), run_id: 'r'.repeat(32), pack_hash: 'p'.repeat(64), row_hash: 'h'.repeat(64) },
   { id: 'I-2', title: 'Divide', capability_class: 'feature.add', size: 'S', kind: 'code', status: 'not_ready', dor_gaps: ['method_path', 'response_shape'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked', cell_route: NO_ROUTE, ...UNTOUCHED, refusal: { step: 'readiness', reason: 'two structural gaps are unsigned', reason_code: '', measured_route: '' } },
 ]
+const INTAKE = {
+  repo: 'alpha',
+  listener: { enabled: true, column: 'Ready for manufacture', switched_by: 'Ada', switched_at: '2026-09-22T09:00:00Z', since: '2026-09-22T09:00:00Z' },
+  connection: { tracker: 'ado', url: 'https://dev.azure.invalid/contoso', project: 'Widgets', column: 'Ready for manufacture', poll_s: 300, outcome_map: { merged: 'Done' }, configured: true, credential_set: true, credential_fingerprint: 'AB12' },
+  last_poll: { repo: 'alpha', column: 'Ready for manufacture', seen: 2, read: 2, skipped: 0, commented: 2, registered: 1, queued: 0, stopped: '', detail: '', advice: '', at: '2026-09-22T09:05:00Z' },
+  rows: [
+    {
+      key: '4711', title: 'Fix the crash when the cart is empty', url: 'https://dev.azure.invalid/contoso/Widgets/_workitems/edit/4711', revision: '3',
+      label: 'crb:queued', state: 'Ready for manufacture', item_id: 'ado-4711', item_url: '/factory?repo=alpha&item=ado-4711',
+      feedback: 'Commit Replay Bench: this ticket is ready to manufacture.', open_questions: [],
+      capability_class: 'bug.fix', confidence: 0.67, size: 'S', registered: true, is_evolution: false, supersedes: '',
+      cell_route: DELIVER, read_at: '2026-09-22T09:05:00Z', stopped: '', stopped_advice: '',
+    },
+    {
+      key: '4712', title: 'Add a POST /health route', url: 'https://dev.azure.invalid/contoso/Widgets/_workitems/edit/4712', revision: '1',
+      label: 'crb:needs-info', state: 'Ready for manufacture', item_id: 'ado-4712', item_url: '/factory?repo=alpha&item=ado-4712',
+      feedback: 'Commit Replay Bench: this ticket needs more information before anything is built.',
+      open_questions: [{ ref: 'ado-4712::backend.route.add::response_shape', severity: 'blocking', reason: 'What is the response shape (status code, body fields and types)?' }],
+      capability_class: 'backend.route.add', confidence: 0.5, size: 'M', registered: false, is_evolution: false, supersedes: '',
+      cell_route: NO_ROUTE, read_at: '2026-09-22T09:05:00Z', stopped: '', stopped_advice: '',
+    },
+  ],
+}
+
 const CATALOGUE = {
   classes: [
     { capability_class: 'feature.add', slots: [{ name: 'method_path', question: 'Which HTTP method and path does the change add?', kind: 'structural' }, { name: 'response_shape', question: 'What shape does the response have?', kind: 'structural' }] },
@@ -413,6 +438,16 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
       'GET /runs': FACTORY_RUNS,
     },
     roles: ['viewer', 'operator', 'approver'],
+  },
+  '/factory/intake': {
+    route: '/factory/intake?repo=alpha',
+    path: '/factory/intake',
+    element: <IntakePage />,
+    api: {
+      'GET /repos': REPOS,
+      'GET /factory/alpha/intake': INTAKE,
+    },
+    roles: ['viewer', 'operator'],
   },
   '/posture': {
     route: '/posture',

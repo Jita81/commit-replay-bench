@@ -167,6 +167,21 @@ export const HELP: ScreenHelp[] = [
     ],
   },
   {
+    route: '/factory/intake',
+    purpose: 'Work arrives from your own board: a ticket moved into one watched column is the request to manufacture, and the ticket is the backlog item. Before anything is built, the product tells the ticket what a good acceptance test still needs answering and what it knows about changes of that kind and size.',
+    next: {
+      viewer: 'Read each ticket’s row: what kind of change the product understood it as, what is still missing, and whether it became an item. The comment shown is the comment on the ticket, word for word.',
+      operator: 'Switch the listener on to start reading the column — that switch is the consent, and it is recorded under your name. Re-read the column now to read it without waiting for the timer; Post the feedback again re-posts on every ticket.',
+      admin: 'The tracker, the project, the column and the credential are yours: set CRB_INTAKE__* and store the tracker token in Settings. No listener can be switched on until you have.',
+    },
+    numbers: 'A ticket’s route line is the cell’s decision read from the map before any run, with the number of graded attempts it rests on and the 95 % Wilson interval around the rate. A cell nobody has measured says so; it never shows zero.',
+    terms: ['cell', 'wilson', 'deliver', 'apparatus', 'oracle_strength', 'signoff'],
+    readMore: [
+      { to: 'ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted', label: 'Forward mode' },
+      { to: 'OPERATOR#8-stop-conditions', label: 'Stop conditions' },
+    ],
+  },
+  {
     route: '/posture',
     purpose: 'A printable statement of how this deployment is built, secured and audited, for an architecture or security review. Each row is read from the running system or names its source.',
     next: {

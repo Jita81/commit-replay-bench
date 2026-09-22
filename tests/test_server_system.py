@@ -69,6 +69,7 @@ from crb.store.models import Grade, Repo, Run, WorkerRow
 ROOT_PW = "correct-horse-battery-staple"
 PROBE_NAMES = {
     "db",
+    "intake",
     "migrations",
     "append_only",
     "ledger",

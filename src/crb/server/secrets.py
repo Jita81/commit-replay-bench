@@ -79,6 +79,12 @@ from crb.core.secrets_file import (
     SecretsStore,
     SecretStatus,
 )
+from crb.intake.client import (
+    TRACKER_TOKEN_MAX_LEN,
+    TRACKER_TOKEN_MIN_LEN,
+    TRACKER_TOKEN_SECRET,
+    validate_tracker_token,
+)
 from crb.server.claude_login import LoginBroker
 from crb.server.deps import SettingsDep
 from crb.server.settings import Settings
@@ -126,6 +132,11 @@ SECRETS: dict[str, SecretSpec] = {
         name=CLI_TOKEN_SECRET,
         label="Claude Code login (claude setup-token)",
         validate=validate_claude_code_token,
+    ),
+    TRACKER_TOKEN_SECRET: SecretSpec(
+        name=TRACKER_TOKEN_SECRET,
+        label="Tracker token (Azure DevOps PAT or Jira API token)",
+        validate=validate_tracker_token,
     ),
 }
 
@@ -271,6 +282,9 @@ __all__ = [
     "CLAUDE_CODE_TOKEN_MIN_LEN",
     "CLAUDE_CODE_TOKEN_PREFIX",
     "SECRETS",
+    "TRACKER_TOKEN_MAX_LEN",
+    "TRACKER_TOKEN_MIN_LEN",
+    "TRACKER_TOKEN_SECRET",
     "VERIFY_MIN_INTERVAL_S",
     "SecretSpec",
     "SecretsDep",
@@ -282,4 +296,5 @@ __all__ = [
     "get_verify_limiter",
     "secrets_dir_for",
     "validate_claude_code_token",
+    "validate_tracker_token",
 ]

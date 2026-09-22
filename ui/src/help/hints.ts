@@ -613,6 +613,58 @@ export const HINTS = {
   'button.factory.item_add':
     'Add a further item with the next free id.',
 
+  // ── /factory/intake — work arriving from the team's own board (ADR-0017)
+  'stat.intake.listener':
+    'Whether this repository’s listener is reading the watched column. It is off for every repository until an operator switches it on, and the switch records who threw it and when.',
+  'stat.intake.column':
+    'The one column on the board that this product reads. A ticket anywhere else on that board is never read, and no other column is ever written to.',
+  'stat.intake.tracker':
+    'Which tracker and project the whole deployment is pointed at. An admin sets this once; every repository’s listener reads through it.',
+  'stat.intake.credential':
+    'Whether a tracker credential is stored on the API host. Only its last few characters are ever served, and no screen or log can show the value.',
+  'stat.intake.poll_s':
+    'How often the worker reads the watched column while the listener is on. Reading costs nothing: no builder is invoked and no model is called.',
+  'stat.intake.outcome_map':
+    'What happens to a ticket when the pull request this product opened is merged or closed. With nothing configured, the product never changes anybody’s ticket state.',
+  'stat.intake.last_poll':
+    'What the last read did: how many tickets were in the column, how many were read this time, how many were already handled at that revision, and how many became items.',
+  'button.intake.switch_on':
+    'Start reading the watched column on this repository. This is the consent to read that board and to comment and label on its tickets; it is recorded under your name.',
+  'button.intake.switch_off':
+    'Stop reading the watched column. Nothing on that board is read or written afterwards, and any comment already posted stays where it is.',
+  'button.intake.read_now':
+    'Read the watched column immediately rather than waiting for the timer. A ticket already handled at its current revision is not read again and nothing is written for it.',
+  'button.intake.repost':
+    'Read every ticket in the column again, even ones already handled, and post the feedback afresh. Use it when a comment was deleted or you want today’s numbers on the ticket.',
+  'field.intake.column':
+    'Watch a different column on this repository from the one the deployment names. Leave it empty to use the deployment’s column.',
+  'banner.intake.stopped':
+    'The listener could not finish, and this is the reason it recorded. Nothing was registered from a partial read, and the next read retries on its own.',
+  'item.intake.key':
+    'The ticket’s own key on the board. It is also the identity of the backlog item this ticket becomes, so nothing is ever typed twice.',
+  'item.intake.class':
+    'What kind of change the product thinks this is, how large, and how sure it is. Below the published threshold it says unclassified rather than guessing, and the comment asks you.',
+  'item.intake.revision':
+    'The ticket’s revision when it was last read, and when that was. A ticket read again at the same revision is not read again; an edit makes a new item that replaces the old one.',
+  'item.intake.cell_route':
+    'What this deployment has measured about changes of this kind and size — the cell’s route, how many graded attempts it rests on and the interval around the rate. It is read before any build, never after.',
+  'item.intake.item':
+    'The backlog item this ticket is, or would be. Nothing is registered until every question a good acceptance test needs is answered on the ticket.',
+  'item.intake.stopped':
+    'This ticket’s own step stopped, with the reason the tracker or the product recorded and what closes it. Everything else in the column was still read.',
+  'link.intake.ticket':
+    'Open this ticket on your own board, where the product’s comment and label are.',
+  'link.intake.item':
+    'Open the backlog item this ticket became, with its whole record: readiness, the failing test, the build and the pull request.',
+  'pill.intake.needs_info':
+    'The acceptance test still needs something this ticket does not say. Nothing is built and nothing is spent until it is answered on the ticket.',
+  'pill.intake.ready':
+    'Every question the acceptance test needs is answered and the change can be offered as a pull request once it is built.',
+  'pill.intake.not_deliverable':
+    'The change will still be built, but it will be held back rather than offered as a pull request, because the evidence for work of this kind and size does not license delivery.',
+  'pill.intake.queued':
+    'This ticket is now a registered item in the frozen backlog and is waiting for a factory run.',
+
   // ── /posture — Deployment (screens/Posture/PosturePage.tsx)
   'summary.posture.version':
     'The version of the crb software this deployment is running.',
@@ -1481,6 +1533,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/decisions': 6,
   '/signoff': 30,
   '/factory': 28,
+  '/factory/intake': 14,
   '/posture': 22,
   '/repos': 8,
   // the Overview tab (the state a reader lands on); the Change profile, Tasks and Configuration tabs are held by the ratchet's variants

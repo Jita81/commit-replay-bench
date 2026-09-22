@@ -88,6 +88,9 @@ export const env = {
   work: process.env.CRB_E2E_WORK ?? '',
   publicTier: process.env.CRB_E2E_PUBLIC === '1',
   builder: process.env.CRB_E2E_BUILDER ?? '',
+  /** The fake tracker's board file (ADR-0017). Tier 1 seeds and reads it directly; no
+   *  real Azure DevOps or Jira is contacted by any spec or by CI. */
+  board: process.env.CRB_E2E_BOARD ?? '',
 } as const
 
 const MIN = 60_000
@@ -185,13 +188,32 @@ export function field(scope: Page | Locator, label: string): Locator {
 
 // --- session ----------------------------------------------------------------------------
 
-/** Sign in through the login form (never by cookie injection). */
+/**
+ * Sign in through the login form (never by cookie injection).
+ *
+ * Safe to call on a page that is already signed in — including the `test` fixture's page,
+ * which signs in before the test body runs. `/login` redirects an authenticated person
+ * away, so a naive second sign-in waits for a form that never renders and only fails when
+ * the whole test times out, minutes later. This ends the existing session first when it
+ * belongs to somebody else, and returns immediately when it is already the person asked
+ * for, so no spec can lose four minutes to that mistake again.
+ */
 export async function signIn(page: Page, user = env.user, pass = env.pass): Promise<void> {
   await page.goto('/login')
-  await field(page, 'Username').fill(user)
+  const chip = page.getByTestId('user-chip')
+  const username = field(page, 'Username')
+  // /login either renders the form or redirects: wait for whichever arrives, so this never
+  // races the redirect and then blocks on a form that is no longer coming.
+  await expect(chip.or(username).first()).toBeVisible()
+  if (await chip.isVisible()) {
+    if ((await chip.innerText()).includes(user)) return
+    await page.getByRole('button', { name: 'Sign out' }).click()
+    await expect(username).toBeVisible()
+  }
+  await username.fill(user)
   await field(page, 'Password').fill(pass)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await expect(page.getByTestId('user-chip')).toBeVisible()
+  await expect(chip).toBeVisible()
 }
 
 /**

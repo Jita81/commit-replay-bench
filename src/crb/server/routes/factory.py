@@ -30,6 +30,14 @@ recorded before any edit — :mod:`crb.factory.loop`). This module serves its re
   gap: appended to the hash-chained gap ledger and echoed into the evidence chain.
   Value slots cannot be signed (the DoR gate refuses them by design).
 * ``GET /factory/{repo}/evidence`` — the chain, oldest first.
+* ``GET /factory/{repo}/intake`` — the watched column as the last read saw it: the
+  listener (default OFF), the deployment's tracker connection (no secret), the last
+  poll's outcome and every ticket with its draft, its label and the feedback the
+  ticket carries. No tracker is contacted by this route.
+* ``PUT /factory/{repo}/intake`` (operator) — switch this repository's listener on or
+  off: the consent gate for reading somebody's board, recorded with the actor.
+* ``POST /factory/{repo}/intake/poll`` (operator) — read the column now, doing what the
+  worker's timer would have done (ADR-0017).
 
 Running the loop is a run kind: ``POST /runs {kind: "factory"}`` (see ``routes/runs.py``
 and the worker); this module never builds anything.
@@ -50,15 +58,19 @@ Works with:   src/crb/server/factory_state.py (the state), src/crb/factory/backl
               (the ``factory`` run kind that consumes the backlog; ``_delivery_credentials`` is
               the rule ``_delivery_preflight`` mirrors), src/crb/server/routes/github.py (the
               installation record the pre-flight reads), src/crb/server/github_app.py
-              (``pull_request`` — the outcome sync's reader), docs/API.md (the contract),
-              ui/src/screens/Factory/FactoryPage.tsx (the screen)
-Tested by:    tests/test_server_routes_factory.py, tests/test_factory_outcomes.py
+              (``pull_request`` — the outcome sync's reader), src/crb/server/intake.py
+              (the listener these three routes serve and configure), docs/API.md (the
+              contract), ui/src/screens/Factory/FactoryPage.tsx (the screen),
+              ui/src/screens/Factory/IntakePage.tsx (the intake screen)
+Tested by:    tests/test_server_routes_factory.py, tests/test_factory_outcomes.py,
+              tests/test_server_routes_intake.py
 Touch when:   a factory record gains a field the UI needs (extend TaskView + FactoryTask in
               ui/src/api/types.ts together); a new write path (keep it append-only, role-gated).
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -77,6 +89,7 @@ from crb.factory.backlog import KINDS, LEVELS, BacklogError, BacklogFrozen, Back
 from crb.factory.evidence import verify_events
 from crb.factory.readiness import CATALOGUE, SLOT_VALUE, sign, slots_for
 from crb.factory.testfirst import AuthoredTest
+from crb.intake.client import TrackerError
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import (
@@ -86,9 +99,12 @@ from crb.server.factory_state import (
     sync_outcomes,
 )
 from crb.server.github_app import GitHubApp, GitHubAppError, permissions_allow_delivery
+from crb.server.intake import CONFIG_KEY as INTAKE_CONFIG_KEY
+from crb.server.intake import IntakeStore, ListenerState, build_tracker, poll_repository
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
+from crb.server.secrets import TRACKER_TOKEN_SECRET, SecretsDep
 from crb.store.ledger import DbLedger
 from crb.store.models import GitHubInstallation, Grade, Repo, Run
 
@@ -1055,3 +1071,247 @@ def get_evidence(  # noqa: PLR0917 — FastAPI dependencies + query params
             for i, e in enumerate(page)
         ],
     )
+
+
+# --- intake: the enterprise's own board ---------------------------------------------------
+
+
+class IntakeListenerOut(BaseModel):
+    """One repository's listener, as the screen shows it. ``enabled`` is false until an
+    operator switches it on, and the switch names who threw it."""
+
+    enabled: bool = False
+    column: str = ""
+    switched_by: str = ""
+    switched_at: str = ""
+    since: str = ""
+
+
+class IntakeConnectionOut(BaseModel):
+    """The deployment-wide connection, with no secret in it. ``credential_set`` is the
+    presence of the stored ``tracker_token``, never its value."""
+
+    tracker: str = "none"
+    url: str = ""
+    project: str = ""
+    column: str = ""
+    poll_s: int = 0
+    outcome_map: dict[str, str] = Field(default_factory=dict)
+    configured: bool = False
+    credential_set: bool = False
+    credential_fingerprint: str = ""
+
+
+class IntakeRowOut(BaseModel):
+    """One ticket in the watched column, exactly as the last read saw it."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    key: str
+    title: str = ""
+    url: str = ""
+    revision: str = ""
+    label: str = ""
+    state: str = ""
+    item_id: str = ""
+    item_url: str = ""
+    feedback: str = ""
+    open_questions: list[dict[str, str]] = Field(default_factory=list)
+    capability_class: str = ""
+    confidence: float = 0.0
+    size: str = ""
+    registered: bool = False
+    is_evolution: bool = False
+    supersedes: str = ""
+    cell_route: CellRouteOut | None = None
+    read_at: str = ""
+    stopped: str = ""
+    stopped_advice: str = ""
+
+
+class IntakePollOut(BaseModel):
+    """What the last poll did, and why it stopped if it did."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    repo: str = ""
+    column: str = ""
+    seen: int = 0
+    read: int = 0
+    skipped: int = 0
+    commented: int = 0
+    registered: int = 0
+    queued: int = 0
+    stopped: str = ""
+    detail: str = ""
+    advice: str = ""
+    at: str = ""
+
+
+class IntakeOut(BaseModel):
+    """``GET /factory/{repo}/intake``: the listener, the connection, the last poll and the
+    column's tickets with their draft, their label and the feedback the ticket carries."""
+
+    repo: str
+    listener: IntakeListenerOut
+    connection: IntakeConnectionOut
+    last_poll: IntakePollOut | None = None
+    rows: list[IntakeRowOut] = Field(default_factory=list)
+
+
+class IntakePollIn(BaseModel):
+    """``POST /factory/{repo}/intake/poll``. ``force`` re-reads every ticket in the column
+    even when its revision has already been handled — what "Post the feedback again" does
+    for a person who deleted the comment or wants today's numbers on the ticket. It is
+    still safe to repeat: the comment and the label are idempotent on the tracker."""
+
+    force: bool = False
+
+
+class IntakeListenerIn(BaseModel):
+    """``PUT /factory/{repo}/intake``: switch the listener and, optionally, override the
+    column this repository watches."""
+
+    enabled: bool
+    column: str = Field(default="", max_length=200)
+
+
+def _intake_connection(settings: Any, secrets: Any) -> IntakeConnectionOut:
+    cfg = settings.intake
+    status = secrets.status(TRACKER_TOKEN_SECRET)
+    return IntakeConnectionOut(
+        tracker=cfg.tracker,
+        url=cfg.url,
+        project=cfg.project,
+        column=cfg.column,
+        poll_s=cfg.poll_s,
+        outcome_map=dict(cfg.outcome_map),
+        configured=cfg.enabled,
+        credential_set=bool(status.present),
+        credential_fingerprint=str(getattr(status, "fingerprint", "") or ""),
+    )
+
+
+def _intake_out(repo: str, settings: Any, secrets: Any, row: Repo) -> IntakeOut:
+    listener = ListenerState.from_config(row.config_json)
+    store = IntakeStore(settings.home, repo)
+    last = store.last_poll()
+    return IntakeOut(
+        repo=repo,
+        listener=IntakeListenerOut(**listener.to_dict()),
+        connection=_intake_connection(settings, secrets),
+        last_poll=IntakePollOut(**last) if last else None,
+        rows=[IntakeRowOut(**r.to_dict()) for r in store.rows()],
+    )
+
+
+@router.get(
+    "/factory/{repo}/intake",
+    response_model=IntakeOut,
+    responses={401: _ERR, 404: _ERR},
+    summary="The watched column as the last read saw it: the listener, the connection, every ticket with its draft, label and feedback",
+)
+def get_intake(
+    repo: str, viewer: ViewerDep, db: DbDep, settings: SettingsDep, secrets: SecretsDep
+) -> IntakeOut:
+    """Reads only what a poll already wrote: no tracker is contacted by this route, so a
+    screen never waits on somebody else's service. ``listener.enabled`` is ``false`` until
+    an operator switches it on — that is the default for every repository (ADR-0017)."""
+    del viewer
+    row = get_repo_or_404(db, repo)
+    return _intake_out(repo, settings, secrets, row)
+
+
+@router.put(
+    "/factory/{repo}/intake",
+    response_model=IntakeOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 422: _ERR},
+    summary="Switch this repository's intake listener on or off (operator); optionally override the watched column",
+)
+def put_intake(  # noqa: PLR0917 — FastAPI dependencies + path/body
+    repo: str,
+    body: IntakeListenerIn,
+    operator: OperatorDep,
+    db: DbDep,
+    settings: SettingsDep,
+    secrets: SecretsDep,
+) -> IntakeOut:
+    """The consent gate. Switching a listener on is what allows this product to read
+    somebody's board and write on their tickets, so it is operator-only and the switch is
+    stored with the actor and the time. Switching a listener on when no tracker is
+    configured is refused (422) rather than accepted and silently idle."""
+    row = get_repo_or_404(db, repo)
+    if body.enabled and not settings.intake.enabled:
+        raise ApiError(
+            422,
+            "intake_not_configured",
+            "no tracker is configured for this deployment: an admin sets CRB_INTAKE__* and "
+            "stores the tracker token before a listener can be switched on",
+        )
+    state = ListenerState(
+        enabled=body.enabled,
+        column=body.column.strip(),
+        switched_by=operator.display_name or operator.id,
+        switched_at=_dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat(),
+        since=ListenerState.from_config(row.config_json).since,
+    )
+    row.config_json = {**dict(row.config_json or {}), INTAKE_CONFIG_KEY: state.to_dict()}
+    db.commit()
+    return _intake_out(repo, settings, secrets, row)
+
+
+@router.post(
+    "/factory/{repo}/intake/poll",
+    response_model=IntakeOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR, 502: _ERR},
+    summary="Read the watched column now (operator): comment, label and register whatever it has earned",
+)
+def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
+    repo: str,
+    operator: OperatorDep,
+    db: DbDep,
+    factory: SessionFactoryDep,
+    settings: SettingsDep,
+    secrets: SecretsDep,
+    body: IntakePollIn | None = None,
+) -> IntakeOut:
+    """The same poll the worker makes on its own timer, on demand. Refused (422) when the
+    listener is off — the switch is the consent, and a route that polled anyway would make
+    it meaningless. A tracker that cannot be reached is 502 ``tracker_error`` carrying the
+    published stop reason, and nothing is registered from a partial read."""
+    row = get_repo_or_404(db, repo)
+    listener = ListenerState.from_config(row.config_json)
+    if not listener.enabled:
+        raise ApiError(
+            422,
+            "intake_listener_off",
+            f"the intake listener for {repo!r} is off: switch it on before reading the column",
+        )
+    try:
+        tracker = build_tracker(
+            settings.intake,
+            secrets.get(TRACKER_TOKEN_SECRET) or "",
+            home=settings.home,
+        )
+    except TrackerError as exc:
+        raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc
+    routes = _cell_routes(db, factory, repo)
+    home = _home(settings, repo)
+    report = poll_repository(
+        repo,
+        tracker=tracker,
+        listener=listener,
+        column=listener.column or settings.intake.column,
+        home=home,
+        route_for=lambda item: (
+            routes[f"{item.capability_class}|{item.size_estimate}"].model_dump()
+            if f"{item.capability_class}|{item.size_estimate}" in routes
+            else None
+        ),
+        item_url=lambda item_id: f"/factory?repo={repo}&item={item_id}",
+        run_active=lambda: _active_factory_run(db, repo) is not None,
+        actor=operator.id,
+        force=bool(body.force) if body else False,
+    )
+    IntakeStore(settings.home, repo).write(report)
+    return _intake_out(repo, settings, secrets, row)
