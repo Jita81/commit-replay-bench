@@ -1465,9 +1465,47 @@ export const HINTS = {
   'field.settings.new_role':
     'The role the new account starts with. An approver is what task 7 on Home asks for.',
   'field.settings.new_password':
-    'A first password for the local account. It is never echoed back.',
+    'A first password for the local account: at least 12 characters. It is never echoed back, and the person can change it themselves once they are signed in.',
   'button.settings.create_user':
     'Create the local account with the role chosen.',
+  'col.settings.account_kind':
+    'Where the account is issued: local means this deployment holds its password; oidc means the organisation’s identity provider does.',
+  'pill.settings.account_kind':
+    'A local account signs in with a password held here, so an admin can set it. An oidc account is managed by your identity provider: its password and its disabling are the provider’s.',
+  'col.settings.active':
+    'Whether the account can sign in. A deactivated account is refused on its very next request.',
+  'toggle.settings.user_active':
+    'Turn an account off when the person leaves, and back on when they return. Deactivating refuses the account on its very next request; reactivating within the session lifetime (8 hours by default) restores the sessions it already held, so set a password as well to end them for good. The last active admin cannot be deactivated — activate or create a second admin first.',
+  'col.settings.last_login':
+    'How long ago the account last signed in successfully. "Never" means it has not been used since it was created.',
+  'stat.settings.last_login':
+    'The last successful sign-in for this account, as an age. An account that has never signed in reads "Never".',
+  'col.settings.account_actions':
+    'Set this account’s password, or read the audit trail of every change made to it.',
+  'button.settings.set_password':
+    'Set a new password for this account. Only an admin may set another account’s password — you change your own in the “Change my password” card above. It ends every session the account holds, so the person signs in again with the new one, and only a local account has a password to set at all.',
+  'button.settings.account_history':
+    'Show every recorded change to this account — created, role set, password set, deactivated, reactivated — with who did it and when.',
+  'field.settings.set_password':
+    'The new password for this account: at least 12 characters. It is never shown back and never recorded in the audit trail.',
+  'field.settings.set_password_confirm':
+    'Type the same new password again, so a typo cannot lock the person out.',
+  'button.settings.set_password_submit':
+    'Set the password now. Every session the account holds ends on its next request.',
+  'tile.settings.account_history':
+    'The account’s own audit trail: one row per recorded change, newest first, each with the actor who made it. A change made on the API host reads cli followed by the operating-system user.',
+  'pill.settings.account_event':
+    'What was done to the account: created, role set, password set, deactivated or reactivated.',
+  'tile.settings.my_password':
+    'Change the password of the account you are signed in as. This browser stays signed in; every other session of the account ends.',
+  'field.settings.my_current_password':
+    'Your current password, which proves the session is yours and not a borrowed one. Five wrong attempts in a minute stop further tries — the refusal says how many seconds to wait.',
+  'field.settings.my_new_password':
+    'Your new password: at least 12 characters. It is never shown back.',
+  'field.settings.my_new_password_confirm':
+    'Type your new password again, so a typo cannot lock you out.',
+  'button.settings.change_my_password':
+    'Change your password now. This browser stays signed in; every other session of your account ends.',
 
   // ── /help, /help/docs/:name, 404
   'link.help.read_more':
@@ -1554,8 +1592,10 @@ export const MIN_HINTS: Record<string, number> = {
   '/oracle': 22,
   '/learn': 26,
   '/ledger': 26,
-  // a viewer's Settings (health, the login card read-only, the GitHub App); the admin's configuration and users are held by the ratchet's variants
-  '/settings': 11,
+  // a viewer's Settings: health, the login card read-only, the GitHub App, and their own
+  // "Change my password" card; the admin's configuration and Users card (and the deeper
+  // set-password dialog and account history) are held by the ratchet's variants
+  '/settings': 16,
   // the four shell screens: signed out, the help pages and an unknown address. They carry few
   // elements, so the floor is small — but it is a floor, and the ratchet no longer skips them
   // by name (G-909): both login fields, both sign-in buttons; a Read more and a guide link;

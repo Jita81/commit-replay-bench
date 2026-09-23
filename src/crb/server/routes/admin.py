@@ -71,7 +71,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from crb.builders.claude_code import CLI_TOKEN_SECRET, VERIFY_STATUSES
@@ -99,7 +99,8 @@ from crb.server.auth import (
 )
 from crb.server.claude_login import LoginError
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep, client_ip
-from crb.server.routes.runs import append_system_event, system_trace_id
+from crb.server.routes.runs import append_system_event, event_to_dict, system_trace_id
+from crb.server.schemas import Page, PageDep, StepEventOut
 from crb.server.secrets import (
     CLAUDE_CODE_TOKEN_MAX_LEN,
     TRACKER_TOKEN_MAX_LEN,
@@ -109,7 +110,7 @@ from crb.server.secrets import (
     VerifyLimiterDep,
 )
 from crb.server.settings import MIN_PASSWORD_LENGTH, ROLE_LADDER
-from crb.store.models import User
+from crb.store.models import Event, User
 
 router = APIRouter(tags=["admin"])
 _ERR = {"model": ErrorEnvelope}
@@ -483,6 +484,43 @@ def set_active(user_id: str, body: ActiveChange, admin: AdminDep, db: DbDep) -> 
     )
     db.commit()
     return _user_out(user)
+
+
+@router.get(
+    "/users/{user_id}/events",
+    response_model=Page[StepEventOut],
+    responses={401: _ERR, 403: _ERR, 404: _ERR},
+    summary="The account's audit trail: its user.* events, newest first (admin)",
+)
+def list_user_events(user_id: str, admin: AdminDep, db: DbDep, page: PageDep) -> Page[StepEventOut]:
+    """Every ``user.*`` event on this account's own trace (``users:<id>``), newest first.
+
+    The events are written by every lifecycle route above and by ``crb users`` on the host;
+    this is the read side, so an auditor can see in the product who reset or disabled the
+    account and when. Payloads are served verbatim as they were written — never recomputed,
+    and they never hold a password or a hash (:func:`record_user_event`).
+    """
+    del admin
+    _get_user(db, user_id)  # 404 before an empty page, so an unknown id is never "no events"
+    trace = user_trace_id(user_id)
+    total = int(
+        db.execute(select(func.count(Event.id)).where(Event.trace_id == trace)).scalar_one()
+    )
+    items = list(
+        db.execute(
+            select(Event)
+            .where(Event.trace_id == trace)
+            .order_by(Event.seq.desc(), Event.id.desc())
+            .limit(page.limit)
+            .offset(page.offset)
+        ).scalars()
+    )
+    return Page[StepEventOut](
+        items=[StepEventOut(**event_to_dict(m)) for m in items],
+        total=total,
+        limit=page.limit,
+        offset=page.offset,
+    )
 
 
 @router.get("/settings", responses={401: _ERR, 403: _ERR}, summary="Non-secret settings")

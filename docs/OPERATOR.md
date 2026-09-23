@@ -738,10 +738,22 @@ of the affected cells.
 
 ## 9. Users
 
-An admin manages accounts through the API (`/users`, [API.md](API.md#admin): create, role,
-password, active; the Settings screen lists accounts and changes roles), and — when no
-admin can sign in — with `crb users` on the API host. The host
-verbs need no login: access to the host and the database is the credential. They read the
+An admin manages accounts on the **Settings screen**, in the Users card: every account with
+its role, whether it is local or issued by your identity provider, whether it is active, and
+how long ago it last signed in. From that card an admin changes a role, turns an account off
+and on again, sets a new password (typed twice, never shown back), reads the account's own
+history of changes, and creates a local account. Anyone signed in changes their own password
+in the "Change my password" card on the same screen. The same acts are at the API (`/users`,
+[API.md](API.md#admin)) and — when no admin can sign in at all — in `crb users` on the API
+host.
+
+**Not on this screen, deliberately.** There is no email reset, no self-service unlock and no
+security questions: the second door is the host, not the person's inbox. An account that signs
+in through your identity provider has no password here — it is disabled and reset at the
+provider. The last active admin cannot be deactivated or demoted, so its own toggle and role
+select are disabled with the reason as their hint, rather than refused after the attempt.
+
+The host verbs need no login: access to the host and the database is the credential. They read the
 database `crb serve` reads (`--database-url` → `CRB_DATABASE_URL` → `$CRB_HOME/crb.db`),
 so run them with the service's environment (the same `CRB_DATABASE_URL`; on a host, source
 the unit's `EnvironmentFile` first; in the container, `kubectl exec` into the API pod). A
@@ -771,7 +783,9 @@ identity provider has no local password; disable it there.
 Every change — by the API or the CLI — is one `system` event on the account's trace
 (`user.created`, `user.role_set`, `user.password_set`, `user.activated`,
 `user.deactivated`) with the actor (the admin's user id, or `cli:<os user>`) and the
-target; never the password. Setting a password ends the account's sessions on their next
+target; never the password. `GET /users/{id}/events` serves that trace, and the Users card's
+**History** button renders it under the account, so who reset or disabled an account is read in
+the product and not only in the database. Setting a password ends the account's sessions on their next
 request (the cookie is bound to the credential it was issued under —
 [SECURITY.md §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
 Deactivating refuses every request while the account is inactive, but does not move that

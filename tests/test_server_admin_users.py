@@ -504,3 +504,61 @@ def test_account_events_use_the_unchained_events_table(client: TestClient, app: 
         assert col not in Event.__table__.columns, f"events.{col} exists: update F51 + docs"
         assert not hasattr(ev, col)
         assert col in Grade.__table__.columns and col in Signoff.__table__.columns
+
+
+# --- the account's audit trail is served ----------------------------------------------------
+
+
+class TestAccountEventsRoute:
+    """``GET /users/{id}/events`` — the other half of the audit: the ``user.*`` events are
+    written by every lifecycle route and, until now, nothing served them (G-464)."""
+
+    def test_serves_the_accounts_own_events_newest_first(
+        self, client: TestClient, app: Any
+    ) -> None:
+        login(client)
+        uid = create(client, "gina", "viewer")
+        client.put(f"{API_PREFIX}/users/{uid}/role", json={"role": "operator"})
+        client.put(f"{API_PREFIX}/users/{uid}/password", json={"password": NEW_PW})
+        client.put(f"{API_PREFIX}/users/{uid}/active", json={"active": False})
+        r = client.get(f"{API_PREFIX}/users/{uid}/events")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["total"] == 4
+        actions = [e["action"] for e in body["items"]]
+        assert actions == [
+            "user.deactivated",
+            "user.password_set",
+            "user.role_set",
+            "user.created",
+        ]
+        # served as written: actor and target, never a password
+        assert all(e["actor"] for e in body["items"])
+        assert all(e["payload"]["target"] == uid for e in body["items"])
+        assert NEW_PW not in r.text and USER_PW not in r.text
+
+    def test_only_that_accounts_events_and_an_unknown_id_is_404(
+        self, client: TestClient, app: Any
+    ) -> None:
+        login(client)
+        one = create(client, "hank")
+        two = create(client, "iris")
+        r = client.get(f"{API_PREFIX}/users/{one}/events")
+        assert r.status_code == 200 and r.json()["total"] == 1
+        assert {e["payload"]["username"] for e in r.json()["items"]} == {"hank"}
+        assert two not in r.text
+        r = client.get(f"{API_PREFIX}/users/nobody/events")
+        assert r.status_code == 404 and err(r)["code"] == "not_found"
+
+    @pytest.mark.parametrize("role", ["viewer", "operator", "approver"])
+    def test_below_admin_is_refused(self, client: TestClient, role: str) -> None:
+        login(client)
+        target = create(client, "target")
+        create(client, "reader", role)
+        login(client, "reader", USER_PW)
+        r = client.get(f"{API_PREFIX}/users/{target}/events")
+        assert r.status_code == 403 and err(r)["code"] == "forbidden"
+
+    def test_api_md_lists_the_route(self) -> None:
+        text = Path("docs/API.md").read_text(encoding="utf-8")
+        assert "`/users/{id}/events`" in text

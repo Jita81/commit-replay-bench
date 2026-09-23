@@ -23,6 +23,10 @@
  * Tested by:    ui/src/help/hints-ratchet.test.tsx
  * Touch when:   a screen of these routes gains a state that renders new elements — add the
  *               fixture that shows it; a route is added to the instrument row — add its entry.
+ *               The `/settings` fixtures carry TWO accounts on purpose (F23): the last active
+ *               admin, whose role select and active toggle render disabled with the reason as
+ *               their hint, and an identity-provider account, whose Set-password button is
+ *               disabled — so both states are walked, not only unit-tested.
  */
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -417,7 +421,28 @@ const REMEASURE = {
 
 const GRADES = { items: [ROW, { ...ROW, row_id: 'row-2', row_hash: 'i'.repeat(64), clean: false, target_green: false, provenance: 'imported:census' }], total: 2, limit: 100, offset: 0 }
 
-const USERS = { items: [{ id: 'u1', username: 'ada', display_name: 'Ada', email: 'ada@example.org', role: 'admin', issuer: 'local', active: true, created: '2026-09-01T10:00:00+00:00' }], total: 1, limit: 50, offset: 0 }
+// two accounts on purpose (F23): `ada` is the LAST ACTIVE ADMIN, so its role select and active
+// toggle render disabled with the reason as their hint; `bob` is an identity-provider account, so
+// its Set-password button is disabled and its kind pill reads oidc. Both states are on the screen
+// the ratchet walks, not only in the card's own unit test.
+const USERS = {
+  items: [
+    { id: 'u1', username: 'ada', display_name: 'Ada', email: 'ada@example.org', role: 'admin', issuer: 'local', active: true, created: '2026-09-01T10:00:00+00:00', last_login: '2026-09-15T09:00:00+00:00' },
+    { id: 'u2', username: 'bob', display_name: 'Bob', email: 'bob@example.org', role: 'operator', issuer: 'https://login.example/t', active: true, created: '2026-09-02T10:00:00+00:00', last_login: '' },
+  ],
+  total: 2,
+  limit: 50,
+  offset: 0,
+}
+const USER_EVENTS = {
+  items: [
+    { event_id: 'e2', seq: 2, trace_id: 't', task_id: '', stage: 'system', action: 'user.role_set', status: 'ok', actor: 'u1', timestamp: '2026-09-10T10:00:00+00:00', duration_ms: 0, payload: { target: 'u1', username: 'ada', role: 'admin', active: true, from_role: 'operator' }, error_message: '', input_ref: '', output_ref: '' },
+    { event_id: 'e1', seq: 1, trace_id: 't', task_id: '', stage: 'system', action: 'user.created', status: 'ok', actor: 'root', timestamp: '2026-09-01T10:00:00+00:00', duration_ms: 0, payload: { target: 'u1', username: 'ada', role: 'operator', active: true }, error_message: '', input_ref: '', output_ref: '' },
+  ],
+  total: 2,
+  limit: 50,
+  offset: 0,
+}
 const SECRETS = { items: [{ name: 'claude_code_oauth_token', present: true, fingerprint: 'GOOD', set_at: '2026-09-13T10:00:00+00:00', set_by: 'root' }], secrets_dir: '/srv/crb/secrets' }
 
 // ─── the table ───────────────────────────────────────────────────────────────────────────
@@ -573,7 +598,35 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
     open: async () => {
       await screen.findByTestId('settings-sandbox-mode')
     },
-    minHints: 34,
+    minHints: 56,
+  },
+  {
+    // F23's password act: the dialog's two fields and its submit are a state the one-entry table cannot reach
+    name: '/settings as admin + Set password dialog',
+    route: '/settings',
+    path: '/settings',
+    element: <SettingsPage />,
+    api: INSTRUMENT_SCREENS['/settings']!.api,
+    roles: ['admin'],
+    open: async () => {
+      await userEvent.click(await screen.findByTestId('user-set-password-ada'))
+      await screen.findByTestId('set-password-form')
+    },
+    minHints: 59,
+  },
+  {
+    // F23's audit half: the account's own `user.*` events under its row
+    name: '/settings as admin + account history',
+    route: '/settings',
+    path: '/settings',
+    element: <SettingsPage />,
+    api: { ...INSTRUMENT_SCREENS['/settings']!.api, 'GET /users/u1/events': USER_EVENTS },
+    roles: ['admin'],
+    open: async () => {
+      await userEvent.click(await screen.findByTestId('user-history-ada'))
+      await screen.findByTestId('account-history-list')
+    },
+    minHints: 59,
   },
   {
     name: '/repos + Add a repository dialog',

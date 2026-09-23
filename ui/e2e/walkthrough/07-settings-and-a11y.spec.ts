@@ -18,29 +18,43 @@
  *               versions the footer also carries; that the Claude Code login card
  *               round-trips a shape-valid FAKE `claude setup-token` value — status, ≤ 4-char
  *               fingerprint, provenance, remove — without the value ever appearing in the
- *               page; and that axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a run
- *               detail with real rows, Capability, Ledger and Sign-off — against the live
- *               data the earlier specs produced.
+ *               page; that the ACCOUNT LIFECYCLE works from the screen (F23) — an admin sets
+ *               the walk-approver persona's password, that persona (in its own browser context)
+ *               meets the envelope on a wrong password, signs in with the new one, is refused on
+ *               its very next request once the admin sets the password again, and signs in again
+ *               — then the account is deactivated and reactivated, with the last active admin's
+ *               own controls disabled throughout; and that axe (WCAG 2.1 AA) finds 0 violations on
+ *               Repos, Runs, a run detail with real rows, Capability, Ledger and Sign-off —
+ *               against the live data the earlier specs produced.
  * How:          `AxeBuilder` with the WCAG tags per screen; the fake token is shape-valid and
- *               deliberately not real.
+ *               deliberately not real; the persona's password is `personaPassword`, the same
+ *               stable value 08 and 11 sign in with, so this spec leaves the stack in the
+ *               state the later specs expect.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Settings/SettingsPage.tsx and
- *               ui/src/screens/Settings/ClaudeCodeLoginCard.tsx (the screens under test),
+ * Works with:   ui/e2e/walkthrough/support.ts (`personaPassword`, `field`, `env`),
+ *               ui/src/screens/Settings/SettingsPage.tsx,
+ *               ui/src/screens/Settings/ClaudeCodeLoginCard.tsx,
+ *               ui/src/screens/Settings/UsersCard.tsx and
+ *               ui/src/screens/Settings/SetPasswordDialog.tsx (the screens under test),
  *               ui/src/components/Layout.tsx (the footer versions), src/crb/server/routes/admin.py
- *               (the secrets routes)
+ *               (the secrets and user routes), ui/e2e/walkthrough/08-signoff.spec.ts (signs in
+ *               as the persona this spec sets the password of)
  * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a screen is added (add it to the axe sweep) or the settings fields change.
+ * Touch when:   a screen is added (add it to the axe sweep), the settings fields change, or an
+ *               account act is added to the Users card.
  */
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
-import { env, expect, primary, test } from './support'
+import { env, expect, field, personaPassword, primary, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 //: Shape-valid (prefix, length, alphabet) and deliberately not a real token.
 const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
+//: The second person 08 signs off as; this spec is where their password is set from the screen.
+const APPROVER = 'walk-approver'
 
 async function axeClean(page: Page, where: string): Promise<void> {
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
@@ -130,6 +144,104 @@ test.describe('07 settings + accessibility', () => {
     await expect(page.getByTestId('claude-login-verify')).toBeDisabled()
     text = (await page.locator('main').textContent()) ?? ''
     expect(text).not.toMatch(/sk-ant-|sk-[A-Za-z0-9]{20,}|csk-/)
+  })
+
+  // F23 — the account lifecycle from the screen. The persona's password is the STABLE
+  // `personaPassword` value 08 and 11 sign in with, so the stack is left as they expect it.
+  test('an admin sets the approver persona’s password, that persona signs in with it, the old session is refused, then the account is deactivated and reactivated', async ({ browser, page }) => {
+    const pass = personaPassword(APPROVER)
+
+    await page.goto('/settings')
+    const users = page.getByRole('table', { name: 'Users' })
+    await expect(users).toBeVisible()
+
+    // the persona may already exist (a rerun, or 11-screens on an earlier run): create it once
+    if ((await users.getByRole('cell', { name: APPROVER, exact: true }).count()) === 0) {
+      await field(page, 'Username').fill(APPROVER)
+      await field(page, 'Display name').fill('Walk approver')
+      await field(page, 'Email').fill(`${APPROVER}@example.org`)
+      await field(page, 'Role').selectOption('approver')
+      await field(page, 'Initial password').fill(pass)
+      await page.getByRole('button', { name: 'Create local user' }).click()
+      await expect(page.getByTestId('users-created')).toContainText(`Account ${APPROVER} created as approver`)
+    }
+
+    // the bootstrap admin is the only active admin, so ITS OWN controls are refused up front
+    await expect(page.getByTestId(`user-active-${env.user}`)).toBeDisabled()
+    await expect(page.getByTestId(`user-role-${env.user}`)).toBeDisabled()
+
+    // an admin sets the persona's password; the value never appears on the page
+    await page.getByTestId(`user-set-password-${APPROVER}`).click()
+    const dialog = page.getByTestId('set-password-form')
+    await expect(dialog).toBeVisible()
+    await dialog.getByTestId('set-password-new').fill(pass)
+    await dialog.getByTestId('set-password-again').fill(pass)
+    await dialog.getByTestId('set-password-submit').click()
+    await expect(page.getByTestId('set-password-done')).toContainText(`Password set for ${APPROVER}. Every session that account held has ended`)
+    expect((await page.locator('main').textContent()) ?? '').not.toContain(pass)
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+
+    // The persona's own browser walks the journey end to end, in its own context so the admin's
+    // session is never the one being revoked: wrong password -> the envelope; the new password ->
+    // in; the admin sets the password again -> this session is refused on its very next request;
+    // sign in again with the new one.
+    const personaCtx = await browser.newContext({ baseURL: env.baseUrl })
+    try {
+      const persona = await personaCtx.newPage()
+      await persona.goto('/login')
+      await field(persona, 'Username').fill(APPROVER)
+      await field(persona, 'Password').fill(`${pass}-wrong`)
+      await persona.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await expect(persona.getByTestId('error-state')).toContainText('Wrong username or password')
+
+      await field(persona, 'Password').fill(pass)
+      await persona.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await expect(persona.getByTestId('user-chip')).toContainText('approver')
+
+      // the admin sets it again: the session this browser holds ends on its next request
+      await page.getByTestId(`user-set-password-${APPROVER}`).click()
+      await dialog.getByTestId('set-password-new').fill(pass)
+      await dialog.getByTestId('set-password-again').fill(pass)
+      await dialog.getByTestId('set-password-submit').click()
+      await expect(page.getByTestId('set-password-done')).toBeVisible()
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+
+      await persona.goto('/repos')
+      await expect(persona).toHaveURL(/\/login/)
+      await field(persona, 'Username').fill(APPROVER)
+      await field(persona, 'Password').fill(pass)
+      await persona.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await expect(persona.getByTestId('user-chip')).toContainText('approver')
+    } finally {
+      await personaCtx.close()
+    }
+
+    // still the admin in this browser: deactivate, then reactivate, each saying what it did
+    await page.goto('/settings')
+    const toggle = page.getByTestId(`user-active-${APPROVER}`)
+    try {
+      await expect(toggle).toBeChecked()
+      await toggle.uncheck()
+      await expect(page.getByTestId('users-said')).toContainText(`${APPROVER} is deactivated and is refused on its very next request.`)
+      await expect(toggle).not.toBeChecked()
+      await toggle.check()
+      await expect(page.getByTestId('users-said')).toContainText(`${APPROVER} is active again and can sign in.`)
+      await expect(toggle).toBeChecked()
+    } finally {
+      // 08 and 11 sign in as this account: a failure above must not leave it deactivated and
+      // turn one broken assertion into three broken specs (it did, before the toggle was fixed)
+      if (!(await toggle.isChecked())) await toggle.check()
+    }
+
+    // and the account's own audit trail shows every one of those acts, with who made it
+    await page.getByTestId(`user-history-${APPROVER}`).click()
+    const history = page.getByTestId('account-history')
+    await expect(history).toContainText(`History for ${APPROVER}`)
+    // `.first()`: the password was set twice on this path, so `user.password_set` is two rows
+    for (const action of ['user.activated', 'user.deactivated', 'user.password_set', 'user.created']) {
+      await expect(history.locator(`[data-action="${action}"]`).first(), `history row ${action}`).toBeVisible()
+    }
+    await axeClean(page, '/settings (users)')
   })
 
   test('Repos and Runs have no WCAG 2.1 AA violations', async ({ page }) => {
