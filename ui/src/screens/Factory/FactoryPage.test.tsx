@@ -285,6 +285,24 @@ describe('FactoryPage — the shipped contract', () => {
     expect(panel).toHaveTextContent('reproduction: x')
     // an item that has not stopped offers no draft
     expect(screen.queryByTestId('prefill-I-2')).not.toBeInTheDocument()
+
+    // and the button beside the draft USES the draft: the drafted item replaces the one it
+    // supersedes in the form, so nothing that was already worked out is retyped
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click(within(await screen.findByTestId('factory-item-I-1')).getByRole('button', { name: 'Freeze a revised backlog…' }))
+    const form = await screen.findByTestId('backlog-form')
+    expect(within(form).getAllByLabelText(/^Id/).map((el) => (el as HTMLInputElement).value)).toEqual(['I-1-v2', 'I-2'])
+    expect((within(form).getByLabelText(/How is the bug reproduced\?/) as HTMLInputElement).value).toBe('x')
+    expect(within(form).getAllByLabelText(/^Title/).map((el) => (el as HTMLInputElement).value)).toEqual(['Multiply', 'Divide'])
+  })
+
+  it('the factory screen is the way in to the work arriving from the board (ADR-0017)', async () => {
+    // there was no link anywhere in the app: /factory/intake could only be reached by typing
+    // its URL, and the guides handed the reader a raw path because there was nothing to click
+    mockApi(base())
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const link = await screen.findByRole('link', { name: 'Work arriving from your board' })
+    expect(link).toHaveAttribute('href', '/factory/intake?repo=alpha')
   })
 
   it('Run the factory posts the builder builderChoice picks, and says the spend first (J-FAC-1/2)', async () => {

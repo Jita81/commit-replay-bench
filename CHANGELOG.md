@@ -8,6 +8,78 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
+
+Four independent reviews read the intake path end to end against a fake board, the real
+readiness gate and a real hash chain. What they found was one class of defect rather than a
+list: the product's statements about its own writes were reassuring rather than true. Fixed
+here, each with the test that would have caught it (ADR-0017 amended, DL-052).
+
+- **The comment counts what it writes.** The paragraph on the customer's ticket said the
+  product "only ever adds this one comment … and never edits any other field"; one poll of a
+  ready ticket leaves two comments and attaches a link, and over its life a ticket can receive
+  four. It now names the four marked notes, the one `crb:` label, the link to the item and to
+  the pull request, and the one configured state change — and the test counts the renderers
+  and the protocol's verbs against the sentence instead of looking for the word "never".
+  ONBOARDING step 9 and SECURITY §2 say the same list.
+- **Every link is absolute.** Each URL written on a ticket was a relative path
+  (`/factory?repo=…`), which on Azure DevOps or Jira resolves against the *tracker's* host, so
+  the "Follow it here" the customer was given could not reach the product (and Azure DevOps
+  refuses such a string as a `Hyperlink` relation). `CRB_PUBLIC_URL` is now a setting, one
+  builder makes every link, a listener cannot be switched on until it is set
+  (`intake_no_public_url`) and a pass that somehow starts without it stops `no_public_url`
+  before writing anything.
+- **One pass is bounded twice.** A pass costs about eleven tracker calls per ticket, runs in
+  front of the worker's heartbeat and, on demand, inside an API request; nothing bounded it,
+  and Azure DevOps answers a WIQL query with up to 20,000 ids. `CRB_INTAKE__MAX_PER_POLL`
+  (200) and `CRB_INTAKE__POLL_BUDGET_S` (60) now bound it: a longer column is **not read at
+  all** (`column_too_large`, with the advice to narrow the area path or the JQL), and a pass
+  that runs out of time serves what it read and says how far it got. The adapters ask for one
+  more than the bound, so an overflow is visible rather than silently truncated, and Jira's
+  search pages properly instead of taking 200 and ignoring the rest.
+- **Jira reads like a person wrote it.** ADF has no hidden node, so the "hidden" marker was
+  the first line of every comment, the renderer's Markdown arrived as raw `##` and `**`
+  characters, and idempotency compared held text against a lossily flattened document — which
+  is never equal for a real comment, so the same unchanged comment was rewritten on **every
+  poll**. The marker is now an attribution line a reader understands (carrying the same
+  token), the structure maps onto ADF headings, strong marks and code marks, and both sides of
+  the comparison go through the same flattening. A remote link is named by what it points at
+  ("Backlog item" / "Pull request") instead of always "Pull request".
+- **A half-written ticket is repaired.** A re-read of a ticket already registered wrote
+  nothing at all, so a ticket whose queued note or link had failed once kept `crb:ready` on
+  the board for ever while the screen said queued. The poll now re-asserts the label, the
+  queued note and the item link — all idempotent, so a healthy ticket is untouched.
+- **The consent switch is an event.** `switched_by` is one mutable field, so switching off and
+  on again overwrote who consented. Every throw of the switch is now
+  `intake.listener.switched` on the repository's system trace, naming the operator.
+- **`/health` reports the stop the last read recorded.** A deployment whose every listener was
+  failing `unauthorised` read `intake: ok`, so monitoring never learned the front door was
+  shut. The probe still contacts no tracker: it reports the reachability the last real poll
+  measured, and `degraded` names the repository, the reason and the advice.
+- **The screen has a door, and says something useful when it cannot classify.** Nothing in the
+  app linked to `/factory/intake`: the only ways in were a bookmark or the raw path the guides
+  printed. The Factory screen now links to it, and a new source-level ratchet fails when any
+  route in `App.tsx` has no link anywhere (or no stated reason). A ticket the classifier could
+  not place showed an amber "needs information" pill and listed nothing; it now says the one
+  thing that closes it. The route reads as a verdict pill, as it does on every other screen,
+  and the button beside a drafted replacement item now uses that draft.
+- **Smaller, still load-bearing.** A decision now carries both ends of its Wilson interval, so
+  the worker's own timed poll no longer writes "67 % to unknown" on a ticket where the
+  on-demand poll writes "67 % to 90 %". Two long ticket keys can no longer collapse onto one
+  item id (the overflow is hashed, not truncated). A ticket whose key cannot become an id costs
+  that ticket alone instead of the whole column. The served view is written by the poll that
+  produced it, and a deleted view is rebuilt by the next pass. The tracker credential is in no
+  log, no event, no state file and no error message — as a test, not a promise; the https-only
+  rule on the tracker URL has one too. `test_run_forever_survives_a_broken_iteration` waits on
+  an event instead of a 0.3 s sleep, so the full suite is deterministic.
+- **The record itself.** `product.evidence.6` is back to `partial`: the `dod`, `claims`,
+  `ui-unit` and `ui-smoke` jobs run on every pull request but are not on branch protection's
+  required list (G-930). The walkthrough's `proof.20` is narrowed to what the spec walks, with
+  the pull-request and outcome leg opened as G-931. A gap id used twice in one file is
+  renumbered (G-929) and `dod_check.py` now fails on that instead of silently dropping one of
+  them. Its anchor rule matches GitHub's, so the 63 cited headings a reader clicks resolve.
+  Two criteria whose text still said a thing "does not exist" now say what shipped.
+
 ### 2026-09-22 — the work arrives from the board, and the gates that watch the gates
 
 - **Work arrives from the team's own board (stream I; ADR-0017, DL-051).** A person moves a

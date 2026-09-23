@@ -544,3 +544,182 @@ def test_a_forced_re_read_of_a_registered_ticket_re_posts_without_registering_ag
     assert report.rows[0].registered is True
     assert report.rows[0].label == c.LABEL_QUEUED
     assert [e.kind for e in home.events() if e.kind == sv.EV_STOPPED] == []
+
+
+# --- what a ticket already registered is owed ------------------------------------------
+
+
+def test_a_re_read_of_a_registered_ticket_re_asserts_the_label_the_board_should_show(
+    home: FactoryHome,
+) -> None:
+    """The row said queued and registered; the BOARD said `crb:ready`, for ever. Nothing
+    pinned the label, so the screen and the customer's own ticket disagreed permanently."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver())
+    tracker.labels["4711"] = c.LABEL_READY  # as an earlier poll left it
+    report = _poll(home, tracker, route=_deliver(), force=True)
+    assert tracker.labels["4711"] == c.LABEL_QUEUED
+    assert report.rows[0].label == c.LABEL_QUEUED and report.rows[0].registered is True
+
+
+def test_a_queued_note_that_failed_once_is_repaired_by_the_next_read(home: FactoryHome) -> None:
+    """The tracker was briefly unreachable when the queued note was posted. The item IS
+    registered, so the next poll must not register it again — and must still finish telling
+    the ticket what happened to it."""
+    tracker = _tracker(_ticket())
+    queued_marker = c.marker_for("fake", "4711:queued")
+
+    def fail_the_queued_note(verb: str, what: str) -> c.TrackerError | None:
+        if verb == "comment" and what == queued_marker:
+            return c.TrackerError(c.REASON_UNREACHABLE, "the tracker did not answer")
+        return None
+
+    tracker.fail_when = fail_the_queued_note
+    first = _poll(home, tracker, route=_deliver())
+    assert first.registered == 1
+    assert queued_marker not in tracker.comments["4711"]
+    assert tracker.links.get("4711") is None
+
+    tracker.fail_when = None
+    second = _poll(home, tracker, route=_deliver(), force=True)
+    assert second.registered == 0  # the item is on the frozen record; it is not registered twice
+    assert queued_marker in tracker.comments["4711"]
+    assert tracker.links["4711"] == ["https://crb.invalid/factory?item=fake-4711"]
+    assert tracker.labels["4711"] == c.LABEL_QUEUED
+
+
+def test_a_link_this_product_attaches_is_named_by_what_it_points_at(home: FactoryHome) -> None:
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver())
+    assert tracker.link_titles["https://crb.invalid/factory?item=fake-4711"] == c.LINK_ITEM
+
+
+# --- the served view is a cache, and the poll rebuilds it -------------------------------
+
+
+def test_the_served_view_is_written_by_the_poll_itself(home: FactoryHome) -> None:
+    """Not by each caller in turn: a poll whose caller was killed before its own write left
+    the screen showing a ticket it had already commented on as unread."""
+    report = _poll(home, _tracker(_ticket()), route=_deliver())
+    rows = sv.store_for(home).rows()
+    assert [r.key for r in rows] == ["4711"]
+    assert sv.store_for(home).last_poll() == report.to_dict()
+
+
+def test_deleting_the_state_file_is_survivable_because_the_next_poll_rebuilds_it(
+    home: FactoryHome,
+) -> None:
+    """The docstring's promise, pinned. The chain stays the record: the item is not
+    registered again and the ticket is not written to, because every write is idempotent."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver())
+    sv.store_for(home).path.unlink()
+    before = dict(tracker.comments["4711"])
+    report = _poll(home, tracker, route=_deliver())
+    assert [r.key for r in report.rows] == ["4711"]
+    assert [r.key for r in sv.store_for(home).rows()] == ["4711"]
+    assert report.registered == 0
+    assert tracker.comments["4711"] == before  # identical text: the board is untouched
+    assert len(home.load_backlog().items) == 1  # type: ignore[union-attr]
+
+
+# --- one pass is bounded ---------------------------------------------------------------
+
+
+def _column_of(n: int) -> FakeTracker:
+    tickets = {str(i): _ticket(key=str(i)) for i in range(n)}
+    t = FakeTracker(tickets)
+    t.column = [
+        c.TicketRef(key=k, revision="1", title=v.title, changed="2026-09-22")
+        for k, v in tickets.items()
+    ]
+    return t
+
+
+def test_a_column_bigger_than_one_pass_may_read_stops_rather_than_walking_it(
+    home: FactoryHome,
+) -> None:
+    """A pass costs about eleven tracker calls per ticket and holds the worker's heartbeat
+    and an API thread. Reading an arbitrary 200 of somebody's board and saying nothing about
+    the rest would be worse than reading none of it, so nothing is read."""
+    tracker = _column_of(5)
+    report = _poll(home, tracker, route=_deliver(), max_tickets=4)
+    assert report.stopped == c.REASON_COLUMN_TOO_LARGE
+    assert report.seen == 5 and report.read == 0 and report.rows == []
+    assert "Narrow the area path" in report.to_dict()["advice"]
+    assert tracker.calls == [("entered", "Ready")]  # not one ticket was read
+    stop = [e for e in home.events() if e.kind == sv.EV_STOPPED][-1]
+    assert stop.payload["reason"] == c.REASON_COLUMN_TOO_LARGE
+    assert stop.payload["max_per_poll"] == 4
+
+
+def test_a_pass_that_runs_out_of_time_serves_what_it_has_and_says_so(home: FactoryHome) -> None:
+    # the clock is read once at the start and once before each ticket after the first
+    ticks = iter([0.0, 0.0, 99.0])
+    report = _poll(
+        home,
+        _column_of(3),
+        route=_deliver(),
+        budget_s=10.0,
+        clock=lambda: next(ticks),
+    )
+    assert report.stopped == c.REASON_COLUMN_TOO_LARGE
+    assert report.read == 2 and len(report.rows) == 2  # what it got through is served
+    assert "1 of 3 tickets" not in report.detail and "2 of 3 tickets" in report.detail
+    assert "the next pass" in report.detail
+
+
+def test_the_default_bounds_are_the_settings_defaults(home: FactoryHome) -> None:
+    """A caller that names no bound is bounded anyway — the same numbers the deployment
+    ships with, so a test can never exercise an unbounded pass the product cannot make."""
+    from crb.server.settings import IntakeSettings
+
+    cfg = IntakeSettings()
+    assert cfg.max_per_poll == sv.DEFAULT_MAX_PER_POLL
+    assert float(cfg.poll_budget_s) == sv.DEFAULT_POLL_BUDGET_S
+
+
+# --- a link a reader cannot open is worse than no link ---------------------------------
+
+
+def test_a_deployment_that_does_not_know_its_own_address_writes_nothing(
+    home: FactoryHome,
+) -> None:
+    tracker = _tracker(_ticket())
+    report = _poll(home, tracker, route=_deliver(), item_url=sv.item_url_for("", "alpha"))
+    assert report.stopped == c.REASON_NO_PUBLIC_URL
+    assert report.read == 0 and tracker.calls == []
+    assert "CRB_PUBLIC_URL" in report.to_dict()["advice"]
+
+
+def test_the_url_a_ticket_is_given_is_absolute_and_escaped() -> None:
+    build = sv.item_url_for("https://crb.example.com/", "alpha/beta")
+    url = build("fake-4711")
+    assert url == "https://crb.example.com/factory?repo=alpha%2Fbeta&item=fake-4711"
+    assert sv.is_absolute_url(url)
+    assert not sv.is_absolute_url(sv.item_url_for("", "alpha")("fake-4711"))
+
+
+# --- one unmappable ticket costs that ticket and nothing else --------------------------
+
+
+def test_a_ticket_whose_key_cannot_become_an_item_id_skips_only_itself(
+    home: FactoryHome,
+) -> None:
+    """``poll_repository`` promises never to raise and that the rest of the column is still
+    served. A key with no character an item id may use used to propagate a ValueError out of
+    the whole pass: no stop event, no state file, every other ticket unread."""
+    good = _ticket(key="4711")
+    bad = _ticket(key="!!!")
+    tracker = FakeTracker({"!!!": bad, "4711": good})
+    tracker.column = [
+        c.TicketRef(key="!!!", revision="1", title=bad.title, changed="2026-09-22"),
+        c.TicketRef(key="4711", revision="1", title=good.title, changed="2026-09-22"),
+    ]
+    report = _poll(home, tracker, route=_deliver())
+    assert report.seen == 2 and report.read == 1 and report.skipped == 1
+    assert [r.key for r in report.rows] == ["!!!", "4711"]
+    assert report.rows[0].stopped == c.REASON_REFUSED and report.rows[0].stopped_advice
+    assert report.rows[1].registered is True
+    stops = [e for e in home.events() if e.kind == sv.EV_STOPPED]
+    assert [e.payload["step"] for e in stops] == ["draft"]

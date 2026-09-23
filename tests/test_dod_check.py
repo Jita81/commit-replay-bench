@@ -423,6 +423,45 @@ def test_one_gap_id_is_one_piece_of_work_across_the_tree(
     assert "gap G-001 is defined differently in" in capsys.readouterr().out
 
 
+def test_one_gap_id_is_one_piece_of_work_inside_a_single_file_too(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The blind spot the cross-file check left: gaps were collected into a per-artefact dict,
+    so the SAME id twice in one file silently overwrote the first line and the register
+    dropped a gap nobody had closed. An identical pair inside one file passed clean while the
+    identical pair ACROSS two files failed."""
+    mod, root = tree
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    page = root / "docs/dod/pages/results.md"
+    page.write_text(
+        page.read_text(encoding="utf-8")
+        + "- **G-001** \u2014 a different piece of work entirely \u00b7 change it \u00b7 server\n",
+        encoding="utf-8",
+    )
+    assert mod.main(["--check"]) == 1
+    assert "is defined twice in this file" in capsys.readouterr().out
+
+
+def test_an_anchor_resolves_by_githubs_own_slug_rule(
+    tree: tuple[ModuleType, Path],
+) -> None:
+    """GitHub replaces EACH space with its own hyphen and does not collapse runs, so a heading
+    with a stripped character between two spaces gets a DOUBLE hyphen. Collapsing them here
+    made the checker accept an anchor a reader's click could not resolve."""
+    mod, _ = tree
+    assert (
+        mod._slug("11. Intake — work arriving from a board")
+        == "11-intake--work-arriving-from-a-board"
+    )
+    assert (
+        mod._slug("3.1 Oracle adequacy — mutation scoring")
+        == "31-oracle-adequacy--mutation-scoring"
+    )
+    # and the ordinary cases are unchanged
+    assert mod._slug("Stop conditions") == "stop-conditions"
+    assert mod._slug("`crb doctor`") == "crb-doctor"
+
+
 def test_a_gap_record_needs_the_em_dash_and_measured_needs_an_apparatus_version(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:

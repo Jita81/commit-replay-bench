@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-470 files with a header · 1 exempt (listed at the end).
+471 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -388,10 +388,11 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`ui/e2e/walkthrough/repo-config.spec.ts`](../ui/e2e/walkthrough/repo-config.spec.ts) | Walkthrough spec for the Configuration tab, on a repo it registers itself from the tier-1 fixture with a deliberately bare config. | [`ui/e2e/walkthrough/repo-config.spec.ts`](../ui/e2e/walkthrough/repo-config.spec.ts) | a `RepoConfig` field is added (assert its round-trip here) or the audit event payload changes. |
 | [`ui/e2e/walkthrough/support.ts`](../ui/e2e/walkthrough/support.ts) | The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract), `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`, `signIn`, `personaPassword`, `startRun`, `waitForRun`, `runStatus`, `expectLogAction`, `stackHealth`. | every spec under [`ui/e2e/walkthrough`](../ui/e2e/walkthrough) (they all import this) | a walkthrough variable, a tier target or a form label changes; for a new repository in tier 2, add a `RepoTarget` to `publicTargets()`. |
 
-## `ui/src` (2 files)
+## `ui/src` (3 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
+| [`ui/src/App.reachability.test.ts`](../ui/src/App.reachability.test.ts) | A source-level ratchet over `[`ui/src/App.tsx`](../ui/src/App.tsx)`: each route it mounts must be linked to from somewhere in the app, or be named here as a deliberate exception with the reason. | itself | a route is added — link to it from a screen or the nav, or add it below with the reason it has no door. |
 | [`ui/src/App.tsx`](../ui/src/App.tsx) | The `App` component: the auth provider and the route table. | [`ui/e2e/smoke.spec.ts`](../ui/e2e/smoke.spec.ts) (login and the shell), [`ui/e2e/walkthrough/01-login.spec.ts`](../ui/e2e/walkthrough/01-login.spec.ts); screen tests mount screens directly through [`ui/src/test/utils.tsx`](../ui/src/test/utils.tsx) | a screen is added — one `<Route>` here, its `NAV` entry in [`ui/src/components/Layout.tsx`](../ui/src/components/Layout.tsx) and its `HELP` entry in [`ui/src/help/help.ts`](../ui/src/help/help.ts); never for a new repository. |
 | [`ui/src/main.tsx`](../ui/src/main.tsx) | The Vite entry module (`index.html` → `#root`). | [`ui/e2e/smoke.spec.ts`](../ui/e2e/smoke.spec.ts) (the built bundle boots against a mocked API); screen tests build their own client in [`ui/src/test/utils.tsx`](../ui/src/test/utils.tsx) | a query default changes for every screen (keep [`ui/src/test/utils.tsx`](../ui/src/test/utils.tsx) in step); never for a new repository. |
 

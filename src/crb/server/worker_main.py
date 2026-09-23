@@ -99,6 +99,7 @@ WORKER_ID_ENV = "CRB_WORKER_ID"
 METRICS_PORT_ENV = "CRB_METRICS_PORT"
 METRICS_HOST_ENV = "CRB_METRICS_HOST"
 METRICS_ENABLED_ENV = "CRB_METRICS_ENABLED"
+PUBLIC_URL_ENV = "CRB_PUBLIC_URL"
 DEFAULT_METRICS_PORT = 9464
 DEFAULT_METRICS_HOST = "127.0.0.1"
 
@@ -206,6 +207,7 @@ def settings_from_args(
         github=shared.github,
         factory=shared.factory,
         intake=shared.intake,
+        public_url=shared.public_url,
         metrics_enabled=shared.metrics_enabled,
         metrics_host=host,
         metrics_port=int(port),
@@ -230,6 +232,9 @@ class _SharedWithApi(BaseSettings):
     #: worker polls the watched column of every repository whose listener is on; the API
     #: reads the same block so one environment configures both processes.
     intake: IntakeSettings = IntakeSettings()
+    #: ``CRB_PUBLIC_URL`` — this deployment's own address, which the links intake writes on
+    #: a ticket are built from. The API validates its shape; the worker only carries it.
+    public_url: str = ""
     metrics_enabled: bool = True
     #: The worker's own exposition bind address (loopback by default, like the API's
     #: ``CRB_BIND_HOST``; a container sets ``0.0.0.0``) and port (the API keeps ``/metrics``
@@ -280,6 +285,8 @@ def _keys_for(env: dict[str, str]) -> dict[str, Any]:
     }
     if intake:
         out["intake"] = intake
+    if PUBLIC_URL_ENV in env:
+        out["public_url"] = env[PUBLIC_URL_ENV]
     return out
 
 

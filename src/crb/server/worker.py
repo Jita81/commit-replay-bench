@@ -242,10 +242,10 @@ from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.intake import (
-    IntakeStore,
     ListenerState,
     apply_outcome_map,
     build_tracker,
+    item_url_for,
     poll_repository,
     post_outcomes_to_tickets,
 )
@@ -465,6 +465,11 @@ class WorkerSettings:
     #: column of every repository whose listener an operator switched on. ``tracker: none``
     #: (the default) means the idle loop never polls anything.
     intake: IntakeSettings = field(default_factory=IntakeSettings)
+    #: This deployment's own public address (``CRB_PUBLIC_URL``), read the way the API reads
+    #: it. Every link the intake listener writes on somebody's ticket is built from it, and a
+    #: pass that starts without one stops with ``no_public_url`` rather than writing a
+    #: relative path a reader on the tracker's site cannot open.
+    public_url: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", Path(self.home).expanduser())
@@ -802,25 +807,31 @@ class Worker:
         """Read one repository's column, then apply the outcome map to its merged items."""
         home = FactoryHome(self.home, repo)
         lookup = self._route_lookup(repo)
-        report = poll_repository(
+        # ONE builder for every link this pass writes on a ticket, and it is absolute: a
+        # relative path in somebody else's comment resolves against THEIR host
+        item_url = item_url_for(self.settings.public_url, repo)
+        # poll_repository writes the view the screen reads, so nothing is returned that this
+        # caller has to remember to persist
+        poll_repository(
             repo,
             tracker=tracker,
             listener=state,
             column=state.column or self.settings.intake.column,
             home=home,
             route_for=lookup,
-            item_url=lambda item_id: f"/factory?repo={repo}&item={item_id}",
+            item_url=item_url,
             run_active=lambda: self._factory_run_active(repo),
             actor="worker",
+            max_tickets=self.settings.intake.max_per_poll,
+            budget_s=float(self.settings.intake.poll_budget_s),
         )
-        IntakeStore(self.home, repo).write(report)
         # what the loop did with the items this column produced, told to the tickets that
         # produced them: the pull request link when one opened, the refusal and its way
         # forward when the loop stopped. Read from the chain, posted once per marker.
         post_outcomes_to_tickets(
             tracker,
             home=home,
-            item_url=lambda item_id: f"/factory?repo={repo}&item={item_id}",
+            item_url=item_url,
             evidence=home.evidence(actor="worker"),
         )
         apply_outcome_map(

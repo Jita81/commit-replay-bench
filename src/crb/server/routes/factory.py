@@ -89,7 +89,12 @@ from crb.factory.backlog import KINDS, LEVELS, BacklogError, BacklogFrozen, Back
 from crb.factory.evidence import verify_events
 from crb.factory.readiness import CATALOGUE, SLOT_VALUE, sign, slots_for
 from crb.factory.testfirst import AuthoredTest
-from crb.intake.client import TrackerError
+from crb.intake.client import (
+    REASON_NO_PUBLIC_URL,
+    REASON_NO_SECRET,
+    STOP_ADVICE,
+    TrackerError,
+)
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import (
@@ -100,10 +105,18 @@ from crb.server.factory_state import (
 )
 from crb.server.github_app import GitHubApp, GitHubAppError, permissions_allow_delivery
 from crb.server.intake import CONFIG_KEY as INTAKE_CONFIG_KEY
-from crb.server.intake import IntakeStore, ListenerState, build_tracker, poll_repository
+from crb.server.intake import (
+    IntakeStore,
+    ListenerState,
+    build_tracker,
+    item_url_for,
+    needs_credential,
+    poll_repository,
+)
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
+from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.secrets import TRACKER_TOKEN_SECRET, SecretsDep
 from crb.store.ledger import DbLedger
 from crb.store.models import GitHubInstallation, Grade, Repo, Run
@@ -1237,17 +1250,23 @@ def put_intake(  # noqa: PLR0917 — FastAPI dependencies + path/body
     secrets: SecretsDep,
 ) -> IntakeOut:
     """The consent gate. Switching a listener on is what allows this product to read
-    somebody's board and write on their tickets, so it is operator-only and the switch is
-    stored with the actor and the time. Switching a listener on when no tracker is
-    configured is refused (422) rather than accepted and silently idle."""
+    somebody's board and write on their tickets, so it is operator-only, every switch is
+    an event on the repository's system trace naming the operator who threw it, and the
+    current state carries the actor and the time.
+
+    It refuses (422) everything it would otherwise accept and be silently unable to do:
+    no tracker configured, no credential stored (its own message promised that), and no
+    public address for this deployment — without one, every link the product wrote on a
+    ticket would be a relative path a reader on the tracker's site cannot open.
+
+    The switch is recorded as well as stored because ``switched_by`` is one mutable field:
+    switching off and on again overwrites it, and without the event the writes made on
+    somebody's tickets under the earlier consent would appear to have been consented by
+    whoever switched it last.
+    """
     row = get_repo_or_404(db, repo)
-    if body.enabled and not settings.intake.enabled:
-        raise ApiError(
-            422,
-            "intake_not_configured",
-            "no tracker is configured for this deployment: an admin sets CRB_INTAKE__* and "
-            "stores the tracker token before a listener can be switched on",
-        )
+    if body.enabled:
+        _refuse_unless_ready_to_listen(settings, secrets)
     state = ListenerState(
         enabled=body.enabled,
         column=body.column.strip(),
@@ -1256,8 +1275,53 @@ def put_intake(  # noqa: PLR0917 — FastAPI dependencies + path/body
         since=ListenerState.from_config(row.config_json).since,
     )
     row.config_json = {**dict(row.config_json or {}), INTAKE_CONFIG_KEY: state.to_dict()}
+    # the same shape the repository routes write (an ISO-8601 string to the second)
+    row.updated = _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()
+    append_system_event(
+        db,
+        trace_id=system_trace_id("intake", repo),
+        action="intake.listener.switched",
+        repo=repo,
+        actor=operator.id,
+        payload={
+            "enabled": body.enabled,
+            "column": state.column or settings.intake.column,
+            "tracker": settings.intake.tracker,
+            "switched_by": state.switched_by,
+        },
+    )
     db.commit()
     return _intake_out(repo, settings, secrets, row)
+
+
+def _refuse_unless_ready_to_listen(settings: Any, secrets: Any) -> None:
+    """Everything that must be true before a listener may be switched on, in one place.
+
+    Each is refused HERE rather than discovered by the first poll, because the act being
+    gated is consent to write on a third party's tickets: an operator who was told "the
+    listener is on" should not learn from a stop event that it never could be.
+    """
+    if not settings.intake.enabled:
+        raise ApiError(
+            422,
+            "intake_not_configured",
+            "no tracker is configured for this deployment: an admin sets CRB_INTAKE__* and "
+            "stores the tracker token before a listener can be switched on",
+        )
+    # the same rule `build_tracker` applies, asked of the one function that owns it: the
+    # walkthrough's file-backed board needs no credential, and a gate that demanded one
+    # anyway refused a switch the poll would have honoured
+    if needs_credential(settings.intake.tracker) and not bool(
+        secrets.status(TRACKER_TOKEN_SECRET).present
+    ):
+        raise ApiError(422, "intake_no_credential", STOP_ADVICE[REASON_NO_SECRET])
+    if not settings.public_url:
+        raise ApiError(
+            422,
+            "intake_no_public_url",
+            "this deployment does not know its own address, so a link on a ticket would not "
+            "open: " + STOP_ADVICE[REASON_NO_PUBLIC_URL],
+        )
 
 
 @router.post(
@@ -1297,7 +1361,9 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
         raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc
     routes = _cell_routes(db, factory, repo)
     home = _home(settings, repo)
-    report = poll_repository(
+    # poll_repository writes the served view itself, so this route reads it back through
+    # `_intake_out` exactly as the GET does — one shape, one writer
+    poll_repository(
         repo,
         tracker=tracker,
         listener=listener,
@@ -1308,10 +1374,13 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
             if f"{item.capability_class}|{item.size_estimate}" in routes
             else None
         ),
-        item_url=lambda item_id: f"/factory?repo={repo}&item={item_id}",
+        item_url=item_url_for(settings.public_url, repo),
         run_active=lambda: _active_factory_run(db, repo) is not None,
         actor=operator.id,
         force=bool(body.force) if body else False,
+        # the same bounds the worker polls under: this one runs inside a request, holding a
+        # database session, so a long column may not hold it open for the length of a board
+        max_tickets=settings.intake.max_per_poll,
+        budget_s=float(settings.intake.poll_budget_s),
     )
-    IntakeStore(settings.home, repo).write(report)
     return _intake_out(repo, settings, secrets, row)

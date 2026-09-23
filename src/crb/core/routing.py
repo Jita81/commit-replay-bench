@@ -341,9 +341,10 @@ DEFAULT_POLICY = RoutingPolicy()
 
 @dataclass(frozen=True)
 class RouteDecision:
-    """One cell's route with the evidence it was decided on (``n``, ``point``,
-    ``ci_low``, ``false_q1``, ``oracle_strength``, the controls verdict) and the
-    policy versions — enough for a reader to re-derive it from the ledger."""
+    """One cell's route with the evidence it was decided on (``n``, ``point``, the whole
+    Wilson interval as ``ci_low`` and ``ci_high``, ``false_q1``, ``oracle_strength``, the
+    controls verdict) and the policy versions — enough for a reader to re-derive it from the
+    ledger, and enough for any reader of a decision to quote the interval as a range."""
 
     route: str
     reason: str
@@ -354,6 +355,13 @@ class RouteDecision:
     false_q1: int
     oracle_strength: float | None
     policy_version: str
+    #: The UPPER end of the same Wilson interval as ``ci_low``. The rule never reads it —
+    #: the bar is on the lower bound — but every reader quotes the interval as a range, and
+    #: a decision that carried only one end made the comment on a customer's ticket say
+    #: "67 % to unknown" wherever it was rendered from a decision rather than from the
+    #: capability map's row. ``1.0`` is the Wilson upper bound of no data, which is what an
+    #: unset value honestly means (the same default as :mod:`crb.core.learn`).
+    ci_high: float = 1.0
     reason_code: str = ""
     controls: ControlsVerdict | None = None
     controls_policy: str = ""
@@ -374,6 +382,7 @@ class RouteDecision:
             "n": self.n,
             "point": round(self.point, 4),
             "ci_low": round(self.ci_low, 4),
+            "ci_high": round(self.ci_high, 4),
             "false_q1": self.false_q1,
             "oracle_strength": None
             if self.oracle_strength is None
@@ -412,6 +421,7 @@ def route(
         "n": stats.n,
         "point": stats.point,
         "ci_low": stats.ci.low,
+        "ci_high": stats.ci.high,
         "false_q1": stats.false_q1,
         "oracle_strength": strength,
         "policy_version": policy.version,

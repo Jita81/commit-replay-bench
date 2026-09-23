@@ -650,6 +650,10 @@ export const HINTS = {
     'What this deployment has measured about changes of this kind and size — the cell’s route, how many graded attempts it rests on and the interval around the rate. It is read before any build, never after.',
   'item.intake.item':
     'The backlog item this ticket is, or would be. Nothing is registered until every question a good acceptance test needs is answered on the ticket.',
+  'link.factory.intake':
+    'The watched column on your own team’s board: which tickets the product has read, what it understood, what each one still needs answering, and where the ones it accepted went. Reading it is a viewer’s act; switching the listener on is an operator’s.',
+  'item.intake.unclassified':
+    'The product could not tell what kind of change this ticket asks for, so it cannot say which questions a good acceptance test needs answered — and it will not spend anything on it. A crb:class= tag on the ticket settles it, and the next read uses it.',
   'item.intake.stopped':
     'This ticket’s own step stopped, with the reason the tracker or the product recorded and what closes it. Everything else in the column was still read.',
   'link.intake.ticket':

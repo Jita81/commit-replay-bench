@@ -1,7 +1,11 @@
 /**
  * 12 — work arriving from the team's own board: a ticket enters the watched column, the
- * product says what is missing, a person answers it, the ticket becomes a registered item,
- * and the pull request and the merge come back to the ticket.
+ * product says what is missing, a person answers it, and the ticket becomes a registered,
+ * queued item. The pull-request note and the mapped outcome transition are NOT walked here —
+ * reaching them needs a delivered pull request, and this spec spends nothing; they are proved
+ * at unit and route level (`test_the_pull_request_link_reaches_the_ticket_it_came_from`,
+ * `test_a_configured_outcome_map_moves_the_ticket_after_the_merge`) and the missing
+ * walkthrough leg is G-931 in docs/dod/journeys/intake-from-a-ticket.md.
  *
  * **No real Azure DevOps or Jira is contacted by this spec or by CI.** The stack runs with
  * `CRB_ENABLE_FAKE_TRACKER=1` and `CRB_INTAKE__TRACKER=fake`, so the whole board is one
@@ -19,8 +23,11 @@
  *               `crb:needs-info` on the board, and nothing is registered. The person edits
  *               the ticket (the board file) and its revision moves; the next read registers
  *               it, labels it `crb:queued` and links the item. A second read of an unchanged
- *               column writes nothing. Finally the outcome map moves the ticket when a
- *               merge is recorded, and the screen shows every step at 375 px and 1280 px.
+ *               column writes nothing. The screen shows every step at 375 px and 1280 px, and
+ *               the listener goes off again at the end.
+ *               The worker's own timed poll is parked by the stack (`CRB_INTAKE__POLL_S`
+ *               a day), so every read here is one an operator asked for and the counts this
+ *               spec asserts belong to that click; the timer is tests/test_intake_worker.py's.
  * How:          support.ts's `test` fixture, which has ALREADY signed in as the admin —
  *               calling `signIn` again would go to /login, which redirects an authenticated
  *               person away, and wait for a form that never renders; a viewer persona in its

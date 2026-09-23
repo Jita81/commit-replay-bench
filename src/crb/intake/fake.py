@@ -155,12 +155,15 @@ class FileTracker:
         doc["tickets"][key] = t
         self._save(doc)
 
-    def link(self, key: str, url: str) -> None:
+    def link(self, key: str, url: str, title: str = "") -> None:
         doc = self._load()
         t = self._ticket(doc, key)
         links = list(t.get("links") or [])
         if url not in links:
             t["links"] = [*links, url]
+            # the board keeps the name each link was given, so a spec can assert that the
+            # queued link is called "Backlog item" and the delivered one "Pull request"
+            t["link_titles"] = {**dict(t.get("link_titles") or {}), url: title}
             doc["tickets"][key] = t
             self._save(doc)
 

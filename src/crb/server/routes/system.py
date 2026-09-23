@@ -120,11 +120,11 @@ from crb.core.ledger import BELT_SET_V3_LEGACY, BELT_SET_V5, LedgerIntegrityErro
 from crb.core.routing import POLICY_VERSION
 from crb.core.secrets_file import SecretsError
 from crb.core.version import APPARATUS_VERSION, __version__
-from crb.intake.client import TRACKER_TOKEN_SECRET
+from crb.intake.client import STOP_ADVICE, TRACKER_TOKEN_SECRET
 from crb.observability import metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
-from crb.server.intake import ListenerState
+from crb.server.intake import IntakeStore, ListenerState
 from crb.server.secrets import SecretsFile
 from crb.server.settings import Settings
 from crb.store.ledger import assert_append_only
@@ -518,11 +518,16 @@ def probe_intake(
 
     **It contacts no tracker.** A readiness probe that called somebody else's service would
     make this deployment's health depend on theirs, and would poll a board nobody asked it
-    to. It reports only what this deployment knows about itself: whether a tracker is
-    configured, whether a credential is stored, and how many repositories have their
-    listener switched on. Whether the tracker actually answers is the listener's own
-    business, and it says so as ``intake.stopped`` on the repository's chain and on the
-    intake screen.
+    to. It reports what this deployment already knows about itself: whether a tracker is
+    configured, whether a credential is stored, this deployment's own public address (a
+    link on a ticket needs it), how many repositories have their listener switched on —
+    **and the stop the last pass of each switched-on listener recorded on disk**.
+
+    That last one needs no tracker contact and is the whole point of the line: a
+    deployment whose every listener is failing ``unauthorised`` must not read ``ok``, or
+    monitoring never learns the front door is shut. It reports ``degraded`` naming the
+    repository, the published reason and the advice; the reachability it reports is
+    therefore the reachability the last real poll MEASURED, not one this probe provoked.
     """
 
     def _read() -> ProbeResult:
@@ -531,10 +536,16 @@ def probe_intake(
         # this probe's answer whatever the tracker setting says, and a store that cannot be
         # read must fail this probe like every other one rather than pass on a skip
         listening = 0
+        stopped: list[tuple[str, str, str]] = []  # repo, reason, detail
         with factory() as session:
             for row in session.execute(select(Repo)).scalars().all():
-                if ListenerState.from_config(dict(row.config_json or {})).enabled:
-                    listening += 1
+                if not ListenerState.from_config(dict(row.config_json or {})).enabled:
+                    continue
+                listening += 1
+                last = IntakeStore(settings.home, str(row.name)).last_poll() or {}
+                reason = str(last.get("stopped") or "")
+                if reason:
+                    stopped.append((str(row.name), reason, str(last.get("detail") or "")))
         if cfg.tracker == "none":
             detail = (
                 "no tracker configured (optional) — set CRB_INTAKE__TRACKER, __URL, __PROJECT "
@@ -563,8 +574,13 @@ def probe_intake(
             "configured": cfg.enabled,
             "column": cfg.column,
             "credential_set": secrets_present,
+            "public_url_set": bool(settings.public_url),
             "listening": listening,
             "poll_s": cfg.poll_s,
+            "max_per_poll": cfg.max_per_poll,
+            "stopped": [
+                {"repo": r, "reason": reason, "detail": detail} for r, reason, detail in stopped
+            ],
         }
         if not cfg.enabled:
             return ProbeResult(
@@ -582,6 +598,15 @@ def probe_intake(
                 "PUT /settings/secrets/tracker-token; nothing can be read until they do",
                 data,
             )
+        if not settings.public_url:
+            return ProbeResult(
+                "intake",
+                DEGRADED,
+                "no CRB_PUBLIC_URL is set — a link this product writes on a ticket would be "
+                "a relative path nobody on the tracker can open, so no listener may be "
+                "switched on",
+                data,
+            )
         if listening == 0:
             return ProbeResult(
                 "intake",
@@ -590,11 +615,21 @@ def probe_intake(
                 "(the default) — nothing is read or written",
                 data,
             )
+        if stopped:
+            worst = stopped[0]
+            more = f" (and {len(stopped) - 1} more)" if len(stopped) > 1 else ""
+            return ProbeResult(
+                "intake",
+                DEGRADED,
+                f"the last read of {worst[0]!r} stopped: {worst[1]} — "
+                f"{STOP_ADVICE.get(worst[1], 'see the intake screen for what to do')}{more}",
+                data,
+            )
         return ProbeResult(
             "intake",
             OK,
             f"{cfg.tracker} configured; {listening} repository listener(s) on column "
-            f"{cfg.column!r} every {cfg.poll_s}s",
+            f"{cfg.column!r} every {cfg.poll_s}s; the last read of each one stopped at nothing",
             data,
         )
 

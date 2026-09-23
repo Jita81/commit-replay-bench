@@ -511,6 +511,10 @@ class TestDoctorReport:
     ) -> None:
         fake_cli(True)
         monkeypatch.setenv("CRB_ENV", "dev")
+        # the `ui` line below asserts the NO-built-UI case, so this test must not read the
+        # developer's own `ui/dist`: running the walkthrough in the same worktree built one and
+        # the line flipped to `ok` — a test that depends on the machine it runs on
+        monkeypatch.setenv("CRB_UI_DIST", str(home / "no-built-ui"))
         url = f"sqlite:///{home / 'crb.db'}"
         home.mkdir()
         migrate.upgrade(url)

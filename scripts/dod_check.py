@@ -246,6 +246,15 @@ def parse_artefact(path: Path) -> tuple[Artefact, list[str]]:
             m = re.match("^- \\*\\*(G-\\d{3})\\*\\*\\s*\u2014\\s*(.+)$", s)
             if m:
                 body = m.group(2).strip()
+                if m.group(1) in gaps and gaps[m.group(1)] != body:
+                    # the cross-artefact check below compares files; without this one, the
+                    # SAME id twice in ONE file silently overwrote the first line and the
+                    # register dropped a gap nobody had closed (STANDARD §2: one id is one
+                    # piece of work)
+                    errors.append(
+                        f"{path.name}:{n}: gap {m.group(1)} is defined twice in this file with "
+                        "different text — one id is one piece of work; renumber one of them"
+                    )
                 gaps[m.group(1)] = body
                 fields = body.split(" · ")
                 if len(fields) < 3:
@@ -357,10 +366,17 @@ def _resolve_code(ref: str) -> bool:
 
 
 def _slug(heading: str) -> str:
+    """A heading's anchor, by GitHub's rule — including the part that surprises people.
+
+    GitHub replaces EACH space with its own hyphen and does not collapse runs, so a heading
+    with a stripped character between two spaces (``§11. Intake — work``) gets a DOUBLE
+    hyphen (``#11-intake--work``). Collapsing runs here made the checker accept an anchor a
+    reader's click could not resolve, which is the opposite of what this gate is for.
+    """
     h = heading.strip().lower()
     h = re.sub(r"[`*_]", "", h)
     h = re.sub(r"[^\w\s-]", "", h)
-    return re.sub(r"\s+", "-", h.strip())
+    return h.strip().replace(" ", "-")
 
 
 def _resolve_doc(ref: str) -> bool:

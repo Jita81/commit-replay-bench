@@ -38,6 +38,10 @@ from crb.server.worker import Worker, WorkerSettings
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.models import Repo, Run
 
+#: The deployment's own address. Every link the listener writes on a ticket is built from
+#: it, and a worker without one stops before it writes anything.
+PUBLIC = "https://crb.invalid"
+
 BOARD: dict[str, Any] = {
     "tickets": {
         "4711": {
@@ -72,7 +76,7 @@ def _intake(**kw: Any) -> IntakeSettings:
 class Stack:
     """A worker, a store, a repository row and a board — nothing else."""
 
-    def __init__(self, tmp_path: Path, intake: IntakeSettings) -> None:
+    def __init__(self, tmp_path: Path, intake: IntakeSettings, public_url: str = PUBLIC) -> None:
         self.home = tmp_path / "home"
         url = f"sqlite:///{self.home / 'crb.db'}"
         self.home.mkdir(parents=True, exist_ok=True)
@@ -87,6 +91,7 @@ class Stack:
                 poll_s=0.05,
                 heartbeat_s=0.05,
                 intake=intake,
+                public_url=public_url,
             ),
             engine=engine,
         )
@@ -270,3 +275,19 @@ def test_a_configured_outcome_map_moves_the_ticket_after_the_merge(tmp_path: Pat
     board = json.loads(fake_tracker_path(stack.home).read_text(encoding="utf-8"))
     assert board["tickets"]["4711"]["state"] == "Done"
     assert "intake.transitioned" in [e.kind for e in FactoryHome(stack.home, "alpha").events()]
+
+
+def test_a_worker_that_does_not_know_the_deployments_address_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    """The listener's links are the product's own pages. Relative, they resolve against the
+    TRACKER's host on the customer's board, so the pass stops before it writes anything and
+    the stop names the setting to put right."""
+    stack = Stack(tmp_path, _intake(), public_url="")
+    stack.add_repo("alpha", {"enabled": True})
+    assert stack.worker.poll_intake() == 1
+    last = IntakeStore(stack.home, "alpha").last_poll() or {}
+    assert last["stopped"] == c.REASON_NO_PUBLIC_URL
+    assert "CRB_PUBLIC_URL" in last["advice"]
+    board = json.loads(fake_tracker_path(stack.home).read_text(encoding="utf-8"))
+    assert board["tickets"]["4711"].get("comments") in (None, {})

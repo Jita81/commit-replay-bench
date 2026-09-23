@@ -87,11 +87,21 @@ ROUTE_WORDS: dict[str, str] = {
     ),
 }
 
+#: What this product does to a ticket, stated as the COUNT a reader can check against their
+#: own board, not as a reassuring "only". Over a ticket's life it adds up to four comments,
+#: each marked as its own: this one about what is missing, a note when the work is queued, a
+#: note when a pull request opens, and a note if the work stopped. It sets one ``crb:``
+#: label, attaches a link to the backlog item and to the pull request, and — only where the
+#: team configured it — makes one state change when the pull request is merged. Those, and
+#: nothing else, are the six verbs the adapter has (docs/adr/0017); the sentence must keep
+#: matching them, which is why a test counts them rather than looking for the word "never".
 _NON_GOALS = (
-    "This product only ever adds this one comment, sets one crb: label, and — where the "
-    "team configured it — makes one state change when the pull request is merged. It "
-    "never edits any other field, never creates a ticket, and never reads a column it "
-    "was not pointed at."
+    "What this product writes on this ticket: up to four comments, each marked as its own "
+    "(this one about what is missing, a note when the work is queued, a note when a pull "
+    "request opens, and a note if the work stopped); one crb: label; a link to the backlog "
+    "item and to the pull request; and — only where the team configured it — one state "
+    "change when the pull request is merged. It edits no other field, it never creates a "
+    "ticket, and it never reads a column it was not pointed at."
 )
 
 

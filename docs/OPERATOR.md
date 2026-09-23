@@ -717,7 +717,7 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 - a sandbox escape or unexpected network egress from a test container;
 - a builder repeatedly disqualified for test tampering (shows as a rising `disqualified` count).
 
-**Intake stop conditions** (ADR-0017). A listener stops with one of six published reasons,
+**Intake stop conditions** (ADR-0017). A listener stops with one of eight published reasons,
 shown on `/factory/intake?repo=`, on the item's evidence chain as `intake.stopped` and in
 `crb doctor`'s `intake` line. None of them loses work: the next poll retries, and nothing is
 registered from a partial read.
@@ -729,7 +729,9 @@ registered from a partial read.
 | `unauthorised` | the tracker rejected the credential (401/403) | mint a new token with permission to read work items and add comments, and store it |
 | `unreachable` | the tracker did not answer (timeout, 5xx, 429) | check the URL and that the deployment may reach it; the next poll retries on its own |
 | `column_gone` | the watched column or state no longer exists on that board | point the listener at a column that does (`PUT /factory/{repo}/intake` with `column`) |
-| `refused` | the tracker refused a write — usually a workflow transition it does not allow, or a permission the credential lacks | nothing was changed on the ticket; fix the workflow or the permission, or clear `CRB_INTAKE__OUTCOME_MAP` |
+| `refused` | the tracker refused a write — usually a workflow transition it does not allow, or a permission the credential lacks; or a ticket whose key cannot become an item id, which costs that ticket and nothing else | nothing was changed on the ticket; fix the workflow or the permission, or clear `CRB_INTAKE__OUTCOME_MAP` |
+| `column_too_large` | the column holds more tickets than one pass may read (`CRB_INTAKE__MAX_PER_POLL`), or the pass ran past `CRB_INTAKE__POLL_BUDGET_S` | narrow the area path or the JQL so the column holds the work that is genuinely ready, or raise the bound; a pass that ran out of time serves what it read and the rest are read next time |
+| `no_public_url` | this deployment does not know its own address, so a link on a ticket would not open | set `CRB_PUBLIC_URL` to the address people use to reach the product, on the API and the worker |
 
 Resume only after root cause, correction, a targeted regression run and re-qualification
 of the affected cells.
@@ -848,8 +850,26 @@ CRB_INTAKE__PROJECT=Widgets
 CRB_INTAKE__COLUMN="Ready for manufacture"    # the System.State / Jira status watched
 CRB_INTAKE__AREA_PATH="Widgets\\Payments"      # Azure DevOps only, optional
 CRB_INTAKE__POLL_S=300
+CRB_INTAKE__MAX_PER_POLL=200                  # a longer column is not read at all (see below)
+CRB_INTAKE__POLL_BUDGET_S=60                  # one pass may take this long, then it stops early
 CRB_INTAKE__OUTCOME_MAP='{"merged": "Done"}'  # EMPTY by default: no ticket is ever moved
+CRB_PUBLIC_URL=https://crb.example.com        # THIS deployment's address (required, see below)
 ```
+
+`CRB_PUBLIC_URL` is not optional for intake. The product writes links to its own pages on
+somebody else's ticket, and a relative path in an Azure DevOps or Jira comment resolves
+against **their** host, so it would go nowhere. A listener cannot be switched on until it is
+set (the switch is refused with `intake_no_public_url`), and a pass that somehow starts
+without it stops with `no_public_url` before it writes anything.
+
+**Bounds on one pass.** A pass costs about eleven tracker calls per ticket, runs in front of
+the worker's heartbeat and, for *Re-read the column now*, inside an API request. So a column
+holding more than `CRB_INTAKE__MAX_PER_POLL` tickets is **not read at all**: the pass stops
+with `column_too_large` and says to narrow the area path or the JQL, because reading an
+arbitrary 200 of somebody's board and saying nothing about the rest would be worse than
+reading none of it. A pass still running after `CRB_INTAKE__POLL_BUDGET_S` stops early,
+serves the tickets it read and records the same reason with how far it got; the rest are
+read on the next pass.
 
 The credential is deliberately **not** an environment variable. An admin stores it through
 `PUT /settings/secrets/tracker-token` (or the Settings screen): an Azure DevOps personal
@@ -867,14 +887,22 @@ the column. For each ticket it has not already handled at its current revision i
 backlog item, runs the readiness gate, and leaves **one** comment (idempotent by a hidden
 marker) and **one** `crb:` label. When every question a good acceptance test needs is
 answered, the item is registered through the same path the freeze form uses and the ticket
-gets `crb:queued` with a link. An edited ticket comes back as an *evolution* — a new item
-superseding the old one; the frozen record is never rewritten. It will never edit any other
-field, never create a ticket, and never read a column it was not pointed at.
+gets `crb:queued`, a note naming the item and a link to it. An edited ticket comes back as an
+*evolution* — a new item superseding the old one; the frozen record is never rewritten. Over
+a ticket's life it can receive four comments, each marked as its own (what is missing, the
+queued note, the pull-request note, the note if the work stopped), one `crb:` label, a link
+to the item and a link to the pull request, and — only where the outcome map is configured —
+one state change. It edits no other field, never creates a ticket, and never reads a column it
+was not pointed at. Switching the listener on or off is itself an event on the repository's
+system trace (`intake.listener.switched`) naming the operator, so a later switch cannot
+quietly overwrite who consented.
 
 **Telemetry.** `/health` and `crb doctor` carry an `intake` line: the tracker, whether a
-credential is stored, and how many listeners are on. It contacts no tracker — a readiness
-probe that called somebody else's service would make this deployment's health depend on
-theirs. Every step is on the repository's own evidence chain
+credential is stored, whether this deployment knows its own address, how many listeners are
+on, and **the stop the last real read recorded** — so a deployment whose listeners are all
+failing `unauthorised` reads `degraded`, not `ok`. It contacts no tracker: a readiness probe
+that called somebody else's service would make this deployment's health depend on theirs, and
+the reachability it reports is therefore the reachability the last poll measured. Every step is on the repository's own evidence chain
 (`GET /factory/{repo}/evidence`) as `intake.polled`, `intake.read`,
 `intake.feedback.posted`, `intake.registered`, `intake.queued`, `intake.delivered`,
 `intake.transitioned` and `intake.stopped` (API.md, "Event vocabulary"). Stop conditions

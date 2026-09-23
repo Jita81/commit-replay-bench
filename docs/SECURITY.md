@@ -54,13 +54,16 @@ only what is named here:
 | Builder / labeller / reviewer calls | the model endpoint (`CRB_OPENAI_BASE_URL` / Azure / Anthropic) | the task brief, the source files the builder reads in its worktree, tool results, the diff it writes | the held-out tests, the ledger, credentials, other repositories |
 | Repository clone and fetch | the repository's git remote (`repos.url`) | the git protocol; the push token only on an `https://` / `ssh` remote and only for factory delivery (§3.4 / `crb.factory.delivery`) | anything not in the git protocol |
 | Sign-in | the OIDC issuer (`CRB_OIDC__ISSUER`, https-only) | the authorisation code flow (PKCE), the ID-token validation against the issuer's JWKS | the session cookie, any repository content |
-| Intake — the watched column (ADR-0017; **off by default**, and off entirely unless `CRB_INTAKE__TRACKER` names one) | the tracker (`CRB_INTAKE__URL`, https-only): Azure DevOps `/_apis/wit/*` or Jira `/rest/api/3/*` | a WIQL or JQL query naming the configured project, column and area path; a read of the work items it returns; and, per ticket, ONE comment, ONE `crb:` label and — only where `CRB_INTAKE__OUTCOME_MAP` configures it — ONE state transition and one link to the pull request | the source code, the diff, the ledger, an evidence pack, any other repository's content, any field of the ticket other than its own comment, its `crb:` label and the mapped state; the model endpoint's credentials |
+| Intake — the watched column (ADR-0017; **off by default**, and off entirely unless `CRB_INTAKE__TRACKER` names one) | the tracker (`CRB_INTAKE__URL`, https-only): Azure DevOps `/_apis/wit/*` or Jira `/rest/api/3/*` | a WIQL or JQL query naming the configured project, column and area path; a read of the work items it returns; and, per ticket, up to four comments each marked as its own (what is missing, queued, the pull request, the stop), ONE `crb:` label, a link to the backlog item and a link to the pull request, and — only where `CRB_INTAKE__OUTCOME_MAP` configures it — ONE state transition. One pass reads at most `CRB_INTAKE__MAX_PER_POLL` tickets (200) and lasts at most `CRB_INTAKE__POLL_BUDGET_S` (60 s), so a column cannot become an unbounded egress | the source code, the diff, the ledger, an evidence pack, any other repository's content, any field of the ticket other than its own comment, its `crb:` label and the mapped state; the model endpoint's credentials |
 
 The intake flow is the only one that WRITES to a third-party system, and what it may write
 is bounded by the size of the protocol it has (`crb.intake.client.TrackerClient`: six verbs,
 no more) rather than by a rule somebody has to remember. Its credential lives in the
 product's own secret store (`tracker_token`, owner-only, read back as a fingerprint), never
-in a URL, a log, an event or an error message.
+in a URL, a log, an event or an error message — which is not a promise but a test
+(`tests/test_server_routes_intake.py::test_the_tracker_token_is_in_no_log_no_event_no_state_file_and_no_error`
+drives a poll and a failed one at DEBUG level and looks for the stored value in every
+record the product writes).
 
 There is no telemetry, no update check, no licence phone-home, and the opt-in federated
 export (ADR-0007) is a file the operator produces, never a call the product makes. With the

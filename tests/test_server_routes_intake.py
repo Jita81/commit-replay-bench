@@ -95,6 +95,21 @@ def _env_with(tmp_path: Path, settings: Any) -> Iterator[Env]:
         yield Env(client=client, factory=factory, info=info, settings=settings)
 
 
+def _env_without_token(tmp_path: Path, settings: Any) -> Any:
+    """The same stack with NO tracker credential stored — the state a deployment is in
+    between an admin setting the connection and an admin setting the token."""
+    from fastapi.testclient import TestClient
+
+    from crb.server.app import create_app
+    from fixtures.server_seed import add_users, make_factory, seed
+
+    factory = make_factory(tmp_path)
+    info = seed(factory)
+    add_users(factory)
+    with TestClient(create_app(settings, factory)) as client:
+        yield Env(client=client, factory=factory, info=info, settings=settings)
+
+
 def _get(env: Env) -> dict[str, Any]:
     r = env.client.get(f"{API_PREFIX}/factory/{ALPHA}/intake")
     assert r.status_code == 200, r.text
@@ -338,3 +353,180 @@ def test_a_tracker_token_with_a_line_break_in_it_is_refused_with_advice(env: Env
     )
     assert r.status_code == 422
     assert "paste the token itself" in envelope(r)["message"]
+
+
+# --- the consent gate leaves a record, and it checks what it promises -----------------
+
+
+def _events(env: Env, action: str) -> list[dict[str, Any]]:
+    from sqlalchemy import select
+
+    from crb.store.models import Event
+
+    with env.factory() as s:
+        rows = s.execute(select(Event).where(Event.action == action)).scalars().all()
+        return [
+            {"actor": r.actor, "repo": r.repo, "payload": dict(r.payload_json or {})} for r in rows
+        ]
+
+
+def test_every_switch_of_the_listener_is_an_event_naming_the_operator(env: Env) -> None:
+    """`switched_by` is ONE mutable field: switching off and on again overwrites it. Without
+    the event, writes made on somebody's tickets under the earlier consent would appear to
+    have been consented by whoever switched it last."""
+    login(env.client, "operator")
+    assert _switch(env, True).status_code == 200
+    login(env.client, "admin")
+    assert _switch(env, False).status_code == 200
+    assert _switch(env, True, column="Another column").status_code == 200
+
+    events = _events(env, "intake.listener.switched")
+    assert [e["payload"]["enabled"] for e in events] == [True, False, True]
+    assert len({e["actor"] for e in events}) == 2  # the first consent is still readable
+    assert all(e["repo"] == ALPHA for e in events)
+    assert events[-1]["payload"]["column"] == "Another column"
+    assert events[0]["payload"]["tracker"] == "fake"
+
+
+def test_switching_a_listener_on_with_no_credential_stored_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The route's own 422 message promised that an admin stores the tracker token first.
+    It accepted the switch anyway, told the operator "the listener is on", and then every
+    poll stopped `no_secret` — advice arriving after the act it was meant to prevent."""
+    monkeypatch.setenv(FAKE_TRACKER_ENV, "1")
+    settings = make_settings(
+        tmp_path,
+        intake={
+            "tracker": "ado",
+            "url": "https://dev.azure.invalid/contoso",
+            "project": "Widgets",
+            "column": "Ready for manufacture",
+        },
+    )
+    for env in _env_without_token(tmp_path, settings):
+        login(env.client, "operator")
+        r = _switch(env, True)
+        assert r.status_code == 422
+        assert envelope(r)["code"] == "intake_no_credential"
+        assert "admin" in envelope(r)["message"]
+        assert _get(env)["listener"]["enabled"] is False
+        break
+
+
+def test_switching_a_listener_on_with_no_public_address_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every link the product writes on a ticket is built from this deployment's own
+    address. Without one they are relative paths, which resolve against the TRACKER's host
+    on the customer's board — so the switch is refused rather than writing dead links."""
+    monkeypatch.setenv(FAKE_TRACKER_ENV, "1")
+    settings = make_settings(
+        tmp_path,
+        public_url="",
+        intake={
+            "tracker": "fake",
+            "url": "https://tracker.invalid",
+            "project": "Widgets",
+            "column": "Ready for manufacture",
+        },
+    )
+    for env in _env_with(tmp_path, settings):
+        login(env.client, "operator")
+        r = _switch(env, True)
+        assert r.status_code == 422
+        assert envelope(r)["code"] == "intake_no_public_url"
+        assert "CRB_PUBLIC_URL" in envelope(r)["message"]
+        break
+
+
+def test_the_link_written_on_a_ticket_is_absolute(env: Env) -> None:
+    login(env.client, "operator")
+    _switch(env, True)
+    env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+    row = _get(env)["rows"][0]
+    assert row["item_url"].startswith("http://localhost:8000/factory?repo=")
+    board = json.loads(fake_tracker_path(env.settings.home).read_text(encoding="utf-8"))
+    ticket = board["tickets"]["4711"]
+    assert ticket["links"] == [row["item_url"]]
+    assert ticket["link_titles"][row["item_url"]] == c.LINK_ITEM
+    comment = "\n".join(str(v) for v in ticket["comments"].values())
+    assert "Follow it here: http" in comment
+
+
+# --- the credential never travels in clear, and never appears anywhere ------------------
+
+
+def test_a_plain_http_tracker_url_is_refused_at_start_up(tmp_path: Path) -> None:
+    """The PAT travels on this URL as ``Authorization: Basic``. Nothing pinned this rule:
+    deleting the validator let a deployment start on ``http://`` and send the credential
+    unencrypted on every poll, with the whole suite still green."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="https"):
+        make_settings(
+            tmp_path,
+            intake={
+                "tracker": "ado",
+                "url": "http://dev.azure.invalid/contoso",
+                "project": "Widgets",
+                "column": "Ready for manufacture",
+            },
+        )
+    ok = make_settings(
+        tmp_path,
+        intake={
+            "tracker": "ado",
+            "url": "https://dev.azure.invalid/contoso/",
+            "project": "Widgets",
+            "column": "Ready for manufacture",
+        },
+    )
+    assert ok.intake.url == "https://dev.azure.invalid/contoso"  # the trailing slash is stripped
+
+
+def test_the_tracker_token_is_in_no_log_no_event_no_state_file_and_no_error(
+    env: Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ADR-0017 and SECURITY §2 forbid a credential in a URL, a log, an event or an error
+    message, and nothing enforced it: a careless edit put the token in a log line and the
+    whole suite stayed green. One test covers the whole sentence."""
+    import logging
+
+    token = "a-tracker-token-value"  # what the fixture stored
+    login(env.client, "operator")
+    _switch(env, True)
+    with caplog.at_level(logging.DEBUG):
+        assert env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").status_code == 200
+        # and a poll that cannot reach its tracker, which is where a detail is built
+        fake_tracker_path(env.settings.home).write_text("not json", encoding="utf-8")
+        env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+
+    assert token not in caplog.text
+    assert token not in json.dumps(_get(env))
+    state = (env.settings.home / "factory" / ALPHA / "intake-state.json").read_text("utf-8")
+    assert token not in state
+    chain = env.client.get(f"{API_PREFIX}/factory/{ALPHA}/evidence").json()
+    assert token not in json.dumps(chain)
+    settings_body = env.client.get(f"{API_PREFIX}/settings").json()
+    assert token not in json.dumps(settings_body)
+
+
+def test_the_walkthroughs_fake_board_needs_no_credential_to_switch_on(env: Env) -> None:
+    """The consent gate asks the SAME question `build_tracker` asks — it must, or a gate can
+    refuse a switch the poll would have honoured. The file-backed fake board has no
+    authentication, so demanding a stored token for it broke the walkthrough while every unit
+    test passed."""
+    from crb.server.intake import needs_credential
+
+    assert needs_credential("ado") and needs_credential("jira")
+    assert not needs_credential("fake") and not needs_credential("none")
+    # the fixture stack IS the fake tracker; clearing the token must not close the gate
+    login(env.client, "admin")
+    assert env.client.delete(f"{API_PREFIX}/settings/secrets/tracker-token").status_code in (
+        200,
+        204,
+    )
+    login(env.client, "operator")
+    assert _switch(env, True).status_code == 200
+    assert _get(env)["listener"]["enabled"] is True

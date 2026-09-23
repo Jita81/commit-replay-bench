@@ -159,10 +159,18 @@ graded attempts behind it, the interval, and whether the honesty floor is intact
 labelled `crb:needs-info`, `crb:ready`, `crb:not-deliverable` or `crb:queued`. Reading a
 column, drafting the item and posting that comment call no model and spend nothing.
 
-**Switching it on takes two people.** An admin configures the tracker and stores its
-credential once for the deployment; an operator switches the listener on for a repository
-on `/factory/intake?repo=`. Every repository starts with its listener **off**.
+**Switching it on takes two people.** An admin configures the tracker, stores its credential
+and sets this deployment's own address (`CRB_PUBLIC_URL` — the links the product writes on your
+tickets are built from it, and a relative path would resolve against your tracker's host, so
+the listener cannot be switched on without it); an operator then switches the listener on for a
+repository from the Factory screen's *Work arriving from your board*, or at
+`/factory/intake?repo=`. Every repository starts with its listener **off**.
 [OPERATOR §11](OPERATOR.md#11-intake--work-arriving-from-a-board) has both.
+
+**One read is bounded.** A column holding more tickets than one pass may read (200 by default)
+is not read at all: the pass stops and says to narrow the area path or the JQL, because reading
+an arbitrary 200 of your board and saying nothing about the rest would be worse than reading
+none of it.
 
 **Two things to know about how it reads a ticket.**
 
@@ -179,13 +187,17 @@ moves under it.
 Story points map to a size tier on a published scale: `≤ 1 → XS`, `≤ 3 → S`, `≤ 8 → M`,
 `≤ 20 → L`, above that `XL`. A ticket with no estimate is `S`, and the comment says so.
 
-**The non-goals, so nobody has to wonder.** The product never edits any ticket field other
-than its own comment, its own `crb:` label and — only where your deployment configured a
-mapping — the one state change after a pull request merges. It never creates a ticket. It
-never reads a column it was not pointed at. It never puts your source code, your diffs, the
-ledger or an evidence pack on the tracker. Those are bounded by the size of the protocol it
-has (six verbs), not by a rule somebody has to remember
-([SECURITY §2](SECURITY.md#2-trust-boundaries)).
+**What it writes, counted, so nobody has to wonder.** Over a ticket's life the product adds
+up to four comments, each marked as its own: what is missing, a note when the work is queued,
+a note when a pull request opens, and a note if the work stopped. It sets one `crb:` label.
+It attaches a link to the backlog item and a link to the pull request. And — only where your
+deployment configured a mapping — it makes one state change after a pull request merges. It
+edits no other ticket field. It never creates a ticket. It never reads a column it was not
+pointed at. It never puts your source code, your diffs, the ledger or an evidence pack on the
+tracker. Those are bounded by the size of the protocol it has (six verbs: read the column,
+read a ticket, comment, label, link, transition), not by a rule somebody has to remember
+([SECURITY §2](SECURITY.md#2-trust-boundaries)). The comment on your ticket carries the same
+list, so this page and your board cannot drift apart.
 
 ---
 

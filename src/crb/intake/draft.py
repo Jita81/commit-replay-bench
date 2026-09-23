@@ -56,6 +56,7 @@ Touch when:   a capability class joins the readiness catalogue — give it cues 
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -64,6 +65,7 @@ from typing import Any
 from crb.core.evidence import utc_now_iso
 from crb.core.spec import UNCLASSIFIED
 from crb.factory.backlog import (
+    ID_MAX_LEN,
     KIND_CODE,
     KIND_INFRA,
     KINDS,
@@ -394,6 +396,13 @@ def item_id_for(tracker: str, key: str) -> str:
     The KEY is checked on its own: a key that sanitises to nothing would make an id that
     names only the tracker, and two such tickets would collide. That is refused, never
     guessed at.
+
+    Two keys can never become one id. The backlog's ids are capped at 64 characters, and a
+    plain truncation would map two keys sharing a 64-character prefix onto the same item —
+    the second ticket would be told, on its own board, that it had been recorded as the
+    first one's item while nothing was registered for it. An id that has to be shortened
+    therefore keeps 55 characters of the slug and ends in eight characters of its SHA-256,
+    which is derived from the WHOLE key.
     """
     key_slug = _ID_ILLEGAL.sub("-", str(key).lower()).strip("-.")
     if not key_slug:
@@ -401,7 +410,10 @@ def item_id_for(tracker: str, key: str) -> str:
     slug = _ID_ILLEGAL.sub("-", f"{tracker}-{key_slug}".lower()).strip("-.")
     if not slug or not slug[0].isalnum():
         raise ValueError(f"ticket key {key!r} does not make a usable item id")
-    return slug[:64]
+    if len(slug) <= ID_MAX_LEN:
+        return slug
+    digest = hashlib.sha256(f"{tracker}-{key}".encode()).hexdigest()[:8]
+    return f"{slug[: ID_MAX_LEN - 9].rstrip('-.')}-{digest}"
 
 
 def _tag_value(tags: tuple[str, ...], prefix: str) -> str:

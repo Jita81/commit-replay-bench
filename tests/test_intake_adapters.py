@@ -43,6 +43,37 @@ from crb.intake import client as c
 ORG = "https://dev.azure.invalid/contoso"
 SITE = "https://contoso.atlassian.invalid"
 
+#: A REAL marker, not a one-letter fixture: what makes a comment this product's is the
+#: token ``crb:intake:<tracker>:<key>``, and a test that used ``<!-- m -->`` would pass on
+#: an adapter that matched the letter "m" anywhere in somebody else's comment.
+MARKER = c.marker_for("ado", "4711")
+JIRA_MARKER = c.marker_for("jira", "WID-12")
+
+
+def _a_real_feedback_comment() -> str:
+    """The comment the product actually posts, rendered by the product's own code.
+
+    A hand-written two-line fixture cannot catch a lossy comparison: the real comment has
+    blank lines between its sections, and dropping them is exactly what broke Jira's
+    idempotency.
+    """
+    from crb.factory.readiness import assess
+    from crb.intake.draft import draft_from
+    from crb.intake.feedback import render_feedback
+
+    ticket = c.Ticket(
+        key="WID-12",
+        title="Fix the 500 on the export endpoint",
+        body="The export endpoint returns 500 when the range is empty.",
+        acceptance_criteria="Given an empty range, when exporting, then a 200 with no rows.",
+        type="Bug",
+        state="Ready for manufacture",
+        revision="7",
+        url=f"{SITE}/browse/WID-12",
+    )
+    draft = draft_from(ticket, tracker="jira")
+    return render_feedback(draft, assess(draft.item, []), cell_route=None).text
+
 
 def _client(handler: Any) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
@@ -125,6 +156,29 @@ def test_ado_asks_wiql_for_the_state_inside_the_area_path_and_returns_refs() -> 
     assert seen["auth"].startswith("Basic ")
 
 
+def test_ado_bounds_the_wiql_query_and_the_ids_it_asks_for() -> None:
+    """Azure DevOps answers a WIQL query with up to 20,000 ids, and one pass costs about
+    eleven calls per ticket, so the QUERY carries the bound — and the adapter truncates to it
+    even if the service ignored ``$top``."""
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/wiql"):
+            seen["top"] = request.url.params["$top"]
+            return _json({"workItems": [{"id": i} for i in range(1, 10)]})
+        seen["ids"] = request.url.params["ids"]
+        return _json({"value": [{"id": 1, "fields": {ado.FIELD_TITLE: "x"}}]})
+
+    _ado(handler, max_refs=4).entered("Ready", "")
+    assert seen["top"] == "4"
+    assert seen["ids"] == "1,2,3,4"
+
+
+def test_ado_refuses_a_connection_whose_bound_is_not_a_bound() -> None:
+    with pytest.raises(ValueError, match="max_refs"):
+        ado.AdoConfig(organisation_url=ORG, project="Widgets", column="Ready", max_refs=0)
+
+
 def test_ado_escapes_a_quote_in_a_column_name_rather_than_building_broken_wiql() -> None:
     seen: dict[str, Any] = {}
 
@@ -175,8 +229,8 @@ def test_ado_posts_a_comment_when_the_marker_is_absent() -> None:
         posted.append(json.loads(request.content)["text"])
         return _json({"id": 2}, 201)
 
-    _ado(handler).comment("4711", "<!-- m -->\nhello", "<!-- m -->")
-    assert posted == ["<!-- m -->\nhello"]
+    _ado(handler).comment("4711", f"{MARKER}\nhello", MARKER)
+    assert posted == [f"{MARKER}\nhello"]
 
 
 def test_ado_writes_nothing_when_the_same_comment_is_already_there() -> None:
@@ -184,9 +238,9 @@ def test_ado_writes_nothing_when_the_same_comment_is_already_there() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.method)
-        return _json({"comments": [{"id": 1, "text": "<!-- m -->\nhello"}]})
+        return _json({"comments": [{"id": 1, "text": f"{MARKER}\nhello"}]})
 
-    _ado(handler).comment("4711", "<!-- m -->\nhello", "<!-- m -->")
+    _ado(handler).comment("4711", f"{MARKER}\nhello", MARKER)
     assert calls == ["GET"]
 
 
@@ -195,14 +249,36 @@ def test_ado_patches_the_existing_comment_when_the_text_changed() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
-            return _json({"comments": [{"id": 9, "text": "<!-- m -->\nold"}]})
+            return _json({"comments": [{"id": 9, "text": f"{MARKER}\nold"}]})
         assert request.method == "PATCH"
         patched.append((request.url.path, json.loads(request.content)["text"]))
         return _json({"id": 9})
 
-    _ado(handler).comment("4711", "<!-- m -->\nnew", "<!-- m -->")
+    _ado(handler).comment("4711", f"{MARKER}\nnew", MARKER)
     assert patched and patched[0][0].endswith("/comments/9")
-    assert patched[0][1] == "<!-- m -->\nnew"
+    assert patched[0][1] == f"{MARKER}\nnew"
+
+
+def test_ado_marks_a_note_that_does_not_carry_the_marker_itself() -> None:
+    """The queued, pull-request and refusal notes are rendered without a marker. Without
+    this, each of them would carry no identity on the ticket and every re-read would add
+    another copy — so the adapter puts the marker on, and finds it again next time."""
+    posted: list[str] = []
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return _json({"comments": [{"id": 1, "text": t} for t in seen]})
+        posted.append(json.loads(request.content)["text"])
+        seen.append(posted[-1])
+        return _json({"id": len(posted)}, 201)
+
+    note = "This ticket is now item `ado-4711` in the factory's frozen backlog."
+    queued = c.marker_for("ado", "4711:queued")
+    _ado(handler).comment("4711", note, queued)
+    assert posted == [f"{queued}\n{note}"]
+    _ado(handler).comment("4711", note, queued)
+    assert len(posted) == 1  # the second call found its own marker and wrote nothing
 
 
 def test_ado_label_replaces_only_the_products_own_tags() -> None:
@@ -252,6 +328,23 @@ def test_ado_reports_a_state_the_board_does_not_have_as_a_refusal_not_a_missing_
     assert "Nowhere" in err.value.detail
 
 
+def test_ado_names_the_link_so_a_reader_knows_what_it_opens() -> None:
+    """The same verb attaches the backlog item when a ticket is queued and the pull request
+    when one opens, so the name travels with the URL."""
+    ops: list[Any] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return _json({"id": 4711, "fields": {}, "relations": []})
+        ops.append(json.loads(request.content))
+        return _json({"id": 4711})
+
+    _ado(handler).link("4711", "https://crb.invalid/factory?item=ado-4711", c.LINK_ITEM)
+    value = ops[0][0]["value"]
+    assert value["rel"] == "Hyperlink"
+    assert value["attributes"]["comment"] == "Backlog item"
+
+
 def test_ado_link_is_skipped_when_the_url_is_already_attached() -> None:
     methods: list[str] = []
 
@@ -296,6 +389,38 @@ def test_jira_asks_jql_for_the_status_in_the_project() -> None:
     assert "(component = payments)" in seen["jql"]
 
 
+def test_jira_pages_until_the_bound_and_never_drops_the_rest_in_silence() -> None:
+    """The first version asked for one page of 200 and ignored whatever came after it. A
+    column longer than the bound now comes back AT the bound, and the service — which asked
+    for one more than a pass may read — stops the pass rather than reading a truncated
+    column and saying nothing."""
+    page_size = jira.PAGE_SIZE
+    pages: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        pages.append(body)
+        start = len(pages) - 1
+        issues = [
+            {
+                "key": f"WID-{start * page_size + i}",
+                "fields": {"summary": "x", "updated": "2026-09-22"},
+            }
+            for i in range(min(page_size, body["maxResults"]))
+        ]
+        return _json({"issues": issues, "nextPageToken": f"tok{len(pages)}"})
+
+    refs = _jira(handler, max_refs=page_size + 5).entered("Ready for manufacture", "")
+    assert len(refs) == page_size + 5
+    assert [p["maxResults"] for p in pages] == [page_size, 5]
+    assert pages[1]["nextPageToken"] == "tok1"
+
+
+def test_jira_refuses_a_connection_whose_bound_is_not_a_bound() -> None:
+    with pytest.raises(ValueError, match="max_refs"):
+        jira.JiraConfig(site_url=SITE, project="WID", column="Ready", max_refs=0)
+
+
 def test_jira_read_flattens_adf_and_reads_the_configured_points_field() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return _json(
@@ -328,7 +453,9 @@ def test_jira_read_flattens_adf_and_reads_the_configured_points_field() -> None:
     assert t.state == "Ready for manufacture"
 
 
-def test_jira_writes_the_comment_as_adf_carrying_the_marker_as_text() -> None:
+def _jira_posted(text: str, marker: str) -> dict[str, Any]:
+    """The ADF document the adapter would post for ``text`` — the only honest fixture for
+    "the comment is already there", since the adapter compares against its own shape."""
     posted: list[Any] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -337,20 +464,78 @@ def test_jira_writes_the_comment_as_adf_carrying_the_marker_as_text() -> None:
         posted.append(json.loads(request.content)["body"])
         return _json({"id": "1"}, 201)
 
-    _jira(handler).comment("WID-12", "<!-- m -->\nhello", "<!-- m -->")
-    assert posted[0]["type"] == "doc"
-    assert jira.adf_to_text(posted[0]) == "<!-- m -->\nhello"
+    _jira(handler).comment("WID-12", text, marker)
+    return dict(posted[0])
+
+
+def test_jira_keeps_the_marker_out_of_the_body_and_names_itself_instead() -> None:
+    """ADF has no hidden node, so a marker written as an HTML comment is READ OUT on a Jira
+    issue: the first paragraph of every comment literally said ``<!-- crb:intake:jira:… -->``.
+    The identity is shown instead of smuggled — one attribution line a person understands —
+    and the token is in it, so the same lookup still finds the comment."""
+    doc = _jira_posted(f"{JIRA_MARKER}\nhello", JIRA_MARKER)
+    text = jira.adf_to_text(doc)
+    assert doc["type"] == "doc"
+    assert "<!--" not in text
+    assert text.startswith("hello")
+    assert c.marker_token(JIRA_MARKER) in text
+    assert "only ever edits this one comment" in text
+
+
+def test_jira_renders_the_renderers_markdown_as_adf_marks_not_as_characters() -> None:
+    doc = _jira_posted(f"{JIRA_MARKER}\n**What is missing** the `acceptance` slot", JIRA_MARKER)
+    nodes = [n for p in doc["content"] for n in (p.get("content") or [])]
+    strong = [n["text"] for n in nodes if {"type": "strong"} in (n.get("marks") or [])]
+    code = [n["text"] for n in nodes if {"type": "code"} in (n.get("marks") or [])]
+    assert strong == ["What is missing"]
+    assert code == ["acceptance"]
+    assert not any("**" in n["text"] or "`" in n["text"] for n in nodes)
 
 
 def test_jira_writes_nothing_when_the_same_comment_is_already_there() -> None:
     methods: list[str] = []
+    already = _jira_posted(f"{JIRA_MARKER}\nhello", JIRA_MARKER)
 
     def handler(request: httpx.Request) -> httpx.Response:
         methods.append(request.method)
-        return _json({"comments": [{"id": "1", "body": jira.text_to_adf("<!-- m -->\nhello")}]})
+        return _json({"comments": [{"id": "1", "body": already}]})
 
-    _jira(handler).comment("WID-12", "<!-- m -->\nhello", "<!-- m -->")
+    _jira(handler).comment("WID-12", f"{JIRA_MARKER}\nhello", JIRA_MARKER)
     assert methods == ["GET"]
+
+
+def test_jira_writes_nothing_when_the_products_own_comment_is_already_there() -> None:
+    """The regression the two-line fixture above cannot catch. ``adf_to_text`` drops blank
+    lines, and every comment the renderer produces has them, so comparing the text the
+    product holds against the flattened text Jira returns was never equal for a REAL
+    comment: the same unchanged comment was rewritten on every poll, for ever."""
+    text = _a_real_feedback_comment()
+    assert "\n\n" in text, "the fixture must be the real comment, blank lines and all"
+    already = _jira_posted(text, JIRA_MARKER)
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        return _json({"comments": [{"id": "1", "body": already}]})
+
+    _jira(handler).comment("WID-12", text, JIRA_MARKER)
+    assert methods == ["GET"], "the same comment was rewritten"
+
+
+def test_jira_names_the_remote_link_by_what_it_points_at() -> None:
+    """A Jira remote link SHOWS its title. Hard-coding "Pull request" labelled the queued
+    link — attached long before any pull request exists — as something that did not exist."""
+    posted: list[Any] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content))
+        return _json({"id": 1}, 201)
+
+    t = _jira(handler)
+    t.link("WID-12", "https://crb.invalid/factory?item=jira-wid-12", c.LINK_ITEM)
+    t.link("WID-12", "https://github.invalid/o/r/pull/7", c.LINK_PULL_REQUEST)
+    assert [p["object"]["title"] for p in posted] == ["Backlog item", "Pull request"]
+    assert posted[0]["globalId"] == posted[0]["object"]["url"]
 
 
 def test_jira_label_removes_the_other_crb_labels_and_adds_the_wanted_one() -> None:

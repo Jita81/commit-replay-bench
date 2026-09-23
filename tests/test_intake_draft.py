@@ -28,7 +28,7 @@ from __future__ import annotations
 import pytest
 
 from crb.factory import readiness as rd
-from crb.factory.backlog import KIND_CODE, KIND_INFRA, KIND_OPERATOR, BacklogItem
+from crb.factory.backlog import ID_MAX_LEN, KIND_CODE, KIND_INFRA, KIND_OPERATOR, BacklogItem
 from crb.intake import client as c
 from crb.intake import draft as d
 from fixtures.intake import a_ticket
@@ -57,6 +57,22 @@ def test_the_item_id_is_tracker_and_key_lowercased_and_legal(
 def test_a_key_that_sanitises_to_nothing_is_refused_rather_than_guessed() -> None:
     with pytest.raises(ValueError, match="key"):
         d.draft_from(a_ticket(key="///"), tracker="ado")
+
+
+def test_two_long_keys_sharing_a_prefix_never_become_one_item() -> None:
+    """A plain ``slug[:64]`` mapped two keys sharing a 64-character prefix onto one id: the
+    second ticket was labelled queued, told it had been recorded as the FIRST one's item and
+    linked to it, while nothing at all was registered for it — a silent drop with an
+    affirmative false statement on somebody's board."""
+    long_a = "a" * 80 + "1"
+    long_b = "a" * 80 + "2"
+    id_a = d.item_id_for("ado", long_a)
+    id_b = d.item_id_for("ado", long_b)
+    assert id_a != id_b
+    assert len(id_a) <= ID_MAX_LEN and len(id_b) <= ID_MAX_LEN
+    # still a legal id, and still derived from the whole key (the same key gives the same id)
+    assert BacklogItem(id=id_a, title="t", kind=KIND_CODE).id == id_a
+    assert d.item_id_for("ado", long_a) == id_a
 
 
 # --- rich text to plain text -----------------------------------------------------

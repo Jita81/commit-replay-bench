@@ -375,6 +375,18 @@ class IntakeSettings(BaseModel):
     acceptance_field: str = ""
     #: Seconds between polls of a switched-on repository's column.
     poll_s: int = Field(default=300, ge=30)
+    #: The most tickets ONE pass may read. A pass costs about eleven tracker calls per
+    #: ticket, and Azure DevOps will answer a query with up to 20,000 ids, so an
+    #: unbounded pass would starve the worker's heartbeat and hold an API thread for as
+    #: long as the column is long. A column with more than this in it is not read at all:
+    #: the pass stops with ``column_too_large`` and says to narrow the area path or the
+    #: JQL, because reading an arbitrary 200 of somebody's board and saying nothing about
+    #: the rest would be worse than reading none of it.
+    max_per_poll: int = Field(default=200, ge=1, le=2000)
+    #: The longest one pass may take before it stops early and serves what it has. It
+    #: bounds the worker's idle loop (the heartbeat that follows the pass must not be late)
+    #: and the API request the on-demand poll runs inside.
+    poll_budget_s: int = Field(default=60, ge=5, le=900)
     #: ``merged``/``closed`` → the state the ticket moves to. EMPTY BY DEFAULT: a
     #: deployment that configures nothing never moves anybody's ticket.
     outcome_map: dict[str, str] = Field(default_factory=dict)
@@ -417,6 +429,8 @@ class IntakeSettings(BaseModel):
             "points_field": self.points_field,
             "acceptance_field": self.acceptance_field,
             "poll_s": self.poll_s,
+            "max_per_poll": self.max_per_poll,
+            "poll_budget_s": self.poll_budget_s,
             "outcome_map": dict(self.outcome_map),
             "enabled": self.enabled,
         }
@@ -464,6 +478,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     bind_host: str = "127.0.0.1"
     bind_port: int = Field(default=8000, ge=1, le=65535)
+    #: The address people use to reach THIS deployment (``https://crb.example.com``).
+    #: It is needed because the product writes links to its own pages on somebody else's
+    #: ticket, and a relative path in a Jira or Azure DevOps comment resolves against
+    #: THEIR host, so it goes nowhere. Empty is refused where it matters rather than
+    #: papered over: a listener cannot be switched on without it, and a pass that somehow
+    #: starts without it stops with ``no_public_url`` before it writes anything.
+    public_url: str = ""
     #: Seconds after which a running run with a stale heartbeat is reported degraded.
     worker_heartbeat_stale_s: int = Field(default=120, ge=1)
     #: Built UI directory (``ui/dist``). When it exists the API serves it at ``/`` with an
@@ -479,6 +500,26 @@ class Settings(BaseSettings):
                 return json.loads(raw)
             return [p.strip() for p in raw.split(",") if p.strip()]
         return v
+
+    @field_validator("public_url")
+    @classmethod
+    def _public_url_is_absolute(cls, v: str) -> str:
+        # An absolute https:// address, because it is written into a third party's ticket
+        # and a reader there clicks it from another host. Loopback over http is admitted
+        # for a developer and for the walkthrough's own stack, which has no certificate;
+        # nothing else may be plain http, since the link is how a person reaches a page
+        # that asks them to sign in.
+        raw = v.strip().rstrip("/")
+        if not raw:
+            return ""
+        low = raw.lower()
+        if low.startswith("https://"):
+            return raw
+        if low.startswith(("http://localhost", "http://127.0.0.1", "http://[::1]")):
+            return raw
+        raise ValueError(
+            f"CRB_PUBLIC_URL must be an https:// address (or http:// on loopback), got {raw!r}"
+        )
 
     @field_validator("cors_origins")
     @classmethod
@@ -611,6 +652,7 @@ class Settings(BaseSettings):
             "builder": self.builder.redacted(),
             "factory": self.factory.redacted(),
             "intake": self.intake.redacted(),
+            "public_url": self.public_url,
             "metrics_enabled": self.metrics_enabled,
             "log_format": self.log_format,
             "worker_heartbeat_stale_s": self.worker_heartbeat_stale_s,

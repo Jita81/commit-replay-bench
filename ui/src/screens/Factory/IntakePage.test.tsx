@@ -23,7 +23,7 @@
  * Tested by:    ui/src/screens/Factory/IntakePage.test.tsx
  * Touch when:   an act is added to the screen; a field is added to the intake response.
  */
-import { cleanup, screen, waitFor } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Intake } from '../../api/types'
@@ -188,7 +188,34 @@ describe('IntakePage', () => {
     expect(row.textContent).toContain('ado-4711')
     expect(row.textContent).toContain('bug.fix')
     expect(row.textContent).toContain('confidence 0.67')
-    expect(row.textContent).toContain('Route deliver on n = 42')
+    // the route is a verdict pill, the same gloss as the map and the factory — not the bare
+    // machine word, on the one screen aimed at the newest reader
+    expect(row.textContent).toContain('Deliver on n = 42')
+    expect(within(row).getByTestId('verdict-deliver')).toBeInTheDocument()
+  })
+
+  it('the item link stays inside the app although the ticket carries an absolute one', async () => {
+    // `item_url` is the ABSOLUTE address written on the customer's ticket, so a reader on
+    // their board can open it. In here the same page is one route away.
+    setup(ON)
+    const row = await screen.findByTestId('intake-row-4711')
+    const link = within(row).getByRole('link', { name: 'ado-4711' })
+    expect(link).toHaveAttribute('href', '/factory?repo=alpha&item=ado-4711')
+  })
+
+  it('a ticket the classifier could not place says the one thing that closes it', async () => {
+    // the commonest bad ticket: `crb:needs-info` with no open question at all, because a
+    // class nobody could work out means nobody can say what the test needs
+    setup({
+      ...ON,
+      rows: [{ ...ON.rows[0]!, key: '4713', label: 'crb:needs-info', capability_class: '(unclassified)', confidence: 0, registered: false, open_questions: [] }],
+    })
+    const row = await screen.findByTestId('intake-row-4713')
+    expect(row.textContent).toContain('needs information')
+    expect(row.textContent).toContain('could not work out what kind of change this is')
+    expect(row.textContent).toContain('crb:class=bug.fix')
+    expect(row.textContent).toContain('unclassified')
+    expect(row.textContent).not.toContain('(unclassified)')
   })
 
   it('a ticket that needs information shows the question and says nothing is registered', async () => {

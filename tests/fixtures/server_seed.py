@@ -224,6 +224,9 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
         "sandbox": {"executor": "local"},
         "bootstrap_admin": {"username": USERS["admin"], "password": ROOT_PW},
         "log_format": "text",
+        # a deployment that knows its own address, because one that does not may not switch
+        # an intake listener on (a link on somebody's ticket has to be openable)
+        "public_url": "http://localhost:8000",
     }
     base.update(overrides)
     return Settings(**base)

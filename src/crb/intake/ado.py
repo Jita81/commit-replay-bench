@@ -56,6 +56,7 @@ from crb.intake.client import (
     Ticket,
     TicketRef,
     TrackerError,
+    marker_token,
 )
 from crb.intake.draft import html_to_text
 from crb.intake.http import DEFAULT_TIMEOUT_S, TrackerHttp, basic_auth
@@ -92,11 +93,20 @@ class AdoConfig:
     #: Optional ``System.AreaPath`` the query is restricted to, so one deployment can
     #: watch one team's board inside a shared project.
     area_path: str = ""
+    #: The most tickets one read of the column may return. Azure DevOps answers a WIQL
+    #: query with up to 20,000 ids, and one pass of the listener costs about eleven HTTP
+    #: calls per ticket, so the query itself is bounded (``$top``). The service asks for one
+    #: MORE than the deployment's ``max_per_poll`` deliberately: it can then see that the
+    #: column overflowed and stop the pass with ``column_too_large`` rather than read a
+    #: truncated column and say nothing.
+    max_refs: int = 201
 
     def __post_init__(self) -> None:
         for name in ("organisation_url", "project", "column"):
             if not str(getattr(self, name)).strip():
                 raise ValueError(f"an Azure DevOps connection needs {name}")
+        if int(self.max_refs) < 1:
+            raise ValueError("an Azure DevOps connection needs max_refs of at least 1")
 
     @property
     def base_url(self) -> str:
@@ -150,11 +160,13 @@ class AdoTracker:
         )
         body = self.http.post(
             "_apis/wit/wiql",
-            params={"api-version": API_VERSION},
+            params={"api-version": API_VERSION, "$top": int(self.config.max_refs)},
             json={"query": wiql},
             expect=(200,),
         )
-        ids = [str(w.get("id")) for w in (body or {}).get("workItems", []) if w.get("id")]
+        ids = [str(w.get("id")) for w in (body or {}).get("workItems", []) if w.get("id")][
+            : int(self.config.max_refs)
+        ]
         if not ids:
             return []
         return self._refs(ids)
@@ -226,7 +238,14 @@ class AdoTracker:
 
         Identical text writes nothing at all, so a poll that runs every minute does not
         touch the ticket between edits.
+
+        The marker is put INTO the text when the caller's text does not already carry it
+        (the gap feedback does; the queued, pull-request and refusal notes do not). Without
+        that, those three notes would carry no identity on the ticket, and every re-read
+        would add another copy of them.
         """
+        token = marker_token(marker)
+        wanted = text if token in text else f"{marker}\n{text}"
         body = self.http.get(
             f"_apis/wit/workItems/{key}/comments",
             params={"api-version": COMMENTS_API_VERSION, "$top": 200},
@@ -234,21 +253,21 @@ class AdoTracker:
         )
         for c in (body or {}).get("comments", []):
             existing = str(c.get("text", ""))
-            if marker not in existing:
+            if token not in existing:
                 continue
-            if existing.strip() == text.strip():
+            if existing.strip() == wanted.strip():
                 return
             self.http.patch(
                 f"_apis/wit/workItems/{key}/comments/{c.get('id')}",
                 params={"api-version": COMMENTS_API_VERSION},
-                json={"text": text},
+                json={"text": wanted},
                 expect=(200,),
             )
             return
         self.http.post(
             f"_apis/wit/workItems/{key}/comments",
             params={"api-version": COMMENTS_API_VERSION},
-            json={"text": text},
+            json={"text": wanted},
             expect=(200, 201),
         )
 
@@ -285,14 +304,20 @@ class AdoTracker:
                 ) from exc
             raise
 
-    def link(self, key: str, url: str) -> None:
-        """Attach a hyperlink once; a second call with the same URL writes nothing."""
+    def link(self, key: str, url: str, title: str = "") -> None:
+        """Attach a hyperlink once; a second call with the same URL writes nothing.
+
+        ``title`` becomes the relation's comment, which is what Azure DevOps shows beside
+        the link — so a queued ticket reads "Backlog item" and a delivered one reads
+        "Pull request". The URL stays the identity, so a title changed later does not make
+        a second link.
+        """
         if url in self.read(key).links:
             return
-        self._patch(
-            key,
-            [{"op": "add", "path": "/relations/-", "value": {"rel": "Hyperlink", "url": url}}],
-        )
+        value: dict[str, Any] = {"rel": "Hyperlink", "url": url}
+        if title:
+            value["attributes"] = {"comment": title}
+        self._patch(key, [{"op": "add", "path": "/relations/-", "value": value}])
 
 
 __all__ = [

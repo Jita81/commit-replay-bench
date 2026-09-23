@@ -16,6 +16,8 @@
  *               the feedback again — each with a success state naming what happened
  *               (tickets read, comments posted, items registered) and an error that says
  *               what to do (tracker unreachable, credential missing, the write refused).
+ *               A row's `item_url` is the ABSOLUTE address written on the customer's ticket;
+ *               in here the item page is one route away, so the screen builds its own path.
  * How:          `useRepoParam({ defaultToLatest: true })` → `useIntake` (a pure read: no
  *               tracker is contacted) → `useSetIntakeListener` (PUT, operator) and
  *               `usePollIntake` (POST, operator; `force` is "post the feedback again").
@@ -28,7 +30,10 @@
  *               ui/src/api/types.ts (`Intake`, `IntakeRow`),
  *               src/crb/server/routes/factory.py (the three routes),
  *               src/crb/server/intake.py (the listener these acts drive),
- *               ui/src/screens/Factory/FactoryPage.tsx (where a queued item goes next),
+ *               ui/src/screens/Factory/FactoryPage.tsx (where a queued item goes next, and the
+ *               screen that links HERE — this one is reached from the Factory card, never by
+ *               typing its path), ui/src/components/VerdictPill.tsx (the route reads the same
+ *               here as on the map and the factory),
  *               ui/src/help/help.ts (the About block), ui/src/help/hints.ts (every element)
  * Tested by:    ui/src/screens/Factory/IntakePage.test.tsx, ui/e2e/walkthrough/12-intake.spec.ts
  * Touch when:   a field is added to the intake response (types first); a fifth label or a
@@ -49,6 +54,7 @@ import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
+import { VerdictPill } from '../../components/VerdictPill'
 import { Details, NotificationBanner, SummaryList } from '../../components/govuk'
 import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
@@ -63,6 +69,12 @@ const LABEL_DISPLAY: Record<string, { tone: Tone; label: string; hint: HintId }>
   'crb:not-deliverable': { tone: 'red', label: 'not deliverable', hint: 'pill.intake.not_deliverable' },
   'crb:queued': { tone: 'green', label: 'queued', hint: 'pill.intake.queued' },
 }
+
+/** What the server serves when the classifier would have to guess. It is a SENTINEL, not a
+ *  class: brackets and all, so nobody mistakes it for one. The screen shows the word without
+ *  the brackets and, because a reader of an amber row deserves something to do, the one act
+ *  that closes it. */
+const UNCLASSIFIED = '(unclassified)'
 
 /** A stop the server named, with the server's own advice under it. Never our own words. */
 function Stopped({ reason, advice }: { reason: string; advice: string }) {
@@ -81,9 +93,14 @@ function Stopped({ reason, advice }: { reason: string; advice: string }) {
 }
 
 /** One ticket: what it is, what the product understood, what is still missing, where it went. */
-function Row({ row }: { row: IntakeRow }) {
+function Row({ row, repo }: { row: IntakeRow; repo: string }) {
   const display = LABEL_DISPLAY[row.label]
   const route = row.cell_route
+  const unclassified = row.capability_class === UNCLASSIFIED || !row.capability_class
+  // `row.item_url` is the ABSOLUTE address written on the customer's ticket, so a reader on
+  // their board can open it. In here the same page is one route away, so the screen builds
+  // its own path rather than sending the browser back out through the front door.
+  const itemHref = `/factory?repo=${encodeURIComponent(repo)}&item=${encodeURIComponent(row.item_id)}`
   return (
     <li className="border-b border-border py-4 last:border-0" data-testid={`intake-row-${row.key}`}>
       <div className="flex flex-wrap items-baseline gap-2">
@@ -101,7 +118,7 @@ function Row({ row }: { row: IntakeRow }) {
         <div>
           <Hint id="item.intake.class">
             <span className="text-on-surface-muted">
-              Kind of change: <span className="font-mono">{row.capability_class || 'unclassified'}</span> ({row.size || '—'}), confidence {row.confidence.toFixed(2)}
+              Kind of change: <span className="font-mono">{unclassified ? 'unclassified' : row.capability_class}</span> ({row.size || '—'}), confidence {row.confidence.toFixed(2)}
             </span>
           </Hint>
         </div>
@@ -118,7 +135,7 @@ function Row({ row }: { row: IntakeRow }) {
             <span className="text-on-surface-muted">
               {route ? (
                 <>
-                  Route <span className="font-mono">{route.route}</span> on n = {fmtInt(route.n)}, interval {(route.ci_low * 100).toFixed(0)}–{(route.ci_high * 100).toFixed(0)} %
+                  <VerdictPill route={route.route} size="xs" reason={route.reason} /> on n = {fmtInt(route.n)}, interval {(route.ci_low * 100).toFixed(0)}–{(route.ci_high * 100).toFixed(0)} %
                 </>
               ) : (
                 'This cell has not been measured on this repository — it says nothing, not zero.'
@@ -132,7 +149,7 @@ function Row({ row }: { row: IntakeRow }) {
               {row.registered ? (
                 <>
                   Registered as{' '}
-                  <Link to={row.item_url} className="font-mono underline">
+                  <Link to={itemHref} className="font-mono underline">
                     {row.item_id}
                   </Link>
                   {row.is_evolution ? ` (replaces ${row.supersedes})` : ''}
@@ -151,6 +168,17 @@ function Row({ row }: { row: IntakeRow }) {
           <Hint id="item.intake.stopped">
             <span>
               This ticket stopped at <span className="font-mono">{row.stopped}</span>. {row.stopped_advice}
+            </span>
+          </Hint>
+        </p>
+      )}
+      {unclassified && (
+        <p className="mt-2 text-sm">
+          <Hint id="item.intake.unclassified">
+            <span>
+              The product could not work out what kind of change this is, so it cannot say what
+              the acceptance test needs. Add a tag such as <span className="font-mono">crb:class=bug.fix</span> to the ticket and it
+              will use it on the next read.
             </span>
           </Hint>
         </p>
@@ -177,7 +205,7 @@ function Row({ row }: { row: IntakeRow }) {
           </LinkButton>
         )}
         {row.registered && (
-          <LinkButton to={row.item_url} size="sm" hint="link.intake.item">
+          <LinkButton to={itemHref} size="sm" hint="link.intake.item">
             Open the item
           </LinkButton>
         )}
@@ -392,7 +420,7 @@ export function IntakePage() {
             ) : (
               <ul className="m-0 list-none p-0">
                 {data.rows.map((row) => (
-                  <Row key={row.key} row={row} />
+                  <Row key={row.key} row={row} repo={repo} />
                 ))}
               </ul>
             )}

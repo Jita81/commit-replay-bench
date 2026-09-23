@@ -87,7 +87,9 @@ Rules for the table:
   the two separators.)
 - **A gap id names one piece of work.** Two files may share an id — and must, when the same
   change closes criteria in both — but then the line is identical in both, word for word. The
-  checker fails when one id carries two different lines. Ids are allocated from one register
+  checker fails when one id carries two different lines — whether they are in two files or
+  twice in one, which it missed until a wave used an id that was already taken. Ids are
+  allocated from one register
   per band: pages `G-100`–`G-299`, journeys `G-300`–`G-499`, streams `G-500`–`G-599`, the
   product `G-600`–`G-699`, and gaps shared across files `G-900`–`G-999`.
 

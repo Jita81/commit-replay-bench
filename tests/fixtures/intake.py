@@ -27,6 +27,8 @@ Touch when:   a verb is added to the protocol — add it here first, then the ad
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from crb.intake import client as c
 
 
@@ -46,20 +48,32 @@ class FakeTracker:
         self.labels: dict[str, str] = {}
         self.states: dict[str, str] = {}
         self.links: dict[str, list[str]] = {}
+        #: url → the name the link was given ("Backlog item" / "Pull request").
+        self.link_titles: dict[str, str] = {}
         self.calls: list[tuple[str, str]] = []
+        #: Raised by EVERY verb — the blunt instrument, for "the tracker is unreachable".
         self.fail: c.TrackerError | None = None
+        #: ``(verb, what) -> TrackerError | None`` — raised by that one call, so a test can
+        #: fail exactly one write (the queued comment, say) and let the rest of the poll
+        #: through, which is how a real tracker fails. ``what`` is the marker for a comment
+        #: and the ticket key for every other verb.
+        self.fail_when: Callable[[str, str], c.TrackerError | None] | None = None
 
-    def _maybe_fail(self) -> None:
+    def _maybe_fail(self, verb: str = "", what: str = "") -> None:
         if self.fail is not None:
             raise self.fail
+        if self.fail_when is not None:
+            exc = self.fail_when(verb, what)
+            if exc is not None:
+                raise exc
 
     def entered(self, column: str, since: str) -> list[c.TicketRef]:
-        self._maybe_fail()
+        self._maybe_fail("entered", column)
         self.calls.append(("entered", column))
         return [r for r in self.column if not since or r.changed >= since]
 
     def read(self, key: str) -> c.Ticket:
-        self._maybe_fail()
+        self._maybe_fail("read", key)
         self.calls.append(("read", key))
         try:
             return self.tickets[key]
@@ -67,24 +81,25 @@ class FakeTracker:
             raise c.TrackerError(c.REASON_REFUSED, f"no ticket {key!r}") from None
 
     def comment(self, key: str, text: str, marker: str) -> None:
-        self._maybe_fail()
+        self._maybe_fail("comment", marker)
         self.calls.append(("comment", key))
         self.comments.setdefault(key, {})[marker] = text
 
     def label(self, key: str, value: str) -> None:
-        self._maybe_fail()
+        self._maybe_fail("label", key)
         self.calls.append(("label", key))
         self.labels[key] = value
 
     def transition(self, key: str, state: str) -> None:
-        self._maybe_fail()
+        self._maybe_fail("transition", key)
         self.calls.append(("transition", key))
         self.states[key] = state
 
-    def link(self, key: str, url: str) -> None:
-        self._maybe_fail()
+    def link(self, key: str, url: str, title: str = "") -> None:
+        self._maybe_fail("link", key)
         self.calls.append(("link", key))
         self.links.setdefault(key, []).append(url)
+        self.link_titles[url] = title
 
 
 def a_ticket(**kw: object) -> c.Ticket:

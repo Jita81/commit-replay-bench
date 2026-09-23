@@ -151,7 +151,7 @@ jobs:
         with:
           python-version: "3.12"
       # The pages covered are scripts/claims_check.py's ALLOWLIST; the rest of the
-      # documentation is ungated and the gap analysis (G-605) says so.
+      # documentation is ungated and the gap analysis (G-929) says so.
       - name: Every claim on a covered page carries what its tag requires
         run: python scripts/claims_check.py --check
 

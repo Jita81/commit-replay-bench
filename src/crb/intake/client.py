@@ -61,6 +61,11 @@ LABELS: tuple[str, ...] = (LABEL_NEEDS_INFO, LABEL_READY, LABEL_NOT_DELIVERABLE,
 #: The prefix an adapter uses to recognise (and clear) a label of its own.
 LABEL_PREFIX = "crb:"
 
+#: What a link the product attaches to a ticket is called, so a reader of the ticket knows
+#: what they are about to open. The product attaches exactly these two things and no others.
+LINK_ITEM = "Backlog item"
+LINK_PULL_REQUEST = "Pull request"
+
 #: Why a listener stopped. One of these words is on every ``intake.stopped`` event, the
 #: ``/health`` probe and the intake screen; docs/API.md publishes them.
 REASON_UNREACHABLE = "unreachable"
@@ -69,6 +74,8 @@ REASON_NO_SECRET = "no_secret"  # noqa: S105 — a reason WORD, not a value
 REASON_REFUSED = "refused"
 REASON_COLUMN_GONE = "column_gone"
 REASON_NOT_CONFIGURED = "not_configured"
+REASON_COLUMN_TOO_LARGE = "column_too_large"
+REASON_NO_PUBLIC_URL = "no_public_url"
 STOP_REASONS: tuple[str, ...] = (
     REASON_UNREACHABLE,
     REASON_UNAUTHORISED,
@@ -76,6 +83,8 @@ STOP_REASONS: tuple[str, ...] = (
     REASON_REFUSED,
     REASON_COLUMN_GONE,
     REASON_NOT_CONFIGURED,
+    REASON_COLUMN_TOO_LARGE,
+    REASON_NO_PUBLIC_URL,
 )
 
 #: What a person can do about each stop, in the words the screen and the health probe
@@ -103,6 +112,15 @@ STOP_ADVICE: dict[str, str] = {
     ),
     REASON_NOT_CONFIGURED: (
         "No tracker is configured for this deployment. Set the intake block in settings first."
+    ),
+    REASON_COLUMN_TOO_LARGE: (
+        "The watched column holds more work than one pass may take, so nothing was read. "
+        "Narrow the area path or the JQL so the column holds the tickets that are genuinely "
+        "ready, or raise CRB_INTAKE__MAX_PER_POLL if the whole column is meant to be read."
+    ),
+    REASON_NO_PUBLIC_URL: (
+        "This deployment does not know its own address, so a link on a ticket would not open. "
+        "Set CRB_PUBLIC_URL to the address people use to reach this product, then re-read."
     ),
 }
 
@@ -163,14 +181,28 @@ def validate_tracker_token(token: str) -> str:
 
 
 def marker_for(tracker: str, key: str) -> str:
-    """The hidden HTML comment that makes this product's comment on this ticket unique.
+    """The marker that makes this product's comment on this ticket unique.
 
-    An adapter finds the one comment containing this marker and edits it; finding none,
-    it adds one. The marker is inside an HTML comment so a reader never sees it, and it
-    names the tracker as well as the key so two deployments watching two trackers cannot
-    collide on a shared key.
+    An adapter finds the one comment containing this marker and edits it; finding none, it
+    adds one. It names the tracker as well as the key, so two deployments watching two
+    trackers cannot collide on a shared key.
+
+    The marker is written as an HTML comment because Azure DevOps renders comments as HTML
+    and a reader there never sees it. Jira does not: its comments are Atlassian Document
+    Format, which has no hidden node, so the Jira adapter carries :func:`marker_token`
+    instead, in a one-line attribution footer a reader can understand. Both forms contain
+    the token, so either is found by the same lookup.
     """
     return f"<!-- crb:intake:{tracker}:{key} -->"
+
+
+def marker_token(marker: str) -> str:
+    """The marker without its HTML-comment wrapper (``crb:intake:ado:4711``).
+
+    This — not the wrapper — is the identity a tracker is searched for, so a comment
+    written as an HTML comment and one written as a plain reference are the same comment.
+    """
+    return marker.strip().removeprefix("<!--").removesuffix("-->").strip()
 
 
 def _tuple_of_str(value: Any) -> tuple[str, ...]:
@@ -342,8 +374,14 @@ class TrackerClient(Protocol):
         ``TrackerError(REASON_REFUSED)`` — the product never forces it."""
         ...
 
-    def link(self, key: str, url: str) -> None:
-        """Attach ``url`` (the pull request) to the ticket, once."""
+    def link(self, key: str, url: str, title: str = "") -> None:
+        """Attach ``url`` to the ticket, once, under ``title``.
+
+        The same verb attaches two different things at two different moments — the backlog
+        item's page when the ticket is queued, and the pull request when one opens — so the
+        caller says which, and a tracker that shows a link's name shows the right one.
+        ``title`` empty means the tracker's own default.
+        """
         ...
 
 
@@ -354,8 +392,12 @@ __all__ = [
     "LABEL_PREFIX",
     "LABEL_QUEUED",
     "LABEL_READY",
+    "LINK_ITEM",
+    "LINK_PULL_REQUEST",
     "REASON_COLUMN_GONE",
+    "REASON_COLUMN_TOO_LARGE",
     "REASON_NOT_CONFIGURED",
+    "REASON_NO_PUBLIC_URL",
     "REASON_NO_SECRET",
     "REASON_REFUSED",
     "REASON_UNAUTHORISED",
@@ -370,5 +412,6 @@ __all__ = [
     "TrackerClient",
     "TrackerError",
     "marker_for",
+    "marker_token",
     "validate_tracker_token",
 ]

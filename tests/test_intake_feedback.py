@@ -167,11 +167,39 @@ def test_a_false_q1_cell_is_reported_as_the_honesty_floor_breach_it_is() -> None
     assert "do not ship" in f.text.lower() or "do_not_ship" in f.text
 
 
-def test_the_comment_states_the_non_goals_so_nobody_fears_a_wider_edit() -> None:
+def test_the_comment_counts_what_it_writes_rather_than_promising_it_writes_little() -> None:
+    """The sentence used to say the product "only ever adds this one comment … and never
+    edits any other field". One poll of a ready ticket leaves TWO comments and attaches a
+    link, and over its life a ticket can get four. The old test looked for the words
+    "never", "comment" and "label", so it could not catch the miscount. This one counts
+    against the renderers that exist and the verbs the adapter has."""
+    import inspect
+
     f = _render(_ready_ticket(), _deliver_route())
     low = f.text.lower()
-    assert "never" in low
-    assert "comment" in low and "label" in low
+    # the four notes, the label, both links and the one configured state change
+    assert "up to four comments" in low
+    for phrase in ("what is missing", "queued", "pull request opens", "if the work stopped"):
+        assert phrase in low
+    assert "one crb: label" in low
+    assert "a link to the backlog item and to the pull request" in low
+    assert "one state change when the pull request is merged" in low
+    assert "edits no other field" in low
+    # and the count is the truth: one renderer per note the sentence claims
+    renderers = [n for n in dir(fb) if n.startswith("render_")]
+    assert sorted(renderers) == [
+        "render_delivered",
+        "render_feedback",
+        "render_queued",
+        "render_refusal",
+    ]
+    # nothing in the sentence promises a bound the protocol does not have
+    verbs = [
+        n
+        for n, _ in inspect.getmembers(c.TrackerClient, inspect.isfunction)
+        if not n.startswith("_")
+    ]
+    assert sorted(verbs) == ["comment", "entered", "label", "link", "read", "transition"]
 
 
 def test_the_comment_has_no_unexplained_jargon() -> None:
@@ -218,3 +246,36 @@ def test_a_refusal_comment_carries_the_served_way_forward_verbatim() -> None:
 def test_a_delivery_comment_carries_the_pull_request_link() -> None:
     body = fb.render_delivered("ado-4711", "https://github.invalid/o/r/pull/7")
     assert "https://github.invalid/o/r/pull/7" in body
+
+
+def test_a_decision_rendered_straight_from_the_router_quotes_the_whole_interval() -> None:
+    """The worker's own timed poll — the product's DEFAULT front door — handed the renderer a
+    ``RouteDecision.to_dict()`` while the on-demand poll handed it the capability map's row.
+    Only the row carried ``ci_high``, so the same cell produced two different comments and
+    the worker's one said the interval ran "to unknown". One shape, pinned from the router's
+    own output, is what stops that coming back.
+    """
+    from crb.core.capability import CellKey, CellStats
+    from crb.core.ledger import wilson_interval
+    from crb.core.routing import route
+
+    cell = CellKey("replay", "bug.fix", "S", "python", "agentic", "m", "p")
+    stats = CellStats(
+        cell=cell,
+        n=42,
+        clean=34,
+        disqualified=0,
+        errors=0,
+        false_q1=0,
+        point=34 / 42,
+        ci=wilson_interval(34, 42),
+        cost_usd_mean=0.01,
+        latency_s_mean=5.0,
+        oracle_strength_mean=None,
+        apparatus_versions=("2.2",),
+    )
+    decision = dict(route(stats).to_dict())
+    decision["apparatus_versions"] = ["2.2"]
+    text = _render(_ready_ticket(), decision).text
+    assert "to unknown" not in text
+    assert f"{stats.ci.low * 100:.0f} % to {stats.ci.high * 100:.0f} %" in text

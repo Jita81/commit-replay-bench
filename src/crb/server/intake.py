@@ -61,10 +61,12 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -85,8 +87,13 @@ from crb.factory.readiness import assess
 from crb.intake.ado import AdoConfig, AdoTracker
 from crb.intake.client import (
     LABEL_QUEUED,
+    LINK_ITEM,
+    LINK_PULL_REQUEST,
+    REASON_COLUMN_TOO_LARGE,
+    REASON_NO_PUBLIC_URL,
     REASON_NO_SECRET,
     REASON_NOT_CONFIGURED,
+    REASON_REFUSED,
     STOP_ADVICE,
     Ticket,
     TicketRef,
@@ -114,6 +121,12 @@ EV_DELIVERED = EV_INTAKE_DELIVERED
 EV_TRANSITIONED = EV_INTAKE_TRANSITIONED
 EV_STOPPED = EV_INTAKE_STOPPED
 INTAKE_EVENTS: tuple[str, ...] = INTAKE_EVENT_KINDS
+
+#: The bounds a pass is run with when a caller names none. They are the SETTINGS' defaults
+#: (:class:`crb.server.settings.IntakeSettings`) repeated, so a test that calls the service
+#: directly is bounded the same way the product is, rather than accidentally unbounded.
+DEFAULT_MAX_PER_POLL = 200
+DEFAULT_POLL_BUDGET_S = 60.0
 
 #: The key in a repository row's ``config_json`` that holds its listener.
 CONFIG_KEY = "intake"
@@ -300,8 +313,10 @@ class IntakeStore:
     """The one file the screen reads: the last poll's rows and its outcome.
 
     It is a cache of what the chain already says, written after every poll so a viewer
-    never waits on a tracker. The chain stays the record; this file can be deleted and
-    the next poll rebuilds it.
+    never waits on a tracker. The chain stays the record, and this file can be deleted:
+    the next poll rebuilds it, because a ticket the chain says was handled but the cache
+    has lost is READ again rather than skipped (:func:`_handle_ticket`). Every write that
+    re-read makes is idempotent, so rebuilding the view changes nothing on the board.
     """
 
     def __init__(self, home: str | Path, repo: str) -> None:
@@ -337,6 +352,19 @@ class IntakeStore:
 # ---------------------------------------------------------------------------
 
 
+#: Tracker kinds that need no stored credential: ``none`` reads nothing at all, and ``fake``
+#: is the walkthrough's file-backed board (a JSON file, no authentication). It lives beside
+#: :func:`build_tracker`, which is the code that acts on it, so the consent gate on
+#: ``PUT /factory/{repo}/intake`` and the poll itself cannot disagree about what a deployment
+#: needs before a listener may be switched on.
+CREDENTIAL_FREE_TRACKERS: frozenset[str] = frozenset({"none", "fake"})
+
+
+def needs_credential(tracker: str) -> bool:
+    """Does this tracker kind need a stored ``tracker_token`` before anything can be read?"""
+    return str(tracker or "none") not in CREDENTIAL_FREE_TRACKERS
+
+
 def build_tracker(
     intake: Any,
     token: str,
@@ -364,7 +392,7 @@ def build_tracker(
                 "the fake tracker is a test fixture and needs CRB_ENABLE_FAKE_TRACKER=1",
             )
         return FileTracker(fake_tracker_path(home or "."))
-    if not token:
+    if needs_credential(kind) and not token:
         raise TrackerError(REASON_NO_SECRET, "no tracker credential is stored")
     if kind == "ado":
         return AdoTracker(
@@ -373,6 +401,9 @@ def build_tracker(
                 project=intake.project,
                 column=intake.column,
                 area_path=intake.area_path,
+                # one MORE than a pass may read, so an overflowing column is VISIBLE to
+                # the service (which stops the pass) instead of being silently truncated
+                max_refs=int(getattr(intake, "max_per_poll", DEFAULT_MAX_PER_POLL)) + 1,
             ),
             token,
             client=client,
@@ -387,11 +418,37 @@ def build_tracker(
                 jql=intake.jql,
                 points_field=intake.points_field,
                 acceptance_field=intake.acceptance_field,
+                max_refs=int(getattr(intake, "max_per_poll", DEFAULT_MAX_PER_POLL)) + 1,
             ),
             token,
             client=client,
         )
     raise TrackerError(REASON_NOT_CONFIGURED, f"unknown tracker {kind!r}")
+
+
+def item_url_for(public_url: str, repo: str) -> Callable[[str], str]:
+    """The ABSOLUTE address of an item's page on this deployment, as a ticket must carry it.
+
+    The one builder every caller uses (the worker's timed poll, its outcome pass and the
+    on-demand poll route), because the bug it prevents is not a typo: a relative
+    ``/factory?repo=…`` written into an Azure DevOps or Jira comment resolves against the
+    TRACKER's host, so the "Follow it here" the customer is given, and the link attached
+    beside it, go nowhere — and Azure DevOps refuses a relation whose URL is not a URI.
+
+    With no ``CRB_PUBLIC_URL`` set the result is deliberately relative, which
+    :func:`poll_repository` recognises and stops on (``no_public_url``) before any write.
+    """
+    base = str(public_url or "").strip().rstrip("/")
+
+    def build(item_id: str) -> str:
+        return f"{base}/factory?repo={quote(repo, safe='')}&item={quote(item_id, safe='')}"
+
+    return build
+
+
+def is_absolute_url(url: str) -> bool:
+    """Would a reader on somebody else's site be able to open this link?"""
+    return str(url).lower().startswith(("https://", "http://"))
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +519,9 @@ def poll_repository(
     actor: str = "intake",
     now: Callable[[], str] = utc_now_iso,
     force: bool = False,
+    max_tickets: int = DEFAULT_MAX_PER_POLL,
+    budget_s: float = DEFAULT_POLL_BUDGET_S,
+    clock: Callable[[], float] = time.monotonic,
 ) -> PollReport:
     """Read the watched column once and do whatever each ticket has earned.
 
@@ -475,9 +535,75 @@ def poll_repository(
     see the current numbers on the ticket. It is still safe to repeat: the comment and the
     label are idempotent on the tracker's side, so an unchanged ticket gets identical text
     and nothing is written.
+
+    **One pass is bounded twice.** A column holding more than ``max_tickets`` is not read
+    at all — the pass stops with ``column_too_large`` and the advice says to narrow the
+    area path or the JQL, because reading an arbitrary 200 of somebody's board and saying
+    nothing about the rest would be worse than reading none of it. And a pass that runs
+    past ``budget_s`` stops early, serves the rows it has and records the same reason with
+    what it got through: this runs in the worker's idle loop, in front of the heartbeat,
+    and inside an API request, so it may not take as long as a board is long.
     """
+    report = _poll_column(
+        repo,
+        tracker=tracker,
+        listener=listener,
+        column=column,
+        home=home,
+        route_for=route_for,
+        item_url=item_url,
+        run_active=run_active,
+        actor=actor,
+        now=now,
+        force=force,
+        max_tickets=max_tickets,
+        budget_s=budget_s,
+        clock=clock,
+    )
+    # The served view is written HERE, by the function that reads it, not by each caller in
+    # turn: a poll whose caller was killed before its own write left the screen showing a
+    # ticket it had already commented on as unread, and the two callers could drift.
+    try:
+        store_for(home).write(report)
+    except OSError:  # a cache is not the record; the chain already has every step
+        log.warning("intake state not written", extra={"repo": repo})
+    return report
+
+
+def _poll_column(
+    repo: str,
+    *,
+    tracker: TrackerClient,
+    listener: ListenerState,
+    column: str,
+    home: FactoryHome,
+    route_for: Callable[[BacklogItem], Mapping[str, Any] | None],
+    item_url: Callable[[str], str],
+    run_active: Callable[[], bool],
+    actor: str,
+    now: Callable[[], str],
+    force: bool,
+    max_tickets: int,
+    budget_s: float,
+    clock: Callable[[], float],
+) -> PollReport:
+    """One pass, with no side effect outside the tracker and the chain. See
+    :func:`poll_repository`, which is this plus the served view."""
     report = PollReport(repo=repo, column=column, at=now())
     evidence = home.evidence(actor=actor)
+    started = clock()
+    if not is_absolute_url(item_url("probe")):
+        # asked of the builder rather than of a setting, so NO caller can slip a relative
+        # link past this guard: a dead link in somebody else's ticket is worse than no link
+        detail = (
+            "this deployment does not know its own address, so the link this product would "
+            "write on a ticket could not be opened from the tracker"
+        )
+        report.stopped, report.detail = REASON_NO_PUBLIC_URL, detail
+        evidence.append(
+            EV_STOPPED, "", step="public_url", reason=REASON_NO_PUBLIC_URL, detail=detail
+        )
+        return report
     try:
         refs = tracker.entered(column, listener.since)
     except TrackerError as exc:
@@ -485,9 +611,43 @@ def poll_repository(
         evidence.append(EV_STOPPED, "", step="entered", reason=exc.reason, detail=exc.detail)
         return report
     report.seen = len(refs)
+    if len(refs) > int(max_tickets):
+        detail = (
+            f"the watched column holds at least {len(refs)} tickets and one pass may read "
+            f"{int(max_tickets)}; nothing was read"
+        )
+        report.stopped, report.detail = REASON_COLUMN_TOO_LARGE, detail
+        evidence.append(
+            EV_STOPPED,
+            "",
+            step="entered",
+            reason=REASON_COLUMN_TOO_LARGE,
+            detail=detail,
+            seen=len(refs),
+            max_per_poll=int(max_tickets),
+        )
+        return report
     events = _read_events(home)
     signoffs = list(home.gap_ledger().records()) if home.dir.exists() else []
-    for ref in refs:
+    for i, ref in enumerate(refs):
+        if i and clock() - started > float(budget_s):
+            detail = (
+                f"the pass stopped after {i} of {len(refs)} tickets: it may take "
+                f"{float(budget_s):.0f} seconds and it had taken longer. The rest are read "
+                "on the next pass"
+            )
+            report.stopped, report.detail = REASON_COLUMN_TOO_LARGE, detail
+            evidence.append(
+                EV_STOPPED,
+                "",
+                step="budget",
+                reason=REASON_COLUMN_TOO_LARGE,
+                detail=detail,
+                handled=i,
+                seen=len(refs),
+                budget_s=float(budget_s),
+            )
+            break
         row = _handle_ticket(
             ref,
             tracker=tracker,
@@ -537,8 +697,17 @@ def _handle_ticket(
     """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped."""
     del actor
     if not force and already_handled(events, tracker.name, ref.key, ref.revision):
-        report.skipped += 1
-        return _row_from_state(home, ref)
+        cached = _row_from_state(home, ref)
+        if cached is not None:
+            report.skipped += 1
+            return cached
+        # The chain says this ticket was handled, but the served cache has lost its row —
+        # the state file was deleted, or a poll was killed before it was written. The row a
+        # viewer reads has to come back, so the ticket is read once more and its row built
+        # again. Nothing is registered twice (the item is already on the frozen record, and
+        # the branch below re-asserts rather than re-registers) and every tracker write
+        # below is idempotent, so rebuilding the view changes nothing on the board.
+        log.info("intake row rebuilt from the tracker", extra={"key": ref.key, "repo": home.repo})
     try:
         ticket = tracker.read(ref.key)
     except TrackerError as exc:
@@ -560,20 +729,54 @@ def _handle_ticket(
             stopped=exc.reason,
             stopped_advice=exc.advice,
         )
-    report.read += 1
     previous_id = item_for_ticket(events, tracker.name, ticket.key)
     backlog = home.load_backlog()
     previous = backlog.get(previous_id) if (backlog is not None and previous_id) else None
-    draft = draft_from(ticket, tracker=tracker.name, previous=previous)
+    try:
+        draft = draft_from(ticket, tracker=tracker.name, previous=previous)
+    except ValueError as exc:
+        # A ticket this product cannot map to an item at all (a key with no character an
+        # item id may use). It costs that ticket and nothing else: the promise this
+        # function makes is that one bad ticket never stops the column.
+        evidence.append(
+            EV_STOPPED,
+            "",
+            step="draft",
+            key=ticket.key,
+            reason=REASON_REFUSED,
+            detail=str(exc)[:300],
+        )
+        report.skipped += 1
+        return IntakeRow(
+            key=ticket.key,
+            title=ticket.title,
+            url=ticket.url,
+            revision=ticket.revision,
+            label="",
+            state=ticket.state,
+            item_id="",
+            item_url="",
+            feedback="",
+            read_at=now(),
+            stopped=REASON_REFUSED,
+            stopped_advice=STOP_ADVICE[REASON_REFUSED],
+        )
+    report.read += 1  # counted once the ticket is a draft: before that it is a skip
     readiness = assess(draft.item, signoffs)
     route = route_for(draft.item)
     feedback = render_feedback(draft, readiness, cell_route=route)
+    already_registered = backlog is not None and backlog.get(draft.item.id) is not None
+    # The label is decided before it is written, not adjusted afterwards: a ticket already
+    # on the frozen record is QUEUED, and writing `crb:ready` first and `crb:queued` second
+    # would show a reader of the board a state the product had already left behind.
+    queued_already = feedback.ready_to_register and already_registered
+    label = LABEL_QUEUED if queued_already else feedback.label
     row = IntakeRow(
         key=ticket.key,
         title=ticket.title,
         url=ticket.url,
         revision=ticket.revision,
-        label=feedback.label,
+        label=label,
         state=ticket.state,
         item_id=draft.item.id,
         item_url=item_url(draft.item.id),
@@ -589,7 +792,7 @@ def _handle_ticket(
     )
     try:
         tracker.comment(ticket.key, feedback.text, feedback.marker)
-        tracker.label(ticket.key, feedback.label)
+        tracker.label(ticket.key, label)
     except TrackerError as exc:
         evidence.append(
             EV_STOPPED,
@@ -606,18 +809,40 @@ def _handle_ticket(
         draft.item.id,
         tracker=tracker.name,
         key=ticket.key,
-        label=feedback.label,
+        label=label,
         marker=feedback.marker,
         open_questions=len(feedback.open_questions),
         route=(route or {}).get("route", ""),
     )
     awaiting = False
-    already_registered = backlog is not None and backlog.get(draft.item.id) is not None
-    if feedback.ready_to_register and already_registered:
-        # a forced re-read of a ticket nothing has changed: the item is already on the
-        # frozen record, so registering it again would be an ItemExists refusal recorded
-        # as a stop. The comment and the label have been refreshed; that is the whole job.
+    if queued_already:
+        # A re-read of a ticket already on the frozen record: registering it again would be
+        # an ItemExists refusal recorded as a stop. What the ticket is owed instead is the
+        # state it is actually in — so the queued note and the item link are re-asserted
+        # here, not just the gap comment. Both are idempotent on their marker and their
+        # URL, so a healthy ticket is not touched; a ticket whose queued note or link failed
+        # on an earlier poll (the tracker was briefly unreachable) is repaired by the next
+        # one, instead of being left saying `crb:ready` on the board for ever while the
+        # screen said queued.
         row = replace_row(row, registered=True, label=LABEL_QUEUED)
+        url = item_url(draft.item.id)
+        try:
+            tracker.comment(
+                ticket.key,
+                render_queued(draft.item.id, url),
+                marker_for(tracker.name, f"{ticket.key}:queued"),
+            )
+            tracker.link(ticket.key, url, LINK_ITEM)
+        except TrackerError as exc:
+            evidence.append(
+                EV_STOPPED,
+                draft.item.id,
+                step="queued",
+                key=ticket.key,
+                reason=exc.reason,
+                detail=exc.detail,
+            )
+            row = _stopped(row, exc)
     elif feedback.ready_to_register:
         awaiting = not _register_and_queue(
             draft,
@@ -710,7 +935,7 @@ def _register_and_queue(
             render_queued(draft.item.id, url),
             marker_for(tracker.name, f"{draft.ticket.key}:queued"),
         )
-        tracker.link(draft.ticket.key, url)
+        tracker.link(draft.ticket.key, url, LINK_ITEM)
     except TrackerError as exc:
         # the item IS registered; only the courtesy write failed. Say so and move on.
         evidence.append(
@@ -724,9 +949,15 @@ def _register_and_queue(
     return True
 
 
+def store_for(home: FactoryHome) -> IntakeStore:
+    """The served view beside this repository's chain. One accessor, because the poll writes
+    it and the skip path reads it, and a second spelling of the path would let them drift."""
+    return IntakeStore(home.dir.parent.parent, home.repo)
+
+
 def _row_from_state(home: FactoryHome, ref: TicketRef) -> IntakeRow | None:
     """The row a previous poll served for this ticket, so a skip still shows something."""
-    store = IntakeStore(home.dir.parent.parent, home.repo)
+    store = store_for(home)
     for row in store.rows():
         if row.key == ref.key:
             return row
@@ -746,7 +977,7 @@ def post_delivery(
         tracker.comment(
             key, render_delivered(item_id, pr_url), marker_for(tracker.name, f"{key}:pr")
         )
-        tracker.link(key, pr_url)
+        tracker.link(key, pr_url, LINK_PULL_REQUEST)
     except TrackerError as exc:
         evidence.append(
             EV_STOPPED, item_id, step="delivered", key=key, reason=exc.reason, detail=exc.detail
@@ -902,6 +1133,9 @@ def apply_outcome_map(
 
 __all__ = [
     "CONFIG_KEY",
+    "CREDENTIAL_FREE_TRACKERS",
+    "DEFAULT_MAX_PER_POLL",
+    "DEFAULT_POLL_BUDGET_S",
     "EV_DELIVERED",
     "EV_FEEDBACK",
     "EV_POLLED",
@@ -924,10 +1158,14 @@ __all__ = [
     "already_handled",
     "apply_outcome_map",
     "build_tracker",
+    "is_absolute_url",
     "item_for_ticket",
+    "item_url_for",
+    "needs_credential",
     "poll_repository",
     "post_delivery",
     "post_outcomes_to_tickets",
     "post_refusal",
     "replace_row",
+    "store_for",
 ]

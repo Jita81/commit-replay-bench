@@ -56,12 +56,43 @@ ticket read again at the same revision writes nothing. A ticket read at a *new* 
 becomes a new item, `<id>.r<revision>`, with `supersedes` set — the frozen record's hash
 never moves (`crb.intake.draft.draft_from`).
 
-**The ticket learns before any spend.** One comment, idempotent by a hidden HTML marker,
-carries the readiness gate's open questions with the exact line that closes each one, and
-the cell's route with its n, its 95 % interval, its apparatus version and whether the
+**The ticket learns before any spend.** One comment about what is missing, idempotent by its
+own marker, carries the readiness gate's open questions with the exact line that closes each
+one, and the cell's route with its n, its 95 % interval, its apparatus version and whether the
 honesty floor is intact — read from the map *before* any run
 (`crb.intake.feedback.render_feedback`). One of four labels goes with it:
-`crb:needs-info`, `crb:ready`, `crb:not-deliverable`, `crb:queued`.
+`crb:needs-info`, `crb:ready`, `crb:not-deliverable`, `crb:queued`. Three further marked notes
+follow the item's life (queued, the pull request, the stop), so what the product writes is
+**four comments at most, each marked as its own**, the label, a link to the item and a link to
+the pull request, and the one configured state change — and the comment on the ticket says
+exactly that list, counted, rather than reassuring the reader that it writes little.
+
+**How the marker is carried depends on the tracker, and both are found the same way.** Azure
+DevOps renders comments as HTML, so the marker is an HTML comment a reader never sees. Jira
+comments are Atlassian Document Format, which has no hidden node: a marker written as an HTML
+comment there is READ OUT as the first line. On Jira the identity is therefore shown rather
+than smuggled — one attribution line in plain English carrying the same token
+(`crb.intake.client.marker_token`), and the renderer's structure is mapped onto ADF marks
+instead of being flattened to characters. Idempotency compares like with like on both: a
+comparison across a lossy conversion rewrote the same unchanged comment on every poll.
+
+**Every link the product writes is absolute.** A relative path in somebody else's comment
+resolves against *their* host, so `CRB_PUBLIC_URL` is required before a listener may be
+switched on, and a pass without it stops with `no_public_url` before it writes anything
+(`crb.server.intake.item_url_for`).
+
+**One pass is bounded twice.** At most `CRB_INTAKE__MAX_PER_POLL` tickets and at most
+`CRB_INTAKE__POLL_BUDGET_S` seconds: a pass costs about eleven tracker calls per ticket, runs
+in front of the worker's heartbeat and, on demand, inside an API request. A column longer than
+the bound is not read at all — `column_too_large`, with the advice to narrow the area path or
+the JQL, because reading an arbitrary 200 of somebody's board and saying nothing about the
+rest would be worse than reading none of it.
+
+**The consent switch is an event, not just a field.** `switched_by` on the repository row is
+one mutable value a later switch overwrites, so every throw of the switch is
+`intake.listener.switched` on that repository's system trace, naming the operator — otherwise
+writes made under one operator's consent would later appear to have been consented by
+whoever switched it last.
 
 **The classifier never guesses silently.** It serves a confidence, and below the published
 threshold the class is `unclassified` and the comment says so, asking the person rather
