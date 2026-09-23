@@ -184,7 +184,10 @@ const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
  * this one, which needs a live stack to place and belongs to the page that owns it.
  */
 const SIDEWAYS_SCROLL_RATCHET: Record<string, string> = {
-  'tasks-detail': 'G-292 — the 11-column grade table is too wide for a phone (scrollWidth 981 at 375, measured 2026-09-22, apparatus 2.2); docs/dod/pages/tasks-repo-taskId.md',
+  // Empty, and it only ever shrinks. G-292 (the 11-column grade table at 375) was the last
+  // entry: DataTable's scroll region carries `min-w-0`, so the table scrolls inside itself
+  // and the document never does, whatever the data. A route that starts overflowing fails
+  // here rather than being listed — an entry is a debt with a gap id, not a permission.
 }
 
 /**
