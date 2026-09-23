@@ -268,10 +268,10 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/learn',
-    purpose: 'What the ledger teaches, as three reports: refusals that should become guard tests, weak oracles that should become test work, and evidence that has gone stale since the apparatus changed. Nothing here acts; a person does.',
+    purpose: 'What the ledger teaches, as three reports: refusals that should become guard tests, weak oracles that should become test work, and evidence that has gone stale since the apparatus changed. The product decides nothing; an operator decides here, beside the report, and every decision is recorded with their name.',
     next: {
-      viewer: 'Read the reports; every row carries the rows and spend behind it.',
-      operator: 'Copy a candidate corpus line into a decision file, freeze a strengthening item on the Factory, or queue the re-measurement runs the plan lists.',
+      viewer: 'Read the reports; every row carries the rows and spend behind it. The three decisions are an operator’s.',
+      operator: 'Decide a refusal class, register a strengthening item on this repository’s backlog, or queue a cell’s re-measurement runs. Each is one control on the report that computed it, and each says what it wrote. Queueing spends the budget, so it shows the estimate first.',
     },
     numbers: 'Refusal share is protocol rows / all rows with a 95 % Wilson interval, per apparatus version. Re-measurement spend multiplies each cell’s own mean row cost by the rows still needed; a dash means no cost is known.',
     terms: ['apparatus', 'stale', 'oracle_strength', 'wilson', 'cell'],

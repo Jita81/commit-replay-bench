@@ -1307,9 +1307,9 @@ export const HINTS = {
   'col.learn_refusals.cost':
     'Dollars spent on the attempts in this class before they were refused.',
   'col.learn_refusals.verdict':
-    'Always unsure here: a person decides whether the refusal was honest or should be allowed, and writes the line into the guard corpus.',
+    'Unsure until a person decides whether the guard was right. Once decided it reads honest or refused and names who decided it.',
   'pill.learn.verdict':
-    'The product never decides: a person writes honest or refuse for this class with the command-line tool.',
+    'The product never decides. Nobody has judged this class yet, so nothing has been written into the guard corpus for it.',
   'stat.learn.oracle_held':
     'Cells withheld from deliver because their oracle is under the bar or their controls escaped or were thin, under the routing policy and threshold shown. More attempts will not move these; stronger tests will.',
   'stat.learn.items':
@@ -1346,6 +1346,50 @@ export const HINTS = {
     'The oracle page for this repository, where an oracle run is queued and scores are read.',
   'link.learn.runs':
     'The runs page for this repository, where the plan’s runs are queued.',
+  'pill.learn.decided':
+    'The verdict a named person recorded for this class, and the corpus the line was written into: honest allows the command, refused keeps the guard refusing it.',
+  'col.learn_refusals.decide':
+    'Records your verdict on this class. Only an operator sees this column, and the decision is stored with the name of whoever made it.',
+  'button.learn.decide_refusal':
+    'Opens the form that records your verdict on this refusal class and writes the line into the guard corpus.',
+  'field.learn.verdict':
+    'Honest means the guard was wrong and this command must be allowed. Refused means the guard was right and must keep refusing it.',
+  'field.learn.note':
+    'One line saying why, written into the corpus file as a comment above the line, for whoever reads it next.',
+  'field.learn.command':
+    'The whole command. Every recorded example of this class was cut short by the recorder’s cap, and a cut command would not be a usable corpus line.',
+  'field.learn.prefix':
+    'Which guard family to file the refusal under. The refused corpus takes archaeology and network lines only; an attempt to tamper with the tests is judged elsewhere.',
+  'button.learn.accept_refusal':
+    'Writes the line into the guard corpus under your name and records the decision. Repeating it writes nothing.',
+  'button.learn.cancel_decision':
+    'Closes the form. Nothing is written and the class stays unsure.',
+  'button.learn.close_decision':
+    'Closes the form. The decision is already recorded.',
+  'banner.learn.decision':
+    'What the decision wrote: the verdict, who made it, and the corpus file the line landed in.',
+  'col.learn_strengthen.register':
+    'Puts this item on the repository’s backlog. Only an operator sees this column.',
+  'button.learn.register_item':
+    'Registers this item on the repository’s backlog. Registering the same item again supersedes it rather than overwriting it, so the earlier record is kept.',
+  'banner.learn.registered':
+    'What the registration did: the item id, the backlog it is on now, and the item it replaced if any.',
+  'link.learn.factory':
+    'The factory for this repository, where the backlog is read and a run that builds the item is queued.',
+  'col.learn_remeasure.queue':
+    'Queues this cell’s re-measurement runs. Only an operator sees this column, and the estimate is shown before anything is sent.',
+  'button.learn.queue_remeasure':
+    'Shows what queueing this cell would run and cost before anything is sent.',
+  'button.learn.cancel_queue':
+    'Closes the confirmation. Nothing is queued and nothing is spent.',
+  'button.learn.confirm_queue':
+    'Sends the plan’s runs for this cell. This spends the deployment’s budget.',
+  'button.learn.close_queue':
+    'Closes the confirmation. The runs are already queued.',
+  'banner.learn.queued':
+    'What was queued: how many runs, for which cell and mode, the rows the rule still needs, and what the plan estimated.',
+  'link.learn.queued_runs':
+    'The runs page for this repository, where the runs just queued report their progress.',
 
   // ── /ledger (screens/Ledger/LedgerPage.tsx)
   'button.ledger.export_jsonl':

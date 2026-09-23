@@ -500,6 +500,13 @@ class Settings(BaseSettings):
     #: Built UI directory (``ui/dist``). When it exists the API serves it at ``/`` with an
     #: ``index.html`` fallback for deep links; API paths never fall through to it.
     ui_dist: str = ""
+    #: Where ``POST /learn/refusals/accept`` appends an accepted guard-corpus line
+    #: (``shell_corpus.txt`` / ``shell_corpus_refused.txt``). Empty means
+    #: ``<home>/learn/corpus`` — this deployment's own record of the decisions its operators
+    #: made. A deployment running from a source checkout points it at that checkout's
+    #: ``tests/fixtures``, so an accepted line binds the guard-corpus test directly
+    #: (``docs/LEARNING-LOOP.md#4-using-it``).
+    learn_corpus_dir: str = ""
 
     @field_validator("cors_origins", "trusted_proxies", mode="before")
     @classmethod
@@ -673,6 +680,7 @@ class Settings(BaseSettings):
             "metrics_enabled": self.metrics_enabled,
             "log_format": self.log_format,
             "worker_heartbeat_stale_s": self.worker_heartbeat_stale_s,
+            "learn": {"corpus_dir": self.learn_corpus_dir},
         }
 
 

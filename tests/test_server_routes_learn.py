@@ -8,23 +8,36 @@ so nothing is stale until the query asks about a newer one.
 
 Navigation
 ----------
-What it is:   ``/learn/{refusals, strengthen, remeasure}``'s test suite — the three learning
-              reports over the seed.
+What it is:   ``/learn/*``'s test suite — the three learning reports over the seed, and the
+              three operator-gated writes they hand off to.
 What it does: Pins RBAC and 404, refusals empty then one after a protocol row lands through the
               write path, that strengthen uses the controls verdict and the per-task
               ``oracle.score`` events from the store, that the CLI over the exports derives the
               same route items, that nothing is stale until the apparatus moves, and that a
-              false-Q1 row inserted around the ledger refuses to load.
+              false-Q1 row inserted around the ledger refuses to load. For the writes (G-532):
+              that all three need ``operator``; that an accepted refusal lands in the corpus
+              under a provenance comment naming the DECIDER, is served back with the report, is
+              on the chain with the account as actor and is idempotent; that the API refuses
+              exactly what the CLI refuses; that registering freezes the first item, evolves the
+              rest and supersedes a re-registered one; that an unknown id and an in-flight
+              factory run are refused with nothing written; and that queueing enqueues the
+              PLAN's own run bodies, never the caller's.
 How:          ``make_env`` over the seed; a protocol row appended through ``DbLedger``; the CLI
-              invoked over the API's own exports for the parity case.
+              invoked over the API's own exports for the parity case; the writes driven through
+              ``env.post`` and checked against ``GET /factory/{repo}/backlog``, ``GET /runs`` and
+              the ``events`` table.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md
 Works with:   src/crb/server/routes/learn.py (under test), src/crb/core/learn.py (the
-              derivations), tests/test_cli_learn.py (the CLI half of the parity),
-              tests/fixtures/server_seed.py, docs/LEARNING-LOOP.md, docs/API.md
+              derivations and ``apply_triage`` — the writer both halves share),
+              tests/test_cli_learn.py (the CLI half of the parity),
+              tests/fixtures/server_seed.py (``make_env``, ``assert_rbac``, ``user_id``),
+              src/crb/server/factory_state.py (the backlog the register write moves),
+              docs/LEARNING-LOOP.md (the contract these writes implement), docs/API.md
 Tested by:    tests/test_server_routes_learn.py
 Touch when:   a learn report gains a field (the CLI must read the export the same way — add the
-              parity case); the event shapes the reports read change.
+              parity case); the event shapes the reports read change; a fourth write path lands
+              (pin its role, its refusals and its event here).
 """
 
 from __future__ import annotations
@@ -41,15 +54,17 @@ from sqlalchemy import select
 from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND
 from crb.core.version import APPARATUS_VERSION
 from crb.store.ledger import DbLedger
-from crb.store.models import Event, Grade
+from crb.store.models import Event, Grade, Run
 from fixtures.server_seed import (
     ALPHA,
     BETA,
     RUN_IDS,
+    USERS,
     Env,
     assert_rbac,
     envelope,
     make_env,
+    user_id,
 )
 
 ERR_NHS = (
@@ -269,3 +284,224 @@ def test_false_q1_row_refuses_to_load(env: Env) -> None:
         r = env.get(f"{path}?repo={ALPHA}")
         assert r.status_code == 409, (path, r.text)
         assert envelope(r)["code"] == "false_q1_refused"
+
+
+# ---------------------------------------------------------------------------
+# The three writes (G-532): a named operator's decision, from the report that computed it
+# ---------------------------------------------------------------------------
+
+
+def _accept(env: Env, group_id: str, verdict: str, **extra: Any) -> Any:
+    return env.post(
+        f"/learn/refusals/accept?repo={ALPHA}",
+        json={"group_id": group_id, "verdict": verdict, **extra},
+    )
+
+
+def _group(env: Env, prefix: str) -> dict[str, Any]:
+    """One refusal class of ALPHA's current report, by guard family."""
+    groups = env.get(f"/learn/refusals?repo={ALPHA}").json()["groups"]
+    return next(g for g in groups if g["prefix"] == prefix)
+
+
+def test_the_three_writes_are_operator_gated(env: Env) -> None:
+    """Reading the reports is a viewer's; deciding is an operator's — at the API, not only
+    in the UI. The bodies are the smallest valid ones: RBAC is checked before they are."""
+    _add_protocol_row(env)
+    gid = _group(env, "archaeology")["group_id"]
+    assert_rbac(
+        env,
+        "POST",
+        f"/learn/refusals/accept?repo={ALPHA}",
+        min_role="operator",
+        json={"group_id": gid, "verdict": "honest"},
+    )
+    item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
+    assert_rbac(
+        env,
+        "POST",
+        f"/learn/strengthen/register?repo={ALPHA}",
+        min_role="operator",
+        json={"item_ids": [item_id]},
+    )
+    cell = env.get(f"/learn/remeasure?repo={ALPHA}&apparatus=9.9").json()["cells"][0]["label"]
+    assert_rbac(
+        env,
+        "POST",
+        f"/learn/remeasure/queue?repo={ALPHA}",
+        min_role="operator",
+        json={"cell": cell, "apparatus": "9.9"},
+    )
+
+
+def test_accepting_a_refusal_writes_the_line_under_the_operators_name(env: Env) -> None:
+    """The verdict the report never makes, made once on the screen's behalf: the line lands
+    in the corpus under a provenance comment that names WHO decided, the decision is served
+    back with the report, and repeating it writes nothing."""
+    _add_protocol_row(env)
+    group = _group(env, "archaeology")
+    r = _accept(env, group["group_id"], "honest", note=".git inside a quoted argument")
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert d["decided_by"] == USERS["admin"] and d["verdict"] == "honest"
+    assert d["honest_added"] == [group["candidate_honest"]] and d["refused_added"] == []
+    assert d["already_present"] is False
+    corpus = Path(d["honest_path"])
+    assert corpus.is_file()
+    text = corpus.read_text(encoding="utf-8")
+    assert group["candidate_honest"] in text
+    assert f"(honest→{USERS['admin']})" in text and "quoted argument" in text
+    # the decision is now part of what the report serves — nobody has to remember it
+    served = env.get(f"/learn/refusals?repo={ALPHA}").json()["decisions"]
+    assert [x["group_id"] for x in served] == [group["group_id"]]
+    assert served[0]["decided_by"] == USERS["admin"] and served[0]["verdict"] == "honest"
+    assert served[0]["lines"] == [group["candidate_honest"]]
+    # and it is on the chain, once, with the actor
+    with env.factory() as s:
+        events = list(
+            s.execute(
+                select(Event).where(Event.action == "learn.refusal.accepted", Event.repo == ALPHA)
+            ).scalars()
+        )
+    assert len(events) == 1 and events[0].actor == user_id(USERS["admin"])
+    assert events[0].payload_json["guard"] == "archaeology"
+    # idempotent: the same decision again adds nothing and says the line was already there
+    again = _accept(env, group["group_id"], "honest")
+    assert again.status_code == 201, again.text
+    assert again.json()["honest_added"] == [] and again.json()["already_present"] is True
+    assert corpus.read_text(encoding="utf-8") == text
+
+
+def test_accepting_refuses_exactly_what_the_cli_refuses(env: Env) -> None:
+    """The API and ``crb learn refusals --apply`` share ``apply_triage``, so they refuse the
+    same things: an unknown class, a verdict the report may not carry, and a line that would
+    contradict the other corpus (never weaken a refusal to make a line pass)."""
+    _add_protocol_row(env)
+    assert _accept(env, "no-such-group", "honest").status_code == 404
+    curl = _group(env, "network")
+    assert _accept(env, curl["group_id"], "unsure").status_code == 422  # the report's own word
+    assert _accept(env, curl["group_id"], "refuse").status_code == 201
+    contradiction = _accept(env, curl["group_id"], "honest")
+    assert contradiction.status_code == 422
+    assert envelope(contradiction)["code"] == "refusal_refused"
+    assert "OTHER corpus" in envelope(contradiction)["message"]
+
+
+def test_the_corpus_directory_defaults_under_home_and_is_overridable(tmp_path: Path) -> None:
+    """Unset, the accepted lines are this deployment's own record under ``CRB_HOME``. A
+    deployment running from a source checkout points ``CRB_LEARN_CORPUS_DIR`` at that
+    checkout's fixtures, and an accepted line then binds the guard-corpus test directly."""
+    from crb.server.routes.learn import corpus_dir
+
+    class _S:
+        home = tmp_path
+        learn_corpus_dir = ""
+
+    assert corpus_dir(_S()) == tmp_path / "learn" / "corpus"
+    _S.learn_corpus_dir = str(tmp_path / "checkout" / "tests" / "fixtures")
+    assert corpus_dir(_S()) == tmp_path / "checkout" / "tests" / "fixtures"
+
+
+def test_registering_strengthening_items_freezes_then_evolves(env: Env) -> None:
+    """The hand-off that used to be a paste into ``POST /factory/{repo}/backlog``: the first
+    item freezes the backlog, the next is an evolution, and an item already on the record is
+    registered as a NEW id superseding the latest of its lineage — a frozen record never
+    mutates, so re-registering after a re-score chains rather than overwrites."""
+    assert env.get(f"/factory/{ALPHA}/backlog").status_code == 404
+    items = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"]
+    assert len(items) >= 2, items
+    first, second = items[0]["id"], items[1]["id"]
+    r = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [first, second]})
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert [x["how"] for x in d["registered"]] == ["frozen", "evolved"]
+    assert [x["item_id"] for x in d["registered"]] == [first, second]
+    assert all(x["supersedes"] == "" for x in d["registered"])
+    backlog = env.get(f"/factory/{ALPHA}/backlog").json()
+    assert backlog["hash"] == d["backlog_hash"]
+    ids = [i["id"] for i in backlog["items"]]
+    assert first in ids and second in ids
+    # the same item again: a new id that supersedes the one on the record
+    again = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [first]})
+    assert again.status_code == 201, again.text
+    row = again.json()["registered"][0]
+    assert (
+        row["item_id"] == f"{first}-v2" and row["supersedes"] == first and row["how"] == "evolved"
+    )
+    # a third registration chains onto the SECOND, never onto the superseded first
+    third = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [first]}).json()
+    assert third["registered"][0]["supersedes"] == f"{first}-v2"
+    with env.factory() as s:
+        events = list(
+            s.execute(
+                select(Event).where(
+                    Event.action == "learn.strengthen.registered", Event.repo == ALPHA
+                )
+            ).scalars()
+        )
+    assert len(events) == 3 and all(e.actor == user_id(USERS["admin"]) for e in events)
+    assert events[0].payload_json["items"][0]["item_id"] == first
+
+
+def test_registering_refuses_an_unknown_id_and_a_factory_run_in_flight(env: Env) -> None:
+    """The body names ids and nothing else, so an id the report does not hold is refused
+    before anything is written; and the backlog a queued run verifies against cannot change
+    under it."""
+    bad = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": ["strengthen-x"]})
+    assert bad.status_code == 422 and envelope(bad)["code"] == "validation_error"
+    assert envelope(bad)["detail"]["unknown"] == ["strengthen-x"]
+    item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
+    with env.factory() as s:
+        s.add(Run(id="ab" * 16, repo=ALPHA, kind="factory", status="queued", mode="sighted"))
+        s.commit()
+    blocked = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [item_id]})
+    assert blocked.status_code == 409 and envelope(blocked)["code"] == "factory_run_active"
+    assert env.get(f"/factory/{ALPHA}/backlog").status_code == 404  # nothing was written
+
+
+def test_queueing_a_remeasurement_enqueues_the_plans_own_bodies(env: Env) -> None:
+    """Money is spent only on an operator's instruction, and only on the bodies the plan
+    computed: the caller names a cell, the product composes the runs."""
+    plan = env.get(f"/learn/remeasure?repo={ALPHA}&apparatus=9.9").json()
+    cell = plan["cells"][0]
+    before = env.get("/runs").json()["total"]
+    r = env.post(
+        f"/learn/remeasure/queue?repo={ALPHA}", json={"cell": cell["label"], "apparatus": "9.9"}
+    )
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert len(d["run_ids"]) == len(cell["requests"])
+    assert d["n_needed"] == cell["n_needed"] and d["cost_known"] == cell["cost_known"]
+    assert env.get("/runs").json()["total"] == before + len(d["run_ids"])
+    queued = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
+    for run, request in zip(queued, cell["requests"], strict=True):
+        assert run["status"] == "queued" and run["repo"] == ALPHA
+        assert run["kind"] == request["kind"] and run["mode"] == request["mode"]
+        assert run["builder"] == request["builder"] and run["model"] == request["model"]
+        assert run["task_ids"] == request["task_ids"]
+    with env.factory() as s:
+        event = s.execute(
+            select(Event).where(Event.action == "learn.remeasure.queued", Event.repo == ALPHA)
+        ).scalar_one()
+    assert event.actor == user_id(USERS["admin"])
+    assert event.payload_json["run_ids"] == d["run_ids"]
+    assert event.payload_json["cell"] == cell["label"]
+
+
+def test_queueing_refuses_a_cell_the_plan_does_not_hold(env: Env) -> None:
+    """A cell that is not in the plan — or is not planned in the mode asked for, since
+    sighted and blind are never pooled — is refused with the plan's own cells named."""
+    plan = env.get(f"/learn/remeasure?repo={ALPHA}&apparatus=9.9").json()
+    cell = plan["cells"][0]
+    before = env.get("/runs").json()["total"]
+    missing = env.post(
+        f"/learn/remeasure/queue?repo={ALPHA}", json={"cell": "replay|nope|S", "apparatus": "9.9"}
+    )
+    assert missing.status_code == 422 and envelope(missing)["code"] == "validation_error"
+    assert envelope(missing)["detail"]["available"]
+    wrong_mode = env.post(
+        f"/learn/remeasure/queue?repo={ALPHA}",
+        json={"cell": cell["label"], "mode": "blind", "apparatus": "9.9"},
+    )
+    assert wrong_mode.status_code == 422
+    assert env.get("/runs").json()["total"] == before  # nothing was queued

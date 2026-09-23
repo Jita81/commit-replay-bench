@@ -333,6 +333,9 @@ export const ACTION_HELP: Record<string, string> = {
   'signoff.revoked': 'A sign-off was revoked.',
   'review.created': 'A human review of an accepted patch was recorded, anchored to the bytes read.',
   'review.refused': 'A review was refused because its patch hash did not match the pack.',
+  'learn.refusal.accepted': 'An operator judged one class of refused rows honest or refused; the line was written into the guard corpus under their name.',
+  'learn.strengthen.registered': 'An operator registered strengthening items on this repository’s backlog from the Learn report; a re-registered item supersedes the earlier one.',
+  'learn.remeasure.queued': 'An operator queued the re-measurement runs the plan computed for one cell; the payload names what the plan estimated it would cost.',
   // legacy — the CLI's ledger import, never on a run's live log
   'legacy.tasks': 'A legacy task file was read for import; the payload counts the tasks.',
   'legacy.skip': 'A legacy line was skipped on import; the payload names the reason.',

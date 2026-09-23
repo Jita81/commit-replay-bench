@@ -31,7 +31,11 @@ moment it happened (§5 play 04 asks for a *person* to read refusals); a
 strengthening item pulled into a sprint by the product would spend a builder on an
 oracle nobody reviewed (§5 play 03); a re-measurement queued by the product would
 spend money without an operator's consent. Each derivation stops exactly where a
-decision needs a name attached.
+decision needs a name attached. **Where the name is attached is not this module's
+business**: a named person decides on the host (``crb learn refusals --apply``) or on the
+screen (the operator-gated ``POST /learn/{refusals/accept,strengthen/register,
+remeasure/queue}``, which record the decision with the signed-in operator's identity).
+Nothing here decides either way.
 
 Navigation
 ----------
@@ -67,7 +71,8 @@ Touch when:   never for a new repository; a new guard prefix, a new routing reas
               change to ``BacklogItem`` must be mirrored here (the core cannot import the
               builders or the factory — tests/test_learn.py pins the mirrors); the human
               steps are deliberate (docs/LEARNING-LOOP.md#3-what-still-needs-a-human-and-why-that-is-deliberate)
-              — do not add a path that accepts, builds or queues.
+              — nothing in this module may accept, build or queue on its own; the writes
+              belong to src/crb/server/routes/learn.py, behind a named person.
 """
 
 from __future__ import annotations
@@ -408,8 +413,10 @@ class RefusalReport:
             "verdicts": list(VERDICTS),
             "groups": [g.to_dict() for g in self.groups],
             "note": (
-                "every verdict is 'unsure': the product never accepts a corpus line; "
-                "a human decides per group and `apply_triage` appends with provenance"
+                "every verdict is 'unsure': this derivation never decides; a NAMED person "
+                "does, and `apply_triage` appends their decision with provenance — from the "
+                "host (`crb learn refusals --apply`) or from the screen "
+                "(`POST /learn/refusals/accept`, recorded with the operator's identity)"
             ),
         }
 
@@ -922,8 +929,11 @@ class StrengthenBacklog:
             "cells_without_scores": list(self.cells_without_scores),
             "items": [i.to_dict() for i in self.items],
             "note": (
-                "items are proposals in the frozen-backlog shape; a human pulls one into a "
-                "sprint (freeze) — the product never registers or builds them"
+                "items are proposals in the frozen-backlog shape; this derivation registers "
+                "and builds nothing. A NAMED person pulls one into a sprint — "
+                "`POST /learn/strengthen/register` registers the ones they choose (an "
+                "evolution supersedes; the frozen record never mutates) and a factory run, "
+                "queued separately, is what builds one"
             ),
         }
 
@@ -1262,7 +1272,8 @@ class RemeasurePlan:
             },
             "note": (
                 "requests are POST /runs bodies for an operator to queue; nothing here "
-                "was sent. One entry per (cell, mode) — sighted and blind are never pooled. "
+                "was sent (POST /learn/remeasure/queue sends one cell's, on an operator's "
+                "instruction and with their identity on the runs). One entry per (cell, mode) — sighted and blind are never pooled. "
                 "Costs are that cell's own mean row cost x rows needed x attempts per row "
                 "(1 sighted; the ladder's rungs blind) — an estimate, unknown where no row "
                 "recorded a cost. tasks_stale / tasks_current say how many DISTINCT commits "
