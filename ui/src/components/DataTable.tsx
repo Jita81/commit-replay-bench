@@ -132,7 +132,10 @@ export function DataTable<T>({
 
   // the scroll region is focusable: a wide table scrolls sideways at phone width (WCAG 2.1.1, axe scrollable-region-focusable)
   return (
-    <div className="overflow-auto rounded-[var(--radius-control)] border border-border" style={{ maxHeight }} tabIndex={0} role="region" aria-label={caption}>
+    // `min-w-0` so a wide table can never push the PAGE sideways: a grid or flex child
+    // defaults to min-width:auto and refuses to shrink below its content, which is how an
+    // 11-column grade table made /tasks/:repo/:taskId scroll the document at 375 px (G-292).
+    <div className="min-w-0 overflow-auto rounded-[var(--radius-control)] border border-border" style={{ maxHeight }} tabIndex={0} role="region" aria-label={caption}>
       <table className="w-full border-collapse text-[13px]">
         <caption className={captionVisible ? 'px-3 py-2 text-left text-xs text-on-surface-muted' : 'sr-only'}>{caption}</caption>
         <thead className="sticky top-0 z-10 bg-surface-high">

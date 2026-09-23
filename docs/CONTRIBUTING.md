@@ -134,7 +134,8 @@ the branch up to date before a merge** (lint, types, layers, code-map, dod, both
 pytest matrices, PostgreSQL, security, container, walkthrough — the same commands you run
 locally:
 `pytest tests`, `ruff check`, `ruff format --check`, `mypy --strict src scripts`,
-`scripts/code_map.py --check`, `scripts/dod_check.py --check`, `lint-imports`,
+`scripts/code_map.py --check`, `scripts/dod_check.py --check`,
+`scripts/claims_check.py --check`, `lint-imports`,
 `cd ui && npx tsc -b && npx vitest run`,
 `helm lint --strict`); the adversarial verify pass (re-run the full suite on the merged
 tree) before each release tag. The repository is public and Actions minutes are free, so

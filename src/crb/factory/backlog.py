@@ -77,7 +77,12 @@ LEVEL_L2 = "L2"
 LEVEL_L3 = "L3"
 LEVELS: tuple[str, ...] = (LEVEL_L1, LEVEL_L2, LEVEL_L3)
 
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+#: The longest an item id may be. Published because a caller that BUILDS an id — intake,
+#: turning a ticket key into one — has to shorten to the same bound, and a hand-copied 64
+#: in that caller would drift from this regex the day one of them changed.
+ID_MAX_LEN = 64
+
+_ID_RE = re.compile(rf"[A-Za-z0-9][A-Za-z0-9._-]{{0,{ID_MAX_LEN - 1}}}")
 
 
 class BacklogError(ValueError):
@@ -423,6 +428,7 @@ class Backlog:
 
 __all__ = [
     "BACKLOG_SCHEMA",
+    "ID_MAX_LEN",
     "KINDS",
     "KIND_CODE",
     "KIND_INFRA",

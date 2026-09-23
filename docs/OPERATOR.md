@@ -27,7 +27,8 @@ Contents: [1 Install](#1-install) · [1.1 Check the installation](#11-check-the-
 [3 Run a sweep](#3-run-a-sweep) · [4 Read the capability map](#4-read-the-capability-map) ·
 [5 Sign off](#5-sign-off) · [6 Export the ledger](#6-export-and-verify-the-ledger) ·
 [7 When the sandbox is unavailable](#7-when-the-sandbox-is-unavailable) · [8 Stop conditions](#8-stop-conditions) ·
-[9 Users](#9-users)
+[9 Users](#9-users) · [10 The factory's test author](#10-the-factorys-test-author) ·
+[11 Intake — work arriving from a board](#11-intake--work-arriving-from-a-board)
 
 ---
 
@@ -716,6 +717,22 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 - a sandbox escape or unexpected network egress from a test container;
 - a builder repeatedly disqualified for test tampering (shows as a rising `disqualified` count).
 
+**Intake stop conditions** (ADR-0017). A listener stops with one of eight published reasons,
+shown on `/factory/intake?repo=`, on the item's evidence chain as `intake.stopped` and in
+`crb doctor`'s `intake` line. None of them loses work: the next poll retries, and nothing is
+registered from a partial read.
+
+| Reason | What happened | What you do |
+|---|---|---|
+| `not_configured` | no tracker is configured for this deployment (or `tracker: fake` without `CRB_ENABLE_FAKE_TRACKER=1`) | set the `CRB_INTAKE__*` block; a listener cannot be switched on until you have |
+| `no_secret` | a tracker is configured but no credential is stored | an admin stores the tracker token (`PUT /settings/secrets/tracker-token`, or the Settings screen) |
+| `unauthorised` | the tracker rejected the credential (401/403) | mint a new token with permission to read work items and add comments, and store it |
+| `unreachable` | the tracker did not answer (timeout, 5xx, 429) | check the URL and that the deployment may reach it; the next poll retries on its own |
+| `column_gone` | the watched column or state no longer exists on that board | point the listener at a column that does (`PUT /factory/{repo}/intake` with `column`) |
+| `refused` | the tracker refused a write — usually a workflow transition it does not allow, or a permission the credential lacks; or a ticket whose key cannot become an item id, which costs that ticket and nothing else | nothing was changed on the ticket; fix the workflow or the permission, or clear `CRB_INTAKE__OUTCOME_MAP` |
+| `column_too_large` | the column holds more tickets than one pass may read (`CRB_INTAKE__MAX_PER_POLL`), or the pass ran past `CRB_INTAKE__POLL_BUDGET_S` | narrow the area path or the JQL so the column holds the work that is genuinely ready, or raise the bound; a pass that ran out of time serves what it read and the rest are read next time |
+| `no_public_url` | this deployment does not know its own address, so a link on a ticket would not open | set `CRB_PUBLIC_URL` to the address people use to reach the product, on the API and the worker |
+
 Resume only after root cause, correction, a targeted regression run and re-qualification
 of the affected cells.
 
@@ -762,3 +779,141 @@ credential: re-activating within the session lifetime (`CRB_SESSION_TTL`, 8 hour
 default) restores the sessions issued before. To contain a suspected compromise, deactivate
 **and** set a new password; the password is what ends the sessions for good. The last
 active admin can never be deactivated, by either door.
+
+## 10. The factory's test author
+
+Forward mode has no held-out test, so nothing can be built until one failing test exists. An
+item whose oracle you pasted in when you registered the backlog has one. An item without one
+stops `no_oracle` and waits for a person — unless this deployment configures a **test-author
+rung**.
+
+Set one variable, on the API *and* the worker:
+
+```
+CRB_FACTORY__TEST_AUTHOR=openai_agent:gpt-oss-120b:cerebras
+```
+
+The spelling is a rung — `builder:model[:provider]` — exactly as you would write a build
+rung, and the builder half must be a registered builder name (`editblock`, `openai_agent`,
+`claude_code`). Empty, or `none`, means no author: that is the default and it is the
+behaviour the product shipped with. One run can override it without changing the
+deployment:
+
+```
+POST /runs {"repo": "cobra", "kind": "factory", "test_author": "editblock:gpt-oss-120b"}
+POST /runs {"repo": "cobra", "kind": "factory", "test_author": "none"}   # this run pays for no authoring
+```
+
+**The author rung and the build rung are never the same rung.** This is the same refusal
+that has always stopped a rung building against a test it wrote itself: when the run's spec
+is built, the author's label is compared with every rung on the ladder, and a match ends the
+run with `SameIdentityError` **before anything is built or paid for**. If the run fails that
+way, choose another rung — the message names the ladder. What the refusal deliberately does
+not catch is the same model under a *different* registered builder name; the label space is
+closed to the registry, so no label can be invented to dodge it, but model-level separation
+is your choice of models, not something the product can enforce. [gap]
+
+Nothing the author writes is taken on trust. The test is written in a throwaway worktree at
+the base (a stray source edit cannot leak out of it), then the ordinary RED proof runs it at
+the base and requires a failure with attributable test ids — green, a timeout or an
+unattributable failure is refused. The proven bytes are staged as a throwaway commit and
+belt 1 re-checks every test byte after the build. A reply the product cannot use (no file,
+an empty file, a path the repository does not call a test) is put back to the model with the
+reason, and after the attempts are spent the item simply has no oracle.
+
+**What you see.** The run's apparatus stamp carries `test_author` (`""` = none), the trace
+carries `factory/author.configured` before any authoring and one `author.attempt` per try
+with the reason a reply could not be used. `GET /settings` (admin) serves the configured
+rung under `raw.factory.test_author` (`none` when there is none); the Settings screen does
+not show it yet. [gap] An item that still stops `no_oracle` with an author configured
+means the author produced nothing usable — read `author.attempt`.
+
+**When the review says the test is too weak.** The loop never rebuilds against an unchanged
+test: the item stops `oracle_needs_strengthening` and the Factory screen offers the
+replacement item already drafted from the item that stopped and from the reviewer's own
+finding. Read the draft, strengthen the test, and register it — the frozen backlog does not
+change, the draft is chained onto it.
+## 11. Intake — work arriving from a board
+
+A team's own board can be the front door of the factory: a ticket moved into one watched
+column is the request to manufacture, and the ticket **is** the backlog item
+(ADR-0017). Nothing about this is on by default, and it takes two separate decisions by
+two different roles to switch on.
+
+**1. An admin configures the connection, once per deployment.** Set the `CRB_INTAKE__*`
+block on the API *and* the worker (DEPLOYMENT.md §2.1), then store the credential:
+
+```
+CRB_INTAKE__TRACKER=ado                       # none (default) | ado | jira
+CRB_INTAKE__URL=https://dev.azure.com/contoso # https only; the site URL for Jira
+CRB_INTAKE__PROJECT=Widgets
+CRB_INTAKE__COLUMN="Ready for manufacture"    # the System.State / Jira status watched
+CRB_INTAKE__AREA_PATH="Widgets\\Payments"      # Azure DevOps only, optional
+CRB_INTAKE__POLL_S=300
+CRB_INTAKE__MAX_PER_POLL=200                  # a longer column is not read at all (see below)
+CRB_INTAKE__POLL_BUDGET_S=60                  # one pass may take this long, then it stops early
+CRB_INTAKE__OUTCOME_MAP='{"merged": "Done"}'  # EMPTY by default: no ticket is ever moved
+CRB_PUBLIC_URL=https://crb.example.com        # THIS deployment's address (required, see below)
+```
+
+`CRB_PUBLIC_URL` is not optional for intake. The product writes links to its own pages on
+somebody else's ticket, and a relative path in an Azure DevOps or Jira comment resolves
+against **their** host, so it would go nowhere. A listener cannot be switched on until it is
+set (the switch is refused with `intake_no_public_url`), and a pass that somehow starts
+without it stops with `no_public_url` before it writes anything.
+
+**Bounds on one pass.** A first pass over a ticket it registers costs **eleven** Azure DevOps
+requests, or **nine** Jira ones **[measured — n = 1 ready ticket × 2 adapters; method: every
+request counted through an `httpx.MockTransport` for the verb sequence `poll_repository` makes on a
+ticket it registers (the column, the ticket, the readiness comment, the label, the queued note, the
+item link) — `tests/test_intake_write_bound.py::test_a_first_pass_on_one_ready_ticket_costs_eleven_azure_devops_requests`
+and `::test_the_same_first_pass_costs_nine_jira_requests`, which also assert where each request
+goes; apparatus 2.2. A count, so no interval]**. Azure DevOps is the dearer of the two because
+three of its verbs read before they write. A pass runs in front of the worker's heartbeat and, for
+*Re-read the column now*, inside an API request. So a column holding more than
+`CRB_INTAKE__MAX_PER_POLL` tickets is **not read at all**: the pass stops
+with `column_too_large` and says to narrow the area path or the JQL, because reading an
+arbitrary 200 of somebody's board and saying nothing about the rest would be worse than
+reading none of it. A pass still running after `CRB_INTAKE__POLL_BUDGET_S` stops early,
+serves the tickets it read and records the same reason with how far it got; the rest are
+read on the next pass.
+
+The credential is deliberately **not** an environment variable. An admin stores it through
+`PUT /settings/secrets/tracker-token` (or the Settings screen): an Azure DevOps personal
+access token with *Work items: read & write*, or a Jira API token with the account email in
+`CRB_INTAKE__EMAIL`. It is held owner-only on the API host and read back only as a
+fingerprint, exactly like the GitHub App key.
+
+**2. An operator switches the listener on, per repository.** `/factory/intake?repo=` →
+*Switch the listener on*. Until they do, that repository's column is never read and no
+ticket is ever written to — and the switch is stored with who threw it and when. It is one
+click to switch off again.
+
+**What the product then does, and what it will never do.** Every `poll_s` the worker reads
+the column. For each ticket it has not already handled at its current revision it drafts a
+backlog item, runs the readiness gate, and leaves **one** comment (idempotent by a hidden
+marker) and **one** `crb:` label. When every question a good acceptance test needs is
+answered, the item is registered through the same path the freeze form uses and the ticket
+gets `crb:queued`, a note naming the item and a link to it. An edited ticket comes back as an
+*evolution* — a new item superseding the old one; the frozen record is never rewritten. Over
+a ticket's life it can receive four comments, each marked as its own (what is missing, the
+queued note, the pull-request note, the note if the work stopped), one `crb:` label, a link
+to the item and a link to the pull request, and — only where the outcome map is configured —
+one state change. It edits no other field, never creates a ticket, and never reads a column it
+was not pointed at. Switching the listener on or off is itself an event on the repository's
+system trace (`intake.listener.switched`) naming the operator, so a later switch cannot
+quietly overwrite who consented.
+
+**Telemetry.** `/health` and `crb doctor` carry an `intake` line: the tracker, whether a
+credential is stored, whether this deployment knows its own address, how many listeners are
+on, and **the stop the last real read recorded** — so a deployment whose listeners are all
+failing `unauthorised` reads `degraded`, not `ok`. It contacts no tracker: a readiness probe
+that called somebody else's service would make this deployment's health depend on theirs, and
+the reachability it reports is therefore the reachability the last poll measured. Every step is on the repository's own evidence chain
+(`GET /factory/{repo}/evidence`) as `intake.polled`, `intake.read`,
+`intake.feedback.posted`, `intake.registered`, `intake.queued`, `intake.delivered`,
+`intake.transitioned` and `intake.stopped` (API.md, "Event vocabulary"). Stop conditions
+are in §8.
+
+**Cost.** Reading a column, drafting an item and posting the feedback call no model and
+spend nothing. Only a factory run spends, and it is still started the same way (§3).

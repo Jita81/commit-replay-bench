@@ -6,8 +6,22 @@
 #   types     mypy --strict over src/crb
 #   code-map  every source file carries a valid Navigation header; docs/CODE-MAP.md current
 #   dod       every page/journey/stream + the product carry a definition of done; docs/dod/GAP-ANALYSIS.md current
+#   claims    every quantified sentence on an allowlisted public page carries a permitted tag,
+#             and a [measured] one carries its n, its method and its apparatus version
 #   layers    import-linter: crb.core is stdlib-only; layers depend downward only
 #   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
+#   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
+#             The hint ratchet, the native-`title=` allowlist and every screen suite run
+#             there, so a hint-registry, a copy or a type regression fails a build instead of
+#             waiting for someone to run the gates by hand before a release. Both UI jobs run
+#             on every pull request, and a red one must be fixed like any other gate — but
+#             neither context is on main's required-checks list yet, so its failure does not
+#             by itself stop a merge. Only a repository administrator can add them; both
+#             contexts belong on that list alongside `container` (docs/DEPLOYMENT.md §3.4
+#             names the branch-protection call, README.md "Status" records the current list)
+#   ui-smoke  the mocked Playwright smoke spec (ui/e2e/smoke.spec.ts) over the built bundle:
+#             the axe sweep of /login, the index redirect signed in and signed out, and the
+#             end-to-end 404. No server and no model — `page.route` answers every API call
 #   security  gitleaks (secrets in history) + pip-audit on the resolved environment
 #   sbom      CycloneDX SBOM of the resolved environment, uploaded as an artifact
 #   test-postgres  the store suite (tests/test_store_*.py) against a real PostgreSQL 16 service
@@ -20,9 +34,10 @@
 #                  each language through DockerExecutor ON THAT IMAGE (uid 65534, read-only
 #                  root, network off, qualify + grade clean — tests/test_sandbox_images_docker.py),
 #                  and the sandbox + sealed-builder suites on the python one; a skip in the
-#                  smoke fails the job. Always runs and is blocking: the context
+#                  smoke fails the job. Always runs, and is not on main's required-checks list
+#                  yet, so its failure does not by itself stop a merge: the context
 #                  "sandbox-images (build + hadolint + smoke each reference sandbox image)"
-#                  belongs in main's required status checks alongside `container`
+#                  belongs on that list alongside `container`
 #                  (docs/DEPLOYMENT.md §3.4 names the branch-protection call). The `test` job
 #                  deselects the `sandbox_images` marker: these tests build images, and this
 #                  job builds each exactly once with the GHA layer cache
@@ -114,8 +129,11 @@ jobs:
       - name: Headers present, links resolve, map current
         run: python scripts/code_map.py --check
 
+  # GitHub truncates a check-run name at 100 characters, and branch protection matches the
+  # FULL name — a longer one can never satisfy a required context (it blocked PR #48). Keep
+  # every `name:` in this file under 100 characters.
   dod:
-    name: dod (every route, journey, stream and the product carry a definition of done; evidence resolves; the gap analysis is current)
+    name: dod (every route, journey and stream has its definition of done; evidence resolves)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -127,6 +145,22 @@ jobs:
           python-version: "3.12"
       - name: Artefacts valid, evidence resolves, docs/dod/GAP-ANALYSIS.md current
         run: python scripts/dod_check.py --check
+
+  claims:
+    name: claims (every quantified sentence on a covered page carries its tag)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # The pages covered are scripts/claims_check.py's ALLOWLIST; the rest of the
+      # documentation is ungated and the gap analysis (G-929) says so.
+      - name: Every claim on a covered page carries what its tag requires
+        run: python scripts/claims_check.py --check
 
   layers:
     name: layers (import-linter)
@@ -197,6 +231,65 @@ jobs:
         with:
           name: coverage-py${{ matrix.python }}
           path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ui-unit:
+    name: ui-unit (tsc -b + vitest, the hint ratchet included)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install the UI
+        working-directory: ui
+        run: npm ci --no-audit --no-fund --legacy-peer-deps
+      - name: Types (tsc -b)
+        working-directory: ui
+        run: npm run typecheck
+      - name: Unit tests (vitest — screens, help registry, hint ratchet, title= allowlist)
+        working-directory: ui
+        run: npx vitest run
+
+  ui-smoke:
+    # quoted: an unquoted YAML scalar may not contain ": "
+    name: "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install the UI + Playwright Chromium (with system deps)
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund --legacy-peer-deps
+          npx playwright install --with-deps chromium
+      - name: Smoke (ui/e2e/smoke.spec.ts — the config builds the bundle and serves it)
+        working-directory: ui
+        env:
+          CI: "1"
+        run: npx playwright test
+      - name: Upload the Playwright report + traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
+        with:
+          name: ui-smoke-playwright-report
+          path: |
+            ui/playwright-report
+            ui/test-results
           if-no-files-found: ignore
           retention-days: 7
 

@@ -131,15 +131,20 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               src/crb/observability/metrics.py (the recorders, ``record_event`` on
               the emitter's metering sink, ``crb_queue_depth`` on check-in),
               src/crb/core/run.py (a replay's task loop), src/crb/builders/adapter.py (the
-              build function, ladder, pre-flight), src/crb/core/mine.py (mining; the oracle
+              build function, ladder, pre-flight), src/crb/factory/author.py (the factory
+              run's test-author rung, from ``CRB_FACTORY__TEST_AUTHOR`` or
+              ``params.test_author``), src/crb/core/mine.py (mining; the oracle
               and controls kinds call their core modules the same way),
               src/crb/server/factory_state.py (forward mode's files and ``sync_outcomes``,
               which runs first; the loop itself is src/crb/factory/loop.py),
+              src/crb/server/intake.py (the idle loop's tracker poll — the watched column
+              of every repository whose listener an operator switched on, ADR-0017),
               src/crb/server/github_app.py (installation tokens for clone, fetch,
               delivery and the pull-request read), src/crb/server/reaper.py (the durable
               queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
+              tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py
 Touch when:   a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
@@ -216,10 +221,12 @@ from crb.core.run import BuildAttempt, RunSpec, RunSummary
 from crb.core.run import run as core_run
 from crb.core.runners import get_runner
 from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
+from crb.core.secrets_file import SecretsStore
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
 from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.core.workspace import Workspace
+from crb.factory.author import author_from_label
 from crb.factory.backlog import BacklogItem
 from crb.factory.delivery import (
     GitCredentials,
@@ -228,15 +235,24 @@ from crb.factory.delivery import (
     github_open_pr_fn,
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
-from crb.factory.testfirst import AuthoredTest
+from crb.factory.testfirst import AuthoredTest, TestAuthor, author_label
+from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.github_app import GitHubApp, GitHubAppError
+from crb.server.intake import (
+    ListenerState,
+    apply_outcome_map,
+    build_tracker,
+    item_url_for,
+    poll_repository,
+    post_outcomes_to_tickets,
+)
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
-from crb.server.settings import GitHubAppSettings
+from crb.server.settings import FactorySettings, GitHubAppSettings, IntakeSettings
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
@@ -441,6 +457,19 @@ class WorkerSettings:
     #: The GitHub App this deployment is registered as (``CRB_GITHUB__*``): the worker
     #: mints installation tokens to clone and deliver linked repositories (ADR-0014).
     github: GitHubAppSettings = field(default_factory=GitHubAppSettings)
+    #: The served factory's defaults (``CRB_FACTORY__*``) — today the test-author rung a
+    #: factory run uses when nobody authored an oracle for an item. Empty = no author,
+    #: which is why such an item stops ``no_oracle``.
+    factory: FactorySettings = field(default_factory=FactorySettings)
+    #: Where work arrives from (``CRB_INTAKE__*``, ADR-0017): the worker reads the watched
+    #: column of every repository whose listener an operator switched on. ``tracker: none``
+    #: (the default) means the idle loop never polls anything.
+    intake: IntakeSettings = field(default_factory=IntakeSettings)
+    #: This deployment's own public address (``CRB_PUBLIC_URL``), read the way the API reads
+    #: it. Every link the intake listener writes on somebody's ticket is built from it, and a
+    #: pass that starts without one stops with ``no_public_url`` rather than writing a
+    #: relative path a reader on the tracker's site cannot open.
+    public_url: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", Path(self.home).expanduser())
@@ -639,6 +668,9 @@ class Worker:
         self.worker_id = settings.worker_id
         self._checkin_lock = threading.Lock()
         self._last_checkin = 0.0
+        # the intake listener's own timer (ADR-0017): the first idle pass polls, then
+        # every CRB_INTAKE__POLL_S. Zero means "due now".
+        self._intake_last = 0.0
         self.reaper = ContainerReaper(self.home / STATE_FILENAME, docker=_reaper_docker())
         self._handlers: dict[str, Handler] = {
             KIND_SETUP: self._run_setup,
@@ -701,9 +733,145 @@ class Worker:
                 _LOG.exception("worker loop error")
                 run = None
             if run is None:
+                self.poll_intake()
                 stop.wait(self.settings.poll_s)
         self.checkin(stopped=True)
         _LOG.info("worker %s stopped", self.worker_id)
+
+    # --- intake: the enterprise's own board ----------------------------------------
+    def intake_due(self, now: float | None = None) -> bool:
+        """Is a poll due? ``CRB_INTAKE__POLL_S`` since the last one. A deployment with no
+        tracker configured is never due, so the idle loop costs nothing."""
+        if not self.settings.intake.enabled:
+            return False
+        t = time.time() if now is None else now
+        return (t - self._intake_last) >= float(self.settings.intake.poll_s)
+
+    def intake_repos(self) -> list[tuple[str, ListenerState]]:
+        """Every repository whose listener an operator switched ON, with its state.
+
+        Default OFF is enforced here as well as at the API: a repository row with no
+        ``intake`` key in its config is simply not in this list, so a deployment that has
+        configured a tracker still polls nothing until somebody consents.
+        """
+        out: list[tuple[str, ListenerState]] = []
+        with self.factory() as s:
+            for row in s.execute(select(Repo)).scalars().all():
+                state = ListenerState.from_config(dict(row.config_json or {}))
+                if state.enabled:
+                    out.append((str(row.name), state))
+        return out
+
+    def poll_intake(self, now: float | None = None) -> int:
+        """One pass of the intake listener over every switched-on repository.
+
+        Returns how many repositories were polled. Never raises: a tracker that cannot be
+        built or reached is an ``intake.stopped`` event on each repository's chain and the
+        next pass retries. Called from the idle loop only, so a poll never competes with a
+        run for this worker.
+
+        The pass keeps its own check-in running for as long as it lasts. The idle loop's
+        throttled check-in only happens BETWEEN passes, and one ticket costs about eleven
+        synchronous tracker calls, so a slow board could hold the loop past the liveness
+        window — and the health probe then called this worker stale, and told an operator
+        queued runs would not start, while it was working.
+        """
+        if not self.intake_due(now):
+            return 0
+        self._intake_last = time.time() if now is None else now
+        repos = self.intake_repos()
+        if not repos:
+            return 0
+        try:
+            tracker = build_tracker(
+                self.settings.intake, self._tracker_token(), home=self.settings.home
+            )
+        except TrackerError as exc:
+            for repo, _state in repos:
+                FactoryHome(self.home, repo).evidence(actor="worker").append(
+                    "intake.stopped", "", step="connect", reason=exc.reason, detail=exc.detail
+                )
+            _LOG.warning("intake not polled: %s", exc.reason)
+            return 0
+        stop_checkin = threading.Event()
+        checkin = self._checkin_thread(stop_checkin, name="intake")
+        try:
+            for repo, state in repos:
+                try:
+                    self._poll_one(repo, tracker, state)
+                except Exception:  # the idle loop must survive anything a tracker does
+                    _LOG.exception("intake poll failed for %s", repo)
+        finally:
+            stop_checkin.set()
+            checkin.join(timeout=5)
+        return len(repos)
+
+    def _tracker_token(self) -> str:
+        """The stored tracker credential, read at poll time and never held on the worker.
+        Missing or unreadable is an empty string, which ``build_tracker`` turns into the
+        ``no_secret`` stop an operator can act on."""
+        try:
+            return SecretsStore.from_env().get(TRACKER_TOKEN_SECRET) or ""
+        except Exception:  # an insecure or absent store is "no secret", never a crash
+            return ""
+
+    def _poll_one(self, repo: str, tracker: Any, state: ListenerState) -> None:
+        """Read one repository's column, then apply the outcome map to its merged items."""
+        home = FactoryHome(self.home, repo)
+        lookup = self._route_lookup(repo)
+        # ONE builder for every link this pass writes on a ticket, and it is absolute: a
+        # relative path in somebody else's comment resolves against THEIR host
+        item_url = item_url_for(self.settings.public_url, repo)
+        # poll_repository writes the view the screen reads, so nothing is returned that this
+        # caller has to remember to persist
+        poll_repository(
+            repo,
+            tracker=tracker,
+            listener=state,
+            column=state.column or self.settings.intake.column,
+            home=home,
+            route_for=lookup,
+            item_url=item_url,
+            run_active=lambda: self._factory_run_active(repo),
+            actor="worker",
+            max_tickets=self.settings.intake.max_per_poll,
+            budget_s=float(self.settings.intake.poll_budget_s),
+        )
+        # what the loop did with the items this column produced, told to the tickets that
+        # produced them: the pull request link when one opened, the refusal and its way
+        # forward when the loop stopped. Read from the chain, posted once per marker.
+        post_outcomes_to_tickets(
+            tracker,
+            home=home,
+            item_url=item_url,
+            evidence=home.evidence(actor="worker"),
+        )
+        apply_outcome_map(
+            tracker,
+            home=home,
+            outcome_map=dict(self.settings.intake.outcome_map),
+            evidence=home.evidence(actor="worker"),
+        )
+
+    def _factory_run_active(self, repo: str) -> bool:
+        """Is a factory run queued or running for ``repo``? A registration that arrives now
+        is queued rather than refused — the backlog hash a run verifies against must not
+        move under it."""
+        with self.factory() as s:
+            row = (
+                s.execute(
+                    select(Run.id)
+                    .where(
+                        Run.repo == repo,
+                        Run.kind == KIND_FACTORY,
+                        Run.status.in_(("queued", "running")),
+                    )
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+        return row is not None
 
     # --- the reaper ---------------------------------------------------------------
     @property
@@ -790,6 +958,22 @@ class Worker:
         """Idle-loop check-in, throttled to ``heartbeat_s`` (the loop wakes every ``poll_s``)."""
         if time.monotonic() - self._last_checkin >= self.settings.heartbeat_s:
             self.checkin()
+
+    def _checkin_thread(self, stop: threading.Event, *, name: str) -> threading.Thread:
+        """A check-in every ``heartbeat_s`` until ``stop`` is set — for work the idle loop
+        cannot interrupt, such as one intake pass over somebody's board.
+
+        It carries no run id: this is the worker saying it is alive while holding nothing, and
+        a run's own liveness is :meth:`_heartbeat_thread`'s (which also renews the claim).
+        """
+
+        def loop() -> None:
+            while not stop.wait(self.settings.heartbeat_s):
+                self.checkin()  # never raises: liveness must not take the pass down
+
+        t = threading.Thread(target=loop, name=f"crb-checkin-{name}-{self.worker_id}", daemon=True)
+        t.start()
+        return t
 
     def checkin(self, *, current_run_id: str = "", stopped: bool = False) -> None:
         """Upsert this worker's ``workers`` row (J-TEL-2): hostname, executor, kinds,
@@ -1840,7 +2024,10 @@ class Worker:
 
         ``params``: the ladder / budget / builder_config of a replay; ``deliver`` (default
         False — a PR needs a credentials provider, absent here, so delivery fails closed
-        as ``delivery_failed`` when asked for); ``max_rework`` (default 1)."""
+        as ``delivery_failed`` when asked for); ``max_rework`` (default 1); ``test_author``
+        (a rung label, or ``none``; default the deployment's ``CRB_FACTORY__TEST_AUTHOR``)
+        — the rung that writes the failing test for an item nobody authored an oracle for,
+        refused when it is a rung on this run's own ladder."""
         run = ctx.run
         p = ctx.params
         home = FactoryHome(self.home, run.repo)
@@ -1875,6 +2062,10 @@ class Worker:
         retain = dict(p.get("retain") or {})
         runner = self._runner(ctx)
         executor = self._executor(ctx)
+        # G-904 — the served worker's test author. Resolved here, BEFORE anything is
+        # stamped or spent, so a rung that is also on the build ladder is refused by
+        # ``FactorySpec``'s existing identity check rather than found half-way through.
+        test_author = self._test_author(ctx, ladder)
         overrides = dict(p.get("builder_config") or {})
         builders: dict[str, Builder] = {}
 
@@ -1900,6 +2091,9 @@ class Worker:
             deliver=bool(p.get("deliver", False)),
             budget=budget.to_dict(),
             ladder=[r.label for r in ladder.rungs],
+            # the author rung, on the run's apparatus stamp: "" reads "no test author",
+            # which is why an item with no operator-authored oracle stops ``no_oracle``
+            test_author=author_label(test_author) if test_author is not None else "",
             # F39 — the base every RED proof and build of this run starts from (the
             # default branch as fetched, or the clone's head when nothing was fetched)
             base_sha=ctx.git.rev_parse("HEAD"),
@@ -1937,6 +2131,7 @@ class Worker:
             ledger=as_run_ledger(run_ledger),
             budget=budget,
             gap_ledger=home.gap_ledger(),
+            test_author=test_author,
             deliver=bool(p.get("deliver", False)),
             creds=creds,
             open_pr_fn=open_pr if creds is not None else None,
@@ -1983,6 +2178,35 @@ class Worker:
         if self._cancelled(ctx):
             return STATUS_CANCELLED, counts, ""
         return STATUS_SUCCEEDED, counts, ""
+
+    def _test_author(self, ctx: RunContext, ladder: EscalationLadder) -> TestAuthor | None:
+        """The run's test author, or ``None`` when this deployment has none.
+
+        The run's ``params.test_author`` wins over the deployment's
+        ``CRB_FACTORY__TEST_AUTHOR``; ``none`` in either place means no author, so a run
+        can decline one a deployment configures. The label is a rung
+        (``builder:model[:provider]``) and its builder must be a registered builder name,
+        because the invariant the loop enforces — **the author rung and the build rung are
+        never the same rung** — is a comparison of rung labels
+        (:func:`crb.factory.testfirst.assert_distinct_identity`, applied to every rung by
+        :class:`~crb.factory.loop.FactorySpec`). Nothing is enforced twice here; this only
+        builds the author so the refusal has a label to compare, and names the ladder in the
+        message when an operator has to choose another rung.
+        """
+        raw = str(ctx.params.get("test_author", "") or "").strip()
+        if not raw:
+            raw = self.settings.factory.test_author.strip()
+        default_provider = str(ctx.run.provider or ctx.params.get("provider") or "")
+        try:
+            author = author_from_label(raw, default_provider=default_provider)
+        except ValueError as exc:
+            raise ValueError(
+                f"test author {raw!r} cannot be used: {exc} "
+                f"(this run's ladder is {[r.label for r in ladder.rungs]})"
+            ) from exc
+        if author is not None:
+            ctx.emit("factory", "author.configured", author=author_label(author))
+        return author
 
     def _sync_outcomes(
         self, ctx: RunContext, home: FactoryHome, cfg: Mapping[str, Any], remote: str

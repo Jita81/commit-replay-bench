@@ -373,7 +373,8 @@ def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
                 label=c.label,
                 verification_tier=c.verification_tier or "automated-pass",
                 apparatus_versions=list(c.stats.apparatus_versions),
-                ci_high=round(c.stats.ci.high, 4),
+                # ci_high arrives in ``d``: the decision itself carries both ends of its
+                # interval now, so passing it again here would be a duplicate keyword
                 belt_sets=list(c.belt_sets),
                 model_n=c.model_n,
                 model_point=None if c.model_point is None else round(c.model_point, 4),

@@ -52,6 +52,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
+import { ShortId } from '../../components/ShortId'
 import { StatTile } from '../../components/StatTile'
 import { useAuth } from '../../lib/auth'
 import { fmtInt, fmtRatio, fmtSeconds, shortId, wilson } from '../../lib/format'
@@ -95,7 +96,7 @@ function ControlsSection({ repo }: { repo: string }) {
   const q = useOracleControls(repo)
   const columns = useMemo<Column<ControlRow>[]>(
     () => [
-      { key: 'task', header: 'Task', hint: 'col.controls.task', mono: true, sortValue: (r) => r.task_id, cell: (r) => <Link to={`/tasks/${encodeURIComponent(r.repo)}/${r.task_id}`} title={r.task_id}>{shortId(r.task_id)}</Link> },
+      { key: 'task', header: 'Task', hint: 'col.controls.task', mono: true, sortValue: (r) => r.task_id, cell: (r) => <Link to={`/tasks/${encodeURIComponent(r.repo)}/${r.task_id}`}><ShortId value={r.task_id} /></Link> },
       { key: 'control', header: 'Control', hint: 'col.controls.control', mono: true, sortValue: (r) => r.control, cell: (r) => r.control },
       { key: 'expected', header: 'Expected', hint: 'col.controls.expected', sortValue: (r) => r.expected, cell: (r) => r.expected },
       { key: 'observed', header: 'Observed', hint: 'col.controls.expected', sortValue: (r) => r.observed, cell: (r) => r.observed },
@@ -184,7 +185,7 @@ export function OraclePage() {
   )
   const taskCols = useMemo<Column<OracleTask>[]>(
     () => [
-      { key: 'task', header: 'Task', hint: 'col.oracle_task.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <Link to={`/tasks/${encodeURIComponent(repo)}/${t.task_id}`} title={t.task_id}>{shortId(t.task_id)}</Link> },
+      { key: 'task', header: 'Task', hint: 'col.oracle_task.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <Link to={`/tasks/${encodeURIComponent(repo)}/${t.task_id}`}><ShortId value={t.task_id} /></Link> },
       { key: 'class', header: 'Class', hint: 'col.oracle_task.task', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
       { key: 'size', header: 'Size', hint: 'col.oracle_task.task', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
       // strength = killed / mutants, a binomial rate: it is shown with its Wilson 95% interval

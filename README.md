@@ -2,7 +2,9 @@
 
 **Commit Replay Bench** grades an AI builder against a repository's **own held-out tests**.
 Its verdicts do not come from a model's opinion of a model's work: every verdict is the
-result of five **mechanical belts** run over the repository's real test suite and its own lint gate, and the
+result of the **mechanical belts** run over the repository's real test suite and its own lint
+gate (belt set v5 — each belt is defined in
+[Evidence & claims §2](docs/EVIDENCE-AND-CLAIMS.md#2-clean-semantic-q1-and-false-q1)), and the
 product refuses — at the moment of writing — to record a pass that any belt contradicts
 (**false-Q1 = 0**, enforced in `GradeResult.__post_init__` and `GradeRow.assert_invariants`).
 Every verdict is written to an **append-only, hash-chained ledger** with a per-task
@@ -21,9 +23,17 @@ loop runs on `crb`'s own repository, and what one team learns reaches another on
 abstract cells, never code.
 
 > Status: **2.0.0a1 on `main`, 2.0.0b1 in preparation** (apparatus **2.2**, belt set v5) — a public, Apache-2.0
-> repository since 2026-09-16 with **CI green on `main`** (eleven jobs, required by branch
-> protection before anything merges) and every change since 2026-09-15 reviewed by
-> CodeRabbit (ADR-0013). Every phase of the product plan has shipped (P0–P7: engine, oracle,
+> repository since 2026-09-16 with **CI green on `main`** — every job in
+> [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request, and
+> branch protection requires the ten checks on its required list before anything merges;
+> every other job — `sbom`, `sandbox-images` and each gate added since, this wave's `dod`,
+> `claims`, `ui-unit` and `ui-smoke` among them — runs on every pull request but is not on
+> that list, which only
+> an administrator of the repository can change
+> **[measured 2026-09-22 — the required-checks list read once from the repository setting
+> (`gh api …/branches/main/protection`) against the workflow's job keys, n = 1 reading;
+> apparatus n/a: a repository setting, not a graded number]** — and every change since
+> 2026-09-15 reviewed by CodeRabbit (ADR-0013). Every phase of the product plan has shipped (P0–P7: engine, oracle,
 > builders, store, server, UI, factory, deployment) plus the MCP server (P8) so Claude Code
 > can drive a deployment. `v2.0.0a1` is tagged and its image is on GHCR; `v2.0.0b1` will be
 > cut per [docs/RELEASING.md §2](docs/RELEASING.md#2-cut-a-release) once the shippable wave
@@ -223,13 +233,20 @@ Full description, C4 diagrams, sequence diagrams and the data model:
 
 ## Evidence & claims policy
 
-Every claim in this repository carries one of three tags:
+Every claim in this repository carries one of these tags:
 
 | Tag | Meaning |
 |-----|---------|
 | `[measured]` | Backed by ledger rows you can re-derive: `n`, method, Wilson interval, apparatus version. |
 | `[hypothesis]` | Directionally supported; not yet confirmed by a pre-registered or replicated measurement. |
 | `[aspiration]` | Designed for; not demonstrated. |
+| `[gap]` | Named as missing, so a reader is never left to assume it is there. |
+
+The rule is a gate, not a habit: CI's `claims` job (`scripts/claims_check.py`) reads the pages
+on its allowlist, finds the sentences that quantify something, and fails when one carries no
+tag — or when a `[measured]` one carries no `n`, no method and no apparatus version. The
+script's own docstring says what the heuristic deliberately does not catch, and which pages
+are not yet covered.
 
 **A number without its method is a slogan.** Every figure the product shows carries its
 `n`, its confidence interval and its apparatus version; numbers from different apparatus
@@ -240,12 +257,16 @@ permitted claim shapes at each maturity — is in
 
 ## What has been measured (2026-09-15) — and what it licenses
 
-Everything below is `[measured]`, re-derivable from the ledger, on the **host executor
-posture** (see the evidence caveat in the [Changelog](CHANGELOG.md)); nothing here is a
-per-repository or per-model capability claim.
+Everything below is **[measured — each bullet names its corpus, its mode, its builder and
+its budget, and every row behind it is in the ledger and re-derivable with `crb`; apparatus
+2.2 unless the bullet names another, and the SQLAlchemy census rows (apparatus 1.0-census)
+are never pooled with rows from apparatus 2.2]**, on the **host executor posture** (see the evidence caveat
+in the [Changelog](CHANGELOG.md)); nothing here is a per-repository or per-model capability
+claim.
 
-- **The instrument holds on real code.** Four public libraries (cobra, click, koa,
-  SQLAlchemy census) and three NHS repositories (nhsuk-frontend, nhsuk-react-components,
+- **The instrument holds on real code.** n = 7 repositories: four public libraries (cobra,
+  click, koa, SQLAlchemy census) and three NHS repositories (nhsuk-frontend,
+  nhsuk-react-components,
   mesh-client) mined, oracle-scored and negative-controlled; **false-Q1 = 0** across every
   ledger row; controls **passed with 0 escapes** on every repository they were run on
   ([NHS measurement](docs/reviews/2026-09-14-nhs-public-repos.md), [critical-friend review](docs/reviews/2026-09-13-critical-friend.md)).

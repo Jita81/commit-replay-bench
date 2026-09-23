@@ -14,7 +14,11 @@
  *               a session to another host. An already-authenticated visitor is redirected
  *               straight to `next`. Both fields and both sign-in buttons carry a hint
  *               (`field.login.*`, `button.login.*`) so the form explains itself on hover,
- *               focus and tap before a person has any role at all.
+ *               focus and tap before a person has any role at all. Under the form one
+ *               sentence gives the person who cannot get in a way forward and states the
+ *               page's non-goal: an admin resets a password on Settings, or the person who
+ *               runs the deployment does (`crb users`, OPERATOR §9) — accounts are never
+ *               created, reset or reactivated here (the reset screen is backlog F23).
  * How:          `useAuth` (redirect if logged in) → `useLogin` mutation on submit → the auth
  *               query is seeded with the principal; `safeNext` validates the return path.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -122,6 +126,14 @@ export function LoginPage() {
             </>
           )}
         </section>
+
+        {/* The stop has a way forward. This page signs people in and does nothing else, so it
+            names who can reset a password or reactivate an account: an admin on Settings, or
+            the person who runs the deployment (`crb users`, docs/OPERATOR.md §9). The reset
+            screen itself is backlog F23. */}
+        <p className="text-center text-[13px] text-on-surface-muted">
+          Forgotten your password, or locked out? Ask an admin to reset it on the Settings screen, or ask the person who runs this deployment. Accounts are not created, reset or reactivated here.
+        </p>
 
         <p className="text-center text-[11px] text-on-surface-muted">Sessions are cookie-based and expire with the browser unless your organisation's policy says otherwise.</p>
       </main>

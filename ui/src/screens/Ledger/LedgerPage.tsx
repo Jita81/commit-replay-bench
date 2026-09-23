@@ -50,9 +50,10 @@ import { Pill } from '../../components/Pill'
 import { Provenance } from '../../components/Provenance'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
+import { ShortId } from '../../components/ShortId'
 import { StatTile } from '../../components/StatTile'
 import { useAuth } from '../../lib/auth'
-import { fmtDate, fmtInt, fmtRatio, fmtSeconds, fmtUsd, shortId } from '../../lib/format'
+import { fmtDate, fmtInt, fmtRatio, fmtSeconds, fmtUsd } from '../../lib/format'
 
 /** Rows per page of `GET /grades`. */
 const PAGE = 100
@@ -89,7 +90,7 @@ export function LedgerPage() {
     () => [
       { key: 'created', header: 'Created', hint: 'col.ledger.created', sortValue: (r) => r.created, cell: (r) => <span className="text-xs text-on-surface-muted">{fmtDate(r.created)}</span> },
       { key: 'repo', header: 'Repo', hint: 'col.ledger.repo', sortValue: (r) => r.repo, cell: (r) => r.repo },
-      { key: 'task', header: 'Task', hint: 'col.ledger.task', mono: true, sortValue: (r) => r.task_id, cell: (r) => <Link to={`/tasks/${encodeURIComponent(r.repo)}/${r.task_id}`} title={r.task_id}>{shortId(r.task_id)}</Link> },
+      { key: 'task', header: 'Task', hint: 'col.ledger.task', mono: true, sortValue: (r) => r.task_id, cell: (r) => <Link to={`/tasks/${encodeURIComponent(r.repo)}/${r.task_id}`}><ShortId value={r.task_id} /></Link> },
       { key: 'cell', header: 'Cell', hint: 'col.ledger.cell', mono: true, sortValue: (r) => `${r.capability_class}|${r.size}`, cell: (r) => `${r.capability_class} · ${r.size}` },
       { key: 'builder', header: 'Builder', hint: 'col.ledger.builder', mono: true, sortValue: (r) => r.builder, cell: (r) => (r.builder ? `${r.builder}${r.model ? ` · ${r.model}` : ''}` : '—'), hideBelowMd: true },
       { key: 'mode', header: 'Mode', hint: 'col.ledger.mode', sortValue: (r) => r.mode, cell: (r) => <span className="font-mono text-xs">{r.mode} · {r.trial || 'r1'}</span>, hideBelowMd: true },
@@ -118,7 +119,7 @@ export function LedgerPage() {
       { key: 'latency', header: 'Latency', hint: 'col.ledger.cost_latency_oracle', numeric: true, sortValue: (r) => r.latency_s, cell: (r) => fmtSeconds(r.latency_s), hideBelowMd: true },
       { key: 'oracle', header: 'Oracle', hint: 'col.ledger.cost_latency_oracle', numeric: true, sortValue: (r) => r.oracle_strength ?? -1, cell: (r) => fmtRatio(r.oracle_strength), hideBelowMd: true },
       { key: 'prov', header: 'Provenance', hint: 'col.ledger.provenance', cell: (r) => <Provenance apparatus={r.apparatus_version} beltSet={r.belt_set} provenance={r.provenance} />, hideBelowMd: true },
-      { key: 'hash', header: 'Row hash', hint: 'col.ledger.hash', mono: true, cell: (r) => <span title={r.row_hash}>{shortId(r.row_hash, 10)}</span>, hideBelowMd: true },
+      { key: 'hash', header: 'Row hash', hint: 'col.ledger.hash', mono: true, cell: (r) => <ShortId value={r.row_hash} n={10} />, hideBelowMd: true },
     ],
     [],
   )

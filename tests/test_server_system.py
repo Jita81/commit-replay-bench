@@ -69,6 +69,7 @@ from crb.store.models import Grade, Repo, Run, WorkerRow
 ROOT_PW = "correct-horse-battery-staple"
 PROBE_NAMES = {
     "db",
+    "intake",
     "migrations",
     "append_only",
     "ledger",
@@ -741,3 +742,110 @@ class TestSettingsView:
             assert raw["sandbox"]["executor"] == "local"
             assert raw["database"] == {"dialect": "sqlite"}
             assert raw["secret_key_configured"] is True
+
+
+# --- the intake line reports what the last real poll measured ---------------------------
+
+
+def _intake_probe(tmp_path: Path, factory: sessionmaker[Session], **over: Any) -> ProbeResult:
+    from crb.server.routes.system import probe_intake
+
+    kw: dict[str, Any] = {
+        "public_url": "https://crb.invalid",
+        "intake": {
+            "tracker": "ado",
+            "url": "https://dev.azure.invalid/contoso",
+            "project": "Widgets",
+            "column": "Ready for manufacture",
+        },
+    }
+    kw.update(over)
+    settings = make_settings(tmp_path, **kw)
+    from crb.server.secrets import SecretsFile
+
+    SecretsFile.for_settings(settings).set("tracker_token", "a-tracker-token-value")
+    return probe_intake(factory, settings)
+
+
+def _switch_on(factory: sessionmaker[Session], repo: str) -> None:
+    with factory() as s:
+        s.add(
+            Repo(
+                name=repo,
+                language="python",
+                runner="pytest",
+                config_json={"intake": {"enabled": True, "column": "Ready for manufacture"}},
+            )
+        )
+        s.commit()
+
+
+def test_the_intake_line_is_degraded_when_the_last_read_stopped(
+    tmp_path: Path, factory: sessionmaker[Session]
+) -> None:
+    """A deployment whose every listener is failing ``unauthorised`` used to read
+    ``intake: ok``, so monitoring never learned the front door was shut. The probe still
+    contacts NO tracker: the stop it reports is the one the last real poll wrote to disk."""
+    from crb.server.intake import IntakeStore, PollReport
+
+    with TestClient(create_app(make_settings(tmp_path), factory)):
+        pass  # the lifespan creates the tables
+    _switch_on(factory, "alpha")
+    ok = _intake_probe(tmp_path, factory)
+    assert ok.status == "ok"
+    assert "stopped at nothing" in ok.detail
+
+    IntakeStore(tmp_path, "alpha").write(
+        PollReport(
+            repo="alpha",
+            column="Ready for manufacture",
+            stopped="unauthorised",
+            detail="the tracker answered 401",
+        )
+    )
+    bad = _intake_probe(tmp_path, factory)
+    assert bad.status == "degraded"
+    assert "unauthorised" in bad.detail
+    assert "alpha" in bad.detail
+    assert bad.data["stopped"] == [
+        {"repo": "alpha", "reason": "unauthorised", "detail": "the tracker answered 401"}
+    ]
+
+
+def test_the_intake_line_asks_for_a_credential_only_where_one_is_needed(
+    tmp_path: Path, factory: sessionmaker[Session]
+) -> None:
+    """``tracker: fake`` is the walkthrough's file-backed board and needs no token — the rule
+    the consent gate and ``build_tracker`` both apply. The probe checked presence instead, so
+    a walkthrough stack read ``intake: degraded`` and told an admin to set a credential while
+    every poll was succeeding."""
+    from crb.server.routes.system import probe_intake
+
+    with TestClient(create_app(make_settings(tmp_path), factory)):
+        pass
+    _switch_on(factory, "alpha")
+    settings = make_settings(
+        tmp_path,
+        public_url="https://crb.invalid",
+        intake={
+            "tracker": "fake",
+            "url": "https://tracker.invalid",
+            "project": "Widgets",
+            "column": "Ready for manufacture",
+        },
+    )
+    r = probe_intake(factory, settings)  # no credential is stored at all
+    assert r.data["credential_set"] is False  # still reported, honestly
+    assert r.status == "ok"
+    assert "credential" not in r.detail
+
+
+def test_the_intake_line_is_degraded_when_the_deployment_has_no_public_address(
+    tmp_path: Path, factory: sessionmaker[Session]
+) -> None:
+    with TestClient(create_app(make_settings(tmp_path), factory)):
+        pass
+    r = _intake_probe(tmp_path, factory, public_url="")
+    assert r.status == "degraded"
+    assert "CRB_PUBLIC_URL" in r.detail
+    assert r.data["public_url_set"] is False

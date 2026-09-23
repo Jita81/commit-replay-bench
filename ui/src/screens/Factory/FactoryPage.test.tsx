@@ -20,7 +20,9 @@
  *               latest repository is chosen (as the Baseline) and a viewer is offered no
  *               action on an empty deployment
  *               (J-FAC-2/3), that a refusal's reason reaches the step and the row (J-FAC-4,
- *               J-FAC-15), that a built item opens its evidence (F15), and that an active
+ *               J-FAC-15), that the drafted successor takes the item it supersedes out of the
+ *               form AND out of the other items' dependencies (G-904 — a stale dependency is
+ *               refused 422 on freeze), that a built item opens its evidence (F15), and that an active
  *               factory run is a banner that polls the chain (J-FAC-5 / J-TEL-9), and that
  *               at phone width an item is one line with the six cards behind a Details and
  *               the cell-route pill short (J-FAC-14).
@@ -36,9 +38,9 @@
  */
 import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { FactoryBacklog, FactoryTask } from '../../api/types'
+import type { FactoryBacklog, FactoryEvolutionPrefill, FactoryTask } from '../../api/types'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
-import { FactoryPage, deliverableCount, estimateFromMap, nextId, refusalSentence, stepsFor } from './FactoryPage'
+import { FactoryPage, deliverableCount, estimateFromMap, nextId, refusalSentence, stepsFor, withEvolution } from './FactoryPage'
 
 const NO_ROUTE = { route: '', reason_code: '', reason: '', n: 0, point: 0, ci_low: 0, ci_high: 0, apparatus_versions: [], deliverable: false }
 const DELIVER = { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, apparatus_versions: ['2.2'], deliverable: true }
@@ -46,6 +48,21 @@ const CALIBRATE = { route: 'calibrate', reason_code: 'ci_low_below_bar', reason:
 const NOT_LINKED = { can_deliver: false, reason_code: 'not_linked' as const, reason: 'Delivery is not possible for this repository: it is connected by URL, not through the GitHub App. Connect it through the GitHub App with Contents: write and Pull requests: write, then Sync installations in Settings.', full_name: '', default_branch: '', installation_id: null, account_login: '' }
 const LINKED = { can_deliver: true, reason_code: 'ok' as const, reason: '', full_name: 'acme/cobra', default_branch: 'main', installation_id: 77, account_login: 'acme' }
 const UNTOUCHED = { outcome_reason: '', refusal: null, error: '', task_id: '', run_id: '', pack_hash: '', row_hash: '' }
+
+/** The superseding item the API drafts for the stopped `I-1` (G-904), as `_prefill` serves it. */
+const PREFILL: FactoryEvolutionPrefill = {
+  id: 'I-1-v2',
+  title: 'Multiply',
+  kind: 'code',
+  description: 'calc needs multiply',
+  capability_class: 'bug.fix',
+  size_estimate: 'XS',
+  structural_facts: ['reproduction: x'],
+  acceptance_criteria: ['multiply(3, 4) == 12'],
+  depends_on: [],
+  level: 'L1',
+  supersedes: 'I-1',
+}
 
 const BACKLOG: FactoryBacklog = {
   repo: 'alpha',
@@ -222,7 +239,7 @@ describe('FactoryPage — the shipped contract', () => {
   it('renders the frozen backlog and the bare task list', async () => {
     mockApi(base({ 'GET /auth/me': PRINCIPAL }))
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
-    await waitFor(() => expect(screen.getByText(/hash aaaaaaaaaaaaaaaa/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('factory-backlog-hash')).toHaveTextContent(`hash ${'a'.repeat(64)}`))
     expect(screen.getByText('frozen')).toBeInTheDocument()
     expect(screen.getByText('2 items')).toBeInTheDocument()
     expect(screen.getAllByText('Multiply').length).toBeGreaterThan(0)
@@ -241,6 +258,70 @@ describe('FactoryPage — the shipped contract', () => {
     expect(screen.getByTestId('cell-route-I-1-prov')).toHaveTextContent('n = 40 · 95 % [84 %, 99 %] · apparatus 2.2')
     expect(screen.getByTestId('cell-route-I-2')).toHaveTextContent('not measured · withheld')
     expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('1 of 2 items sit in a cell that routes deliver today')
+  })
+
+  it('a stopped item shows what to change and the replacement item already drafted (G-904)', async () => {
+    const reason = 'the reviewer found the oracle weak (the test asserts only that the call returns) and this deployment has no test author: strengthen the test and register a superseding item'
+    const stopped: FactoryTask = {
+      ...TASKS[0]!,
+      status: 'oracle_needs_strengthening',
+      outcome_reason: reason,
+      error: reason,
+      refusal: { step: 'review', reason, reason_code: '', measured_route: '' },
+      way_forward: {
+        action: 'register_evolution',
+        route: '/factory/alpha/backlog/evolutions',
+        supersedes: 'I-1',
+        what_to_change: 'Strengthen the test so it fails for the reason the review gave, then register this item with the stronger test attached.',
+        needs_authored_test: true,
+        prefill: { ...PREFILL, description: `${PREFILL.description}\n\nWhy the last attempt stopped: ${reason}` },
+      },
+    }
+    mockApi(base({ 'GET /factory/alpha/tasks': [stopped, TASKS[1]!] }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const panel = await screen.findByTestId('prefill-I-1')
+    // one sentence saying what must be different, and that this stop needs a test with it
+    expect(panel).toHaveTextContent('Strengthen the test so it fails for the reason the review gave')
+    expect(panel).toHaveTextContent('Attach the failing test with the item.')
+    // the draft itself: a new id superseding the stopped one, the item's own words, and the
+    // reason it stopped — so nothing is retyped and the reader sees what was too weak
+    expect(panel).toHaveTextContent('I-1-v2 supersedes I-1')
+    expect(panel).toHaveTextContent('the test asserts only that the call returns')
+    expect(panel).toHaveTextContent('reproduction: x')
+    // an item that has not stopped offers no draft
+    expect(screen.queryByTestId('prefill-I-2')).not.toBeInTheDocument()
+
+    // and the button beside the draft USES the draft: the drafted item replaces the one it
+    // supersedes in the form, so nothing that was already worked out is retyped
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click(within(await screen.findByTestId('factory-item-I-1')).getByRole('button', { name: 'Freeze a revised backlog…' }))
+    const form = await screen.findByTestId('backlog-form')
+    expect(within(form).getAllByLabelText(/^Id/).map((el) => (el as HTMLInputElement).value)).toEqual(['I-1-v2', 'I-2'])
+    expect((within(form).getByLabelText(/How is the bug reproduced\?/) as HTMLInputElement).value).toBe('x')
+    expect(within(form).getAllByLabelText(/^Title/).map((el) => (el as HTMLInputElement).value)).toEqual(['Multiply', 'Divide'])
+    // I-2 depended on I-1: the successor takes the predecessor's place in the GRAPH too, or
+    // the freeze is refused 422 for a dependency on an id the revised backlog no longer holds
+    expect((within(form).getAllByLabelText(/^Depends on/)[1] as HTMLInputElement).value).toBe('I-1-v2')
+  })
+
+  it('a revision that keeps the item’s own id leaves every dependency alone (G-904)', async () => {
+    // the same-id case is NOT a replacement: nothing moves in the graph, so I-2 still reads I-1
+    const same = withEvolution(BACKLOG, { ...PREFILL, id: 'I-1', supersedes: '' })
+    expect(same.items.map((i) => i.id)).toEqual(['I-1', 'I-2'])
+    expect(same.items[1]!.depends_on).toEqual(['I-1'])
+    // and an item the backlog does not hold is appended, with the rest untouched
+    const added = withEvolution(BACKLOG, { ...PREFILL, id: 'I-9', supersedes: 'I-nope' })
+    expect(added.items.map((i) => i.id)).toEqual(['I-1', 'I-2', 'I-9'])
+    expect(added.items[1]!.depends_on).toEqual(['I-1'])
+  })
+
+  it('the factory screen is the way in to the work arriving from the board (ADR-0017)', async () => {
+    // there was no link anywhere in the app: /factory/intake could only be reached by typing
+    // its URL, and the guides handed the reader a raw path because there was nothing to click
+    mockApi(base())
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const link = await screen.findByRole('link', { name: 'Work arriving from your board' })
+    expect(link).toHaveAttribute('href', '/factory/intake?repo=alpha')
   })
 
   it('Run the factory posts the builder builderChoice picks, and says the spend first (J-FAC-1/2)', async () => {
@@ -273,7 +354,7 @@ describe('FactoryPage — the shipped contract', () => {
   it('with no ?repo= the most recently updated repository is chosen (as the Baseline); an empty deployment offers Connect to an operator only', async () => {
     mockApi(base({ 'GET /repos': { items: [{ name: 'alpha', updated: '2026-09-10T00:00:00Z' }, { name: 'beta', updated: '2026-09-12T00:00:00Z' }], total: 2, limit: 50, offset: 0 }, 'GET /factory/beta/backlog': { ...BACKLOG, repo: 'beta' }, 'GET /factory/beta/tasks': TASKS }))
     renderApp(<FactoryPage />, { route: '/factory' })
-    await waitFor(() => expect(screen.getByText(/hash aaaaaaaaaaaaaaaa/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('factory-backlog-hash')).toHaveTextContent(`hash ${'a'.repeat(64)}`))
     expect(screen.queryByText('Choose a repository')).toBeNull()
     expect((screen.getByTestId('repo-picker') as HTMLSelectElement).value).toBe('beta')
     cleanup()

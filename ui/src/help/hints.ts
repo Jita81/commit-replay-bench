@@ -556,6 +556,10 @@ export const HINTS = {
     'The pull request the factory opened in the repository, for review under the repository’s own rules.',
   'banner.factory.refusal':
     'Why the loop stopped on this item, from the chain, and the two ways forward: add the fact and register an evolution that supersedes the item, or open the change by hand and mark it done next time.',
+  'banner.factory.what_to_change':
+    'One sentence naming what must be different about the replacement item for the loop to get past this stop: a stronger failing test, or a fact the readiness gate asked for.',
+  'item.factory.prefill':
+    'The replacement item, drafted from the one that stopped and from the reason it stopped. Nothing is registered until an operator posts it; the frozen backlog does not change, the draft is chained onto it.',
   'button.factory.freeze_revised':
     'Open the freeze form prefilled from the active backlog: change what this item needs and keep the rest. This is the heavier path, a new backlog with a new hash; an evolution keeps the frozen hash.',
   'pill.factory.step_current':
@@ -608,6 +612,62 @@ export const HINTS = {
     'Drop this item from the backlog being frozen. Ids of removed items are not reused.',
   'button.factory.item_add':
     'Add a further item with the next free id.',
+
+  // ── /factory/intake — work arriving from the team's own board (ADR-0017)
+  'stat.intake.listener':
+    'Whether this repository’s listener is reading the watched column. It is off for every repository until an operator switches it on, and the switch records who threw it and when.',
+  'stat.intake.column':
+    'The one column on the board that this product reads. A ticket anywhere else on that board is never read, and no other column is ever written to.',
+  'stat.intake.tracker':
+    'Which tracker and project the whole deployment is pointed at. An admin sets this once; every repository’s listener reads through it.',
+  'stat.intake.credential':
+    'Whether a tracker credential is stored on the API host. Only its last few characters are ever served, and no screen or log can show the value.',
+  'stat.intake.poll_s':
+    'How often the worker reads the watched column while the listener is on. Reading costs nothing: no builder is invoked and no model is called.',
+  'stat.intake.outcome_map':
+    'What happens to a ticket when the pull request this product opened is merged or closed. With nothing configured, the product never changes anybody’s ticket state.',
+  'stat.intake.last_poll':
+    'What the last read did: how many tickets were in the column, how many were read this time, how many were already handled at that revision, and how many became items.',
+  'button.intake.switch_on':
+    'Start reading the watched column on this repository. This is the consent to read that board and to comment and label on its tickets; it is recorded under your name.',
+  'button.intake.switch_off':
+    'Stop reading the watched column. Nothing on that board is read or written afterwards, and any comment already posted stays where it is.',
+  'button.intake.read_now':
+    'Read the watched column immediately rather than waiting for the timer. A ticket already handled at its current revision is not read again and nothing is written for it.',
+  'button.intake.repost':
+    'Read every ticket in the column again, even ones already handled, and post the feedback afresh. Use it when a comment was deleted or you want today’s numbers on the ticket.',
+  'field.intake.column':
+    'Watch a different column on this repository from the one the deployment names. Leave it empty to use the deployment’s column.',
+  'banner.intake.stopped':
+    'The listener could not finish, and this is the reason it recorded. Nothing was registered from a partial read, and the next read retries on its own.',
+  'item.intake.key':
+    'The ticket’s own key on the board. It is also the identity of the backlog item this ticket becomes, so nothing is ever typed twice.',
+  'item.intake.class':
+    'What kind of change the product thinks this is, how large, and how sure it is. Below the published threshold it says unclassified rather than guessing, and the comment asks you.',
+  'item.intake.revision':
+    'The ticket’s revision when it was last read, and when that was. A ticket read again at the same revision is not read again; an edit makes a new item that replaces the old one.',
+  'item.intake.cell_route':
+    'What this deployment has measured about changes of this kind and size — the cell’s route, how many graded attempts it rests on and the interval around the rate. It is read before any build, never after.',
+  'item.intake.item':
+    'The backlog item this ticket is, or would be. Nothing is registered until every question a good acceptance test needs is answered on the ticket.',
+  'link.factory.intake':
+    'The watched column on your own team’s board: which tickets the product has read, what it understood, what each one still needs answering, and where the ones it accepted went. Reading it is a viewer’s act; switching the listener on is an operator’s.',
+  'item.intake.unclassified':
+    'The product could not tell what kind of change this ticket asks for, so it cannot say which questions a good acceptance test needs answered — and it will not spend anything on it. A crb:class= tag on the ticket settles it, and the next read uses it.',
+  'item.intake.stopped':
+    'This ticket’s own step stopped, with the reason the tracker or the product recorded and what closes it. Everything else in the column was still read.',
+  'link.intake.ticket':
+    'Open this ticket on your own board, where the product’s comment and label are.',
+  'link.intake.item':
+    'Open the backlog item this ticket became, with its whole record: readiness, the failing test, the build and the pull request.',
+  'pill.intake.needs_info':
+    'The acceptance test still needs something this ticket does not say. Nothing is built and nothing is spent until it is answered on the ticket.',
+  'pill.intake.ready':
+    'Every question the acceptance test needs is answered and the change can be offered as a pull request once it is built.',
+  'pill.intake.not_deliverable':
+    'The change will still be built, but it will be held back rather than offered as a pull request, because the evidence for work of this kind and size does not license delivery.',
+  'pill.intake.queued':
+    'This ticket is now a registered item in the frozen backlog and is waiting for a factory run.',
 
   // ── /posture — Deployment (screens/Posture/PosturePage.tsx)
   'summary.posture.version':
@@ -950,6 +1010,10 @@ export const HINTS = {
     'The event’s outcome: ok, error, invalid, skipped or in progress.',
   'link.run.event_task':
     'The task this event belongs to; click to filter the per-task table to it.',
+  'button.run.event_error':
+    'Read the whole error message this event carried. The row is one line high and cuts a long message off, so the full text opens under the log.',
+  'button.run.event_error_hide':
+    'Close the full error message and leave the log on its own. The row it came from stays where it is.',
   'col.run_tasks.task':
     'The task attempted, shortened. Click the row to open the evidence pack of its last trial.',
   'col.run_tasks.cell':
@@ -1253,7 +1317,7 @@ export const HINTS = {
   'stat.learn.no_scores':
     'Held cells whose tasks have no mutation score yet, so the escaped mutants cannot be listed. Run an oracle run to fill them.',
   'col.learn_strengthen.item':
-    'The proposed test-writing item and its title.',
+    'The proposed test-writing item: its id, the test it would add, and its title.',
   'col.learn_strengthen.cell':
     'The class and size the item would strengthen.',
   'col.learn_strengthen.reason':
@@ -1410,6 +1474,10 @@ export const HINTS = {
     'The guide section that says more about this term.',
   'link.help.guide':
     'Open this bundled guide; its sections are what the Read more links point at.',
+  'link.help.back':
+    'Return to the glossary and the list of guides, at the place this guide is listed.',
+  'link.help.index':
+    'Open the glossary and the list of bundled guides, to find the one you meant.',
   'button.notfound.home':
     'Return to Home, the start of the journey, with the navigation intact.',
 } as const satisfies Record<string, string>
@@ -1473,6 +1541,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/decisions': 6,
   '/signoff': 30,
   '/factory': 28,
+  '/factory/intake': 14,
   '/posture': 22,
   '/repos': 8,
   // the Overview tab (the state a reader lands on); the Change profile, Tasks and Configuration tabs are held by the ratchet's variants
@@ -1487,6 +1556,14 @@ export const MIN_HINTS: Record<string, number> = {
   '/ledger': 26,
   // a viewer's Settings (health, the login card read-only, the GitHub App); the admin's configuration and users are held by the ratchet's variants
   '/settings': 11,
+  // the four shell screens: signed out, the help pages and an unknown address. They carry few
+  // elements, so the floor is small — but it is a floor, and the ratchet no longer skips them
+  // by name (G-909): both login fields, both sign-in buttons; a Read more and a guide link;
+  // the guide's way back; the 404's one way out.
+  '/login': 4,
+  '/help': 2,
+  '/help/docs/:name': 1,
+  '*': 1,
 }
 
 /** The text for an id; the union type makes a typo a compile error, so this can never be undefined. */

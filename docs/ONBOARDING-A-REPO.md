@@ -144,6 +144,70 @@ branch. Every step is in the evidence chain ([API.md](API.md) "Factory").
 
 ---
 
+## Step 9 — Let the work arrive from your own board (optional)
+
+Steps 1 to 8 assume somebody types the backlog into this product. They do not have to.
+A team's own board can be the front door: move a ticket into **one** watched column and
+that is the request to manufacture — the ticket *is* the backlog item, and the column is
+the consent gate (ADR-0017).
+
+**What you get for nothing.** Before any build is paid for, the ticket gets one comment in
+its own thread saying what a good acceptance test still needs answering — each question in
+the catalogue's words with the exact line to paste into the acceptance criteria — plus what
+this deployment has measured about changes of that kind and size (the route, the number of
+graded attempts behind it, the interval, and whether the honesty floor is intact). It is
+labelled `crb:needs-info`, `crb:ready`, `crb:not-deliverable` or `crb:queued`. Reading a
+column, drafting the item and posting that comment call no model and spend nothing.
+
+**Switching it on takes two steps, and the second one is the consent.** First an admin
+configures the tracker, stores its credential and sets this deployment's own address
+(`CRB_PUBLIC_URL` — the links the product writes on your tickets are built from it, and a
+relative path would resolve against your tracker's host, so the listener cannot be switched on
+without it). Then an operator switches the listener on for a repository from the Factory
+screen's *Work arriving from your board*, or at `/factory/intake?repo=`. Every repository starts
+with its listener **off**. The two steps are two **roles**, not necessarily two people: the role
+ladder admits an admin wherever an operator is asked for, so one admin account can take both.
+The switch records who threw it and when; nothing here refuses the same person taking both
+steps, and the product's two-person rule applies to signing a cell, not to this switch
+(`signoff-policy.v3`).
+[OPERATOR §11](OPERATOR.md#11-intake--work-arriving-from-a-board) has both.
+
+**One read is bounded.** A column holding more tickets than one pass may read (200 by default)
+is not read at all: the pass stops and says to narrow the area path or the JQL, because reading
+an arbitrary 200 of your board and saying nothing about the rest would be worse than reading
+none of it.
+
+**Two things to know about how it reads a ticket.**
+
+*It says when it does not know.* The class of change is inferred from the title and the
+description and comes with a confidence. Below the published threshold the product says it
+could not classify the ticket and asks, rather than routing money at a guess. You can settle
+it yourself with a tag: `crb:class=bug.fix` (and `crb:kind=`, `crb:level=` likewise).
+
+*An edit is never an overwrite.* `(tracker, key, revision)` is the key: a ticket read again
+unchanged is not read again, and nothing is written. A ticket **you** edit comes back as a new
+item that **supersedes** the old one, so the frozen record a run verified against never
+moves under it. What the product itself writes on the ticket — the label, the comments, the
+link — moves a tracker's own revision, and that is not an edit: only a change to the ticket's
+content makes a new item.
+
+Story points map to a size tier on a published scale: `≤ 1 → XS`, `≤ 3 → S`, `≤ 8 → M`,
+`≤ 20 → L`, above that `XL`. A ticket with no estimate is `S`, and the comment says so.
+
+**What it writes, counted, so nobody has to wonder.** Over a ticket's life the product adds
+up to four comments, each marked as its own: what is missing, a note when the work is queued,
+a note when a pull request opens, and a note if the work stopped. It sets one `crb:` label.
+It attaches a link to the backlog item and a link to the pull request. And — only where your
+deployment configured a mapping — it makes one state change after a pull request merges. It
+edits no other ticket field. It never creates a ticket. It never reads a column it was not
+pointed at. It never puts your source code, your diffs, the ledger or an evidence pack on the
+tracker. Those are bounded by the size of the protocol it has (six verbs: read the column,
+read a ticket, comment, label, link, transition), not by a rule somebody has to remember
+([SECURITY §2](SECURITY.md#2-trust-boundaries)). The comment on your ticket carries the same
+list, so this page and your board cannot drift apart.
+
+---
+
 ## What a developer changes for a new repository — and what they do not
 
 **Change:** the repository's configuration (step 1), its `runner_opts` (step 2), possibly a

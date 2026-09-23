@@ -96,12 +96,14 @@ server and never appear in logs or `/settings`.
 | `CRB_HOME` | | state dir; `/srv/crb` in the image. **Refused** in `prod` (warned in `dev`) when it resolves under `/tmp`, `/private/tmp`, `/var/folders` or `$TMPDIR` — §1.1 |
 | `CRB_ALLOW_TEMP_HOME` | | `true` admits a temporary `CRB_HOME` in `prod` for a throwaway evaluation; the warning is still logged. Never on a server |
 | `CRB_BIND_HOST` / `CRB_BIND_PORT` | | `0.0.0.0:8000` in the image |
+| `CRB_PUBLIC_URL` | for *work arriving from a board* | the address people use to reach THIS deployment (`https://crb.example.com`; plain `http://` only on loopback). Set it on the **API and the worker**: the product writes links to its own pages on somebody else's ticket, and a relative path resolves against the tracker's host, so an intake listener cannot be switched on until it is set and a pass without it stops with `no_public_url` |
 | `CRB_FORWARDED_ALLOW_IPS` / `CRB_TRUSTED_PROXIES` | | addresses whose `X-Forwarded-*` are believed (uvicorn / app). Set both to the proxy's CIDR; empty = believe nobody. Never `*` — a wildcard lets any client spoof its address and scheme (Helm ships empty; compose `127.0.0.1`) |
 | `CRB_WEB_CONCURRENCY` | | uvicorn workers (default 1; 2 in compose/Helm) |
 | `CRB_BOOTSTRAP_ADMIN__USERNAME` / `__PASSWORD` | first boot | seeds the first admin **only while `users` is empty** (≥ 12 chars) |
 | `CRB_LOCAL_AUTH_ENABLED` | | set `false` once OIDC works |
 | `CRB_OIDC__ISSUER`, `__CLIENT_ID`, `__CLIENT_SECRET`, `__REDIRECT_URL`, `__SCOPES`, `__ROLE_CLAIM`, `__ROLE_MAP`, `__ADMIN_GROUPS` | for SSO | see §4.1 for the Entra ID mapping |
 | `CRB_GITHUB__APP_ID`, `__APP_SLUG`, `__PRIVATE_KEY` or `__PRIVATE_KEY_FILE`, `__API_URL`, `__WEB_URL` | for *Connect from GitHub* | the deployment's GitHub App (docs/GITHUB-APP.md); set on the **API and the worker**; the key from the secret store, never inline in a values file |
+| `CRB_INTAKE__TRACKER`, `__URL`, `__PROJECT`, `__COLUMN`, `__AREA_PATH`, `__JQL`, `__EMAIL`, `__POINTS_FIELD`, `__ACCEPTANCE_FIELD`, `__POLL_S`, `__MAX_PER_POLL`, `__POLL_BUDGET_S`, `__OUTCOME_MAP` | for *work arriving from a board* | the tracker this deployment takes work from (ADR-0017); set on the **API and the worker** so one environment configures both. `TRACKER` is `none` (the default — nothing is read anywhere), `ado` or `jira`; `URL` must be `https://`; `POLL_S` defaults to 300; `MAX_PER_POLL` (200) bounds one pass — a longer column is not read at all, it stops with `column_too_large` — and `POLL_BUDGET_S` (60) is how long one pass may take before it stops early and serves what it read; `OUTCOME_MAP` is JSON (`{"merged": "Done"}`) and is **empty by default**, so no ticket is ever moved. The credential is NOT an environment variable: an admin stores it at `PUT /settings/secrets/tracker-token`. Whether a given repository's listener is on is per repository, **default off**, and an operator's to switch |
 | `CRB_SANDBOX__EXECUTOR` | api, worker | `docker` (default, fail-closed) or `local` (development). Read by the API (`/settings`, `/health`) and by the worker (`crb worker`; its short form `CRB_EXECUTOR` is read when this is absent) |
 | `CRB_METRICS_ENABLED` | api, worker | `true` (default). `false` → the api's `/metrics` answers 404 and the worker starts no exposition |
 | `CRB_METRICS_HOST` | worker | the address the worker's exposition binds (default `127.0.0.1`, like `CRB_BIND_HOST`: the series name repositories, builders and installations, so a bare `crb worker` on a host offers them to nobody else). Compose and Helm set `0.0.0.0` inside the container, where only the compose network / the NetworkPolicy's scraper can reach the port (§9.1) |
@@ -109,6 +111,7 @@ server and never appear in logs or `/settings`.
 | `CRB_LOG_FORMAT` / `CRB_LOG_LEVEL` | api, worker | `json` (default, one object per line) or `text`; `INFO` — every record is redacted before a handler sees it (§9) |
 | `CRB_WORKER_HEARTBEAT_STALE_S` | api | seconds after which a *running* run's heartbeat is reported stale by `/health` (default 120). Worker liveness itself is judged against each worker's own `heartbeat_s` (§9) |
 | `CRB_SANDBOX__IMAGE` | worker | default sandbox image when a repository config has none (a repository's own `sandbox_image` wins). The shipped reference images — `deploy/sandbox/Dockerfile.{python,node,go}`, built and smoked by CI — are what to push to your registry and name here (`deploy/sandbox/README.md`); the worker never pulls (`docker run --pull=never` **[measured — `tests/test_execution.py::test_docker_build_argv_has_every_hardening_flag` pins the flag on the argv; `tests/test_sandbox_images_docker.py::test_an_absent_image_fails_closed_without_a_pull` proves an absent image is `SandboxUnavailable` (exit 125, `No such image`) against a daemon, colima / Docker 29.5.2; apparatus 2.2]**), so the image must be in the daemon's store |
+| `CRB_FACTORY__TEST_AUTHOR` | api, worker | the factory's test-author rung — `builder:model[:provider]`, the same spelling as a build rung, or empty / `none` (the default) for no author. With no author, an item nobody wrote a failing test for stops `no_oracle`; with one, that rung writes the test. **The author rung and the build rung are never the same rung**: a label that is also on a run's ladder is refused before anything is built. A run may override it (`POST /runs {test_author}`) |
 | `CRB_RETENTION__TRANSCRIPTS_DAYS` | | 0 = keep no builder transcripts (default) |
 | `CRB_OPENAI_BASE_URL`, `CRB_OPENAI_KEY_ENV` + the named key var | builder | OpenAI-compatible endpoint (vLLM, Cerebras, …) |
 | `CRB_AZURE_ENDPOINT`, `CRB_AZURE_DEPLOYMENT`, `CRB_AZURE_API_VERSION`, `CRB_AZURE_KEY_ENV` + `AZURE_OPENAI_API_KEY` | builder | Azure OpenAI in-tenant (setting the endpoint selects Azure) |
@@ -282,13 +285,28 @@ gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/requir
  "test (py3.12)", "test (py3.13)", "test-postgres (store suite on PostgreSQL 16)",
  "security (gitleaks + pip-audit)", "container (docker build + smoke + helm lint)",
  "walkthrough (browser, live stack, tier 1)",
+ "ui-unit (tsc -b + vitest, the hint ratchet included)",
+ "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
+ "dod (every route, journey and stream has its definition of done; evidence resolves)",
+ "claims (every quantified sentence on a covered page carries its tag)",
  "sandbox-images (build + hadolint + smoke each reference sandbox image)"]}
 JSON
 ```
 
-(the list is the current set plus the new context — `PATCH` replaces it, so send all of
+A context must be the check-run name EXACTLY, and GitHub truncates a check-run name at 100
+characters — a `name:` longer than that can never satisfy the context it is required under
+(it blocked PR #48 until the two job names were shortened). Keep every `name:` in
+`.github/workflows/ci.yml` under 100 characters.
+
+(the list is the current set plus the new contexts — `PATCH` replaces it, so send all of
 them; `GET …/protection` first to confirm the set has not moved). Until then the job's
-verdict is visible on every pull request but advisory.
+verdict is visible on every pull request but advisory. The same holds for the two UI jobs
+`ui-unit` and `ui-smoke`, added to the list above: they run the type-check, the vitest suites
+(the hint ratchet and the native-`title=` allowlist among them) and the mocked browser smoke
+on every pull request, and they block a merge only once their contexts are in this set. The
+same holds for `dod` and `claims`, also added to the list above: the definition-of-done record
+and the claim-tag rule are gates in the workflow and advisory on a branch until an
+administrator sends this call.
 
 ## 4. Azure
 

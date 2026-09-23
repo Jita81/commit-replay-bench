@@ -195,6 +195,17 @@ export CRB_LOG_FORMAT=text
 export CRB_LOG_LEVEL="${CRB_LOG_LEVEL:-INFO}"
 export CRB_ALLOW_LOCAL_CLONE=1        # file:// remotes (test/dev switch)
 export CRB_ENABLE_FIXTURE_BUILDER=1   # registers the test-only fixture_gold builder
+export CRB_ENABLE_FAKE_TRACKER=1      # admits the file-backed fake tracker (ADR-0017); NO real ADO/Jira is ever contacted
+export CRB_INTAKE__TRACKER=fake
+export CRB_INTAKE__URL="https://tracker.invalid"
+export CRB_INTAKE__PROJECT=Widgets
+export CRB_INTAKE__COLUMN="Ready for manufacture"
+# the worker's own timed poll is parked for the length of the run (a day): spec 12 drives the
+# OPERATOR's reads — "Re-read the column now" — and asserts what each one did (1 read, 1
+# registered). A 30-second timer raced those clicks and made "1 seen, 0 read" a real outcome,
+# because the worker had already handled the ticket at that revision. The timed poll itself is
+# covered by tests/test_intake_worker.py, which owns the timer.
+export CRB_INTAKE__POLL_S=86400
 E2E_USER="${CRB_E2E_USER:-walkthrough-admin}"
 E2E_PASS="${CRB_E2E_PASS:-$("$PY" -c 'import secrets; print(secrets.token_urlsafe(18))')}"
 export CRB_BOOTSTRAP_ADMIN__USERNAME="$E2E_USER"
@@ -207,6 +218,9 @@ free_port() {
 PORT="${CRB_E2E_PORT:-$(free_port)}"
 while [[ "$PORT" == "8000" ]]; do PORT="$(free_port)"; done   # never a live server's default
 BASE_URL="http://127.0.0.1:$PORT"
+# the stack's own address, so the links intake writes on the fake board are absolute and
+# openable — a listener may not be switched on without it
+export CRB_PUBLIC_URL="$BASE_URL"
 
 "$CRB" migrate >"$API_LOG" 2>&1
 
@@ -235,6 +249,7 @@ export CRB_E2E_REPO_NAME="${CRB_E2E_REPO_NAME:-walk-pyrepo}"
 export CRB_E2E_PYTHON="$PY"            # the pytest runner's interpreter (has pytest; no install)
 export CRB_E2E_CRB="$CRB"              # `crb ledger verify --path` for the exported JSONL
 export CRB_E2E_WORK="$WORK"            # downloads land here
+export CRB_E2E_BOARD="$CRB_HOME/intake-fake.json"   # the fake tracker's whole board (ADR-0017)
 export CRB_E2E_REPORT_DIR="${CRB_E2E_REPORT_DIR:-$WORK/playwright-report}"
 export CRB_E2E_OUTPUT_DIR="${CRB_E2E_OUTPUT_DIR:-$WORK/test-results}"
 

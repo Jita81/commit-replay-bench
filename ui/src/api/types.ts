@@ -1192,6 +1192,38 @@ export interface FactoryRefusal {
   measured_route: string
 }
 
+/** The superseding item the API drafts for a stopped one (G-904): the body an operator POSTs to
+ *  `FactoryWayForward.route`, every field but `id` and `description` taken from the item that
+ *  stopped. `description` is that item's own words plus the stop's reason — for a weak-oracle
+ *  stop, the reviewer's finding. */
+export interface FactoryEvolutionPrefill {
+  id: string
+  title: string
+  kind: string
+  description: string
+  capability_class: string
+  size_estimate: string
+  structural_facts: string[]
+  acceptance_criteria: string[]
+  depends_on: string[]
+  level: string
+  supersedes: string
+}
+
+/** The stopped item's next action: the evolutions route, one sentence saying what must be
+ *  different, whether the POST should carry a stronger oracle, and the draft itself. */
+export interface FactoryWayForward {
+  action: 'register_evolution'
+  route: string
+  supersedes: string
+  /** One sentence: what must be different about the superseding item. `''` on an older server. */
+  what_to_change?: string
+  /** True when the stop was about the test: the POST should carry an `authored` oracle. */
+  needs_authored_test?: boolean
+  /** The draft; `null` when the item is not in a backlog the API can read. */
+  prefill?: FactoryEvolutionPrefill | null
+}
+
 /** `GET /factory/{repo}/tasks` — a bare list (not a `Page`): the latest state of every active item, folded from the evidence chain. */
 export interface FactoryTask {
   id: string
@@ -1218,7 +1250,7 @@ export interface FactoryTask {
   /** The next action the API serves for a stopped item (a readiness / red / review stop, a rejected or
    *  rework-exhausted verdict, no oracle): `POST` an evolution to `route` with `supersedes` = this item.
    *  `null` while the item is not stopped or is already superseded. */
-  way_forward?: { action: 'register_evolution'; route: string; supersedes: string } | null
+  way_forward?: FactoryWayForward | null
   /** The newest refusal since the item's last readiness pass; `null` = not refused. (The
    * server always sends these five; optional so a mock built before J-FAC-4 still types.) */
   refusal?: FactoryRefusal | null
@@ -1361,3 +1393,83 @@ export interface GitHubConnectRequest {
   belt_scope?: string | string[]
 }
 
+
+// --- intake: the enterprise's own board (ADR-0017) ------------------------------------
+
+/** One repository's intake listener. `enabled` is false until an operator switches it on. */
+export interface IntakeListener {
+  enabled: boolean
+  /** An override for the deployment's watched column; '' means "the deployment's". */
+  column: string
+  switched_by: string
+  switched_at: string
+  /** The newest change watermark a poll saw; the next poll asks from here. */
+  since: string
+}
+
+/** The deployment-wide tracker connection. Never carries the credential — only whether
+ *  one is stored and its fingerprint. */
+export interface IntakeConnection {
+  tracker: string
+  url: string
+  project: string
+  column: string
+  poll_s: number
+  outcome_map: Record<string, string>
+  configured: boolean
+  credential_set: boolean
+  credential_fingerprint: string
+}
+
+/** One ticket in the watched column, exactly as the last read saw it. */
+export interface IntakeRow {
+  key: string
+  title: string
+  url: string
+  revision: string
+  /** One of `crb:needs-info` · `crb:ready` · `crb:not-deliverable` · `crb:queued`, or ''. */
+  label: string
+  /** The ticket's own state on the board. */
+  state: string
+  item_id: string
+  item_url: string
+  /** The comment the product posted, verbatim — the row and the ticket never disagree. */
+  feedback: string
+  open_questions: Array<{ ref: string; severity: string; reason: string }>
+  capability_class: string
+  confidence: number
+  size: string
+  registered: boolean
+  is_evolution: boolean
+  supersedes: string
+  cell_route: FactoryTask['cell_route'] | null
+  read_at: string
+  /** A published stop reason when this ticket's own step stopped; '' otherwise. */
+  stopped: string
+  stopped_advice: string
+}
+
+/** What the last poll did, and why it stopped if it did. */
+export interface IntakePoll {
+  repo: string
+  column: string
+  seen: number
+  read: number
+  skipped: number
+  commented: number
+  registered: number
+  queued: number
+  stopped: string
+  detail: string
+  advice: string
+  at: string
+}
+
+/** `GET /factory/{repo}/intake` — the listener, the connection, the last poll, the column. */
+export interface Intake {
+  repo: string
+  listener: IntakeListener
+  connection: IntakeConnection
+  last_poll: IntakePoll | null
+  rows: IntakeRow[]
+}

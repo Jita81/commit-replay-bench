@@ -73,6 +73,7 @@ const SEGMENT_ROUTE: Record<string, string | null> = {
   decisions: '/decisions',
   signoff: '/signoff',
   factory: '/factory',
+  intake: '/factory/intake',
   cell_route: '/factory',
   posture: '/posture',
   repos: '/repos',
@@ -112,9 +113,9 @@ function routeOf(id: string): string | null {
   return SEGMENT_ROUTE[seg] ?? null
 }
 
-/** Every `<Route path="…">` in App.tsx that is a screen (not login, not the help pages, not the catch-all). */
+/** Every `<Route path="…">` in App.tsx — login, the help pages and the catch-all included (G-909). */
 function screenRoutes(): string[] {
-  return Array.from(appSource.matchAll(/<Route\s+path="([^"]+)"/g), (m: RegExpMatchArray) => m[1]!).filter((p) => p !== '/login' && p !== '*' && !p.startsWith('/help'))
+  return Array.from(appSource.matchAll(/<Route\s+path="([^"]+)"/g), (m: RegExpMatchArray) => m[1]!)
 }
 
 const ENTRIES = Object.entries(HINTS) as Array<[HintId, string]>

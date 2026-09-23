@@ -55,6 +55,7 @@ import {
 import { api, ApiError, qs } from './client'
 import { RunEventStream, type EventSourceFactory, type SseSnapshot } from './sse'
 import type {
+  Intake,
   GitHubAppInfo,
   GitHubConnectRequest,
   GitHubInstallation,
@@ -138,6 +139,7 @@ export const keys = {
   factoryBacklog: (repo: string) => ['factory', repo, 'backlog'] as const,
   factoryTasks: (repo: string) => ['factory', repo, 'tasks'] as const,
   factoryEvidence: (repo: string) => ['factory', repo, 'evidence'] as const,
+  intake: (repo: string) => ['factory', repo, 'intake'] as const,
   users: ['users'] as const,
   settings: ['settings'] as const,
   githubApp: ['github', 'app'] as const,
@@ -812,3 +814,47 @@ export function useLinkRepoToGitHub(): UseMutationResult<RepoDetail, ApiError, {
   })
 }
 
+
+// --- intake: the enterprise's own board (ADR-0017) ------------------------------------
+
+/** `GET /factory/{repo}/intake` — the listener, the connection, the last poll and the
+ *  watched column's tickets. No tracker is contacted by this read, so it never waits on
+ *  somebody else's service. */
+export function useIntake(repo: string): UseQueryResult<Intake, ApiError> {
+  return useQuery({
+    queryKey: keys.intake(repo),
+    queryFn: () => api<Intake>(`/factory/${enc(repo)}/intake`),
+    enabled: repo.length > 0,
+    retry: false,
+  })
+}
+
+/** `PUT /factory/{repo}/intake` (operator) — switch the listener on or off, and set the
+ *  column this repository watches. The switch is the consent gate (ADR-0017). */
+export function useSetIntakeListener(): UseMutationResult<Intake, ApiError, { repo: string; enabled: boolean; column?: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, enabled, column }) =>
+      api<Intake>(`/factory/${enc(repo)}/intake`, { method: 'PUT', body: { enabled, column: column ?? '' } }),
+    onSuccess: (data, { repo }) => {
+      qc.setQueryData(keys.intake(repo), data)
+    },
+  })
+}
+
+/** `POST /factory/{repo}/intake/poll` (operator) — read the column now. `force` re-reads
+ *  every ticket even when its revision was already handled ("Post the feedback again");
+ *  the writes are idempotent either way. Invalidates the backlog and the tasks, because a
+ *  poll can register an item. */
+export function usePollIntake(): UseMutationResult<Intake, ApiError, { repo: string; force?: boolean }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, force }) =>
+      api<Intake>(`/factory/${enc(repo)}/intake/poll`, { method: 'POST', body: { force: Boolean(force) } }),
+    onSuccess: (data, { repo }) => {
+      qc.setQueryData(keys.intake(repo), data)
+      void qc.invalidateQueries({ queryKey: keys.factoryBacklog(repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(repo) })
+    },
+  })
+}

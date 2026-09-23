@@ -22,7 +22,7 @@ Navigation
 What it is:   The server's configuration model — every ``CRB_*`` variable the API and its
               ``/settings`` view know about, with the fail-closed rules attached.
 What it does: Parses the environment into typed, nested settings (OIDC, bootstrap admin,
-              retention, sandbox, builder container); refuses to start in ``prod`` without a
+              retention, sandbox, builder container, factory); refuses to start in ``prod`` without a
               strong ``CRB_SECRET_KEY``, with a short bootstrap password or with a ``CRB_HOME``
               under an OS-managed temporary directory (``dev`` warns); keeps secret
               values as ``SecretStr`` and exposes only ``redacted_dict`` for display. Defines
@@ -38,8 +38,10 @@ Works with:   src/crb/server/app.py (reads ``resolved_database_url``, cookie sec
               src/crb/server/routes/system.py (serves ``redacted_dict``),
               src/crb/builders/container.py (the worker reads the same ``CRB_BUILDER__*``),
               src/crb/cli/commands/service.py (``crb doctor``'s ``home`` line reuses
-              ``temp_dir_reason``), docs/DEPLOYMENT.md#21-environment-reference (the
-              operator-facing list; §1.1 the temporary-directory rule)
+              ``temp_dir_reason``), src/crb/factory/author.py (the rung spelling
+              ``CRB_FACTORY__TEST_AUTHOR`` carries and the refusal it feeds),
+              docs/DEPLOYMENT.md#21-environment-reference (the operator-facing list; §1.1 the
+              temporary-directory rule)
 Tested by:    tests/test_server_app.py, tests/test_server_system.py, tests/test_server_auth.py,
               tests/test_settings_home_guard.py
 Touch when:   never for a new repository (repositories are configured in the database, not
@@ -57,6 +59,7 @@ import secrets
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -72,6 +75,11 @@ ROLE_RANK: dict[str, int] = {r: i for i, r in enumerate(ROLE_LADDER)}
 
 #: Minimum length for any locally-stored password (bootstrap admin included).
 MIN_PASSWORD_LENGTH = 12
+
+#: The only hosts ``CRB_PUBLIC_URL`` may name over plain http: a developer's own machine and
+#: the walkthrough stack, which has no certificate. Matched against the PARSED host name, so
+#: a name that merely starts with one of these ("localhost.example.com") is not one of them.
+LOOPBACK_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1"})
 
 #: OS-managed temporary roots (``$TMPDIR`` is added at run time). On macOS ``/tmp`` and
 #: ``/var`` are symlinks into ``/private``, so both spellings are listed and both sides are
@@ -245,6 +253,38 @@ class SandboxSettings(BaseModel):
     image: str = ""
 
 
+class FactorySettings(BaseModel):
+    """The served factory's deployment defaults (``CRB_FACTORY__*``).
+
+    ``test_author`` is the rung that writes the failing test for an item nobody authored
+    an oracle for — the same ``builder:model[:provider]`` spelling as a build rung,
+    because the refusal that keeps an author out of its own build compares rung labels
+    (:mod:`crb.factory.author`). Empty (the default) means no author: an item without an
+    operator-authored test stops ``no_oracle`` and waits for a person, which is what this
+    product did before the setting existed. A run may override it
+    (``params.test_author``); ``none`` in either place means no author.
+    """
+
+    test_author: str = ""
+
+    @field_validator("test_author")
+    @classmethod
+    def _rung_shaped(cls, v: str) -> str:
+        # a typo fails at start-up, not half-way through a paid run
+        raw = v.strip()
+        if raw and raw.lower() != "none" and ":" not in raw:
+            raise ValueError(
+                "CRB_FACTORY__TEST_AUTHOR must be a rung, 'builder:model[:provider]' "
+                "(or 'none' / empty for no test author)"
+            )
+        return raw
+
+    def redacted(self) -> dict[str, Any]:
+        """The ``/settings`` view. Nothing here is secret, and an absent author is a state
+        an operator needs to see — it is why items stop ``no_oracle``."""
+        return {"test_author": self.test_author or "none"}
+
+
 class BuilderSettings(BaseModel):
     """Where the builder attempt runs (ADR-0012). Read by the worker from the same
     ``CRB_BUILDER__*`` variables (:meth:`crb.builders.container.BuilderContainerSettings.from_env`);
@@ -308,6 +348,104 @@ class BuilderSettings(BaseModel):
         }
 
 
+class IntakeSettings(BaseModel):
+    """The tracker this deployment takes work from (``CRB_INTAKE__*``).
+
+    This is the *connection* only — which tracker, where, which project, which column.
+    Whether a given repository's listener is ON is not here: it is per repository, it
+    defaults to OFF, and an operator throws it on the Intake screen
+    (:class:`crb.server.intake.ListenerState`). The credential is not here either: it
+    lives in the product's own secret store as ``tracker_token`` and is read back as a
+    fingerprint, exactly like the GitHub App key.
+
+    ``tracker: none`` (the default) means no column is watched anywhere, whatever any
+    repository's listener says.
+    """
+
+    #: ``fake`` is the walkthrough's file-backed board; it is refused unless
+    #: ``CRB_ENABLE_FAKE_TRACKER=1`` is set, like the fixture builder.
+    tracker: Literal["none", "ado", "jira", "fake"] = "none"
+    #: Azure DevOps organisation URL (``https://dev.azure.com/contoso``) or Jira site URL
+    #: (``https://contoso.atlassian.net``).
+    url: str = ""
+    project: str = ""
+    #: The state (Azure DevOps) or status (Jira) the listener watches.
+    column: str = ""
+    #: Azure DevOps only: restrict the query to one area path.
+    area_path: str = ""
+    #: Jira only: extra JQL ANDed onto the query, the account email the API token belongs
+    #: to, and the custom fields holding story points and acceptance criteria on that site.
+    jql: str = ""
+    email: str = ""
+    points_field: str = ""
+    acceptance_field: str = ""
+    #: Seconds between polls of a switched-on repository's column.
+    poll_s: int = Field(default=300, ge=30)
+    #: The most tickets ONE pass may read. A pass costs about eleven tracker calls per
+    #: ticket, and Azure DevOps will answer a query with up to 20,000 ids, so an
+    #: unbounded pass would starve the worker's heartbeat and hold an API thread for as
+    #: long as the column is long. A column with more than this in it is not read at all:
+    #: the pass stops with ``column_too_large`` and says to narrow the area path or the
+    #: JQL, because reading an arbitrary 200 of somebody's board and saying nothing about
+    #: the rest would be worse than reading none of it.
+    max_per_poll: int = Field(default=200, ge=1, le=2000)
+    #: The longest one pass may take before it stops early and serves what it has. It is
+    #: checked between tickets AND at the tracker boundary inside one, so an expired pass
+    #: starts no further call on somebody's board — which is what bounds the API request the
+    #: on-demand poll runs inside, and its database session. It cannot cancel a call already
+    #: in flight (an HTTPX timeout measures network inactivity, not total duration), so the
+    #: bound is this plus the calls of the verb in progress. The worker's own liveness does
+    #: not depend on it: a pass keeps checking in for as long as it lasts.
+    poll_budget_s: int = Field(default=60, ge=5, le=900)
+    #: ``merged``/``closed`` → the state the ticket moves to. EMPTY BY DEFAULT: a
+    #: deployment that configures nothing never moves anybody's ticket.
+    outcome_map: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def enabled(self) -> bool:
+        """Whether a tracker is configured at all (a listener still has to be switched on)."""
+        return self.tracker != "none" and bool(self.url.strip()) and bool(self.column.strip())
+
+    @field_validator("url")
+    @classmethod
+    def _https_only(cls, v: str) -> str:
+        # The credential travels on this URL. A plain-http tracker would put a personal
+        # access token on the wire, so it is refused at start-up rather than at the first
+        # poll (the same rule as the OIDC issuer and the GitHub API URL).
+        raw = v.strip().rstrip("/")
+        if raw and not raw.lower().startswith("https://"):
+            raise ValueError(f"the tracker URL must be https://, got {raw!r}")
+        return raw
+
+    @field_validator("outcome_map")
+    @classmethod
+    def _outcomes_are_known(cls, v: dict[str, str]) -> dict[str, str]:
+        bad = sorted(k for k in v if k not in ("merged", "closed"))
+        if bad:
+            raise ValueError(f"outcome_map keys must be 'merged' or 'closed', got {bad}")
+        return v
+
+    def redacted(self) -> dict[str, Any]:
+        """What ``/settings`` may show. There is no secret in this model, but the shape
+        matches ``BuilderSettings.redacted`` so a reader treats them alike."""
+        return {
+            "tracker": self.tracker,
+            "url": self.url,
+            "project": self.project,
+            "column": self.column,
+            "area_path": self.area_path,
+            "jql": self.jql,
+            "email": self.email,
+            "points_field": self.points_field,
+            "acceptance_field": self.acceptance_field,
+            "poll_s": self.poll_s,
+            "max_per_poll": self.max_per_poll,
+            "poll_budget_s": self.poll_budget_s,
+            "outcome_map": dict(self.outcome_map),
+            "enabled": self.enabled,
+        }
+
+
 class Settings(BaseSettings):
     """The top-level settings object: one instance per app, built from the environment
     (or by a test with keyword arguments). See the module docstring for the invariants."""
@@ -341,11 +479,22 @@ class Settings(BaseSettings):
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     builder: BuilderSettings = Field(default_factory=BuilderSettings)
+    factory: FactorySettings = Field(default_factory=FactorySettings)
+    #: Where work arrives from (ADR-0017). ``tracker: none`` by default: no column is
+    #: watched until an admin configures one AND an operator switches a listener on.
+    intake: IntakeSettings = Field(default_factory=IntakeSettings)
     metrics_enabled: bool = True
     log_format: Literal["json", "text"] = "json"
     log_level: str = "INFO"
     bind_host: str = "127.0.0.1"
     bind_port: int = Field(default=8000, ge=1, le=65535)
+    #: The address people use to reach THIS deployment (``https://crb.example.com``).
+    #: It is needed because the product writes links to its own pages on somebody else's
+    #: ticket, and a relative path in a Jira or Azure DevOps comment resolves against
+    #: THEIR host, so it goes nowhere. Empty is refused where it matters rather than
+    #: papered over: a listener cannot be switched on without it, and a pass that somehow
+    #: starts without it stops with ``no_public_url`` before it writes anything.
+    public_url: str = ""
     #: Seconds after which a running run with a stale heartbeat is reported degraded.
     worker_heartbeat_stale_s: int = Field(default=120, ge=1)
     #: Built UI directory (``ui/dist``). When it exists the API serves it at ``/`` with an
@@ -361,6 +510,33 @@ class Settings(BaseSettings):
                 return json.loads(raw)
             return [p.strip() for p in raw.split(",") if p.strip()]
         return v
+
+    @field_validator("public_url")
+    @classmethod
+    def _public_url_is_absolute(cls, v: str) -> str:
+        # An absolute https:// address, because it is written into a third party's ticket
+        # and a reader there clicks it from another host. Loopback over http is admitted
+        # for a developer and for the walkthrough's own stack, which has no certificate;
+        # nothing else may be plain http, since the link is how a person reaches a page
+        # that asks them to sign in.
+        # The value is PARSED, not prefix-matched: `http://localhost.example.com` and
+        # `http://127.0.0.1.attacker.test` both begin with a loopback name and are neither,
+        # and `https:///path` has no host at all. Every link the product writes on a ticket
+        # is built from this value, so a host that only looks like loopback would put a plain
+        # http address somebody else controls into a customer's work item.
+        raw = v.strip().rstrip("/")
+        if not raw:
+            return ""
+        parts = urlsplit(raw)
+        scheme, host = parts.scheme.lower(), (parts.hostname or "")
+        if scheme == "https" and host:
+            return raw
+        if scheme == "http" and host in LOOPBACK_HOSTS:
+            return raw
+        raise ValueError(
+            f"CRB_PUBLIC_URL must be an https:// address with a host name (or http:// on "
+            f"loopback: {', '.join(sorted(LOOPBACK_HOSTS))}), got {raw!r}"
+        )
 
     @field_validator("cors_origins")
     @classmethod
@@ -491,6 +667,9 @@ class Settings(BaseSettings):
             "retention": {"transcripts_days": self.retention.transcripts_days},
             "sandbox": {"executor": self.sandbox.executor, "image": self.sandbox.image},
             "builder": self.builder.redacted(),
+            "factory": self.factory.redacted(),
+            "intake": self.intake.redacted(),
+            "public_url": self.public_url,
             "metrics_enabled": self.metrics_enabled,
             "log_format": self.log_format,
             "worker_heartbeat_stale_s": self.worker_heartbeat_stale_s,
@@ -505,6 +684,8 @@ __all__ = [
     "TEMP_HOME_ADVICE",
     "BootstrapAdmin",
     "BuilderSettings",
+    "FactorySettings",
+    "IntakeSettings",
     "OidcSettings",
     "RetentionSettings",
     "Role",

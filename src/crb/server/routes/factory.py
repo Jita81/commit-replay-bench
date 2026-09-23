@@ -30,6 +30,14 @@ recorded before any edit — :mod:`crb.factory.loop`). This module serves its re
   gap: appended to the hash-chained gap ledger and echoed into the evidence chain.
   Value slots cannot be signed (the DoR gate refuses them by design).
 * ``GET /factory/{repo}/evidence`` — the chain, oldest first.
+* ``GET /factory/{repo}/intake`` — the watched column as the last read saw it: the
+  listener (default OFF), the deployment's tracker connection (no secret), the last
+  poll's outcome and every ticket with its draft, its label and the feedback the
+  ticket carries. No tracker is contacted by this route.
+* ``PUT /factory/{repo}/intake`` (operator) — switch this repository's listener on or
+  off: the consent gate for reading somebody's board, recorded with the actor.
+* ``POST /factory/{repo}/intake/poll`` (operator) — read the column now, doing what the
+  worker's timer would have done (ADR-0017).
 
 Running the loop is a run kind: ``POST /runs {kind: "factory"}`` (see ``routes/runs.py``
 and the worker); this module never builds anything.
@@ -50,16 +58,21 @@ Works with:   src/crb/server/factory_state.py (the state), src/crb/factory/backl
               (the ``factory`` run kind that consumes the backlog; ``_delivery_credentials`` is
               the rule ``_delivery_preflight`` mirrors), src/crb/server/routes/github.py (the
               installation record the pre-flight reads), src/crb/server/github_app.py
-              (``pull_request`` — the outcome sync's reader), docs/API.md (the contract),
-              ui/src/screens/Factory/FactoryPage.tsx (the screen)
-Tested by:    tests/test_server_routes_factory.py, tests/test_factory_outcomes.py
+              (``pull_request`` — the outcome sync's reader), src/crb/server/intake.py
+              (the listener these three routes serve and configure), docs/API.md (the
+              contract), ui/src/screens/Factory/FactoryPage.tsx (the screen),
+              ui/src/screens/Factory/IntakePage.tsx (the intake screen)
+Tested by:    tests/test_server_routes_factory.py, tests/test_factory_outcomes.py,
+              tests/test_server_routes_intake.py
 Touch when:   a factory record gains a field the UI needs (extend TaskView + FactoryTask in
               ui/src/api/types.ts together); a new write path (keep it append-only, role-gated).
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import datetime as _dt
+import re
+from collections.abc import Iterable, Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -69,12 +82,19 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from crb.core.capability import PROJECTION_CLASS_SIZE
+from crb.core.redact import redact_and_cap_head
 from crb.core.routing import ROUTE_DELIVER
 from crb.core.spec import SIZE_TIER_NAMES
 from crb.factory.backlog import KINDS, LEVELS, BacklogError, BacklogFrozen, BacklogItem
 from crb.factory.evidence import verify_events
 from crb.factory.readiness import CATALOGUE, SLOT_VALUE, sign, slots_for
 from crb.factory.testfirst import AuthoredTest
+from crb.intake.client import (
+    REASON_NO_PUBLIC_URL,
+    REASON_NO_SECRET,
+    STOP_ADVICE,
+    TrackerError,
+)
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import (
@@ -84,9 +104,20 @@ from crb.server.factory_state import (
     sync_outcomes,
 )
 from crb.server.github_app import GitHubApp, GitHubAppError, permissions_allow_delivery
+from crb.server.intake import CONFIG_KEY as INTAKE_CONFIG_KEY
+from crb.server.intake import (
+    IntakeStore,
+    ListenerState,
+    build_tracker,
+    item_url_for,
+    needs_credential,
+    poll_repository,
+)
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
+from crb.server.routes.runs import append_system_event, system_trace_id
+from crb.server.secrets import TRACKER_TOKEN_SECRET, SecretsDep
 from crb.store.ledger import DbLedger
 from crb.store.models import GitHubInstallation, Grade, Repo, Run
 
@@ -260,13 +291,49 @@ class RefusalOut(BaseModel):
     measured_route: str = ""
 
 
+class EvolutionPrefillOut(BaseModel):
+    """The superseding item, pre-filled — the body an operator POSTs to the way forward's
+    ``route``, so the next step is a review of a draft rather than retyping what the
+    product already knows (G-904).
+
+    Every field but ``id`` and ``description`` is the stopped item's own. ``id`` is the
+    next free ``<id>-v<n>`` (the register route refuses an id that exists). ``description``
+    is the stopped item's description followed by what the stop asked for — for a
+    ``oracle_needs_strengthening`` stop, the reviewer's own finding, verbatim, so the
+    person strengthening the test can read what was too weak. Nothing here is a decision:
+    the operator edits it and posts it, or does not.
+    """
+
+    id: str
+    title: str
+    kind: str
+    description: str
+    capability_class: str
+    size_estimate: str
+    structural_facts: list[str]
+    acceptance_criteria: list[str]
+    depends_on: list[str]
+    level: str
+    supersedes: str
+
+
 class WayForwardOut(BaseModel):
     """The next action the API serves for a stopped item: register an evolution that
-    supersedes it (F32) — ``route`` is the path to POST to, ``supersedes`` the item id."""
+    supersedes it (F32) — ``route`` is the path to POST to, ``supersedes`` the item id.
+
+    ``what_to_change`` is one plain sentence naming what must be different about the
+    superseding item for the loop to get further than this stop; ``prefill`` is that item
+    already drafted (``null`` only when the item is not in the backlog the API can read).
+    ``needs_authored_test`` says whether the POST should carry an ``authored`` oracle —
+    true when the stop was about the test itself.
+    """
 
     action: str = "register_evolution"
     route: str
     supersedes: str
+    what_to_change: str = ""
+    needs_authored_test: bool = False
+    prefill: EvolutionPrefillOut | None = None
 
 
 class FactoryTaskOut(BaseModel):
@@ -324,18 +391,109 @@ _STOPPED_STATUSES = frozenset(
 )
 _STOPPED_STEPS = frozenset({"readiness", "red", "review"})
 
+#: Per stopped status: the sentence naming what must be different about the superseding
+#: item, and whether the POST should carry an oracle of its own. A stop about the TEST
+#: needs a stronger test; a stop about the FACTS needs a fact.
+_WHAT_TO_CHANGE: dict[str, tuple[str, bool]] = {
+    "oracle_needs_strengthening": (
+        "Strengthen the test so it fails for the reason the review gave, then register "
+        "this item with the stronger test attached.",
+        True,
+    ),
+    "no_oracle": (
+        "Attach a test that fails on the repository as it stands today: nothing proved this "
+        "item before the change, so there was nothing to build against.",
+        True,
+    ),
+    "not_red": (
+        "Attach a test that fails on the repository as it stands today — the one on record "
+        "did not.",
+        True,
+    ),
+    "not_ready": (
+        "Add the structural fact the readiness gate asked for, as a `slot: text` line.",
+        False,
+    ),
+    "rejected": ("Answer what the review rejected, then register the revised item.", False),
+    "rework_exhausted": (
+        "Answer what the review kept asking for, then register the revised item.",
+        False,
+    ),
+}
+_DEFAULT_WHAT_TO_CHANGE = (
+    "Change what the stop asked for, then register the revised item.",
+    False,
+)
+#: How far the stop's own reason is quoted into the pre-filled description. The HEAD is
+#: kept: a stop's reason is read off its prefix (the finding, then the way forward).
+_REASON_CHARS = 1000
+#: ``BacklogItemIn.description``'s own limit — the draft must be a body the register route
+#: accepts unedited, so the item's words plus the stop's reason are capped to it.
+_DESCRIPTION_CHARS = 8000
 
-def _way_forward(repo: str, view: Mapping[str, Any]) -> WayForwardOut | None:
+
+def _next_item_id(base: str, taken: Iterable[str]) -> str:
+    """``<base>-v2``, ``-v3`` … — the first that is free. The register route refuses an id
+    that exists, so a pre-filled body must not arrive carrying one."""
+    used = set(taken)
+    stem = re.sub(r"-v\d+$", "", base)[:56] or "item"
+    n = 2
+    while f"{stem}-v{n}" in used:
+        n += 1
+    return f"{stem}-v{n}"
+
+
+def _prefill(item: BacklogItem, *, taken: Iterable[str], reason: str) -> EvolutionPrefillOut:
+    """The stopped item, drafted again as its successor, with the stop's own reason in the
+    description — so the person reads what was wrong where they will fix it."""
+    note = (
+        f"\n\nWhy the last attempt stopped: {redact_and_cap_head(reason, max_chars=_REASON_CHARS)}"
+    )
+    return EvolutionPrefillOut(
+        id=_next_item_id(item.id, taken),
+        title=item.title,
+        kind=item.kind,
+        description=(item.description + note).strip()[:_DESCRIPTION_CHARS],
+        capability_class=item.capability_class,
+        size_estimate=item.size_estimate,
+        structural_facts=list(item.structural_facts),
+        acceptance_criteria=list(item.acceptance_criteria),
+        depends_on=list(item.depends_on),
+        level=item.level,
+        supersedes=item.id,
+    )
+
+
+def _way_forward(
+    repo: str,
+    view: Mapping[str, Any],
+    *,
+    item: BacklogItem | None = None,
+    taken: Iterable[str] = (),
+) -> WayForwardOut | None:
     """The evolutions route as the next action, for an item the loop stopped and no
-    evolution has replaced yet; ``None`` otherwise."""
+    evolution has replaced yet; ``None`` otherwise.
+
+    When the item itself can be read (``item``), the superseding item is served
+    pre-filled from it and from the stop's own reason (G-904): on an
+    ``oracle_needs_strengthening`` verdict that reason is the reviewer's weak-oracle
+    finding, so the draft says what was too weak about the test it must strengthen.
+    """
     if view.get("superseded_by"):
         return None
-    refusal = view.get("refusal") or {}
-    stopped = view.get("status") in _STOPPED_STATUSES or refusal.get("step") in _STOPPED_STEPS
+    refusal = dict(view.get("refusal") or {})
+    status = str(view.get("status") or "")
+    stopped = status in _STOPPED_STATUSES or refusal.get("step") in _STOPPED_STEPS
     if not stopped:
         return None
+    what, needs_test = _WHAT_TO_CHANGE.get(status, _DEFAULT_WHAT_TO_CHANGE)
+    reason = str(view.get("outcome_reason") or refusal.get("reason") or "")
     return WayForwardOut(
-        route=f"/factory/{repo}/backlog/evolutions", supersedes=str(view.get("id", ""))
+        route=f"/factory/{repo}/backlog/evolutions",
+        supersedes=str(view.get("id", "")),
+        what_to_change=what,
+        needs_authored_test=needs_test,
+        prefill=_prefill(item, taken=taken, reason=reason) if item is not None else None,
     )
 
 
@@ -759,8 +917,14 @@ def list_tasks(
 ) -> list[FactoryTaskOut]:
     del viewer
     get_repo_or_404(db, repo)
-    views = _home(settings, repo).task_views()
+    home = _home(settings, repo)
+    views = home.task_views()
     routes = _cell_routes(db, factory, repo) if views else {}
+    # G-904 — the stopped item's own record, so its way forward can carry the superseding
+    # item already drafted; ``taken`` keeps that draft's id off one the register route
+    # would refuse. A repository whose backlog has gone serves the way forward without it.
+    backlog = home.load_backlog() if views else None
+    items = {i.id: i for i in (*backlog.items, *backlog.evolutions)} if backlog is not None else {}
     # F15 — the run that produced the newest build, from the ledger row the build event
     # names (the chain carries the row, the row carries the run)
     row_ids = [v.row_id for v in views if v.row_id]
@@ -779,7 +943,7 @@ def list_tasks(
                 **d,
                 run_id=run_by_row.get(v.row_id, ""),
                 cell_route=routes.get(f"{v.capability_class}|{v.size}", CellRouteOut()),
-                way_forward=_way_forward(repo, d),
+                way_forward=_way_forward(repo, d, item=items.get(v.id), taken=items.keys()),
             )
         )
     return out
@@ -920,3 +1084,303 @@ def get_evidence(  # noqa: PLR0917 — FastAPI dependencies + query params
             for i, e in enumerate(page)
         ],
     )
+
+
+# --- intake: the enterprise's own board ---------------------------------------------------
+
+
+class IntakeListenerOut(BaseModel):
+    """One repository's listener, as the screen shows it. ``enabled`` is false until an
+    operator switches it on, and the switch names who threw it."""
+
+    enabled: bool = False
+    column: str = ""
+    switched_by: str = ""
+    switched_at: str = ""
+    since: str = ""
+
+
+class IntakeConnectionOut(BaseModel):
+    """The deployment-wide connection, with no secret in it. ``credential_set`` is the
+    presence of the stored ``tracker_token``, never its value."""
+
+    tracker: str = "none"
+    url: str = ""
+    project: str = ""
+    column: str = ""
+    poll_s: int = 0
+    outcome_map: dict[str, str] = Field(default_factory=dict)
+    configured: bool = False
+    credential_set: bool = False
+    credential_fingerprint: str = ""
+
+
+class IntakeRowOut(BaseModel):
+    """One ticket in the watched column, exactly as the last read saw it."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    key: str
+    title: str = ""
+    url: str = ""
+    revision: str = ""
+    label: str = ""
+    state: str = ""
+    item_id: str = ""
+    item_url: str = ""
+    feedback: str = ""
+    open_questions: list[dict[str, str]] = Field(default_factory=list)
+    capability_class: str = ""
+    confidence: float = 0.0
+    size: str = ""
+    registered: bool = False
+    is_evolution: bool = False
+    supersedes: str = ""
+    cell_route: CellRouteOut | None = None
+    read_at: str = ""
+    stopped: str = ""
+    stopped_advice: str = ""
+
+
+class IntakePollOut(BaseModel):
+    """What the last poll did, and why it stopped if it did."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    repo: str = ""
+    column: str = ""
+    seen: int = 0
+    read: int = 0
+    skipped: int = 0
+    commented: int = 0
+    registered: int = 0
+    queued: int = 0
+    stopped: str = ""
+    detail: str = ""
+    advice: str = ""
+    at: str = ""
+
+
+class IntakeOut(BaseModel):
+    """``GET /factory/{repo}/intake``: the listener, the connection, the last poll and the
+    column's tickets with their draft, their label and the feedback the ticket carries."""
+
+    repo: str
+    listener: IntakeListenerOut
+    connection: IntakeConnectionOut
+    last_poll: IntakePollOut | None = None
+    rows: list[IntakeRowOut] = Field(default_factory=list)
+
+
+class IntakePollIn(BaseModel):
+    """``POST /factory/{repo}/intake/poll``. ``force`` re-reads every ticket in the column
+    even when its revision has already been handled — what "Post the feedback again" does
+    for a person who deleted the comment or wants today's numbers on the ticket. It is
+    still safe to repeat: the comment and the label are idempotent on the tracker."""
+
+    force: bool = False
+
+
+class IntakeListenerIn(BaseModel):
+    """``PUT /factory/{repo}/intake``: switch the listener and, optionally, override the
+    column this repository watches."""
+
+    enabled: bool
+    column: str = Field(default="", max_length=200)
+
+
+def _intake_connection(settings: Any, secrets: Any) -> IntakeConnectionOut:
+    cfg = settings.intake
+    status = secrets.status(TRACKER_TOKEN_SECRET)
+    return IntakeConnectionOut(
+        tracker=cfg.tracker,
+        url=cfg.url,
+        project=cfg.project,
+        column=cfg.column,
+        poll_s=cfg.poll_s,
+        outcome_map=dict(cfg.outcome_map),
+        configured=cfg.enabled,
+        credential_set=bool(status.present),
+        credential_fingerprint=str(getattr(status, "fingerprint", "") or ""),
+    )
+
+
+def _intake_out(repo: str, settings: Any, secrets: Any, row: Repo) -> IntakeOut:
+    listener = ListenerState.from_config(row.config_json)
+    store = IntakeStore(settings.home, repo)
+    last = store.last_poll()
+    return IntakeOut(
+        repo=repo,
+        listener=IntakeListenerOut(**listener.to_dict()),
+        connection=_intake_connection(settings, secrets),
+        last_poll=IntakePollOut(**last) if last else None,
+        rows=[IntakeRowOut(**r.to_dict()) for r in store.rows()],
+    )
+
+
+@router.get(
+    "/factory/{repo}/intake",
+    response_model=IntakeOut,
+    responses={401: _ERR, 404: _ERR},
+    summary="The watched column as the last read saw it: the listener, the connection, every ticket with its draft, label and feedback",
+)
+def get_intake(
+    repo: str, viewer: ViewerDep, db: DbDep, settings: SettingsDep, secrets: SecretsDep
+) -> IntakeOut:
+    """Reads only what a poll already wrote: no tracker is contacted by this route, so a
+    screen never waits on somebody else's service. ``listener.enabled`` is ``false`` until
+    an operator switches it on — that is the default for every repository (ADR-0017)."""
+    del viewer
+    row = get_repo_or_404(db, repo)
+    return _intake_out(repo, settings, secrets, row)
+
+
+@router.put(
+    "/factory/{repo}/intake",
+    response_model=IntakeOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 422: _ERR},
+    summary="Switch this repository's intake listener on or off (operator); optionally override the watched column",
+)
+def put_intake(  # noqa: PLR0917 — FastAPI dependencies + path/body
+    repo: str,
+    body: IntakeListenerIn,
+    operator: OperatorDep,
+    db: DbDep,
+    settings: SettingsDep,
+    secrets: SecretsDep,
+) -> IntakeOut:
+    """The consent gate. Switching a listener on is what allows this product to read
+    somebody's board and write on their tickets, so it is operator-only, every switch is
+    an event on the repository's system trace naming the operator who threw it, and the
+    current state carries the actor and the time.
+
+    It refuses (422) everything it would otherwise accept and be silently unable to do:
+    no tracker configured, no credential stored (its own message promised that), and no
+    public address for this deployment — without one, every link the product wrote on a
+    ticket would be a relative path a reader on the tracker's site cannot open.
+
+    The switch is recorded as well as stored because ``switched_by`` is one mutable field:
+    switching off and on again overwrites it, and without the event the writes made on
+    somebody's tickets under the earlier consent would appear to have been consented by
+    whoever switched it last.
+    """
+    row = get_repo_or_404(db, repo)
+    if body.enabled:
+        _refuse_unless_ready_to_listen(settings, secrets)
+    state = ListenerState(
+        enabled=body.enabled,
+        column=body.column.strip(),
+        switched_by=operator.display_name or operator.id,
+        switched_at=_dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat(),
+        since=ListenerState.from_config(row.config_json).since,
+    )
+    row.config_json = {**dict(row.config_json or {}), INTAKE_CONFIG_KEY: state.to_dict()}
+    # the same shape the repository routes write (an ISO-8601 string to the second)
+    row.updated = _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()
+    append_system_event(
+        db,
+        trace_id=system_trace_id("intake", repo),
+        action="intake.listener.switched",
+        repo=repo,
+        actor=operator.id,
+        payload={
+            "enabled": body.enabled,
+            "column": state.column or settings.intake.column,
+            "tracker": settings.intake.tracker,
+            "switched_by": state.switched_by,
+        },
+    )
+    db.commit()
+    return _intake_out(repo, settings, secrets, row)
+
+
+def _refuse_unless_ready_to_listen(settings: Any, secrets: Any) -> None:
+    """Everything that must be true before a listener may be switched on, in one place.
+
+    Each is refused HERE rather than discovered by the first poll, because the act being
+    gated is consent to write on a third party's tickets: an operator who was told "the
+    listener is on" should not learn from a stop event that it never could be.
+    """
+    if not settings.intake.enabled:
+        raise ApiError(
+            422,
+            "intake_not_configured",
+            "no tracker is configured for this deployment: an admin sets CRB_INTAKE__* and "
+            "stores the tracker token before a listener can be switched on",
+        )
+    # the same rule `build_tracker` applies, asked of the one function that owns it: the
+    # walkthrough's file-backed board needs no credential, and a gate that demanded one
+    # anyway refused a switch the poll would have honoured
+    if needs_credential(settings.intake.tracker) and not bool(
+        secrets.status(TRACKER_TOKEN_SECRET).present
+    ):
+        raise ApiError(422, "intake_no_credential", STOP_ADVICE[REASON_NO_SECRET])
+    if not settings.public_url:
+        raise ApiError(
+            422,
+            "intake_no_public_url",
+            "this deployment does not know its own address, so a link on a ticket would not "
+            "open: " + STOP_ADVICE[REASON_NO_PUBLIC_URL],
+        )
+
+
+@router.post(
+    "/factory/{repo}/intake/poll",
+    response_model=IntakeOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR, 502: _ERR},
+    summary="Read the watched column now (operator): comment, label and register whatever it has earned",
+)
+def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
+    repo: str,
+    operator: OperatorDep,
+    db: DbDep,
+    factory: SessionFactoryDep,
+    settings: SettingsDep,
+    secrets: SecretsDep,
+    body: IntakePollIn | None = None,
+) -> IntakeOut:
+    """The same poll the worker makes on its own timer, on demand. Refused (422) when the
+    listener is off — the switch is the consent, and a route that polled anyway would make
+    it meaningless. A tracker that cannot be reached is 502 ``tracker_error`` carrying the
+    published stop reason, and nothing is registered from a partial read."""
+    row = get_repo_or_404(db, repo)
+    listener = ListenerState.from_config(row.config_json)
+    if not listener.enabled:
+        raise ApiError(
+            422,
+            "intake_listener_off",
+            f"the intake listener for {repo!r} is off: switch it on before reading the column",
+        )
+    try:
+        tracker = build_tracker(
+            settings.intake,
+            secrets.get(TRACKER_TOKEN_SECRET) or "",
+            home=settings.home,
+        )
+    except TrackerError as exc:
+        raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc
+    routes = _cell_routes(db, factory, repo)
+    home = _home(settings, repo)
+    # poll_repository writes the served view itself, so this route reads it back through
+    # `_intake_out` exactly as the GET does — one shape, one writer
+    poll_repository(
+        repo,
+        tracker=tracker,
+        listener=listener,
+        column=listener.column or settings.intake.column,
+        home=home,
+        route_for=lambda item: (
+            routes[f"{item.capability_class}|{item.size_estimate}"].model_dump()
+            if f"{item.capability_class}|{item.size_estimate}" in routes
+            else None
+        ),
+        item_url=item_url_for(settings.public_url, repo),
+        run_active=lambda: _active_factory_run(db, repo) is not None,
+        actor=operator.id,
+        force=bool(body.force) if body else False,
+        # the same bounds the worker polls under: this one runs inside a request, holding a
+        # database session, so a long column may not hold it open for the length of a board
+        max_tickets=settings.intake.max_per_poll,
+        budget_s=float(settings.intake.poll_budget_s),
+    )
+    return _intake_out(repo, settings, secrets, row)

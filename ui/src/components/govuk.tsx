@@ -210,9 +210,17 @@ export function InsetText({ children, className = '' }: { children: ReactNode; c
   return <div className={`mb-8 max-w-[44em] border-l-8 border-primary py-2 pl-6 text-[19px] leading-[1.47] [&_a]:underline ${className}`}>{children}</div>
 }
 
-export function BackLink({ to, children }: { to: string; children: ReactNode }) {
+export function BackLink({ to, children, hint }: { to: string; children: ReactNode; hint?: HintId }) {
+  const className = 'mb-4 inline-block text-[16px] leading-[1.5] text-primary underline'
+  if (hint) {
+    return (
+      <Hint as={Link} id={hint} to={to} className={className}>
+        {children}
+      </Hint>
+    )
+  }
   return (
-    <Link to={to} className="mb-4 inline-block text-[16px] leading-[1.5] text-primary underline">
+    <Link to={to} className={className}>
       {children}
     </Link>
   )

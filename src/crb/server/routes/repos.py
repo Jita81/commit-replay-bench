@@ -96,8 +96,10 @@ _ERR = {"model": ErrorEnvelope}
 
 PROFILE_KEY = "profile"
 #: ``config_json`` keys that are NOT repository config and survive every config update:
-#: the cached change profile, and the GitHub App link (src/crb/server/routes/github.py).
-PRESERVED_KEYS: tuple[str, ...] = (PROFILE_KEY, "github")
+#: the cached change profile, the GitHub App link (src/crb/server/routes/github.py) and the
+#: intake listener's switch (src/crb/server/intake.py) — editing a repository's test command
+#: must never silently switch its listener off.
+PRESERVED_KEYS: tuple[str, ...] = (PROFILE_KEY, "github", "intake")
 PROBE_STATES: frozenset[str] = frozenset({"ok", "degraded", "down"})
 
 

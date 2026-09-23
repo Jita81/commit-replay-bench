@@ -13,12 +13,17 @@
  *               "<belt> ✓" or "<belt> ✗ — <cause>" from the payload (a failed belt is a
  *               verdict, so the envelope status stays ok; the glyph goes red anyway), and any
  *               event carrying `error_message` gets the red glyph with the message in place
- *               of the payload summary. Every row explains its action with `actionHelp`
+ *               of the payload summary — as a button, because a one-line row cuts a long
+ *               message off: it opens the whole text under the list, where nothing truncates
+ *               it. Every row explains its action with `actionHelp`
  *               ("Explain each row", on by default, one checkbox to switch off).
  * How:          Fixed row height (taller with explanations on) → slice `[start, end)` from
  *               `scrollTop` with overscan → absolutely positioned rows inside a full-height
  *               spacer, so the explanation costs nothing per event; `role="log"`,
- *               `aria-live="polite"`, and the scroll region is focusable (WCAG 2.1.1).
+ *               `aria-live="polite"`, and the scroll region is focusable (WCAG 2.1.1). The
+ *               opened error message is held as the message itself (a row scrolls out of the
+ *               rendered window while it is being read) and rendered OUTSIDE the rows, so the
+ *               fixed height that makes the list virtualisable is never variable.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/components/Hint.tsx (the stream pill, the two checkboxes, every
@@ -30,21 +35,23 @@
  *               `fmtMs`, `fmtUsd`), src/crb/core/grade.py (the `grade.belt` payload this reads:
  *               belt, value, new, rc, timed_out, detected)
  * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx (events from a fake EventSource
- *               appear as rows; a failed belt and an error row are red; the explanation
+ *               appear as rows; a failed belt and an error row are red; a long error message
+ *               opens in full outside the row; the explanation
  *               line and its toggle), ui/e2e/walkthrough/03-mine.spec.ts (`expectLogAction` on
  *               a real worker's events), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe
  *               on the run page)
  * Touch when:   `StepEvent` gains a field worth a column (ui/src/api/types.ts first); never for
  *               a new repository.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { StepEvent } from '../api/types'
 import type { SseStatus } from '../api/sse'
-import { fmtMs, fmtTime, fmtUsd, shortId } from '../lib/format'
+import { fmtMs, fmtTime, fmtUsd } from '../lib/format'
 import { TONE_TEXT, actionHelp, stepStatusDisplay, type Display } from '../lib/verdict'
 import { EmptyState } from './EmptyState'
 import { Hint } from './Hint'
 import { Pill } from './Pill'
+import { ShortId } from './ShortId'
 
 interface LiveLogProps {
   events: readonly StepEvent[]
@@ -131,12 +138,21 @@ export function logRowDisplay(ev: StepEvent): LogRowDisplay {
  * visible window rendered, follows the tail while the user is at the bottom
  * (and stops following the moment they scroll up). Each row: time · stage ·
  * action · status glyph · task · duration · cost · payload summary.
+ *
+ * An error message is the one payload a reader must be able to read in full, and the row is
+ * one line high: the message is a button that opens the whole text UNDER the scroll region,
+ * where nothing truncates it. Fixed row height is what makes the list virtualisable, so the
+ * disclosure is never inside the row.
  */
 export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, height = 360, onSelectTask }: LiveLogProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [follow, setFollow] = useState(true)
   const [explain, setExplain] = useState(true)
+  // The message itself, not a row index: a row scrolls out of the rendered window (and out of
+  // `events` order on a rerun) while the reader is still reading what it said.
+  const [openError, setOpenError] = useState('')
+  const errorPanelId = useId()
   const rowH = explain ? ROW_H_EXPLAINED : ROW_H
 
   // Follow the tail: every new event pins the scroll to the bottom while `follow` is on.
@@ -222,7 +238,7 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
                   <div className="flex items-center gap-2 whitespace-nowrap" style={{ height: ROW_H }}>
                     <span className="w-[86px] shrink-0 text-on-surface-muted">{fmtTime(ev.timestamp)}</span>
                     <span className="w-[54px] shrink-0 text-on-surface-muted">{ev.stage}</span>
-                    <span className="w-[150px] shrink-0 truncate text-on-surface" title={ev.action}>
+                    <span className="w-[150px] shrink-0 truncate text-on-surface">
                       {ev.action}
                     </span>
                     {/* one glyph per row, hundreds of rows: hover and tap open the hint; the status text is the accessible name */}
@@ -231,21 +247,33 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
                     </Hint>
                     {ev.task_id ? (
                       onSelectTask ? (
-                        <Hint as="button" id="link.run.event_task" type="button" onClick={() => onSelectTask(ev.task_id)} className="w-[84px] shrink-0 text-left text-primary underline-offset-2 hover:underline" title={ev.task_id}>
-                          {shortId(ev.task_id)}
+                        <Hint as="button" id="link.run.event_task" type="button" onClick={() => onSelectTask(ev.task_id)} className="w-[84px] shrink-0 text-left text-primary underline-offset-2 hover:underline">
+                          <ShortId value={ev.task_id} />
                         </Hint>
                       ) : (
-                        <span className="w-[84px] shrink-0 text-on-surface-muted" title={ev.task_id}>
-                          {shortId(ev.task_id)}
-                        </span>
+                        <ShortId value={ev.task_id} className="w-[84px] shrink-0 text-on-surface-muted" />
                       )
                     ) : (
                       <span className="w-[84px] shrink-0 text-on-surface-muted">—</span>
                     )}
                     <span className="w-[60px] shrink-0 text-right text-on-surface-muted">{ev.duration_ms !== null ? fmtMs(ev.duration_ms) : ''}</span>
                     <span className="w-[64px] shrink-0 text-right text-on-surface-muted">{ev.cost_usd !== null ? fmtUsd(ev.cost_usd) : ''}</span>
-                    <span className="min-w-0 flex-1 truncate text-on-surface-muted" title={d.isError ? d.summary : payloadSummary(ev.payload)}>
-                      {d.isError ? <span className="text-status-red">{d.summary}</span> : d.summary}
+                    <span className="min-w-0 flex-1 truncate text-on-surface-muted">
+                      {d.isError ? (
+                        <Hint
+                          as="button"
+                          id="button.run.event_error"
+                          type="button"
+                          aria-expanded={openError === d.summary}
+                          aria-controls={errorPanelId}
+                          onClick={() => setOpenError(openError === d.summary ? '' : d.summary)}
+                          className="block w-full truncate border-0 bg-transparent p-0 text-left font-mono text-[11.5px] text-status-red underline underline-offset-2"
+                        >
+                          {d.summary}
+                        </Hint>
+                      ) : (
+                        d.summary
+                      )}
                     </span>
                   </div>
                   {explain && (
@@ -259,6 +287,18 @@ export function LiveLog({ events, status, reconnects = 0, dropped = 0, error, he
           </div>
         )}
       </div>
+      {/* Outside the fixed-height rows, so the whole message can be read however long it is.
+          Absent while closed — `aria-controls` beside `aria-expanded="false"` is allowed to
+          name an element that is not there yet, and an always-present wrapper would leave a
+          gap under the log on every run that had no error. */}
+      {openError && (
+        <div id={errorPanelId} className="flex items-start justify-between gap-3 rounded-[var(--radius-control)] border border-status-red bg-surface-high p-2" data-testid="log-error-full">
+          <pre className="m-0 min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[11.5px] leading-4 text-status-red">{openError}</pre>
+          <Hint as="button" id="button.run.event_error_hide" type="button" onClick={() => setOpenError('')} className="shrink-0 border-0 bg-transparent p-0 text-[11.5px] text-on-surface-muted underline underline-offset-2">
+            Hide
+          </Hint>
+        </div>
+      )}
     </div>
   )
 }

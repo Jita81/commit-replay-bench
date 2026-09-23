@@ -20,7 +20,9 @@
  *               a factory run is active the chain polls and a banner names the run and the
  *               item in hand (J-FAC-5 / J-TEL-9). A built item opens its evidence (F15); a
  *               stopped item says the way forward — an evolution that supersedes it, the
- *               route the API serves as `way_forward` (DL-049) — and the freeze form for a
+ *               route the API serves as `way_forward` (DL-049), one sentence naming what must
+ *               be different, and that replacement item already drafted from the stop's own
+ *               reason (G-904) — and the freeze form for a
  *               revised backlog (a new hash) starts from the active one (J-FAC-15). Every act goes through the API under its role; the
  *               chain (`/factory/{repo}/evidence`) is the record, and this screen renders the
  *               folded view of it (`task_views`).
@@ -39,7 +41,10 @@
  *               scrolls to and highlights one item (the Decisions inbox links here).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md (amendment 2026-09-16: the route gate)
- * Works with:   ui/src/api/hooks.ts (`useFactoryBacklog`, `useFactoryTasks`, `useSignGap`,
+ * Works with:   ui/src/screens/Factory/IntakePage.tsx (the work arriving from the team's own
+ *               board — this screen is its only door, and ui/src/App.reachability.test.ts holds
+ *               that),
+ *               ui/src/api/hooks.ts (`useFactoryBacklog`, `useFactoryTasks`, `useSignGap`,
  *               `useRegisterBacklog`, `useCreateRun`, `useCancelRun`, `useRuns`, `useHealth`,
  *               `useCapabilityMap`, `useAllRepos`), ui/src/api/types.ts (`FactoryTask`,
  *               `FactoryBacklog`), ui/src/lib/builder.ts (`builderChoice`, shared with
@@ -59,7 +64,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'react-router'
 import { useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useRegisterBacklog, useRuns, useSignGap } from '../../api/hooks'
-import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryTask, type Run } from '../../api/types'
+import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryEvolutionPrefill, type FactoryTask, type Run } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Dialog } from '../../components/Dialog'
@@ -71,6 +76,7 @@ import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
+import { ShortId } from '../../components/ShortId'
 import { Details, NotificationBanner, SummaryList, WarningButton } from '../../components/govuk'
 import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
@@ -443,8 +449,15 @@ export function FactoryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
 
-  const openFreeze = (from: FactoryBacklog | null) => {
-    setPrefill(from)
+  /**
+   * Open the freeze form. `evolution` is the replacement item the API already drafted for a
+   * stopped item: it is put INTO the backlog the form starts from, superseding its
+   * predecessor, because the point of a drafted item is that nobody retypes it. Without this
+   * the operator read the draft in a Details and then filled a form seeded from something
+   * else.
+   */
+  const openFreeze = (from: FactoryBacklog | null, evolution?: FactoryEvolutionPrefill | null) => {
+    setPrefill(evolution ? withEvolution(from, evolution) : from)
     setDialogKey((k) => k + 1)
     setRegisterOpen(true)
   }
@@ -475,13 +488,19 @@ export function FactoryPage() {
             title="Backlog"
             eyebrow="frozen · hashed · the first event of the chain"
             actions={
-              can('operator') ? (
-                <div className="flex flex-wrap gap-2">
+              // the way IN to intake (ADR-0017). Without a link here the screen was reachable
+              // only by typing its URL, and the guides had to hand the reader a raw path.
+              // Reading the column is a viewer's act, so the link is not gated on a role.
+              <div className="flex flex-wrap gap-2">
+                <LinkButton size="sm" to={`/factory/intake?repo=${encodeURIComponent(repo)}`} hint="link.factory.intake">
+                  Work arriving from your board
+                </LinkButton>
+                {can('operator') && (
                   <Button size="sm" onClick={() => openFreeze(null)} disabled={activeRun !== null} hint="button.factory.freeze">
                     Freeze a backlog…
                   </Button>
-                </div>
-              ) : undefined
+                )}
+              </div>
             }
           >
             {backlog.isPending && <p className="text-sm text-on-surface-muted">Loading…</p>}
@@ -514,8 +533,8 @@ export function FactoryPage() {
                     {backlog.data.frozen_at ? 'frozen' : 'not frozen'}
                   </Pill>
                   <Hint id="stat.factory.hash">
-                    <span className="font-mono text-xs" title={backlog.data.hash}>
-                      hash {shortId(backlog.data.hash, 16)}
+                    <span className="font-mono text-xs" data-testid="factory-backlog-hash">
+                      hash <ShortId value={backlog.data.hash} n={16} />
                     </span>
                   </Hint>
                   <Hint id="stat.factory.items_count" className="text-xs text-on-surface-muted">
@@ -543,7 +562,7 @@ export function FactoryPage() {
                     focused={t.id === focus}
                     canSign={can('approver')}
                     canFreeze={can('operator') && activeRun === null}
-                    onFreeze={() => openFreeze(backlog.data ?? null)}
+                    onFreeze={(evolution) => openFreeze(backlog.data ?? null, evolution)}
                     onEvidence={(p, row) => setPack({ pack: p, row })}
                   />
                 ))}
@@ -784,7 +803,9 @@ function ItemRow({
   focused: boolean
   canSign: boolean
   canFreeze: boolean
-  onFreeze: () => void
+  /** Called with the replacement item the API already drafted for this stop, when there is
+   *  one, so the freeze form starts from it rather than from a blank of the active backlog. */
+  onFreeze: (evolution?: FactoryEvolutionPrefill | null) => void
   onEvidence: (pack: string, row: string) => void
 }) {
   const steps = stepsFor(t)
@@ -828,10 +849,11 @@ function ItemRow({
             {sentence}
           </Hint>
           {canFreeze && (
-            <Button size="sm" onClick={onFreeze} hint="button.factory.freeze_revised">
+            <Button size="sm" onClick={() => onFreeze(t.way_forward?.prefill ?? null)} hint="button.factory.freeze_revised">
               Freeze a revised backlog…
             </Button>
           )}
+          <PrefilledEvolution t={t} />
         </div>
       )}
       {narrow && (
@@ -856,6 +878,45 @@ function ItemRow({
       {t.dor_gaps.length > 0 && canSign && <GapForm repo={repo} task={t} />}
       {t.dor_gaps.length > 0 && !canSign && <p className="m-0 mt-2 text-xs text-on-surface-muted">An approver signs the structural gap(s); a value gap is never signed — it routes test-first.</p>}
     </li>
+  )
+}
+
+/**
+ * G-904 — the replacement item, already drafted. A stopped item's way forward is not only a
+ * route: the API serves the superseding item pre-filled from the item that stopped and from
+ * the stop's own reason (for a weak-test stop, the review's finding), so the next step is a
+ * read of a draft rather than retyping what the product already knows. Nothing is registered
+ * here — the draft is shown, and the operator posts it from the freeze form or the API.
+ */
+function PrefilledEvolution({ t }: { t: FactoryTask }) {
+  const wf = t.way_forward
+  const pre = wf?.prefill
+  if (!wf || !pre) return null
+  return (
+    <div className="basis-full" data-testid={`prefill-${t.id}`}>
+      <Hint as="p" id="banner.factory.what_to_change" className="m-0 mb-1 text-xs">
+        {wf.what_to_change}
+        {wf.needs_authored_test ? ' Attach the failing test with the item.' : ''}
+      </Hint>
+      <Details summary="The replacement item, drafted" className="mb-0 text-sm">
+        <Hint as="div" id="item.factory.prefill" className="min-w-0">
+          <p className="m-0">
+            <span className="font-mono text-xs">{pre.id}</span> supersedes <span className="font-mono text-xs">{pre.supersedes}</span> · {pre.capability_class} · {pre.size_estimate} · {pre.kind}
+          </p>
+          <p className="m-0 mt-1 font-semibold">{pre.title}</p>
+          <p className="m-0 mt-1 whitespace-pre-wrap break-words text-xs text-on-surface-muted">{pre.description}</p>
+          {pre.structural_facts.length > 0 && (
+            <ul className="m-0 mt-1 list-disc pl-5 text-xs text-on-surface-muted">
+              {pre.structural_facts.map((f) => (
+                <li key={f} className="break-words">
+                  {f}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Hint>
+      </Details>
+    </div>
   )
 }
 
@@ -1012,6 +1073,44 @@ const emptyItem = (id: string, cat: FactoryCatalogue | undefined): DraftItem => 
 })
 
 /** J-FAC-15 — the active backlog's item as a draft, so one item can be edited and the rest kept. */
+/**
+ * The active backlog with the drafted replacement item in it: the predecessor it supersedes is
+ * replaced in place (so the list reads as the revision it is), and an item the backlog does
+ * not hold is appended. With no backlog to revise, the draft alone is the backlog.
+ *
+ * A successor takes its predecessor's place in the GRAPH as well as in the list: an item that
+ * depended on the item being replaced is re-pointed at the replacement. Leaving it pointing at
+ * an id the revised backlog no longer holds is not a smaller change — the freeze is refused
+ * 422 (`item I-2 depends on unknown item 'I-1'`, src/crb/factory/backlog.py `_check_items`)
+ * naming an item the operator never touched. Nothing is written: this is the form's starting
+ * point, and every dependency stays editable in it.
+ */
+export function withEvolution(from: FactoryBacklog | null, pre: FactoryEvolutionPrefill): FactoryBacklog {
+  const drafted: FactoryBacklogItem = {
+    id: pre.id,
+    title: pre.title,
+    kind: pre.kind,
+    capability_class: pre.capability_class,
+    size: pre.size_estimate,
+    level: pre.level,
+    depends_on: [...pre.depends_on],
+    structural_facts: [...pre.structural_facts],
+    has_authored_test: false,
+    description: pre.description,
+  }
+  const base: FactoryBacklog = from ?? { repo: '', hash: '', frozen_at: null, items: [] }
+  const at = base.items.findIndex((i) => i.id === pre.supersedes || i.id === pre.id)
+  const replaced = at >= 0 ? base.items[at] : undefined
+  const placed = replaced ? base.items.map((i, j) => (j === at ? drafted : i)) : [...base.items, drafted]
+  // Only a REPLACEMENT under a new id moves the edges: revising an item in place (same id)
+  // and appending one the backlog does not hold leave every dependency exactly as it was.
+  const stale = replaced && replaced.id !== drafted.id ? replaced.id : ''
+  const items = stale
+    ? placed.map((i) => (i.id !== drafted.id && i.depends_on.includes(stale) ? { ...i, depends_on: i.depends_on.map((d) => (d === stale ? drafted.id : d)) } : i))
+    : placed
+  return { ...base, items }
+}
+
 function draftFrom(i: FactoryBacklogItem): DraftItem {
   const facts: Record<string, string> = {}
   for (const line of i.structural_facts) {

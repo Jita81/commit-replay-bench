@@ -1290,18 +1290,23 @@ def test_run_forever_survives_a_broken_iteration(
     h: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls = {"n": 0}
+    # the SECOND iteration signals: waiting on the event rather than on a 0.3 s sleep is what
+    # makes this deterministic. Under the load of the full suite the sleep was not always long
+    # enough for two iterations, so the assertion failed for want of a CPU slice, not a bug.
+    iterated_twice = threading.Event()
 
     def flaky() -> Run | None:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("db hiccup")
+        iterated_twice.set()
         return None
 
     monkeypatch.setattr(h.worker, "run_once", flaky)
     stop = threading.Event()
     t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
     t.start()
-    time.sleep(0.3)
+    assert iterated_twice.wait(timeout=10), "the loop did not survive the broken iteration"
     stop.set()
     t.join(timeout=5)
     assert calls["n"] >= 2

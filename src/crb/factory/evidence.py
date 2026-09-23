@@ -102,6 +102,28 @@ EV_VERDICT = "review.verdict"
 EV_EDIT = "edit.permitted"
 EV_CHECKPOINT = "horizon.checkpoint"
 EV_ITEM_OUTCOME = "item.outcome"
+#: Intake (ADR-0017): what the listener did with a ticket. These sit on the SAME chain as
+#: the manufacture steps on purpose — "who read this ticket, when, at which revision, and
+#: what it wrote back" is evidence of the same kind as "who built it", and a reader
+#: should not have to visit a second ledger to see the whole life of an item.
+EV_INTAKE_POLLED = "intake.polled"
+EV_INTAKE_READ = "intake.read"
+EV_INTAKE_FEEDBACK = "intake.feedback.posted"
+EV_INTAKE_REGISTERED = "intake.registered"
+EV_INTAKE_QUEUED = "intake.queued"
+EV_INTAKE_DELIVERED = "intake.delivered"
+EV_INTAKE_TRANSITIONED = "intake.transitioned"
+EV_INTAKE_STOPPED = "intake.stopped"
+INTAKE_EVENT_KINDS: tuple[str, ...] = (
+    EV_INTAKE_POLLED,
+    EV_INTAKE_READ,
+    EV_INTAKE_FEEDBACK,
+    EV_INTAKE_REGISTERED,
+    EV_INTAKE_QUEUED,
+    EV_INTAKE_DELIVERED,
+    EV_INTAKE_TRANSITIONED,
+    EV_INTAKE_STOPPED,
+)
 EVENT_KINDS: tuple[str, ...] = (
     EV_BACKLOG_FROZEN,
     EV_BACKLOG_EVOLVED,
@@ -120,6 +142,7 @@ EVENT_KINDS: tuple[str, ...] = (
     EV_EDIT,
     EV_CHECKPOINT,
     EV_ITEM_OUTCOME,
+    *INTAKE_EVENT_KINDS,
 )
 #: The two ways a delivered pull request ends; the sync records exactly one of them.
 OUTCOME_MERGED = "merged"

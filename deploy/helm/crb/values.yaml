@@ -51,6 +51,10 @@ config:
   # client spoof its address and scheme; CodeRabbit on PR #4, 2026-09-15).
   CRB_TRUSTED_PROXIES: ""
   CRB_FORWARDED_ALLOW_IPS: ""
+  # The factory's test-author rung (builder:model[:provider]); "" or "none" = no author,
+  # and an item nobody wrote a failing test for stops `no_oracle`. Never a rung that is
+  # also on a run's ladder — the author rung and the build rung are never the same rung.
+  CRB_FACTORY__TEST_AUTHOR: ""
   CRB_RETENTION__TRANSCRIPTS_DAYS: "0"
   # Model endpoint (BYOK). OpenAI-compatible:
   CRB_OPENAI_BASE_URL: ""

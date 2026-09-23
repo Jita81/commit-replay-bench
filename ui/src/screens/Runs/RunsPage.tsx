@@ -43,8 +43,9 @@ import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
+import { ShortId } from '../../components/ShortId'
 import { useAuth } from '../../lib/auth'
-import { fmtDate, fmtInt, fmtPct, fmtUsd, shortId } from '../../lib/format'
+import { fmtDate, fmtInt, fmtPct, fmtUsd } from '../../lib/format'
 import { runStatusDisplay } from '../../lib/verdict'
 import { RunNewDialog } from './RunNewDialog'
 
@@ -89,7 +90,7 @@ export function RunsPage() {
 
   const columns = useMemo<Column<Run>[]>(
     () => [
-      { key: 'id', header: 'Run', hint: 'col.runs.id', mono: true, sortValue: (r) => r.id, cell: (r) => <Link to={`/runs/${encodeURIComponent(r.id)}`} title={r.id}>{shortId(r.id, 8)}</Link> },
+      { key: 'id', header: 'Run', hint: 'col.runs.id', mono: true, sortValue: (r) => r.id, cell: (r) => <Link to={`/runs/${encodeURIComponent(r.id)}`}><ShortId value={r.id} n={8} /></Link> },
       { key: 'repo', header: 'Repo', hint: 'col.runs.repo', sortValue: (r) => r.repo, cell: (r) => r.repo },
       { key: 'kind', header: 'Kind', hint: 'col.runs.kind', sortValue: (r) => r.kind, cell: (r) => <span className="font-mono text-xs">{r.kind}{r.kind === 'replay' || r.kind === 'blind' ? ` · ${r.mode}` : ''}</span> },
       {
