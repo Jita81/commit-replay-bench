@@ -637,7 +637,7 @@ def _poll_column(
         return report
     events = _read_events(home)
     signoffs = list(home.gap_ledger().records()) if home.dir.exists() else []
-    check_budget = _budget_guard(started + float(budget_s), budget_s, clock)
+    check_budget = _BudgetGuard(started + float(budget_s), budget_s, clock)
     for i, ref in enumerate(refs):
         if i and clock() - started > float(budget_s):
             detail = (
@@ -675,6 +675,30 @@ def _poll_column(
         )
         if row is not None:
             report.rows.append(row)
+        if check_budget.fired:
+            # The budget ran out INSIDE this ticket. `_handle_ticket` records that on the
+            # ticket's own row and carries on, so without this the stop is invisible on the
+            # pass whenever it happens in the LAST ticket — a one-ticket column ended with
+            # `stopped` empty, `/health` read `ok` and the screen said the pass was fine.
+            # It is reported here, against the ticket it actually curtailed, rather than by
+            # the next iteration, which would say a ticket finished that did not.
+            detail = (
+                f"the pass stopped inside ticket {i + 1} of {len(refs)}: it may take "
+                f"{float(budget_s):.0f} seconds and it had taken longer. What that ticket "
+                "still needs, and the tickets after it, are read on the next pass"
+            )
+            report.stopped, report.detail = REASON_COLUMN_TOO_LARGE, detail
+            evidence.append(
+                EV_STOPPED,
+                "",
+                step="budget",
+                reason=REASON_COLUMN_TOO_LARGE,
+                detail=detail,
+                handled=i,
+                seen=len(refs),
+                budget_s=float(budget_s),
+            )
+            break
     evidence.append(
         EV_POLLED,
         "",
@@ -688,9 +712,7 @@ def _poll_column(
     return report
 
 
-def _budget_guard(
-    deadline: float, budget_s: float, clock: Callable[[], float]
-) -> Callable[[str], None]:
+class _BudgetGuard:
     """A check the pass makes at the tracker boundary: is there budget left to START another
     call? Expired, it raises the pass's own budget stop, which the caller already knows how to
     record and serve.
@@ -700,18 +722,28 @@ def _budget_guard(
     (and its database session) for minutes against a 60-second budget. This does not cancel a
     call already in flight — an HTTPX timeout measures network inactivity, not total duration —
     so the bound is the budget plus the calls of the verb in progress, not the budget exactly.
+
+    It remembers that it fired (``fired``) because ``_handle_ticket`` catches the stop and
+    carries on with the next ticket: without the flag the poll loop cannot tell a ticket the
+    budget curtailed from one that simply took a while, and the stop would never reach the
+    pass when it happened inside the last ticket.
     """
 
-    def check(step: str) -> None:
-        if clock() < deadline:
+    def __init__(self, deadline: float, budget_s: float, clock: Callable[[], float]) -> None:
+        self._deadline = deadline
+        self._budget_s = float(budget_s)
+        self._clock = clock
+        self.fired = False
+
+    def __call__(self, step: str) -> None:
+        if self._clock() < self._deadline:
             return
+        self.fired = True
         raise TrackerError(
             REASON_COLUMN_TOO_LARGE,
-            f"the pass had used its {float(budget_s):.0f}-second budget before this ticket's "
+            f"the pass had used its {self._budget_s:.0f}-second budget before this ticket's "
             f"{step}, so it started no further tracker call. The next pass finishes it",
         )
-
-    return check
 
 
 def _handle_ticket(
@@ -733,7 +765,7 @@ def _handle_ticket(
 ) -> IntakeRow | None:
     """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped.
 
-    ``check_budget`` is asked before each group of tracker calls (:func:`_budget_guard`), so a
+    ``check_budget`` is asked before each group of tracker calls (:class:`_BudgetGuard`), so a
     pass that has run out of time starts no further call on somebody's board.
     """
     del actor

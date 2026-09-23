@@ -97,6 +97,22 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   opens in full from a keyboard-reachable button outside the fixed-height row, a drafted
   successor takes its predecessor's place in the dependency graph as well as the list, and the
   intake row's route carries its apparatus like every other number.
+- **A third pass, on the gates themselves.** A poll whose budget ran out **inside the last
+  ticket** reported nothing: `_handle_ticket` recorded the stop on that ticket's row and the
+  pass-level stop was set only by the check at the top of the next iteration, which a
+  one-ticket column never reaches — so the served view, `/health`'s intake line and the screen
+  all read `ok` on a pass that had run out of time. The budget check now remembers that it
+  fired, and the pass records the stop against the ticket it actually curtailed rather than
+  over-counting a ticket that did not finish. The claim gate stopped exempting the bare word
+  "confidence": `65% confidence that the builder can deliver` is an outcome claim, and it
+  passed untagged because the `interval`/`level` half of the phrase was optional (`a confidence
+  of 95%` is still exempt, because there the percentage *is* the confidence). The whole-life
+  write bound is driven through `apply_outcome_map` instead of the test calling `transition`
+  itself, so the "one state change" count bounds the product rather than the test. And three
+  statements now say what is true: the poll budget stops further tracker calls rather than
+  capping a pass's wall-clock time (SECURITY §2, ADR-0017), the 11-screens keyboard and
+  375-px checks cover every *authenticated* route (PLAN stream E), and G-192 separates what is
+  measured about `/login` from what is still missing.
 - **The record itself.** `product.evidence.6` is back to `partial`: the `dod`, `claims`,
   `ui-unit` and `ui-smoke` jobs run on every pull request but are not on branch protection's
   required list (G-930). The walkthrough's `proof.20` is narrowed to what the spec walks, with

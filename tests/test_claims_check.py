@@ -140,6 +140,7 @@ def test_a_missing_allowlisted_file_is_itself_a_finding(tree: Path) -> None:
         "Every rate carries a Wilson 95% interval and its apparatus.\n",  # a confidence level
         "Each rate carries a 95% confidence interval.\n",  # the level, written the other way
         "Each rate carries a 95% CI.\n",  # and abbreviated
+        "Each rate is quoted at a confidence of 95%.\n",  # the percentage IS the confidence
         "Rule DL-0052 covers stopped items.\n",  # a leading zero is an identifier, not 52
         "The June 2026 v1 contents are tagged and frozen.\n",  # a year is not a count
         "Exactly one process reaches the model endpoint.\n",  # "one" never counts a plural
@@ -164,6 +165,10 @@ def test_prose_that_makes_no_claim_is_not_flagged(tree: Path, body: str) -> None
         # a result standing beside a confidence interval is still a result
         "65% passed (Wilson 95% interval).\n",
         "97.5% passed, with a 95% confidence interval.\n",
+        # the word "confidence" alone is not an interval: this is an outcome claim, and the
+        # exemption used to swallow it because the "interval|level" half was optional
+        "There is 65% confidence that the builder can deliver.\n",
+        "The reviewer had 80% confidence in the verdict.\n",
     ],
 )
 def test_a_quantified_assertion_in_prose_is_a_claim(tree: Path, body: str) -> None:

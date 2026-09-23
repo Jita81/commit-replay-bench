@@ -87,17 +87,22 @@ resolves against *their* host, so `CRB_PUBLIC_URL` is required before a listener
 switched on, and a pass without it stops with `no_public_url` before it writes anything
 (`crb.server.intake.item_url_for`).
 
-**One pass is bounded twice.** At most `CRB_INTAKE__MAX_PER_POLL` tickets and at most
-`CRB_INTAKE__POLL_BUDGET_S` seconds: a first pass over one ticket it registers costs **eleven**
-Azure DevOps requests, or **nine** Jira ones **[measured — n = 1 ready ticket × 2 adapters;
-method: every request counted through an `httpx.MockTransport` for the verb sequence one pass
-makes, `tests/test_intake_write_bound.py`; apparatus 2.2. A count, so no interval]**, runs
-in front of the worker's heartbeat and, on demand, inside an API request. The budget is asked
-again at the tracker boundary inside a ticket, so an expired pass starts no further call on
-somebody's board (`crb.server.intake._budget_guard`). A column longer than
-the bound is not read at all — `column_too_large`, with the advice to narrow the area path or
-the JQL, because reading an arbitrary 200 of somebody's board and saying nothing about the
-rest would be worse than reading none of it.
+**One pass is bounded twice.** At most `CRB_INTAKE__MAX_PER_POLL` tickets, and no tracker
+call started once `CRB_INTAKE__POLL_BUDGET_S` seconds have gone: a first pass over one ticket
+it registers costs **eleven** Azure DevOps requests, or **nine** Jira ones **[measured —
+n = 1 ready ticket × 2 adapters; method: every request counted through an
+`httpx.MockTransport` for the verb sequence one pass makes,
+`tests/test_intake_write_bound.py`; apparatus 2.2. A count, so no interval]**, runs in front
+of the worker's heartbeat and, on demand, inside an API request. The budget is asked again at
+the tracker boundary inside a ticket, so an expired pass starts no further call on somebody's
+board (`crb.server.intake._BudgetGuard`). It bounds the calls rather than holding a
+stopwatch: a call already in flight is not cancelled and runs on to its own timeout, so the
+pass takes the budget plus the verb in progress. Wherever the budget goes — between two
+tickets or inside the last one — the pass itself records the stop and how far it got, so a
+served view that names no stop means there was none. A column longer than the bound is not
+read at all — `column_too_large`, with the advice to narrow the area path or the JQL, because
+reading an arbitrary 200 of somebody's board and saying nothing about the rest would be worse
+than reading none of it.
 
 **The consent switch is an event, not just a field.** `switched_by` on the repository row is
 one mutable value a later switch overwrites, so every throw of the switch is

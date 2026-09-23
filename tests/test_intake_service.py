@@ -801,9 +801,58 @@ def test_a_budget_that_runs_out_inside_a_ticket_starts_no_further_tracker_call(
     row = report.rows[0]
     assert row.stopped == c.REASON_COLUMN_TOO_LARGE and row.stopped_advice
     assert report.registered == 0 and home.load_backlog() is None
-    stop = [e for e in home.events() if e.kind == sv.EV_STOPPED][-1]
-    assert stop.payload["step"] == "feedback"
-    assert "budget" in stop.payload["detail"] and "next pass" in stop.payload["detail"]
+    stops = [e for e in home.events() if e.kind == sv.EV_STOPPED]
+    ticket_stop = [e for e in stops if e.payload.get("step") == "feedback"][-1]
+    assert "budget" in ticket_stop.payload["detail"]
+    assert "next pass" in ticket_stop.payload["detail"]
+
+
+def test_a_budget_that_runs_out_inside_the_last_ticket_stops_the_pass_not_only_the_row(
+    home: FactoryHome,
+) -> None:
+    """A one-ticket column, the budget gone the moment that ticket has been read.
+
+    The stop used to reach the ROW and stop there: ``_handle_ticket`` catches the budget
+    error, and the pass-level stop was set only by the check at the top of the NEXT
+    iteration, which a one-ticket column never runs. The pass then reported nothing
+    stopped — so the served view, `/health`'s intake line and the screen all read ``ok``
+    on a pass that had run out of time, and OPERATOR §11's "records the same reason with
+    how far it got" was not true of the last ticket.
+    """
+    tracker = _tracker(_ticket())
+
+    def clock() -> float:  # expired as soon as the one ticket has been read
+        return 99.0 if ("read", "4711") in tracker.calls else 0.0
+
+    report = _poll(home, tracker, route=_deliver(), budget_s=10.0, clock=clock)
+    assert report.stopped == c.REASON_COLUMN_TOO_LARGE
+    assert not report.ok
+    assert "inside ticket 1 of 1" in report.detail and "the next pass" in report.detail
+    assert report.rows[0].stopped == c.REASON_COLUMN_TOO_LARGE  # the row still says it too
+    pass_stop = [
+        e for e in home.events() if e.kind == sv.EV_STOPPED and e.payload.get("step") == "budget"
+    ]
+    assert len(pass_stop) == 1
+    assert pass_stop[0].payload["handled"] == 0 and pass_stop[0].payload["seen"] == 1
+
+
+def test_a_pass_whose_last_ticket_finished_inside_the_budget_does_not_say_it_stopped(
+    home: FactoryHome,
+) -> None:
+    """The other half of the bound: the stop is reported when the budget CURTAILED a ticket,
+    never merely because the clock passed the deadline as the pass finished. A pass that got
+    everything done must not read ``stopped`` — that would be a false alarm on the screen and
+    a false ``degraded`` on `/health`."""
+    tracker = _tracker(_ticket())
+    calls = {"n": 0}
+
+    def clock() -> float:  # still inside the budget for every check, then long past it
+        calls["n"] += 1
+        return 0.0 if calls["n"] <= 50 else 99.0
+
+    report = _poll(home, tracker, route=_deliver(), budget_s=10.0, clock=clock)
+    assert report.registered == 1 and report.stopped == "" and report.ok
+    assert [e for e in home.events() if e.kind == sv.EV_STOPPED] == []
 
 
 def test_the_default_bounds_are_the_settings_defaults(home: FactoryHome) -> None:

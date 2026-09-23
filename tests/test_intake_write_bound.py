@@ -21,7 +21,9 @@ What it does: Pins that a first pass over a one-ticket column ending in registra
               ELEVEN Azure DevOps requests and NINE Jira requests; that one poll of a ready
               ticket leaves exactly two marked comments, one ``crb:`` label and one link;
               and that the whole life of a ticket is at most four marked comments, two
-              links, one label and one configured state change.
+              links, one label and one configured state change — the state change driven
+              through ``apply_outcome_map`` (swept twice), and none at all where no outcome
+              map is configured.
 How:          ``httpx.MockTransport`` counts every request the adapter makes (no tracker is
               contacted, here or in CI) for the exact verb sequence ``poll_repository``
               makes; then a real ``FactoryHome`` under ``tmp_path`` plus
@@ -29,7 +31,8 @@ How:          ``httpx.MockTransport`` counts every request the adapter makes (no
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
 Works with:   src/crb/intake/ado.py and src/crb/intake/jira.py (the per-verb request cost),
-              src/crb/server/intake.py (the poll and the later moments it counts),
+              src/crb/server/intake.py (the poll, the later moments and the outcome sweep
+              it counts),
               src/crb/intake/client.py (the six verbs and the four labels),
               tests/fixtures/intake.py (the fake whose ``calls`` list is the count),
               tests/test_intake_feedback.py (counts the renderers; this counts the calls),
@@ -242,6 +245,11 @@ def test_the_whole_life_of_a_ticket_is_four_comments_two_links_one_label_one_tra
     A poll, then the two later moments (the pull request and a stop), then the configured
     transition: four distinct markers and no fifth, both links, one ``crb:`` label at a
     time out of the four that exist, and one state change.
+
+    Every write here is made by the PRODUCT. The state change used to be ``tracker.transition``
+    called by the test itself, so the count below counted this file rather than the product and
+    could not fail; it is driven through ``apply_outcome_map``, twice, because that is what a
+    poll does on every pass.
     """
     tracker = _tracker()
     _poll(home, tracker)
@@ -259,7 +267,16 @@ def test_the_whole_life_of_a_ticket_is_four_comments_two_links_one_label_one_tra
         url="https://crb.invalid/factory?item=fake-4711",
         evidence=evidence,
     )
-    tracker.transition(KEY, "Done")
+    home.evidence(actor="test").append(
+        "delivery.merged", "fake-4711", pr_url="https://github.invalid/o/r/pull/7"
+    )
+    for _ in range(2):  # every pass sweeps the map; the ticket still moves once
+        sv.apply_outcome_map(
+            tracker,
+            home=home,
+            outcome_map={sv.OUTCOME_MERGED: "Done"},
+            evidence=home.evidence(actor="test"),
+        )
 
     assert sorted(tracker.comments[KEY]) == sorted(
         [
@@ -277,6 +294,28 @@ def test_the_whole_life_of_a_ticket_is_four_comments_two_links_one_label_one_tra
     assert tracker.labels[KEY] == c.LABEL_QUEUED and len(c.LABELS) == 4
     assert tracker.states == {KEY: "Done"}
     assert [verb for verb, _ in tracker.calls].count("transition") == 1
+
+
+def test_an_unconfigured_outcome_map_moves_nothing_however_often_it_is_swept(
+    home: FactoryHome,
+) -> None:
+    """The default map is empty, so the default deployment moves no ticket at all — the
+    other half of the one-state-change bound, and the half a sweep that transitioned on an
+    empty map would break."""
+    tracker = _tracker()
+    _poll(home, tracker)
+    home.evidence(actor="test").append(
+        "delivery.merged", "fake-4711", pr_url="https://github.invalid/o/r/pull/7"
+    )
+    for _ in range(2):
+        assert (
+            sv.apply_outcome_map(
+                tracker, home=home, outcome_map={}, evidence=home.evidence(actor="test")
+            )
+            == []
+        )
+    assert tracker.states == {}
+    assert [verb for verb, _ in tracker.calls].count("transition") == 0
 
 
 def test_a_repeat_of_a_later_write_adds_no_fifth_comment(home: FactoryHome) -> None:

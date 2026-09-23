@@ -205,10 +205,17 @@ _PERCENT_RE = re.compile(_PERCENT)
 #: nearby word: "Wilson 95% interval", "95% confidence interval", "95% CI", "at a
 #: confidence of 95%". A result standing beside such an interval ("65% passed (Wilson 95%
 #: interval)") is not exempted, because the exemption covers only the span it matches.
+#:
+#: The word ``confidence`` on its own exempts nothing. "There is 65% confidence that the
+#: builder can deliver" is an outcome claim, not an interval, and it used to pass the gate
+#: untagged because the ``interval|level`` half of the phrase was optional. The exemption now
+#: needs the whole noun ("confidence interval", "confidence level") or the construction that
+#: makes the percentage the confidence itself ("a confidence of 95%").
+_INTERVAL_NOUN = r"(?:confidence\s+(?:interval|level)|interval)"
 _CONFIDENCE_PERCENT_RE = re.compile(
-    rf"{_PERCENT}\s+(?:confidence(?:\s+(?:interval|level))?|interval|ci)\b"
-    rf"|\b(?:confidence(?:\s+(?:interval|level))?|interval)"
-    rf"(?:\s+(?:of|at|is|was))?\s+{_PERCENT}",
+    rf"{_PERCENT}\s+(?:{_INTERVAL_NOUN}|ci)\b"
+    rf"|\b{_INTERVAL_NOUN}(?:\s+(?:of|at|is|was))?\s+{_PERCENT}"
+    rf"|\bconfidence\s+(?:of|at|is|was)\s+{_PERCENT}",
     re.I,
 )
 _TAG_RE = re.compile(r"\[(" + "|".join(TAGS) + r")\b([^\]]*)\]", re.I)
