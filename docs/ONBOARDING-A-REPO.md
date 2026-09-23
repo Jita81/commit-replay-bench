@@ -159,12 +159,17 @@ graded attempts behind it, the interval, and whether the honesty floor is intact
 labelled `crb:needs-info`, `crb:ready`, `crb:not-deliverable` or `crb:queued`. Reading a
 column, drafting the item and posting that comment call no model and spend nothing.
 
-**Switching it on takes two people.** An admin configures the tracker, stores its credential
-and sets this deployment's own address (`CRB_PUBLIC_URL` — the links the product writes on your
-tickets are built from it, and a relative path would resolve against your tracker's host, so
-the listener cannot be switched on without it); an operator then switches the listener on for a
-repository from the Factory screen's *Work arriving from your board*, or at
-`/factory/intake?repo=`. Every repository starts with its listener **off**.
+**Switching it on takes two steps, and the second one is the consent.** First an admin
+configures the tracker, stores its credential and sets this deployment's own address
+(`CRB_PUBLIC_URL` — the links the product writes on your tickets are built from it, and a
+relative path would resolve against your tracker's host, so the listener cannot be switched on
+without it). Then an operator switches the listener on for a repository from the Factory
+screen's *Work arriving from your board*, or at `/factory/intake?repo=`. Every repository starts
+with its listener **off**. The two steps are two **roles**, not necessarily two people: the role
+ladder admits an admin wherever an operator is asked for, so one admin account can take both.
+The switch records who threw it and when; nothing here refuses the same person taking both
+steps, and the product's two-person rule applies to signing a cell, not to this switch
+(`signoff-policy.v3`).
 [OPERATOR §11](OPERATOR.md#11-intake--work-arriving-from-a-board) has both.
 
 **One read is bounded.** A column holding more tickets than one pass may read (200 by default)
@@ -180,9 +185,11 @@ could not classify the ticket and asks, rather than routing money at a guess. Yo
 it yourself with a tag: `crb:class=bug.fix` (and `crb:kind=`, `crb:level=` likewise).
 
 *An edit is never an overwrite.* `(tracker, key, revision)` is the key: a ticket read again
-unchanged is not read again, and nothing is written. A ticket you edit comes back as a new
+unchanged is not read again, and nothing is written. A ticket **you** edit comes back as a new
 item that **supersedes** the old one, so the frozen record a run verified against never
-moves under it.
+moves under it. What the product itself writes on the ticket — the label, the comments, the
+link — moves a tracker's own revision, and that is not an edit: only a change to the ticket's
+content makes a new item.
 
 Story points map to a size tier on a published scale: `≤ 1 → XS`, `≤ 3 → S`, `≤ 8 → M`,
 `≤ 20 → L`, above that `XL`. A ticket with no estimate is `S`, and the comment says so.

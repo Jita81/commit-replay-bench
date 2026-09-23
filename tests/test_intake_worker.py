@@ -8,8 +8,10 @@ What it is:   The worker-side intake suite: which repositories are polled, when 
 What it does: Pins that a deployment with no tracker never polls, that a repository whose
               listener nobody switched on is never polled however the deployment is
               configured, that the poll runs on its own timer rather than every idle pass,
-              that a registration arriving during a factory run is queued, and that an
-              exception inside one repository's poll does not touch the others.
+              that the worker keeps checking in for as long as a pass lasts (a slow board
+              must not read as a stale worker), that a registration arriving during a factory
+              run is queued, and that an exception inside one repository's poll does not
+              touch the others.
 How:          A ``Worker`` over a SQLite store under ``tmp_path`` with the file-backed
               fake tracker; nothing here reaches a network, a model or a real tracker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -24,6 +26,8 @@ Touch when:   the idle loop gains another periodic job — give it its own timer
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -159,6 +163,32 @@ def test_the_poll_runs_on_its_own_timer_not_on_every_idle_pass(tmp_path: Path) -
     assert stack.worker.intake_due(now=1010.0) is False
     assert stack.worker.poll_intake(now=1010.0) == 0
     assert stack.worker.intake_due(now=1031.0) is True
+
+
+def test_the_worker_checks_in_while_a_slow_board_is_being_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The idle loop's check-in happens BETWEEN passes. One ticket costs about eleven
+    synchronous tracker calls with a 20-second timeout each, so a slow board could hold the
+    loop past the liveness window — and the health probe then reported this worker stale, and
+    told an operator queued runs would not start, while it was working. The pass now keeps its
+    own check-in running for as long as it lasts, and stops it however the pass ends."""
+    stack = Stack(tmp_path, _intake())  # heartbeat_s = 0.05
+    stack.add_repo("alpha", {"enabled": True})
+    beats: list[str] = []
+    monkeypatch.setattr(stack.worker, "checkin", lambda **kw: beats.append("beat"))
+
+    def slow(repo: str, tracker: Any, state: ListenerState) -> None:
+        time.sleep(0.4)  # one ticket making its tracker calls
+        raise RuntimeError("and then the tracker refused")  # the pass must still stop it
+
+    monkeypatch.setattr(stack.worker, "_poll_one", slow)
+    assert stack.worker.poll_intake() == 1
+    assert len(beats) >= 3  # ~8 at heartbeat_s=0.05; never 0, which is the bug
+    before = len(beats)
+    time.sleep(0.2)
+    assert len(beats) == before  # the thread is stopped, not left beating for ever
+    assert [t.name for t in threading.enumerate() if "crb-checkin" in t.name] == []
 
 
 # --- what a poll does --------------------------------------------------------------------

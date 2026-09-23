@@ -12,9 +12,11 @@ Two rules make the writes safe to repeat:
   comment (``<!-- crb:intake:ado:4711 -->``) that an adapter looks for before it
   writes: same marker, same text → nothing happens; same marker, new text → the
   existing comment is edited. A restart mid-poll therefore never doubles a comment.
-* **A label replaces, never accumulates.** :data:`LABELS` is a closed set of four; an
-  adapter removes any other ``crb:`` label as it sets one, so a ticket shows exactly
-  one state.
+* **A state label replaces, never accumulates.** :data:`LABELS` is a closed set of four;
+  an adapter removes the other three as it sets one (:func:`is_state_label`), so a ticket
+  shows exactly one state. A ``crb:`` tag that is not one of the four is a classifier
+  INPUT and is preserved — clearing those by prefix took the operator's own
+  ``crb:class=`` off the ticket and out of the next draft.
 
 Every failure is a :class:`TrackerError` carrying one of :data:`STOP_REASONS` — the
 word the listener records as ``intake.stopped``, the health probe reports and the
@@ -58,8 +60,24 @@ LABEL_NOT_DELIVERABLE = "crb:not-deliverable"
 LABEL_QUEUED = "crb:queued"
 LABELS: tuple[str, ...] = (LABEL_NEEDS_INFO, LABEL_READY, LABEL_NOT_DELIVERABLE, LABEL_QUEUED)
 
-#: The prefix an adapter uses to recognise (and clear) a label of its own.
+#: The prefix every tag this product understands carries — its own four state labels AND the
+#: classifier tags a person writes on a ticket (``crb:class=``, ``crb:kind=``, ``crb:level=``:
+#: :mod:`crb.intake.draft`). It recognises a tag; it is NOT the test for removing one.
 LABEL_PREFIX = "crb:"
+
+_STATE_LABELS: frozenset[str] = frozenset(label.casefold() for label in LABELS)
+
+
+def is_state_label(tag: str) -> bool:
+    """Is ``tag`` one of the four labels this product sets? The test an adapter applies
+    before it REMOVES a tag.
+
+    A ``crb:`` tag that is not one of the four is an input, not a state: the classifier tags
+    are somebody's own words about their own ticket, and an adapter that cleared every
+    ``crb:`` tag by prefix deleted the operator's classification from the work item.
+    """
+    return str(tag).strip().casefold() in _STATE_LABELS
+
 
 #: What a link the product attaches to a ticket is called, so a reader of the ticket knows
 #: what they are about to open. The product attaches exactly these two things and no others.
@@ -411,6 +429,7 @@ __all__ = [
     "TicketRef",
     "TrackerClient",
     "TrackerError",
+    "is_state_label",
     "marker_for",
     "marker_token",
     "validate_tracker_token",

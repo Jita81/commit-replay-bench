@@ -124,7 +124,7 @@ from crb.intake.client import STOP_ADVICE, TRACKER_TOKEN_SECRET
 from crb.observability import metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
-from crb.server.intake import IntakeStore, ListenerState
+from crb.server.intake import IntakeStore, ListenerState, needs_credential
 from crb.server.secrets import SecretsFile
 from crb.server.settings import Settings
 from crb.store.ledger import assert_append_only
@@ -590,7 +590,11 @@ def probe_intake(
                 "CRB_INTAKE__COLUMN are both required",
                 data,
             )
-        if not secrets_present:
+        # The rule the consent gate and ``build_tracker`` apply, asked of the one function
+        # that owns it: the walkthrough's file-backed board needs no credential, so a probe
+        # that demanded one reported `degraded` — and told an admin to set a token — over a
+        # poll that was succeeding.
+        if needs_credential(cfg.tracker) and not secrets_present:
             return ProbeResult(
                 "intake",
                 DEGRADED,

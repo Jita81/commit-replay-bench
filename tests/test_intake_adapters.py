@@ -259,6 +259,35 @@ def test_ado_patches_the_existing_comment_when_the_text_changed() -> None:
     assert patched[0][1] == f"{MARKER}\nnew"
 
 
+def test_ado_names_the_comment_format_on_both_the_add_and_the_edit() -> None:
+    """The renderer writes Markdown and the marker is an HTML comment. Left to the service's
+    own default the comment is stored as rich text and comes back rewritten — the marker a
+    re-read looks for is gone, and the same note is added again. The update route documents
+    ``format`` as required, so both requests name it."""
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        fmt = request.url.params.get("format", "")
+        if request.method == "GET":
+            return _json({"comments": [{"id": 9, "text": f"{MARKER}\nold"}]})
+        seen.append((request.method, fmt))
+        return _json({"id": 9})
+
+    _ado(handler).comment("4711", f"{MARKER}\nnew", MARKER)
+    assert seen == [("PATCH", "markdown")]
+
+    posted: list[tuple[str, str]] = []
+
+    def empty(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return _json({"comments": []})
+        posted.append((request.method, request.url.params.get("format", "")))
+        return _json({"id": 1}, 201)
+
+    _ado(empty).comment("4711", f"{MARKER}\nhello", MARKER)
+    assert posted == [("POST", "markdown")]
+
+
 def test_ado_marks_a_note_that_does_not_carry_the_marker_itself() -> None:
     """The queued, pull-request and refusal notes are rendered without a marker. Without
     this, each of them would carry no identity on the ticket and every re-read would add
@@ -293,6 +322,24 @@ def test_ado_label_replaces_only_the_products_own_tags() -> None:
 
     _ado(handler).label("4711", c.LABEL_QUEUED)
     assert written == ["area:api; crb:queued"]
+
+
+def test_ado_label_keeps_the_classifier_tags_a_person_put_on_the_work_item() -> None:
+    """``crb:class=`` / ``crb:kind=`` / ``crb:level=`` are an INPUT to the draft, not a state
+    this product owns. Removed by prefix, the operator's classification left the work item —
+    and because the tag write moves ``System.Rev``, the next poll drafted the same ticket
+    again without it (a different class, a different size, a needless evolution)."""
+    written: list[str] = []
+    tags = "area:api; crb:class=backend.route.add; crb:level=L2; crb:needs-info"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return _json({"id": 4711, "fields": {ado.FIELD_TAGS: tags}})
+        written.append(json.loads(request.content)[0]["value"])
+        return _json({"id": 4711})
+
+    _ado(handler).label("4711", c.LABEL_QUEUED)
+    assert written == ["area:api; crb:class=backend.route.add; crb:level=L2; crb:queued"]
 
 
 def test_ado_label_writes_nothing_when_the_tag_is_already_the_only_crb_tag() -> None:
@@ -549,6 +596,23 @@ def test_jira_label_removes_the_other_crb_labels_and_adds_the_wanted_one() -> No
 
     _jira(handler).label("WID-12", c.LABEL_QUEUED)
     assert updates == [[{"remove": "crb:needs-info"}, {"add": "crb:queued"}]]
+
+
+def test_jira_label_keeps_the_classifier_labels_somebody_put_on_the_issue() -> None:
+    """The state label replaces the other three and nothing else. Jira's ticket revision is
+    ``fields.updated``, so a label write that deleted ``crb:level=L2`` also made the next
+    draft read the issue as L1."""
+    updates: list[Any] = []
+    labels = ["area-api", "crb:class=backend.route.add", "crb:level=L2", "crb:ready"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return _json({"key": "WID-12", "fields": {"labels": labels}})
+        updates.append(json.loads(request.content)["update"]["labels"])
+        return httpx.Response(204)
+
+    _jira(handler).label("WID-12", c.LABEL_QUEUED)
+    assert updates == [[{"remove": "crb:ready"}, {"add": "crb:queued"}]]
 
 
 def test_jira_moves_the_issue_by_the_transition_that_lands_on_the_status() -> None:

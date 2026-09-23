@@ -190,7 +190,8 @@ describe('IntakePage', () => {
     expect(row.textContent).toContain('confidence 0.67')
     // the route is a verdict pill, the same gloss as the map and the factory — not the bare
     // machine word, on the one screen aimed at the newest reader
-    expect(row.textContent).toContain('Deliver on n = 42')
+    // and the number carries its n, its interval AND its apparatus, like every other number
+    expect(row.textContent).toContain('Deliver on n = 42, interval 83–99 % · apparatus 2.2')
     expect(within(row).getByTestId('verdict-deliver')).toBeInTheDocument()
   })
 

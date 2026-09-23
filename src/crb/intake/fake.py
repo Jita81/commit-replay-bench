@@ -45,12 +45,12 @@ from pathlib import Path
 from typing import Any
 
 from crb.intake.client import (
-    LABEL_PREFIX,
     REASON_COLUMN_GONE,
     REASON_REFUSED,
     Ticket,
     TicketRef,
     TrackerError,
+    is_state_label,
 )
 
 #: The environment switch. Without it, ``tracker: fake`` is refused.
@@ -138,9 +138,12 @@ class FileTracker:
         self._save(doc)
 
     def label(self, key: str, value: str) -> None:
+        """One state label, like the real adapters: the other three go, a classifier tag
+        (``crb:class=`` and its two siblings) stays — the board must not be kinder to the
+        walkthrough than Azure DevOps and Jira are to a customer's ticket."""
         doc = self._load()
         t = self._ticket(doc, key)
-        tags = [x for x in list(t.get("tags") or []) if not str(x).startswith(LABEL_PREFIX)]
+        tags = [x for x in list(t.get("tags") or []) if not is_state_label(str(x))]
         t["tags"] = [*tags, value]
         doc["tickets"][key] = t
         self._save(doc)

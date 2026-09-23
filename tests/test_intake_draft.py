@@ -9,7 +9,8 @@ What it does: Pins the id shape (``ado-4711``, ``jira-abc-123``) against the bac
               id regex, that every mapping states the rule it used (``size_reason``,
               ``kind_reason``, ``Classification.reason``), that a low-confidence
               classification is ``unclassified`` and never a silent guess, and that a
-              re-read at a new revision produces a NEW id that supersedes the old one.
+              re-read whose CONTENT changed produces a NEW id that supersedes the old one —
+              while a new revision the product's own writes moved does not.
 How:          Plain ``Ticket`` objects from ``fixtures.intake``'s helper; the
               produced ``BacklogItem`` is fed to the real ``crb.factory.readiness.assess``
               so the facts this module writes are the facts the gate reads.
@@ -24,6 +25,8 @@ Touch when:   a capability class is added to the readiness catalogue (give it cu
 """
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 import pytest
 
@@ -333,10 +336,43 @@ def test_a_re_read_at_the_same_revision_is_not_an_evolution() -> None:
 
 def test_a_third_read_supersedes_the_second_not_the_first() -> None:
     first = d.draft_from(a_ticket(revision="1"), tracker="ado").item
-    second = d.draft_from(a_ticket(revision="3"), tracker="ado", previous=first).item
-    third = d.draft_from(a_ticket(revision="4"), tracker="ado", previous=second)
+    edited = a_ticket(revision="3", title="Add a health route, revised")
+    second = d.draft_from(edited, tracker="ado", previous=first).item
+    again = a_ticket(revision="4", title="Add a health route, revised twice")
+    third = d.draft_from(again, tracker="ado", previous=second)
     assert third.item.supersedes == second.id == "ado-4711.r3"
     assert third.item.id == "ado-4711.r4"
+
+
+def test_a_re_read_at_a_new_revision_the_product_itself_moved_is_not_an_evolution() -> None:
+    """The product's own writes move the ticket's revision: an Azure DevOps tag PATCH
+    increments ``System.Rev`` and every Jira write moves ``fields.updated``. Compared on the
+    revision alone, a ticket NOBODY had edited became a new evolution on the next poll — one
+    needless item per pass, each superseding the last, and the backlog's evolutions hash
+    moving with them. The comparison is on the draft's own content."""
+    first = d.draft_from(a_ticket(revision="1"), tracker="ado").item
+    assert first.labels["content_revision"]  # recorded on the item, so a later poll can ask
+    # same ticket, next revision, and the product's own label now on it
+    same = d.draft_from(a_ticket(revision="2", tags=("crb:queued",)), tracker="ado", previous=first)
+    assert same.is_evolution is False
+    assert same.item.id == first.id
+    assert same.item.supersedes == ""
+    assert same.item.labels["revision"] == "2"  # the revision is still recorded, honestly
+    # and a real edit at that same revision IS one
+    edited = d.draft_from(
+        a_ticket(revision="2", title="Add a health route, revised"), tracker="ado", previous=first
+    )
+    assert edited.is_evolution is True and edited.item.id == "ado-4711.r2"
+
+
+def test_an_item_registered_before_the_digest_existed_still_evolves_on_a_new_revision() -> None:
+    """An item on a frozen record from before this rule carries no digest. The revision is
+    then the only thing there is to compare, once — and a re-read at a new revision is still
+    an evolution rather than a silent overwrite."""
+    old = d.draft_from(a_ticket(revision="1"), tracker="ado").item
+    without = replace(old, labels={k: v for k, v in old.labels.items() if k != "content_revision"})
+    again = d.draft_from(a_ticket(revision="2"), tracker="ado", previous=without)
+    assert again.is_evolution is True and again.item.id == "ado-4711.r2"
 
 
 def test_the_draft_round_trips_through_its_dict_for_the_intake_row() -> None:

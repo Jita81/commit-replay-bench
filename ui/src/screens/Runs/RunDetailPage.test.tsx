@@ -509,4 +509,41 @@ describe('RunDetailPage — telemetry on the Progress card and the live log (T2)
     })
     expect(screen.getAllByTestId('log-row')[0]!.textContent).not.toContain('One belt was evaluated')
   })
+
+  it('live log: a long error message can be read in full, from a button, outside the fixed-height row', async () => {
+    // a real builder error is a paragraph, and the row is one line high: without a disclosure
+    // the rest of it could not be read at all
+    const long = `builder: rate limited after 3 attempts — ${'diff rejected on hunk 12; '.repeat(20)}retry after 60 s`
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': RUN,
+      'GET /runs/run-1/tasks': tasksPage([]),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+    const es = FakeEventSource.instances[0]!
+    await act(async () => {
+      es.open()
+      es.emit('step', step(1, { stage: 'build', action: 'build.done', status: 'ok', error_message: long, payload: {} }))
+    })
+    // the message is a control, not inert text: a keyboard reader reaches it and opens it
+    const row = screen.getAllByTestId('log-row')[0]!
+    const open = within(row).getByRole('button', { name: long })
+    expect(open).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByTestId('log-error-full')).toBeNull()
+    await act(async () => {
+      open.click()
+    })
+    const panel = screen.getByTestId('log-error-full')
+    expect(panel.textContent).toContain(long)
+    expect(open).toHaveAttribute('aria-expanded', 'true')
+    expect(open.getAttribute('aria-controls')).toBe(panel.id)
+    // OUTSIDE the row: the fixed row height is what makes the list virtualisable, so the full
+    // text is never inside one — it is where nothing truncates it
+    expect(panel.closest('[data-testid="log-row"]')).toBeNull()
+    await act(async () => {
+      screen.getByRole('button', { name: 'Hide' }).click()
+    })
+    expect(screen.queryByTestId('log-error-full')).toBeNull()
+  })
 })

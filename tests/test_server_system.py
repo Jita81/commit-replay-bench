@@ -812,6 +812,34 @@ def test_the_intake_line_is_degraded_when_the_last_read_stopped(
     ]
 
 
+def test_the_intake_line_asks_for_a_credential_only_where_one_is_needed(
+    tmp_path: Path, factory: sessionmaker[Session]
+) -> None:
+    """``tracker: fake`` is the walkthrough's file-backed board and needs no token — the rule
+    the consent gate and ``build_tracker`` both apply. The probe checked presence instead, so
+    a walkthrough stack read ``intake: degraded`` and told an admin to set a credential while
+    every poll was succeeding."""
+    from crb.server.routes.system import probe_intake
+
+    with TestClient(create_app(make_settings(tmp_path), factory)):
+        pass
+    _switch_on(factory, "alpha")
+    settings = make_settings(
+        tmp_path,
+        public_url="https://crb.invalid",
+        intake={
+            "tracker": "fake",
+            "url": "https://tracker.invalid",
+            "project": "Widgets",
+            "column": "Ready for manufacture",
+        },
+    )
+    r = probe_intake(factory, settings)  # no credential is stored at all
+    assert r.data["credential_set"] is False  # still reported, honestly
+    assert r.status == "ok"
+    assert "credential" not in r.detail
+
+
 def test_the_intake_line_is_degraded_when_the_deployment_has_no_public_address(
     tmp_path: Path, factory: sessionmaker[Session]
 ) -> None:

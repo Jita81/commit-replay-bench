@@ -92,6 +92,19 @@ def test_a_label_replaces_the_products_own_and_leaves_other_peoples_alone(tmp_pa
     assert t.read("4711").tags == ("area:api", c.LABEL_QUEUED)
 
 
+def test_a_label_leaves_the_classifier_tags_on_the_board_ticket(tmp_path: Path) -> None:
+    """The board behaves as Azure DevOps and Jira do: the state label replaces the other
+    three, and ``crb:class=`` (an input to the draft, not a state) stays put. A fake that
+    cleared every ``crb:`` tag would let the walkthrough pass over the adapters' bug."""
+    path = tmp_path / "b.json"
+    t = _board(path)
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["tickets"]["4711"]["tags"] = ["area:api", "crb:class=backend.route.add", "crb:ready"]
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    t.label("4711", c.LABEL_QUEUED)
+    assert t.read("4711").tags == ("area:api", "crb:class=backend.route.add", c.LABEL_QUEUED)
+
+
 def test_a_workflow_it_was_told_to_refuse_refuses(tmp_path: Path) -> None:
     path = tmp_path / "b.json"
     t = _board(path)

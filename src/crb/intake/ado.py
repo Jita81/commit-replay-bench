@@ -50,12 +50,12 @@ from typing import Any
 import httpx
 
 from crb.intake.client import (
-    LABEL_PREFIX,
     REASON_COLUMN_GONE,
     REASON_REFUSED,
     Ticket,
     TicketRef,
     TrackerError,
+    is_state_label,
     marker_token,
 )
 from crb.intake.draft import html_to_text
@@ -66,6 +66,12 @@ from crb.intake.http import DEFAULT_TIMEOUT_S, TrackerHttp, basic_auth
 API_VERSION = "7.1"
 #: Comments live on a preview route of their own; Microsoft has not promoted it.
 COMMENTS_API_VERSION = "7.1-preview.4"
+#: How a comment this product writes is stored. Named on BOTH comment requests: the update
+#: route documents ``format`` as required, and the renderer writes Markdown whose marker is
+#: an HTML comment. A comment left to the service's own default is stored as rich text and
+#: comes back rewritten, which is how the marker a re-read looks for goes missing — and a
+#: marker that cannot be found again is a second copy of the same note on somebody's ticket.
+COMMENT_FORMAT = "markdown"
 
 FIELD_TITLE = "System.Title"
 FIELD_DESCRIPTION = "System.Description"
@@ -259,14 +265,14 @@ class AdoTracker:
                 return
             self.http.patch(
                 f"_apis/wit/workItems/{key}/comments/{c.get('id')}",
-                params={"api-version": COMMENTS_API_VERSION},
+                params={"api-version": COMMENTS_API_VERSION, "format": COMMENT_FORMAT},
                 json={"text": wanted},
                 expect=(200,),
             )
             return
         self.http.post(
             f"_apis/wit/workItems/{key}/comments",
-            params={"api-version": COMMENTS_API_VERSION},
+            params={"api-version": COMMENTS_API_VERSION, "format": COMMENT_FORMAT},
             json={"text": wanted},
             expect=(200, 201),
         )
@@ -281,9 +287,13 @@ class AdoTracker:
         )
 
     def label(self, key: str, value: str) -> None:
-        """Set one ``crb:`` tag, removing any other. Other teams' tags are left alone."""
+        """Set the product's one STATE tag, removing the other three. Other teams' tags are
+        left alone, and so are the ``crb:class=`` / ``crb:kind=`` / ``crb:level=`` tags a
+        person put on the ticket to classify it: those are an INPUT to the draft, and
+        clearing them by prefix took the operator's own classification off the work item
+        (and, because the tag write moves ``System.Rev``, took it off the next draft too)."""
         current = self.read(key).tags
-        kept = [t for t in current if not t.lower().startswith(LABEL_PREFIX)]
+        kept = [t for t in current if not is_state_label(t)]
         wanted = [*kept, value]
         if list(current) == wanted:
             return
@@ -323,6 +333,7 @@ class AdoTracker:
 __all__ = [
     "API_VERSION",
     "COMMENTS_API_VERSION",
+    "COMMENT_FORMAT",
     "FIELD_AC",
     "FIELD_POINTS",
     "FIELD_STATE",

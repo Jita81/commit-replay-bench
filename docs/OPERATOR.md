@@ -862,9 +862,16 @@ against **their** host, so it would go nowhere. A listener cannot be switched on
 set (the switch is refused with `intake_no_public_url`), and a pass that somehow starts
 without it stops with `no_public_url` before it writes anything.
 
-**Bounds on one pass.** A pass costs about eleven tracker calls per ticket, runs in front of
-the worker's heartbeat and, for *Re-read the column now*, inside an API request. So a column
-holding more than `CRB_INTAKE__MAX_PER_POLL` tickets is **not read at all**: the pass stops
+**Bounds on one pass.** A first pass over a ticket it registers costs **eleven** Azure DevOps
+requests, or **nine** Jira ones **[measured — n = 1 ready ticket × 2 adapters; method: every
+request counted through an `httpx.MockTransport` for the verb sequence `poll_repository` makes on a
+ticket it registers (the column, the ticket, the readiness comment, the label, the queued note, the
+item link) — `tests/test_intake_write_bound.py::test_a_first_pass_on_one_ready_ticket_costs_eleven_azure_devops_requests`
+and `::test_the_same_first_pass_costs_nine_jira_requests`, which also assert where each request
+goes; apparatus 2.2. A count, so no interval]**. Azure DevOps is the dearer of the two because
+three of its verbs read before they write. A pass runs in front of the worker's heartbeat and, for
+*Re-read the column now*, inside an API request. So a column holding more than
+`CRB_INTAKE__MAX_PER_POLL` tickets is **not read at all**: the pass stops
 with `column_too_large` and says to narrow the area path or the JQL, because reading an
 arbitrary 200 of somebody's board and saying nothing about the rest would be worse than
 reading none of it. A pass still running after `CRB_INTAKE__POLL_BUDGET_S` stops early,

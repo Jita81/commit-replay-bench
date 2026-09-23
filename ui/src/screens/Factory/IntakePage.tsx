@@ -135,7 +135,9 @@ function Row({ row, repo }: { row: IntakeRow; repo: string }) {
             <span className="text-on-surface-muted">
               {route ? (
                 <>
-                  <VerdictPill route={route.route} size="xs" reason={route.reason} /> on n = {fmtInt(route.n)}, interval {(route.ci_low * 100).toFixed(0)}–{(route.ci_high * 100).toFixed(0)} %
+                  {/* every number carries its n, its interval AND its apparatus — the same
+                      provenance the factory's own cell-route line reads (FactoryPage.tsx) */}
+                  <VerdictPill route={route.route} size="xs" reason={route.reason} /> on n = {fmtInt(route.n)}, interval {(route.ci_low * 100).toFixed(0)}–{(route.ci_high * 100).toFixed(0)} % · apparatus {route.apparatus_versions.join(', ') || '—'}
                 </>
               ) : (
                 'This cell has not been measured on this repository — it says nothing, not zero.'

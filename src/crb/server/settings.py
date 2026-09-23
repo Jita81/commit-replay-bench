@@ -59,6 +59,7 @@ import secrets
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -74,6 +75,11 @@ ROLE_RANK: dict[str, int] = {r: i for i, r in enumerate(ROLE_LADDER)}
 
 #: Minimum length for any locally-stored password (bootstrap admin included).
 MIN_PASSWORD_LENGTH = 12
+
+#: The only hosts ``CRB_PUBLIC_URL`` may name over plain http: a developer's own machine and
+#: the walkthrough stack, which has no certificate. Matched against the PARSED host name, so
+#: a name that merely starts with one of these ("localhost.example.com") is not one of them.
+LOOPBACK_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1"})
 
 #: OS-managed temporary roots (``$TMPDIR`` is added at run time). On macOS ``/tmp`` and
 #: ``/var`` are symlinks into ``/private``, so both spellings are listed and both sides are
@@ -383,9 +389,13 @@ class IntakeSettings(BaseModel):
     #: JQL, because reading an arbitrary 200 of somebody's board and saying nothing about
     #: the rest would be worse than reading none of it.
     max_per_poll: int = Field(default=200, ge=1, le=2000)
-    #: The longest one pass may take before it stops early and serves what it has. It
-    #: bounds the worker's idle loop (the heartbeat that follows the pass must not be late)
-    #: and the API request the on-demand poll runs inside.
+    #: The longest one pass may take before it stops early and serves what it has. It is
+    #: checked between tickets AND at the tracker boundary inside one, so an expired pass
+    #: starts no further call on somebody's board — which is what bounds the API request the
+    #: on-demand poll runs inside, and its database session. It cannot cancel a call already
+    #: in flight (an HTTPX timeout measures network inactivity, not total duration), so the
+    #: bound is this plus the calls of the verb in progress. The worker's own liveness does
+    #: not depend on it: a pass keeps checking in for as long as it lasts.
     poll_budget_s: int = Field(default=60, ge=5, le=900)
     #: ``merged``/``closed`` → the state the ticket moves to. EMPTY BY DEFAULT: a
     #: deployment that configures nothing never moves anybody's ticket.
@@ -509,16 +519,23 @@ class Settings(BaseSettings):
         # for a developer and for the walkthrough's own stack, which has no certificate;
         # nothing else may be plain http, since the link is how a person reaches a page
         # that asks them to sign in.
+        # The value is PARSED, not prefix-matched: `http://localhost.example.com` and
+        # `http://127.0.0.1.attacker.test` both begin with a loopback name and are neither,
+        # and `https:///path` has no host at all. Every link the product writes on a ticket
+        # is built from this value, so a host that only looks like loopback would put a plain
+        # http address somebody else controls into a customer's work item.
         raw = v.strip().rstrip("/")
         if not raw:
             return ""
-        low = raw.lower()
-        if low.startswith("https://"):
+        parts = urlsplit(raw)
+        scheme, host = parts.scheme.lower(), (parts.hostname or "")
+        if scheme == "https" and host:
             return raw
-        if low.startswith(("http://localhost", "http://127.0.0.1", "http://[::1]")):
+        if scheme == "http" and host in LOOPBACK_HOSTS:
             return raw
         raise ValueError(
-            f"CRB_PUBLIC_URL must be an https:// address (or http:// on loopback), got {raw!r}"
+            f"CRB_PUBLIC_URL must be an https:// address with a host name (or http:// on "
+            f"loopback: {', '.join(sorted(LOOPBACK_HOSTS))}), got {raw!r}"
         )
 
     @field_validator("cors_origins")

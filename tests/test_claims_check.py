@@ -9,8 +9,10 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               allowlist is honoured (a file off it is never read) and that the shipped
               allowlist is the real repository's; that the documented exemptions — headings,
               table rows, fenced code, a lead-in ending in a colon, a confidence level, a
-              year — are not claims; and that ``--check`` exits non-zero while the default
-              report exits zero.
+              year, a leading-zero identifier — are not claims; that a count written without
+              digit grouping (``1200``) and a result standing beside a confidence interval
+              *are*; that a tag written inside inline code does not cover the claim around it;
+              and that ``--check`` exits non-zero while the default report exits zero.
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -136,6 +138,9 @@ def test_a_missing_allowlisted_file_is_itself_a_finding(tree: Path) -> None:
         "```\nCI runs eleven jobs.\n```\n",  # fenced code is not examined
         "The workflow runs three jobs in order:\n\n1. build\n",  # a lead-in to what it counts
         "Every rate carries a Wilson 95% interval and its apparatus.\n",  # a confidence level
+        "Each rate carries a 95% confidence interval.\n",  # the level, written the other way
+        "Each rate carries a 95% CI.\n",  # and abbreviated
+        "Rule DL-0052 covers stopped items.\n",  # a leading zero is an identifier, not 52
         "The June 2026 v1 contents are tagged and frozen.\n",  # a year is not a count
         "Exactly one process reaches the model endpoint.\n",  # "one" never counts a plural
         "The package version is one number in three files.\n",  # a structural noun
@@ -153,11 +158,28 @@ def test_prose_that_makes_no_claim_is_not_flagged(tree: Path, body: str) -> None
         "The instrument reproduced 97.5% of the corpus.\n",
         "Four public libraries were mined and scored.\n",
         "The gate found 12 defects in the last sweep.\n",
+        # a count is a count however it is punctuated: 1200 is not exempt for want of a comma
+        "1200 tasks were completed.\n",
+        "The corpus holds 12000 commits.\n",
+        # a result standing beside a confidence interval is still a result
+        "65% passed (Wilson 95% interval).\n",
+        "97.5% passed, with a 95% confidence interval.\n",
     ],
 )
 def test_a_quantified_assertion_in_prose_is_a_claim(tree: Path, body: str) -> None:
     _write(tree, "README.md", f"# t\n\n{body}")
     assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]
+
+
+def test_a_tag_written_inside_inline_code_does_not_cover_the_claim_around_it(tree: Path) -> None:
+    """A page may document the tag vocabulary; documenting it is not claiming it."""
+    body = "The run passed 12 tests; see `[hypothesis]` for the tag syntax.\n"
+    _write(tree, "README.md", f"# t\n\n{body}")
+    findings = cc.check_tree(tree, ("README.md",))
+    assert [f.reason for f in findings] == ["no claim tag"]
+
+    _write(tree, "README.md", "# t\n\nThe run passed 12 tests. [hypothesis]\n")
+    assert cc.check_tree(tree, ("README.md",)) == []
 
 
 def test_check_exits_non_zero_and_the_default_report_exits_zero(

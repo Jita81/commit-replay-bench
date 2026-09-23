@@ -406,8 +406,18 @@ def test_reason_codes_cover_every_clause_and_decision_refuses_unknown() -> None:
     assert rt.route(stats(50, 50, size="XL")).reason_code == "granularize"
     with pytest.raises(ValueError, match="reason_code"):
         rt.RouteDecision(
-            "deliver", "r", {}, 1, 1.0, 1.0, 0, None, "routing.v1", reason_code="vibes"
+            "deliver", "r", {}, 1, 1.0, 1.0, 0, None, "routing.v1", 1.0, reason_code="vibes"
         )
+
+
+def test_a_decision_cannot_be_built_without_the_upper_end_of_its_interval() -> None:
+    """``ci_high`` had a ``1.0`` default, so a caller who measured ``ci_low`` and omitted it
+    serialised a made-up upper bound beside a measured lower one — and every reader quotes
+    the pair as a range. Mistake-proofed: the constructor asks for both ends."""
+    with pytest.raises(TypeError, match="ci_high"):
+        rt.RouteDecision("deliver", "r", {}, 10, 0.9, 0.67, 0, None, "routing.v1")  # type: ignore[call-arg]
+    made = rt.RouteDecision("deliver", "r", {}, 10, 0.9, 0.67, 0, None, "routing.v1", 0.98)
+    assert made.to_dict()["ci_high"] == 0.98
 
 
 def test_default_policy_carries_the_controls_thresholds() -> None:

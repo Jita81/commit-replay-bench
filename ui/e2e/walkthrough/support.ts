@@ -39,6 +39,8 @@
  *               order), ui/e2e/walkthrough/README.md (tiers, variables, selectors),
  *               tests/fixtures/pyrepo.py (the tier-1 fixture repository),
  *               ui/src/components/Field.tsx (the `Label *` rendering `field()` matches),
+ *               ui/src/components/Layout.tsx (the user chip — display name and role, never
+ *               the username, which is why `signIn` records who it signed in as),
  *               ui/src/screens/Runs/RunNewDialog.tsx (what `startRun` fills)
  * Tested by:    every spec under ui/e2e/walkthrough (they all import this)
  * Touch when:   a walkthrough variable, a tier target or a form label changes; for a new
@@ -189,6 +191,20 @@ export function field(scope: Page | Locator, label: string): Locator {
 // --- session ----------------------------------------------------------------------------
 
 /**
+ * The login name `signIn` last typed on a page, per page.
+ *
+ * The signed-in identity cannot be read back: the chip renders `display_name || email` and
+ * the role and never the username (ui/src/components/Layout.tsx), the name is `hidden` below
+ * `sm` so at 375 px the chip is the role alone, and `GET /auth/me` serves a `Principal`
+ * (id, display_name, email, role, issuer — src/crb/server/deps.py) with no username either;
+ * the one route that reports a username, `GET /users`, is admin-only. So the early return
+ * is keyed on what this helper itself typed, which is knowledge, not an inference from
+ * presentation. A page it has not signed in on — or has signed out of — is somebody else's
+ * session and is signed out before the form is filled.
+ */
+const signedInAs = new WeakMap<Page, string>()
+
+/**
  * Sign in through the login form (never by cookie injection).
  *
  * Safe to call on a page that is already signed in — including the `test` fixture's page,
@@ -206,14 +222,16 @@ export async function signIn(page: Page, user = env.user, pass = env.pass): Prom
   // races the redirect and then blocks on a form that is no longer coming.
   await expect(chip.or(username).first()).toBeVisible()
   if (await chip.isVisible()) {
-    if ((await chip.innerText()).includes(user)) return
+    if (signedInAs.get(page) === user) return
     await page.getByRole('button', { name: 'Sign out' }).click()
+    signedInAs.delete(page)
     await expect(username).toBeVisible()
   }
   await username.fill(user)
   await field(page, 'Password').fill(pass)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(chip).toBeVisible()
+  signedInAs.set(page, user)
 }
 
 /**

@@ -6,7 +6,8 @@ What it is:   The renderer's test suite: which of the four labels each situation
               that the comment carries the marker, the open questions, the cell's route
               with n and interval and the apparatus, and that it never leaves jargon
               unexplained.
-What it does: Pins the label ladder (not deliverable beats needs-info beats ready), that
+What it does: Pins the label ladder (needs-info beats not deliverable beats ready — asking
+              the person comes first, because answering is the only step they can take), that
               an unclassified item SAYS it is unclassified rather than showing a class,
               that a cell nobody has measured is named as unmeasured rather than shown as
               zero, that the same inputs render byte-identical text (so a re-post writes
@@ -92,7 +93,7 @@ def test_a_cell_that_does_not_route_deliver_is_not_deliverable_even_when_ready()
     assert f.ready_to_register is True  # it is still built and withheld, never dropped
 
 
-def test_not_deliverable_beats_needs_info_is_false_the_person_is_asked_first() -> None:
+def test_needs_info_beats_not_deliverable_so_the_person_is_asked_first() -> None:
     # a ticket that is BOTH missing a slot and on an unmeasured cell asks for the
     # information first: answering it is the only step the person can take.
     t = _ready_ticket()

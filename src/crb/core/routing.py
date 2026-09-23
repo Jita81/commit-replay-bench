@@ -359,9 +359,11 @@ class RouteDecision:
     #: the bar is on the lower bound — but every reader quotes the interval as a range, and
     #: a decision that carried only one end made the comment on a customer's ticket say
     #: "67 % to unknown" wherever it was rendered from a decision rather than from the
-    #: capability map's row. ``1.0`` is the Wilson upper bound of no data, which is what an
-    #: unset value honestly means (the same default as :mod:`crb.core.learn`).
-    ci_high: float = 1.0
+    #: capability map's row. REQUIRED, and deliberately: it carried ``1.0`` (the Wilson
+    #: upper bound of no data) as a default, so a caller that measured ``ci_low`` and forgot
+    #: this one serialised a made-up upper bound beside a measured lower one. A decision
+    #: with no data says so by passing ``1.0`` itself.
+    ci_high: float
     reason_code: str = ""
     controls: ControlsVerdict | None = None
     controls_policy: str = ""

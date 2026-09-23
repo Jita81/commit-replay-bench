@@ -52,9 +52,15 @@ enforced twice, at the API (`PUT /factory/{repo}/intake`) and in the worker
 
 **An edit is an evolution, never an overwrite.** `(tracker, key, revision)` is the
 idempotency key and it lives on the factory's own hash-chained evidence, not in memory. A
-ticket read again at the same revision writes nothing. A ticket read at a *new* revision
+ticket read again at the same revision writes nothing. A ticket whose *content* has changed
 becomes a new item, `<id>.r<revision>`, with `supersedes` set — the frozen record's hash
-never moves (`crb.intake.draft.draft_from`).
+never moves (`crb.intake.draft.draft_from`). The revision is the pre-filter and never the
+test on its own, because the product's own writes move it: an Azure DevOps tag PATCH
+increments `System.Rev` and every Jira write moves `fields.updated`, so a ticket nobody had
+touched became a new evolution on the next pass. What is compared is a digest of what the
+draft is actually made of — title, body, acceptance criteria, type, points, url and the
+classifier tags — recorded on the item as `content_revision` and on `intake.read`
+(`crb.intake.draft.content_revision`).
 
 **The ticket learns before any spend.** One comment about what is missing, idempotent by its
 own marker, carries the readiness gate's open questions with the exact line that closes each
@@ -82,8 +88,13 @@ switched on, and a pass without it stops with `no_public_url` before it writes a
 (`crb.server.intake.item_url_for`).
 
 **One pass is bounded twice.** At most `CRB_INTAKE__MAX_PER_POLL` tickets and at most
-`CRB_INTAKE__POLL_BUDGET_S` seconds: a pass costs about eleven tracker calls per ticket, runs
-in front of the worker's heartbeat and, on demand, inside an API request. A column longer than
+`CRB_INTAKE__POLL_BUDGET_S` seconds: a first pass over one ticket it registers costs **eleven**
+Azure DevOps requests, or **nine** Jira ones **[measured — n = 1 ready ticket × 2 adapters;
+method: every request counted through an `httpx.MockTransport` for the verb sequence one pass
+makes, `tests/test_intake_write_bound.py`; apparatus 2.2. A count, so no interval]**, runs
+in front of the worker's heartbeat and, on demand, inside an API request. The budget is asked
+again at the tracker boundary inside a ticket, so an expired pass starts no further call on
+somebody's board (`crb.server.intake._budget_guard`). A column longer than
 the bound is not read at all — `column_too_large`, with the advice to narrow the area path or
 the JQL, because reading an arbitrary 200 of somebody's board and saying nothing about the
 rest would be worse than reading none of it.

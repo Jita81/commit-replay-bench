@@ -138,6 +138,14 @@ STATE_FILE = "intake-state.json"
 OUTCOME_MERGED = "merged"
 OUTCOME_CLOSED = "closed"
 
+#: What one ticket's registration attempt did, as three words rather than one boolean: the
+#: frozen record took the item, a factory run holds the backlog so the next poll will try
+#: again, or the record refused it and nothing was registered. The row an operator reads is
+#: set from THIS, so a refusal can never be shown as a queued item.
+OUTCOME_REGISTERED = "registered"
+OUTCOME_QUEUED = "queued"
+OUTCOME_REFUSED = "refused"
+
 #: Item outcomes the ticket is told about as a refusal, with the way forward. These are
 #: exactly the statuses the API serves a ``way_forward`` for
 #: (:func:`crb.server.routes.factory._way_forward`): a stop a revised ticket answers.
@@ -629,6 +637,7 @@ def _poll_column(
         return report
     events = _read_events(home)
     signoffs = list(home.gap_ledger().records()) if home.dir.exists() else []
+    check_budget = _budget_guard(started + float(budget_s), budget_s, clock)
     for i, ref in enumerate(refs):
         if i and clock() - started > float(budget_s):
             detail = (
@@ -662,6 +671,7 @@ def _poll_column(
             now=now,
             report=report,
             force=force,
+            check_budget=check_budget,
         )
         if row is not None:
             report.rows.append(row)
@@ -676,6 +686,32 @@ def _poll_column(
         queued=report.queued,
     )
     return report
+
+
+def _budget_guard(
+    deadline: float, budget_s: float, clock: Callable[[], float]
+) -> Callable[[str], None]:
+    """A check the pass makes at the tracker boundary: is there budget left to START another
+    call? Expired, it raises the pass's own budget stop, which the caller already knows how to
+    record and serve.
+
+    The between-ticket check cannot bound one pass on its own: ONE ticket costs about eleven
+    synchronous tracker calls, each with its own timeout, so a pass could hold an API request
+    (and its database session) for minutes against a 60-second budget. This does not cancel a
+    call already in flight — an HTTPX timeout measures network inactivity, not total duration —
+    so the bound is the budget plus the calls of the verb in progress, not the budget exactly.
+    """
+
+    def check(step: str) -> None:
+        if clock() < deadline:
+            return
+        raise TrackerError(
+            REASON_COLUMN_TOO_LARGE,
+            f"the pass had used its {float(budget_s):.0f}-second budget before this ticket's "
+            f"{step}, so it started no further tracker call. The next pass finishes it",
+        )
+
+    return check
 
 
 def _handle_ticket(
@@ -693,8 +729,13 @@ def _handle_ticket(
     now: Callable[[], str],
     report: PollReport,
     force: bool = False,
+    check_budget: Callable[[str], None] = lambda step: None,
 ) -> IntakeRow | None:
-    """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped."""
+    """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped.
+
+    ``check_budget`` is asked before each group of tracker calls (:func:`_budget_guard`), so a
+    pass that has run out of time starts no further call on somebody's board.
+    """
     del actor
     if not force and already_handled(events, tracker.name, ref.key, ref.revision):
         cached = _row_from_state(home, ref)
@@ -709,6 +750,7 @@ def _handle_ticket(
         # below is idempotent, so rebuilding the view changes nothing on the board.
         log.info("intake row rebuilt from the tracker", extra={"key": ref.key, "repo": home.repo})
     try:
+        check_budget("read")
         ticket = tracker.read(ref.key)
     except TrackerError as exc:
         evidence.append(
@@ -791,6 +833,7 @@ def _handle_ticket(
         read_at=now(),
     )
     try:
+        check_budget("comment")
         tracker.comment(ticket.key, feedback.text, feedback.marker)
         tracker.label(ticket.key, label)
     except TrackerError as exc:
@@ -827,6 +870,7 @@ def _handle_ticket(
         row = replace_row(row, registered=True, label=LABEL_QUEUED)
         url = item_url(draft.item.id)
         try:
+            check_budget("queued note")
             tracker.comment(
                 ticket.key,
                 render_queued(draft.item.id, url),
@@ -844,7 +888,7 @@ def _handle_ticket(
             )
             row = _stopped(row, exc)
     elif feedback.ready_to_register:
-        awaiting = not _register_and_queue(
+        outcome = _register_and_queue(
             draft,
             tracker=tracker,
             home=home,
@@ -853,16 +897,30 @@ def _handle_ticket(
             run_active=run_active,
             report=report,
             row=row,
+            check_budget=check_budget,
         )
-        row = replace_row(
-            row, registered=not awaiting, label=LABEL_QUEUED if not awaiting else row.label
-        )
+        awaiting = outcome == OUTCOME_QUEUED
+        if outcome == OUTCOME_REGISTERED:
+            row = replace_row(row, registered=True, label=LABEL_QUEUED)
+        elif outcome == OUTCOME_REFUSED:
+            # A refusal is NOT a registration. The row used to say registered and queued
+            # because the three outcomes were one boolean, so the screen showed an item that
+            # was never on the frozen record — and the label on the board still said ready.
+            row = replace_row(
+                row,
+                registered=False,
+                stopped=REASON_REFUSED,
+                stopped_advice=STOP_ADVICE[REASON_REFUSED],
+            )
     evidence.append(
         EV_READ,
         draft.item.id,
         tracker=tracker.name,
         key=ticket.key,
         revision=ticket.revision,
+        # what the evolution rule actually compared, so a reader of the chain can see why a
+        # ticket read at a new revision did or did not become a new item
+        content_revision=draft.item.labels.get("content_revision", ""),
         ready=feedback.ready_to_register,
         awaiting_registration=awaiting,
     )
@@ -892,8 +950,15 @@ def _register_and_queue(
     run_active: Callable[[], bool],
     report: PollReport,
     row: IntakeRow,
-) -> bool:
-    """Register the draft and tell the ticket. ``False`` means "queued, try next poll"."""
+    check_budget: Callable[[str], None] = lambda step: None,
+) -> str:
+    """Register the draft and tell the ticket. One of three words, because these are three
+    different things to say to the person reading the screen:
+
+    * ``queued`` — a factory run holds the backlog; the next poll registers it,
+    * ``refused`` — the frozen record would not take the item; NOTHING is registered,
+    * ``registered`` — it is on the record and the ticket has been told.
+    """
     del row
     if run_active():
         report.queued += 1
@@ -904,7 +969,7 @@ def _register_and_queue(
             key=draft.ticket.key,
             reason="a factory run holds this repository's backlog; the next poll registers it",
         )
-        return False
+        return OUTCOME_QUEUED
     try:
         how = _register(home, draft.item, actor=f"intake:{tracker.name}")
     except Exception as exc:  # a malformed item or a frozen-record refusal: never crash a poll
@@ -913,10 +978,10 @@ def _register_and_queue(
             draft.item.id,
             step="register",
             key=draft.ticket.key,
-            reason="refused",
+            reason=REASON_REFUSED,
             detail=str(exc)[:300],
         )
-        return True
+        return OUTCOME_REFUSED
     report.registered += 1
     url = item_url(draft.item.id)
     evidence.append(
@@ -929,6 +994,7 @@ def _register_and_queue(
         url=url,
     )
     try:
+        check_budget("queued note")
         tracker.label(draft.ticket.key, LABEL_QUEUED)
         tracker.comment(
             draft.ticket.key,
@@ -937,7 +1003,10 @@ def _register_and_queue(
         )
         tracker.link(draft.ticket.key, url, LINK_ITEM)
     except TrackerError as exc:
-        # the item IS registered; only the courtesy write failed. Say so and move on.
+        # the item IS registered; only the courtesy write failed. Say so and move on. An
+        # expired budget arrives here as that same refusal: the item is on the record, and the
+        # next pass re-asserts the note and the link (both idempotent) rather than this one
+        # holding the request open to finish them.
         evidence.append(
             EV_STOPPED,
             draft.item.id,
@@ -946,7 +1015,7 @@ def _register_and_queue(
             reason=exc.reason,
             detail=exc.detail,
         )
-    return True
+    return OUTCOME_REGISTERED
 
 
 def store_for(home: FactoryHome) -> IntakeStore:
@@ -1033,6 +1102,15 @@ def post_outcomes_to_tickets(
     }
     if not keys:
         return []
+    # ticket key → the LATEST item registered from it. A refusal is posted under ONE marker
+    # per ticket (`<key>:refusal`), and its once-only check covers deliveries, not refusals:
+    # a ticket whose item AND its evolution were both stopped therefore had that one comment
+    # written twice on every pass — the superseded item's refusal, then the live one over it.
+    # Only the latest item speaks for the ticket; the superseded stop stays on the chain.
+    newest: dict[str, str] = {}
+    for e in events:
+        if e.kind == EV_REGISTERED and e.payload.get("key"):
+            newest[str(e.payload["key"])] = str(e.item_id)
     told = {str(e.item_id) for e in events if e.kind == EV_DELIVERED}
     delivered: dict[str, str] = {}
     stopped: dict[str, tuple[str, str]] = {}
@@ -1059,6 +1137,8 @@ def post_outcomes_to_tickets(
     for item_id, (status, reason) in stopped.items():
         if item_id in delivered:
             continue
+        if newest.get(keys[item_id]) != item_id:
+            continue  # a superseded item does not rewrite the ticket's one refusal comment
         ok = post_refusal(
             tracker,
             keys[item_id],
@@ -1147,6 +1227,9 @@ __all__ = [
     "INTAKE_EVENTS",
     "OUTCOME_CLOSED",
     "OUTCOME_MERGED",
+    "OUTCOME_QUEUED",
+    "OUTCOME_REFUSED",
+    "OUTCOME_REGISTERED",
     "STATE_FILE",
     "STOPPED_STATUSES",
     "IntakeRow",

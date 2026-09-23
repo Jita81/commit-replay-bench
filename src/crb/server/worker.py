@@ -769,6 +769,12 @@ class Worker:
         built or reached is an ``intake.stopped`` event on each repository's chain and the
         next pass retries. Called from the idle loop only, so a poll never competes with a
         run for this worker.
+
+        The pass keeps its own check-in running for as long as it lasts. The idle loop's
+        throttled check-in only happens BETWEEN passes, and one ticket costs about eleven
+        synchronous tracker calls, so a slow board could hold the loop past the liveness
+        window — and the health probe then called this worker stale, and told an operator
+        queued runs would not start, while it was working.
         """
         if not self.intake_due(now):
             return 0
@@ -787,11 +793,17 @@ class Worker:
                 )
             _LOG.warning("intake not polled: %s", exc.reason)
             return 0
-        for repo, state in repos:
-            try:
-                self._poll_one(repo, tracker, state)
-            except Exception:  # the idle loop must survive anything a tracker does
-                _LOG.exception("intake poll failed for %s", repo)
+        stop_checkin = threading.Event()
+        checkin = self._checkin_thread(stop_checkin, name="intake")
+        try:
+            for repo, state in repos:
+                try:
+                    self._poll_one(repo, tracker, state)
+                except Exception:  # the idle loop must survive anything a tracker does
+                    _LOG.exception("intake poll failed for %s", repo)
+        finally:
+            stop_checkin.set()
+            checkin.join(timeout=5)
         return len(repos)
 
     def _tracker_token(self) -> str:
@@ -946,6 +958,22 @@ class Worker:
         """Idle-loop check-in, throttled to ``heartbeat_s`` (the loop wakes every ``poll_s``)."""
         if time.monotonic() - self._last_checkin >= self.settings.heartbeat_s:
             self.checkin()
+
+    def _checkin_thread(self, stop: threading.Event, *, name: str) -> threading.Thread:
+        """A check-in every ``heartbeat_s`` until ``stop`` is set — for work the idle loop
+        cannot interrupt, such as one intake pass over somebody's board.
+
+        It carries no run id: this is the worker saying it is alive while holding nothing, and
+        a run's own liveness is :meth:`_heartbeat_thread`'s (which also renews the claim).
+        """
+
+        def loop() -> None:
+            while not stop.wait(self.settings.heartbeat_s):
+                self.checkin()  # never raises: liveness must not take the pass down
+
+        t = threading.Thread(target=loop, name=f"crb-checkin-{name}-{self.worker_id}", daemon=True)
+        t.start()
+        return t
 
     def checkin(self, *, current_run_id: str = "", stopped: bool = False) -> None:
         """Upsert this worker's ``workers`` row (J-TEL-2): hostname, executor, kinds,

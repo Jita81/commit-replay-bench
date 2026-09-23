@@ -124,13 +124,19 @@ def test_a_ready_ticket_is_commented_labelled_registered_and_linked(home: Factor
 
 
 def test_the_row_the_screen_will_show_carries_the_draft_and_the_route(home: FactoryHome) -> None:
-    report = _poll(home, _tracker(_ticket()), route=_deliver())
+    tracker = _tracker(_ticket())
+    report = _poll(home, tracker, route=_deliver())
     row = report.rows[0]
     assert row.capability_class == "backend.route.add"
     assert row.confidence > 0
     assert row.item_url.endswith("item=fake-4711")
     assert row.cell_route is not None and row.cell_route["n"] == 42
-    assert "POST /health" not in row.feedback or row.feedback  # the comment text is served
+    # the comment text is served VERBATIM (docs/API.md): the screen and the ticket cannot
+    # disagree. The assertion here was `"POST /health" not in row.feedback or row.feedback`,
+    # which is true for an empty string and true for every non-empty one — it checked nothing.
+    posted = tracker.comments["4711"][c.marker_for("fake", "4711")]
+    assert row.feedback == posted
+    assert row.feedback.startswith(c.marker_for("fake", "4711"))
 
 
 # --- idempotency --------------------------------------------------------------------
@@ -236,6 +242,57 @@ def test_a_re_read_after_registration_is_an_evolution_not_an_overwrite(home: Fac
     )  # type: ignore[union-attr]
 
 
+def test_a_revision_the_product_itself_moved_registers_no_second_item(home: FactoryHome) -> None:
+    """The product's own writes move the ticket's revision — an Azure DevOps tag PATCH
+    increments ``System.Rev``, and every Jira write moves ``fields.updated``. Compared on the
+    revision alone, the next poll read a ticket NOBODY had edited as an evolution: one more
+    backlog item per pass, each superseding the last, and the evolutions hash moving with
+    them. The pre-filter is still the revision; the decision is the draft's own content."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver())
+    frozen = home.load_backlog()
+    assert frozen is not None and [i.id for i in frozen.items] == ["fake-4711"]
+
+    for revision in ("2", "3"):  # as the tracker would report it after the product's writes
+        tracker.column = [
+            c.TicketRef(key="4711", revision=revision, changed="2026-09-2" + revision)
+        ]
+        tracker.tickets["4711"] = _ticket(revision=revision, tags=("crb:queued",))
+        report = _poll(home, tracker, route=_deliver())
+        assert report.read == 1 and report.registered == 0  # re-read, nothing registered
+        row = report.rows[0]
+        assert row.is_evolution is False and row.item_id == "fake-4711"
+        assert row.registered is True and row.label == c.LABEL_QUEUED
+
+    after = home.load_backlog()
+    assert after is not None
+    assert [i.id for i in after.items] == ["fake-4711"]
+    assert after.evolutions == ()  # not one needless evolution
+    assert after.backlog_hash == frozen.backlog_hash
+    read = [e for e in home.events() if e.kind == sv.EV_READ]
+    assert read[-1].payload["revision"] == "3"  # the revision IS recorded, honestly
+    assert read[-1].payload["content_revision"] == read[0].payload["content_revision"]
+
+
+def test_a_deferred_registration_is_still_retried_when_the_revision_moved(
+    home: FactoryHome,
+) -> None:
+    """The queued-registration retry does not go through the digest: nothing is registered
+    yet, so there is no previous item to compare with. A ticket read while a factory run held
+    the backlog is registered by the next poll, at whatever revision it is then on."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), run_active=lambda: True)
+    assert home.load_backlog() is None
+    assert "intake.queued" in [e.kind for e in home.events()]
+
+    tracker.column = [c.TicketRef(key="4711", revision="2", changed="2026-09-23")]
+    tracker.tickets["4711"] = _ticket(revision="2")
+    report = _poll(home, tracker, route=_deliver())
+    assert report.registered == 1
+    backlog = home.load_backlog()
+    assert backlog is not None and [i.id for i in backlog.items] == ["fake-4711"]
+
+
 # --- refusal paths --------------------------------------------------------------------
 
 
@@ -285,6 +342,31 @@ def test_a_write_the_tracker_refuses_leaves_the_row_stopped_and_registers_nothin
     assert report.rows[0].stopped == c.REASON_REFUSED
     assert home.load_backlog() is None
     assert sv.EV_STOPPED in [e.kind for e in home.events()]
+
+
+def test_a_registration_the_frozen_record_refuses_is_served_as_stopped_not_as_queued(
+    home: FactoryHome, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_register_and_queue`` had one boolean for three outcomes, so a refusal read as "not
+    awaiting": the row said registered and queued for an item that is not on the record at
+    all, while the label on the board still said ready. The stop event alone did not correct
+    the row, and ``already_handled`` then made every later poll skip the revision."""
+
+    def refuse(*a: Any, **kw: Any) -> str:
+        raise RuntimeError("the frozen record would not take it")
+
+    monkeypatch.setattr(sv, "_register", refuse)
+    tracker = _tracker(_ticket())
+    report = _poll(home, tracker, route=_deliver())
+
+    row = report.rows[0]
+    assert row.registered is False
+    assert row.stopped == c.REASON_REFUSED and row.stopped_advice
+    assert row.label == c.LABEL_READY  # what the board was actually told, not "queued"
+    assert report.registered == 0
+    assert home.load_backlog() is None
+    stops = [e for e in home.events() if e.kind == sv.EV_STOPPED]
+    assert stops and stops[-1].payload["reason"] == c.REASON_REFUSED
 
 
 def test_an_unclassified_ticket_is_never_registered_and_says_why(home: FactoryHome) -> None:
@@ -515,6 +597,37 @@ def test_an_accepted_item_is_not_told_it_was_refused(home: FactoryHome) -> None:
     )
 
 
+def test_only_the_latest_item_registered_from_a_ticket_writes_its_refusal(
+    home: FactoryHome,
+) -> None:
+    """A refusal is one comment per TICKET (marker ``<key>:refusal``), and its once-only guard
+    covers deliveries, not refusals. An item and its evolution both stopped therefore wrote
+    that ONE comment twice on every poll — the superseded item's refusal onto somebody's
+    ticket, then the live one over it. What this product writes on a ticket is counted and
+    bounded (ADR-0017), and a write nobody asked for is not in the count. Only the latest item
+    registered from a ticket speaks for it; the superseded stop stays on the chain."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver())  # registers fake-4711
+    tracker.tickets["4711"] = _ticket(revision="5", title="Add a POST /health route (revised)")
+    tracker.column = [c.TicketRef(key="4711", revision="5", changed="2026-09-24")]
+    _poll(home, tracker, route=_deliver())  # registers fake-4711.r5, superseding it
+    ev = home.evidence(actor="run")
+    ev.append("item.outcome", "fake-4711", status="not_ready", error="the first stop")
+    ev.append("item.outcome", "fake-4711.r5", status="no_oracle", error="the live stop")
+
+    marker = c.marker_for("fake", "4711:refusal")
+    for _ in range(2):  # twice: a poll runs this every pass
+        before = len(tracker.calls)
+        written = sv.post_outcomes_to_tickets(
+            tracker, home=home, item_url=lambda i: f"/factory?item={i}", evidence=home.evidence()
+        )
+        writes = [verb for verb, key in tracker.calls[before:] if verb == "comment"]
+        assert writes == ["comment"]  # ONE write, not one per item the ticket ever produced
+        assert written == ["4711"]
+        assert "the live stop" in tracker.comments["4711"][marker]
+        assert "the first stop" not in tracker.comments["4711"][marker]
+
+
 def test_a_ticket_with_a_pull_request_is_told_about_that_rather_than_an_earlier_stop(
     home: FactoryHome,
 ) -> None:
@@ -654,19 +767,43 @@ def test_a_column_bigger_than_one_pass_may_read_stops_rather_than_walking_it(
 
 
 def test_a_pass_that_runs_out_of_time_serves_what_it_has_and_says_so(home: FactoryHome) -> None:
-    # the clock is read once at the start and once before each ticket after the first
-    ticks = iter([0.0, 0.0, 99.0])
-    report = _poll(
-        home,
-        _column_of(3),
-        route=_deliver(),
-        budget_s=10.0,
-        clock=lambda: next(ticks),
-    )
+    tracker = _column_of(3)
+
+    # time runs out the moment the first ticket has been told everything (its link is the
+    # last write): the pass then stops before the second one rather than walking the column
+    def clock() -> float:
+        return 99.0 if ("link", "0") in tracker.calls else 0.0
+
+    report = _poll(home, tracker, route=_deliver(), budget_s=10.0, clock=clock)
     assert report.stopped == c.REASON_COLUMN_TOO_LARGE
-    assert report.read == 2 and len(report.rows) == 2  # what it got through is served
-    assert "1 of 3 tickets" not in report.detail and "2 of 3 tickets" in report.detail
+    assert report.read == 1 and len(report.rows) == 1  # what it got through is served
+    assert "1 of 3 tickets" in report.detail
     assert "the next pass" in report.detail
+    assert [k for verb, k in tracker.calls if verb == "read"] == ["0"]  # ticket 1 only
+
+
+def test_a_budget_that_runs_out_inside_a_ticket_starts_no_further_tracker_call(
+    home: FactoryHome,
+) -> None:
+    """The budget was checked only BETWEEN tickets. One ticket costs about eleven synchronous
+    tracker calls, each with its own 20-second timeout, so a single ticket could hold this
+    request — and its database session — for minutes against a 60-second budget. The check is
+    at the tracker boundary now: an expired pass starts no further call, records the stop it
+    already has a word for, and leaves the rest to the next pass. It cannot cancel a call
+    already in flight, so the bound is the budget plus the verb in progress."""
+    tracker = _tracker(_ticket())
+
+    def clock() -> float:  # expired as soon as the ticket has been read
+        return 99.0 if ("read", "4711") in tracker.calls else 0.0
+
+    report = _poll(home, tracker, route=_deliver(), budget_s=10.0, clock=clock)
+    assert [verb for verb, _ in tracker.calls] == ["entered", "read"]  # not one write
+    row = report.rows[0]
+    assert row.stopped == c.REASON_COLUMN_TOO_LARGE and row.stopped_advice
+    assert report.registered == 0 and home.load_backlog() is None
+    stop = [e for e in home.events() if e.kind == sv.EV_STOPPED][-1]
+    assert stop.payload["step"] == "feedback"
+    assert "budget" in stop.payload["detail"] and "next pass" in stop.payload["detail"]
 
 
 def test_the_default_bounds_are_the_settings_defaults(home: FactoryHome) -> None:

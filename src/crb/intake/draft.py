@@ -57,6 +57,7 @@ Touch when:   a capability class joins the readiness catalogue — give it cues 
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -74,7 +75,7 @@ from crb.factory.backlog import (
     BacklogItem,
 )
 from crb.factory.readiness import CATALOGUE, slots_for
-from crb.intake.client import Ticket
+from crb.intake.client import Ticket, is_state_label
 
 #: Below this the classifier says ``unclassified`` instead of guessing. Chosen so that a
 #: single cue on its own (strength 1/3) can never clear it: two independent cues with no
@@ -424,6 +425,39 @@ def _tag_value(tags: tuple[str, ...], prefix: str) -> str:
     return ""
 
 
+def content_tags(ticket: Ticket) -> tuple[str, ...]:
+    """The ticket's tags without the product's own four state labels — what is left is
+    somebody else's words about their own ticket, which is what a draft may read."""
+    return tuple(t for t in ticket.tags if not is_state_label(t))
+
+
+def content_revision(ticket: Ticket, tags: tuple[str, ...] | None = None) -> str:
+    """A digest of everything a draft is made of, and nothing else.
+
+    The tracker's own revision cannot answer "has this ticket changed?", because the
+    product's own writes move it: an Azure DevOps tag PATCH increments ``System.Rev`` and
+    every Jira write moves ``fields.updated``. Compared on the revision alone, a ticket
+    nobody had touched became a new EVOLUTION on the next poll — one needless item per
+    pass, each superseding the last.
+
+    So the comparison is on content: title, body, acceptance criteria, type, points, url
+    and the classifier tags. Deliberately absent are the four state labels, the state and
+    the links — those are what the product itself writes, and a ticket must not evolve
+    because it was read.
+    """
+    content = {
+        "title": ticket.title,
+        "body": ticket.body,
+        "acceptance_criteria": list(ticket.acceptance_criteria),
+        "type": ticket.type,
+        "points": ticket.points,
+        "url": ticket.url,
+        "tags": sorted(content_tags(ticket) if tags is None else tags),
+    }
+    encoded = json.dumps(content, sort_keys=True, ensure_ascii=False).encode()
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
 def size_for(points: float | None) -> tuple[str, str]:
     """``(tier, the sentence that says why)`` for a story-point estimate."""
     if points is None or points <= 0:
@@ -520,30 +554,46 @@ def draft_from(
 ) -> Draft:
     """Map one ticket to the item the product would register, with every rule stated.
 
-    ``previous`` is the item already registered from this ticket, if any. When the
-    ticket's revision has moved on since, the draft is an EVOLUTION: a new id
-    (``<id>.r<revision>``) that supersedes ``previous``. The frozen record is never
-    rewritten — that is the whole point of reading a ticket twice.
+    ``previous`` is the item already registered from this ticket, if any. When the ticket's
+    CONTENT has changed since, the draft is an EVOLUTION: a new id (``<id>.r<revision>``)
+    that supersedes ``previous``. The frozen record is never rewritten — that is the whole
+    point of reading a ticket twice.
+
+    The revision is the pre-filter, never the test on its own: the product's own writes move
+    it (:func:`content_revision`), and an unchanged ticket re-read at a new revision is the
+    SAME item, not an evolution of itself. An item registered before this rule existed
+    carries no digest, so for that one the revision decides, once.
     """
     base_id = item_id_for(tracker, ticket.key)
     classification = _class_for(ticket)
     facts, prose, unused = _facts_from(ticket.acceptance_criteria, classification.capability_class)
     size, size_reason = size_for(ticket.points)
     kind, kind_reason = kind_for(classification.capability_class, ticket.tags, ticket.type)
-    is_evolution = previous is not None and previous.labels.get("revision", "") != ticket.revision
-    item_id = (
-        f"{base_id}.r{_ID_ILLEGAL.sub('-', ticket.revision.lower())}" if is_evolution else base_id
+    tags = content_tags(ticket)
+    digest = content_revision(ticket, tags)
+    previous_digest = previous.labels.get("content_revision", "") if previous is not None else ""
+    is_evolution = previous is not None and (
+        previous_digest != digest
+        if previous_digest
+        else previous.labels.get("revision", "") != ticket.revision
     )
+    if is_evolution:
+        item_id = f"{base_id}.r{_ID_ILLEGAL.sub('-', ticket.revision.lower())}"
+    else:
+        # the same content as the item already on the record IS that item, whatever the
+        # tracker's revision now says — including when that item is itself an evolution
+        item_id = previous.id if previous is not None else base_id
     labels = {
         "tracker": tracker,
         "ticket": ticket.key,
         "revision": ticket.revision,
+        "content_revision": digest,
         "source": "intake",
     }
     if ticket.url:
         labels["url"] = ticket.url
-    if ticket.tags:
-        labels["tags"] = ", ".join(ticket.tags)
+    if tags:
+        labels["tags"] = ", ".join(tags)
     item = BacklogItem(
         id=item_id,
         title=ticket.title or f"{tracker} {ticket.key}",
@@ -586,6 +636,8 @@ __all__ = [
     "Draft",
     "adf_to_text",
     "classify",
+    "content_revision",
+    "content_tags",
     "draft_from",
     "html_to_text",
     "item_id_for",

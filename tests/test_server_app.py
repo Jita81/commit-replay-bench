@@ -348,6 +348,29 @@ class TestMiddleware:
             make_settings(tmp_path, oidc={"issuer": "http://login.example", "client_id": "c"})
             assert r.headers["access-control-allow-credentials"] == "true"
 
+    def test_the_public_address_is_parsed_not_prefix_matched(self, tmp_path: Path) -> None:
+        """Every link this product writes on somebody else's ticket is built from
+        ``CRB_PUBLIC_URL``. The check matched prefixes, so a host that merely STARTS with a
+        loopback name passed — a plain-http address under somebody else's domain, written
+        into a customer's work item — and so did an https value with no host at all."""
+        for good in (
+            "https://crb.example",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://[::1]:8000",
+        ):
+            assert make_settings(tmp_path, public_url=good + "/").public_url == good
+        for bad in (
+            "http://localhost.example.com",
+            "http://127.0.0.1.attacker.test",
+            "https:///path",
+            "http://crb.example",
+            "ftp://crb.example",
+            "crb.example",
+        ):
+            with pytest.raises(ValidationError, match="CRB_PUBLIC_URL"):
+                make_settings(tmp_path, public_url=bad)
+
 
 # --- error envelope ---------------------------------------------------------------------
 

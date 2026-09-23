@@ -29,7 +29,10 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   builder makes every link, a listener cannot be switched on until it is set
   (`intake_no_public_url`) and a pass that somehow starts without it stops `no_public_url`
   before writing anything.
-- **One pass is bounded twice.** A pass costs about eleven tracker calls per ticket, runs in
+- **One pass is bounded twice.** A first pass over one ticket it registers costs eleven Azure
+  DevOps requests, or nine Jira ones [measured — n = 1 ready ticket × 2 adapters; method: every
+  request counted through an `httpx.MockTransport` for the verb sequence one pass makes,
+  `tests/test_intake_write_bound.py`; apparatus 2.2 — a count, so no interval]. A pass runs in
   front of the worker's heartbeat and, on demand, inside an API request; nothing bounded it,
   and Azure DevOps answers a WIQL query with up to 20,000 ids. `CRB_INTAKE__MAX_PER_POLL`
   (200) and `CRB_INTAKE__POLL_BUDGET_S` (60) now bound it: a longer column is **not read at
@@ -72,6 +75,28 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   log, no event, no state file and no error message — as a test, not a promise; the https-only
   rule on the tracker URL has one too. `test_run_forever_survives_a_broken_iteration` waits on
   an event instead of a 0.3 s sleep, so the full suite is deterministic.
+- **A second review pass over the same path, and what it found was the same class again.** A
+  ticket is no longer read as *edited* because this product wrote on it: the tracker's own
+  revision moves when a tag or a comment is written (`System.Rev` on Azure DevOps,
+  `fields.updated` on Jira), which made an untouched ticket a new EVOLUTION on every pass. The
+  comparison is now a digest of what the draft is made of — `content_revision`, on the item and
+  on `intake.read` — with the revision as the pre-filter. A `crb:class=` / `crb:kind=` /
+  `crb:level=` tag somebody put on their own ticket is an INPUT and is kept: clearing every
+  `crb:` tag by prefix deleted the operator's classification, and the tag write then moved the
+  revision, so the next draft read the ticket without it. A registration the frozen record
+  REFUSES is served as stopped instead of as queued (three outcomes were one boolean, so the
+  screen showed an item that was never registered). A refusal comment is written by the latest
+  item a ticket produced, not once per superseded item. The pass now asks its budget again at
+  the tracker boundary inside a ticket, so an expired pass starts no further call on somebody's
+  board, and the worker keeps checking in for as long as a pass lasts — a slow board read as a
+  stale worker. `CRB_PUBLIC_URL` is parsed rather than prefix-matched, so
+  `http://localhost.example.com` is refused. Azure DevOps comments name their format, so the
+  marker survives the round trip. The `/health` intake line asks for a credential only where
+  one is needed. `RouteDecision.ci_high` is required, so no caller can serialise a made-up
+  upper bound beside a measured lower one. On screen: a long error message in the live log
+  opens in full from a keyboard-reachable button outside the fixed-height row, a drafted
+  successor takes its predecessor's place in the dependency graph as well as the list, and the
+  intake row's route carries its apparatus like every other number.
 - **The record itself.** `product.evidence.6` is back to `partial`: the `dod`, `claims`,
   `ui-unit` and `ui-smoke` jobs run on every pull request but are not on branch protection's
   required list (G-930). The walkthrough's `proof.20` is narrowed to what the spec walks, with
@@ -144,10 +169,14 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   `tests/test_server_routes_factory.py::test_a_weak_oracle_stop_serves_the_superseding_item_pre_filled`.
   Docs: OPERATOR §10, the API factory rows and the `author.*` event vocabulary.
 - **The UI's own gates run in CI, and nothing explains itself by hover alone (stream E).**
-  Two new blocking jobs: `ui-unit` (`npm ci`, `npm run typecheck`, `npx vitest run` — the hint
-  ratchet, the native-`title=` allowlist and every screen suite) and `ui-smoke` (the mocked
-  Playwright spec over the built bundle). Until now those ran only when somebody remembered
-  them. `testTimeout`/`hookTimeout` are 20 s so a shared runner can meet them [measured — the
+  Two new jobs on every pull request: `ui-unit` (`npm ci`, `npm run typecheck`, `npx vitest
+  run` — the hint ratchet, the native-`title=` allowlist and every screen suite) and
+  `ui-smoke` (the mocked Playwright spec over the built bundle). Until now those ran only when
+  somebody remembered them. Neither context is on `main`'s required-checks list yet, so a red
+  one must be fixed like any other gate but does not by itself stop a merge; only an
+  administrator of the repository can add them (README's "Status" records the list in force,
+  docs/DEPLOYMENT.md §3.4 names the branch-protection call, and the gap is G-930).
+  `testTimeout`/`hookTimeout` are 20 s so a shared runner can meet them [measured — the
   full vitest suite run twice on an 8-core laptop while the walkthrough held the other cores:
   18 then 24 tests failed, every one "Test timed out in 5000ms", and all passed when the same
   files ran alone; method: `npx vitest run` twice, then the failing files alone; apparatus 2.2].
@@ -346,8 +375,9 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   Go command really gets (`exec` on the tmpfs) and its true size (477 MB); every
   `[measured]` sandbox-image tag names the run that executed on which head (a document can
   never cite a run of its own commit) with the local count on images built from the tree;
-  `sandbox-images` is declared blocking in `ci.yml` and DEPLOYMENT §3.4 gives the
-  branch-protection call that makes it so (a repository setting, for the administrator).
+  `sandbox-images` runs on every pull request, is not on `main`'s required-checks list, and
+  DEPLOYMENT §3.4 gives the branch-protection call that would put it there (a repository
+  setting, for the administrator).
 
 ### 2026-09-21 — the two-person rule is enforced at write; every sign-off says who signed (F7b, F34)
 

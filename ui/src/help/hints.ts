@@ -1010,6 +1010,10 @@ export const HINTS = {
     'The event’s outcome: ok, error, invalid, skipped or in progress.',
   'link.run.event_task':
     'The task this event belongs to; click to filter the per-task table to it.',
+  'button.run.event_error':
+    'Read the whole error message this event carried. The row is one line high and cuts a long message off, so the full text opens under the log.',
+  'button.run.event_error_hide':
+    'Close the full error message and leave the log on its own. The row it came from stays where it is.',
   'col.run_tasks.task':
     'The task attempted, shortened. Click the row to open the evidence pack of its last trial.',
   'col.run_tasks.cell':

@@ -13,9 +13,12 @@
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
 #             The hint ratchet, the native-`title=` allowlist and every screen suite run
 #             there, so a hint-registry, a copy or a type regression fails a build instead of
-#             waiting for someone to run the gates by hand before a release. Both UI jobs
-#             always run and are blocking; their contexts belong in main's required status
-#             checks alongside `container` (docs/DEPLOYMENT.md §3.4 names the call)
+#             waiting for someone to run the gates by hand before a release. Both UI jobs run
+#             on every pull request, and a red one must be fixed like any other gate — but
+#             neither context is on main's required-checks list yet, so its failure does not
+#             by itself stop a merge. Only a repository administrator can add them; both
+#             contexts belong on that list alongside `container` (docs/DEPLOYMENT.md §3.4
+#             names the branch-protection call, README.md "Status" records the current list)
 #   ui-smoke  the mocked Playwright smoke spec (ui/e2e/smoke.spec.ts) over the built bundle:
 #             the axe sweep of /login, the index redirect signed in and signed out, and the
 #             end-to-end 404. No server and no model — `page.route` answers every API call
@@ -31,9 +34,10 @@
 #                  each language through DockerExecutor ON THAT IMAGE (uid 65534, read-only
 #                  root, network off, qualify + grade clean — tests/test_sandbox_images_docker.py),
 #                  and the sandbox + sealed-builder suites on the python one; a skip in the
-#                  smoke fails the job. Always runs and is blocking: the context
+#                  smoke fails the job. Always runs, and is not on main's required-checks list
+#                  yet, so its failure does not by itself stop a merge: the context
 #                  "sandbox-images (build + hadolint + smoke each reference sandbox image)"
-#                  belongs in main's required status checks alongside `container`
+#                  belongs on that list alongside `container`
 #                  (docs/DEPLOYMENT.md §3.4 names the branch-protection call). The `test` job
 #                  deselects the `sandbox_images` marker: these tests build images, and this
 #                  job builds each exactly once with the GHA layer cache

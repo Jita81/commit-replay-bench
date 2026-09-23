@@ -1077,6 +1077,13 @@ const emptyItem = (id: string, cat: FactoryCatalogue | undefined): DraftItem => 
  * The active backlog with the drafted replacement item in it: the predecessor it supersedes is
  * replaced in place (so the list reads as the revision it is), and an item the backlog does
  * not hold is appended. With no backlog to revise, the draft alone is the backlog.
+ *
+ * A successor takes its predecessor's place in the GRAPH as well as in the list: an item that
+ * depended on the item being replaced is re-pointed at the replacement. Leaving it pointing at
+ * an id the revised backlog no longer holds is not a smaller change — the freeze is refused
+ * 422 (`item I-2 depends on unknown item 'I-1'`, src/crb/factory/backlog.py `_check_items`)
+ * naming an item the operator never touched. Nothing is written: this is the form's starting
+ * point, and every dependency stays editable in it.
  */
 export function withEvolution(from: FactoryBacklog | null, pre: FactoryEvolutionPrefill): FactoryBacklog {
   const drafted: FactoryBacklogItem = {
@@ -1093,7 +1100,14 @@ export function withEvolution(from: FactoryBacklog | null, pre: FactoryEvolution
   }
   const base: FactoryBacklog = from ?? { repo: '', hash: '', frozen_at: null, items: [] }
   const at = base.items.findIndex((i) => i.id === pre.supersedes || i.id === pre.id)
-  const items = at >= 0 ? base.items.map((i, j) => (j === at ? drafted : i)) : [...base.items, drafted]
+  const replaced = at >= 0 ? base.items[at] : undefined
+  const placed = replaced ? base.items.map((i, j) => (j === at ? drafted : i)) : [...base.items, drafted]
+  // Only a REPLACEMENT under a new id moves the edges: revising an item in place (same id)
+  // and appending one the backlog does not hold leave every dependency exactly as it was.
+  const stale = replaced && replaced.id !== drafted.id ? replaced.id : ''
+  const items = stale
+    ? placed.map((i) => (i.id !== drafted.id && i.depends_on.includes(stale) ? { ...i, depends_on: i.depends_on.map((d) => (d === stale ? drafted.id : d)) } : i))
+    : placed
   return { ...base, items }
 }
 

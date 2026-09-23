@@ -44,12 +44,12 @@ from typing import Any
 import httpx
 
 from crb.intake.client import (
-    LABEL_PREFIX,
     LINK_ITEM,
     REASON_REFUSED,
     Ticket,
     TicketRef,
     TrackerError,
+    is_state_label,
     marker_token,
 )
 from crb.intake.draft import adf_to_text
@@ -338,10 +338,16 @@ class JiraTracker:
         self.http.post(f"{API}/issue/{key}/comment", json={"body": doc}, expect=(201,))
 
     def label(self, key: str, value: str) -> None:
-        """Set one ``crb:`` label, removing any other. Jira labels may not contain a
-        space, which every label in :data:`crb.intake.client.LABELS` respects."""
+        """Set the product's one STATE label, removing the other three. Jira labels may not
+        contain a space, which every label in :data:`crb.intake.client.LABELS` respects.
+
+        A ``crb:`` label that is not one of the four is a classifier tag somebody put on the
+        issue (``crb:class=``, ``crb:kind=``, ``crb:level=``) and is left alone: removing it
+        by prefix deleted the operator's own classification, and because Jira's
+        ``fields.updated`` is the ticket revision, the next draft read the issue without it.
+        """
         current = self.read(key).tags
-        remove = [t for t in current if t.lower().startswith(LABEL_PREFIX) and t != value]
+        remove = [t for t in current if is_state_label(t) and t != value]
         if value in current and not remove:
             return
         updates = [{"remove": t} for t in remove]

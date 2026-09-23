@@ -14,10 +14,12 @@ requires.
 
 **The heuristic, honestly.** A sentence is treated as a claim when, after inline code, links
 and HTML comments are stripped, it contains either a percentage or a cardinal (``12``,
-``eleven``) qualifying a plural noun — "eleven jobs", "22 tasks", "four public libraries".
-A tag covers the block it sits in (a paragraph, a list item, a blockquote paragraph), and a
-list item is also covered by the paragraph that introduces the list, which is how the README
-tags a whole measured section at its head.
+``1200``, ``eleven``) qualifying a plural noun — "eleven jobs", "22 tasks", "1200 tasks",
+"four public libraries". A tag covers the block it sits in (a paragraph, a list item, a
+blockquote paragraph), and a list item is also covered by the paragraph that introduces the
+list, which is how the README tags a whole measured section at its head. Inline code is
+stripped from the cover too: a page that *documents* ``[hypothesis]`` in backticks has not
+thereby tagged the sentence around it.
 
 **What it deliberately does not catch**, so nobody reads a green job as more than it is:
 
@@ -25,7 +27,9 @@ tags a whole measured section at its head.
   exactly the claims §7 forbids; a reader still has to read;
 - claims inside tables, headings, fenced code, checklist items and a sentence that ends in a
   colon to introduce the thing it counts (the list below it is its own evidence);
-- a percentage that states a confidence level ("Wilson 95% interval") and a four-digit year;
+- a percentage that is itself the confidence level ("Wilson 95% interval", "95% CI") — a
+  result standing beside one ("65% passed (Wilson 95% interval)") *is* caught — a four-digit
+  year, and a number written with a leading zero, which is an identifier ("ADR-0011");
 - whether the tag is the *right* one, and whether a ``[measured]`` figure is true: it checks
   that ``n``, a method and an apparatus version are *present*, never that they are sound.
   Only a person reading the ledger can do that;
@@ -190,10 +194,23 @@ FUNCTION_WORDS: frozenset[str] = frozenset(
     }
 )
 
-_CARDINAL = r"(?:\d{1,3}(?:,\d{3})*(?:\.\d+)?|" + "|".join(NUMBER_WORDS) + r")"
+#: A cardinal: grouped ("1,200"), ungrouped ("1200" — a count is a count however it is
+#: punctuated), decimal, or written as a word. A leading zero marks an identifier
+#: ("ADR-0011"), never a count, and is excluded in ``is_claim``.
+_CARDINAL = r"(?:\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d{4,}(?:\.\d+)?|" + "|".join(NUMBER_WORDS) + r")"
 _COUNT_RE = re.compile(rf"\b({_CARDINAL})\s+(?:([a-z][\w'-]*)\s+)?([a-z][\w'-]{{2,}}s)\b", re.I)
-_PERCENT_RE = re.compile(r"\d[\d,]*(?:\.\d+)?\s?%")
-_CONFIDENCE_RE = re.compile(r"(wilson|confidence|interval)", re.I)
+_PERCENT = r"\d[\d,]*(?:\.\d+)?\s?%"
+_PERCENT_RE = re.compile(_PERCENT)
+#: A percentage that *is* a confidence level, matched by its construction rather than by a
+#: nearby word: "Wilson 95% interval", "95% confidence interval", "95% CI", "at a
+#: confidence of 95%". A result standing beside such an interval ("65% passed (Wilson 95%
+#: interval)") is not exempted, because the exemption covers only the span it matches.
+_CONFIDENCE_PERCENT_RE = re.compile(
+    rf"{_PERCENT}\s+(?:confidence(?:\s+(?:interval|level))?|interval|ci)\b"
+    rf"|\b(?:confidence(?:\s+(?:interval|level))?|interval)"
+    rf"(?:\s+(?:of|at|is|was))?\s+{_PERCENT}",
+    re.I,
+)
 _TAG_RE = re.compile(r"\[(" + "|".join(TAGS) + r")\b([^\]]*)\]", re.I)
 _N_RE = re.compile(r"\bn\s*(?:=|≥|>=|of)\s*\d|\b\d[\d,]*\s*(?:/|of)\s*\d", re.I)
 _APPARATUS_RE = re.compile(r"apparatus\s+(?:\d+\.\d+|n/a|none|[a-z0-9.-]+)", re.I)
@@ -207,9 +224,6 @@ _CHECKLIST_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 #: A method is checked for presence only: words inside the tag beyond its n and its apparatus.
 METHOD_MIN_WORDS = 5
-#: How close "Wilson" / "interval" / "confidence" must sit to a percentage for it to be read as
-#: a confidence level rather than a result. Wider, and a rate beside an interval escapes.
-CONFIDENCE_WINDOW = 25
 
 
 @dataclass(frozen=True)
@@ -310,9 +324,9 @@ def is_claim(sentence: str) -> bool:
     text = _strip_markup(sentence).strip()
     if not text or text.endswith(":"):
         return False
+    confidence = [m.span() for m in _CONFIDENCE_PERCENT_RE.finditer(text)]
     for match in _PERCENT_RE.finditer(text):
-        window = text[max(0, match.start() - CONFIDENCE_WINDOW) : match.end() + CONFIDENCE_WINDOW]
-        if not _CONFIDENCE_RE.search(window):
+        if not any(start <= match.start() < end for start, end in confidence):
             return True
     for match in _COUNT_RE.finditer(text):
         cardinal, between, noun = match.group(1), match.group(2), match.group(3)
@@ -322,6 +336,8 @@ def is_claim(sentence: str) -> bool:
             continue
         digits = cardinal.replace(",", "")
         if digits.replace(".", "").isdigit():
+            if digits.startswith("0") and not digits.startswith("0."):
+                continue  # "ADR-0011", "DL-0052" — an identifier, not a count
             value = float(digits)
             if value <= 1 or (value.is_integer() and 1900 <= value <= 2099):
                 continue
@@ -336,7 +352,8 @@ def tag_defects(cover: str) -> list[str] | None:
     its apparatus once at the head and each bullet carries its own ``n``. The *method* is
     read inside the tag itself, because that is where "how this was produced" belongs.
     """
-    tags = _TAG_RE.findall(_COMMENT_RE.sub(" ", cover))
+    prose = _CODE_RE.sub(" ", _COMMENT_RE.sub(" ", cover))
+    tags = _TAG_RE.findall(prose)
     if not tags:
         return None
     details = [detail for name, detail in tags if name.lower() == "measured"]
