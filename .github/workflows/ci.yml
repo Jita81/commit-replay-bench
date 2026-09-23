@@ -129,8 +129,11 @@ jobs:
       - name: Headers present, links resolve, map current
         run: python scripts/code_map.py --check
 
+  # GitHub truncates a check-run name at 100 characters, and branch protection matches the
+  # FULL name — a longer one can never satisfy a required context (it blocked PR #48). Keep
+  # every `name:` in this file under 100 characters.
   dod:
-    name: dod (every route, journey, stream and the product carry a definition of done; evidence resolves; the gap analysis is current)
+    name: dod (every route, journey and stream has its definition of done; evidence resolves)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -144,7 +147,7 @@ jobs:
         run: python scripts/dod_check.py --check
 
   claims:
-    name: claims (every quantified sentence on a covered page carries its tag; a [measured] one carries n, method and apparatus)
+    name: claims (every quantified sentence on a covered page carries its tag)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -287,11 +287,16 @@ gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/requir
  "walkthrough (browser, live stack, tier 1)",
  "ui-unit (tsc -b + vitest, the hint ratchet included)",
  "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
- "dod (every route, journey, stream and the product carry a definition of done; evidence resolves; the gap analysis is current)",
- "claims (every quantified sentence on a covered page carries its tag; a [measured] one carries n, method and apparatus)",
+ "dod (every route, journey and stream has its definition of done; evidence resolves)",
+ "claims (every quantified sentence on a covered page carries its tag)",
  "sandbox-images (build + hadolint + smoke each reference sandbox image)"]}
 JSON
 ```
+
+A context must be the check-run name EXACTLY, and GitHub truncates a check-run name at 100
+characters — a `name:` longer than that can never satisfy the context it is required under
+(it blocked PR #48 until the two job names were shortened). Keep every `name:` in
+`.github/workflows/ci.yml` under 100 characters.
 
 (the list is the current set plus the new contexts — `PATCH` replaces it, so send all of
 them; `GET …/protection` first to confirm the set has not moved). Until then the job's
