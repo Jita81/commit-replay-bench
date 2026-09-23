@@ -130,7 +130,7 @@ describe('PosturePage', () => {
           { id: 2, account_login: 'beta', account_type: 'Organization', repository_selection: 'all', html_url: '', suspended: false, permissions: { contents: 'read' }, can_deliver: false, recorded_by: 'u1', updated: '2026-09-15T10:00:00+00:00' },
         ],
       },
-      'GET /settings': { sandbox_mode: 'local', raw: { builder: { executor: 'local' } } },
+      'GET /settings': { sandbox_mode: 'local', raw: { builder: { executor: 'local' }, factory: { test_author: 'none', require_signed_cell: true } } },
     })
     renderApp(<PosturePage />, { route: '/posture' })
     await waitFor(() => expect(screen.getByText('crb 2.0.0a1')).toBeInTheDocument())
@@ -147,7 +147,10 @@ describe('PosturePage', () => {
     expect(delivery).toHaveTextContent('a branch named by the item and one pull request against the repository’s default branch; the factory never writes to the default branch')
     expect(delivery).toHaveTextContent('1 of 2 installations can deliver')
     expect(delivery).toHaveTextContent('a pull request opens only for a cell the capability map routes deliver under routing.v1')
-    expect(delivery).toHaveTextContent('an approver may override the gate for one run; the override is an event on the chain naming the approver and the route it overrode')
+    // ADR-0018 — the second clause of the same gate, read from this deployment's own settings
+    // (the settings query is only enabled once /auth/me has answered admin, so it lands later)
+    await waitFor(() => expect(delivery).toHaveTextContent('a signed cell as well as a deliver route: the factory opens no pull request until a person has attested that cell'))
+    expect(delivery).toHaveTextContent('an approver may override the gate for one run, clause by clause; each override is an event on the chain naming the approver, the clause and what it overrode')
     expect(delivery).toHaveTextContent('installation tokens minted per push, never stored')
     // admins get the Settings link on rows they can act on
     expect(screen.getAllByRole('link', { name: 'Settings' }).length).toBeGreaterThan(0)

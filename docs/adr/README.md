@@ -27,6 +27,7 @@ and be recorded here.
 | [0015](0015-signoffs-expire-with-the-apparatus.md) | A sign-off expires with the apparatus: `covers_apparatus` at read, served `stale` / `active: false`, never edited; no apparatus bump (a read rule, not a moved instrument) | Accepted | 2026-09-17 |
 | [0016](0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md) | The two-person rule (`same_actor`, `signoff-policy.v3`) is a write-time policy clause, not an apparatus move: the seam is `policy_version` / `schema` on every record; no apparatus bump (ADR-0015 §4 argument); pre-v3 records stay valid and identifiable (F53) | Accepted | 2026-09-21 |
 | [0017](0017-the-ticket-is-the-backlog-item.md) | The ticket is the backlog item; the column is the consent gate: one watched column per repository (listener default OFF, operator-switched), six tracker verbs behind one protocol, an edit is an evolution and never an overwrite, and the gap feedback reaches the ticket before any spend; no apparatus impact (intake decides which items exist, never how one is graded) | Accepted | 2026-09-22 |
+| [0018](0018-a-signed-cell-licenses-delivery.md) | A signed cell licenses delivery: the factory's gate reads the sign-off as well as the route (`unsigned_cell`, default ON), the override is an approver's named per-run act bounded to one pull request, and the posture is served; no apparatus bump (ADR-0016 §3 argument) | Accepted | 2026-09-23 |
 
 ## Format
 

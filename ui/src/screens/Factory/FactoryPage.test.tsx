@@ -43,7 +43,9 @@ import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { FactoryPage, deliverableCount, estimateFromMap, nextId, refusalSentence, stepsFor, withEvolution } from './FactoryPage'
 
 const NO_ROUTE = { route: '', reason_code: '', reason: '', n: 0, point: 0, ci_low: 0, ci_high: 0, apparatus_versions: [], deliverable: false }
-const DELIVER = { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, apparatus_versions: ['2.2'], deliverable: true }
+const DELIVER = { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, apparatus_versions: ['2.2'], verification_tier: 'human-verified', signed: true, deliverable: true }
+/** ADR-0018 — measured exactly as well, and nobody has signed it: the server says not deliverable. */
+const DELIVER_UNSIGNED = { ...DELIVER, verification_tier: 'automated-pass', signed: false, deliverable: false }
 const CALIBRATE = { route: 'calibrate', reason_code: 'ci_low_below_bar', reason: 'the lower bound sits under the bar', n: 24, point: 0.96, ci_low: 0.8, ci_high: 0.99, apparatus_versions: ['2.2'], deliverable: false }
 const NOT_LINKED = { can_deliver: false, reason_code: 'not_linked' as const, reason: 'Delivery is not possible for this repository: it is connected by URL, not through the GitHub App. Connect it through the GitHub App with Contents: write and Pull requests: write, then Sync installations in Settings.', full_name: '', default_branch: '', installation_id: null, account_login: '' }
 const LINKED = { can_deliver: true, reason_code: 'ok' as const, reason: '', full_name: 'acme/cobra', default_branch: 'main', installation_id: 77, account_login: 'acme' }
@@ -257,7 +259,34 @@ describe('FactoryPage — the shipped contract', () => {
     expect(screen.getByTestId('cell-route-I-1')).toHaveTextContent('routes deliver')
     expect(screen.getByTestId('cell-route-I-1-prov')).toHaveTextContent('n = 40 · 95 % [84 %, 99 %] · apparatus 2.2')
     expect(screen.getByTestId('cell-route-I-2')).toHaveTextContent('not measured · withheld')
-    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('1 of 2 items sit in a cell that routes deliver today')
+    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('1 of 2 items sit in a cell this deployment would deliver from today')
+  })
+
+  it('a cell that measures well but nobody signed reads withheld, and the withheld delivery step names the clause (ADR-0018)', async () => {
+    const unsigned: FactoryTask = {
+      ...TASKS[0]!,
+      cell_route: DELIVER_UNSIGNED,
+      pr_url: null,
+      status: 'accepted',
+      last_event: 'delivery.refused',
+      refusal: {
+        step: 'delivery',
+        reason: 'signed-cell gate: the cell is not signed (verification tier automated-pass) — a measured route alone does not license a pull request (ADR-0018)',
+        reason_code: 'unsigned_cell',
+        measured_route: 'deliver',
+      },
+    }
+    mockApi(base({ 'GET /factory/alpha/tasks': [unsigned, TASKS[1]] }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('cell-route-I-1')).toBeInTheDocument())
+    // the cell's own pill: the route is deliver and the answer is still withheld
+    const pill = screen.getByTestId('cell-route-I-1')
+    expect(pill).toHaveTextContent('routes deliver · withheld')
+    expect(pill).toHaveAttribute('aria-label', expect.stringContaining('nobody has signed this cell off, and a signed cell is what licenses a pull request here'))
+    // the delivery step says which clause, not just that something was withheld
+    expect(screen.getByTestId('step-I-1-delivery')).toHaveTextContent('Delivery withheld — the signed-cell clause: nobody has signed bug.fix × XS off')
+    // nothing this deployment would deliver from today
+    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('0 of 2 items sit in a cell this deployment would deliver from today')
   })
 
   it('a stopped item shows what to change and the replacement item already drafted (G-904)', async () => {
@@ -332,7 +361,7 @@ describe('FactoryPage — the shipped contract', () => {
     // the estimate rests on the map's measured mean, with its n and apparatus, and names the band
     await waitFor(() => expect(box).toHaveTextContent("this repository's measured mean over n = 40 attempts at apparatus 2.2"))
     expect(box).toHaveTextContent('$0.27 to $0.41 for 1 item at about $0.34 each')
-    expect(box).toHaveTextContent('1 of 2 will be worked (1 waits on a signed gap); 1 sits in a cell that routes deliver')
+    expect(box).toHaveTextContent('1 of 2 will be worked (1 waits on a signed gap); 1 could be delivered as a pull request today')
     expect(box).toHaveTextContent('no spend cap yet')
     expect(box).toHaveTextContent('You can cancel the run at any point. Items already built are still charged.')
     const { default: userEvent } = await import('@testing-library/user-event')
@@ -431,8 +460,10 @@ describe('FactoryPage — the shipped contract', () => {
     const { default: userEvent } = await import('@testing-library/user-event')
     await userEvent.click(deliver)
     expect(box).toHaveTextContent('on — a clean build in a deliver cell pushes a branch to acme/cobra and opens a pull request against main; nothing is written to main.')
-    const override = within(box).getByRole('checkbox', { name: /Override the route gate/ })
-    expect(box).toHaveTextContent('Recorded on the evidence chain as your override of the route gate, under your name.')
+    const override = within(box).getByRole('checkbox', { name: /Override the delivery gate/ })
+    // ADR-0018 — the gate has two clauses now, and the override says what it is not
+    expect(box).toHaveTextContent('Recorded on the evidence chain under your name, one clause at a time: the route gate, and the signed-cell clause.')
+    expect(box).toHaveTextContent('it is not an attestation of the cell and no second person is claimed for it')
     await userEvent.click(override)
     await userEvent.click(screen.getByRole('button', { name: /^Run the factory/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))

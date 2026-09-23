@@ -52,6 +52,7 @@ import { fmtDate } from '../../lib/format'
 import { probeDisplay } from '../../lib/verdict'
 import { ClaudeCodeLoginCard } from './ClaudeCodeLoginCard'
 import { GitHubAppCard } from './GitHubAppCard'
+import { InviteApproverCard } from './InviteApproverCard'
 
 /** Every probe from `GET /health` with its verdict, plus the versions. */
 function HealthCard() {
@@ -281,6 +282,7 @@ export function SettingsPage() {
             </QueryBoundary>
           </Card>
           <UsersCard />
+          <InviteApproverCard />
         </>
       ) : (
         <Card title="Configuration">

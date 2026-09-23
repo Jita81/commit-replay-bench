@@ -1,12 +1,12 @@
 /**
- * The shell screens' entries for the hint ratchet — sign in, the help pages and an unknown
- * address, the four routes the ratchet used to skip by name.
+ * The shell screens' entries for the hint ratchet — sign in, accept an invitation, the help
+ * pages and an unknown address: the routes outside the journey.
  *
  * Navigation
  * ----------
  * What it is:   `SHELL_SCREENS`: one `{ route, path, element, api, roles }` per route that is
- *               not part of the journey — `/login`, `/help`, `/help/docs/:name` and `*` —
- *               spread into the ratchet's `SCREENS` table.
+ *               not part of the journey — `/login`, `/invite`, `/help`, `/help/docs/:name`
+ *               and `*` — spread into the ratchet's `SCREENS` table.
  * What it does: Closes G-909. Until this file existed the ratchet read App.tsx's route table
  *               and then dropped those four by name, so a new unhinted element on any of them
  *               failed no test, against the operator's ask that every element explains itself.
@@ -22,17 +22,19 @@
  * ADRs:         none
  * Works with:   ui/src/help/hints-ratchet.test.tsx (spreads these into `SCREENS`),
  *               ui/src/help/hints.ts (`MIN_HINTS` — the floors these routes are held to),
- *               ui/src/screens/Login/LoginPage.tsx, ui/src/screens/Help/HelpPage.tsx,
+ *               ui/src/screens/Login/LoginPage.tsx,
+ *               ui/src/screens/Invite/AcceptInvitePage.tsx, ui/src/screens/Help/HelpPage.tsx,
  *               ui/src/screens/Help/DocPage.tsx, ui/src/screens/NotFoundPage.tsx (the
  *               screens rendered under these fixtures), ui/src/test/utils.tsx (`envelope`)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx
- * Touch when:   one of the four screens gains an element — add the fixture state that renders
- *               it and raise its `MIN_HINTS` floor.
+ * Touch when:   one of these screens gains an element — add the fixture state that renders it
+ *               and raise its `MIN_HINTS` floor.
  */
 import type { ReactElement } from 'react'
 import type { Role } from '../api/types'
 import { DocPage } from '../screens/Help/DocPage'
 import { HelpPage } from '../screens/Help/HelpPage'
+import { AcceptInvitePage } from '../screens/Invite/AcceptInvitePage'
 import { LoginPage } from '../screens/Login/LoginPage'
 import { NotFoundPage } from '../screens/NotFoundPage'
 import { PRINCIPAL, envelope } from '../test/utils'
@@ -62,6 +64,15 @@ export const SHELL_SCREENS: Record<string, ShellScreen> = {
     element: <LoginPage />,
     api: SIGNED_OUT,
     // the screen is the same for everyone: nobody has a role until they are through it
+    roles: ['viewer'],
+  },
+  '/invite': {
+    // the link's own page, with a token in it: the form renders (no token renders the sentence)
+    route: '/invite?token=a-one-time-token',
+    path: '/invite',
+    element: <AcceptInvitePage />,
+    api: SIGNED_OUT,
+    // nobody has a role while accepting an invitation
     roles: ['viewer'],
   },
   '/help': {

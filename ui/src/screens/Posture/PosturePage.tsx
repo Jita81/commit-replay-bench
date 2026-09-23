@@ -23,7 +23,8 @@
  * Works with:   ui/src/components/govuk.tsx (SummaryList), ui/src/components/Help.tsx (`Term`,
  *               `DocLink`), ui/src/screens/Settings/SettingsPage.tsx (where an admin acts),
  *               src/crb/server/worker.py (`_delivery_credentials` — what the Delivery rows
- *               describe), src/crb/factory/loop.py (the route gate and the override event),
+ *               describe), src/crb/factory/loop.py (the route gate, the signed-cell clause of
+ *               ADR-0018 and the override events),
  *               docs/SECURITY.md §2 (the trust boundaries these rows describe), docs/DEPLOYMENT.md
  * Tested by:    ui/src/components/govuk.test.tsx (the page is covered there)
  * Touch when:   a deployment fact is added to `/settings` that a review board would ask for;
@@ -70,6 +71,9 @@ export function PosturePage() {
   const probeText = (name: string) => (health.isError ? 'the health check could not be read' : (probe(name)?.detail ?? '…'))
   const s = settings.data
   const admin = can('admin')
+  // ADR-0018 — the delivery licence posture, from the deployment's own settings; `undefined`
+  // when this reader is not an admin (the settings query is not even issued for them)
+  const signedCellRequired = s?.raw?.factory?.require_signed_cell
   const adminOnly = (v: unknown): ReactNode => (admin ? String(v ?? '—') : 'shown to admins')
 
   // the executor as the deployment reports it: the admin's settings when they answer,
@@ -221,7 +225,25 @@ export function PosturePage() {
           ),
         },
         { key: 'Route gate', hint: 'summary.posture.route_gate', value: `a pull request opens only for a cell the capability map routes deliver under ${version.data?.policy ?? '…'}` },
-        { key: 'Override', hint: 'summary.posture.override', value: 'an approver may override the gate for one run; the override is an event on the chain naming the approver and the route it overrode' },
+        // ADR-0018 — the second clause of the same gate. Admins read the deployment's own
+        // setting; everyone else reads the default, which is what a deployment that has not
+        // changed it is running. Never presented as "on" without having read it.
+        {
+          key: 'Delivery licence',
+          hint: 'summary.posture.delivery_licence',
+          // no bare environment-variable token in a viewer's row: an unbreakable name this
+          // long sets the summary list's min-content width and the page scrolls sideways at
+          // 375 px (J-FAC-14). The admin's row prints it with break-all, as the sandbox row does.
+          value: signedCellRequired === undefined ? (admin ? '…' : 'a signed cell as well as a deliver route, unless this deployment has turned that off — the setting itself is shown to admins') : signedCellRequired ? 'a signed cell as well as a deliver route: the factory opens no pull request until a person has attested that cell, on the current apparatus (a sign-off expires with the apparatus)' : (
+            <>
+              the route alone — this deployment has turned the signed-cell clause off (<code className="break-all">CRB_FACTORY__REQUIRE_SIGNED_CELL=false</code>), so a measured cell licenses a pull request with no human attestation.{' '}
+              <NextStep admin={admin} doc={<DocLink to="ONBOARDING-A-REPO#step-7--sign-off-approver">Sign off (ONBOARDING)</DocLink>}>
+                To require a person before any pull request, unset it.
+              </NextStep>
+            </>
+          ),
+        },
+        { key: 'Override', hint: 'summary.posture.override', value: 'an approver may override the gate for one run, clause by clause; each override is an event on the chain naming the approver, the clause and what it overrode. It licenses one run to open a pull request and is never an attestation of the cell' },
         { key: 'Credentials', hint: 'summary.posture.credentials', value: 'installation tokens minted per push, never stored' },
       ],
     },

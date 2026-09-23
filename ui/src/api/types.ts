@@ -1263,7 +1263,8 @@ export interface FactoryTask {
   row_hash?: string
   /** F28 — the capability map's route for the item's (class × size) cell, from the same
    * signed map the delivery gate reads; `route: ''` = nobody has measured the cell. */
-  cell_route: { route: string; reason_code: string; reason: string; n: number; point: number; ci_low: number; ci_high: number; apparatus_versions: string[]; deliverable: boolean }
+  /** `deliverable` is BOTH clauses of the delivery gate under this deployment's posture (ADR-0018): the route says `deliver` and, while `require_signed_cell` is on, `signed` is true. */
+  cell_route: { route: string; reason_code: string; reason: string; n: number; point: number; ci_low: number; ci_high: number; apparatus_versions: string[]; verification_tier?: string; signed?: boolean; deliverable: boolean }
 }
 
 /** `GET /factory/catalogue` — what a backlog item may be made of (F24: the freeze form asks these). */
@@ -1305,6 +1306,76 @@ export interface UserCreateRequest {
   password: string
 }
 
+// ---------------------------------------------------------------------------
+// Invitations and two-person readiness — `src/crb/server/routes/invitations.py` (G-518)
+// ---------------------------------------------------------------------------
+
+/** The state an invitation is in, as the server decides it (accepted wins over expired). */
+export type InvitationState = 'pending' | 'accepted' | 'expired' | 'revoked'
+
+/** One invitation as the API reports it — never the token and never its hash. */
+export interface Invitation {
+  id: string
+  user_id: string
+  username: string
+  display_name: string
+  email: string
+  role: Role
+  state: InvitationState
+  created: string
+  expires: string
+  accepted: string
+  revoked: string
+  created_by: string
+  revoked_reason: string
+  /** ISO time of the invited account's last sign-in; empty while it has never arrived. */
+  last_login: string
+}
+
+/** `POST /invitations` body. */
+export interface InviteRequest {
+  username: string
+  role: Role
+  display_name: string
+  email: string
+  expires_hours: number
+}
+
+/**
+ * `POST /invitations` response — the ONE place the token appears. It is not stored anywhere
+ * else, so a lost link is re-invited, never recovered.
+ */
+export interface InvitationCreated {
+  invitation: Invitation
+  accept_url: string
+  token: string
+  /** True when the deployment has no public URL, so `accept_url` is a path, not a link. */
+  public_url_missing: boolean
+}
+
+/** `POST /invitations/accept` response: the account is live and the next step is to sign in. */
+export interface InvitationAccepted {
+  username: string
+  display_name: string
+  role: Role
+  accepted: string
+}
+
+/**
+ * `GET /two-person-readiness` — can this deployment produce a sign-off the two-person rule
+ * accepts? It counts ACCOUNTS, not people, and its `reason` says so.
+ */
+export interface TwoPersonReadiness {
+  ready: boolean
+  reason_code: 'ready' | 'no_approver' | 'approver_never_signed_in' | 'single_person'
+  reason: string
+  approvers_active: number
+  approvers_signed_in: number
+  other_active_accounts: number
+  accounts_signed_in: number
+  invitations_pending: number
+}
+
 /** Whether a builder's credential is present — never its value. */
 export interface BuilderConfigured {
   name: string
@@ -1326,6 +1397,8 @@ export interface Settings {
     /** The BUILDER posture (`BuilderSettings.redacted()`): where the model-driven builder runs. */
     builder?: { executor: string; image?: string; egress_network?: string; allow_hosts?: string[] }
     sandbox?: { executor: string; image?: string }
+    /** `FactorySettings.redacted()`: the test author and the delivery licence posture (ADR-0018). */
+    factory?: { test_author: string; require_signed_cell: boolean }
   }
 }
 

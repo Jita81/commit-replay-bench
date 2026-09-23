@@ -278,7 +278,15 @@ class CellRouteOut(BaseModel):
     ci_low: float = 0.0
     ci_high: float = 0.0
     apparatus_versions: list[str] = []
-    #: True only when the gate would let a clean build of this item open a pull request.
+    #: The cell's verification tier with the repo's sign-offs overlaid — ``human-verified``
+    #: or ``ab-confirmed`` means a person has attested it (the delivery gate's second
+    #: clause, ADR-0018); ``automated-pass`` means the ledger alone, ``""`` unmeasured.
+    verification_tier: str = ""
+    #: Has a human attested this cell (an active sign-off on the current apparatus)?
+    signed: bool = False
+    #: True only when the gate would let a clean build of this item open a pull request —
+    #: BOTH clauses under this deployment's posture: the route says ``deliver`` and, while
+    #: ``CRB_FACTORY__REQUIRE_SIGNED_CELL`` is on (the default), the cell is signed.
     deliverable: bool = False
 
 
@@ -919,7 +927,11 @@ def list_tasks(
     get_repo_or_404(db, repo)
     home = _home(settings, repo)
     views = home.task_views()
-    routes = _cell_routes(db, factory, repo) if views else {}
+    routes = (
+        _cell_routes(db, factory, repo, require_signed_cell=settings.factory.require_signed_cell)
+        if views
+        else {}
+    )
     # G-904 — the stopped item's own record, so its way forward can carry the superseding
     # item already drafted; ``taken`` keeps that draft's id off one the register route
     # would refuse. A repository whose backlog has gone serves the way forward without it.
@@ -949,10 +961,17 @@ def list_tasks(
     return out
 
 
-def _cell_routes(db: DbDep, factory: SessionFactoryDep, repo: str) -> dict[str, CellRouteOut]:
+def _cell_routes(
+    db: DbDep, factory: SessionFactoryDep, repo: str, *, require_signed_cell: bool = True
+) -> dict[str, CellRouteOut]:
     """``class|size`` → the map's decision, from exactly the reading the worker's delivery
     gate uses (:meth:`crb.server.worker.Worker._route_lookup`): sighted rows on the current
-    apparatus, the repo's latest controls verdict, sign-offs overlaid."""
+    apparatus, the repo's latest controls verdict, sign-offs overlaid.
+
+    ``require_signed_cell`` is the deployment's posture (``CRB_FACTORY__REQUIRE_SIGNED_CELL``,
+    ADR-0018): ``deliverable`` is computed under the SAME two clauses the loop enforces, so
+    what the screen predicts before a run spends anything and what the gate does cannot
+    disagree."""
     rows = rows_for_apparatus(
         rows_for_mode(DbLedger(factory).rows(repo=repo), "sighted"), "current"
     )
@@ -974,7 +993,9 @@ def _cell_routes(db: DbDep, factory: SessionFactoryDep, repo: str) -> dict[str, 
             ci_low=st.ci.low if st is not None else 0.0,
             ci_high=st.ci.high if st is not None else 0.0,
             apparatus_versions=list(st.apparatus_versions) if st is not None else [],
-            deliverable=d.route == ROUTE_DELIVER,
+            verification_tier=c.verification_tier or "",
+            signed=c.earned,
+            deliverable=d.route == ROUTE_DELIVER and (c.earned or not require_signed_cell),
         )
     return out
 
@@ -1359,7 +1380,9 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
         )
     except TrackerError as exc:
         raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc
-    routes = _cell_routes(db, factory, repo)
+    routes = _cell_routes(
+        db, factory, repo, require_signed_cell=settings.factory.require_signed_cell
+    )
     home = _home(settings, repo)
     # poll_repository writes the served view itself, so this route reads it back through
     # `_intake_out` exactly as the GET does — one shape, one writer

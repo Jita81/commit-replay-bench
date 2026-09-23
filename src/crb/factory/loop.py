@@ -9,7 +9,8 @@
     build ladder → grade (pack + ledger row, process_step=factory)
       ▼ not clean / disqualified ──▶ not_clean / disqualified
     deliver (OPT-IN, default OFF; fails closed on missing creds) ──▶ delivery_failed
-      ▼   gated on the route read at readiness (DL-038, DL-045)
+      ▼   gated on the route AND the sign-off of the reading taken at readiness
+      ▼   (DL-038, DL-045, ADR-0018: an unsigned cell is withheld ``unsigned_cell``)
     review (independent identity, probes) → verdict RECORDED before any edit
       ▼ accept_with_edit ──▶ rework: edit permitted → RED proof → build → grade
       │     │                 → re-deliver (the SAME pull request, updated; a failed
@@ -30,7 +31,7 @@ What it is:   The governed loop — one backlog item end to end, every step evid
 What it does: Sequences readiness (where the capability map's route for the item's cell
               is read once, before any build) → RED proof (authored or test-first rung) →
               build ladder → optional delivery (default OFF, fails closed, gated on that
-              route) → independent review → rework (edit permitted only after a recorded
+              route AND on the cell's sign-off — ADR-0018) → independent review → rework (edit permitted only after a recorded
               verdict; bounded by ``max_rework``; its re-delivery updates the pull request
               the first delivery opened; a ``weak_oracle`` verdict never rebuilds against
               an unchanged oracle — DL-045 rule 3), turning every governed refusal into an
@@ -46,7 +47,9 @@ ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0003-one-routing-rule.md (the route gate; amended 2026-09-19),
               docs/adr/0013-external-review-is-advisory-and-recorded.md (amended
-              2026-09-21: a weak_oracle verdict never rebuilds against an unchanged oracle)
+              2026-09-21: a weak_oracle verdict never rebuilds against an unchanged oracle),
+              docs/adr/0018-a-signed-cell-licenses-delivery.md (the signed-cell clause on
+              the delivery gate, default ON, and what an override may be claimed to mean)
 Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory/readiness.py
               + src/crb/factory/testfirst.py + src/crb/factory/build.py +
               src/crb/factory/delivery.py + src/crb/factory/review.py (the steps, in order),
@@ -55,8 +58,11 @@ Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory
 Tested by:    tests/test_factory_loop.py
 Touch when:   never for a new repository (delivery is switched on per run, not per repo);
               adding a status means ``STATUSES`` here, the UI's factory screen and
-              docs/API.md#factory-phase-p6; changing the step order is a governance change
-              — an ADR.
+              docs/API.md#factory-phase-p6; adding a clause to the delivery gate means a
+              refusal code here, the pre-run prediction in
+              src/crb/server/routes/factory.py (``_cell_routes``) and the posture row, so
+              what is predicted and what is enforced never disagree; changing the step order
+              is a governance change — an ADR.
 """
 
 from __future__ import annotations
@@ -68,6 +74,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from crb.builders.base import Budget, Builder, Rung
+from crb.core.capability import EARNED_TIERS
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.ledger import JsonlLedger
@@ -149,6 +156,12 @@ STATUSES: tuple[str, ...] = (
     STATUS_BLOCKED,
     STATUS_ERROR,
 )
+#: The delivery gate's second clause (ADR-0018): the item's cell carries no active human
+#: attestation on this apparatus, so nothing but a measurement licensed the pull request.
+#: Recorded as the ``delivery.refused`` event's ``reason_code`` and emitted as
+#: ``delivery.unsigned``; ``FactorySpec.require_signed_cell`` is the setting.
+REFUSAL_UNSIGNED_CELL = "unsigned_cell"
+
 #: How much of a ``weak_oracle`` finding's detail the ``oracle_needs_strengthening`` reason
 #: quotes — its head, so the reason's prefix and way forward fit ``ItemOutcome.error``.
 _FINDING_HEAD_CHARS = 300
@@ -195,9 +208,17 @@ class FactorySpec:
     #: item, at readiness, before any build: the map that licenses a delivery is the map
     #: as it stood before this run's own rows landed (B-1b finding 2 → DL-045).
     route_decision_for: Callable[[BacklogItem], Mapping[str, Any] | None] | None = None
-    #: An approver's identity that overrides the route gate for THIS run; recorded on the
-    #: evidence chain as a ``route.decided`` event naming the measured route it overrode.
-    #: Empty = no override (the default).
+    #: Does a pull request need a SIGNED cell as well as a ``deliver`` route? Default True
+    #: (ADR-0018): the tier of the cell decision read at readiness must be an earned one
+    #: (``crb.core.capability.EARNED_TIERS``), else delivery is withheld ``unsigned_cell``.
+    #: False is a deployment's stated decision that the measurement is its whole licence
+    #: (``CRB_FACTORY__REQUIRE_SIGNED_CELL=false``), and the served posture says which is in
+    #: force — it is never a silent choice.
+    require_signed_cell: bool = True
+    #: An approver's identity that overrides the delivery gate for THIS run — BOTH clauses
+    #: (the route and the signed cell); recorded on the evidence chain as a ``route.decided``
+    #: event naming the clause and the measured route it overrode. Empty = no override (the
+    #: default). One person, one run, no attestation (ADR-0018 §4).
     deliver_override_by: str = ""
     keep_workspaces: bool = False
 
@@ -275,6 +296,9 @@ _ROUTE_SUMMARY_KEYS: tuple[str, ...] = (
     "false_q1",
     "policy_version",
     "apparatus_versions",
+    # ADR-0018: whether a human had attested the cell when the route was read — the second
+    # clause of the delivery gate, so the chain quotes the licence as well as the route
+    "verification_tier",
 )
 
 
@@ -535,6 +559,54 @@ class FactoryLoop:
                 item.id,
                 override_by=s.deliver_override_by,
                 measured_route=measured,
+            )
+        # THE SIGNED-CELL CLAUSE (ADR-0018, G-517): the route is a measurement, and a
+        # measurement is not a person. A pull request in somebody else's repository is
+        # licensed by a human attestation on the cell as well as by its route — the
+        # verification tier of the SAME reading taken at readiness, which the sign-off
+        # overlay has already narrowed to active, repo-scoped, current-apparatus records
+        # (ADR-0015). An approver's named per-run override lifts this clause too and says so
+        # on the chain; what that override may be claimed to mean is bounded by ADR-0018 §4
+        # (one person, one run, no attestation) and the pull request body repeats it.
+        tier = str((route or {}).get("verification_tier", "") or "")
+        if s.require_signed_cell and tier not in EARNED_TIERS:
+            unsigned = (
+                f"the cell is not signed (verification tier {tier or 'unmeasured'}) — "
+                "a measured route alone does not license a pull request (ADR-0018)"
+            )
+            if not s.deliver_override_by:
+                s.evidence.record_delivery_refused(
+                    item.id,
+                    f"signed-cell gate: {unsigned}",
+                    pack_hash=final.pack_hash,
+                    measured_route=measured,
+                    reason_code=REFUSAL_UNSIGNED_CELL,
+                    verification_tier=tier,
+                )
+                self._emit(
+                    "delivery.unsigned",
+                    item.id,
+                    status=StepStatus.SKIPPED,
+                    reason=unsigned,
+                    reason_code=REFUSAL_UNSIGNED_CELL,
+                    verification_tier=tier,
+                )
+                return None, ""
+            s.evidence.record_route(
+                item.id,
+                ROUTE_DELIVER_WORD,
+                f"signed-cell gate overridden by {s.deliver_override_by}: {unsigned}",
+                override_by=s.deliver_override_by,
+                clause=REFUSAL_UNSIGNED_CELL,
+                measured_route=measured,
+                verification_tier=tier,
+            )
+            self._emit(
+                "delivery.override",
+                item.id,
+                override_by=s.deliver_override_by,
+                clause=REFUSAL_UNSIGNED_CELL,
+                verification_tier=tier,
             )
         try:
             d = deliver(

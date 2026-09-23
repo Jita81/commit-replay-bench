@@ -13,6 +13,10 @@ signoffs   — APPEND-ONLY: human attestations (revocations are new rows)
 reviews    — APPEND-ONLY: human post-hoc verdicts on ONE graded row each, hash-chained
              (``ReviewRecord`` columns; revision 0003)
 users      — local accounts / OIDC subjects and their role
+invitations — one-time invitations for a local account (revision 0009); the token is stored
+             only as a SHA-256 hash and the audit trail is the account's ``user.*`` events
+decisions_due — when each derived decisions-inbox row first became due and when it was last
+             seen (revision 0010); a clock over the derivation, never a second source of truth
 workers    — one row per worker process, upserted every heartbeat even when idle (the
              ``/health`` worker probe's liveness source; revision 0007)
 
@@ -333,6 +337,81 @@ class User(Base):
     last_login: Mapped[str] = mapped_column(String(40), nullable=False, default="")
 
     __table_args__ = (UniqueConstraint("issuer", "subject", name="uq_users_issuer_subject"),)
+
+
+class Invitation(Base):
+    """An invitation for the second person (G-518, revision 0009). Creating one creates the
+    account INACTIVE with a password nobody knows; the one-time token is shown to the admin
+    once and stored only as a SHA-256 hash, so a leaked database row cannot be redeemed.
+    Accepting it sets the account's own password and activates it.
+
+    Mutable state, not a ledger: ``accepted`` / ``revoked`` are stamped in place and the
+    audit trail is the account's ``user.invited`` / ``user.invite_accepted`` /
+    ``user.invite_revoked`` events on the append-only ``events`` table. One live invitation
+    per account: a second one for the same account replaces nothing — the route refuses it.
+    """
+
+    __tablename__ = "invitations"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    #: The account this invitation creates and activates.
+    user_id: Mapped[str] = mapped_column(String(32), ForeignKey("users.id"), nullable=False)
+    #: SHA-256 hex of the one-time token. The token itself is never stored.
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: The role the account was invited as (a copy, for the record the admin reads).
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="approver")
+    created: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
+    #: When the link stops working (always set).
+    expires: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    #: When it was redeemed / withdrawn (``""`` while neither has happened).
+    accepted: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    revoked: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    #: The admin who invited, and the reason a revocation carries.
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    revoked_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_invitations_token_hash"),
+        Index("ix_invitations_user", "user_id"),
+    )
+
+
+class DecisionDue(Base):
+    """When a decision first became due, and when it was last seen due (G-518's sibling,
+    G-516; revision 0010).
+
+    The decisions inbox is DERIVED — from the capability map, the sign-offs and the factory
+    chain — so before this table a decision existed only while somebody had the page open:
+    nothing recorded that a cell had been waiting eleven days for an approver. This table is
+    the memory, not a second source of truth: the derivation stays the derivation, and each
+    row here stamps the moment one derived row first appeared (``first_due``), the last time
+    it was still there (``last_seen``) and, when it stopped being due, when that happened
+    (``resolved``; a row that becomes due again clears it and keeps its original
+    ``first_due`` — the wait a person experiences is not reset by a flicker).
+
+    Keyed ``(repo, kind, key)``: ``kind`` is the inbox's row kind (``signoff_due``,
+    ``gap_unsigned``, …) and ``key`` is what that kind is about — ``<class>|<size>`` for a
+    cell row, the item id for a factory row. Mutable state, no append-only triggers: the
+    evidence of what happened is the ledger and the factory chain, and this is a clock.
+    """
+
+    __tablename__ = "decisions_due"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    repo: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    key: Mapped[str] = mapped_column(String(256), nullable=False)
+    #: The row's own words when it was last seen — what a reader of the age is reading about.
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: The role the act belongs to (``approver`` / ``operator`` / ``viewer``).
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    first_due: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
+    last_seen: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
+    #: When the row stopped being due (``""`` while it still is).
+    resolved: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("repo", "kind", "key", name="uq_decisions_due_row"),
+        Index("ix_decisions_due_repo", "repo"),
+    )
 
 
 class GitHubInstallation(Base):

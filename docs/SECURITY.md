@@ -303,6 +303,22 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   (`not_local`), the last active admin never deactivated (`last_admin`), every change an
   audit event with actor and target, sessions ended by the change (§3.3). [measured]
   `tests/test_server_admin_users.py`, `tests/test_cli_users.py`
+- **Inviting the second person** (G-518): `POST /invitations` (admin) creates the account
+  **inactive** with a password nobody knows (32 random bytes, never returned) and mints a
+  one-time token; only its SHA-256 hash is stored, so a database dump cannot be redeemed, and
+  the token appears in exactly one response and no log, list or event. The link expires (72
+  hours by default, 1–336) and can be withdrawn with a recorded reason while unused.
+  `POST /invitations/accept` needs no session — it is the link's own page — sets the person's
+  own password (≥ 12 characters, argon2id) and activates the account in one transaction; a
+  wrong, spent, withdrawn or expired token is one indistinguishable `401 invalid_token`
+  counted against the same per-IP limiter as a failed login, and no session is issued, so the
+  first thing the account does is sign in with the password it chose. Every step is an audit
+  event on the account's trace (`user.invited`, `user.invite_accepted`, `user.invite_revoked`)
+  with actor and target and never a token. `GET /two-person-readiness` (any signed-in role)
+  says whether a sign-off the two-person rule would accept is possible at all, and counts
+  **accounts, not people** — two accounts held by one person pass it and are still wrong,
+  which the reading itself states. [measured — n = 7 tests under apparatus 2.2 in
+  `tests/test_server_invitations.py`; pass/fail, not a rate]
 - Roles are an ascending ladder `viewer < operator < approver < admin`; every mutating route
   names its minimum role; `/health` and `/metrics` are unauthenticated and must be bound to
   an internal interface. [measured] RBAC matrix in `tests/test_server_app.py`

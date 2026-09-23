@@ -756,6 +756,24 @@ crb users deactivate <name>          # refused for the last active admin (last_a
 crb users activate <name>            # restores sessions issued before the deactivation
 ```
 
+### Inviting the second person
+
+A sign-off needs a **second person**: the API refuses one from whoever produced the evidence
+(`same_actor`, [ADR-0016](adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md)),
+and no setting waives it. Rather than typing a password on somebody else's behalf, invite them:
+**Settings → Invite an approver** (or `POST /invitations`). That creates the account **inactive**
+with a password nobody knows and mints a one-time link which is shown to you **once** — this
+product sends no email, so you pass the link on yourself, by whatever channel your organisation
+uses. The person opens it, chooses their own password, and the account is activated at that
+moment. A link expires (72 hours by default, 1 to 336), works once, and can be withdrawn with a
+recorded reason while it is unused; an accepted one is an account, so deactivate the account
+instead. Only the link's SHA-256 hash is stored: a lost link is re-invited, never recovered.
+
+The card and Home's task 7 both read `GET /two-person-readiness`, which answers whether a
+sign-off the two-person rule would accept is possible at all — an account that can sign, that
+has signed in, and a second account that has too. It counts **accounts, not people**: two
+accounts held by one person would pass it and still be wrong, and it says so.
+
 **Forgot the admin password?** On the API host: `crb users set-password admin` (the
 bootstrap username, or whichever `crb users list` shows as an active admin), type the new
 password at the prompt, sign in. **Locked out with no admin at all** (every admin
@@ -770,7 +788,8 @@ identity provider has no local password; disable it there.
 
 Every change — by the API or the CLI — is one `system` event on the account's trace
 (`user.created`, `user.role_set`, `user.password_set`, `user.activated`,
-`user.deactivated`) with the actor (the admin's user id, or `cli:<os user>`) and the
+`user.deactivated`, `user.invited`, `user.invite_accepted`, `user.invite_revoked`) with the
+actor (the admin's user id, or `cli:<os user>`) and the
 target; never the password. Setting a password ends the account's sessions on their next
 request (the cookie is bound to the credential it was issued under —
 [SECURITY.md §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).

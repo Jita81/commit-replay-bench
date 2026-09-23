@@ -77,6 +77,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from crb.core.capability import EARNED_TIERS
 from crb.core.evidence import sha256_text, utc_now_iso
 from crb.core.git import GitError, GitRepo
 from crb.core.redact import redact
@@ -295,6 +296,17 @@ def pr_body(
         lines.append(
             f"- route: **{route_decision.get('route', '')}** — {route_decision.get('reason', '')} "
             f"(policy `{route_decision.get('policy_version', '')}`)"
+        )
+        # ADR-0018: the reader who merges this is told which licence opened it. An earned
+        # tier means a named second person attested the cell (ADR-0016); anything else
+        # means this was opened under an approver's per-run override, which is one person,
+        # one run, and not an attestation — never presented as one.
+        tier = str(route_decision.get("verification_tier", "") or "")
+        lines.append(
+            f"- licence: **signed cell** — a human attested this cell (`{tier}`)"
+            if tier in EARNED_TIERS
+            else "- licence: **unsigned cell** — opened under a named per-run override by an "
+            "approver, not a human attestation of the cell"
         )
     if item.acceptance_criteria:
         lines += ["", "### Acceptance criteria", ""] + [f"- {c}" for c in item.acceptance_criteria]

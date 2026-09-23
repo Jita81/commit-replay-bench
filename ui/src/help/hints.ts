@@ -386,6 +386,8 @@ export const HINTS = {
     'How many of the decisions above belong to this repository; each is listed under it.',
   'pill.decisions.kind':
     'The kind of decision: must not ship (false-Q1), sign-off due, a structural gap to sign, a factory item routed to a person, a review to read, or delivery withheld by the route.',
+  'stat.decisions.waiting':
+    'How long this decision has been waiting, from the moment the product first saw it was due. The clock is the server’s and runs whether or not anybody has this page open.',
   'stat.decisions.evidence':
     'The cell’s attempts (n), its clean rate with its 95 % Wilson interval, and the reason code that decided its route, under the apparatus in the kicker.',
   'button.decisions.act':
@@ -521,9 +523,9 @@ export const HINTS = {
   'field.factory.deliver':
     'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, every item is built and graded locally only.',
   'stat.factory.deliverable':
-    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; the rest are built and withheld.',
+    'How many items sit right now in a cell this deployment would open a pull request from: the map routes it deliver AND a person has signed the cell off. It is read at this moment and changes as measurement and sign-off change; the rest are built and withheld.',
   'field.factory.override':
-    'Let this run open pull requests for items whose cell does not route deliver. The override is recorded on the evidence chain under your name. Approver only.',
+    'Let this run open pull requests for items the delivery gate would withhold — a cell that does not route deliver, or one nobody has signed off. Each clause you override is recorded on the evidence chain under your name. It licenses this run only; it is not a sign-off. Approver only.',
   'details.factory.own_builder':
     'Name a registered builder and model for this run instead of the deployment’s default. Blank keeps the builder above.',
   'field.factory.own_builder':
@@ -684,6 +686,8 @@ export const HINTS = {
     'The four roles and what each may do: read, start runs, sign cells, administer.',
   'summary.posture.separation':
     'The two-person rule and how it is enforced: the server refuses a sign-off whose approver produced the evidence, so an operator who queued the runs cannot also sign them.',
+  'summary.posture.delivery_licence':
+    'What has to be true before this deployment opens a pull request in someone else’s repository: the cell’s route, and — while the default is in force — a person’s sign-off on that cell.',
   'summary.posture.source_control':
     'Whether the GitHub App is registered, how many installations it has, and that its tokens are minted per use and never stored.',
   'summary.posture.executor':
@@ -1450,6 +1454,51 @@ export const HINTS = {
     'A builder provider and whether its credential is configured on the worker. Configured or not is all the API reports; the secret itself is never returned.',
   'tile.settings.retention':
     'The retention settings in force: what raw artefacts are kept and for how long. Zero raw retention by default.',
+  // --- inviting the second person (G-518) ---------------------------------------------
+  'pill.invitations.two_person':
+    'Whether this deployment could produce a sign-off the two-person rule accepts: an account that can sign, that has signed in, and a second account that has too. It counts accounts, not people.',
+  'stat.invitations.two_person':
+    'The reading behind the pill: why a sign-off is or is not possible here, how many accounts that can sign have actually signed in, and how many invitations are still waiting.',
+  'stat.invitations.link':
+    'The invitation you have just made: who it is for, the role it grants and when the link stops working.',
+  'col.invitations.account':
+    'The sign-in name of the account the invitation creates. It exists already and is inactive until the link is used.',
+  'col.invitations.role':
+    'The role the account gets when the invitation is accepted. Only a role that can sign a cell may be invited.',
+  'col.invitations.state':
+    'Where the invitation stands: waiting for the person, accepted, expired, or withdrawn by an admin. Accepted rows also say whether that account has ever signed in.',
+  'col.invitations.invited':
+    'When the invitation was made, and by implication how long it has been waiting for the person to use it.',
+  'col.invitations.act':
+    'What an admin can do to this invitation: withdraw a link that has not been used. An accepted one is an account — deactivate the account instead.',
+  'button.invitations.invite':
+    'Create the account inactive and mint a one-time link. Nobody is emailed: the link is shown to you once, and you pass it on.',
+  'button.invitations.copy':
+    'Copy the one-time link to the clipboard. It is shown once and cannot be recovered — make a new invitation if you lose it.',
+  'button.invitations.revoke':
+    'Stop this link working. The inactive account is left as it is, and the withdrawal is recorded with a reason.',
+  'field.invitations.username':
+    'The name the invited person will type at sign-in. It cannot be one an account already uses.',
+  'field.invitations.display':
+    'The name shown next to the account in the product. Optional.',
+  'field.invitations.email':
+    'Recorded on the account so an operator can tell whose it is. Nothing is sent to it — this product emails nobody.',
+  'field.invitations.role':
+    'The role the invitation grants. Approver is the one a sign-off needs; admin also administers the deployment.',
+  'field.invitations.expires':
+    'How long the link works for, in hours (1 to 336). A shorter window is safer; an expired link is re-invited, never revived.',
+  'field.invite.password':
+    'The password you choose for your own account. At least 12 characters; nobody — including the admin who invited you — can read it.',
+  'field.invite.password_again':
+    'The same password again. The two are compared here, before anything is sent.',
+  'button.invite.accept':
+    'Set this password and activate your account. The link is then spent, and you sign in with the password you chose.',
+  'stat.invite.accepted':
+    'Your account is active and holds the role the invitation granted. The next step is to sign in with the password you just chose.',
+  'stat.invite.no_token':
+    'This page needs the one-time token from your invitation link. Without it there is nothing to accept.',
+  'link.invite.sign_in':
+    'Go to the sign-in page and use the password you have just chosen.',
   'col.settings.users':
     'The account’s sign-in name, display name, email, where it is issued (local or the OpenID provider) and when it was created.',
   'col.settings.role':
@@ -1561,6 +1610,8 @@ export const MIN_HINTS: Record<string, number> = {
   // by name (G-909): both login fields, both sign-in buttons; a Read more and a guide link;
   // the guide's way back; the 404's one way out.
   '/login': 4,
+  // the invitation link's own page, outside the shell: both password fields and the button
+  '/invite': 3,
   '/help': 2,
   '/help/docs/:name': 1,
   '*': 1,

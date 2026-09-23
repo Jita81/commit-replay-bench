@@ -141,6 +141,7 @@ const findingOf = (reason: string) => reason.replace(new RegExp(`:\\s*${WAY_FORW
 /** The reason a delivery refusal records when the opt-in was off (src/crb/factory/loop.py `_deliver`). */
 const OPT_IN_OFF = /^delivery is opt-in and OFF/
 const ROUTE_GATE = /^route gate: /
+const SIGNED_CELL_GATE = /^signed-cell gate: /
 
 /** What an open value slot means, after the readiness detail: it routes, it is never signed. */
 function valueGapNote(t: FactoryTask): string {
@@ -260,7 +261,14 @@ export function stepsFor(t: FactoryTask): Step[] {
             status: 'skipped',
             detail: 'Delivery withheld — delivery was off for this run. Built and graded locally only.',
           }
-        : ROUTE_GATE.test(r.reason)
+        : SIGNED_CELL_GATE.test(r.reason)
+          ? {
+              id: 'delivery',
+              title: 'Delivery',
+              status: 'skipped',
+              detail: `Delivery withheld — the signed-cell clause: nobody has signed ${t.capability_class} × ${t.size} off, and this deployment opens a pull request only for a cell a person has attested (ADR-0018). Built, graded and reviewed; no pull request opened.`,
+            }
+          : ROUTE_GATE.test(r.reason)
           ? {
               id: 'delivery',
               title: 'Delivery',
@@ -706,7 +714,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           {
             key: 'Items',
             hint: 'summary.factory.items',
-            value: `${worked} of ${total} will be worked${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell that routes deliver`,
+            value: `${worked} of ${total} will be worked${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} could be delivered as ${deliverable === 1 ? 'a pull request' : 'pull requests'} today`,
             note: 'Readiness is assessed again at the run; an item with an unsigned structural gap is refused before any spend.',
           },
           {
@@ -746,7 +754,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
             Open pull requests where the map routes <code>deliver</code>
             {tasks && (
               <Hint id="stat.factory.deliverable" className="block text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
-                {deliverable} of {tasks.length} items sit in a cell that routes <code>deliver</code> today; the rest are built and withheld under the current route
+                {deliverable} of {tasks.length} items sit in a cell this deployment would deliver from today; the rest are built and withheld — by the route, or because nobody has signed the cell off (ADR-0018)
               </Hint>
             )}
           </span>
@@ -755,8 +763,8 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           <Hint as="label" id="field.factory.override" className="flex items-start gap-2">
             <input type="checkbox" className="mt-1" checked={override} onChange={(e) => setOverride(e.target.checked)} />
             <span>
-              Override the route gate (approver)
-              <span className="block text-xs text-on-surface-muted">Recorded on the evidence chain as your override of the route gate, under your name.</span>
+              Override the delivery gate (approver)
+              <span className="block text-xs text-on-surface-muted">Recorded on the evidence chain under your name, one clause at a time: the route gate, and the signed-cell clause. It licenses this run to open a pull request; it is not an attestation of the cell and no second person is claimed for it.</span>
             </span>
           </Hint>
         )}
@@ -994,7 +1002,8 @@ function GapForm({ repo, task: t }: { repo: string; task: FactoryTask }) {
   )
 }
 
-/** How many items sit in a cell the map routes `deliver` — what a run could actually deliver. */
+/** How many items sit in a cell this deployment would deliver from — the WHOLE gate the server
+ * computed (route + signed cell under the deployment's posture, ADR-0018), never half of it. */
 export function deliverableCount(tasks: FactoryTask[]): number {
   return tasks.filter((t) => t.cell_route?.deliverable).length
 }
@@ -1020,11 +1029,11 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
   return (
     <>
       {r.deliverable ? (
-        <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver — ${prov}: a clean build may open a pull request`} hint="factory.cell_route.deliverable" data-testid={`cell-route-${t.id}`}>
+        <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver${r.signed ? ' and a person has signed it off' : ''} — ${prov}: a clean build may open a pull request`} hint="factory.cell_route.deliverable" data-testid={`cell-route-${t.id}`}>
           routes deliver
         </Pill>
       ) : (
-        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: delivery would be withheld — ${r.reason}`} hint="factory.cell_route.withheld" data-testid={`cell-route-${t.id}`}>
+        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: delivery would be withheld — ${withheldWhy(r)}`} hint="factory.cell_route.withheld" data-testid={`cell-route-${t.id}`}>
           routes {r.route} · withheld
         </Pill>
       )}
@@ -1033,6 +1042,12 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
       </Hint>
     </>
   )
+}
+
+/** Which clause of the delivery gate holds this cell back (ADR-0018) — the route, or the
+ * missing signature. Said in the reader's words, never as a code on its own. */
+function withheldWhy(r: NonNullable<FactoryTask['cell_route']>): string {
+  return r.route === 'deliver' && r.signed === false ? 'nobody has signed this cell off, and a signed cell is what licenses a pull request here' : r.reason
 }
 
 function pct(x: number): string {

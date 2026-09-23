@@ -57,7 +57,7 @@ This is what makes the workflow easy for an enterprise to follow.*
 | **S1 — connect & prove** | G-500, G-431, G-432, G-428 | the next £0 stage is queued when the previous one passes (opt-in per repository); each `gold_note` becomes a named candidate config change to accept or reject; re-qualify selected tasks from the Tasks tab; a controls escape links to the weak task's escaped mutants and a strengthening item |
 | **S2 — measure** | G-565, G-564 | every under-bar cell serves "n needed and what it costs" with the run body pre-filled |
 | **S3 — learn** | G-532 | the three write paths behind the same named-person decision the CLI already requires: accept a refusal line, register a strengthening item, queue a re-measurement |
-| **S4 — decide & license** | G-518, G-516, G-517 | an approver invitation with a one-time link; Home task 7 reads the deployment's real two-person readiness, not the presence of an admin |
+| **S4 — decide & license** | G-518, G-516, G-517 | an approver invitation with a one-time link; Home task 7 reads the deployment's real two-person readiness, not the presence of an admin; the delivery gate reads the sign-off as well as the route (ADR-0018), and a decision carries the moment it became due |
 
 **Done when:** from Home, an operator can reach the next action of every stream in one click,
 and no stream's top gap is `AUTOMATION`.

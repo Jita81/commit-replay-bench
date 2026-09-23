@@ -263,9 +263,17 @@ class FactorySettings(BaseModel):
     operator-authored test stops ``no_oracle`` and waits for a person, which is what this
     product did before the setting existed. A run may override it
     (``params.test_author``); ``none`` in either place means no author.
+
+    ``require_signed_cell`` (ADR-0018, default true) is the delivery gate's second clause:
+    the factory opens a pull request only for a cell a human has attested — an active
+    sign-off on the current apparatus — as well as one the map routes ``deliver``. Setting
+    it false is a deployment's stated decision that the measurement alone is its licence;
+    the posture is served (``/settings``, the Posture page) so it is never a silent choice,
+    and the Factory screen predicts each item's delivery under whichever is in force.
     """
 
     test_author: str = ""
+    require_signed_cell: bool = True
 
     @field_validator("test_author")
     @classmethod
@@ -281,8 +289,13 @@ class FactorySettings(BaseModel):
 
     def redacted(self) -> dict[str, Any]:
         """The ``/settings`` view. Nothing here is secret, and an absent author is a state
-        an operator needs to see — it is why items stop ``no_oracle``."""
-        return {"test_author": self.test_author or "none"}
+        an operator needs to see — it is why items stop ``no_oracle``. The delivery
+        licence posture is here for the same reason: a reader must be able to tell whether
+        a pull request needs a signed cell (ADR-0018) without reading the environment."""
+        return {
+            "test_author": self.test_author or "none",
+            "require_signed_cell": self.require_signed_cell,
+        }
 
 
 class BuilderSettings(BaseModel):

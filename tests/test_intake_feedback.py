@@ -93,6 +93,18 @@ def test_a_cell_that_does_not_route_deliver_is_not_deliverable_even_when_ready()
     assert f.ready_to_register is True  # it is still built and withheld, never dropped
 
 
+def test_a_deliver_route_the_server_says_is_not_deliverable_is_not_labelled_ready() -> None:
+    """ADR-0018: the route is only half the delivery gate. When the server's reading says a
+    clean build of this cell would still be withheld — today because nobody has signed the
+    cell off — the ticket must not promise `ready`, and the comment must say why."""
+    f = _render(_ready_ticket(), _deliver_route(deliverable=False))
+    assert f.label == c.LABEL_NOT_DELIVERABLE
+    assert f.ready_to_register is True  # still built and withheld, never dropped
+    assert "only for a cell a person has signed off" in f.text
+    # a reading without the key at all (an older caller) still reads the route alone
+    assert _render(_ready_ticket(), _deliver_route()).label == c.LABEL_READY
+
+
 def test_needs_info_beats_not_deliverable_so_the_person_is_asked_first() -> None:
     # a ticket that is BOTH missing a slot and on an unmeasured cell asks for the
     # information first: answering it is the only step the person can take.

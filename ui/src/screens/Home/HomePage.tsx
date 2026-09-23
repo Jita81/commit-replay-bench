@@ -30,8 +30,10 @@
  *               tap away and listed in the About block.
  * How:          `useGitHubApp`, `useAllRepos`, the chosen repository (`?repo=` or the most
  *               recently updated) → `useRepo` + `useOracle` + `useOracleControls` +
- *               `useCapabilityMap` → `stagesFor`; `useSignoffs` for task 6; `useUsers`
- *               (admin) or the principal's role for task 7; `useFactoryBacklog` +
+ *               `useCapabilityMap` → `stagesFor`; `useSignoffs` for task 6;
+ *               `useTwoPersonReadiness` for task 7 (the deployment's real readiness to
+ *               produce a signature the two-person rule accepts, read by every role — not the
+ *               presence of an admin; a waiting invitation reads "In progress"); `useFactoryBacklog` +
  *               `useFactoryTasks` + `useActiveRun(repo, 'factory')` → `factoryStatusFor`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none (DL-042, DL-044)
@@ -50,7 +52,7 @@
 
 import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFactoryTasks, useGitHubApp, useHealth, useOracle, useOracleControls, useRepo, useSignoffs, useUsers } from '../../api/hooks'
+import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFactoryTasks, useGitHubApp, useHealth, useOracle, useOracleControls, useRepo, useSignoffs, useTwoPersonReadiness } from '../../api/hooks'
 import { isApiError } from '../../api/client'
 import { Hint } from '../../components/Hint'
 import { InsetText, Kicker, Lede, NotificationBanner, PageTitle, StartButton, type TagTone, TaskList, type TaskItem } from '../../components/govuk'
@@ -102,7 +104,10 @@ export function HomePage() {
   const gh = useGitHubApp()
   const repos = useAllRepos()
   const health = useHealth()
-  const users = useUsers(can('admin'))
+  // G-518 — task 7 reads the deployment's real two-person readiness, not the presence of an
+  // admin: an account that can sign but has never signed in, or a deployment where the only
+  // signer is the only operator, cannot license anything. Readable by every role.
+  const twoPerson = useTwoPersonReadiness()
   const chosen = useMemo(() => {
     const items = repos.data?.items ?? []
     const wanted = params.get('repo')
@@ -153,7 +158,10 @@ export function HomePage() {
   const anyRows = (map.data?.summary.n_total ?? 0) > 0
   const baselineActed = (signoffs.data?.items ?? []).some((s) => s.active && !s.stale)
   const operator = can('operator')
-  const approverKnown = users.data ? users.data.items.some((u) => u.role === 'approver' || u.role === 'admin') : me?.role === 'approver' || me?.role === 'admin' ? true : undefined
+  const ready = twoPerson.data
+  const approverKnown = ready ? ready.ready : undefined
+  // a link that was sent and not used is progress a nag would hide
+  const inviteWaiting = (ready?.invitations_pending ?? 0) > 0
 
   const q = chosen ? `?repo=${encodeURIComponent(chosen)}` : ''
   const walk = chosen ? `/connect/${encodeURIComponent(chosen)}` : '/connect'
@@ -177,13 +185,15 @@ export function HomePage() {
     { num: 6, name: 'Read the baseline', status: baselineActed ? 'Completed' : anyRows ? 'Incomplete' : 'Cannot start yet', tone: baselineActed ? 'pale' : anyRows ? 'blue' : 'grey', to: `/results${q}`, hint: 'task.home.read_baseline' },
     // only an admin can invite; everyone else reads a state (not an instruction), is not sent
     // to a page that refuses them, and gets the note under the list
-    { num: 7, name: 'Invite an approver', status: approverKnown === true ? 'Completed' : approverKnown === false ? 'Incomplete' : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey', to: can('admin') ? '/settings' : '/posture', hint: 'task.home.invite_approver' },
+    { num: 7, name: 'Invite an approver', status: approverKnown === true ? 'Completed' : approverKnown === false ? (inviteWaiting ? 'In progress' : 'Incomplete') : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey', to: can('admin') ? '/settings' : '/posture', hint: 'task.home.invite_approver' },
     // the destination (DL-044): the factory delivers a change under the baseline the walk earned
     { num: 8, name: 'Deliver your first change', status: factoryLabel, tone: FACTORY_TONE[factoryStatus], to: chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory', hint: 'task.home.deliver' },
   ]
   const completed = tasks.filter((t) => t.status === 'Completed').length
   // the operator's next press: the first task they can act on now; all done → the factory
-  const nextTask = tasks.find((t) => ACTIONABLE.has(t.status) || t.status.startsWith('In progress'))
+  // …and only a task THIS role can act on: task 7 needs an admin, so an operator's Continue
+  // never lands on a screen that would refuse them (it is still shown, as a state, above)
+  const nextTask = tasks.find((t) => (ACTIONABLE.has(t.status) || t.status.startsWith('In progress')) && (t.num !== 7 || can('admin')))
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
 
   return (
@@ -209,9 +219,9 @@ export function HomePage() {
       )}
       <div className="max-w-[44em]">
         <TaskList tasks={tasks} completed={completed} summary={<Hint id="stat.home.completed">{operator ? `You have completed ${completed} of ${tasks.length} tasks.` : `The operators have completed ${completed} of ${tasks.length} tasks.`}</Hint>} />
-        {approverKnown !== true && !can('admin') && (
-          <p className="m-0 mt-2 text-[16px] text-on-surface-muted">
-            <strong>Task 7.</strong> Only an admin can add users. Ask your admin to add someone with the approver role in Settings.
+        {approverKnown !== true && ready && (
+          <p className="m-0 mt-2 text-[16px] text-on-surface-muted" data-testid="home-task-7-note">
+            <strong>Task 7.</strong> {ready.reason}. {can('admin') ? 'Invite them on the Settings screen: the account is created inactive and you pass on a one-time link.' : 'Only an admin can invite somebody. Ask your admin to invite an approver in Settings.'}
           </p>
         )}
       </div>

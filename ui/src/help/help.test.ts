@@ -4,7 +4,8 @@
  * Navigation
  * ----------
  * What it is:   The help registry's ratchet test.
- * What it does: Pins that (1) every path in the app's route table except `/login` and `*`
+ * What it does: Pins that (1) every path in the app's route table except the pre-session
+ *               screens (`/login`, `/invite`) and `*`
  *               has a `helpFor()` hit and the two help routes have none; (2) every
  *               `readMore.to` and every term's `readMore` names a bundled guide and, when it
  *               carries a slug, a heading in that file slugifies to it; (3) every `terms[]` id
@@ -79,11 +80,13 @@ const LINT: Array<[RegExp, TermId]> = [
 ]
 
 describe('HELP ratchet', () => {
-  it('every route in App.tsx except /login and * has an entry; the help routes have none', () => {
+  it('every route in App.tsx except the two pre-session screens and * has an entry; the help routes have none', () => {
     const paths = appRoutePaths()
     expect(paths.length).toBeGreaterThan(20)
     for (const p of paths) {
-      if (p === '/login' || p === '*') continue
+      // /login and /invite render outside the shell, so there is no Help panel to open on
+      // them: both explain themselves in their own copy and carry hints the ratchet enforces
+      if (p === '/login' || p === '/invite' || p === '*') continue
       if (p.startsWith('/help')) {
         expect(helpFor(concrete(p)), p).toBeUndefined()
         continue

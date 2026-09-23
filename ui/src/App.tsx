@@ -41,6 +41,7 @@ import { IntakePage } from './screens/Factory/IntakePage'
 import { DocPage } from './screens/Help/DocPage'
 import { HelpPage } from './screens/Help/HelpPage'
 import { LedgerPage } from './screens/Ledger/LedgerPage'
+import { AcceptInvitePage } from './screens/Invite/AcceptInvitePage'
 import { LoginPage } from './screens/Login/LoginPage'
 import { NotFoundPage } from './screens/NotFoundPage'
 import { LearnPage } from './screens/Learn/LearnPage'
@@ -64,6 +65,7 @@ export function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/invite" element={<AcceptInvitePage />} />
         <Route
           element={
             <RequireAuth>

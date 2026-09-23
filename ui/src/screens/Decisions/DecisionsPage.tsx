@@ -9,7 +9,9 @@
  *               human, asked for rework or withheld by the route gate — one list, ordered by
  *               what blocks what, each row linking to the surface where the act is recorded.
  * What it does: Answers "what needs me, now?" for an approver, and "what is waiting on a
- *               person?" for everyone else. The rows are facts from the map, the sign-offs
+ *               person?" for everyone else — and, since G-516, for HOW LONG: each row carries
+ *               the moment it first became due, from the server's own clock, so a decision
+ *               nobody has looked at for eleven days says eleven days. The rows are facts from the map, the sign-offs
  *               and the factory chain (`decisionsFor`); the screen never decides anything
  *               and never hides a row a viewer may read — it only changes the verb, on the
  *               stale rows too (a viewer reads; "approver acts"). The one line of evidence
@@ -47,7 +49,7 @@ import { Hint } from '../../components/Hint'
 import { Pill } from '../../components/Pill'
 import { useAuth } from '../../lib/auth'
 import { REASON_DISPLAY, type ReasonCode } from '../Capability/contract'
-import { type DecisionKind, KIND_LABEL, evidenceStats } from './decisions'
+import { type DecisionKind, KIND_LABEL, evidenceStats, waitedFor } from './decisions'
 import { useApparatus, useDecisions } from './useDecisionCount'
 
 const KIND_TAG: Record<DecisionKind, TagTone> = {
@@ -75,7 +77,8 @@ function listNames(names: string[]): string {
 
 export function DecisionsPage() {
   const { can } = useAuth()
-  const d = useDecisions()
+  // `true`: this screen shows how long each decision has waited, so it pays for the clock
+  const d = useDecisions(true)
   const apparatus = useApparatus()
   const total = d.decisions.length + d.stale.length
   const repos = Object.keys(d.byRepo)
@@ -129,6 +132,11 @@ export function DecisionsPage() {
                         {KIND_LABEL[row.kind]}
                       </Tag>
                       <h3 className="mb-1 mt-2 text-[24px] font-bold leading-[1.3]">{row.title}</h3>
+                      {waitedFor(row.ageS) && (
+                        <Hint id="stat.decisions.waiting" className="mb-1 block text-[16px] text-on-surface-muted" data-testid={`decision-age-${row.kind}-${row.key}`}>
+                          Waiting {waitedFor(row.ageS)} — since {row.dueSince?.slice(0, 10)}
+                        </Hint>
+                      )}
                       <Hint as="p" id="stat.decisions.evidence" className="m-0 font-mono text-[16px] leading-[1.5] text-on-surface-muted">
                         {evidenceStats(row)}
                         {row.reasonCode && (

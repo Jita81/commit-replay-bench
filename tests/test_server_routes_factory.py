@@ -56,7 +56,7 @@ from crb.server.factory_state import FactoryHome
 from crb.server.settings import GitHubAppSettings
 from crb.store.models import GitHubInstallation, Repo, Run
 from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
-from fixtures.signoff_seed import clear_policy
+from fixtures.signoff_seed import attested_body, clear_policy
 
 PATHS: list[tuple[str, str, str]] = [
     ("GET", f"/factory/{ALPHA}/backlog", "viewer"),
@@ -168,6 +168,8 @@ def test_register_freezes_hashes_and_records(env: Env) -> None:
         "ci_low": 0.0,
         "ci_high": 0.0,
         "apparatus_versions": [],
+        "verification_tier": "",
+        "signed": False,
         "deliverable": False,
     }
     e = env.get(f"/factory/{ALPHA}/evidence").json()
@@ -391,7 +393,10 @@ def test_tasks_carry_the_cell_route_the_delivery_gate_will_read(env: Env) -> Non
     assert by_id["D-1"]["route"] == "human" and by_id["D-1"]["deliverable"] is False
     clear_policy(env)
     by_id = {t["id"]: t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}
-    assert by_id["D-1"]["route"] == "deliver" and by_id["D-1"]["deliverable"] is True
+    # ADR-0018 — the route now says deliver and the prediction still says withheld: this
+    # deployment needs a signed cell too, and nobody has signed it
+    assert by_id["D-1"]["route"] == "deliver" and by_id["D-1"]["deliverable"] is False
+    assert by_id["D-1"]["signed"] is False and by_id["D-1"]["verification_tier"] == "automated-pass"
     assert by_id["D-1"]["n"] >= 10 and by_id["D-1"]["reason_code"] == "deliver"
     # the provenance behind the route: the rate, its interval and the apparatus
     d1 = by_id["D-1"]
@@ -399,6 +404,31 @@ def test_tasks_carry_the_cell_route_the_delivery_gate_will_read(env: Env) -> Non
     assert d1["apparatus_versions"] == [APPARATUS_VERSION]
     assert by_id["T-1"]["route"] != "deliver" and by_id["T-1"]["deliverable"] is False
     assert by_id["T-1"]["reason_code"] and by_id["T-1"]["n"] > 0
+    # a second person attests the cell → the same reading now predicts a pull request, and
+    # the prediction is computed from the same two clauses the loop enforces
+    login(env.client, "approver")
+    r = env.post("/signoffs", json=attested_body(env, {"capability_class": "bug.fix", "size": "S"}))
+    assert r.status_code == 201, r.text
+    login(env.client, "operator")
+    signed = {t["id"]: t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}["D-1"]
+    assert signed["route"] == "deliver" and signed["signed"] is True
+    assert signed["verification_tier"] == "human-verified" and signed["deliverable"] is True
+
+
+def test_the_prediction_follows_the_deployments_delivery_licence_posture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deployment that has set ``CRB_FACTORY__REQUIRE_SIGNED_CELL=false`` (ADR-0018 §5)
+    predicts what ITS gate would do: the measured route alone makes the cell deliverable,
+    with `signed` still saying the truth — nobody attested it."""
+    monkeypatch.setenv("CRB_FACTORY__REQUIRE_SIGNED_CELL", "false")
+    with make_env(tmp_path / "route-alone") as env:
+        login(env.client, "operator")
+        assert _register(env, [{**ITEM, "id": "D-1", "size_estimate": "S"}]).status_code == 201
+        clear_policy(env)
+        (route,) = [t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()]
+        assert route["route"] == "deliver" and route["signed"] is False
+        assert route["deliverable"] is True
 
 
 def test_register_refuses_invalid_items_and_unknown_authored(env: Env) -> None:

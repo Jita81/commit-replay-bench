@@ -22,7 +22,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { CapabilityCell, FactoryTask, Signoff } from '../../api/types'
-import { decisionsFor, evidenceStats } from './decisions'
+import { decisionsFor, evidenceStats, waitedFor } from './decisions'
 
 function cell(over: Partial<CapabilityCell>): CapabilityCell {
   return { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22 …', reason_code: 'deliver', ...over } as CapabilityCell
@@ -87,5 +87,33 @@ describe('decisionsFor', () => {
     ])
     expect(rows[0]).toMatchObject({ role: 'approver', act: 'Sign a gap', href: '/factory?repo=alpha&item=I-1', evidence: 'method_path, response_shape' })
     expect(rows[0]?.title).toBe('I-1 Divide is blocked on 2 structural gaps')
+  })
+
+  it('every row carries the identity the server keeps the clock under (G-516)', () => {
+    const rows = decisionsFor({
+      repo: 'alpha',
+      cells: [cell({ route: 'deliver' })],
+      signoffs: [],
+      tasks: [task({ id: 'I-1', dor_gaps: ['method_path'] })],
+    })
+    // `<class>|<size>` for a cell row and the item id for a factory row — the same keys
+    // `src/crb/server/decisions.py` computes, which is how `GET /decisions` ages join on
+    expect(rows.map((r) => [r.kind, r.key])).toEqual([
+      ['gap_unsigned', 'I-1'],
+      ['signoff_due', 'bug.fix|XS'],
+    ])
+  })
+})
+
+describe('waitedFor', () => {
+  it('reads a wait in the units a person thinks in, and says nothing when nothing is known', () => {
+    expect(waitedFor(undefined)).toBeNull()
+    expect(waitedFor(-1)).toBeNull()
+    expect(waitedFor(30)).toBe('just now')
+    expect(waitedFor(60 * 5)).toBe('5 min')
+    expect(waitedFor(3600)).toBe('1 hour')
+    expect(waitedFor(3600 * 5)).toBe('5 hours')
+    expect(waitedFor(86400)).toBe('1 day')
+    expect(waitedFor(86400 * 11)).toBe('11 days')
   })
 })

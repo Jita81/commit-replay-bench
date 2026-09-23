@@ -112,6 +112,8 @@ REVISION_TABLES: tuple[tuple[str, str], ...] = (
     ("0003", "reviews"),
     ("0005", "github_installations"),
     ("0007", "workers"),
+    ("0009", "invitations"),
+    ("0010", "decisions_due"),
 )
 #: ``(revision, table, index)`` — the INDEX a revision adds when it adds no column or table.
 #: Walked after :data:`REVISION_MARKERS` in the same way: a ``create_all`` schema that

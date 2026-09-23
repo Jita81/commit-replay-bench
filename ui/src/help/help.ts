@@ -103,6 +103,7 @@ export const HELP: ScreenHelp[] = [
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-3--prove-the-instrument-on-this-repository-operator-0', label: 'Prove the instrument for £0' },
       { to: 'OPERATOR#7-when-the-sandbox-is-unavailable', label: 'When the sandbox is unavailable' },
+      { to: 'OPERATOR#9-users', label: 'Users, roles and inviting an approver' },
     ],
   },
   {
@@ -338,10 +339,10 @@ export const HELP: ScreenHelp[] = [
     purpose: 'The instrument’s health, the builder sign-in, the GitHub App and, for admins, the non-secret configuration and user accounts. Secrets are never returned by the API and never shown here.',
     next: {
       viewer: 'Read the health probes; ask an admin for anything else.',
-      admin: 'Register the GitHub App, store the builder token, create an approver account. A probe that is not ok explains itself in its detail line.',
+      admin: 'Register the GitHub App, store the builder token, invite the approver who will sign cells off. A probe that is not ok explains itself in its detail line.',
     },
-    numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule).',
-    terms: ['apparatus', 'negative_controls'],
+    numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule). The two-person reading counts accounts that can sign and accounts that have signed in — accounts, not people.',
+    terms: ['apparatus', 'negative_controls', 'cell', 'signoff'],
     readMore: [
       { to: 'GITHUB-APP#2-register-the-app-once-per-deployment', label: 'Register the GitHub App' },
       { to: 'SECURITY#33-credentials', label: 'How credentials are held' },

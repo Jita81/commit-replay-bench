@@ -60,6 +60,8 @@ const SEGMENT_ROUTE: Record<string, string | null> = {
   shell: null,
   shared: null,
   login: null,
+  // the invitation link's own page: outside the shell, so it has no About block to lint against
+  invite: null,
   help: null,
   notfound: null,
   home: '/home',
@@ -76,6 +78,7 @@ const SEGMENT_ROUTE: Record<string, string | null> = {
   intake: '/factory/intake',
   cell_route: '/factory',
   posture: '/posture',
+  invitations: '/settings',
   repos: '/repos',
   repo_new: '/repos',
   repo: '/repos/:name',

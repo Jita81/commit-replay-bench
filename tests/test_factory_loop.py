@@ -282,8 +282,13 @@ DELIVER_ROUTE: dict[str, Any] = {
     "ci_low": 0.76,
     "false_q1": 0,
     "apparatus_versions": ["2.2"],
+    # ADR-0018: the gate's second clause reads the tier of this same reading — the signed
+    # map the worker hands over, so a delivery test must say a person attested the cell
+    "verification_tier": "human-verified",
     "policy_thresholds": {"min_n": 10},  # not part of the evidence summary
 }
+#: The same cell, measured exactly as well, with nobody's name on it (ADR-0018).
+UNSIGNED_DELIVER_ROUTE: dict[str, Any] = {**DELIVER_ROUTE, "verification_tier": "automated-pass"}
 HUMAN_ROUTE: dict[str, Any] = {
     "route": "human",
     "reason": "oracle strength 0.58 < 0.80 — green cannot license auto-delivery",
@@ -517,13 +522,17 @@ def test_route_gate_override_by_an_approver_is_itself_on_the_record(
     assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
     assert len(rig.pushes) == 1 and len(rig.prs) == 1
     routes = [e.payload for e in rig.evidence.events_for("I-1", fe.EV_ROUTE)]
-    override = [r for r in routes if r.get("override_by")]
+    # ADR-0018: an override lifts BOTH clauses of the delivery gate and each one is recorded
+    # on its own, naming the clause — this cell routes `human` AND is unsigned
+    override = [r for r in routes if r.get("override_by") and not r.get("clause")]
     assert len(override) == 1
     assert override[0]["route"] == "deliver" and override[0]["measured_route"] == "human"
     assert (
         override[0]["override_by"] == "approver:ada" and override[0]["reason_code"] == "oracle_weak"
     )
     assert "route gate overridden by approver:ada" in override[0]["reason"]
+    signed_clause = [r for r in routes if r.get("clause") == fl.REFUSAL_UNSIGNED_CELL]
+    assert len(signed_clause) == 1 and signed_clause[0]["override_by"] == "approver:ada"
     kinds = rig.kinds("I-1")
     assert kinds.index(fe.EV_ROUTE) < kinds.index(fe.EV_DELIVERY)
 
@@ -569,6 +578,7 @@ def test_route_is_read_once_per_item_at_readiness_before_any_build(
         "false_q1": 0,
         "policy_version": "routing.v1",
         "apparatus_versions": ["2.2"],
+        "verification_tier": "human-verified",
     }
     kinds = rig.kinds("I-1")
     assert kinds.index(fe.EV_ROUTE) < kinds.index(fe.EV_RED_PROOF) < kinds.index(fe.EV_BUILD)
@@ -600,6 +610,137 @@ def test_route_read_once_is_what_gates_delivery_even_if_the_map_moves_later(
     assert out2.status == fl.STATUS_ACCEPTED and out2.delivery is None
     (route,) = rig2.evidence.events_for("I-1", fe.EV_ROUTE)
     assert route.payload["cell_route"] is None
+
+
+# --- the signed-cell clause (ADR-0018, G-517) ---------------------------------------
+
+
+class TestSignedCellGate:
+    """The delivery gate's second clause: a measured route is not a person. A pull request
+    needs an active human attestation on the item's cell as well as a ``deliver`` route
+    (ADR-0018, default ON), the refusal is its own code and event, and an approver's named
+    per-run override lifts it and says so on the chain."""
+
+    def test_an_unsigned_cell_is_withheld_with_its_own_refusal_code_and_event(
+        self, pyrepo: pr.PyRepo, tmp_path: Path
+    ) -> None:
+        rig = _rig(
+            pyrepo,
+            tmp_path,
+            deliver=True,
+            creds=_creds(),
+            route_decision_for=lambda item: UNSIGNED_DELIVER_ROUTE,
+        )
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        # built, graded and reviewed — only the pull request is withheld
+        assert out.status == fl.STATUS_ACCEPTED and out.delivery is None
+        assert not rig.pushes and not rig.prs
+        (refused,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+        ev = refused.payload
+        assert ev["reason"].startswith("signed-cell gate: the cell is not signed")
+        assert ev["reason_code"] == fl.REFUSAL_UNSIGNED_CELL == "unsigned_cell"
+        assert ev["verification_tier"] == "automated-pass"
+        assert ev["measured_route"] == "deliver"  # the route clause passed; this one did not
+        emitted = [e for e in rig.sink.events if e.action == "delivery.unsigned"]
+        assert len(emitted) == 1 and emitted[0].status is StepStatus.SKIPPED
+        assert emitted[0].payload["reason_code"] == "unsigned_cell"
+        assert fe.EV_DELIVERY not in rig.kinds("I-1")
+        assert pyrepo.repo.rev_parse("main") == pyrepo.docs_sha
+
+    def test_an_unmeasured_tier_is_not_a_licence_either(
+        self, pyrepo: pr.PyRepo, tmp_path: Path
+    ) -> None:
+        """A reading with no tier at all (a map built before the overlay ran) withholds:
+        the clause fails closed, it never reads an absent tier as permission."""
+        no_tier = {k: v for k, v in DELIVER_ROUTE.items() if k != "verification_tier"}
+        rig = _rig(
+            pyrepo, tmp_path, deliver=True, creds=_creds(), route_decision_for=lambda item: no_tier
+        )
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.status == fl.STATUS_ACCEPTED and out.delivery is None and not rig.prs
+        ev = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)[0].payload
+        assert ev["verification_tier"] == "" and "verification tier unmeasured" in ev["reason"]
+
+    def test_a_signed_cell_delivers_and_the_pull_request_says_which_licence(
+        self, pyrepo: pr.PyRepo, tmp_path: Path
+    ) -> None:
+        rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds())  # DELIVER_ROUTE is signed
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
+        assert len(rig.pushes) == 1 and len(rig.prs) == 1
+        assert not rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+        body = rig.prs[0]["body"]
+        assert "- licence: **signed cell** — a human attested this cell (`human-verified`)" in body
+
+    def test_the_deployment_may_set_the_route_alone_as_its_bar(
+        self, pyrepo: pr.PyRepo, tmp_path: Path
+    ) -> None:
+        """``require_signed_cell=False`` (``CRB_FACTORY__REQUIRE_SIGNED_CELL=false``) is the
+        pre-ADR-0018 behaviour: the same unsigned cell delivers, and the pull request says
+        no human attested it."""
+        rig = _rig(
+            pyrepo,
+            tmp_path,
+            deliver=True,
+            creds=_creds(),
+            require_signed_cell=False,
+            route_decision_for=lambda item: UNSIGNED_DELIVER_ROUTE,
+        )
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
+        assert len(rig.prs) == 1
+        assert "- licence: **unsigned cell**" in rig.prs[0]["body"]
+
+    def test_an_approver_may_override_the_clause_and_is_named_for_it(
+        self, pyrepo: pr.PyRepo, tmp_path: Path
+    ) -> None:
+        rig = _rig(
+            pyrepo,
+            tmp_path,
+            deliver=True,
+            creds=_creds(),
+            route_decision_for=lambda item: UNSIGNED_DELIVER_ROUTE,
+            deliver_override_by="approver:ada",
+        )
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
+        assert not rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+        overrides = [
+            e.payload
+            for e in rig.evidence.events_for("I-1", fe.EV_ROUTE)
+            if e.payload.get("clause") == "unsigned_cell"
+        ]
+        assert len(overrides) == 1
+        assert overrides[0]["override_by"] == "approver:ada"
+        assert overrides[0]["verification_tier"] == "automated-pass"
+        assert "signed-cell gate overridden by approver:ada" in overrides[0]["reason"]
+        emitted = [
+            e
+            for e in rig.sink.events
+            if e.action == "delivery.override" and e.payload.get("clause") == "unsigned_cell"
+        ]
+        assert len(emitted) == 1
+        # and the reader who merges it is never told a person attested the cell
+        assert (
+            "- licence: **unsigned cell** — opened under a named per-run override"
+            in (rig.prs[0]["body"])
+        )
+
+    def test_the_route_clause_is_still_read_first(self, pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+        """A cell that is signed but does not route ``deliver`` is refused by the ROUTE
+        clause, with the route's own code — the clauses are not interchangeable."""
+        signed_human = {**HUMAN_ROUTE, "verification_tier": "human-verified"}
+        rig = _rig(
+            pyrepo,
+            tmp_path,
+            deliver=True,
+            creds=_creds(),
+            route_decision_for=lambda item: signed_human,
+        )
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.status == fl.STATUS_ACCEPTED and out.delivery is None
+        ev = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)[0].payload
+        assert ev["reason"].startswith("route gate:") and ev["reason_code"] == "oracle_weak"
 
 
 # --- rework -------------------------------------------------------------------------
