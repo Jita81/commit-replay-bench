@@ -44,7 +44,9 @@
  *               (`Term`), ui/src/components/Hint.tsx + ui/src/help/hints.ts (the triggers
  *               and their copy), ui/src/screens/Repos/* (registration and config live there; this
  *               screen links to them), ui/src/screens/Results/ResultsPage.tsx (the baseline,
- *               where the walk ends), docs/ONBOARDING-A-REPO.md (the same steps for the CLI)
+ *               where the walk ends), ui/src/components/FlowPanel.tsx (the connect stream's own
+ *               lead time and spend under the walk), docs/ONBOARDING-A-REPO.md (the same steps
+ *               for the CLI)
  * Tested by:    ui/src/screens/Connect/ConnectPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element on /connect and /connect/:name resolves to a registry id)
  * Touch when:   a stage is added (connection.ts first); the API grows a GitHub App install
@@ -73,6 +75,7 @@ import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
+import { FlowPanel } from '../../components/FlowPanel'
 import { Term } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
@@ -447,6 +450,8 @@ export function ConnectRepoPage() {
           {actionError && <ErrorState compact error={actionError} />}
         </Card>
       )}
+      {/* the connect stream's own numbers (docs/dod/streams/connect-and-prove.md MEASURE) */}
+      <FlowPanel stream="connect-and-prove" repo={name} />
       <RunNewDialog
         open={measureOpen}
         onClose={() => setMeasureOpen(false)}

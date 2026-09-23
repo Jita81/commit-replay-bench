@@ -10,6 +10,8 @@
  *  - the Ledger page's chain gate is OPEN with false-Q1 = 0 and the rows are listed;
  *  - the Capability page renders the (class × size) cell with its n, its Wilson
  *    interval and the route `calibrate` (n < 10) — never a fabricated cell;
+ *  - the Baseline carries the measure stream's flow card: a measured lead time with its n,
+ *    and a spend that names which rows it covers (G-925);
  *  - the Sign-off page refuses to attest a thin cell: under `signoff-policy.v1` the
  *    server's preview lists the failing clauses (`thin_cell`, and the controls escape
  *    04's run found), the gate is CLOSED and the action stays disabled — 08 tells the
@@ -43,7 +45,8 @@
  *               hermetic builder — registered only under `CRB_ENABLE_FIXTURE_BUILDER=1`),
  *               ui/src/screens/Runs/RunDetailPage.tsx, ui/src/screens/Runs/EvidenceDrawer.tsx,
  *               ui/src/screens/Ledger/LedgerPage.tsx, ui/src/screens/Capability/CapabilityPage.tsx,
- *               ui/src/screens/Signoff/SignoffPage.tsx (the screens under test)
+ *               ui/src/components/FlowPanel.tsx, ui/src/screens/Signoff/SignoffPage.tsx (the
+ *               screens under test)
  * Tested by:    ui/e2e/walkthrough/05-replay-fake.spec.ts
  * Touch when:   a screen's test ids change, or the thin-cell refusal wording changes (08
  *               asserts on the same cell's n).
@@ -193,6 +196,24 @@ test.describe(`05 replay (${BUILDER})`, () => {
     await expect(page.getByText(`n=${n} < 10`)).toBeVisible()
     await expect(page.getByText('Pass rate', { exact: true })).toBeVisible()
     await expect(page.getByText('Wilson 95%').first()).toBeVisible()
+  })
+
+  test('the Baseline carries the measure stream’s own flow: a lead time with its n, and a spend that is a floor', async ({ page }) => {
+    await page.goto(`/results?repo=${encodeURIComponent(t.name)}`)
+    const card = page.locator('#flow-measure')
+    await expect(card).toBeVisible()
+    // the figures are a fold over records already kept, and the card says so
+    await expect(card).toContainText('derived from the stored')
+    // the run this spec queued was graded, so queued → graded is measured, not a dash
+    const lead = page.getByTestId('flow-queued_to_graded')
+    await expect(lead).toBeVisible()
+    await expect(tileValue(lead)).not.toHaveText('—')
+    await expect(lead).toContainText('n =')
+    // the spend names which rows it covers and whether any reported no price
+    const spend = page.getByTestId('flow-spend-measure')
+    await expect(spend).toContainText('every graded row recorded for this repository')
+    // and the counts are counts: the rows this repository has graded
+    await expect(card).toContainText('graded rows')
   })
 
   test('the Sign-off page refuses to attest the thin cell: the policy gate stays CLOSED', async ({ page }) => {

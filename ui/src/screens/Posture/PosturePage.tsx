@@ -24,6 +24,7 @@
  *               `DocLink`), ui/src/screens/Settings/SettingsPage.tsx (where an admin acts),
  *               src/crb/server/worker.py (`_delivery_credentials` — what the Delivery rows
  *               describe), src/crb/factory/loop.py (the route gate and the override event),
+ *               ui/src/components/FlowPanel.tsx (the platform stream's own recovery lead time),
  *               docs/SECURITY.md §2 (the trust boundaries these rows describe), docs/DEPLOYMENT.md
  * Tested by:    ui/src/components/govuk.test.tsx (the page is covered there)
  * Touch when:   a deployment fact is added to `/settings` that a review board would ask for;
@@ -32,7 +33,8 @@
 
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
-import { useGitHubApp, useHealth, useLedgerVerify, useSettings, useVersion } from '../../api/hooks'
+import { useAllRepos, useGitHubApp, useHealth, useLedgerVerify, useSettings, useVersion } from '../../api/hooks'
+import { FlowPanel } from '../../components/FlowPanel'
 import { DocLink, Term } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { InsetText, Kicker, PageTitle, SummaryList, type SummaryRow } from '../../components/govuk'
@@ -64,6 +66,9 @@ export function PosturePage() {
   const settings = useSettings(can('admin'))
   const verify = useLedgerVerify()
   const gh = useGitHubApp()
+  // any connected repository keys the flow reading; the platform stream's figures are the
+  // deployment's own, so which one it is does not change them
+  const anyRepo = useAllRepos().data?.items[0]?.name ?? ''
   const probe = (name: string) => health.data?.probes.find((p) => p.name === name)
   // a probe's sentence, or why there is none: "…" while loading, and the truth when the health
   // check itself could not be read (never a silent ellipsis)
@@ -265,6 +270,11 @@ export function PosturePage() {
           <SummaryList rows={g.rows} label={g.name} />
         </section>
       ))}
+      {/* The platform stream's own numbers (docs/dod/streams/run-the-platform.md MEASURE).
+          They are the DEPLOYMENT's — accounts and recoveries, not one repository's — but the
+          reading is keyed by a repository because the other five streams are, so this uses any
+          connected one; with none connected there is nothing yet to read. */}
+      <FlowPanel stream="run-the-platform" repo={anyRepo} title="How this flows: running the platform" />
       <InsetText>
         <p className="m-0">Secret values are never shown, here or anywhere else in this interface. What is shown is the reference the deployment resolves at run time, and whether it is configured.</p>
       </InsetText>

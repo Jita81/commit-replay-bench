@@ -68,6 +68,7 @@ import type {
   FactoryBacklog,
   FactoryCatalogue,
   FactoryTask,
+  Flow,
   ForecastBuild,
   ForecastReadiness,
   GradeListParams,
@@ -140,6 +141,7 @@ export const keys = {
   factoryTasks: (repo: string) => ['factory', repo, 'tasks'] as const,
   factoryEvidence: (repo: string) => ['factory', repo, 'evidence'] as const,
   intake: (repo: string) => ['factory', repo, 'intake'] as const,
+  flow: (repo: string) => ['flow', repo] as const,
   users: ['users'] as const,
   settings: ['settings'] as const,
   githubApp: ['github', 'app'] as const,
@@ -574,6 +576,21 @@ export function useForecastReadiness(repo: string): UseQueryResult<ForecastReadi
     queryFn: () => api<ForecastReadiness>(`/forecast/readiness${qs({ repo })}`),
     enabled: repo.length > 0,
     retry: false,
+  })
+}
+
+/**
+ * `GET /flow?repo=` — every value stream's lead time, spend and counts, derived from stored
+ * records. One query per repository: each screen reads its own stream out of the same reading,
+ * so five panels cost one request. 30 s stale, like the map.
+ */
+export function useFlow(repo: string): UseQueryResult<Flow, ApiError> {
+  return useQuery({
+    queryKey: keys.flow(repo),
+    queryFn: () => api<Flow>(`/flow${qs({ repo })}`),
+    enabled: repo.length > 0,
+    retry: false,
+    staleTime: 30_000,
   })
 }
 

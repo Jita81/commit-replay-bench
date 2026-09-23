@@ -35,10 +35,12 @@
  * Works with:   ui/src/screens/Results/MapTable.tsx (the grid; `canSign`),
  *               ui/src/screens/Decisions/decisions.ts (the rows and the role rule reused
  *               here), ui/src/components/RepoPicker.tsx (`defaultToLatest`),
- *               ui/src/components/StatTile.tsx (the tile anatomy), ui/src/components/Help.tsx
- *               (`Term` on the route tiles), ui/src/help/hints.ts (the `stat.results.*` copy;
+ *               ui/src/components/StatTile.tsx (the tile anatomy), ui/src/components/Help.tsx +
+ *               ui/src/help/hints.ts (`Term` on the route tiles and the `stat.results.*` copy;
  *               the trigger is `Hint`), ui/src/screens/Capability/CapabilityPage.tsx
- *               (the full grid), docs/EVIDENCE-AND-CLAIMS.md (what a number may be said to mean)
+ *               (the full grid), ui/src/components/FlowPanel.tsx (the measure stream's own lead
+ *               time and spend under the map), docs/EVIDENCE-AND-CLAIMS.md (what a number may
+ *               be said to mean)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
  * Touch when:   a headline fact is added to the map summary; the wording of what `deliver`
@@ -54,6 +56,7 @@ import { LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
+import { FlowPanel } from '../../components/FlowPanel'
 import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
@@ -283,6 +286,8 @@ export function ResultsPage() {
               </ul>
             )}
           </Card>
+          {/* the measure stream's own numbers (docs/dod/streams/measure.md MEASURE) */}
+          <FlowPanel stream="measure" repo={repo} />
         </>
       )}
     </>

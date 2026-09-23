@@ -8,6 +8,30 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-23 — the product measures its own flow (G-925)
+
+Every event carried a timestamp and every graded row a cost, and the product folded none of
+it: no screen could say how long anything took or what it cost. `GET /flow?repo=` now derives
+— it stores nothing new — each value stream's own lead time, spend and counts out of records
+already kept, and each screen shows the stream it owns: the Connection walk shows registration
+to a passed controls report, the Baseline shows a run queued to its last row graded and what a
+routable cell cost, Sign-off shows the attested row to the signature, the Factory shows an item
+registered to a pull request opened and merged, and Deployment shows how long an account
+recovery took.
+
+- **An unmeasured figure is null, never zero.** A median of no durations, a spend with no
+  priced row and a cost per delivery with nothing delivered all read as a dash with one
+  sentence saying why. An unpriced row (`GradeRow.cost_known` false) is never counted as $0:
+  the sum says how many rows it leaves out, so the total reads as a floor.
+- **The figures nobody records are named, not derived.** Four of them: the developer hours of
+  the guide's "real work" (G-556), the moment a cell first routed `deliver` and the reviewer
+  minutes a decision cost (G-557), and the install-to-first-green-`/health` and go-live lines
+  (G-558). Each is printed on the screen with why and with the gap that would close it, rather
+  than a number nobody measured. Two of the five MEASURE criteria are now `met`; the other
+  three are `partial` with those gaps, and G-925 is closed.
+- **It refuses untrusted rows like the map does.** A repository holding a false-Q1 row answers
+  `409 false_q1_refused` — a flow reading is never folded over rows the ledger will not load.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real

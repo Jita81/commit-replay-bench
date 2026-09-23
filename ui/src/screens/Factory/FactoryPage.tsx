@@ -54,7 +54,8 @@
  *               included — documented under "Factory" in the API doc),
  *               src/crb/server/factory_state.py (`task_views`, the fold of the factory
  *               loop's chain this screen renders; the loop itself is src/crb/factory/loop.py),
- *               ui/src/screens/Decisions/decisions.ts (the inbox rows that link here)
+ *               ui/src/components/FlowPanel.tsx (the manufacture stream's lead time from item
+ *               to merge), ui/src/screens/Decisions/decisions.ts (the inbox rows that link here)
  * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx, ui/e2e/walkthrough/10-factory.spec.ts
  * Touch when:   a step or a stop status is added to the loop (add it to `stepsFor` and the
  *               loop's docstring); a field is added to `FactoryTaskOut`; a refusal is
@@ -71,6 +72,7 @@ import { Dialog } from '../../components/Dialog'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextArea, TextField } from '../../components/Field'
+import { FlowPanel } from '../../components/FlowPanel'
 import { DocLink, Term } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
@@ -569,6 +571,8 @@ export function FactoryPage() {
               </ul>
             )}
           </Card>
+          {/* the manufacture stream's own numbers (docs/dod/streams/manufacture-and-deliver.md MEASURE) */}
+          <FlowPanel stream="manufacture-and-deliver" repo={repo} />
         </>
       )}
       <RegisterBacklogDialog key={dialogKey} open={registerOpen} repo={repo} from={prefill} onClose={() => setRegisterOpen(false)} />

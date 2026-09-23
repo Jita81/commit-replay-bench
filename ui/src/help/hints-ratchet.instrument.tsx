@@ -420,6 +420,33 @@ const GRADES = { items: [ROW, { ...ROW, row_id: 'row-2', row_hash: 'i'.repeat(64
 const USERS = { items: [{ id: 'u1', username: 'ada', display_name: 'Ada', email: 'ada@example.org', role: 'admin', issuer: 'local', active: true, created: '2026-09-01T10:00:00+00:00' }], total: 1, limit: 50, offset: 0 }
 const SECRETS = { items: [{ name: 'claude_code_oauth_token', present: true, fingerprint: 'GOOD', set_at: '2026-09-13T10:00:00+00:00', set_by: 'root' }], secrets_dir: '/srv/crb/secrets' }
 
+// ── the flow reading every screen shows its own stream's numbers from (G-925)
+const flowStream = (stream: string, name: string, key: string) => ({
+  stream,
+  name,
+  lead_times: [{ key, label: `${name} lead time`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' }],
+  spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6 },
+  spend_label: 'every graded row recorded for this repository',
+  per_unit: null,
+  per_unit_label: stream === 'manufacture-and-deliver' ? 'per merged pull request' : '',
+  counts: { graded_rows: 44 },
+  not_captured: stream === 'decide-and-license' ? [{ figure: 'the reviewer minutes each decision cost', why: 'POST /reviews asks for no minutes', gap: 'G-557' }] : [],
+})
+const FLOW = {
+  repo: 'alpha',
+  apparatus: '2.2',
+  generated: '2026-09-23T10:00:00+00:00',
+  method: 'derived from the stored runs, graded rows, events, sign-offs and factory chain',
+  streams: [
+    flowStream('connect-and-prove', 'Connect & prove', 'registered_to_controls'),
+    flowStream('measure', 'Measure', 'queued_to_graded'),
+    flowStream('decide-and-license', 'Decide & license', 'accepted_to_signed'),
+    flowStream('manufacture-and-deliver', 'Manufacture & deliver', 'registered_to_pr'),
+    flowStream('learn', 'Learn', 'refusal_to_strengthening'),
+    flowStream('run-the-platform', 'Run the platform', 'password_set_to_signed_in'),
+  ],
+}
+
 // ─── the table ───────────────────────────────────────────────────────────────────────────
 
 export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
@@ -436,6 +463,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
       'GET /version': VERSION,
       'GET /capability-map': MAP,
       'GET /runs': FACTORY_RUNS,
+      'GET /flow': FLOW,
     },
     roles: ['viewer', 'operator', 'approver'],
   },
@@ -453,7 +481,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     route: '/posture',
     path: '/posture',
     element: <PosturePage />,
-    api: { 'GET /version': VERSION, 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'degraded', detail: 'no worker has checked in', data: {} }, { name: 'toolchains', status: 'ok', detail: 'python 3.12', data: {} }, { name: 'append_only', status: 'ok', detail: 'triggers present', data: {} }] }, 'GET /settings': SETTINGS, 'GET /ledger/verify': LEDGER_VERIFY, 'GET /github/app': GITHUB_APP },
+    api: { 'GET /version': VERSION, 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'degraded', detail: 'no worker has checked in', data: {} }, { name: 'toolchains', status: 'ok', detail: 'python 3.12', data: {} }, { name: 'append_only', status: 'ok', detail: 'triggers present', data: {} }] }, 'GET /settings': SETTINGS, 'GET /ledger/verify': LEDGER_VERIFY, 'GET /github/app': GITHUB_APP, 'GET /repos': REPOS, 'GET /flow': FLOW },
     roles: ['viewer', 'admin'],
   },
   '/repos': {

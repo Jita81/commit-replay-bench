@@ -146,12 +146,40 @@ const SIGNED = {
   attestation: { reviewed_task_id: 'a'.repeat(40), reviewed_row_hash: ROW, statement: 'I read the diff.', at: '2026-09-14T10:00:00+00:00', subject: 'fix: task 4' },
 }
 
+// ── the flow reading every screen shows its own stream's numbers from (G-925)
+const flowStream = (stream: string, name: string, key: string) => ({
+  stream,
+  name,
+  lead_times: [{ key, label: `${name} lead time`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' }],
+  spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6 },
+  spend_label: 'every graded row recorded for this repository',
+  per_unit: null,
+  per_unit_label: stream === 'manufacture-and-deliver' ? 'per merged pull request' : '',
+  counts: { graded_rows: 44 },
+  not_captured: stream === 'decide-and-license' ? [{ figure: 'the reviewer minutes each decision cost', why: 'POST /reviews asks for no minutes', gap: 'G-557' }] : [],
+})
+const FLOW = {
+  repo: 'alpha',
+  apparatus: '2.2',
+  generated: '2026-09-23T10:00:00+00:00',
+  method: 'derived from the stored runs, graded rows, events, sign-offs and factory chain',
+  streams: [
+    flowStream('connect-and-prove', 'Connect & prove', 'registered_to_controls'),
+    flowStream('measure', 'Measure', 'queued_to_graded'),
+    flowStream('decide-and-license', 'Decide & license', 'accepted_to_signed'),
+    flowStream('manufacture-and-deliver', 'Manufacture & deliver', 'registered_to_pr'),
+    flowStream('learn', 'Learn', 'refusal_to_strengthening'),
+    flowStream('run-the-platform', 'Run the platform', 'password_set_to_signed_in'),
+  ],
+}
+
 const ALPHA_WALK = {
   'GET /repos/alpha': { ...REPO, last_run: { id: 'r9', kind: 'replay', status: 'running', finished: null } },
   'GET /oracle/alpha': ORACLE,
   'GET /oracle/alpha/controls': CONTROLS,
   'GET /capability-map': MAP,
   'GET /runs/r9': RUN,
+  'GET /flow': FLOW,
 }
 
 /** The on-ramp routes, keyed by App.tsx pattern. */
@@ -222,6 +250,7 @@ export const ONRAMP_SCREENS: Record<string, OnrampScreen> = {
       'GET /oracle/alpha': ORACLE,
       'GET /signoffs': { items: [STALE], total: 1, limit: 50, offset: 0 },
       'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /flow': FLOW,
     },
     roles: ['viewer', 'approver'],
   },
@@ -247,6 +276,7 @@ export const ONRAMP_SCREENS: Record<string, OnrampScreen> = {
       'GET /capability-map': SIGNOFF_MAP,
       'GET /signoffs': { items: [SIGNED], total: 1, limit: 50, offset: 0 },
       'GET /signoffs/preview': PREVIEW,
+      'GET /flow': FLOW,
     },
     roles: ['viewer', 'approver'],
   },

@@ -1473,3 +1473,66 @@ export interface Intake {
   last_poll: IntakePoll | null
   rows: IntakeRow[]
 }
+
+// ---------------------------------------------------------------------------
+// Flow (docs/API.md "Flow (how long each stream takes, and what it spent)")
+// ---------------------------------------------------------------------------
+
+/**
+ * One milestone pair's duration. `median_s` / `min_s` / `max_s` are `null` when `n` is 0 —
+ * unmeasured, not zero — and `reason` then says why in one sentence. `dropped` counts the pairs
+ * the server refused (an unreadable stamp, or an end before its start).
+ */
+export interface LeadTime {
+  key: string
+  label: string
+  n: number
+  median_s: number | null
+  min_s: number | null
+  max_s: number | null
+  dropped: number
+  reason: string
+}
+
+/**
+ * What a stream spent. `usd` sums only the rows whose cost is a measurement and is `null` when
+ * there are none; `rows_unpriced` is how many rows the sum leaves out, so the total is read as
+ * a floor and never as the whole bill.
+ */
+export interface Spend {
+  usd: number | null
+  rows_priced: number
+  rows_unpriced: number
+}
+
+/** A figure a stream's definition of done asks for that nothing in the product records. */
+export interface NotCaptured {
+  figure: string
+  why: string
+  gap: string
+}
+
+/** One value stream's own numbers. */
+export interface StreamFlow {
+  stream: string
+  name: string
+  lead_times: LeadTime[]
+  spend: Spend
+  /** Which rows the spend covers, in words — the streams do not all buy the same thing. */
+  spend_label: string
+  /** The spend divided by the thing the stream delivers, or `null` when either side is unmeasured. */
+  per_unit: number | null
+  per_unit_label: string
+  counts: Record<string, number>
+  not_captured: NotCaptured[]
+}
+
+/** `GET /flow?repo=` — every stream's lead time, spend and counts, derived from stored records. */
+export interface Flow {
+  repo: string
+  apparatus: string
+  generated: string
+  /** How the figures were produced — a fold over stored records, not a live probe. */
+  method: string
+  streams: StreamFlow[]
+}
