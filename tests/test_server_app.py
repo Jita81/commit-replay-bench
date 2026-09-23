@@ -204,6 +204,7 @@ class TestFactory:
             "auth",
             "capability",
             "factory",
+            "flow",
             "forecast",
             "github",
             "grades",
