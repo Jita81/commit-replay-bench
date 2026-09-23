@@ -844,11 +844,12 @@ def test_a_pass_whose_last_ticket_finished_inside_the_budget_does_not_say_it_sto
     everything done must not read ``stopped`` — that would be a false alarm on the screen and
     a false ``degraded`` on `/health`."""
     tracker = _tracker(_ticket())
-    calls = {"n": 0}
 
-    def clock() -> float:  # still inside the budget for every check, then long past it
-        calls["n"] += 1
-        return 0.0 if calls["n"] <= 50 else 99.0
+    # The clock goes past the deadline the moment the ticket's last tracker write has
+    # happened, so a deadline check added AFTER that write fails this control (CodeRabbit on
+    # PR #48): a generous call ceiling would keep returning 0.0 and pass either way.
+    def clock() -> float:  # inside the budget while the ticket is worked, then long past it
+        return 99.0 if tracker.calls and tracker.calls[-1][0] == "link" else 0.0
 
     report = _poll(home, tracker, route=_deliver(), budget_s=10.0, clock=clock)
     assert report.registered == 1 and report.stopped == "" and report.ok

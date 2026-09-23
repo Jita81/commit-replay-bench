@@ -765,7 +765,7 @@ def _handle_ticket(
 ) -> IntakeRow | None:
     """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped.
 
-    ``check_budget`` is asked before each group of tracker calls (:class:`_BudgetGuard`), so a
+    ``check_budget`` is asked before EVERY tracker call (:class:`_BudgetGuard`), so a
     pass that has run out of time starts no further call on somebody's board.
     """
     del actor
@@ -867,6 +867,7 @@ def _handle_ticket(
     try:
         check_budget("comment")
         tracker.comment(ticket.key, feedback.text, feedback.marker)
+        check_budget("label")
         tracker.label(ticket.key, label)
     except TrackerError as exc:
         evidence.append(
@@ -908,6 +909,7 @@ def _handle_ticket(
                 render_queued(draft.item.id, url),
                 marker_for(tracker.name, f"{ticket.key}:queued"),
             )
+            check_budget("queued link")
             tracker.link(ticket.key, url, LINK_ITEM)
         except TrackerError as exc:
             evidence.append(
@@ -1028,11 +1030,13 @@ def _register_and_queue(
     try:
         check_budget("queued note")
         tracker.label(draft.ticket.key, LABEL_QUEUED)
+        check_budget("queued comment")
         tracker.comment(
             draft.ticket.key,
             render_queued(draft.item.id, url),
             marker_for(tracker.name, f"{draft.ticket.key}:queued"),
         )
+        check_budget("queued link")
         tracker.link(draft.ticket.key, url, LINK_ITEM)
     except TrackerError as exc:
         # the item IS registered; only the courtesy write failed. Say so and move on. An
