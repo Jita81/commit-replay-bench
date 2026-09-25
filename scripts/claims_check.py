@@ -68,8 +68,9 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
               qualifying a plural noun → look for a permitted tag in the block's cover. Then
-              each docs/reviews/*.md Actions table → its action numbers ⇄ the
-              ``\`<stem>\` action #N: <state>`` records in docs/DECISION-LOG.md.
+              each docs/reviews/*.md Actions table → its action numbers ⇄ the records in
+              docs/DECISION-LOG.md, each under a head that names the review's stem in
+              backticks, then ``action #N: <state>``.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of),
