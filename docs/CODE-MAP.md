@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-486 files with a header · 1 exempt (listed at the end).
+488 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -16,7 +16,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`deploy/entrypoint.sh`](../deploy/entrypoint.sh) | The container entrypoint: one image, the role chosen by the first argument. | untested — no unit test; the container smoke in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs the ``migrate upgrade`` and ``migrate current`` roles through the built image | a role is added to the image (a ``case`` arm, [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md) and the Helm template that runs it); a uvicorn flag changes (keep ``--proxy-headers`` scoped to ``CRB_FORWARDED_ALLOW_IPS``). |
 | [`deploy/verify-image.sh`](../deploy/verify-image.sh) | The operator's release-verification script: keyless signature, SBOM attestation and (optionally) the tag → digest pin, before an image is run. | [`tests/test_release_verify_image.py`](../tests/test_release_verify_image.py) | the image repository, issuer or identity pattern changes (change release.yml, the Helm values and this script together — the test enforces it); cosign's CLI changes. |
 
-## `scripts` (5 files)
+## `scripts` (6 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -24,6 +24,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`scripts/claims_check.py`](../scripts/claims_check.py) | The claim-tag gate over the public pages (stdlib only; CI's ``claims`` job). | [`tests/test_claims_check.py`](../tests/test_claims_check.py) | a tag is added to the policy (update TAGS and EVIDENCE-AND-CLAIMS §1 together); a page joins the allowlist (add it and make it pass in the same change). |
 | [`scripts/code_map.py`](../scripts/code_map.py) | The code-map generator and header gate (stdlib only; runs in CI's ``code-map`` job). | [`tests/test_code_map.py`](../tests/test_code_map.py) | a new source root or language is added; a key is added to the standard (update REQUIRED_KEYS, the standard and every header together). |
 | [`scripts/dod_check.py`](../scripts/dod_check.py) | The definition-of-done checker and gap-analysis generator (stdlib only; CI's ``dod`` job runs ``--check``). | [`tests/test_dod_check.py`](../tests/test_dod_check.py) | a level or category is added to the standard (update CATEGORIES / LEVELS and the standard together); a new evidence prefix is needed (add a resolver and a row to STANDARD.md §3); a route or journey step is added (write its artefact — the check tells you which). |
+| [`scripts/prevention_from_export.py`](../scripts/prevention_from_export.py) | The offline register builder over an exported ledger (PSV), for the value wave's baseline numbers (ADR-0020's "What the register would do today"). | [`tests/test_prevention_from_export.py`](../tests/test_prevention_from_export.py) | the export's columns change (``COLUMNS``), or the product's error classes do (``EXPORT_ERRORS`` must map each to the kind the product's rule gives it). |
 | [`scripts/walkthrough.sh`](../scripts/walkthrough.sh) | The browser-walkthrough driver: boots a FRESH crb stack in a temporary ``CRB_HOME`` and runs the Playwright suite against it, then tears it down. | [`ui/e2e/walkthrough/01-login.spec.ts`](../ui/e2e/walkthrough/01-login.spec.ts), [`ui/e2e/walkthrough/05-replay-fake.spec.ts`](../ui/e2e/walkthrough/05-replay-fake.spec.ts) (the suite it drives; the script itself has no unit test — CI runs it end to end) | a spec needs another ``CRB_E2E_*`` variable (export it in step 4 and document it in the README); the server or worker CLI flags change; never to inherit an existing home, database or port. |
 
 ## `src/crb/builders` (12 files)
@@ -223,7 +224,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/migrations/versions/v0008_workers_unconfirmed_containers.py`](../src/crb/store/migrations/versions/v0008_workers_unconfirmed_containers.py) | Revision 0008: ``workers.unconfirmed_containers`` (``INTEGER NOT NULL DEFAULT 0``) — the count the worker stamps on its check-in row from its reaper queue. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py), [`tests/test_server_system.py`](../tests/test_server_system.py) | never — a released revision is immutable. |
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 
-## `tests` (154 files)
+## `tests` (155 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -318,6 +319,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_oracle_mutation_text.py`](../tests/test_oracle_mutation_text.py) | The C-family text mutator's test suite (``crb.core.oracle.mutators_text``) and its wiring into the scorer. | [`tests/test_oracle_mutation_text.py`](../tests/test_oracle_mutation_text.py) | a language is added to the text mutator (a scanner case for its literal syntax, an operator case per family, the registration case and an end-to-end); an operator is added (the table hash changes — an apparatus consequence). |
 | [`tests/test_oracle_sealed_corpus.py`](../tests/test_oracle_sealed_corpus.py) | The sealed corpus's test suite (``crb.core.oracle.sealed_corpus``). | [`tests/test_oracle_sealed_corpus.py`](../tests/test_oracle_sealed_corpus.py) | a model cut-off is added to the exposure table; the split or stratification rule changes (the determinism cases pin exact assignments). |
 | [`tests/test_playbook_leakage.py`](../tests/test_playbook_leakage.py) | The playbook's leakage suite (ADR-0020 §7). | [`tests/test_playbook_leakage.py`](../tests/test_playbook_leakage.py) | a template or a slot is added (plant a canary in its source here first). |
+| [`tests/test_prevention_from_export.py`](../tests/test_prevention_from_export.py) | The export script's test, over a synthetic PSV (the operator's export is never committed). | [`tests/test_prevention_from_export.py`](../tests/test_prevention_from_export.py) | the export's columns or the product's error classes change. |
 | [`tests/test_prevention_gaming.py`](../tests/test_prevention_gaming.py) | The prevention loop's anti-gaming suite (ADR-0020 §1, §6; "What we must never do"). | [`tests/test_prevention_gaming.py`](../tests/test_prevention_gaming.py) | a parameter is added to a public function of the loop (it must not filter), or a key joins ``WRITABLE`` (with an ADR-0020 amendment). |
 | [`tests/test_prevention_register_seam.py`](../tests/test_prevention_register_seam.py) | The seam test between ``crb.core.prevention.PreventionRegister`` and stream S's ``crb.core.value.BugRegister`` protocol. | [`tests/test_prevention_register_seam.py`](../tests/test_prevention_register_seam.py) | stream S's protocol changes (the merge adds an equality test of the status vocabularies beside these). |
 | [`tests/test_prevention_rule.py`](../tests/test_prevention_rule.py) | The prevention rule's test suite over the fixture ledger (ADR-0020 §5, §6). | [`tests/test_prevention_rule.py`](../tests/test_prevention_rule.py) | a threshold of the rule changes (bump ``DECISION_RULE`` with it and update the expected numbers here). |

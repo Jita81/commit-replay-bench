@@ -11,7 +11,8 @@ as it is, each stopping exactly where a decision needs a name attached.
 
 Contents: [1 What loops today](#1-what-loops-mechanically-today) ·
 [2 What this module adds](#2-what-crbcorelearn-adds) · [3 What still needs a human, and why](#3-what-still-needs-a-human-and-why-that-is-deliberate) ·
-[4 Using it](#4-using-it) · [5 Properties the tests pin](#5-properties-the-tests-pin) · [6 Not yet](#6-what-this-is-not-yet)
+[4 Using it](#4-using-it) · [5 Properties the tests pin](#5-properties-the-tests-pin) · [6 Not yet](#6-what-this-is-not-yet) ·
+[7 Prevention](#7-prevention--a-bug-is-closed-by-a-change-that-stops-it-recurring)
 
 ---
 
@@ -207,3 +208,133 @@ summary.
   not propose new oracle coverage for classes that have no tasks.
 * The re-measurement plan estimates cost from the cell's own history; a cell whose rows
   recorded no cost says `cost_known: false` rather than guessing.
+
+## 7. Prevention — a bug is closed by a change that stops it recurring
+
+*The operator, 2026-09-25: "We should be learning from a bug and then going back to update
+our process or context to remove it moving forward."* The three reports above stop where a
+person decides. The prevention loop (`crb.core.prevention`, ADR-0020) goes one step further
+for the failures a builder makes: it names each failure class, gives it the strongest change
+the class admits, and keeps, retires or escalates that change by what the next attempts show.
+It acts only under a switch an operator throws.
+
+### 7.1 The one rule
+
+The loop changes how a change is made, never how it is judged. It may switch on three process
+mechanisms and add checklist lines to the brief, and nothing else:
+
+| lever | what it does | level |
+|---|---|---|
+| `checks.format_step` | the repository's own formatter runs over the changed files before grading | construction |
+| `checks.finish_gate` | the builder gets the repository's own checks as a checklist, and `done` needs them to pass | gate |
+| `spend.budget_profile: calibrated` | the caps come from the cell's clean completions | mistake-proofing |
+| a playbook line | one operating fact, from a closed template | advisory |
+
+It never writes a belt or its switch (`checks.api_stable` included), the lint plan, a runner,
+the guards or their corpus, the oracle, a routing threshold or the failure rule —
+`check_writable` refuses each by name — and it never switches anything off. A fix that needs
+one of those keys, or needs code, becomes a *filed item* for a person. On this branch none of
+the three mechanisms ships yet (streams W and K build them), so the loop can file items and
+apply lines, and the register says which switch it is waiting for.
+
+### 7.2 The switch
+
+One switch per repository, `learning.auto_apply`, thrown only by an operator with a reason
+(`PUT /learn/switch`); the record names the person.
+
+| setting | what the loop may do |
+|---|---|
+| `off` (the default) | compute and show the register and its recommendations; nothing reaches a builder, nothing is written |
+| `context` | apply playbook lines, and file items |
+| `config` | also throw the three process switches |
+
+The team's own configuration always wins: a key the repository sets itself, or a run sets,
+outranks the loop's overlay, and the register shows the loop's change as `overridden`. A run
+can opt out (`POST /runs` with `learning: "off"`) but never opt in. Switching to `off`
+suspends every change from the next run; switching back resumes them.
+
+### 7.3 What a class is
+
+A class is a signature computed from the row the same way every time
+(`crb.prevention.sig.v1`): `protocol:network:go mod` (the guard and the refused command's
+first words, never its arguments), `budget:max_turns`, `harness:runner-tool-missing:jest`,
+`format:gofmt`, `lint:ruff:e501` (the rule id from the linter's own output, never its
+message), `api:changed`, `builder_red:target_red`, `review:style`, `factory:pr_closed`. A
+provider refusal (`outage`) observed nothing, so it is never a class.
+
+### 7.4 Reading the register
+
+The Learn page's first card, `GET /learn/register` and `crb learn prevention` show the same
+register:
+
+| column | what it says |
+|---|---|
+| Class | the signature and its family |
+| Seen | first attempts that showed the class, over the comparable first attempts of its stratum (the repository and the mode where it occurs most), with tasks and dollars |
+| Lever | the strongest change the class admits that the loop may apply, and its level; every lever it passed over is listed with the reason |
+| Applied | when the change in force was applied, and on whose behalf |
+| Before → after | recurrence in the frozen before window and on the exposed first attempts since, each with its n, and the bar |
+| Status | `open`, `applied`, `closed`, `retired` or `escalated`, with qualifiers such as `watch` (too few yet), `dormant` (quiet with no change — never credited), `capability` (judged by value, never closed), `suspended` (the switch forbids it now) |
+| Next | one sentence: how many more attempts a decision needs, or what a person must do |
+
+### 7.5 The three numbers
+
+* **Decisive n** — `ceil(ln 0.025 ÷ ln(1 − p0))`, clamped to 10–200, where `p0` is the
+  class's rate in the before window (its stratum's last 100 comparable first attempts,
+  frozen when the change is applied). It is the smallest n at which zero recurrences is
+  significant. For 9 refusals in 30 first attempts, `p0` is 0.30 and n is 11. The formatter
+  step, whose effect the row itself records, needs 3.
+* **The keep test** — at exactly two looks, the first n and the first 2n exposed first
+  attempts (those whose own labels name the change): keep when `P(X ≤ k | n, p0) ≤ 0.025`;
+  at the second look, retire when it did not keep. At the tenth exposed attempt and at each
+  look, retire at once when `P(X ≥ k | n, p0) ≤ 0.01` or the exposed clean rate's Wilson-95
+  upper bound falls below the before clean rate. A retired line escalates to a switch, a
+  retired switch to the filed item.
+* **The closed window** — a kept change closes its class after `max(20, n)` exposed first
+  attempts with no recurrence (a refusal before spend counts), provided the stratum's
+  non-clean rate is no more than 5 points above the before window; otherwise the class reads
+  `displaced` and names what it now fails as. Any later recurrence reopens it.
+
+Only first attempts count: a retry exists only after a failure, and stream K's escalation rule
+decides how many there are. Harness and disqualified rows stay in n, so moving a failure into
+another kind can never shrink the denominator.
+
+### 7.6 Where the register stands today
+
+Nothing has been applied, so nothing is closed. Over the operator's export of 2026-09-25, at
+the export's family-level resolution, the register for the three Phase B repositories reads
+as below [measured — n = the comparable first attempts of each class's stratum, shown as
+k of n; method: `scripts/prevention_from_export.py` over the 618-row export, the product's
+failure rule, first attempts only, outage rows excluded; apparatus 2.2]. The levers are what
+the loop would choose on this branch, where no process mechanism ships yet [hypothesis — the
+lever changes to the finish gate or the calibrated budget once streams W and K merge].
+
+| repository | class | first attempts | decisive n | what the loop would do |
+|---|---|---|---|---|
+| cobra | `protocol:network`, blind | 3 of 19 | 22 | file the refused-call item; apply the network line (the finish gate once it ships) |
+| cobra | `builder_red:target_red`, blind | 6 of 19 | 10 | nothing it may apply yet: a capability class, judged by value, held by routing |
+| cobra | `harness:no-credential`, sighted | 9 of 80 | 31 | file the credential link (stream D's submit-time refusal, measured from its link) |
+| cobra | `budget`, sighted | 4 of 80 | — | dormant: quiet in the last 20 sighted first attempts, never credited |
+| click | `budget`, sighted | 7 of 43 | 21 | file the budget hand-off (the calibrated budget once it ships) |
+| click | `lint`, sighted | 2 of 39 | 71 | apply the lint line (the finish gate once it ships) |
+| click | `builder_red:target_red`, blind | 3 of 11 | 12 | a capability class, held by routing |
+| koa | `builder_red:target_red`, blind | 4 of 10 | 10 | a capability class, held by routing |
+| koa | `budget`, sighted | 3 of 29 | 34 | file the budget hand-off (the calibrated budget once it ships) |
+
+The largest blind class by first attempts is the red target on cobra and koa and the network
+refusal on click; counted over every rung, click's is the budget stop [measured — n = 22, 17
+and 13 blind first attempts; method: the same script; apparatus 2.0–2.2].
+
+### 7.7 What the loop will never do
+
+* write a grader key, a guard-corpus line, the failure rule or a routing threshold;
+* credit a class that went quiet with no change on record;
+* count a class closed while it recurs as a refusal before spend, or while its failures have
+  moved to another class;
+* put free text, a model's words, or anything from a task's gold diff, target tests or
+  review notes into a brief — lines come from closed templates, reach a task only when two
+  other tasks taught them, and are dropped at injection if a slot shares a word with the
+  task's test or source file names;
+* register an item on a backlog, or write on a board, without a named person;
+* re-apply a lever a person reverted.
+

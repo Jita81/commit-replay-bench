@@ -28,7 +28,8 @@ Contents: [1 Install](#1-install) · [1.1 Check the installation](#11-check-the-
 [5 Sign off](#5-sign-off) · [6 Export the ledger](#6-export-and-verify-the-ledger) ·
 [7 When the sandbox is unavailable](#7-when-the-sandbox-is-unavailable) · [8 Stop conditions](#8-stop-conditions) ·
 [9 Users](#9-users) · [10 The factory's test author](#10-the-factorys-test-author) ·
-[11 Intake — work arriving from a board](#11-intake--work-arriving-from-a-board)
+[11 Intake — work arriving from a board](#11-intake--work-arriving-from-a-board) ·
+[12 The prevention loop](#12-the-prevention-loop)
 
 ---
 
@@ -917,3 +918,61 @@ are in §8.
 
 **Cost.** Reading a column, drafting an item and posting the feedback call no model and
 spend nothing. Only a factory run spends, and it is still started the same way (§3).
+
+## 12. The prevention loop
+
+The prevention loop (ADR-0020, the guide's
+[§7](LEARNING-LOOP.md#7-prevention--a-bug-is-closed-by-a-change-that-stops-it-recurring))
+turns each failure class a builder shows into a change to the process or the context, and
+proves by the next attempts whether the change worked. It is **off** on every repository
+until you throw its switch, and it spends nothing itself: it makes no model call.
+
+**Read the register.** Open **Learn** and pick the repository: the first card lists every
+class with how often it occurred on first attempts, the lever the loop would choose and at
+what level, the change in force with its before → after, the status and what happens next.
+`GET /learn/register?repo=` serves the same (any viewer), and `crb learn prevention --repo R`
+builds it from JSONL files.
+
+**Throw the switch** (operator; `PUT /learn/switch?repo=` or the card's switch control), with
+a reason — it is recorded with your name:
+
+* `context` lets the loop add checklist lines to the brief (at most seven, from closed
+  templates) and file items for a person;
+* `config` also lets it switch on the formatter step, the finish gate and the calibrated
+  budget for the repository — as an overlay: a key your repository's configuration sets
+  itself always wins;
+* `off` suspends every change from the next run. Nothing is lost; switching back resumes them.
+
+A run that must not see the loop's changes (the Phase B off arm) is queued with
+`learning: "off"`.
+
+**Let it work.** The worker takes a snapshot of the loop when a replay or blind run starts
+(every row records the switch, the changes in force and the lines the builder read) and runs
+one tick when the run ends. `POST /learn/tick?repo=` runs one now. A tick that fails is
+logged and never fails the run.
+
+**Undo a change** (operator): **Revert** on the class, with a reason, or
+`POST /learn/changes/{change_id}/revert?repo=`. The change leaves the next run, and the loop
+never applies that lever to that class again.
+
+**Act on a filed item.** When the strongest fix is code or a grader decision, the loop files
+an item; it appears in **Decisions** as "a prevention needs an owner". **Register** puts it on
+the repository's factory backlog in one act (`POST /learn/items/{item_id}/register?repo=`):
+the first item freezes a backlog, later ones evolve it; refused while a factory run holds the
+backlog. An item for this product's own code is never put on your backlog: it is served for
+the maintainers.
+
+**Link a fix made elsewhere.** A merged pull request or a change to the environment that
+should stop a class is linked with `POST /learn/links?repo=` (the classes, a reference and a
+note). Its effect is measured from the link forward, never before.
+
+**What the loop will never do:** write a grader key, a guard-corpus line, the failure rule or
+a routing threshold; credit a class that went quiet with no change on record; call a class
+closed while it still recurs, even as a refusal before spend, or while its failures have moved
+to another class; put anything from a task's diff, tests or reviews into a brief; register an
+item or write on a board without a named person; re-apply a lever a person reverted.
+
+**If the chain does not verify**, every prevention route answers `409
+prevention_chain_broken` and nothing is written: restore the `events` table from the database
+backup (DEPLOYMENT §5). The chain lives in the database, never in `CRB_HOME`.
+
