@@ -9,8 +9,9 @@
 # What it contains — the toolchain and the test runner the pytest runner invokes, nothing
 # else: CPython 3.12 from the pinned base, plus `pytest` and its resolved dependencies at
 # exact versions with sha256 hashes (python-requirements.txt). No git, no compiler, no
-# shell tricks, nothing that listens. A repository whose tests need more (its own
-# dependencies, `ruff` for belt 5) extends this image — deploy/sandbox/README.md §4.
+# shell tricks, nothing that listens. A repository's own dependencies are provisioned per
+# task and mounted read-only at /deps/site (ADR-0019, deploy/sandbox/README.md §4); a tool
+# the toolchain lacks (`ruff` for belt 5) goes in a derived image (README §4.1).
 #
 # Build from deploy/sandbox (the context holds only the requirements file):
 #

@@ -155,8 +155,9 @@ spec:
           port: 5432
 {{- end }}
 ---
-# 5. Worker egress: the model endpoint ONLY (extraEgress is granted to every pod in §4).
-#    Sandbox containers themselves run with --network=none.
+# 5. Worker egress: the model endpoint, and — only when dependency provisioning is on
+#    (ADR-0019) — your package mirror, which the fetch sidecar reaches. extraEgress is granted
+#    to every pod in §4. Sandbox (test) containers themselves run with --network=none.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -180,6 +181,17 @@ spec:
       ports:
         - protocol: TCP
           port: {{ $np.modelEndpoint.port }}
+    {{- end }}
+    {{- if $np.packageMirror.cidrs }}
+    # the dependency fetch's allowlisting proxy reaches the mirror, and nothing else
+    - to:
+        {{- range $np.packageMirror.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $np.packageMirror.port }}
     {{- end }}
 ---
 # 6. API egress: the OIDC issuer ONLY (extraEgress is granted to every pod in §4).

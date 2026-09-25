@@ -187,7 +187,8 @@ class TestSettings:
         assert d["secret_key_configured"] is True
         assert d["oidc"]["client_secret_configured"] is True
         assert d["bootstrap_admin"] == {"username": "root", "password_configured": True}
-        assert d["sandbox"] == {"executor": "local", "image": ""}
+        assert d["sandbox"] == {"executor": "local", "image": "", "tree": "copy", "work_size": "1g"}
+        assert d["provision"]["enabled"] is False and "ca_bundle_configured" in d["provision"]
 
 
 # --- factory + seam ---------------------------------------------------------------------

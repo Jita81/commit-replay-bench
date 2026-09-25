@@ -8,6 +8,39 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — the sealed posture can run a repository with dependencies (ADR-0019, stream D)
+
+The first replay in the docker posture (run `0c44ff24…`, cobra) graded every attempt
+`builder_red`: the sealed test container held none of cobra's modules and could not build a
+single target **[measured — n = 4 rows, each `builder_red` with the target red; method: the
+run's grade rows in the deployment's ledger export of 2026-09-25; apparatus 2.2]**. This
+change is the dependency half of the fix (posture-relative qualification and the blame
+witness are the other half, a separate change).
+
+- **Dependencies are provisioned per task, outside the test container.** The lockfiles at
+  the parent and at the gold are read from git objects (never a worktree); a fetch container
+  on the pinned toolchain image fetches them through the allowlisting proxy (or with no
+  network from a `file://` mirror); the result is sealed, content-addressed and mounted
+  read-only while the test container keeps `--network=none`. Go keeps one module cache for
+  the parent's and the gold's modules; Python installs wheels only, with no network; Node
+  runs `npm ci --ignore-scripts`. Every refusal is a `PROVISION_*` code with its fix.
+  Provisioning is **off** by default (`CRB_PROVISION__ENABLED`); under docker a repository
+  that declares dependencies is then refused `PROVISION_DISABLED` before any spend.
+- **Tests run in a throwaway copy of the tree.** The worktree is read-only at `/src`; each
+  command runs in a size-capped tmpfs copy at `/work`, so a test that writes into its own
+  package directory reads the same as on the host (the D5 finding). `CRB_SANDBOX__TREE=readonly`
+  keeps the previous shape. `Command.network=True` is now refused under docker.
+- **Operators can see it.** `crb doctor` and the worker's `/health` gain a `provision` line;
+  `crb deps ls | verify | gc` shows, re-proves and trims the sealed sets; production refuses a
+  public registry (unless allowed) and an unpinned fetch image at start-up; Helm and Compose
+  carry the variables and a NetworkPolicy slot for the package mirror; CI pre-pulls the fetch
+  images and runs the provisioning suites against a real daemon.
+- Proven against a daemon for Go, Python and Node fixtures **[measured — n = 3 fixture
+  repositories, each parent and gold tree passing offline in the shipped sandbox image
+  against its own sealed set; method: `tests/test_provision_{go,python,node}.py` on colima,
+  Docker 29.5.2, 2026-09-25; apparatus 2.2]**. No real repository has been qualified in the
+  sealed posture on a live stack yet **[gap]**.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real
