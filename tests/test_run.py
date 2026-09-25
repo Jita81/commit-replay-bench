@@ -280,27 +280,63 @@ _DEST_EXEMPT: dict[str, str] = {
 }
 
 
-def _dest_arg(call: ast.Call) -> ast.expr | None:
+#: The ``Workspace`` constructors that create a worktree.
+_WS_CTORS = ("create", "at_ref")
+#: What the ratchet treats as a scope of its own: a name bound in one is not bound in another.
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+
+def _workspace_names(tree: ast.AST) -> set[str]:
+    """Every plain name ``Workspace`` is reachable by in the module: itself, an
+    ``import … Workspace as W`` and a ``W = Workspace`` (followed until nothing changes)."""
+    names = {"Workspace"}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            names.update(a.asname or a.name for a in n.names if a.name == "Workspace")
+    grew = True
+    while grew:
+        grew = False
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign) and _is_workspace(n.value, names):
+                for t in n.targets:
+                    if isinstance(t, ast.Name) and t.id not in names:
+                        names.add(t.id)
+                        grew = True
+    return names
+
+
+def _is_workspace(expr: ast.expr, names: set[str]) -> bool:
+    """``Workspace`` by one of its names, or reached as an attribute (``w.Workspace``)."""
+    return (isinstance(expr, ast.Name) and expr.id in names) or (
+        isinstance(expr, ast.Attribute) and expr.attr == "Workspace"
+    )
+
+
+def _is_ctor(expr: ast.expr, ws: set[str]) -> bool:
+    """``Workspace.create`` / ``Workspace.at_ref`` (by any name) or any ``….worktree_add``."""
+    return isinstance(expr, ast.Attribute) and (
+        (expr.attr in _WS_CTORS and _is_workspace(expr.value, ws)) or expr.attr == "worktree_add"
+    )
+
+
+def _dest_arg(call: ast.Call, ws: set[str]) -> ast.expr | None:
     """The destination a worktree-creating call is handed, or ``None`` when ``call`` creates
     no worktree: ``Workspace.create(repo, sha, dest)`` / ``Workspace.at_ref(repo, ref, dest)``
-    and ``<repo>.worktree_add(dest, ref)``, positional or ``dest=``."""
+    and ``<repo>.worktree_add(dest, ref)``, positional or ``dest=``. When the destination
+    cannot be read — it travels in ``*args`` / ``**kwargs`` or is missing — the call itself
+    is returned: not an ``opaque_dest(...)`` call, so the ratchet cannot admit it."""
     f = call.func
-    if not isinstance(f, ast.Attribute):
+    if not _is_ctor(f, ws):
         return None
-    if (
-        f.attr in ("create", "at_ref")
-        and isinstance(f.value, ast.Name)
-        and f.value.id == "Workspace"
-    ):
-        pos = 2
-    elif f.attr == "worktree_add":
-        pos = 0
-    else:
-        return None
+    assert isinstance(f, ast.Attribute)
+    pos = 0 if f.attr == "worktree_add" else 2
     for kw in call.keywords:
         if kw.arg == "dest":
             return kw.value
-    return call.args[pos] if len(call.args) > pos else None
+    head = call.args[: pos + 1]
+    if len(head) > pos and not any(isinstance(a, ast.Starred) for a in head):
+        return call.args[pos]
+    return call
 
 
 def _is_opaque(expr: ast.expr) -> bool:
@@ -311,12 +347,26 @@ def _is_opaque(expr: ast.expr) -> bool:
     )
 
 
+def _own(scope: ast.AST) -> list[ast.AST]:
+    """The scope's own nodes: a nested function, lambda or class body is its own scope."""
+    own: list[ast.AST] = []
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        n = stack.pop()
+        own.append(n)
+        if not isinstance(n, _SCOPES):
+            stack.extend(ast.iter_child_nodes(n))
+    return own
+
+
 def _bindings(scope: ast.AST, own: list[ast.AST]) -> dict[str, list[ast.expr | None]]:
     """Every binding of every name in ``scope``: the value a plain ``name = v`` /
     ``name: T = v`` / ``name += v`` gives it, and ``None`` for every other way a name is
     bound — a parameter, a ``Store`` anywhere else (``with … as``, ``for``, unpacking,
-    ``:=``, a comprehension), ``except … as``, ``import … as`` and a ``match`` capture.
-    Enumerating binding FORMS left gaps (PR #53 review); every ``Store`` is the class."""
+    ``:=``, a comprehension), ``except … as``, ``import … as``, a ``match`` capture and a
+    nested ``def`` / ``class``. Enumerating binding FORMS left gaps (PR #53 review); every
+    ``Store`` is the class. Bindings made in ANOTHER scope through ``global`` / ``nonlocal``
+    are added by ``_scope_bindings``."""
     out: dict[str, list[ast.expr | None]] = {}
     valued: set[int] = set()
     for n in own:
@@ -329,7 +379,7 @@ def _bindings(scope: ast.AST, own: list[ast.AST]) -> dict[str, list[ast.expr | N
             out.setdefault(n.target.id, []).append(n.value)
             valued.add(id(n.target))
     names: list[str] = []
-    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
         a = scope.args
         names += [p.arg for p in (*a.posonlyargs, *a.args, *a.kwonlyargs)]
         names += [p.arg for p in (a.vararg, a.kwarg) if p is not None]
@@ -344,35 +394,68 @@ def _bindings(scope: ast.AST, own: list[ast.AST]) -> dict[str, list[ast.expr | N
             names.append(n.name)
         elif isinstance(n, ast.MatchMapping) and n.rest:
             names.append(n.rest)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.append(n.name)
     for name in names:
         out.setdefault(name, []).append(None)
     return out
 
 
+def _declared(own: list[ast.AST], kind: type[ast.Global] | type[ast.Nonlocal]) -> set[str]:
+    return {name for n in own if isinstance(n, kind) for name in n.names}
+
+
+def _scope_bindings(
+    tree: ast.Module, scopes: list[ast.AST], owns: dict[int, list[ast.AST]]
+) -> dict[int, dict[str, list[ast.expr | None]]]:
+    """Each scope's bindings, with the ones other scopes make through it (PR #53 review,
+    second round): a nested function's ``nonlocal x; x = v`` adds ``v`` to every enclosing
+    scope's ``x``, and any function's ``global x; x = v`` adds ``v`` to the module's. A
+    scope that declares ``x`` ``global`` or ``nonlocal`` itself gets a ``None`` for it:
+    another function can rebind it between the assignment and the call. Over-counting
+    (an intermediate scope that shadows the name) can only fail a call, never admit one."""
+    raw = {id(s): _bindings(s, owns[id(s)]) for s in scopes}
+    out: dict[int, dict[str, list[ast.expr | None]]] = {}
+    for scope in scopes:
+        mine = {k: list(v) for k, v in raw[id(scope)].items()}
+        own = owns[id(scope)]
+        for name in _declared(own, ast.Global) | _declared(own, ast.Nonlocal):
+            mine.setdefault(name, []).append(None)
+        kind: type[ast.Global] | type[ast.Nonlocal] = ast.Global if scope is tree else ast.Nonlocal
+        inner = [n for n in ast.walk(scope) if n is not scope and isinstance(n, _SCOPES)]
+        for sub in inner:
+            for name in _declared(owns[id(sub)], kind):
+                mine.setdefault(name, []).extend(raw[id(sub)].get(name, []))
+        out[id(scope)] = mine
+    return out
+
+
 def worktree_dest_offenders(source: str, rel: str) -> list[str]:
     """Every worktree-creating call in ``source`` whose destination is not drawn by
-    ``opaque_dest`` — directly, or through a name EVERY assignment of which (in the same
-    function) is an ``opaque_dest(...)`` call. Structural, so no spelling of the path
-    (``/``, ``Path(a, b)``, ``joinpath``, a name built on another line) gets past it."""
+    ``opaque_dest`` — directly, or through a name EVERY binding of which (in its scope, or
+    made into it through ``global`` / ``nonlocal``) is an ``opaque_dest(...)`` call — and
+    every constructor handed on as a value (``make = Workspace.create``,
+    ``partial(repo.worktree_add, …)``), whose destination is out of sight. Structural, so
+    no spelling of the PATH (``/``, ``Path(a, b)``, ``joinpath``, a name built on another
+    line) gets past it. What it does not see: a constructor reached by ``getattr`` or a
+    string, a ``Workspace`` that arrives as a function's return value or parameter, and a
+    ``git worktree add`` run as a subprocess (the lexical ratchet above covers the name)."""
     tree = ast.parse(source)
-    scopes: list[ast.AST] = [tree] + [
-        n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-    ]
+    ws = _workspace_names(tree)
+    scopes: list[ast.AST] = [tree] + [n for n in ast.walk(tree) if isinstance(n, _SCOPES)]
+    owns = {id(s): _own(s) for s in scopes}
+    bindings = _scope_bindings(tree, scopes, owns)
     offenders: list[str] = []
+    called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Attribute) and id(n) not in called and _is_ctor(n, ws):
+            offenders.append(f"{rel}:{n.lineno}: {ast.unparse(n)[:120]} (as a value)")
     for scope in scopes:
-        # the scope's own statements, not a nested function's (that is its own scope)
-        own: list[ast.AST] = []
-        stack = list(ast.iter_child_nodes(scope))
-        while stack:
-            n = stack.pop()
-            own.append(n)
-            if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-                stack.extend(ast.iter_child_nodes(n))
-        assigned = _bindings(scope, own)
-        for n in own:
+        assigned = bindings[id(scope)]
+        for n in owns[id(scope)]:
             if not isinstance(n, ast.Call):
                 continue
-            dest = _dest_arg(n)
+            dest = _dest_arg(n, ws)
             if dest is None:
                 continue
             ok = _is_opaque(dest) or (
@@ -474,13 +557,104 @@ def test_the_structural_ratchet_sees_async_rebinding_and_parameters() -> None:
 
 
 @pytest.mark.parametrize(
+    "src",
+    [
+        # a nested function rebinds the enclosing ``dest`` through ``nonlocal``
+        "def f(repo, sha, scratch):\n"
+        '    dest = opaque_dest(scratch, "run")\n'
+        "    def g():\n"
+        "        nonlocal dest\n"
+        "        dest = scratch / sha\n"
+        "    g()\n"
+        "    Workspace.create(repo, sha, dest)\n",
+        # two levels down: the rebinding still reaches the scope that uses it
+        "def f(repo, sha, scratch):\n"
+        '    dest = opaque_dest(scratch, "run")\n'
+        "    def g():\n"
+        "        def h():\n"
+        "            nonlocal dest\n"
+        "            dest = scratch / sha\n"
+        "        h()\n"
+        "    g()\n"
+        "    Workspace.create(repo, sha, dest)\n",
+        # a function rebinds the module-level ``dest`` through ``global``
+        'dest = opaque_dest(scratch, "run")\n'
+        "def g():\n"
+        "    global dest\n"
+        "    dest = scratch / sha\n"
+        "g()\n"
+        "Workspace.create(repo, sha, dest)\n",
+        # a name the scope itself declares ``global`` can be rebound by any other function
+        "def f(repo, sha, scratch):\n"
+        "    global dest\n"
+        '    dest = opaque_dest(scratch, "run")\n'
+        "    Workspace.create(repo, sha, dest)\n",
+        # a lambda is a scope: its call is read, and its parameter is the caller's value
+        "def f(repo, sha, scratch):\n    mk = lambda: Workspace.create(repo, sha, scratch / sha)\n",
+        "def f(repo, sha, scratch):\n"
+        "    mk = lambda dest=scratch / sha: Workspace.create(repo, sha, dest)\n",
+        # a destination the ratchet cannot resolve is not a destination it can admit
+        'Workspace.create(repo, sha, **{"dest": scratch / sha})\n',
+        "Workspace.create(repo, *(sha, scratch / sha))\n",
+        "Workspace.create(*args)\n",
+        # the constructor reached by another name
+        "from crb.core.workspace import Workspace as W\nW.create(repo, sha, scratch / sha)\n",
+        "import crb.core.workspace as w\nw.Workspace.at_ref(repo, ref, scratch / ref)\n",
+        "W = Workspace\nW.create(repo, sha, scratch / sha)\n",
+        # the constructor handed on as a value: its destination is out of sight
+        "make = Workspace.create\nmake(repo, sha, scratch / sha)\n",
+        "partial(repo.worktree_add, scratch / sha)(sha)\n",
+        # a nested ``def`` rebinds the name as surely as ``=`` does
+        "def f(repo, sha, scratch):\n"
+        '    dest = opaque_dest(scratch, "run")\n'
+        "    def dest(): ...\n"
+        "    Workspace.create(repo, sha, dest)\n",
+        # a class body is its own scope: its opaque ``dest`` is not the function's ``dest``
+        "dest = scratch / sha\n"
+        "def f(repo, sha, scratch):\n"
+        "    class C:\n"
+        '        dest = opaque_dest(scratch, "run")\n'
+        "    Workspace.create(repo, sha, dest)\n",
+    ],
+    ids=[
+        "nonlocal",
+        "nonlocal-deep",
+        "global-rebound",
+        "global-declared",
+        "lambda-call",
+        "lambda-param",
+        "double-star",
+        "star",
+        "star-only",
+        "import-alias",
+        "module-alias",
+        "name-alias",
+        "as-value",
+        "partial",
+        "def-rebind",
+        "class-body",
+    ],
+)
+def test_the_structural_ratchet_sees_other_scopes_and_other_names(src: str) -> None:
+    """PR #53 review, second round: ``nonlocal`` / ``global`` rebinding from another
+    function, a call inside a ``lambda``, a ``**`` / ``*`` destination and an aliased
+    ``Workspace`` each passed with 0 offenders. Each must now give exactly one."""
+    assert len(worktree_dest_offenders(src, "x.py")) == 1
+
+
+@pytest.mark.parametrize(
     "body",
     [
         'Workspace.create(repo, sha, opaque_dest(scratch, "run"), config=c)',
         'dest = opaque_dest(scratch, "mine", avoid=(sha,))\n    Workspace.create(repo, sha, dest)',
         'SealedCheckout.create(ws, scratch / "x", test_files=())',
+        # ``nonlocal`` that keeps the name opaque is still admitted
+        'dest = opaque_dest(scratch, "a")\n    def g():\n        nonlocal dest\n'
+        '        dest = opaque_dest(scratch, "b")\n    g()\n    Workspace.create(repo, sha, dest)',
+        # an explicit ``dest=`` beside ``**`` is resolvable
+        'Workspace.create(repo, sha, dest=opaque_dest(scratch, "run"), **extra)',
     ],
-    ids=["inline", "named", "not-a-worktree-constructor"],
+    ids=["inline", "named", "not-a-worktree-constructor", "nonlocal-opaque", "kw-beside-star"],
 )
 def test_the_structural_ratchet_admits_an_opaque_name(body: str) -> None:
     src = f"def f(repo, sha, scratch, c, ws):\n    {body}\n"
