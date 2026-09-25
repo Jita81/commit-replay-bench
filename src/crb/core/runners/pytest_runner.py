@@ -63,6 +63,7 @@ from pathlib import Path
 from crb.core.execution import Command, ExecResult, Executor
 from crb.core.lint import LintPlan, pinned_ruff_spec, python_plan
 from crb.core.runners.base import (
+    READY_CHECK_TIMEOUT_S,
     BaseRunner,
     SetupResult,
     SetupSession,
@@ -191,10 +192,53 @@ class PytestRunner(BaseRunner):
             env["PYTHONPATH"] = "/work" + str(self.opts.get("pythonpath_suffix", "")).replace(
                 str(root), "/work"
             )
+        site = self._site(executor)
+        if site:
+            # the sealed set after the tree: the trial's edits still win over an installed copy
+            env["PYTHONPATH"] += os.pathsep + site
         for k, v in dict(self.opts.get("env", {})).items():
             env[str(k)] = str(v)
-        return Command(
+        cmd = Command(
             tuple(argv), root, env=env, timeout=timeout, writable_paths=(".pytest_scratch",)
+        )
+        return self.bind_deps(cmd, executor)
+
+    def _site(self, executor: Executor) -> str:
+        """Where the bound sealed set's packages are (``/deps/site`` in a container, the
+        store's path on the host), or ``""`` when no set is bound (ADR-0019)."""
+        b = self.deps
+        if b is None or not b.sealed:
+            return ""
+        mount = next((m for m in b.mounts if m.container_path == "/deps/site"), None)
+        if mount is None:
+            return ""
+        return mount.container_path if executor.name == "docker" else str(mount.host_path)
+
+    def env_probe_command(self, root: Path, executor: Executor) -> Command | None:
+        """Offline: every locked distribution resolves by name and version through
+        ``importlib.metadata`` from the bound set — or the posture cannot run this parent."""
+        b = self.deps
+        if b is None or not b.sealed or not b.manifest:
+            return None
+        pins = [p.split("==", 1) for p in b.manifest if "==" in p]
+        script = (
+            "import importlib.metadata as m, sys\n"
+            f"pins = {pins!r}\n"
+            "bad = []\n"
+            "for n, v in pins:\n"
+            "    try:\n"
+            "        got = m.version(n)\n"
+            "    except m.PackageNotFoundError:\n"
+            "        got = None\n"
+            "    if got != v:\n"
+            "        bad.append(f'{n}=={v} (found {got})')\n"
+            "print('missing: ' + ', '.join(bad) if bad else 'ok')\n"
+            "sys.exit(1 if bad else 0)\n"
+        )
+        base = self.command(Path(root), (), executor=executor, timeout=READY_CHECK_TIMEOUT_S)
+        python = base.argv[0]
+        return Command(
+            (python, "-c", script), Path(root), env=dict(base.env), timeout=READY_CHECK_TIMEOUT_S
         )
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
