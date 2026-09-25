@@ -488,7 +488,7 @@ def test_no_test_builds_builder_settings_on_the_hosts_uid() -> None:
     )
 
 
-_RATCHET_SAMPLE = '''\
+_RATCHET_SAMPLE = """\
 import os
 
 
@@ -510,7 +510,7 @@ def test_pins_the_uid(monkeypatch):
 def test_pins_the_uid_by_its_dotted_name(monkeypatch):
     monkeypatch.setattr("os.getuid", lambda: 10001)
     BuilderContainerSettings(image="i")
-'''
+"""
 
 
 def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
