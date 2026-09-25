@@ -168,7 +168,12 @@ reviewer cannot provide.
 
 - Every number in the docs carries its tag and its method (see EVIDENCE-AND-CLAIMS).
 - Cross-link rather than duplicate; ARCHITECTURE is the map, ADRs are the decisions.
-- `CHANGELOG.md` follows Keep a Changelog; add an entry under *Unreleased* in the PR.
+- `CHANGELOG.md` follows Keep a Changelog and grows by **one paragraph per pull request**: a
+  bullet under *Unreleased* with a bold title, a link to the pull request (until the number
+  exists, a link to the pull-request search for the branch) and at most 120 words saying what
+  changed for a reader. The narrative of a wave — what was built, why and what it found — goes
+  in a dated report under `docs/reviews/` (`<date>-wave-report-<scope>.md`), not in the
+  changelog. `tests/test_public_docs.py` holds the shape.
 - Decisions taken by the owner/operator go in `docs/DECISION-LOG.md` (one line, dated).
 - A review that sets numbered actions (an *Actions* table under `docs/reviews/`) gets one
   record per action in `docs/DECISION-LOG.md`, written as

@@ -68,7 +68,7 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of),
-              README.md and docs/RELEASING.md (the pages on the allowlist),
+              README.md, docs/RELEASING.md and docs/SUMMARY.md (the pages on the allowlist),
               docs/DECISION-LOG.md (where a review action's record lives),
               docs/reviews/2026-09-13-critical-friend.md (the review whose actions it holds),
               .github/workflows/ci.yml (the claims job that runs --check),
@@ -92,6 +92,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ALLOWLIST: tuple[str, ...] = (
     "README.md",
     "docs/RELEASING.md",
+    "docs/SUMMARY.md",
 )
 
 #: Where reviews live, and where a review action's record must be.
