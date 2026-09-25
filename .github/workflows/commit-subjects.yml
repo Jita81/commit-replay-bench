@@ -9,6 +9,11 @@
 # On a push to main it checks the subjects that actually landed. That is detection, not
 # prevention: the merge dialog can rewrite the squash subject after the last pull-request
 # check, and this is the only place the real subject can be read.
+#
+# No manual trigger: each step below runs on one event, so a `workflow_dispatch` run would
+# check nothing and still pass. Each push to main is its own concurrency group: a push run
+# checks only the range that push brought, so a later push must never cancel it. Only a
+# superseded pull-request run is cancelled (tests/test_check_commit_subject.py pins both).
 
 name: commit-subjects
 
@@ -17,14 +22,13 @@ on:
     types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: commit-subjects-${{ github.ref }}
-  cancel-in-progress: true
+  group: commit-subjects-${{ github.event_name == 'push' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   commit-subjects:

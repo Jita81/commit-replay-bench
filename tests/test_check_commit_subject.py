@@ -12,9 +12,11 @@ What it does: Pins that a well-formed subject passes and that each rule refuses 
               are the class); that ``--range`` reads every non-merge commit of a pull request
               from git and skips its merge commits; that ``--title`` checks the pull request
               title that a squash merge writes as the subject on ``main``; that ``--check``
-              exits non-zero on a finding; and that CI runs the gate on pull requests, again
-              when a title is edited, and on a push to main, under a job name shorter than
-              100 characters.
+              exits non-zero on a finding; that each allowlisted exception is a whole word the
+              rule needs, so no suffix is exempt ("agreed" is refused); and that CI runs the
+              gate on pull requests, again when a title is edited, and on a push to main,
+              under a job name shorter than 100 characters, with no trigger that checks
+              nothing, and no push run cancelled by the next push.
 How:          Calls ``check_subject`` directly for the rules; builds a small git repository
               under ``tmp_path`` for ``--range``; reads the workflow files as text.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -68,6 +70,10 @@ ccs = _load()
         "ci(deps): bump the github-actions group with 2 updates",
         "fix(runners): address the Maven false-green",
         "feat(core): embed the apparatus stamp in every pack",
+        "fix(worker): need a clone before the fetch",
+        "feat(mine): seed the pool from the newest commits",
+        "perf(repos): speed up the pool's history walk",
+        "fix(factory): proceed only when the RED proof holds",
     ],
 )
 def test_a_well_formed_subject_passes(subject: str) -> None:
@@ -93,6 +99,38 @@ def test_each_rule_refuses_its_defect(subject: str, reason: str) -> None:
     problems = ccs.check_subject(subject)
     assert problems, subject
     assert any(reason in p for p in problems), problems
+
+
+#: Past tenses that end in ``-eed`` (review of PR #54: a blanket ``-eed`` exemption let
+#: "Agreed migration plan" through). The heuristic refuses each one.
+PAST_TENSE_EED = ("agreed", "freed", "guaranteed", "decreed", "refereed", "disagreed")
+
+
+@pytest.mark.parametrize("word", PAST_TENSE_EED)
+def test_a_past_tense_ending_in_eed_is_refused(word: str) -> None:
+    problems = ccs.check_subject(f"docs: {word.capitalize()} migration plan")
+    assert any("not imperative" in p for p in problems), (word, problems)
+
+
+@pytest.mark.parametrize(
+    ("allowlist", "suffix"),
+    [("ENDS_ED_OK", "ed"), ("ENDS_ING_OK", "ing"), ("ENDS_S_OK", "s")],
+)
+def test_every_exception_is_a_whole_word_the_rule_would_otherwise_refuse(
+    allowlist: str, suffix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exceptions are whole words, never a suffix: each allowlisted word passes, and each
+    is refused once it is taken off its list — so every entry is needed, and a word that is
+    not on the list is judged by the rule. A suffix-wide exemption (the ``-eed`` one) could
+    not be written as an entry here, which is the point."""
+    words = getattr(ccs, allowlist)
+    assert words, allowlist
+    for word in sorted(words):
+        assert word.endswith(suffix), (allowlist, word)
+        assert ccs.check_subject(f"feat: {word} the thing") == [], word
+        monkeypatch.setattr(ccs, allowlist, frozenset(words - {word}))
+        assert ccs.check_subject(f"feat: {word} the thing"), f"{word} is not needed on the list"
+        monkeypatch.setattr(ccs, allowlist, words)
 
 
 def test_the_squash_titles_that_reached_main_would_have_been_refused() -> None:
@@ -196,3 +234,53 @@ def test_an_edited_title_is_checked_again() -> None:
     # dialog can rewrite the title after the last pull-request check)
     assert re.search(r"^  push:\n    branches: \[main\]", on.group(1), re.M)
     assert "github.event.before" in text and "github.event.after" in text
+
+
+def _triggers(text: str) -> set[str]:
+    """The event names under a workflow's top-level ``on:`` block."""
+    on = re.search(r"^on:\n((?:[ #].*\n|\n)+)", text, re.M)
+    assert on, "no top-level on: block"
+    return set(re.findall(r"^  ([a-z_]+):", on.group(1), re.M))
+
+
+def test_every_trigger_of_the_gate_runs_a_check() -> None:
+    """Every step that runs the gate is conditioned on an event, so a trigger that no step
+    names would run the job, check nothing and report success (review of PR #54: a manual
+    ``workflow_dispatch`` did exactly that). Each trigger must be one a gate step runs on."""
+    text = _workflow_with("commit-subjects").read_text(encoding="utf-8")
+    checked = set(re.findall(r"github\.event_name == '([a-z_]+)'", text))
+    assert checked, "no gate step names the event it runs on"
+    unchecked = _triggers(text) - checked
+    assert not unchecked, f"triggers that run no check and would pass: {sorted(unchecked)}"
+
+
+def _concurrency(text: str) -> tuple[str, str]:
+    """``(group, cancel-in-progress)`` of a workflow's top-level concurrency block."""
+    block = re.search(r"^concurrency:\n((?:  .*\n)+)", text, re.M)
+    assert block, "no top-level concurrency block"
+    group = re.search(r"^  group: (.+)$", block.group(1), re.M)
+    cancel = re.search(r"^  cancel-in-progress: (.+)$", block.group(1), re.M)
+    return (group.group(1) if group else "", cancel.group(1).strip() if cancel else "false")
+
+
+def test_a_check_scoped_to_one_push_is_never_cancelled_by_the_next() -> None:
+    """A check that reads ``github.event.before..after`` sees only what its own push brought,
+    so a later push cannot stand in for it: if the second push to main cancelled the first
+    run, the first push's subjects would never be checked (review of PR #54). Any workflow
+    that checks a push's own range gives each push run its own concurrency group (keyed on
+    the run id) and cancels only superseded pull-request runs. CI's whole-tree jobs are not
+    this class: the newer run checks a tree that contains the older one."""
+    scoped = [
+        p
+        for p in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        if "github.event.before" in p.read_text(encoding="utf-8")
+    ]
+    assert scoped, "the commit-subjects workflow checks a push's own range"
+    for wf in scoped:
+        text = wf.read_text(encoding="utf-8")
+        if not re.search(r"^concurrency:", text, re.M):
+            continue  # no group: nothing is ever cancelled
+        group, cancel = _concurrency(text)
+        assert "github.run_id" in group and "'push'" in group, (wf.name, group)
+        assert cancel != "true", f"{wf.name}: cancel-in-progress must not apply to a push run"
+        assert "'pull_request'" in cancel, (wf.name, cancel)

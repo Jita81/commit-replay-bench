@@ -18,9 +18,12 @@ turns it into the commit subject on ``main``.
 the gate refuses the four shapes that are reliably *not* imperative: a first word that is an
 article or a determiner ("the", "a", "every"), a past tense ending in ``-ed`` ("fixed"), a
 gerund ending in ``-ing`` ("fixing") and a third-person verb ending in ``-s`` ("fixes"), with
-short allowlists for real imperatives that happen to end that way ("embed", "bring",
-"address", "focus"). It will pass a subject whose first word is a noun ("readme updates") —
-a reviewer still has to read.
+short allowlists for real imperatives that happen to end that way ("embed", "need", "bring",
+"alias"). An exception is a whole word, never a suffix: a suffix-wide exemption lets every
+past tense with that ending through ("-eed" let "agreed" pass until PR #54's review). The
+``-s`` rule skips ``-ss`` and ``-us`` because no third-person form ends that way ("address",
+"focus"). It will pass a subject whose first word is a noun ("readme updates") — a reviewer
+still has to read.
 
 Navigation
 ----------
@@ -39,7 +42,7 @@ Works with:   docs/CONTRIBUTING.md (the commit convention it enforces),
 Tested by:    tests/test_check_commit_subject.py
 Touch when:   a Conventional Commits type is added to the convention (update TYPES and
               docs/CONTRIBUTING.md together); a real imperative is refused (add it to the
-              matching allowlist with a test case).
+              matching allowlist as a whole word, never a suffix, with a test case).
 """
 
 from __future__ import annotations
@@ -76,9 +79,27 @@ _SHAPE_RE = re.compile(
 NOT_A_VERB: frozenset[str] = frozenset(
     {"a", "an", "the", "this", "these", "that", "those", "its", "our", "every", "each", "all"}
 )
-#: Imperatives that end in the suffixes the heuristic reads as another tense.
-ENDS_ED_OK: frozenset[str] = frozenset({"embed", "shed", "shred"})
-ENDS_ING_OK: frozenset[str] = frozenset({"bring", "ring", "sing", "spring", "string", "swing"})
+#: Imperatives that end in the suffixes the heuristic reads as another tense — whole words
+#: only (a word of four letters or fewer is never read as ``-ing``, so "ring" needs no entry).
+ENDS_ED_OK: frozenset[str] = frozenset(
+    {
+        "bleed",
+        "breed",
+        "embed",
+        "exceed",
+        "feed",
+        "heed",
+        "need",
+        "proceed",
+        "seed",
+        "shed",
+        "shred",
+        "speed",
+        "succeed",
+        "weed",
+    }
+)
+ENDS_ING_OK: frozenset[str] = frozenset({"bring", "spring", "string", "swing"})
 ENDS_S_OK: frozenset[str] = frozenset({"alias", "bias"})
 
 
@@ -86,7 +107,7 @@ def _not_imperative(word: str) -> bool:
     w = word.lower().strip("`'\"")
     if w in NOT_A_VERB:
         return True
-    if w.endswith("ed") and not w.endswith("eed") and w not in ENDS_ED_OK and len(w) > 3:
+    if w.endswith("ed") and w not in ENDS_ED_OK and len(w) > 3:
         return True
     if w.endswith("ing") and w not in ENDS_ING_OK and len(w) > 4:
         return True
