@@ -502,13 +502,36 @@ def test_names_getuid_in_a_string():
     BuilderContainerSettings(image="i")  # a string pins nothing
 
 
+def test_sets_getuid_on_another_object(monkeypatch):
+    class Fake:
+        pass
+
+    monkeypatch.setattr(Fake, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a fake's getuid pins nothing
+
+
+def test_sets_getuid_on_another_dotted_name(monkeypatch):
+    monkeypatch.setattr("shutil.getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # another module's getuid pins nothing
+
+
 def test_pins_the_uid(monkeypatch):
     monkeypatch.setattr(os, "getuid", lambda: 10001)
     BuilderContainerSettings(image="i")
 
 
+def test_pins_the_uid_through_a_module_that_imports_os(monkeypatch):
+    monkeypatch.setattr(container.os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
 def test_pins_the_uid_by_its_dotted_name(monkeypatch):
     monkeypatch.setattr("os.getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_pins_the_uid_by_a_longer_dotted_name(monkeypatch):
+    monkeypatch.setattr("crb.builders.container.os.getuid", lambda: 10001)
     BuilderContainerSettings(image="i")
 """
 
@@ -529,7 +552,7 @@ def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
         for i, line in enumerate(_RATCHET_SAMPLE.splitlines(), start=1)
         if "pins nothing" in line
     }
-    assert len(unpinned) == 2
+    assert len(unpinned) == 4
     assert _settings_on_the_hosts_uid(sample) == unpinned
 
 
