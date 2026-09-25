@@ -231,6 +231,7 @@ from crb.factory.backlog import BacklogItem
 from crb.factory.delivery import (
     GitCredentials,
     GitCredentialsProvider,
+    github_close_pr_fn,
     github_comment_pr_fn,
     github_open_pr_fn,
 )
@@ -2119,6 +2120,9 @@ class Worker:
         def comment_pr(**kw: Any) -> None:
             github_comment_pr_fn(api_base=api_base, **kw)
 
+        def close_pr(**kw: Any) -> None:  # ADR-0021: a later non-accept closes an open PR
+            github_close_pr_fn(api_base=api_base, **kw)
+
         spec = FactorySpec(
             config=ctx.config,
             runner=runner,
@@ -2136,6 +2140,7 @@ class Worker:
             creds=creds,
             open_pr_fn=open_pr if creds is not None else None,
             comment_pr_fn=comment_pr if creds is not None else None,
+            close_pr_fn=close_pr if creds is not None else None,
             target_default_branch=str(link.get("default_branch") or "main"),
             # the route gate: the same signed (class × size) map the API serves, under the
             # repo's latest controls verdict, sighted rows of the current apparatus — minus

@@ -449,19 +449,30 @@ class FactoryEvidence:
         merged_by: str = "",
         merge_sha: str = "",
         closed_at: str = "",
+        closed_by: str = "",
+        verdict: str = "",
+        reason: str = "",
     ) -> tuple[FactoryEvent, bool]:
         """The pull request's fate, read back from GitHub: ``state`` is ``merged`` or
         ``closed``. Returns ``(event, recorded)``: ``recorded`` is False — and the event is
         the one already on the chain — when this PR's newest outcome is already ``state``,
         or is ``merged`` (terminal: a merge is never followed by anything). ``merged``
         after ``closed`` IS recorded: a person can reopen a closed pull request and merge
-        it, and the chain must say so (idempotent per state; at most two outcomes per PR)."""
+        it, and the chain must say so (idempotent per state; at most two outcomes per PR).
+        ``closed_by`` / ``verdict`` / ``reason`` are set when the FACTORY closed it
+        (ADR-0021: a later review did not accept the item) and absent on an outcome read
+        back from GitHub."""
         kind = OUTCOME_KINDS.get(state)
         if kind is None:
             raise ValueError(f"state must be one of {tuple(OUTCOME_KINDS)}, got {state!r}")
         existing = self.outcome_for(item_id, pr_number)
         if existing is not None and existing.kind in (kind, EV_DELIVERY_MERGED):
             return existing, False
+        by_factory = {
+            k: v
+            for k, v in (("closed_by", closed_by), ("verdict", verdict), ("reason", reason))
+            if v
+        }
         ev = self.append(
             kind,
             item_id,
@@ -472,6 +483,7 @@ class FactoryEvidence:
             merged_by=merged_by,
             merge_sha=merge_sha,
             closed_at=closed_at,
+            **by_factory,
         )
         return ev, True
 

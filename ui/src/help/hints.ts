@@ -571,9 +571,9 @@ export const HINTS = {
   'step.factory.build':
     'Whether the builder’s change graded clean under every belt inside the sandbox. The status is the server’s word, shown verbatim.',
   'step.factory.delivery':
-    'Whether a branch and pull request were opened. Withheld names why: delivery was off for the run, or the route gate (the cell does not route deliver). Failed means the push was refused.',
+    'Whether a branch and pull request were opened. It comes after the review: only a build the review accepted is delivered. Withheld names why: delivery was off for the run, the route gate (the cell does not route deliver), or the review did not accept the build. Failed means the push was refused.',
   'step.factory.review':
-    'The verdict of the independent review of the built change. It is advisory to a person; it never changes a route.',
+    'The verdict of the independent review of the built change, taken before anything is pushed. Only accept lets a pull request open; it never changes a route.',
   'step.factory.outcome':
     'The item’s final status on the chain, and the error if one stopped it.',
   'pill.factory.step_state':

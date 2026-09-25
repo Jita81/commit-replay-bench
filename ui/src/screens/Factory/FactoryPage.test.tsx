@@ -117,8 +117,8 @@ describe('stepsFor — an item the factory has not touched', () => {
       ['readiness', 'current'],
       ['red', 'todo'],
       ['build', 'todo'],
-      ['delivery', 'todo'],
       ['review', 'todo'],
+      ['delivery', 'todo'],
       ['outcome', 'todo'],
     ])
     expect(steps[0]!.detail).toMatch(/not assessed/)
@@ -136,28 +136,31 @@ describe('stepsFor — an item the factory has not touched', () => {
     expect(routed.detail).toBe('route test_first_authoring · value gap example_payload routes test-first, never signed')
   })
 
-  it('a delivery a rework updated says so, rather than reading as a first opening', () => {
-    // `delivery.updated` is the chain's event for a rework re-pointing the SAME pull request (DL-045)
-    const updated = task({ id: 'T-3', route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/calc/pull/7', review_verdict: 'accept_with_edit', last_event: 'delivery.updated', cell_route: DELIVER })
-    const delivery = stepsFor(updated)[3]!
+  it('a delivery a later accepted build updated says so, rather than reading as a first opening', () => {
+    // `delivery.updated` is the chain's event for an accepted rebuild re-pointing the SAME pull
+    // request an earlier run opened (DL-045; since ADR-0021 only an accepted build reaches it)
+    const updated = task({ id: 'T-3', route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/calc/pull/7', review_verdict: 'accept', last_event: 'delivery.updated', cell_route: DELIVER })
+    const delivery = stepsFor(updated)[4]!
+    expect(delivery.id).toBe('delivery')
     expect(delivery.status).toBe('done')
-    expect(delivery.detail).toBe('pull request updated by a rework')
-    expect(stepsFor({ ...updated, last_event: 'delivery.opened' })[3]!.detail).toBe('branch + pull request opened')
+    expect(delivery.detail).toBe('pull request updated by a later accepted build')
+    expect(stepsFor({ ...updated, last_event: 'delivery.opened' })[4]!.detail).toBe('branch + pull request opened')
   })
 
   it('an item stopped for a stronger oracle reads as a sentence with the way forward (DL-045 rule 3)', () => {
-    // the loop refused to rebuild against an unchanged oracle: one clean build, one PR, one
-    // `accept_with_edit` verdict with a `weak_oracle` finding, routed human — the outcome
-    // step must say what happened and what to do, not spell the status
+    // the loop refused to rebuild against an unchanged oracle: one clean build, one
+    // `accept_with_edit` verdict with a `weak_oracle` finding, NO pull request (ADR-0021: the
+    // review came first), routed human — the outcome step must say what happened and what
+    // to do, not spell the status
     const reason = 'the reviewer found the oracle weak (statement deleted) and this deployment has no test author: strengthen the test and register a superseding item'
-    const stopped = task({ id: 'T-4', status: 'oracle_needs_strengthening', outcome_reason: reason, route_hint: 'human', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/calc/pull/7', review_verdict: 'accept_with_edit', last_event: 'item.outcome', cell_route: DELIVER })
+    const stopped = task({ id: 'T-4', status: 'oracle_needs_strengthening', outcome_reason: reason, route_hint: 'human', red_proof: true, build_status: 'clean', review_verdict: 'accept_with_edit', last_event: 'item.outcome', cell_route: DELIVER })
     const steps = stepsFor(stopped)
     expect(steps.map((x) => [x.id, x.status])).toEqual([
       ['readiness', 'done'],
       ['red', 'done'],
       ['build', 'done'],
-      ['delivery', 'done'],
       ['review', 'current'],
+      ['delivery', 'skipped'],
       ['outcome', 'failed'],
     ])
     const outcome = steps[5]!
@@ -173,7 +176,7 @@ describe('stepsFor — an item the factory has not touched', () => {
     expect(stepsFor({ ...stopped, outcome_reason: 'the oracle is weak' })[5]!.detail).toContain('(the oracle is weak)')
     // without a reason on the view the sentence still stands on its own
     expect(stepsFor({ ...stopped, outcome_reason: '' })[5]!.detail).not.toContain('(')
-    // the readiness step keeps the pre-build reading: the item was BUILT (a PR is open), and
+    // the readiness step keeps the pre-build reading: the item was BUILT and reviewed, and
     // `route_hint` is `human` only because the stop routed it there after the review
     expect(steps[0]!.detail).not.toBe('route human')
     expect(steps[0]!.detail).toContain('after the review')
@@ -185,7 +188,7 @@ describe('stepsFor — an item the factory has not touched', () => {
     const servedSteps = stepsFor(served)
     expect(servedSteps.map((x) => [x.id, x.status])).toEqual(steps.map((x) => [x.id, x.status]))
     expect(servedSteps[0]!.detail).toContain('after the review')
-    expect(servedSteps[4]!.detail).toBe('accept with edit — the reviewer asked for a stronger test')
+    expect(servedSteps[3]!.detail).toBe('accept with edit — the reviewer asked for a stronger test')
     expect(refusalSentence(served)).toBe('The review found the test too weak to rebuild against: the reviewer found the oracle weak (statement deleted) and this deployment has no test author. To bring it back into the factory, strengthen the test and register an evolution that supersedes this item (the frozen hash stays; the old chain is kept); or open the change by hand and mark the item done in the next backlog.')
   })
 
@@ -233,17 +236,17 @@ describe('stepsFor — the review comes before the delivery (ADR-0021)', () => {
 describe('stepsFor — every refusal carries its reason (J-FAC-4)', () => {
   it('the route gate withholding delivery names the measured route and the reason code', () => {
     const t = task({ status: 'accepted', route_hint: 'build', red_proof: true, build_status: 'clean', review_verdict: 'accept', last_event: 'item.outcome', cell_route: CALIBRATE, refusal: { step: 'delivery', reason: 'route gate: the cell routes calibrate (ci_low_below_bar)', reason_code: 'ci_low_below_bar', measured_route: 'calibrate' } })
-    const delivery = stepsFor(t)[3]!
+    const delivery = stepsFor(t)[4]!
     expect(delivery.status).toBe('skipped')
     expect(delivery.detail).toBe('Delivery withheld — the route gate: bug.fix × XS routes calibrate (ci_low_below_bar: the lower bound sits under the bar). Built, graded and reviewed; no pull request opened.')
   })
 
   it('delivery that was off for the run says so; a refused push is a failure with the reason', () => {
     const off = task({ status: 'accepted', route_hint: 'build', red_proof: true, build_status: 'clean', review_verdict: 'accept', cell_route: DELIVER, refusal: { step: 'delivery', reason: 'delivery is opt-in and OFF — built and graded locally only', reason_code: '', measured_route: '' } })
-    expect(stepsFor(off)[3]).toMatchObject({ status: 'skipped', detail: 'Delivery withheld — delivery was off for this run. Built and graded locally only.' })
+    expect(stepsFor(off)[4]).toMatchObject({ status: 'skipped', detail: 'Delivery withheld — delivery was off for this run. Built and graded locally only.' })
     const pushed = task({ status: 'delivery_failed', route_hint: 'build', red_proof: true, build_status: 'clean', cell_route: DELIVER, error: 'DeliveryError: push refused (403)', refusal: { step: 'delivery', reason: 'push refused (403)', reason_code: '', measured_route: '' } })
     const steps = stepsFor(pushed)
-    expect(steps[3]).toMatchObject({ status: 'failed', detail: 'Delivery failed — the push was refused: push refused (403).' })
+    expect(steps[4]).toMatchObject({ status: 'failed', detail: 'Delivery failed — the push was refused: push refused (403).' })
     expect(steps[5]).toMatchObject({ status: 'failed', detail: 'delivery failed — DeliveryError: push refused (403)' })
   })
 

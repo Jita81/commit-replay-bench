@@ -8,15 +8,22 @@
       ▼
     build ladder → grade (pack + ledger row, process_step=factory)
       ▼ not clean / disqualified ──▶ not_clean / disqualified
-    deliver (OPT-IN, default OFF; fails closed on missing creds) ──▶ delivery_failed
-      ▼   gated on the route read at readiness (DL-038, DL-045)
     review (independent identity, probes) → verdict RECORDED before any edit
       ▼ accept_with_edit ──▶ rework: edit permitted → RED proof → build → grade
-      │     │                 → re-deliver (the SAME pull request, updated; a failed
-      │     │                   rework comment is a warning, never a stop) → fresh verdict
+      │     │                 → a fresh verdict on the rebuilt change (nothing delivered)
       │     └─ a weak_oracle finding with no test author, or one that returns the
       │        same oracle ──▶ oracle_needs_strengthening (routed human; NO rebuild)
-    accepted | rejected | rework_exhausted
+      ▼ reject / rework_exhausted / oracle_needs_strengthening ──▶ NO pull request
+    deliver — ONLY an `accept` verdict reaches it (ADR-0021); OPT-IN, default OFF; fails
+      │   closed on missing creds; gated on the route read at readiness (DL-038, DL-045)
+      ▼   ──▶ delivery_failed
+    accepted
+
+An item that already has an OPEN pull request from an earlier run (on the chain, no
+merged/closed outcome) is carried to that pull request: an ``accept`` updates it (the lease
+push, one pull request), any other final verdict CLOSES it with a comment naming the
+verdict (:func:`crb.factory.delivery.close_pull_request`) — the product does not leave a
+pull request open on a change its own review no longer stands behind.
 
 Every arrow above appends to :class:`~crb.factory.evidence.FactoryEvidence`;
 every stage emits :class:`~crb.observability.events.StepEvent` rows with
@@ -29,34 +36,39 @@ What it is:   The governed loop — one backlog item end to end, every step evid
               step skippable.
 What it does: Sequences readiness (where the capability map's route for the item's cell
               is read once, before any build) → RED proof (authored or test-first rung) →
-              build ladder → optional delivery (default OFF, fails closed, gated on that
-              route) → independent review → rework (edit permitted only after a recorded
-              verdict; bounded by ``max_rework``; its re-delivery updates the pull request
-              the first delivery opened; a ``weak_oracle`` verdict never rebuilds against
-              an unchanged oracle — DL-045 rule 3), turning every governed refusal into an
-              ``ItemOutcome`` status
-              rather than an exception; ``run_backlog`` requires a frozen, verifying
-              backlog and records a blocked item explicitly when a dependency was not
-              accepted. Emits a ``factory``-stage ``StepEvent`` per step.
+              build ladder → independent review → rework (edit permitted only after a
+              recorded verdict; bounded by ``max_rework``; a ``weak_oracle`` verdict never
+              rebuilds against an unchanged oracle — DL-045 rule 3) → optional delivery
+              (default OFF, fails closed, gated on that route, and reached ONLY by an
+              ``accept`` verdict — ADR-0021), turning every governed refusal into an
+              ``ItemOutcome`` status rather than an exception; an open pull request an
+              earlier run opened is updated on ``accept`` and closed, naming the verdict, on
+              anything else; ``run_backlog`` requires a frozen, verifying backlog and records
+              a blocked item explicitly when a dependency was not accepted. Emits a
+              ``factory``-stage ``StepEvent`` per step.
 How:          ``FactorySpec`` carries every collaborator; ``FactoryLoop.run_item`` walks the
-              private ``_assess`` / ``_oracle`` / ``_prove`` / ``_build`` / ``_deliver`` /
-              ``_review`` steps under a ``_Stop`` exception that maps to a status.
+              private ``_assess`` / ``_oracle`` / ``_prove`` / ``_build`` / ``_review`` /
+              ``_deliver`` steps under a ``_Stop`` exception that maps to a status;
+              ``_open_delivery`` reads the chain for the item's open pull request and
+              ``_withdraw`` closes it.
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0003-one-routing-rule.md (the route gate; amended 2026-09-19),
               docs/adr/0013-external-review-is-advisory-and-recorded.md (amended
-              2026-09-21: a weak_oracle verdict never rebuilds against an unchanged oracle)
+              2026-09-21: a weak_oracle verdict never rebuilds against an unchanged oracle),
+              docs/adr/0021-factory-review-before-delivery.md (review before delivery; only
+              `accept` delivers; a later non-accept closes the open pull request)
 Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory/readiness.py
               + src/crb/factory/testfirst.py + src/crb/factory/build.py +
-              src/crb/factory/delivery.py + src/crb/factory/review.py (the steps, in order),
+              src/crb/factory/review.py + src/crb/factory/delivery.py (the steps, in order),
               src/crb/observability/events.py (``Emitter`` for the step events),
               src/crb/server/routes/factory.py (serves the chain and the task view)
 Tested by:    tests/test_factory_loop.py
 Touch when:   never for a new repository (delivery is switched on per run, not per repo);
               adding a status means ``STATUSES`` here, the UI's factory screen and
               docs/API.md#factory-phase-p6; changing the step order is a governance change
-              — an ADR.
+              — an ADR (ADR-0021 is the current order).
 """
 
 from __future__ import annotations
@@ -68,6 +80,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from crb.builders.base import Budget, Builder, Rung
+from crb.core.evidence import utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.ledger import JsonlLedger
@@ -78,15 +91,24 @@ from crb.core.spec import RepoConfig
 from crb.factory.backlog import KIND_OPERATOR, Backlog, BacklogError, BacklogItem
 from crb.factory.build import BuildResult, build_ladder
 from crb.factory.delivery import (
+    ClosePrFn,
     CommentPrFn,
     DeliveryError,
     DeliveryResult,
     GitCredentialsProvider,
     OpenPrFn,
     PushFn,
+    close_pull_request,
     deliver,
 )
-from crb.factory.evidence import EV_BACKLOG_FROZEN, FactoryEvent, FactoryEvidence
+from crb.factory.evidence import (
+    EV_BACKLOG_FROZEN,
+    EV_DELIVERY,
+    EV_DELIVERY_UPDATED,
+    OUTCOME_CLOSED,
+    FactoryEvent,
+    FactoryEvidence,
+)
 from crb.factory.readiness import (
     ROUTE_HUMAN,
     ROUTE_TEST_FIRST,
@@ -97,6 +119,8 @@ from crb.factory.readiness import (
 )
 from crb.factory.review import (
     FINDING_WEAK_ORACLE,
+    SEVERITY_BLOCKING,
+    SEVERITY_MAJOR,
     MechanicalReviewer,
     Probe,
     Reviewer,
@@ -180,9 +204,14 @@ class FactorySpec:
     creds: GitCredentialsProvider | None = None
     push_fn: PushFn | None = None
     open_pr_fn: OpenPrFn | None = None
-    #: How a rework's re-delivery tells the pull request's reviewer why the branch moved;
-    #: ``None`` = the branch is updated silently (the evidence chain still says).
+    #: How a re-delivery (an item whose pull request an earlier run opened, accepted again)
+    #: tells the pull request's reviewer why the branch moved; ``None`` = the branch is
+    #: updated silently (the evidence chain still says).
     comment_pr_fn: CommentPrFn | None = None
+    #: How an open pull request an earlier run opened is CLOSED when this run's review does
+    #: not accept the item (ADR-0021); ``None`` = GitHub's pulls API
+    #: (:func:`crb.factory.delivery.github_close_pr_fn`).
+    close_pr_fn: ClosePrFn | None = None
     target_default_branch: str = "main"
     run_id: str = ""
     actor: str = ""
@@ -472,18 +501,28 @@ class FactoryLoop:
         final: BuildResult,
         route: Mapping[str, Any] | None,
         *,
+        verdict: ReviewVerdict,
         previous: DeliveryResult | None = None,
         rework_n: int = 0,
         after_verdict: str = "",
     ) -> tuple[DeliveryResult | None, str]:
-        """Step 4: delivery — skipped and RECORDED when opt-in is off; a failure stops the
-        item (``delivery_failed``). ``route`` is the cell's decision read at readiness.
-        ``previous`` (a rework) is the item's earlier delivery: the same pull request is
-        updated, never a second one opened; its rework comment failing (after the push has
-        moved the branch) is recorded on the ``delivery.updated`` event as ``comment_error``
-        and emitted as a ``delivery.comment_failed`` warning — the item goes on to review
-        the branch the pull request now carries. Returns ``(result, pr_ref)``."""
+        """The LAST step: delivery of a build the review ACCEPTED (ADR-0021) — skipped and
+        RECORDED when opt-in is off; a failure stops the item (``delivery_failed``).
+        ``verdict`` is the review of ``final``: anything but ``accept`` is refused here and
+        again by :func:`crb.factory.delivery.deliver`, so no caller can deliver an
+        unreviewed or unaccepted build. ``route`` is the cell's decision read at readiness.
+        ``previous`` is the item's OPEN pull request from an earlier run: the same pull
+        request is updated, never a second one opened; its comment failing (after the push
+        has moved the branch) is recorded on the ``delivery.updated`` event as
+        ``comment_error`` and emitted as a ``delivery.comment_failed`` warning. Returns
+        ``(result, pr_ref)``."""
         s = self.spec
+        if not verdict.accepted or verdict.pack_hash != final.pack_hash:
+            raise DeliveryError(
+                f"delivery refused: the review of build {final.pack_hash[:12]} is "
+                f"{verdict.verdict!r} on pack {verdict.pack_hash[:12]} — only an accepted, "
+                "reviewed build is delivered (ADR-0021)"
+            )
         if not s.deliver:
             s.evidence.record_delivery_refused(
                 item.id,
@@ -553,6 +592,7 @@ class FactoryLoop:
                 previous=previous,
                 rework_n=rework_n,
                 after_verdict=after_verdict,
+                verdict=verdict.verdict,
             )
         except DeliveryError as exc:
             s.evidence.record_delivery_refused(
@@ -591,9 +631,11 @@ class FactoryLoop:
         return d, d.pr_ref
 
     def _review(
-        self, item: BacklogItem, final: BuildResult, proof: RedProof, pr_ref: str
+        self, item: BacklogItem, final: BuildResult, proof: RedProof, pr_ref: str = ""
     ) -> ReviewVerdict:
-        """Step 5: independent review; the verdict is on the ledger before this returns."""
+        """Step 4: independent review of the built change BEFORE anything leaves the
+        factory (ADR-0021) — ``pr_ref`` is empty, no pull request exists yet; the verdict
+        is on the ledger before this returns."""
         s = self.spec
         v = review(
             final,
@@ -614,6 +656,89 @@ class FactoryLoop:
         self._emit("review.recorded", item.id, verdict=v.verdict, event=v.event_id)
         return v
 
+    # --- a pull request an earlier run opened (ADR-0021) -----------------------------
+    def _open_delivery(self, item: BacklogItem) -> DeliveryResult | None:
+        """The item's newest delivery on the chain whose pull request has no recorded
+        outcome (``delivery.merged`` / ``delivery.closed``) — the pull request an earlier
+        run opened and nobody has merged or closed. Read only when delivery is on: with it
+        off this run touches no remote. ``None`` when there is none."""
+        s = self.spec
+        if not s.deliver:
+            return None
+        latest: FactoryEvent | None = None
+        for ev in s.evidence.events_for(item.id):
+            if ev.kind in (EV_DELIVERY, EV_DELIVERY_UPDATED):
+                latest = ev
+        if latest is None:
+            return None
+        p = latest.payload
+        number = int(p.get("pr_number", 0) or 0)
+        if number <= 0 or s.evidence.outcome_for(item.id, number) is not None:
+            return None
+        return DeliveryResult(
+            item_id=item.id,
+            branch=str(p.get("branch", "")),
+            base=str(p.get("base", "")),
+            commit_sha=str(p.get("commit_sha", "")),
+            pr_url=str(p.get("pr_url", "")),
+            pr_number=number,
+            pack_hash=str(p.get("pack_hash", "")),
+            body_sha256=str(p.get("body_sha256", "")),
+            created=str(p.get("created", "")),
+        )
+
+    def _withdraw(
+        self, item: BacklogItem, open_pr: DeliveryResult | None, verdict: ReviewVerdict, why: str
+    ) -> None:
+        """Close the item's open pull request because this run's review did not accept the
+        item (ADR-0021): a comment names the verdict and why, then the pull request is
+        closed; the chain records ``delivery.closed`` with ``closed_by: factory`` and the
+        verdict. A failure to close is a ``delivery.close_failed`` warning on the trace —
+        the pull request stays open and the outcome sync still reads its fate — never a
+        change to the item's status."""
+        if open_pr is None:
+            return
+        s = self.spec
+        kinds = sorted(
+            {f.kind for f in verdict.findings if f.severity in (SEVERITY_MAJOR, SEVERITY_BLOCKING)}
+        )
+        why = f"{'finding(s) ' + ', '.join(kinds) + ' — ' if kinds else ''}{why}"
+        try:
+            close_pull_request(
+                open_pr,
+                verdict=verdict.verdict,
+                reason=why,
+                creds=s.creds,
+                close_pr_fn=s.close_pr_fn,
+            )
+        except DeliveryError as exc:
+            self._emit(
+                "delivery.close_failed",
+                item.id,
+                status=StepStatus.ERROR,
+                error=str(exc),
+                pr=open_pr.pr_ref,
+                verdict=verdict.verdict,
+            )
+            return
+        s.evidence.record_delivery_outcome(
+            item.id,
+            state=OUTCOME_CLOSED,
+            pr_number=open_pr.pr_number,
+            pr_url=open_pr.pr_url,
+            closed_at=utc_now_iso(),
+            closed_by="factory",
+            verdict=verdict.verdict,
+            reason=why,
+        )
+        self._emit(
+            "delivery.closed",
+            item.id,
+            pr=open_pr.pr_ref,
+            verdict=verdict.verdict,
+            closed_by="factory",
+        )
+
     # --- the oracle rule on rework (DL-045 rule 3) --------------------------------
     @staticmethod
     def _weak_oracle_finding(verdict: ReviewVerdict) -> str | None:
@@ -625,11 +750,18 @@ class FactoryLoop:
         return None
 
     def _refuse_rework(
-        self, item: BacklogItem, verdict: ReviewVerdict, oracle: AuthoredTest, why: str
+        self,
+        item: BacklogItem,
+        verdict: ReviewVerdict,
+        oracle: AuthoredTest,
+        why: str,
+        *,
+        open_pr: DeliveryResult | None = None,
     ) -> NoReturn:
         """Stop the item ``oracle_needs_strengthening``: the reviewer asked for a stronger
         test and none can be had here. Routed human on the chain (the finding and the way
-        forward in the reason), ``rework.refused`` on the trace — and NO build."""
+        forward in the reason), ``rework.refused`` on the trace — NO build, NO delivery,
+        and an open pull request an earlier run opened is closed (ADR-0021)."""
         # the finding's detail may run to the 2000 chars a ReviewFinding allows, and
         # ItemOutcome.error is tail-capped at 2000: composed from the detail's HEAD, the
         # reason keeps its prefix (the reader's key) and the way forward on the outcome
@@ -652,6 +784,7 @@ class FactoryLoop:
         )
         self._emit("route.decided", item.id, route=ROUTE_HUMAN, reason=reason)
         self._emit("rework.refused", item.id, status=StepStatus.SKIPPED, reason=reason)
+        self._withdraw(item, open_pr, verdict, reason)
         raise _Stop(STATUS_ORACLE_NEEDS_STRENGTHENING, error=reason)
 
     # --- one item ----------------------------------------------------------------
@@ -672,6 +805,9 @@ class FactoryLoop:
         keep: list[BuildResult] = []
         try:
             readiness, route = self._assess(item)
+            # the item's pull request from an earlier run, read before this run appends
+            # anything: an accept updates it, any other final verdict closes it (ADR-0021)
+            open_pr = self._open_delivery(item)
             oracle = self._oracle(item, readiness, authored)
             proof = self._prove(item, readiness, oracle)
             results = self._build(item, readiness, oracle, proof, trial_prefix="r")
@@ -682,8 +818,9 @@ class FactoryLoop:
                 raise _Stop(STATUS_DISQUALIFIED)
             if not final.clean:
                 raise _Stop(STATUS_NOT_CLEAN)
-            delivery, pr_ref = self._deliver(item, final, route)
-            verdict = self._review(item, final, proof, pr_ref)
+            # ADR-0021: the review comes BEFORE anything leaves the factory — no pull
+            # request exists while the build is under review
+            verdict = self._review(item, final, proof)
             verdicts.append(verdict)
             while verdict.rework_required and reworks < s.max_rework:
                 # DL-045 rule 3: a `weak_oracle` finding asks for a stronger TEST; rebuilding
@@ -692,7 +829,13 @@ class FactoryLoop:
                 # it — the item stops before any edit is permitted.
                 wants_stronger_test = self._weak_oracle_finding(verdict) is not None
                 if wants_stronger_test and s.rework_test is None:
-                    self._refuse_rework(item, verdict, oracle, "this deployment has no test author")
+                    self._refuse_rework(
+                        item,
+                        verdict,
+                        oracle,
+                        "this deployment has no test author",
+                        open_pr=open_pr,
+                    )
                 reworks += 1
                 # the human/agent edit is PERMITTED only now — the verdict is on the record
                 permit_edit(
@@ -703,14 +846,18 @@ class FactoryLoop:
                     note=f"rework {reworks} after {verdict.verdict}",
                 )
                 self._emit("rework.start", item.id, n=reworks, after=verdict.verdict)
-                # the reviewed build is fully consumed (verdict on the record); release its
-                # worktree so the rework can re-point the delivery branch
+                # the reviewed build is fully consumed (verdict on the record) and was never
+                # delivered; release its worktree before the rebuild
                 final.close()
                 edited = s.rework_test(item, verdict, oracle) if s.rework_test is not None else None
                 if wants_stronger_test and (edited is None or edited.sha256 == oracle.sha256):
                     # the author answered with the same bytes: still the same oracle
                     self._refuse_rework(
-                        item, verdict, oracle, "the test author returned the same oracle"
+                        item,
+                        verdict,
+                        oracle,
+                        "the test author returned the same oracle",
+                        open_pr=open_pr,
                     )
                 oracle = edited or oracle
                 proof = self._prove(item, readiness, oracle)
@@ -722,24 +869,28 @@ class FactoryLoop:
                     raise _Stop(STATUS_DISQUALIFIED)
                 if not final.clean:
                     raise _Stop(STATUS_NOT_CLEAN)
-                # the rework re-points the branch the first delivery pushed and updates ITS
-                # pull request (B-1b finding 1): the earlier result is what it leases against
-                delivery, pr_ref = self._deliver(
+                verdict = self._review(item, final, proof)
+                verdicts.append(verdict)
+            if verdict.accepted:
+                # the ONLY path to a pull request: the final, accepted, reviewed build
+                delivery, _ = self._deliver(
                     item,
                     final,
                     route,
-                    previous=delivery,
+                    verdict=verdict,
+                    previous=open_pr,
                     rework_n=reworks,
-                    after_verdict=verdict.verdict,
+                    after_verdict=verdicts[-2].verdict if len(verdicts) > 1 else "",
                 )
-                verdict = self._review(item, final, proof, pr_ref)
-                verdicts.append(verdict)
-            if verdict.accepted:
                 status = STATUS_ACCEPTED
-            elif verdict.rework_required:
-                status = STATUS_REWORK_EXHAUSTED
             else:
-                status = STATUS_REJECTED
+                status = STATUS_REWORK_EXHAUSTED if verdict.rework_required else STATUS_REJECTED
+                self._withdraw(
+                    item,
+                    open_pr,
+                    verdict,
+                    f"the review of this run's rebuild ended {status}: {verdict.summary}",
+                )
             error = ""
         except _Stop as stop:
             status = stop.status

@@ -8,11 +8,15 @@ What it does: Pins that a spec refuses a test author that is also a rung, that a
               accepted with delivery off by default, that an unsigned structural gap is refused
               and recorded, that an operator item is routed human not built, the test-first route
               through the author rung, that no oracle means no build, that a green authored test
-              is not RED, that a not-clean build stops before delivery and review, that delivery
-              on fails closed without credentials and otherwise opens a branch + PR then reviews,
-              that accept-with-edit forces rework (RED → build → grade → a re-delivery that
-              UPDATES the first pull request → fresh verdict; a failed rework comment is a
-              warning on the record, never a stop) until the budget is exhausted, that a
+              is not RED, that a not-clean build stops before review and delivery, that the
+              review comes BEFORE delivery and only an ``accept`` verdict reaches it (ADR-0021:
+              a weak-oracle, rejected or rework-exhausted build opens no pull request and
+              commits no delivery branch), that delivery on fails closed without credentials
+              and otherwise opens a branch + PR after the review accepts, that
+              accept-with-edit forces rework (RED → build → grade → fresh verdict → ONE pull
+              request on the accepted rebuild) until the budget is exhausted, that an item's
+              pull request from an earlier run is updated on ``accept`` (a failed comment is a
+              warning, never a stop) and CLOSED naming the verdict otherwise, that a
               ``weak_oracle`` verdict never rebuilds against an unchanged oracle (no test
               author, or one that returns the same bytes → ``oracle_needs_strengthening``,
               routed human with a reason whose prefix survives a 2000-char finding;
@@ -24,7 +28,8 @@ How:          ``Rig`` wires ``MultiBuilder`` (edit picked from the brief's subje
               once), ``FakeTestAuthor``, a ``MemorySink`` emitter, static credentials and
               recording push / PR / comment seams over ``pyrepo``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
+              docs/adr/0021-factory-review-before-delivery.md
 Works with:   src/crb/factory/loop.py (under test), src/crb/factory/readiness.py (the DoR
               gate), src/crb/factory/build.py, src/crb/factory/delivery.py and
               src/crb/factory/review.py (the steps it sequences), src/crb/factory/evidence.py
@@ -319,13 +324,14 @@ def test_single_item_accepted_delivery_off_by_default(pyrepo: pr.PyRepo, tmp_pat
         and out.final_verdict.accepted
         and out.final_verdict.pr_ref == ""
     )
+    # ADR-0021: the review precedes the delivery step (here: the opt-in refusal)
     assert rig.kinds("I-1") == [
         fe.EV_READINESS,
         fe.EV_ROUTE,
         fe.EV_RED_PROOF,
         fe.EV_BUILD,
-        fe.EV_DELIVERY_REFUSED,
         fe.EV_VERDICT,
+        fe.EV_DELIVERY_REFUSED,
         fe.EV_ITEM_OUTCOME,
     ]
     refused = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)[0]
@@ -434,12 +440,16 @@ def test_delivery_on_fails_closed_without_credentials(pyrepo: pr.PyRepo, tmp_pat
     rig = _rig(pyrepo, tmp_path, deliver=True)  # no creds → NullProvider
     out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
     assert out.status == fl.STATUS_DELIVERY_FAILED and "fail closed" in out.error
-    assert not rig.pushes and not rig.prs and not out.verdicts
+    # ADR-0021: the build was reviewed and accepted first; only then did delivery fail closed
+    assert not rig.pushes and not rig.prs
+    assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT]
     assert rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
     assert pyrepo.repo.rev_parse("main") == pyrepo.docs_sha
 
 
-def test_delivery_on_opens_branch_and_pr_then_reviews(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+def test_delivery_on_opens_branch_and_pr_after_the_review_accepts(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
     creds = StaticProvider(
         GitCredentials(remote="https://github.com/acme/calc.git", token="ghp_" + "b" * 36)
     )
@@ -454,10 +464,12 @@ def test_delivery_on_opens_branch_and_pr_then_reviews(pyrepo: pr.PyRepo, tmp_pat
             "expected": None,
         }
     ]
-    assert out.final_verdict is not None and out.final_verdict.pr_ref == out.delivery.pr_url
+    # ADR-0021: the review ran before any pull request existed, and licensed the one opened
+    assert out.final_verdict is not None and out.final_verdict.accepted
+    assert out.final_verdict.pr_ref == ""
     assert pyrepo.repo.rev_parse("main") == pyrepo.docs_sha  # never main
     kinds = rig.kinds("I-1")
-    assert fe.EV_DELIVERY in kinds and kinds.index(fe.EV_DELIVERY) < kinds.index(fe.EV_VERDICT)
+    assert fe.EV_DELIVERY in kinds and kinds.index(fe.EV_VERDICT) < kinds.index(fe.EV_DELIVERY)
 
 
 # --- the route gate (DL-038) --------------------------------------------------------
@@ -636,31 +648,17 @@ def test_accept_with_edit_forces_rework_red_build_grade_fresh_verdict(
     assert out.status == fl.STATUS_ACCEPTED and out.reworks == 1
     assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT_WITH_EDIT, rv.VERDICT_ACCEPT]
     assert edits == [rv.VERDICT_ACCEPT_WITH_EDIT]
-    # the delivery branch was re-pointed by the rework: two pushes, ONE pull request — the
-    # second push leases against the commit the first delivery pushed and updates the PR
-    # the first delivery opened (B-1b finding 1, DL-045)
-    assert [p["branch"] for p in rig.pushes] == ["crb/I-1-add-multiply-to-calc"] * 2
+    # ADR-0021: nothing was delivered until the rework's build was accepted — ONE push (a
+    # first push, the bare lease), ONE pull request, carrying the reworked change
+    assert [p["expected"] for p in rig.pushes] == [None]
     opened = rig.evidence.events_for("I-1", fe.EV_DELIVERY)
-    assert len(opened) == 1 and len(rig.prs) == 1
-    first_commit = str(opened[0].payload["commit_sha"])
-    assert [p["expected"] for p in rig.pushes] == [None, first_commit]
-    assert out.delivery is not None and out.delivery.updated
+    assert len(opened) == 1 and len(rig.prs) == 1 and rig.comments == []
+    assert out.delivery is not None and not out.delivery.updated
     assert out.delivery.pr_number == 1 and out.delivery.pr_url == opened[0].payload["pr_url"]
-    assert out.delivery.previous_commit_sha == first_commit != out.delivery.commit_sha
-    assert out.final_verdict is not None and out.final_verdict.pr_ref == out.delivery.pr_url
-    updated = rig.evidence.events_for("I-1", fe.EV_DELIVERY_UPDATED)
-    assert len(updated) == 1
-    up = updated[0].payload
-    assert up["rework"] == 1 and up["after_verdict"] == rv.VERDICT_ACCEPT_WITH_EDIT
-    assert up["previous_commit_sha"] == first_commit and up["commit_sha"] == out.delivery.commit_sha
-    assert up["pr_url"] == out.delivery.pr_url and up["updated"] is True
-    (comment,) = rig.comments
-    assert comment["pr_number"] == 1 and "Rework 1" in comment["body"]
-    assert first_commit in comment["body"] and out.delivery.commit_sha in comment["body"]
-    assert up["body_sha256"] and out.delivery.body_sha256 == up["body_sha256"]
+    assert out.delivery.pack_hash == out.verdicts[-1].pack_hash
+    assert not rig.evidence.events_for("I-1", fe.EV_DELIVERY_UPDATED)
     assert [e.action for e in rig.sink.events if e.action.startswith("delivery.")] == [
         "delivery.opened",
-        "delivery.updated",
     ]
     assert (
         pyrepo.repo.show_file(out.delivery.commit_sha, "tests/test_multiply.py") == stronger.content
@@ -671,92 +669,75 @@ def test_accept_with_edit_forces_rework_red_build_grade_fresh_verdict(
     )  # the rework re-proved RED
     assert [b["trial"] for b in out.builds] == ["r1", "w1r1"]
     kinds = rig.kinds("I-1")
-    # verdict → edit permitted → RED proof → build → re-delivery → fresh verdict, in that order
+    # verdict → edit permitted → RED proof → build → fresh verdict → delivery, in that order
     v1 = kinds.index(fe.EV_VERDICT)
     assert kinds[v1 + 1] == fe.EV_EDIT
     assert kinds[v1 + 2] == fe.EV_RED_PROOF and fe.EV_BUILD in kinds[v1 + 2 :]
-    assert kinds[v1 + 2 :].index(fe.EV_BUILD) < kinds[v1 + 2 :].index(fe.EV_DELIVERY_UPDATED)
-    assert kinds.count(fe.EV_VERDICT) == 2 and kinds[-2] == fe.EV_VERDICT
+    assert kinds.count(fe.EV_VERDICT) == 2
+    assert kinds[-3:] == [fe.EV_VERDICT, fe.EV_DELIVERY, fe.EV_ITEM_OUTCOME]
     assert rig.evidence.verify() == len(kinds)
     rows = list(rig.ledger.rows())
     assert len(rows) == 2 and all(r.process_step == PROCESS_FACTORY for r in rows)
     assert [r.trial for r in rows] == ["r1", "w1r1"] and false_q1_total(rows) == 0
 
 
-def test_rework_whose_pull_request_comment_fails_is_still_updated_and_reviewed(
+def test_a_re_delivery_whose_pull_request_comment_fails_is_still_updated(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
-    """The rework comment is posted AFTER the lease push has moved the remote branch. When
-    it fails (a rate limit, a 5xx, a timeout) the branch and the pull request already carry
-    the rework: the loop must record `delivery.updated` (with the failure as
-    ``comment_error``), warn, and REVIEW the moved branch — never end the item
-    `delivery_failed` with a `delivery.refused` that contradicts the remote."""
-    stronger = AuthoredTest(
-        "tests/test_multiply.py",
-        TEST_MULTIPLY_SRC + "\n\ndef test_multiply_other():\n    assert multiply(5, 6) == 30\n",
-        OPERATOR,
-    )
+    """A re-delivery (the item's pull request an earlier run opened, accepted again —
+    ADR-0021) posts its comment AFTER the lease push has moved the remote branch. When the
+    comment fails (a rate limit, a 5xx, a timeout) the branch and the pull request already
+    carry the new build: the loop must record `delivery.updated` (with the failure as
+    ``comment_error``) and warn — never end the item `delivery_failed` with a
+    `delivery.refused` that contradicts the remote."""
+    from crb.factory.delivery import delivery_branch_name
+
     comments: list[dict[str, Any]] = []
 
     def failing_comment(**kw: Any) -> None:
         comments.append(kw)
         raise DeliveryError("GitHub comments API returned 403: rate limit exceeded")
 
-    creds = StaticProvider(
-        GitCredentials(remote="https://github.com/acme/calc.git", token="x" * 20)
-    )
-    rig = _rig(
-        pyrepo,
-        tmp_path,
-        builder=MultiBuilder(first_edit=MULTIPLY_HARDCODED),
-        rework_test=lambda item, verdict, previous: stronger,
-        deliver=True,
-        creds=creds,
-        comment_pr_fn=failing_comment,
-    )
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds(), comment_pr_fn=failing_comment)
+    seeded = _seed_open_delivery(rig)
     out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
-    # the item ran to its fresh verdict; the rework's build is the one reviewed
-    assert out.status == fl.STATUS_ACCEPTED and out.reworks == 1 and out.error == ""
-    assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT_WITH_EDIT, rv.VERDICT_ACCEPT]
-    opened = rig.evidence.events_for("I-1", fe.EV_DELIVERY)
-    first_commit = str(opened[0].payload["commit_sha"])
-    assert [p["expected"] for p in rig.pushes] == [None, first_commit]
+    assert out.status == fl.STATUS_ACCEPTED and out.error == ""
+    assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT]
+    assert [p["expected"] for p in rig.pushes] == [seeded["commit_sha"]] and rig.prs == []
     assert out.delivery is not None and out.delivery.updated
-    assert out.delivery.commit_sha != first_commit
-    assert out.delivery.commit_sha == pyrepo.repo.rev_parse("crb/I-1-add-multiply-to-calc")
+    assert out.delivery.commit_sha == pyrepo.repo.rev_parse(delivery_branch_name(multiply_item()))
     # the chain agrees with the remote: updated, with the comment failure on the event
     assert not rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
     (updated,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_UPDATED)
     assert updated.payload["commit_sha"] == out.delivery.commit_sha
+    assert updated.payload["previous_commit_sha"] == seeded["commit_sha"]
     assert updated.payload["body_sha256"] == "" and out.delivery.body_sha256 == ""
     assert updated.payload["comment_error"] == out.delivery.comment_error
     assert out.delivery.comment_error.startswith("DeliveryError: GitHub comments API returned 403")
-    assert len(comments) == 1 and comments[0]["pr_number"] == 1
+    assert len(comments) == 1 and comments[0]["pr_number"] == 5
+    assert "Rebuilt by a later factory run" in comments[0]["body"]
     # the step events: the update is recorded, the failed comment is a warning, not a stop
     steps = [e for e in rig.sink.events if e.action.startswith("delivery.")]
-    assert [e.action for e in steps] == [
-        "delivery.opened",
-        "delivery.updated",
-        "delivery.comment_failed",
-    ]
-    assert steps[1].status == StepStatus.OK and steps[2].status == StepStatus.ERROR
-    assert steps[2].error_message == out.delivery.comment_error
-    assert steps[2].payload["pr"] == out.delivery.pr_url
+    assert [e.action for e in steps] == ["delivery.updated", "delivery.comment_failed"]
+    assert steps[0].status == StepStatus.OK and steps[1].status == StepStatus.ERROR
+    assert steps[1].error_message == out.delivery.comment_error
+    assert steps[1].payload["pr"] == out.delivery.pr_url
     kinds = rig.kinds("I-1")
-    assert kinds.count(fe.EV_VERDICT) == 2 and kinds[-2] == fe.EV_VERDICT
-    assert kinds.index(fe.EV_DELIVERY_UPDATED) < len(kinds) - 2  # the fresh verdict follows it
-    assert rig.evidence.verify() == len(kinds)
+    # the seeded delivery, then this run: … verdict → re-delivery → outcome
+    assert kinds[-3:] == [fe.EV_VERDICT, fe.EV_DELIVERY_UPDATED, fe.EV_ITEM_OUTCOME]
+    assert rig.evidence.verify() == len(rig.evidence.events())
 
 
 def _assert_stopped_for_a_stronger_oracle(rig: Rig, out: fl.ItemOutcome) -> None:
     """DL-045 rule 3, both halves: the item ends ``oracle_needs_strengthening`` with ONE
-    build, ONE push, ONE pull request and ONE verdict; the chain routes it human with the
-    reviewer's finding in the reason; the trace carries ``rework.refused``."""
+    build, ONE verdict and — since ADR-0021 — NO push and NO pull request (the review came
+    first); the chain routes it human with the reviewer's finding in the reason; the trace
+    carries ``rework.refused``."""
     assert out.status == fl.STATUS_ORACLE_NEEDS_STRENGTHENING and not out.accepted
     assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT_WITH_EDIT]
     assert rig.builder.calls == 1 and [b["trial"] for b in out.builds] == ["r1"]
-    assert len(rig.pushes) == 1 and len(rig.prs) == 1 and rig.comments == []
-    assert out.delivery is not None and not out.delivery.updated
+    assert rig.pushes == [] and rig.prs == [] and rig.comments == []
+    assert out.delivery is None
     # the reason names the finding and the way forward, on the outcome and the chain
     assert out.error.startswith("the reviewer found the oracle weak (")
     assert "strengthen the test and register a superseding item" in out.error
@@ -780,9 +761,7 @@ def _assert_stopped_for_a_stronger_oracle(rig: Rig, out: fl.ItemOutcome) -> None
     assert decided[-1].payload["reason"] == out.error
     (refused,) = [e for e in rig.sink.events if e.action == "rework.refused"]
     assert refused.status == StepStatus.SKIPPED and refused.payload["reason"] == out.error
-    assert [e.action for e in rig.sink.events if e.action.startswith("delivery.")] == [
-        "delivery.opened"
-    ]
+    assert [e.action for e in rig.sink.events if e.action.startswith("delivery.")] == []
     assert [e.action for e in rig.sink.events].count("build.start") == 1
     assert [e.action for e in rig.sink.events][-1] == "item.done"
 
@@ -807,9 +786,8 @@ def test_weak_oracle_without_a_test_author_stops_before_any_rebuild(
     _assert_stopped_for_a_stronger_oracle(rig, out)
     assert out.reworks == 0 and not rig.evidence.edits_for("I-1")
     assert not [e for e in rig.sink.events if e.action == "rework.start"]
-    # the branch still carries the one delivered build, not a rework
-    assert out.delivery is not None
-    assert out.delivery.commit_sha == pyrepo.repo.rev_parse("crb/I-1-add-multiply-to-calc")
+    # ADR-0021: the weak build was never committed on a delivery branch, let alone pushed
+    assert out.delivery is None and _crb_branches(pyrepo) == []
 
 
 @pytest.mark.parametrize("returns", ["same_bytes", "none"])
@@ -893,7 +871,7 @@ def test_rework_asked_for_a_reason_other_than_the_oracle_keeps_the_rework_path(
 ) -> None:
     """Rule 3 is about the ORACLE: an ``accept_with_edit`` whose findings carry no
     ``weak_oracle`` (a reviewer's own major finding on the change) reworks as before — the
-    same oracle, a fresh RED proof, a second build, the pull request updated."""
+    same oracle, a fresh RED proof, a second build, a fresh verdict."""
 
     class OpinionatedReviewer(rv.MechanicalReviewer):
         name = "opinionated"
@@ -913,7 +891,8 @@ def test_rework_asked_for_a_reason_other_than_the_oracle_keeps_the_rework_path(
     # the loop reworked once (same oracle: a clean build, the map's probes pass) and the
     # reviewer asked again: the budget ends it, never rule 3
     assert out.status == fl.STATUS_REWORK_EXHAUSTED and out.reworks == 1
-    assert rig.builder.calls == 2 and len(rig.pushes) == 2 and len(rig.prs) == 1
+    # ADR-0021: an item that ends rework_exhausted opened no pull request at all
+    assert rig.builder.calls == 2 and rig.pushes == [] and rig.prs == []
     assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT_WITH_EDIT] * 2
     assert all(f.kind != rv.FINDING_WEAK_ORACLE for v in out.verdicts for f in v.findings)
     assert not [e for e in rig.sink.events if e.action == "rework.refused"]
@@ -1076,9 +1055,13 @@ class RejectingReviewer(rv.MechanicalReviewer):
 
 
 def _crb_branches(pyrepo: pr.PyRepo) -> list[str]:
-    """Every ``crb/…`` branch in the repository — a delivery commits on one before it pushes."""
+    """Every delivery branch (``crb/<item>-<slug>``) in the repository — a delivery commits
+    on one before it pushes. The oracle's staging branches (``crb/factory/<item>/test``,
+    build.py) are the factory's own and never pushed, so they are not counted."""
     out = pyrepo.repo.run("for-each-ref", "--format=%(refname)", "refs/heads/crb").stdout
-    return [ln for ln in out.splitlines() if ln.strip()]
+    return [
+        ln for ln in out.splitlines() if ln.strip() and not ln.startswith("refs/heads/crb/factory/")
+    ]
 
 
 def test_a_weak_oracle_verdict_never_reaches_delivery(pyrepo: pr.PyRepo, tmp_path: Path) -> None:

@@ -1,12 +1,13 @@
 """Delivery — a graded change ships as a BRANCH + PR in the customer's repo, never main.
 
-The factory only ever *proposes*. A clean build is committed on a new branch
-``crb/<item_id>-<slug>`` and a pull request is opened against the customer's
-default branch; a human on the customer's side reviews and merges. The factory
-NEVER pushes to, nor opens a PR against, ``main`` / ``master`` / the configured
-default — :func:`assert_not_default_branch` is the hard invariant, checked
-before credentials are resolved or the remote is touched, and its test is a
-ratchet.
+The factory only ever *proposes*. A clean build the independent review ACCEPTED is
+committed on a new branch ``crb/<item_id>-<slug>`` and a pull request is opened
+against the customer's default branch; a human on the customer's side reviews and
+merges. The factory NEVER pushes to, nor opens a PR against, ``main`` / ``master`` /
+the configured default — :func:`assert_not_default_branch` is the hard invariant,
+checked before credentials are resolved or the remote is touched, and its test is a
+ratchet. Nor does it deliver a build the review did not accept: ``deliver`` takes the
+verdict and refuses anything but ``accept`` before a credential is read (ADR-0021).
 
 Credentials are BYOK behind :class:`GitCredentialsProvider`. The default is
 :class:`NullProvider`, which raises :class:`NoGitCredentialsError` — with no
@@ -21,48 +22,62 @@ The PR body is the evidence summary — belts, pack hash, apparatus, route
 decision, RED proof — and a link to the pack. It carries no secrets: every
 string passes through :mod:`crb.core.redact`.
 
-A **re-delivery** (a rework after ``accept_with_edit``) updates the pull request
-the first delivery opened instead of opening a second one: ``deliver`` is given
+A **re-delivery** (an item whose pull request an earlier run opened, accepted again)
+updates that pull request instead of opening a second one: ``deliver`` is given
 the earlier :class:`DeliveryResult` as ``previous``, the push leases against the
 commit that delivery pushed (``--force-with-lease=<branch>:<sha>`` — a bare lease
 has nothing to hold when the push goes to a URL, and git answers ``stale info``;
 B-1b, 2026-09-19), the PR url and number are carried over, and a short comment
-names the rework so the human reviewer sees why the branch moved. The comment is
-the OPTIONAL step and it runs AFTER the push has moved the remote branch: when it
-fails (a rate limit, a 5xx, a timeout) the result is still ``updated`` and carries
-the redacted failure as ``comment_error`` — the record must agree with the remote,
-never say "refused" of a branch the pull request already carries.
+says why the branch moved. The comment is the OPTIONAL step and it runs AFTER the
+push has moved the remote branch: when it fails (a rate limit, a 5xx, a timeout)
+the result is still ``updated`` and carries the redacted failure as
+``comment_error`` — the record must agree with the remote, never say "refused" of
+a branch the pull request already carries.
+
+A **close** (:func:`close_pull_request`) is the rework path for a delivered pull
+request a later review did NOT accept (ADR-0021): a comment names the verdict and
+why, then the pull request is closed — never merged, never deleted, a person may
+reopen it.
 
 Navigation
 ----------
-What it is:   Delivery — a clean build becomes a branch + pull request in the customer's
-              repository, never a write to its default branch.
+What it is:   Delivery — a clean, reviewed and ACCEPTED build becomes a branch + pull
+              request in the customer's repository, never a write to its default branch;
+              and the close of a delivered pull request a later review did not accept.
 What it does: Enforces the hard invariant first (``assert_not_default_branch``, before any
-              credential is read), then resolves BYOK credentials (the default provider
-              refuses — fail closed), commits the source diff plus the oracle on
-              ``crb/<item>-<slug>``, pushes with a one-shot auth header (the token never
-              touches ``.git/config``), and opens the PR whose body is the redacted evidence
-              summary. Push and PR are injectable seams.
-How:          ``deliver`` = invariant → credentials → deliverability → ``commit_on_branch``
-              → ``push_fn`` → ``open_pr_fn`` → ``DeliveryResult``; with ``previous`` the
-              push leases against ``previous.commit_sha``, no PR is opened and
-              ``comment_pr_fn`` posts the rework note (``updated=True``; a failed note is
-              ``comment_error`` on the result, never a refusal of the moved branch).
+              credential is read), then the review (``verdict`` must be ``accept`` —
+              ADR-0021), then resolves BYOK credentials (the default provider refuses —
+              fail closed), commits the source diff plus the oracle on
+              ``crb/<item>-<slug>``, pushes with a one-shot auth header (never in
+              ``.git/config``, never on the argv), and opens the PR whose body is the
+              redacted evidence summary; ``close_pull_request`` comments the verdict and
+              closes. Push, PR, comment and close are injectable seams.
+How:          ``deliver`` = invariant → verdict → credentials → deliverability →
+              ``commit_on_branch`` → ``push_fn`` → ``open_pr_fn`` → ``DeliveryResult``; with
+              ``previous`` the push leases against ``previous.commit_sha``, no PR is opened
+              and ``comment_pr_fn`` posts the note (``updated=True``; a failed note is
+              ``comment_error`` on the result, never a refusal of the moved branch);
+              ``close_pull_request`` = refuse ``accept`` → credentials → ``close_comment``
+              → ``close_pr_fn`` (GitHub: comment, then ``PATCH …/pulls/{n}``).
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md (the PR body is a
-              summary, never raw output)
+              summary, never raw output), docs/adr/0021-factory-review-before-delivery.md
+              (only an accepted build is delivered; a later non-accept closes the PR)
 Works with:   src/crb/factory/build.py (``BuildResult`` and its kept workspace),
-              src/crb/core/git.py (``GitRepo.run`` for checkout / commit / push),
-              src/crb/core/redact.py (every string in the PR body), src/crb/factory/loop.py
-              (``_deliver`` — opt-in, default off; hands the rework its ``previous``),
-              src/crb/factory/evidence.py (``record_delivery`` / ``record_delivery_updated`` /
-              ``record_delivery_refused``), docs/SECURITY.md#33-credentials
+              src/crb/core/git.py (``GitRepo.run`` for checkout / commit / push, and
+              ``git_config_env`` for the header), src/crb/core/redact.py (every string in
+              the PR body), src/crb/factory/loop.py (``_deliver`` — opt-in, default off,
+              reached only by an accepted verdict; ``_withdraw`` closes),
+              src/crb/factory/review.py (``VERDICT_ACCEPT``), src/crb/factory/evidence.py
+              (``record_delivery`` / ``record_delivery_updated`` /
+              ``record_delivery_refused`` / ``record_delivery_outcome``),
+              docs/SECURITY.md#33-credentials
 Tested by:    tests/test_factory_delivery.py, tests/test_factory_loop.py
 Touch when:   onboarding a repository hosted somewhere other than GitHub — add an
-              ``open_pr_fn`` + ``comment_pr_fn`` seam (Azure DevOps, GitLab) and a
-              credentials provider; NEVER
-              relax ``ALWAYS_PROTECTED_BRANCHES`` or the invariant's order (its test is a
-              ratchet — docs/CONTRIBUTING.md#the-never-weaken-a-gate-rule).
+              ``open_pr_fn`` + ``comment_pr_fn`` + ``close_pr_fn`` seam (Azure DevOps,
+              GitLab) and a credentials provider; NEVER relax ``ALWAYS_PROTECTED_BRANCHES``,
+              the verdict refusal or the invariant's order (their tests are ratchets —
+              docs/CONTRIBUTING.md#the-never-weaken-a-gate-rule).
 """
 
 from __future__ import annotations
@@ -83,6 +98,7 @@ from crb.core.git import GitError, GitRepo, git_config_env
 from crb.core.redact import redact
 from crb.factory.backlog import BacklogItem
 from crb.factory.build import FACTORY_IDENTITY, BuildResult
+from crb.factory.review import VERDICT_ACCEPT
 
 DELIVERY_BRANCH_PREFIX = "crb/"
 
@@ -317,11 +333,18 @@ def rework_comment(
     moved (the rework number and the verdict it answers), from which commit to which, and
     the new build's evidence. Every string redacted."""
     belts = build.grade.belts.to_dict()
+    why = (
+        f"after the review verdict `{after_verdict}` asked for a rework and the rebuilt "
+        "change was accepted"
+        if after_verdict
+        else "in a later run whose review accepted the rebuilt change"
+    )
     lines = [
-        f"### Rework {rework_n} — after `{after_verdict or 'review'}`",
+        f"### Rework {rework_n} — after `{after_verdict}`"
+        if after_verdict
+        else "### Rebuilt by a later factory run — accepted by review",
         "",
-        f"The factory rebuilt `{item.id}` after the review verdict "
-        f"`{after_verdict or 'review'}` and moved `{previous.branch}` from "
+        f"The factory rebuilt `{item.id}` {why}, and moved `{previous.branch}` from "
         f"`{previous.commit_sha[:12]}` to `{commit_sha[:12]}` (force-with-lease against the "
         "previous commit; the pull request is the same).",
         "",
@@ -347,6 +370,9 @@ PushFn = Callable[..., None]
 OpenPrFn = Callable[..., tuple[str, int]]
 #: ``comment_pr_fn(*, remote, pr_number, body, credentials) -> None``
 CommentPrFn = Callable[..., None]
+#: ``close_pr_fn(*, remote, pr_number, body, credentials) -> None`` — post ``body`` on the
+#: pull request, then close it (ADR-0021: the rework path for a delivered PR later found weak).
+ClosePrFn = Callable[..., None]
 
 
 def force_with_lease_arg(branch: str, expected: str | None) -> str:
@@ -412,14 +438,21 @@ def owner_repo_from_remote(remote: str) -> tuple[str, str]:
 
 
 def _github_post(
-    url: str, payload: Mapping[str, Any], credentials: GitCredentials, *, what: str, timeout: int
+    url: str,
+    payload: Mapping[str, Any],
+    credentials: GitCredentials,
+    *,
+    what: str,
+    timeout: int,
+    method: str = "POST",
 ) -> dict[str, Any]:
-    """One authenticated POST to the GitHub REST API (stdlib urllib); the decoded JSON
-    body, or a :class:`DeliveryError` naming ``what`` and the (redacted) refusal."""
+    """One authenticated call (``POST`` by default, ``PATCH`` to close) to the GitHub REST
+    API (stdlib urllib); the decoded JSON body, or a :class:`DeliveryError` naming
+    ``what`` and the (redacted) refusal."""
     req = urllib.request.Request(  # noqa: S310 — https API URL built from a parsed remote
         url,
         data=json.dumps(dict(payload)).encode("utf-8"),
-        method="POST",
+        method=method,
         headers={
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {credentials.token}",
@@ -487,6 +520,40 @@ def github_comment_pr_fn(
         credentials,
         what="comments",
         timeout=timeout,
+    )
+
+
+def github_close_pr_fn(
+    *,
+    remote: str,
+    pr_number: int,
+    body: str,
+    credentials: GitCredentials,
+    api_base: str = "https://api.github.com",
+    timeout: int = 30,
+) -> None:
+    """Comment ``body`` on pull request ``pr_number``, then close it (``PATCH
+    /repos/{owner}/{repo}/pulls/{n}`` with ``state: closed``). The comment goes first so a
+    reader of the closed pull request sees why; a failure of either is a
+    :class:`DeliveryError`."""
+    owner, name = owner_repo_from_remote(remote)
+    if pr_number <= 0:
+        raise DeliveryError(f"cannot close pull request number {pr_number!r}")
+    github_comment_pr_fn(
+        remote=remote,
+        pr_number=pr_number,
+        body=body,
+        credentials=credentials,
+        api_base=api_base,
+        timeout=timeout,
+    )
+    _github_post(
+        f"{api_base}/repos/{owner}/{name}/pulls/{pr_number}",
+        {"state": "closed"},
+        credentials,
+        what="pulls",
+        timeout=timeout,
+        method="PATCH",
     )
 
 
@@ -581,10 +648,13 @@ def deliver(
     previous: DeliveryResult | None = None,
     rework_n: int = 0,
     after_verdict: str = "",
+    verdict: str,
 ) -> DeliveryResult:
-    """Deliver a CLEAN build as a new branch + PR. Order of refusals is deliberate:
-    invariant first (before any credential is read), then credentials (fail
-    closed), then deliverability, then git, then the remote.
+    """Deliver a CLEAN, REVIEWED and ACCEPTED build as a new branch + PR. Order of
+    refusals is deliberate: invariant first (before any credential is read), then the
+    review (``verdict`` must be ``accept`` — ADR-0021: a pull request never opens on an
+    unreviewed or unaccepted build, whoever calls this), then credentials (fail closed),
+    then deliverability, then git, then the remote.
 
     With ``previous`` (the item's earlier delivery) this is a RE-delivery: the branch and
     base must be the previous ones, the push leases against ``previous.commit_sha``, no
@@ -597,6 +667,11 @@ def deliver(
     base = _norm_branch(target_default_branch)
     if not base:
         raise DeliveryError("target_default_branch is required (it is the PR base)")
+    if verdict != VERDICT_ACCEPT:
+        raise DeliveryRefused(
+            f"build for {item.id} was not accepted by the review (verdict {verdict!r}) — "
+            "only an accepted, reviewed build is delivered (ADR-0021)"
+        )
     if previous is not None:
         if previous.item_id != item.id:
             raise DeliveryError(
@@ -702,9 +777,61 @@ def deliver(
     )
 
 
+def close_comment(previous: DeliveryResult, *, verdict: str, reason: str) -> str:
+    """The comment a close posts: which verdict, why, and that nothing was merged. Every
+    string redacted."""
+    lines = [
+        f"### Closed by the crb factory — review verdict `{verdict}`",
+        "",
+        f"A later factory run reviewed a rebuild of item `{previous.item_id}` and did not "
+        f"accept it (verdict `{verdict}`). The product no longer stands behind the change on "
+        f"`{previous.branch}`, so this pull request is closed rather than left open for "
+        "someone to merge.",
+        "",
+        f"- why: {reason}",
+        f"- last delivered commit: `{previous.commit_sha}` (evidence pack `{previous.pack_hash}`)",
+        "",
+        "Nothing was merged. The item's evidence chain records the close; a person may "
+        "reopen this pull request.",
+    ]
+    return redact("\n".join(lines))
+
+
+def close_pull_request(
+    previous: DeliveryResult,
+    *,
+    verdict: str,
+    reason: str,
+    creds: GitCredentialsProvider | None,
+    close_pr_fn: ClosePrFn | None = None,
+    repo_id: str = "",
+) -> str:
+    """Close a pull request the factory opened, because a later review of the item did
+    NOT accept it (ADR-0021) — the rework path for a delivered pull request later found
+    weak. Refuses ``verdict == accept`` (an accepted build is delivered, never closed) and
+    a delivery with no pull request; credentials fail closed like a delivery's. Returns the
+    comment posted (the caller records it)."""
+    if verdict == VERDICT_ACCEPT:
+        raise DeliveryError("an accepted build is delivered, never closed")
+    if previous.pr_number <= 0:
+        raise DeliveryError(f"delivery of {previous.item_id!r} has no pull request to close")
+    provider = creds if creds is not None else NullProvider()
+    credentials = provider.resolve(repo_id or previous.item_id)
+    body = close_comment(previous, verdict=verdict, reason=reason)
+    close = close_pr_fn if close_pr_fn is not None else github_close_pr_fn
+    close(
+        remote=credentials.remote,
+        pr_number=previous.pr_number,
+        body=body,
+        credentials=credentials,
+    )
+    return body
+
+
 __all__ = [
     "ALWAYS_PROTECTED_BRANCHES",
     "DELIVERY_BRANCH_PREFIX",
+    "ClosePrFn",
     "CommentPrFn",
     "DefaultBranchProtectionError",
     "DeliveryError",
@@ -719,11 +846,14 @@ __all__ = [
     "PushFn",
     "StaticProvider",
     "assert_not_default_branch",
+    "close_comment",
+    "close_pull_request",
     "commit_on_branch",
     "deliver",
     "delivery_branch_name",
     "force_with_lease_arg",
     "git_push_fn",
+    "github_close_pr_fn",
     "github_comment_pr_fn",
     "github_open_pr_fn",
     "owner_repo_from_remote",

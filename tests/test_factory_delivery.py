@@ -154,7 +154,14 @@ def test_deliver_refuses_default_before_touching_creds(harness: Harness) -> None
                 raise AssertionError("credentials must not be resolved before the invariant")
 
         with pytest.raises(dv.DefaultBranchProtectionError):
-            dv.deliver(harness.repo.repo, item, build, creds=Boom(), target_default_branch=target)
+            dv.deliver(
+                harness.repo.repo,
+                item,
+                build,
+                creds=Boom(),
+                target_default_branch=target,
+                verdict="accept",
+            )
     finally:
         build.close()
 
@@ -174,6 +181,7 @@ def test_null_provider_fails_closed(harness: Harness) -> None:
                 push_fn=seams.push,
                 open_pr_fn=seams.open_pr,
                 target_default_branch="main",
+                verdict="accept",
             )
         with pytest.raises(dv.NoGitCredentialsError):
             dv.deliver(
@@ -184,6 +192,7 @@ def test_null_provider_fails_closed(harness: Harness) -> None:
                 push_fn=seams.push,
                 open_pr_fn=seams.open_pr,
                 target_default_branch="main",
+                verdict="accept",
             )
         assert not seams.pushes and not seams.prs
     finally:
@@ -234,6 +243,7 @@ def test_deliver_commits_source_and_oracle_on_new_branch_and_opens_pr(harness: H
             target_default_branch="main",
             pack_link="packs/x.json",
             route_decision={"route": "calibrate", "reason": "n=0", "policy_version": "routing.v1"},
+            verdict="accept",
         )
         repo = harness.repo.repo
         assert res.branch == "crb/I-1-add-multiply-to-calc" and res.base == "main"
@@ -283,6 +293,7 @@ def test_deliver_refuses_a_build_that_is_not_clean(harness: Harness) -> None:
                 push_fn=seams.push,
                 open_pr_fn=seams.open_pr,
                 target_default_branch="main",
+                verdict="accept",
             )
         assert not seams.pushes
     finally:
@@ -353,6 +364,7 @@ def test_readme_untouched_by_delivery(harness: Harness) -> None:
             push_fn=seams.push,
             open_pr_fn=seams.open_pr,
             target_default_branch="main",
+            verdict="accept",
         )
         assert pr.README not in harness.repo.repo.changed_files(res.commit_sha)
     finally:
@@ -555,7 +567,7 @@ def test_redelivery_leases_on_the_previous_commit_updates_the_pr_and_comments(
     }
     first_build = _clean_build(harness)
     try:
-        first = dv.deliver(harness.repo.repo, item, first_build, **kw)
+        first = dv.deliver(harness.repo.repo, item, first_build, verdict="accept", **kw)
     finally:
         first_build.close()  # the loop releases the reviewed build before a rework
     rework = _clean_build(harness)
@@ -567,6 +579,7 @@ def test_redelivery_leases_on_the_previous_commit_updates_the_pr_and_comments(
             previous=first,
             rework_n=1,
             after_verdict="accept_with_edit",
+            verdict="accept",
             **kw,
         )
         repo = harness.repo.repo
@@ -609,12 +622,14 @@ def test_redelivery_without_a_comment_seam_updates_the_branch_silently(
     }
     b1 = _clean_build(harness)
     try:
-        first = dv.deliver(harness.repo.repo, item, b1, **kw)
+        first = dv.deliver(harness.repo.repo, item, b1, verdict="accept", **kw)
     finally:
         b1.close()
     b2 = _clean_build(harness)
     try:
-        second = dv.deliver(harness.repo.repo, item, b2, previous=first, rework_n=1, **kw)
+        second = dv.deliver(
+            harness.repo.repo, item, b2, previous=first, rework_n=1, verdict="accept", **kw
+        )
         assert second.updated and second.body_sha256 == "" and not seams.comments
         assert len(seams.prs) == 1 and seams.pushes[-1]["expected"] == first.commit_sha
     finally:
@@ -653,14 +668,21 @@ def test_redelivery_whose_comment_fails_keeps_the_moved_branch_on_the_record(
     }
     b1 = _clean_build(harness)
     try:
-        first = dv.deliver(harness.repo.repo, item, b1, **kw)
+        first = dv.deliver(harness.repo.repo, item, b1, verdict="accept", **kw)
     finally:
         b1.close()
     assert first.comment_error == "" and first.to_dict()["comment_error"] == ""
     b2 = _clean_build(harness)
     try:
         second = dv.deliver(
-            harness.repo.repo, item, b2, previous=first, rework_n=1, after_verdict="x", **kw
+            harness.repo.repo,
+            item,
+            b2,
+            previous=first,
+            rework_n=1,
+            after_verdict="x",
+            verdict="accept",
+            **kw,
         )
         # the push happened (leased against the first commit) and the result says so
         assert seams.pushes[-1]["expected"] == first.commit_sha and len(seams.prs) == 1
@@ -690,7 +712,9 @@ def test_redelivery_refuses_a_different_branch_base_or_item(harness: Harness) ->
     }
     b1 = _clean_build(harness)
     try:
-        first = dv.deliver(harness.repo.repo, item, b1, target_default_branch="main", **kw)
+        first = dv.deliver(
+            harness.repo.repo, item, b1, target_default_branch="main", verdict="accept", **kw
+        )
     finally:
         b1.close()
     b2 = _clean_build(harness)
@@ -704,10 +728,17 @@ def test_redelivery_refuses_a_different_branch_base_or_item(harness: Harness) ->
                 previous=replace(first, branch="crb/I-1-something-else"),
                 target_default_branch="main",
                 **kw,
+                verdict="accept",
             )
         with pytest.raises(dv.DeliveryError, match="re-delivery must update"):
             dv.deliver(
-                harness.repo.repo, item, b2, previous=first, target_default_branch="develop", **kw
+                harness.repo.repo,
+                item,
+                b2,
+                previous=first,
+                target_default_branch="develop",
+                verdict="accept",
+                **kw,
             )
         with pytest.raises(dv.DeliveryError, match="for item"):
             dv.deliver(
@@ -717,6 +748,7 @@ def test_redelivery_refuses_a_different_branch_base_or_item(harness: Harness) ->
                 previous=replace(first, item_id="I-9"),
                 target_default_branch="main",
                 **kw,
+                verdict="accept",
             )
         with pytest.raises(dv.DeliveryError, match="no commit to lease"):
             dv.deliver(
@@ -726,6 +758,7 @@ def test_redelivery_refuses_a_different_branch_base_or_item(harness: Harness) ->
                 previous=replace(first, commit_sha=""),
                 target_default_branch="main",
                 **kw,
+                verdict="accept",
             )
         assert len(seams.pushes) == before and len(seams.prs) == 1 and not seams.comments
     finally:
@@ -792,8 +825,12 @@ def test_deliver_refuses_any_verdict_but_accept_before_touching_creds(harness: H
                     verdict=verdict,
                 )
         assert not seams.pushes and not seams.prs
-        branches = harness.repo.repo.run("for-each-ref", "refs/heads/crb").stdout
-        assert branches.strip() == ""
+        # no delivery branch was committed (the oracle's own ``crb/factory/`` staging
+        # branch is the factory's, never pushed)
+        branches = harness.repo.repo.run(
+            "for-each-ref", "--format=%(refname)", "refs/heads/crb"
+        ).stdout.split()
+        assert [b for b in branches if not b.startswith("refs/heads/crb/factory/")] == []
     finally:
         build.close()
 
