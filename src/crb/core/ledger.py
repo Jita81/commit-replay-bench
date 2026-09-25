@@ -1164,10 +1164,11 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
     # re-checked at read time over ALL rows, not just eligible ones: the write-time
     # gate should make this 0, and a reader must be able to see that it is
     fq1 = sum(1 for r in rs if r.clean and not r.belts_all_true())
-    # means over the rows that carry a value — a $0 / 0 s is "not measured" here, not
-    # a free, instant trial (cost_known tells the two apart per row)
-    costs = [r.cost_usd for r in eligible if r.cost_usd]
-    lats = [r.latency_s for r in eligible if r.latency_s]
+    # means over the rows that carry a value: a cost is a row fact (``cost_known`` — a
+    # known $0 counts as $0, an unknown cost is left out, never read as $0); a 0 s
+    # latency is "not recorded", never an instant trial (crb.core.economics, F35)
+    costs = [r.cost_usd for r in eligible if r.cost_known]
+    lats = [r.latency_s for r in eligible if r.latency_s > 0]
     strengths = [r.oracle_strength for r in eligible if r.oracle_strength is not None]
     split = failure_split(rs)
     return CellStats(

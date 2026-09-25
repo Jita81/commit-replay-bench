@@ -30,13 +30,15 @@ What it does: Loads the repo's rows as ``GradeRow`` (a false-Q1 row refuses to l
               409), filters to one mode and one apparatus (never pooled by default),
               reduces them under the ONE routing rule with the repo's latest controls
               verdict and task-level oracle scores, overlays active sign-offs at read time,
-              and returns only MEASURED cells — absence is honest-empty.
+              and returns only MEASURED cells — absence is honest-empty; every cell and the
+              map carry their economics (known counts, t intervals, apparatus — F35).
 How:          ``rows_for_mode`` → ``rows_for_apparatus`` → ``signed_map`` (=
               ``build_capability_map`` + ``apply_signoffs_to_map``) → ``cell_out`` per
               measured cell; ``parse_by`` maps the ``?by=`` aliases onto ``CELL_FIELDS``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md
-Works with:   src/crb/core/capability.py (``build_capability_map``, ``CapabilityCell``),
+Works with:   src/crb/core/capability.py (``build_capability_map``, ``CapabilityCell`` — its
+              ``economics`` and the map's come from src/crb/core/economics.py),
               src/crb/core/routing.py (``DEFAULT_POLICY``, ``ControlsVerdict``),
               src/crb/server/routes/oracle.py (``latest_controls_verdict`` /
               ``oracle_by_task`` — the one source shared with sign-off),
@@ -72,6 +74,7 @@ from crb.core.capability import (
     build_capability_map,
     trusted_autonomy_coverage,
 )
+from crb.core.economics import Economics, fold_economics
 from crb.core.ledger import CELL_FIELDS, GradeRow, failure_split
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DELIVER, ControlsVerdict
 from crb.core.signoff import apply_signoffs_to_map
@@ -88,6 +91,7 @@ from crb.server.schemas_capability import (
     CapabilityCellSplitOut,
     CapabilityMapWithControlsOut,
     ControlsVerdictOut,
+    EconomicsOut,
     FailureSplitOut,
     FailureSplitResponse,
     RouteDecisionWithControlsOut,
@@ -201,13 +205,19 @@ def split_out(c: CapabilityCell) -> FailureSplitOut:
     )
 
 
+def economics_out(e: Economics) -> EconomicsOut:
+    """F35: the core's economics fold, re-typed (no arithmetic here)."""
+    return EconomicsOut.model_validate(e.to_dict())
+
+
 def cell_out(
     c: CapabilityCell, deliveries: Mapping[tuple[str, str], DeliveryCounts] | None = None
 ) -> CapabilityCellSplitOut:
     """A MEASURED cell as the API serves it: key, stats, decision, split, tier, apparatus —
     and, from the factory evidence chain, how many pull requests were delivered from the
     cell and how many merged (B-9 / F30; counts, never a rate)."""
-    assert c.stats is not None and c.decision is not None  # only measured cells are serialised
+    # only measured cells are serialised, and every measured cell carries its economics
+    assert c.stats is not None and c.decision is not None and c.economics is not None
     s = c.stats
     n_delivered, n_merged = delivery_counts_matching(
         deliveries or {}, c.key.capability_class, c.key.size
@@ -258,6 +268,7 @@ def cell_out(
         model_ci_low=None if c.model_point is None else round(s.model_ci.low, 4),
         model_ci_high=None if c.model_point is None else round(s.model_ci.high, 4),
         failure_split=split_out(c),
+        economics=economics_out(c.economics),
     )
 
 
@@ -337,6 +348,7 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
         ),
         policy=RoutingPolicyWithControlsOut(**cmap.policy.to_dict()),
         controls=controls_out(controls),
+        economics=economics_out(fold_economics(rows)),
     )
 
 
@@ -421,6 +433,7 @@ __all__ = [
     "DEFAULT_BY",
     "cell_out",
     "controls_out",
+    "economics_out",
     "parse_by",
     "router",
     "signed_map",

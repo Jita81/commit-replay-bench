@@ -10,7 +10,9 @@
  *               the summary tiles carry value + n + apparatus, that no repo gives the designed
  *               empty state, that a 503 renders the envelope (message, HTTP status, code), and
  *               — after A2 — that a failed / thin / escaped / unmeasured controls verdict gets
- *               its own pill and the split and model point appear next to the point.
+ *               its own pill and the split and model point appear next to the point; and that
+ *               the open cell's cost and latency carry their known n, interval and apparatus,
+ *               an unknown reading as the dash (F35).
  * How:          `mockApi` answers `GET /capability-map` with hand-built maps; `renderApp` at
  *               `/capability?repo=…`; assertions on the `cell-*`, `tile-*`, `kind-*` and
  *               `controls-*` test ids.
@@ -106,6 +108,41 @@ describe('CapabilityPage', () => {
     expect(screen.getAllByTestId('ci-bar')).toHaveLength(2)
     expect(screen.getByTestId('cell-measured').textContent).toContain('n=40')
     expect(screen.getByTestId('cell-measured').textContent).toContain('92.5%')
+  })
+
+  it('the open cell: cost and latency carry the known count as n, the served interval and the apparatus; an unknown is a dash, never $0.00 (F35)', async () => {
+    const T = 'Student-t 95% on the known rows (n-1 df), lower bound floored at 0'
+    const economics = {
+      n_attempts: 40,
+      n_clean: 37,
+      cost_known: 38,
+      cost_known_clean: 35,
+      latency_known: 0,
+      latency_known_clean: 0,
+      apparatus_versions: ['2.0'],
+      pooled: false,
+      cost_per_attempt: { n: 38, value: 0.012, ci_low: 0.01, ci_high: 0.014, method: T, reason: '' },
+      cost_per_clean: { n: 35, value: 0.013, ci_low: 0.011, ci_high: 0.015, method: T, reason: '' },
+      latency_per_attempt: { n: 0, value: null, ci_low: null, ci_high: null, method: T, reason: 'no attempt recorded a known latency' },
+    }
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, cells: [cell({ latency_s_mean: 0, economics })] },
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    const tile = await screen.findByTestId('cell-measured')
+    // the grid line: the known cost, and a dash for the latency nobody recorded (not "0.0 s")
+    expect(within(tile).getByTestId('cell-cost').textContent).toBe('$0.0120')
+    expect(within(tile).getByTestId('cell-latency').textContent).toBe('—')
+    fireEvent.click(tile)
+    const cost = await screen.findByTestId('tile-cost')
+    expect(cost).toHaveTextContent('n =38')
+    expect(cost).toHaveTextContent('95% CI[$0.0100, $0.0140]')
+    expect(cost).toHaveTextContent(`38 of 40 attempts with a known cost · ${T} · apparatus 2.0`)
+    const latency = screen.getByTestId('tile-latency')
+    expect(latency).toHaveTextContent('n =0')
+    expect(latency).toHaveTextContent('no attempt recorded a known latency')
   })
 
   it('shows the designed empty state when no repo is chosen; its action is Connection, not the repo list (J-HEL-14)', async () => {

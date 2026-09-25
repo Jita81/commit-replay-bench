@@ -9,7 +9,7 @@
  *               a bare number can never reach the page. An unmeasured value (`—`, or `n` of 0 /
  *               null) renders muted as an honest empty tile, never as a zero rate; a
  *               non-finite `n` renders as a dash. The apparatus line wraps: the honest
- *               sentence ("no interval yet: the API serves the mean only") is read in full,
+ *               sentence (an economics tile's denominators, method and apparatus) is read in full,
  *               never cut to one line behind a hover title. The label may be a node so a
  *               route name can be a `Term` with its definition one click away. With `hint`
  *               (a registry id — the ratchet requires one on every tile) the whole tile is
@@ -18,7 +18,8 @@
  *               free-text `hint`).
  * How:          A `<dl>` of n / 95 % CI / apparatus under the value; `fmtInt` and `fmtCi` do
  *               the guarding; the root is a `<Hint as="div">` when `hint` is given, so
- *               `data-hint` sits on the tile itself (`data-component="stat-tile"`).
+ *               `data-hint` sits on the tile itself (`data-component="stat-tile"`); `ciFormat`
+ *               prints an interval that is not a rate (dollars, seconds) in its own unit.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/lib/format.ts (`fmtInt`, `fmtCi`, `wilson` for a client-side interval),
@@ -52,6 +53,8 @@ interface StatTileProps {
   n: number | null | undefined
   /** Wilson 95% interval when the value is a rate; `null` prints "95% CI —" (say why in `footer`). */
   ci?: { low: number; high: number } | null
+  /** Formats each end of `ci` when it is not a rate (dollars, seconds); default: a percentage. */
+  ciFormat?: (v: number) => string
   /** Apparatus/method line, e.g. "apparatus 2.0 · belt set v4 · Wilson 95%". */
   apparatus: string
   tone?: Tone
@@ -68,7 +71,7 @@ interface StatTileProps {
  * the n and the apparatus line; when the value is unmeasured pass "—" and
  * n = 0 and it renders as an honest empty tile, never a zero.
  */
-export function StatTile({ label, value, n, ci, apparatus, tone, hint, footer, ...rest }: StatTileProps) {
+export function StatTile({ label, value, n, ci, ciFormat, apparatus, tone, hint, footer, ...rest }: StatTileProps) {
   const nText = typeof n === 'number' && Number.isFinite(n) ? fmtInt(n) : '—'
   const unmeasured = value === '—' || n === 0 || n === null || n === undefined
   const root = {
@@ -90,7 +93,7 @@ export function StatTile({ label, value, n, ci, apparatus, tone, hint, footer, .
         {ci !== undefined && (
           <div className="flex gap-1">
             <dt>95% CI</dt>
-            <dd>{ci ? fmtCi(ci.low, ci.high) : '—'}</dd>
+            <dd>{ci ? (ciFormat ? `[${ciFormat(ci.low)}, ${ciFormat(ci.high)}]` : fmtCi(ci.low, ci.high)) : '—'}</dd>
           </div>
         )}
         <div className="flex gap-1">

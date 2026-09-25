@@ -369,14 +369,22 @@ def test_no_passing_config_returns_none_not_best_effort() -> None:
 
 
 def test_uncosted_configs_fall_back_to_point_selection() -> None:
-    rows = _config("a", cost=0.0, latency=0.0, clean=38) + _config(
-        "b", cost=0.0, latency=0.0, clean=40
+    # imported rows name a builder but never reported a cost: unknown, not $0 (F35)
+    imported = {"provenance": "imported:census"}
+    rows = _config("a", cost=0.0, latency=0.0, clean=38, **imported) + _config(
+        "b", cost=0.0, latency=0.0, clean=40, **imported
     )
     pick = cap.best_config(rows, capability_class="bug.fix", size="S")
     assert pick is not None
     assert pick.selection == cap.SELECTION_POINT
     assert pick.cell.key.model == "b"
     assert pick.cost_usd is None and pick.latency_s is None and pick.frontier == ()
+    # a builder that REPORTED $0 (a fixture, a subscription) is a known $0, never unknown
+    known_zero = cap.best_config(
+        _config("z", cost=0.0, latency=0.0, clean=40), capability_class="bug.fix", size="S"
+    )
+    assert known_zero is not None and known_zero.cost_usd == 0.0
+    assert known_zero.latency_s is None  # 0 s is "not recorded", never instant
     # a costed config is preferred on the frontier when one exists
     pick2 = cap.best_config(
         rows + _config("c", cost=0.5, latency=9.0), capability_class="bug.fix", size="S"

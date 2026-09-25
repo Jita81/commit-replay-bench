@@ -88,9 +88,47 @@ describe('ResultsPage', () => {
     const controls = screen.getByTestId('tile-negative-controls')
     expect(controls).toHaveTextContent('apparatus 2.2 · controls.v3')
     expect(controls).toHaveTextContent('0 violations · 0 escapes · 43 not constructible')
-    // no customer-facing backlog id; the honest "mean only" statement stays
+    // no customer-facing backlog id, and no "mean only" apology: the economics carry an interval now
     expect(screen.queryByText(/backlog F35/)).toBeNull()
-    expect(screen.getAllByText(/no interval yet: the API serves the mean only/)).toHaveLength(2)
+    expect(screen.queryByText(/the API serves the mean only/)).toBeNull()
+  })
+
+  it('the economics tiles carry the known count as n, the served interval and the apparatus; an unknown is a dash with its reason (F35)', async () => {
+    const T = 'Student-t 95% on the known rows (n-1 df), lower bound floored at 0'
+    const economics = {
+      n_attempts: 35,
+      n_clean: 33,
+      cost_known: 30,
+      cost_known_clean: 28,
+      latency_known: 0,
+      latency_known_clean: 0,
+      apparatus_versions: ['2.2'],
+      pooled: false,
+      cost_per_attempt: { n: 30, value: 0.25, ci_low: 0.2, ci_high: 0.3, method: T, reason: '' },
+      cost_per_clean: { n: 28, value: 0.268, ci_low: 0.21, ci_high: 0.33, method: 'delta-method (ratio estimator) Student-t 95%', reason: '' },
+      latency_per_attempt: { n: 0, value: null, ci_low: null, ci_high: null, method: T, reason: 'no attempt recorded a known latency' },
+    }
+    mockApi({ ...ROUTES, 'GET /capability-map': { ...MAP, economics } })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const cost = await screen.findByTestId('tile-cost-per-attempt')
+    expect(cost).toHaveTextContent('$0.2500')
+    expect(cost).toHaveTextContent('n =30') // the attempts with a known cost, not all 35
+    expect(cost).toHaveTextContent('95% CI[$0.2000, $0.3000]')
+    expect(cost).toHaveTextContent(`30 of 35 attempts with a known cost · ${T} · apparatus 2.2`)
+    const perClean = screen.getByTestId('tile-cost-per-clean')
+    expect(perClean).toHaveTextContent('n =28')
+    expect(perClean).toHaveTextContent('28 clean of 30 attempts with a known cost')
+    expect(perClean).toHaveTextContent('95% CI[$0.2100, $0.3300]')
+    const latency = screen.getByTestId('tile-latency')
+    expect(latency).toHaveTextContent('—')
+    expect(latency).toHaveTextContent('95% CI—')
+    expect(latency).toHaveTextContent('no attempt recorded a known latency')
+    expect(latency).not.toHaveTextContent('0 s')
+    // the clean rate is a rate: n, a Wilson interval, the apparatus (35 attempts, 33 clean)
+    const clean = screen.getByTestId('tile-clean-rate')
+    expect(clean).toHaveTextContent('n =35')
+    expect(clean).toHaveTextContent(/95% CI\[\d/)
+    expect(clean).toHaveTextContent('33 clean of 35 attempts, all cells · Wilson 95% · apparatus 2.2')
   })
 
   it('the bar in the oracle tile follows the policy in force, not a constant', async () => {

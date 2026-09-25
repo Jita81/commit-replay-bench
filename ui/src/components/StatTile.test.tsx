@@ -10,7 +10,8 @@
  *               is muted with no fabricated zero and no `NaN` / `Infinity` / `undefined`; that
  *               a non-finite `n` still renders without `NaN`; that `footer` renders the
  *               visible line and `hint` makes the tile root the trigger (`data-hint` on the
- *               element that carries the test id, `data-component="stat-tile"` either way).
+ *               element that carries the test id, `data-component="stat-tile"` either way); and
+ *               that `ciFormat` prints a dollar or seconds interval in its own unit.
  * How:          Testing Library render; assertions on the tile's text content and the muted
  *               class.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -48,11 +49,17 @@ describe('StatTile', () => {
   })
 
   it('the apparatus line is read in full, never cut to one line behind a hover title', () => {
-    const long = 'a mean of builder-reported $ over cells with a known cost, current apparatus — no interval yet: the API serves the mean only'
+    const long = '30 of 35 attempts with a known cost · Student-t 95% on the known rows (n-1 df), lower bound floored at 0 · apparatus 2.2'
     render(<StatTile label="Cost per attempt" value="$0.12" n={40} apparatus={long} data-testid="tile" />)
     const dd = screen.getByText(long)
     expect(dd).not.toHaveAttribute('title')
     expect(dd.className).not.toMatch(/truncate/)
+  })
+
+  it('ciFormat prints an interval that is not a rate in its own unit (dollars, seconds)', () => {
+    render(<StatTile label="Cost" value="$0.25" n={30} ci={{ low: 0.2, high: 0.3 }} ciFormat={(v) => `$${v.toFixed(2)}`} apparatus="a" data-testid="tile" />)
+    expect(screen.getByTestId('tile').textContent).toContain('95% CI[$0.20, $0.30]')
+    expect(screen.getByTestId('tile').textContent).not.toContain('%,')
   })
 
   it('the label may be a node, so a route name can be a term with its definition', () => {

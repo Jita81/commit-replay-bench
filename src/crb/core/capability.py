@@ -58,6 +58,8 @@ Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0007-abstract-cell-export-only.md
 Works with:   src/crb/core/ledger.py (CellStats, group_by_cell, false_q1_total),
               src/crb/core/routing.py (the rule and the controls verdict),
+              src/crb/core/economics.py (each measured cell's cost and latency with
+              known counts, t intervals and apparatus — F35),
               src/crb/core/signoff.py (overlays earned tiers on these cells),
               src/crb/core/forecast.py (reads the map to plan measurement),
               src/crb/core/learn.py (reads it to propose strengthening work),
@@ -80,6 +82,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
+from crb.core.economics import Economics, fold_economics
 from crb.core.git import GitError, GitRepo
 from crb.core.ledger import (
     CELL_FIELDS,
@@ -200,9 +203,12 @@ class CapabilityCell:
     empty. ``sigma`` is the sample standard deviation of the per-trial clean
     indicator (advisory; the Wilson interval on ``stats`` is the method the
     product routes on). ``cost_known`` / ``latency_known`` say whether any
-    eligible row recorded the axis — :class:`CellStats` reports ``0.0`` for an
+    eligible row recorded the axis — a row-level fact (``GradeRow.cost_known``, so a
+    known ``$0`` is known; ``latency_s > 0``). :class:`CellStats` reports ``0.0`` for an
     unmeasured axis, and an axis we cannot compare on is never on a Pareto
-    frontier.
+    frontier. ``economics`` (F35) carries the known counts as denominators, the means
+    with their t intervals and the apparatus they came from — ``None`` only when the
+    cell is unmeasured.
     """
 
     key: CellKey
@@ -216,6 +222,7 @@ class CapabilityCell:
     belt_sets: tuple[str, ...]
     cost_known: bool
     latency_known: bool
+    economics: Economics | None = None
 
     def __post_init__(self) -> None:
         # the invariants of the module docstring, enforced at construction: honest-empty
@@ -344,6 +351,7 @@ class CapabilityCell:
             "belt_sets": list(self.belt_sets),
             "cost_known": self.cost_known,
             "latency_known": self.latency_known,
+            "economics": None if self.economics is None else self.economics.to_dict(),
             "failure_split": {
                 "builder_red": self.n_builder_red,
                 "budget": self.n_budget,
@@ -427,6 +435,7 @@ def measure_cell(
         policy=policy,
     )
     tier = TIER_UNTRUSTED if stats.false_q1 > 0 else TIER_AUTOMATED_PASS
+    economics = fold_economics(rows)
     return CapabilityCell(
         key=stats.cell,
         projection=proj,
@@ -438,9 +447,11 @@ def measure_cell(
         repos=len({r.repo for r in rows}),
         rows=len(rows),
         belt_sets=tuple(sorted({r.belt_set for r in rows})),
-        # an axis nobody recorded (all zeros) is unknown, not free / instant
-        cost_known=any(r.cost_usd > 0 for r in eligible),
-        latency_known=any(r.latency_s > 0 for r in eligible),
+        # row-level: a known $0 is known (GradeRow.cost_known); an axis nobody recorded
+        # is unknown, never free / instant
+        cost_known=economics.cost_known > 0,
+        latency_known=economics.latency_known > 0,
+        economics=economics,
     )
 
 

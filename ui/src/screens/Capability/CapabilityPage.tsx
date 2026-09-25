@@ -16,7 +16,9 @@
  *               terms that open inline) that every tile is `aria-describedby` — never a hover
  *               title inside the tile, and never a button inside the tile's button. The
  *               detail card recomputes the interval in the browser and flags drift from the
- *               server's rather than hiding it. The run action in the empty state is an
+ *               server's rather than hiding it. Cost and latency carry the attempts with a
+ *               known value as n, the server's t interval and the apparatus; an unknown is
+ *               the dash with its reason, never $0.00. The run action in the empty state is an
  *               operator's; other roles read who acts.
  * How:          `useRepoParam` → `useCapabilityMapWithControls(repo, projection)` → index the
  *               cells by `class|size` → the full taxonomy × size order as the grid so 0-count
@@ -29,7 +31,9 @@
  *               ui/src/screens/Capability/FailureSplit.tsx (split, model point, controls pill),
  *               ui/src/components/Help.tsx (`Term` in the legend), ui/src/api/types.ts
  *               (`CapabilityMap`, `CellField`, `NOT_YET_MEASURED`), ui/src/components/StatTile.tsx
- *               (the numbers with their method), src/crb/server/routes/capability.py (the
+ *               (the numbers with their method; cost and latency through
+ *               ui/src/lib/economics.ts — known n, t interval, apparatus, F35),
+ *               src/crb/server/routes/capability.py (the
  *               route and the cell statistics), src/crb/core/taxonomy.py (`ALL_CLASSES` —
  *               the list `ALL_CLASSES` here must match)
  * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx,
@@ -62,7 +66,8 @@ import { StatTile } from '../../components/StatTile'
 import { VerdictPill } from '../../components/VerdictPill'
 import { apiUrl } from '../../api/client'
 import { useAuth } from '../../lib/auth'
-import { fmtInt, fmtPct, fmtRatio, fmtSeconds, fmtUsd, wilson } from '../../lib/format'
+import { economicsTile } from '../../lib/economics'
+import { fmtInt, fmtPct, fmtRatio, wilson } from '../../lib/format'
 import { tierDisplay } from '../../lib/verdict'
 import { controlsDisplay, useCapabilityMapWithControls, type CapabilityCellSplit as CapabilityCell, type ControlsVerdict } from './contract'
 import { ControlsPill, FailureSplitPills, ModelPointLine } from './FailureSplit'
@@ -197,8 +202,9 @@ function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefin
           fQ1 {cell.false_q1}
           {bad ? ' ✗' : ''}
         </span>
-        <span>{fmtUsd(cell.cost_usd_mean)}</span>
-        <span>{fmtSeconds(cell.latency_s_mean)}</span>
+        {/* F35: the served fold — an unknown cost or latency is the dash, never $0.00 / 0 s */}
+        <span data-testid="cell-cost">{economicsTile(cell.economics, 'cost_per_attempt').value}</span>
+        <span data-testid="cell-latency">{economicsTile(cell.economics, 'latency_per_attempt').value}</span>
         <span>or {fmtRatio(cell.oracle_strength_mean)}</span>
         {tier && <span className={`${tier.tone === 'green' ? 'text-status-green' : tier.tone === 'red' ? 'text-status-red' : 'text-status-amber'}`}>{tier.glyph}</span>}
       </div>
@@ -262,8 +268,8 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
             />
           )}
           <StatTile label="false-Q1" hint="stat.capability.cell_false_q1" value={String(cell.false_q1)} n={cell.n} apparatus="clean rows with a failed belt — must be 0" tone={cell.false_q1 > 0 ? 'red' : 'green'} />
-          <StatTile label="Cost / trial" hint="stat.capability.cost" value={fmtUsd(cell.cost_usd_mean)} n={cell.n} apparatus="mean of builder-reported USD" />
-          <StatTile label="Latency / trial" hint="stat.capability.latency" value={fmtSeconds(cell.latency_s_mean)} n={cell.n} apparatus="mean wall-clock of the build" />
+          <StatTile label="Cost / trial" hint="stat.capability.cost" {...economicsTile(cell.economics, 'cost_per_attempt')} data-testid="tile-cost" />
+          <StatTile label="Latency / trial" hint="stat.capability.latency" {...economicsTile(cell.economics, 'latency_per_attempt')} data-testid="tile-latency" />
           <StatTile label="Oracle strength" hint="stat.capability.oracle" value={fmtRatio(cell.oracle_strength_mean)} n={cell.n} apparatus="mean mutation kill-rate of the tasks' oracles" />
         </div>
         <CellLegend data-testid="cell-legend-line" />

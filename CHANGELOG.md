@@ -8,6 +8,24 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — every economics figure carries its n, its interval and its apparatus (F35)
+
+- **The map serves economics, not a bare mean.** Every cell of `GET /capability-map`, and the
+  map itself, now carries `economics`: the attempts and clean attempts with a known cost or
+  latency (the denominators), the mean with a Student-t 95 % interval (cost per clean attempt:
+  a delta-method ratio interval) and the method named, and the apparatus the rows came from.
+  Fewer than two known rows serve no interval and say why; rows from more than one apparatus
+  version are refused, never pooled (`crb.core.economics`).
+- **A known $0 is $0; an unknown is not.** `cost_usd_mean` was the mean of the non-zero costs,
+  so a reported `$0` (a fixture, a subscription) was dropped and an unknown cost with a stray
+  value could be kept. It is now the mean over the rows whose cost is known
+  (`GradeRow.cost_known`), and a cell's `cost_known` follows the same row fact. A served mean
+  can fall for a cell that mixes known `$0` rows with paid ones.
+- **The tiles say so.** Baseline's cost per attempt, cost per clean attempt and latency, and the
+  open cell's cost and latency on the map, show n as the known count, the interval in dollars
+  or seconds, and the apparatus; an unknown is a dash with its reason, never `$0.00`. The
+  clean-rate tile carries a Wilson interval.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real

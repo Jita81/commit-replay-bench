@@ -12,6 +12,10 @@ carry (action #4):
   and Wilson interval. The all-rows ``point`` stays the number that routes.
 * the repo's **negative-controls verdict** every cell was routed under, and each
   decision's ``reason_code`` / ``controls_policy``.
+* the **economics** (F35) of every cell and of the whole map: the attempts and clean
+  attempts with a known cost / latency (the denominators), the mean with a Student-t 95 %
+  interval and its method, the apparatus the rows came from — withheld, with the reason,
+  when fewer than two rows are known or the rows span more than one apparatus.
 
 Nothing here is computed: every field is a core ``to_dict`` value re-typed so the
 OpenAPI document is honest and a drift is a diff.
@@ -22,7 +26,7 @@ What it is:   The response models for ``/capability-map``, ``/routes`` and
               ``/failure-split`` — the base shapes extended with the failure split, the
               model point and the controls verdict.
 What it does: Re-types the core's ``to_dict`` values (``CapabilityCell``, ``RouteDecision``,
-              ``ControlsVerdict``, ``FailureSplit``) so the OpenAPI document is exact and a
+              ``ControlsVerdict``, ``FailureSplit``, ``Economics``) so the OpenAPI document is exact and a
               drift between core and API is a diff; validators pin ``state`` /
               ``reason_code`` / failure kinds to the core's closed vocabularies.
 How:          Pydantic subclasses of the shapes in src/crb/server/schemas.py; no arithmetic.
@@ -31,6 +35,7 @@ ADRs:         docs/adr/0003-one-routing-rule.md
 Works with:   src/crb/server/routes/capability.py (the only producer), src/crb/server/schemas.py
               (the base shapes), src/crb/core/routing.py (``REASON_CODES``,
               ``CONTROLS_STATES``), src/crb/core/ledger.py (``FAILURE_KINDS``),
+              src/crb/core/economics.py (``Economics.to_dict`` — ``EconomicsOut``),
               ui/src/api/types.ts (the TypeScript twin),
               docs/API.md#capability-routing-forecast-sign-off
 Tested by:    tests/test_server_routes_capability.py
@@ -102,6 +107,39 @@ class FailureSplitOut(BaseModel):
     outage: int = 0
 
 
+class EstimateOut(BaseModel):
+    """:meth:`crb.core.economics.Estimate.to_dict`. ``n`` is the denominator (known
+    attempts; known clean attempts for cost per clean attempt). ``value`` is ``null`` when
+    nothing is known — never ``0`` for unknown; ``ci_low`` / ``ci_high`` are ``null``
+    whenever no interval is served, and ``reason`` then says why (``""`` only when the
+    value and its interval are both served)."""
+
+    n: int
+    value: float | None
+    ci_low: float | None
+    ci_high: float | None
+    method: str
+    reason: str
+
+
+class EconomicsOut(BaseModel):
+    """:meth:`crb.core.economics.Economics.to_dict` — cost and latency with their
+    denominators, intervals and apparatus. ``pooled`` is ``true`` when the rows span more
+    than one apparatus version: every estimate is then withheld (never blended)."""
+
+    n_attempts: int
+    n_clean: int
+    cost_known: int
+    cost_known_clean: int
+    latency_known: int
+    latency_known_clean: int
+    apparatus_versions: list[str]
+    pooled: bool
+    cost_per_attempt: EstimateOut
+    cost_per_clean: EstimateOut
+    latency_per_attempt: EstimateOut
+
+
 class CapabilityCellSplitOut(CapabilityCellOut):
     """A measured cell + its failure split, its model point (with n and interval)
     and the routing reason code. ``model_point`` is ``null`` when no fair, finished
@@ -124,6 +162,8 @@ class CapabilityCellSplitOut(CapabilityCellOut):
     model_ci_low: float | None
     model_ci_high: float | None
     failure_split: FailureSplitOut
+    #: F35 — this cell's cost and latency with their known counts, intervals and apparatus.
+    economics: EconomicsOut
 
     @field_validator("reason_code")
     @classmethod
@@ -141,6 +181,9 @@ class CapabilityMapWithControlsOut(CapabilityMapOut):
     cells: list[CapabilityCellSplitOut]  # type: ignore[assignment]
     controls: ControlsVerdictOut
     policy: RoutingPolicyWithControlsOut
+    #: F35 — the economics of every row behind the map (the Baseline's tiles), folded from
+    #: the rows themselves: an interval cannot be recombined from the cells' means.
+    economics: EconomicsOut
 
 
 class RouteDecisionWithControlsOut(RouteDecisionOut):
@@ -199,6 +242,8 @@ __all__ = [
     "CapabilityCellSplitOut",
     "CapabilityMapWithControlsOut",
     "ControlsVerdictOut",
+    "EconomicsOut",
+    "EstimateOut",
     "FailureSplitOut",
     "FailureSplitResponse",
     "RouteDecisionWithControlsOut",
