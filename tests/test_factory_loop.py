@@ -1234,3 +1234,30 @@ def test_a_closed_or_merged_pull_request_is_not_reopened_by_a_new_run(
     out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
     assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
     assert not out.delivery.updated and len(rig.prs) == 1
+
+
+def test_a_close_that_fails_is_a_warning_and_never_changes_the_items_status(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """Closing an earlier run's pull request is the product's courtesy to the customer, not
+    a step of the item: a close the forge refuses (or a seam that blows up) leaves the item's
+    status as the review decided, the pull request open for the outcome sync to read, and a
+    ``delivery.close_failed`` warning on the trace."""
+
+    def broken_close(**kw: Any) -> None:
+        raise RuntimeError("the forge answered 502")
+
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        probes=(MajorProbe(),),
+        close_pr_fn=broken_close,
+    )
+    _seed_open_delivery(rig)
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ORACLE_NEEDS_STRENGTHENING
+    assert not rig.evidence.events_for("I-1", fe.EV_DELIVERY_CLOSED)
+    (warn,) = [e for e in rig.sink.events if e.action == "delivery.close_failed"]
+    assert warn.status == StepStatus.ERROR and "502" in (warn.error_message or "")

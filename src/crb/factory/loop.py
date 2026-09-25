@@ -711,12 +711,12 @@ class FactoryLoop:
                 creds=s.creds,
                 close_pr_fn=s.close_pr_fn,
             )
-        except DeliveryError as exc:
+        except Exception as exc:  # a refused, unreachable or garbled close: never a status
             self._emit(
                 "delivery.close_failed",
                 item.id,
                 status=StepStatus.ERROR,
-                error=str(exc),
+                error=redact_and_cap_head(f"{type(exc).__name__}: {exc}", max_chars=400),
                 pr=open_pr.pr_ref,
                 verdict=verdict.verdict,
             )
