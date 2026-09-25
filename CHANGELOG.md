@@ -8,6 +8,46 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — qualification is posture-relative (ADR-0019, apparatus 2.3)
+
+The first replay in the sealed sandbox graded every attempt `builder_red`: with no module
+cache and no network the targets could not build, the failure-kind rule read a red target
+with no error as the model's, and the replay trusted RED, baseline and gold facts the host
+had measured (run `0c44ff24…`, finding D1–D5). The instrument now proves each task where it
+grades it and blames the model only with a witness from there.
+
+- **Posture is an identity** (`crb.core.posture`): the executor, the image by content id,
+  the exact toolchain probed inside it, the runner's command environment, the tree, the
+  network, the dependency mode and the limits, hashed to `pst_…`; the class
+  (`executor/tree/deps-mode`) is what rates pool on.
+- **Qualification is a record per task and posture, for no model money**
+  (`crb.core.qualify.qualify_task`): an offline environment probe (Go: `go list -deps -test
+  ./...`), RED once, the baseline twice (union and flaky set), the gold twice and its belt
+  scope once at half the wall clock, belt 5 on the gold — each refusal a code with its fix.
+  Kept append-only in `task_qualifications` (revision 0011, a `legacy` back-fill that never
+  satisfies a gate). New run kind `qualify` and `crb repo qualify`; the miner qualifies in
+  its own posture.
+- **The model is blamed only with a witness** (`GradeContext`, `MisattributionViolation`):
+  a verdict that would be `builder_red` or `lint` first runs the failed scope on the gold (or,
+  for a factory item, the environment probe on a fresh base tree) in the same posture; a red
+  control makes the row `harness` with `error: environment: …`. A 2.3 model-failure row
+  without its posture labels and witness cannot be written or read back.
+- **Nothing is built for an unqualified task**: the worker resolves the posture live, admits
+  only qualified tasks (`qualify_first` on by default), and stops at $0 on
+  `POSTURE_UNQUALIFIED`, `POSTURE_DRIFT` and `POSTURE_CANARY_FAILED`; two environment rows in
+  a row stop a run (`env_stop`) and revoke the qualifications. `POST /runs` with
+  `qualify_first: false` and nothing qualified is `409 posture_unqualified`.
+- **Belt 4 reads the builder's changes before the first test ran**: a file a test writes is
+  never the builder's.
+- **Posture is a filter, never a blend**: the map, the route gate and the factory's cell
+  routes read the deployment's posture class; `posture=all` pools only posture-invariant
+  tasks; pre-2.3 docker rows are excluded and counted `unqualified_posture`. New route
+  `GET /repos/{name}/posture`; the repository page gains a Posture panel with a Qualify
+  button that spends nothing.
+- **Apparatus 2.2 → 2.3**: the current map starts empty and 2.2 sign-offs go stale
+  (ADR-0015). The dependency seam (`crb.core.deps`, `crb.provision`) is in place with
+  provisioning off; per-task provisioning is ADR-0019 stream D.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real
