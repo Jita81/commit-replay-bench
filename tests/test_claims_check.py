@@ -258,7 +258,11 @@ def test_a_record_names_the_review_the_action_and_its_state(tree: Path) -> None:
         "| DL-002 | `2026-09-13-friend` action #1: closed. |\n"
         "| DL-003 | `2026-09-14-other` action #2: closed. |\n",
     )
-    assert [f.reason for f in cc.check_review_actions(tree)] == ["review action #2 has no record"]
+    assert [f.reason for f in cc.check_review_actions(tree)] == [
+        "review action #2 has no record",
+        # and a record for a review that is not on disk is itself a finding (PR #54 review)
+        "2026-09-14-other action #2 is recorded but the review has no such action",
+    ]
 
 
 def test_main_fails_on_an_unrecorded_review_action(
@@ -337,3 +341,43 @@ def test_a_review_the_record_only_mentions_does_not_claim_it(tree: Path) -> None
         )
         == set()
     )
+
+
+def test_a_fenced_example_in_an_actions_section_is_not_an_action(tree: Path) -> None:
+    """A review may show what an Actions table looks like inside a fence; a numbered row
+    there is an example, not work a reviewer set (review of PR #54). The fence rule is the
+    one ``blocks_of`` already uses, so a heading inside a fence cannot open or close the
+    Actions section either, and a fence closes only on its own marker."""
+    fenced = REVIEW.replace(
+        "| 2 | Rotate the token. | security | operator |\n",
+        "| 2 | Rotate the token. | security | operator |\n\n"
+        "An example of a row, for the next reviewer:\n\n"
+        "```markdown\n| 7 | An example action. | kind | owner |\n~~~\n"
+        "## 9. Not the next section\n| 8 | Still an example. | kind | owner |\n```\n",
+    )
+    assert [n for n, _ in cc.review_actions(fenced)] == [1, 2]
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open. |\n")
+    _write(tree, "docs/reviews/2026-09-13-friend.md", fenced)
+    assert cc.check_review_actions(tree) == []
+
+
+def test_a_record_whose_review_file_was_deleted_is_a_finding(tree: Path) -> None:
+    """Deleting the review file must not let its records outlive it: the two-way check reads
+    every review the decision log names, not only the reviews still on disk (review of
+    PR #54)."""
+    rows = "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open. |\n"
+    _review_tree(tree, rows)
+    assert cc.check_review_actions(tree) == []
+    (tree / "docs" / "reviews" / "2026-09-13-friend.md").unlink()
+    assert [(f.path, f.line, f.reason) for f in cc.check_review_actions(tree)] == [
+        (
+            "docs/DECISION-LOG.md",
+            5,
+            "2026-09-13-friend action #1 is recorded but the review has no such action",
+        ),
+        (
+            "docs/DECISION-LOG.md",
+            5,
+            "2026-09-13-friend action #2 is recorded but the review has no such action",
+        ),
+    ]

@@ -44,8 +44,8 @@ backticks and then states each action and its state —
 ```` `2026-09-13-critical-friend` action #1: closed …; action #8: [gap] … ```` — where the
 state is the whole word ``closed``, ``open``, ``declined`` or ``[gap]``. The gate reads both
 ways: a review action with no record fails, and so does a record whose review no longer
-lists that action (a deleted row, a renamed *Actions* heading), so neither side can vanish
-alone. The check reads the record's *shape*, not whether the state is true; a person still
+lists that action (a deleted row, a renamed *Actions* heading, a deleted review file), so
+neither side can vanish alone. A fenced example inside the section is not an action. The check reads the record's *shape*, not whether the state is true; a person still
 reads the log.
 Two of the critical friend's ten actions (#8, an independent human review of the core; #9,
 rotating a pasted token) sat for twelve days with no record at all, which is what this rule
@@ -62,13 +62,14 @@ What it does: Parses each allowlisted Markdown page into blocks, finds quantifie
               and reports any that carry no permitted tag — and any ``[measured]`` tag
               without an n, a method or an apparatus version; reports every numbered action
               in a review's Actions table that has no stated record in the decision log,
-              and every record whose review no longer lists the action; --check exits
-              non-zero.
+              and every record whose review no longer lists the action or is no longer on
+              disk; --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
               qualifying a plural noun → look for a permitted tag in the block's cover. Then
-              each docs/reviews/*.md Actions table → its action numbers ⇄ the records in
+              each docs/reviews/*.md Actions table (fenced examples skipped) and each review
+              the log names → its action numbers ⇄ the records in
               docs/DECISION-LOG.md, each under a head that names the review's stem in
               backticks, then ``action #N: <state>``.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -291,6 +292,26 @@ def _strip_markup(text: str) -> str:
     return text.replace("**", "").replace("*", "").replace("> ", " ")
 
 
+def _lines_with_fences(text: str) -> Iterator[tuple[int, str, bool]]:
+    """``(line number, line, fenced)`` for every line; ``fenced`` is true for a fence's own
+    delimiters and everything between them. A fence closes only on the marker that opened it
+    (a ``~~~`` inside a backtick fence is content), as CommonMark reads it. Every reader of a
+    page's structure goes through here, so a fenced example is never read as prose or as a
+    review's action."""
+    marker = ""
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.rstrip()
+        m = _FENCE_RE.match(line)
+        if m and not marker:
+            marker = m.group(1)
+            yield number, line, True
+        elif m and m.group(1) == marker:
+            marker = ""
+            yield number, line, True
+        else:
+            yield number, line, bool(marker)
+
+
 def blocks_of(text: str) -> list[Block]:
     """The page's prose blocks, each with the text that may tag it.
 
@@ -298,7 +319,6 @@ def blocks_of(text: str) -> list[Block]:
     list item's cover is its own text plus the paragraph that introduced the list.
     """
     out: list[Block] = []
-    fenced = False
     paragraph: list[str] = []
     start = 0
     intro = ""
@@ -319,14 +339,10 @@ def blocks_of(text: str) -> list[Block]:
             out.append(Block(item_start, body, f"{intro} {body}"))
             item = []
 
-    for number, raw in enumerate(text.splitlines(), start=1):
-        line = raw.rstrip()
-        if _FENCE_RE.match(line):
+    for number, line, fenced in _lines_with_fences(text):
+        if fenced:
             close_paragraph()
             close_item()
-            fenced = not fenced
-            continue
-        if fenced:
             continue
         stripped = line.strip()
         quoted = stripped[2:].strip() if stripped.startswith("> ") else stripped
@@ -456,10 +472,13 @@ _ACTION_STATE_RE = re.compile(
 
 
 def review_actions(text: str) -> list[tuple[int, int]]:
-    """``(action number, line)`` for every row of the review's Actions table(s)."""
+    """``(action number, line)`` for every row of the review's Actions table(s). A fenced
+    example is skipped: its rows are not actions and its headings open no section."""
     out: list[tuple[int, int]] = []
     inside = False
-    for number, line in enumerate(text.splitlines(), start=1):
+    for number, line, fenced in _lines_with_fences(text):
+        if fenced:
+            continue
         if _HEADING_RE.match(line):
             inside = bool(_ACTIONS_HEADING_RE.match(line))
             continue
@@ -503,29 +522,35 @@ def check_review_actions(root: Path) -> list[Finding]:
     """A finding for every numbered review action with no stated record in the decision log,
     and for every recorded action its review no longer lists. Checking both ways means
     neither side can vanish alone: a deleted row or a renamed Actions heading leaves records
-    pointing at nothing, which is a finding against the decision log."""
+    pointing at nothing, which is a finding against the decision log. The reviews read are
+    the ones on disk AND the ones the log names, so deleting a review file leaves its records
+    as findings rather than taking them out of the check."""
     reviews = root / REVIEWS_DIR
-    if not reviews.is_dir():
-        return []
     log_path = root / DECISION_LOG
     log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
     log_rel = log_path.relative_to(root).as_posix()
+    on_disk = {p.stem: p for p in sorted(reviews.glob("*.md"))} if reviews.is_dir() else {}
+    named = {stem for line in log_text.splitlines() for stem, _ in _records(line)}
     findings: list[Finding] = []
-    for path in sorted(reviews.glob("*.md")):
-        actions = review_actions(path.read_text(encoding="utf-8"))
-        recorded = recorded_actions(log_text, path.stem)
-        rel = path.relative_to(root).as_posix()
-        for action, line in actions:
-            if action not in recorded:
-                findings.append(Finding(rel, line, "", f"review action #{action} has no record"))
+    for stem in sorted(set(on_disk) | named):
+        path = on_disk.get(stem)
+        actions = review_actions(path.read_text(encoding="utf-8")) if path else []
+        recorded = recorded_actions(log_text, stem)
+        if path is not None:
+            rel = path.relative_to(root).as_posix()
+            for action, line in actions:
+                if action not in recorded:
+                    findings.append(
+                        Finding(rel, line, "", f"review action #{action} has no record")
+                    )
         listed = {action for action, _ in actions}
         for action in sorted(recorded - listed):
             findings.append(
                 Finding(
                     log_rel,
-                    _record_line(log_text, path.stem, action),
+                    _record_line(log_text, stem, action),
                     "",
-                    f"{path.stem} action #{action} is recorded but the review has no such action",
+                    f"{stem} action #{action} is recorded but the review has no such action",
                 )
             )
     return findings
