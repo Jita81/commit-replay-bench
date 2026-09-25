@@ -66,6 +66,26 @@ class GoRunner(BaseRunner):
     def _go(self, executor: Executor) -> str:
         return executor.tool("go", self.opts.get("go"))
 
+    def toolchain_argv(self, executor: Executor) -> tuple[str, ...]:
+        """``go version`` — the exact toolchain (``go1.26.8``), part of the posture."""
+        return (self._go(executor), "version")
+
+    def env_probe_command(
+        self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
+    ) -> Command | None:
+        """``go list -deps -test ./...`` offline (``GOPROXY=off``): loads every package the
+        tests import, the module graph included, without compiling anything — so a RED that
+        is a build failure can be told apart from "this posture cannot load the modules"
+        (ADR-0019 §2; the 2026-09-25 finding D1)."""
+        env = {"GOFLAGS": "-mod=mod", "GOPROXY": "off", "GOTOOLCHAIN": "local"}
+        if executor.name == "docker":
+            env["GOCACHE"] = "/tmp/gocache"
+            env["GOMODCACHE"] = str(self.opts.get("gomodcache", "/tmp/gomod"))
+        pkgs = list(scope) or ["./..."]
+        return Command(
+            (self._go(executor), "list", "-deps", "-test", *pkgs), root, env=env, timeout=timeout
+        )
+
     def environment_ready(self, root: Path, env_dir: Path) -> bool:
         """``go list ./...`` with ``GOPROXY=off`` — resolves offline or it is not ready."""
         go = str(self.opts.get("go") or "go")

@@ -155,6 +155,15 @@ class PytestRunner(BaseRunner):
         return self.configured_python(root, env_dir) or sys.executable
 
     # --- execution ---------------------------------------------------------------
+    def toolchain_argv(self, executor: Executor) -> tuple[str, ...]:
+        """``<python> -V`` — the interpreter the tests run under, part of the posture."""
+        host_default = (
+            self.python_for(self.env_dir or Path("."), self.env_dir)
+            if executor.name != "docker"
+            else None
+        )
+        return (executor.tool("python", host_default), "-V")
+
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:

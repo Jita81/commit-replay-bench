@@ -153,6 +153,10 @@ class _NodeBase(BaseRunner):
 
     default_timeout = 420
 
+    def toolchain_argv(self, executor: Executor) -> tuple[str, ...]:
+        """``node --version`` — the runtime the tests run under, part of the posture."""
+        return (executor.tool("node", self.opts.get("node")), "--version")
+
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
         """Test files as the tool addresses them; a ``.snap`` maps to the test that owns it."""
         return tuple(sorted({snapshot_to_test(f) for f in test_files}))
