@@ -1261,3 +1261,98 @@ def test_a_close_that_fails_is_a_warning_and_never_changes_the_items_status(
     assert not rig.evidence.events_for("I-1", fe.EV_DELIVERY_CLOSED)
     (warn,) = [e for e in rig.sink.events if e.action == "delivery.close_failed"]
     assert warn.status == StepStatus.ERROR and "502" in (warn.error_message or "")
+
+
+# --- the other final verdicts close an earlier run's open pull request too -----------
+
+
+def _closing_rig(
+    pyrepo: pr.PyRepo, tmp_path: Path, **overrides: Any
+) -> tuple[Rig, list[dict[str, Any]]]:
+    """A delivering rig whose close seam records its calls, with an earlier run's open
+    pull request (number 5) for ``I-1`` already on the chain."""
+    closed: list[dict[str, Any]] = []
+
+    def close_pr(**kw: Any) -> None:
+        closed.append(kw)
+
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds(), close_pr_fn=close_pr, **overrides)
+    _seed_open_delivery(rig)
+    return rig, closed
+
+
+def _assert_closed_by_the_factory(
+    rig: Rig, closed: list[dict[str, Any]], out: fl.ItemOutcome, verdict: str
+) -> None:
+    assert rig.pushes == [] and rig.prs == [] and rig.comments == [] and out.delivery is None
+    (call,) = closed
+    assert call["pr_number"] == 5 and f"`{verdict}`" in call["body"]
+    (ev,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_CLOSED)
+    assert ev.payload["pr_number"] == 5 and ev.payload["state"] == "closed"
+    assert ev.payload["closed_by"] == "factory" and ev.payload["verdict"] == verdict
+    kinds = rig.kinds("I-1")
+    last_verdict = len(kinds) - 1 - kinds[::-1].index(fe.EV_VERDICT)
+    assert last_verdict < kinds.index(fe.EV_DELIVERY_CLOSED) and kinds[-1] == fe.EV_ITEM_OUTCOME
+    (sunk,) = [e for e in rig.sink.events if e.action == "delivery.closed"]
+    assert sunk.status != StepStatus.ERROR
+
+
+def test_an_open_pull_request_is_closed_when_this_runs_review_rejects_the_item(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """ADR-0021: an earlier run's open pull request is closed on ANY final verdict but
+    ``accept`` — not only the weak-oracle stop. A ``reject`` closes it, naming the verdict,
+    and nothing is pushed."""
+    rig, closed = _closing_rig(pyrepo, tmp_path, reviewer=RejectingReviewer())
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_REJECTED
+    _assert_closed_by_the_factory(rig, closed, out, rv.VERDICT_REJECT)
+
+
+def test_an_open_pull_request_is_closed_when_this_runs_rework_is_exhausted(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The same for a rework budget spent without an ``accept``: the last verdict is
+    ``accept_with_edit`` and the open pull request is closed with it."""
+
+    class Opinionated(rv.MechanicalReviewer):
+        name = "opinionated"
+
+        def assess(self, ctx: Any, probes: Any) -> rv.ReviewOpinion:
+            return rv.ReviewOpinion(
+                rv.VERDICT_ACCEPT_WITH_EDIT,
+                findings=(rv.ReviewFinding("naming", rv.SEVERITY_MAJOR, "rename the helper"),),
+            )
+
+    rig, closed = _closing_rig(pyrepo, tmp_path, reviewer=Opinionated(), max_rework=1)
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_REWORK_EXHAUSTED and out.reworks == 1
+    _assert_closed_by_the_factory(rig, closed, out, rv.VERDICT_ACCEPT_WITH_EDIT)
+    assert "naming" in closed[0]["body"]
+
+
+def test_an_accept_on_another_builds_pack_is_refused_before_anything_is_pushed(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The verdict that licenses a delivery must be the review OF the build being
+    delivered: an ``accept`` recorded for another pack (an earlier build, a rework's
+    predecessor) is refused by the loop's own guard, before the route gate, a credential
+    or a push — deliver() checks the verdict word, only the loop can check the pack."""
+    from types import SimpleNamespace
+
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds())
+    final: Any = SimpleNamespace(pack_hash="b" * 64)
+    verdict = rv.ReviewVerdict(
+        item_id="I-1",
+        verdict=rv.VERDICT_ACCEPT,
+        reviewer="mechanical",
+        builder="fake/multi",
+        test_author="operator",
+        pack_hash="a" * 64,
+        pr_ref="",
+        red_reproduced=True,
+    )
+    with pytest.raises(DeliveryError, match="only an accepted, reviewed build"):
+        rig.loop()._deliver(multiply_item(), final, DELIVER_ROUTE, verdict=verdict)
+    assert rig.pushes == [] and rig.prs == [] and rig.comments == []
+    assert not rig.evidence.events_for("I-1")
