@@ -51,6 +51,7 @@ Touch when:   THIS is the route a new repository goes through — but adding one
 from __future__ import annotations
 
 import datetime as _dt
+import functools
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -517,6 +518,24 @@ def _epoch(iso: str) -> float | None:
     return d.timestamp()
 
 
+#: How many (clone, HEAD) history reads are kept. Each is one int per non-merge commit.
+POOL_HISTORY_CACHE = 32
+
+
+@functools.lru_cache(maxsize=POOL_HISTORY_CACHE)
+def _history_at(path: str, head: str) -> tuple[int, ...]:
+    """The author timestamps of every non-merge commit reachable from ``head`` in the clone
+    at ``path``. Cached on ``(path, head)``: the pool route is open to any viewer, and a full
+    history walk per request would let one viewer make the server walk a large clone over
+    and over. A new commit moves ``head``, so the share is never stale."""
+    out = (
+        GitRepo(Path(path), timeout=60)
+        .run("log", "--no-merges", "--format=%at", head, check=True)
+        .stdout
+    )
+    return tuple(int(x) for x in out.split())
+
+
 def pool_window(session: Session, repo: Repo) -> RepoPool:
     """The mined tasks' date range, and the share of the clone's non-merge history since the
     oldest of them (``None`` with the reason when the clone cannot be read here)."""
@@ -540,8 +559,8 @@ def pool_window(session: Session, repo: Repo) -> RepoPool:
             unavailable = "clone_unavailable"
         else:
             try:
-                out = git.run("log", "--no-merges", "--format=%at", "HEAD", check=True).stdout
-                history = [int(x) for x in out.split()]
+                head = git.run("rev-parse", "--verify", "HEAD", check=True).stdout.strip()
+                history = list(_history_at(str(Path(path).resolve()), head))
             except (GitError, ValueError):
                 unavailable = "git_failed"
     window = (
@@ -571,8 +590,8 @@ def pool_window(session: Session, repo: Repo) -> RepoPool:
     summary="The mined tasks' date range and the share of non-merge history it covers",
 )
 def get_pool(name: str, viewer: ViewerDep, db: DbDep) -> RepoPool:
-    # A read of the clone's history on each request (one `git log`), not cached: the share
-    # changes as the clone moves, and a stale share would understate the recency bias.
+    # The history walk is cached against the clone's HEAD (``_history_at``): a repeat read
+    # costs one `git rev-parse`, and a new commit moves HEAD, so the share is never stale.
     return pool_window(db, get_repo_or_404(db, name))
 
 
