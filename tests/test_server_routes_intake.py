@@ -12,6 +12,10 @@ What it does: Pins that a viewer can read the column but only an operator can sw
               revision is refused), that a poll while another pass holds the repository's
               lease is 409 ``intake_busy``, that the served row carries the cell route the
               ticket was told about, and that the tracker credential is never in a response.
+              Since the PR #55 review: that the Register act is refused while the listener is
+              off, that ``approved_by`` is the operator's account id, and — as prevention —
+              that no route builds a tracker except through the listener check and no
+              ``operator:`` identity is built from a display name.
 How:          The shared ``make_env`` stack with ``CRB_ENABLE_FAKE_TRACKER`` set and the
               file-backed :class:`crb.intake.fake.FileTracker` as the deployment's tracker.
               **No real Azure DevOps or Jira is contacted by this suite or by CI.**
@@ -635,3 +639,110 @@ def test_a_poll_while_another_pass_holds_the_repositorys_lease_is_refused_as_bus
     finally:
         held.release()
     assert env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").status_code == 200
+
+
+# --- PR #55 review: the Register act is a board write, so the switch gates it too --------
+
+
+def test_the_register_act_is_refused_while_the_listener_is_off(env: Env, tmp_path: Path) -> None:
+    """The switch is the consent to write on that board (ADR-0017): after an operator
+    switches the listener off, a draft read while it was on can no longer be registered —
+    422 ``intake_listener_off``, nothing on the frozen backlog, not one write on the board.
+    Switched back on, the same draft registers."""
+    login(env.client, "operator")
+    _switch(env, True)
+    env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+    _switch(env, False)
+    board = fake_tracker_path(tmp_path)
+    before = board.read_text(encoding="utf-8")
+    r = _register(env)
+    assert r.status_code == 422, r.text
+    assert envelope(r)["code"] == "intake_listener_off"
+    assert board.read_text(encoding="utf-8") == before
+    assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
+    assert _events(env, "intake.approved") == []
+    _switch(env, True)
+    assert _register(env).status_code == 200
+
+
+def test_the_approver_on_the_record_is_the_operators_stable_id_not_their_name(
+    env: Env,
+) -> None:
+    """PR #55 review: ``approved_by`` once recorded the operator's display name — mutable
+    and not unique, so two accounts called "Ada" were one approver on the hash chain and a
+    renamed account could not be traced. It is the account id; the name rides alongside as
+    ``approved_by_name`` for a human reader."""
+    login(env.client, "operator")
+    me = env.client.get(f"{API_PREFIX}/auth/me").json()
+    _switch(env, True)
+    env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+    assert _register(env).status_code == 200
+    chain = env.client.get(f"{API_PREFIX}/factory/{ALPHA}/evidence").json()
+    (reg,) = [e for e in chain["items"] if e["kind"] == "intake.registered"]
+    assert reg["payload"]["approved_by"] == f"operator:{me['id']}"
+    assert reg["payload"]["approved_by_name"] == me["display_name"]
+    (approved,) = _events(env, "intake.approved")
+    assert approved["payload"]["approved_by"] == f"operator:{me['id']}"
+    assert approved["payload"]["approved_by_name"] == me["display_name"]
+
+
+def _calls_in(path: Path, name: str) -> dict[str, int]:
+    """How many times each top-level function in ``path`` calls ``name``."""
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    out: dict[str, int] = {}
+    for fn in tree.body:
+        if isinstance(fn, ast.FunctionDef):
+            n = sum(
+                1
+                for node in ast.walk(fn)
+                if isinstance(node, ast.Call)
+                and (
+                    (isinstance(node.func, ast.Name) and node.func.id == name)
+                    or (isinstance(node.func, ast.Attribute) and node.func.attr == name)
+                )
+            )
+            if n:
+                out[fn.name] = n
+    return out
+
+
+def test_a_route_reaches_the_board_only_through_the_listener_check() -> None:
+    """The prevention for the class: no route builds a tracker client itself. The one way
+    a route gets one is ``_consented_tracker``, which refuses when the repository's
+    listener is off — so a new board-writing route cannot forget the consent check."""
+    routes = Path(__file__).resolve().parents[1] / "src" / "crb" / "server" / "routes"
+    callers = {
+        f"{p.name}::{fn}": n
+        for p in sorted(routes.glob("*.py"))
+        for fn, n in _calls_in(p, "build_tracker").items()
+    }
+    assert callers == {"factory.py::_consented_tracker": 1}
+
+
+def test_no_audit_identity_is_built_from_a_display_name() -> None:
+    """The prevention for the ``approved_by`` class: an ``operator:<…>`` identity written
+    to a record is built from the account id, never from a display name (mutable, not
+    unique). Scans every f-string in the server package that starts ``operator:``."""
+    import ast
+
+    src = Path(__file__).resolve().parents[1] / "src" / "crb" / "server"
+    offenders: list[str] = []
+    for p in sorted(src.rglob("*.py")):
+        for node in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.JoinedStr) or not node.values:
+                continue
+            head = node.values[0]
+            if not (
+                isinstance(head, ast.Constant)
+                and isinstance(head.value, str)
+                and head.value.startswith("operator:")
+            ):
+                continue
+            names = {n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)} | {
+                n.id for n in ast.walk(node) if isinstance(n, ast.Name)
+            }
+            if "display_name" in names:
+                offenders.append(f"{p.relative_to(src)}:{node.lineno}")
+    assert offenders == []

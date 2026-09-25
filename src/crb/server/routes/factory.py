@@ -41,7 +41,9 @@ recorded before any edit — :mod:`crb.factory.loop`). This module serves its re
   ``intake_busy`` while another pass holds it).
 * ``POST /factory/{repo}/intake/{key}/register`` (operator) — the Register act (ADR-0022):
   put the draft waiting for ticket ``key`` on the frozen record, as the operator read it at
-  ``revision``; evented on the chain (``approved_by``) and on the repository's system trace.
+  ``revision``; evented on the chain (``approved_by: operator:<account id>``) and on the
+  repository's system trace; 422 ``intake_listener_off`` while the listener is off. Both
+  board-touching routes reach the tracker only through ``_consented_tracker``.
 
 Running the loop is a run kind: ``POST /runs {kind: "factory"}`` (see ``routes/runs.py``
 and the worker); this module never builds anything.
@@ -97,10 +99,18 @@ from crb.intake.client import (
     REASON_NO_PUBLIC_URL,
     REASON_NO_SECRET,
     STOP_ADVICE,
+    TrackerClient,
     TrackerError,
 )
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
+from crb.server.deps import (
+    ApiError,
+    DbDep,
+    ErrorEnvelope,
+    Principal,
+    SessionFactoryDep,
+    SettingsDep,
+)
 from crb.server.factory_state import (
     FactoryHome,
     OutcomeSyncReport,
@@ -125,7 +135,8 @@ from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, sign
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.runs import append_system_event, system_trace_id
-from crb.server.secrets import TRACKER_TOKEN_SECRET, SecretsDep
+from crb.server.secrets import TRACKER_TOKEN_SECRET, SecretsDep, SecretsFile
+from crb.server.settings import Settings
 from crb.store.ledger import DbLedger
 from crb.store.models import GitHubInstallation, Grade, Repo, Run
 
@@ -1353,6 +1364,42 @@ def _refuse_unless_ready_to_listen(settings: Any, secrets: Any) -> None:
         )
 
 
+def _consented_tracker(
+    row: Repo, settings: Settings, secrets: SecretsFile, *, act: str
+) -> tuple[ListenerState, TrackerClient]:
+    """The ONE way a route reaches a repository's board: refused (422
+    ``intake_listener_off``) while that repository's listener is off — the switch is the
+    consent to read and write on that board (ADR-0017), and ``button.intake.switch_off``
+    promises nothing on it is read or written afterwards — then the deployment's tracker,
+    or 502 ``tracker_error`` with the published advice. A route that built a tracker
+    itself could forget the check (the Register act did: PR #55 review);
+    ``tests/test_server_routes_intake.py::test_a_route_reaches_the_board_only_through_the_listener_check``
+    holds every route to this function."""
+    listener = ListenerState.from_config(row.config_json)
+    if not listener.enabled:
+        raise ApiError(
+            422,
+            "intake_listener_off",
+            f"the intake listener for {row.name!r} is off: {act}",
+        )
+    try:
+        tracker = build_tracker(
+            settings.intake,
+            secrets.get(TRACKER_TOKEN_SECRET) or "",
+            home=settings.home,
+        )
+    except TrackerError as exc:
+        raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc
+    return listener, tracker
+
+
+def _approver(operator: Principal) -> str:
+    """The identity an approval is recorded under: ``operator:<account id>`` — stable and
+    unique. Never the display name, which an account can change and two accounts can share
+    (PR #55 review); the name is recorded beside it as ``approved_by_name``."""
+    return f"operator:{operator.id}"
+
+
 @router.post(
     "/factory/{repo}/intake/poll",
     response_model=IntakeOut,
@@ -1373,21 +1420,9 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
     it meaningless. A tracker that cannot be reached is 502 ``tracker_error`` carrying the
     published stop reason, and nothing is registered from a partial read."""
     row = get_repo_or_404(db, repo)
-    listener = ListenerState.from_config(row.config_json)
-    if not listener.enabled:
-        raise ApiError(
-            422,
-            "intake_listener_off",
-            f"the intake listener for {repo!r} is off: switch it on before reading the column",
-        )
-    try:
-        tracker = build_tracker(
-            settings.intake,
-            secrets.get(TRACKER_TOKEN_SECRET) or "",
-            home=settings.home,
-        )
-    except TrackerError as exc:
-        raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc
+    listener, tracker = _consented_tracker(
+        row, settings, secrets, act="switch it on before reading the column"
+    )
     routes = _cell_routes(db, factory, repo)
     home = _home(settings, repo)
     budget_s = float(settings.intake.poll_budget_s)
@@ -1463,15 +1498,11 @@ def register_intake_ticket(
     revision, another pass holds the repository, a factory run holds the backlog, or the
     frozen record refuses the item."""
     row = get_repo_or_404(db, repo)
-    try:
-        tracker = build_tracker(
-            settings.intake,
-            secrets.get(TRACKER_TOKEN_SECRET) or "",
-            home=settings.home,
-        )
-    except TrackerError as exc:
-        raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc
-    approver = f"operator:{operator.display_name or operator.id}"
+    _, tracker = _consented_tracker(
+        row, settings, secrets, act="switch it on before registering a ticket from it"
+    )
+    approver = _approver(operator)
+    approver_name = operator.display_name or operator.id
     budget_s = float(settings.intake.poll_budget_s)
     try:
         registered = register_approved(
@@ -1482,6 +1513,7 @@ def register_intake_ticket(
             home=_home(settings, repo),
             item_url=item_url_for(settings.public_url, repo),
             approver=approver,
+            approver_name=approver_name,
             run_active=lambda: _active_factory_run(db, repo) is not None,
             lease=intake_lease(factory, repo, ttl_s=2 * budget_s + 60),
         )
@@ -1499,6 +1531,7 @@ def register_intake_ticket(
             "revision": body.revision,
             "item_id": registered.item_id,
             "approved_by": approver,
+            "approved_by_name": approver_name,
         },
     )
     db.commit()

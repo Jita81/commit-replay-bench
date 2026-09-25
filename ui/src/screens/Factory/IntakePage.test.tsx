@@ -297,6 +297,16 @@ describe('IntakePage — an operator registers a ready ticket (ADR-0022)', () =>
     expect(within(row).queryByRole('button', { name: /Register this ticket/ })).not.toBeInTheDocument()
   })
 
+  it('with the listener off, a waiting draft offers no Register button and says why', async () => {
+    // PR #55 review: registering writes on the board, and the switch is the consent to write
+    // on it — the server refuses with intake_listener_off; the screen does not offer the act
+    setup({ ...ON, listener: { ...ON.listener, enabled: false }, rows: [AWAITING_ROW] })
+    const row = await screen.findByTestId('intake-row-4714')
+    expect(row.textContent).toContain('Waiting for an operator to register it')
+    expect(within(row).queryByRole('button', { name: /Register this ticket/ })).not.toBeInTheDocument()
+    expect(row.textContent).toContain('Switch the listener on to register it')
+  })
+
   it('the last read counts the drafts waiting for an operator', async () => {
     setup({ ...ON, last_poll: { ...ON.last_poll!, registered: 0, awaiting: 2 }, rows: [AWAITING_ROW] })
     expect(await screen.findByText(/2 waiting for an operator to register them/)).toBeInTheDocument()

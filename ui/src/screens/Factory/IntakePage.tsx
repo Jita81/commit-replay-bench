@@ -101,7 +101,24 @@ function Stopped({ reason, advice }: { reason: string; advice: string }) {
 
 /** One ticket: what it is, what the product understood, what is still missing, where it went —
  *  and, for a ready draft, the operator's Register act (ADR-0022). */
-function Row({ row, repo, operator, onRegister, registering }: { row: IntakeRow; repo: string; operator: boolean; onRegister: (row: IntakeRow) => void; registering: boolean }) {
+function Row({
+  row,
+  repo,
+  operator,
+  listening,
+  onRegister,
+  registering,
+}: {
+  row: IntakeRow
+  repo: string
+  operator: boolean
+  /** The repository's listener is on. Registering writes on the board, and the switch is
+   *  the consent to write on it, so with it off the act is not offered (the server refuses
+   *  it with `intake_listener_off` anyway — PR #55 review). */
+  listening: boolean
+  onRegister: (row: IntakeRow) => void
+  registering: boolean
+}) {
   const display = LABEL_DISPLAY[row.label]
   const route = row.cell_route
   const unclassified = row.capability_class === UNCLASSIFIED || !row.capability_class
@@ -188,6 +205,13 @@ function Row({ row, repo, operator, onRegister, registering }: { row: IntakeRow;
           </Hint>
         </p>
       )}
+      {row.awaiting_approval && !listening && (
+        <p className="mt-2 text-sm">
+          <Hint id="item.intake.register_off">
+            <span>The listener is off, and registering writes on the ticket. Switch the listener on to register it.</span>
+          </Hint>
+        </p>
+      )}
       {row.stopped && (
         <p className="mt-2 text-sm text-status-red">
           <Hint id="item.intake.stopped">
@@ -234,7 +258,7 @@ function Row({ row, repo, operator, onRegister, registering }: { row: IntakeRow;
             Open the item
           </LinkButton>
         )}
-        {row.awaiting_approval && operator && (
+        {row.awaiting_approval && operator && listening && (
           <Button variant="filled" size="sm" onClick={() => onRegister(row)} disabled={registering} hint="button.intake.register">
             Register this ticket
           </Button>
@@ -476,7 +500,7 @@ export function IntakePage() {
             ) : (
               <ul className="m-0 list-none p-0">
                 {data.rows.map((row) => (
-                  <Row key={row.key} row={row} repo={repo} operator={operator} onRegister={registerTicket} registering={register.isPending} />
+                  <Row key={row.key} row={row} repo={repo} operator={operator} listening={listener.enabled} onRegister={registerTicket} registering={register.isPending} />
                 ))}
               </ul>
             )}

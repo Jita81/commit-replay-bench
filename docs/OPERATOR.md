@@ -907,8 +907,11 @@ ticket** button. Moving a ticket into the column is the request; the Register ac
 consent, because anyone who can edit the board can write what becomes the backlog item. Read
 the comment on the row — it is what the item will say — and press Register. The item is then
 registered through the same path the freeze form uses, the ticket gets `crb:queued`, a note
-naming the item and a link to it, and the act is recorded under your name
-(`intake.registered` with `approved_by`, and `intake.approved` on the system trace). If the
+naming the item and a link to it, and the act is recorded against your account
+(`intake.registered` with `approved_by: operator:<your account id>` and your name beside it,
+and `intake.approved` on the system trace). Registering writes on the ticket, so it needs the
+listener on: with the listener off the button is not shown and the act is refused
+(`intake_listener_off`). If the
 ticket was edited after you loaded the page the act is refused (`revision_moved`): reload and
 read the new draft. To let named people's tickets register without the act, list their
 tracker identities in `CRB_INTAKE__APPROVE_AUTHORS` (the ticket's creator: the Azure DevOps

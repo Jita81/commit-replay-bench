@@ -659,7 +659,9 @@ export const HINTS = {
   'link.intake.ticket':
     'Open this ticket on your own board, where the product’s comment and label are.',
   'button.intake.register':
-    'Put this draft on the frozen backlog as it reads now. The ticket is labelled queued and told, the act is recorded under your name, and a ticket edited since you loaded the page is refused.',
+    'Put this draft on the frozen backlog as it reads now. The ticket is labelled queued and told, the act is recorded against your account, and a ticket edited since you loaded the page is refused.',
+  'item.intake.register_off':
+    'Registering a ticket writes on it: a label, a note and a link. With the listener off nothing on that board is written, so a waiting draft can only be registered once the listener is switched on again.',
   'item.intake.author':
     'Who created the ticket, as the tracker names them. Anyone who can edit a ticket in the watched column writes what becomes the backlog item, so an operator reads it before registering it.',
   'stat.intake.approval':

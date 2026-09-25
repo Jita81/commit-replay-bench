@@ -49,9 +49,13 @@ refuses.
    `crb.server.intake.register_approved` — registers exactly the waiting draft, as the
    operator read it: a ticket whose content has changed since that revision is refused
    (409 `revision_moved`), as is a key with nothing waiting (409 `nothing_to_register`) or a
-   repository a factory run holds (409 `factory_run_active`). It is evented twice:
-   `intake.registered` on the item's chain with `approved_by: operator:<name>`, and
-   `intake.approved` on the repository's system trace.
+   repository a factory run holds (409 `factory_run_active`). The act writes on the ticket,
+   so it is refused while the repository's listener is off (422 `intake_listener_off`, the
+   same refusal the poll has: the switch stays the consent to write on that board). It is
+   evented twice: `intake.registered` on the item's chain with
+   `approved_by: operator:<account id>` — the stable, unique account id, never the display
+   name an account can change or share — and `approved_by_name` beside it for a human
+   reader, and `intake.approved` on the repository's system trace.
 2. **An explicit allowlist may bypass it.** `CRB_INTAKE__APPROVE_AUTHORS` (a JSON list,
    empty by default) names tracker authors — the ticket's creator: Azure DevOps
    `System.CreatedBy` sign-in name, Jira `creator` email, or its account id when the email

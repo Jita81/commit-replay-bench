@@ -1367,6 +1367,7 @@ def register_approved(
     home: FactoryHome,
     item_url: Callable[[str], str],
     approver: str,
+    approver_name: str = "",
     run_active: Callable[[], bool] = lambda: False,
     lease: DbLease | None = None,
 ) -> IntakeRow:
@@ -1381,7 +1382,9 @@ def register_approved(
     (``register_refused``). On success the chain carries ``intake.registered`` with
     ``approved_by``, the ticket is labelled queued with its note and link (a refused
     courtesy write is an ``intake.stopped``, never an unregistration), and the served row
-    is updated without another poll.
+    is updated without another poll. ``approver`` is the stable identity recorded as
+    ``approved_by`` (the route passes ``operator:<account id>``); ``approver_name`` is the
+    human-readable name recorded beside it as ``approved_by_name``.
     """
     del repo
     if lease is not None and not lease.acquire():
@@ -1396,6 +1399,7 @@ def register_approved(
             home=home,
             item_url=item_url,
             approver=approver,
+            approver_name=approver_name,
             run_active=run_active,
         )
     finally:
@@ -1411,6 +1415,7 @@ def _register_approved(
     home: FactoryHome,
     item_url: Callable[[str], str],
     approver: str,
+    approver_name: str = "",
     run_active: Callable[[], bool],
 ) -> IntakeRow:
     events = _read_events(home)
@@ -1474,6 +1479,7 @@ def _register_approved(
         supersedes=item.supersedes,
         url=url,
         approved_by=approver,
+        approved_by_name=approver_name or approver,
         revision=str(revision),
     )
     stopped: TrackerError | None = None

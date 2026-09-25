@@ -21,6 +21,16 @@ credential never leaves the tracker's origin; ticket text is inert in the pull r
 the branch is `[a-z0-9-]`. The push token travels in git's environment, never on its argv,
 and a `GitError` redacts any credential it would have kept. No apparatus impact.
 
+The review of PR #55 found four more, each now pinned by a test that failed first. The
+Register act wrote on the ticket while the repository's listener was off; it is now refused
+with `intake_listener_off`, the Intake screen does not offer it, and no route can reach the
+board except through the one listener check. `approved_by` recorded the operator's display
+name; it is now the stable account id, with the name beside it as `approved_by_name`. A
+factory close asked for the item's credentials instead of the repository's; both delivery
+and close now resolve the one repository key the loop holds. A model priced as a
+placeholder lost its dated aliases, so the same-model refusal failed open for it; every key
+in the pricing table now names a model, priced or not.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real

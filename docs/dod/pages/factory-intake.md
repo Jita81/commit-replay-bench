@@ -13,8 +13,9 @@ updated: 2026-09-22
 
 # Intake (work arriving from your board)
 
-**Purpose.** Show one repository's watched column: the listener (the consent gate, off
-until an operator switches it on), the deployment's tracker connection with no secret in
+**Purpose.** Show one repository's watched column: the listener (the consent to read and
+write on that board, off until an operator switches it on — the consent to put a ticket on
+the backlog is the operator's Register act, ADR-0022), the deployment's tracker connection with no secret in
 it, what the last read did, and every ticket with the draft item the product made of it,
 its label, the questions still open and the feedback the ticket itself carries. A person
 can see what the product understood and what it still needs *before* any money is spent.
@@ -30,8 +31,10 @@ state naming what happened, or the server's own stop reason with the server's ow
 sets, plus a credential in the product's secret store) and it never shows the credential.
 It does not edit a ticket by hand: the only writes this product makes are one comment, one
 `crb:` label and the one configured state transition (ADR-0017). It does not register a
-backlog item directly — registration happens when the ticket's structural gaps close, on
-the same path the freeze form uses. It does not run the factory: a queued item is worked by
+backlog item by itself — when the ticket's structural gaps close it becomes a draft that an
+operator registers here with the Register act (ADR-0022), on the same path the freeze form
+uses; only a deployment that switched approval off, or a ticket whose author is on the
+allowlist, registers without it. It does not run the factory: a queued item is worked by
 a factory run started on `/factory`.
 
 ## Definition of done
@@ -51,5 +54,6 @@ a factory run started on `/factory`.
 | factory-intake.accessibility.11 | ACCESSIBILITY | The success and stop panels are announced to a screen reader as they appear, rather than being found only by sighted scanning | `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"announces the outcome and the stop to a screen reader as they land"` · `code:ui/src/screens/Factory/IntakePage.tsx::Stopped` | met |  |
 | factory-intake.non-goals.12 | NON-GOALS | The purpose block states the non-goals in the product's own words — no field edited but the comment, the label and the mapped state; no ticket created; no column read that it was not pointed at — and the comment on the ticket repeats them | `code:ui/src/screens/Factory/IntakePage.tsx::IntakePage` · `code:src/crb/intake/feedback.py::render_feedback` · `spec:ui/e2e/walkthrough/12-intake.spec.ts::"the comment names the cell’s route with its n and interval, read before any build"` | met | |
 | factory-intake.actions.13 | ACTIONS | A ready draft reads "Waiting for an operator to register it" with who wrote the ticket; an operator's Register this ticket sends the revision on the screen and names the item it registered, a viewer sees no button, and the last read counts the drafts waiting (ADR-0022) | `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"a ready ticket waits for an operator, who registers the revision they read"` · `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"a viewer sees the draft waiting and who can register it, with no Register button"` · `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"the last read counts the drafts waiting for an operator"` · `hint:id:button.intake.register` | met | |
+| factory-intake.actions.14 | ACTIONS | With the listener off a waiting draft offers no Register button and says the listener must be switched on, and the server refuses the act with 422 `intake_listener_off` and writes nothing on the board — the switch is the consent to write on it; no route reaches the board except through that check | `vitest:ui/src/screens/Factory/IntakePage.test.tsx::"with the listener off, a waiting draft offers no Register button and says why"` · `test:tests/test_server_routes_intake.py::test_the_register_act_is_refused_while_the_listener_is_off` · `test:tests/test_server_routes_intake.py::test_a_route_reaches_the_board_only_through_the_listener_check` · `hint:id:item.intake.register_off` | met | |
 
 ## Gaps
