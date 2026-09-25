@@ -51,9 +51,10 @@ describe('ReposPage', () => {
     const row = within(table).getByRole('link', { name: MEASURED.name }).closest('tr')!
     expect(within(table).getByRole('link', { name: MEASURED.name })).toHaveAttribute('href', `/repos/${MEASURED.name}`)
     expect(row).toHaveTextContent('python · pytest')
-    expect(within(row).getByText('36')).toBeInTheDocument()
-    expect(within(row).getByText('33')).toBeInTheDocument()
-    expect(within(row).getByText('5')).toBeInTheDocument()
+    // each count is its own table cell, so a screen reader reads it under its column header
+    expect(within(row).getByRole('cell', { name: '36' })).toBeInTheDocument()
+    expect(within(row).getByRole('cell', { name: '33' })).toBeInTheDocument()
+    expect(within(row).getByRole('cell', { name: '5' })).toBeInTheDocument()
     expect(within(row).getByText('replay')).toBeInTheDocument()
     // the probe pill names its state and the runner's own summary for a screen reader
     expect(within(row).getByText('OK')).toBeInTheDocument()
