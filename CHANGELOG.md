@@ -8,6 +8,19 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — the factory reviews before it delivers; an operator approves what a ticket asks
+
+Four findings of the external assessment of 2026-09-25 (C1, C3, C6, D1), each reproduced on
+`main` by a failing test before the change (DL-053; ADR-0021, ADR-0022). The review now runs
+before anything is pushed and only an `accept` opens a pull request; an earlier run's open
+pull request is closed, naming the verdict, when a later review does not accept the item. The
+test author and a build rung must differ by model, not only by label. A ready ticket waits
+for an operator's evented Register act unless its author is on an explicit allowlist; one
+intake pass per repository runs under a lease; a 429 is waited out within a cap; the tracker
+credential never leaves the tracker's origin; ticket text is inert in the pull request and
+the branch is `[a-z0-9-]`. The push token travels in git's environment, never on its argv,
+and a `GitError` redacts any credential it would have kept. No apparatus impact.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real
