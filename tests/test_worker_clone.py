@@ -261,3 +261,24 @@ def test_explicit_labels_mix_with_bare_ones(hr: Harness) -> None:
         ("r1", "m", "", False),
         ("r2", "strong", "q", True),
     ]
+
+
+def test_a_clone_path_that_escapes_the_root_at_use_time_fails_the_run(
+    h: Harness, tmp_path: Path
+) -> None:
+    """D2 follow-up: registration checks the path as written; a symbolic link planted on it
+    afterwards (for example by another repository's clone) must not send a run to a
+    repository elsewhere on the host. The worker re-applies the rule before it reads."""
+    later = h.home / "repos" / "alpha-clone" / "link"
+    add_url_repo(h, "", clone_path=str(later))  # accepted at registration: nothing there yet
+    later.parent.mkdir(parents=True)
+    later.symlink_to(h.pyrepo.path, target_is_directory=True)  # a git repo off the root
+    assert GitRepo(later).is_repo()
+    with pytest.raises(LookupError, match="clone_path_escapes"):
+        h.worker._load_repo(pr.REPO_NAME)
+    h.add_task(h.pyrepo.feat_task())
+    run = h.queue.enqueue(Run(repo=pr.REPO_NAME, kind="probe", actor="tester"))
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert "clone_path_escapes" in (done.error or "")
+    assert not [e for e in h.events(run.id) if e.action == "probe.start"]

@@ -552,3 +552,24 @@ class TestClonePathConfinement:
         assert r.status_code == 200, r.text
         r = env.put("/repos/gamma", json={"clone_path": "/srv/other"})
         assert r.status_code == 403 and envelope(r)["code"] == "clone_path_outside_home"
+
+    def test_a_link_planted_after_registration_is_refused_when_the_path_is_used(
+        self, env: Env, tmp_path: Path
+    ) -> None:
+        """The rule is checked where the path is USED, not only where it is written. A path
+        under the root that does not exist yet passes registration; if a symbolic link
+        later appears on it (a cloned repository can carry one), reading the clone must
+        not follow it off the root."""
+        login(env.client, "operator")
+        root = Path(env.settings.home) / "repos"
+        later = root / "alpha-clone" / "link"
+        r = env.post(
+            "/repos", json={"name": "gamma", "language": "python", "clone_path": str(later)}
+        )
+        assert r.status_code == 201, r.text
+        host_repo = pr.build(tmp_path / "host-repo")  # a git repository off the root
+        later.parent.mkdir(parents=True)
+        later.symlink_to(host_repo.path, target_is_directory=True)
+        r = env.get("/repos/gamma/profile?refresh=true")
+        assert r.status_code == 422, r.text
+        assert envelope(r)["code"] == "clone_path_escapes"

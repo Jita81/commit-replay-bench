@@ -809,6 +809,77 @@ class TestCsrfBoundToSession:
             assert c.get(f"{API_PREFIX}/auth/me").status_code == 401
 
 
+#: Cookies a browser really sends that a strict RFC 6265 parser rejects outright: a space,
+#: a JSON value, a backslash, a consent banner's date, a non-ASCII byte. Any one of them,
+#: planted by a sibling host with ``Domain=``, must not hide the session from the CSRF check.
+_MALFORMED_COOKIES = [
+    pytest.param(b"junk=a b", id="space"),
+    pytest.param(b'prefs={"theme": "dark"}', id="json"),
+    pytest.param(b"bs=a\\b", id="backslash"),
+    pytest.param(
+        b"OptanonConsent=isGpcEnabled=0&datestamp=Thu Sep 25 2026 10:00:00 GMT+0100",
+        id="consent-date",
+    ),
+    pytest.param("lang=café".encode("latin-1"), id="non-ascii"),
+]
+
+
+class TestCsrfSeesTheSameCookiesAsAuth:
+    """The CSRF middleware and the auth dependency must read the SAME session cookie from the
+    SAME ``Cookie`` header. If the middleware's parser gives up on a header the auth parser
+    accepts, the check is skipped while the request still authenticates — a forged POST
+    with no CSRF token then succeeds."""
+
+    @pytest.mark.parametrize("secure", [False, True], ids=["dev", "secure"])
+    @pytest.mark.parametrize("position", ["before", "after"])
+    @pytest.mark.parametrize("junk", _MALFORMED_COOKIES)
+    def test_a_malformed_neighbour_cookie_does_not_skip_the_check(
+        self, tmp_path: Path, secure: bool, position: str, junk: bytes
+    ) -> None:
+        app = create_app(make_settings(tmp_path, cookie_secure=secure))
+        base = "https://testserver" if secure else "http://testserver"
+        name = ("__Host-" if secure else "") + SESSION_COOKIE
+        with TestClient(app, base_url=base) as victim:
+            r = victim.post(
+                f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW}
+            )
+            assert r.status_code == 200, r.text
+            session = victim.cookies[name]
+            csrf = victim.cookies[("__Host-" if secure else "") + CSRF_COOKIE]
+        pair = f"{name}={session}".encode()
+        header = b"; ".join([junk, pair] if position == "before" else [pair, junk])
+        body = {"username": "forged", "password": USER_PW, "role": "admin"}
+        with TestClient(app, base_url=base) as attacker:
+            # the auth dependency still sees the session through the junk ...
+            me = attacker.get(f"{API_PREFIX}/auth/me", headers={"cookie": header})
+            assert me.status_code == 200, me.text
+            # ... so a forged POST without the token must be refused ...
+            r = attacker.post(f"{API_PREFIX}/users", json=body, headers={"cookie": header})
+            assert r.status_code == 403, r.text
+            assert err(r)["code"] == "csrf_failed"
+            # ... and the real page, which sends the token, is not locked out by the junk
+            ok = attacker.post(
+                f"{API_PREFIX}/users",
+                json=body,
+                headers={"cookie": header, "X-CSRF-Token": csrf},
+            )
+            assert ok.status_code == 201, ok.text
+
+    def test_the_server_has_one_cookie_parser(self) -> None:
+        """Prevention: a second, stricter parser anywhere in the server is how the two
+        readers diverged. Every server module reads cookies through Starlette's parser
+        (``request.cookies`` / :func:`crb.server.auth.request_cookies`), never its own."""
+        import crb.server
+
+        root = Path(crb.server.__file__).parent
+        offenders = sorted(
+            str(p.relative_to(root))
+            for p in root.rglob("*.py")
+            if "SimpleCookie" in p.read_text(encoding="utf-8")
+        )
+        assert offenders == [], f"a second cookie parser is back in: {offenders}"
+
+
 class TestLoginRateLimitPerIp:
     """One address guessing across many usernames is bounded too, not only one username."""
 
