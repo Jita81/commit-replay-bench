@@ -37,8 +37,8 @@ What it does: Answers "is go/node/mvn/cargo/docker available" and "can this host
               unreachable registry follows the same policy; a missing tool or daemon is always
               a skip.
 How:          Memoised probes (``docker info``; an HTTPS ``HEAD`` per registry host, where any
-              HTTP status is an answer) → on-disk caches under ``tests/.cache`` → ``docker build`` from
-              stdin or from a Dockerfile + context → ``iter_candidates`` + ``Workspace.create``
+              HTTP status is an answer) → on-disk caches under ``tests/.cache`` → ``docker
+              build`` from stdin or from a Dockerfile + context → ``iter_candidates`` + ``Workspace.create``
               + ``overlay_tests`` through the real runner and executor.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none

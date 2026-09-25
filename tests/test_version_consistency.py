@@ -32,7 +32,8 @@ Works with:   src/crb/core/version.py (the source of truth), deploy/helm/crb/Cha
               (``appVersion`` and ``version``), .github/workflows/release.yml (the tag rule),
               docs/RELEASING.md (§1 — the numbers, and this suite as the check),
               docs/EVIDENCE-AND-CLAIMS.md (the apparatus stamp — why the two versions
-              differ, §4), .github/dependabot.yml (the ``dev-tooling`` group that bumps the gate tools)
+              differ, §4), .github/dependabot.yml (the ``dev-tooling`` group that bumps the
+              gate tools)
 Tested by:    tests/test_version_consistency.py
 Touch when:   releasing (bump all four and the CHANGELOG together — this suite is the
               checklist); never tie ``APPARATUS_VERSION`` to the package version.
