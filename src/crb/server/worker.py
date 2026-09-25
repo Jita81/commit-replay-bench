@@ -2187,8 +2187,9 @@ class Worker:
         can decline one a deployment configures. The label is a rung
         (``builder:model[:provider]``) and its builder must be a registered builder name,
         because the invariant the loop enforces — **the author rung and the build rung are
-        never the same rung** — is a comparison of rung labels
-        (:func:`crb.factory.testfirst.assert_distinct_identity`, applied to every rung by
+        never the same rung, nor the same model** — is a comparison of rung labels and of
+        their model halves (:func:`crb.factory.testfirst.assert_distinct_identity`, C3,
+        applied to every rung by
         :class:`~crb.factory.loop.FactorySpec`). Nothing is enforced twice here; this only
         builds the author so the refusal has a label to compare, and names the ladder in the
         message when an operator has to choose another rung.

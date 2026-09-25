@@ -208,9 +208,11 @@ class FactorySpec:
         if self.probes is not None:
             object.__setattr__(self, "probes", tuple(self.probes))
         if self.test_author is not None:
+            # the author and every build rung differ by LABEL and by MODEL (C3): the refusal
+            # names the rung by its place on the ladder, so the operator knows which to change
             lbl = author_label(self.test_author)
-            for r in self.ladder:
-                assert_distinct_identity(lbl, r.label, role="builder")
+            for i, r in enumerate(self.ladder, start=1):
+                assert_distinct_identity(lbl, r.label, role=f"build rung {i}")
         if self.max_rework < 0:
             raise ValueError("max_rework cannot be negative")
 

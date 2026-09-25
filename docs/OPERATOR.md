@@ -804,14 +804,20 @@ POST /runs {"repo": "cobra", "kind": "factory", "test_author": "editblock:gpt-os
 POST /runs {"repo": "cobra", "kind": "factory", "test_author": "none"}   # this run pays for no authoring
 ```
 
-**The author rung and the build rung are never the same rung.** This is the same refusal
-that has always stopped a rung building against a test it wrote itself: when the run's spec
-is built, the author's label is compared with every rung on the ladder, and a match ends the
-run with `SameIdentityError` **before anything is built or paid for**. If the run fails that
-way, choose another rung — the message names the ladder. What the refusal deliberately does
-not catch is the same model under a *different* registered builder name; the label space is
-closed to the registry, so no label can be invented to dodge it, but model-level separation
-is your choice of models, not something the product can enforce. [gap]
+**The author and every build rung are different models, not only different rungs.** This
+is the same refusal that has always stopped a rung building against a test it wrote itself:
+when the run's spec is built, the author's label is compared with every rung on the ladder,
+and a match ends the run with `SameIdentityError` **before anything is built or paid for**.
+Since 2026-09-25 the refusal compares the **model** as well as the label: the same model
+under a different registered builder name (`editblock:claude-sonnet-5` writing the test that
+`claude_code:claude-sonnet-5` is graded against) is one model's judgement on both sides of the
+test, and it is refused. Aliases do not get past it: the model id is lower-cased, a
+`@provider`, a `[1m]`-style suffix and a `vendor/` prefix are dropped, and the id is matched
+to the longest model in the pricing table (`CRB_PRICING_JSON` extends it), so
+`claude-sonnet-5-20260901` is `claude-sonnet-5`; Claude Code's bare `opus` / `sonnet` /
+`haiku` count as every model of that family. If the run fails this way, the message names
+the rung by its place on the ladder (`build rung 2`) and the model — change that rung's
+model, or give the test author a different one.
 
 Nothing the author writes is taken on trust. The test is written in a throwaway worktree at
 the base (a stray source edit cannot leak out of it), then the ordinary RED proof runs it at
