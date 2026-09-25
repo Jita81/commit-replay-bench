@@ -32,9 +32,14 @@ What it does: Pins that a ``SealedCheckout`` holds exactly one reachable commit 
               clean on it, a sandbox failure propagates, an unsealable builder keeps the real
               worktree; and that a session names exactly the spawned streams — and the
               tool-loop executors' commands — whose kill went unconfirmed
-              (``unconfirmed_kills``) for the worker's reaper.
+              (``unconfirmed_kills``) for the worker's reaper. Every test here runs as if the
+              worker were uid 0 (the ``worker_runs_as_root`` autouse fixture), and a ratchet
+              refuses any test under tests/ that builds the settings on the host's own uid, so
+              the suite gives the same answer in a root container as on a developer's laptop.
 How:          ``SealedCheckout`` on a ``pyrepo`` trial; a local HTTP upstream + the proxy on
-              ephemeral ports; ``FakeSession`` stands in for ``ContainerSession``.
+              ephemeral ports; ``FakeSession`` stands in for ``ContainerSession``;
+              ``os.getuid`` / ``os.getgid`` monkeypatched to 0 after pytest's base temporary
+              directory exists; an ``ast`` walk of tests/ for the ratchet.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
@@ -51,6 +56,7 @@ Touch when:   a hardening flag, mount or environment rule of the builder contain
 
 from __future__ import annotations
 
+import ast
 import http.server
 import os
 import socket
@@ -93,6 +99,24 @@ from crb.core.run import RunSpec, run
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.workspace import HARNESS_SYMLINK, Workspace, sha256_bytes
 from fixtures import pyrepo as pr
+
+TESTS_DIR = Path(__file__).resolve().parent
+
+
+@pytest.fixture(autouse=True)
+def worker_runs_as_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Every test in this module runs as if the worker were uid 0 (a root container).
+
+    The settings' default ``user`` is the worker's own uid, and root is refused, so a test
+    that leans on the default passes on a laptop and fails in a root container. Pinning the
+    uid to 0 here makes that dependency fail on every machine. pytest's base temporary
+    directory is created first: its ownership check reads ``os.getuid`` too.
+    """
+    tmp_path_factory.getbasetemp()
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "getgid", lambda: 0)
 
 
 def _git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -375,6 +399,73 @@ def test_settings_fail_closed() -> None:
     assert not s.networked and s.describe()["egress_network"] == "none"
     assert s.user == f"{os.getuid()}:{os.getgid()}"
     assert s.proxy_image == "i"
+
+
+def test_the_default_user_is_the_workers_own_uid_and_root_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default is the worker's uid:gid (the bind-mounted checkout stays writable) and a
+    worker running as root is refused, whether the uid is implicit or named."""
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    monkeypatch.setattr(os, "getgid", lambda: 10002)
+    assert BuilderContainerSettings(image="i").user == "10001:10002"
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "getgid", lambda: 0)
+    with pytest.raises(SandboxUnavailable, match="root"):
+        BuilderContainerSettings(image="i")
+    with pytest.raises(SandboxUnavailable, match="root"):
+        BuilderContainerSettings(image="i", user="0:0")
+    # a named non-root user runs as that user whoever the worker is
+    assert BuilderContainerSettings(image="i", user="10001:10001").user == "10001:10001"
+
+
+def _settings_on_the_hosts_uid(path: Path) -> set[str]:
+    """Sites in one test file that build builder-container settings without naming a user.
+
+    Two shapes: a ``BuilderContainerSettings(...)`` call with no ``user=`` keyword (a
+    ``**mapping`` is trusted: the docker suite's ``_settings`` runs as the worker's own uid by
+    design and is docker-marked), and a function that sets ``CRB_BUILDER__EXECUTOR`` to
+    ``docker`` without ``CRB_BUILDER__USER``. A function that touches ``getuid`` pins the
+    default on purpose and is exempt.
+    """
+    found: set[str] = set()
+    rel = path.relative_to(TESTS_DIR.parent).as_posix()
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        nodes = list(ast.walk(fn))
+        strings = {
+            n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        }
+        if "getuid" in strings or any(
+            isinstance(n, ast.Attribute) and n.attr == "getuid" for n in nodes
+        ):
+            continue
+        for call in (n for n in nodes if isinstance(n, ast.Call)):
+            callee = call.func
+            name = callee.attr if isinstance(callee, ast.Attribute) else getattr(callee, "id", "")
+            if name == "BuilderContainerSettings" and not any(
+                k.arg in {"user", None} for k in call.keywords
+            ):
+                found.add(f"{rel}:{call.lineno}")
+        if {"CRB_BUILDER__EXECUTOR", "docker"} <= strings and "CRB_BUILDER__USER" not in strings:
+            found.add(f"{rel}:{fn.lineno} ({fn.name})")
+    return found
+
+
+def test_no_test_builds_builder_settings_on_the_hosts_uid() -> None:
+    """The class, not the instance: a test that builds the settings on the host's own uid
+    passes as a developer and fails in a root container (12 did, assessment 2026-09-25 §E2).
+    Every construction under tests/ names its user, or pins the uid it depends on."""
+    offenders: set[str] = set()
+    for path in sorted(TESTS_DIR.rglob("*.py")):
+        if ".cache" not in path.parts:  # the per-session toolchain caches are not tests
+            offenders |= _settings_on_the_hosts_uid(path)
+    assert not offenders, (
+        "these tests build BuilderContainerSettings on the host's uid — pass user= "
+        "(or CRB_BUILDER__USER) with a non-root uid:gid: " + ", ".join(sorted(offenders))
+    )
 
 
 def test_builder_run_args_hardening_and_secret_handling(tmp_path: Path) -> None:

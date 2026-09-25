@@ -20,15 +20,19 @@ What it is:   The version-drift test suite — one package version in three plac
 What it does: Pins that ``pyproject.toml``, ``crb.core.version.__version__`` and the Helm chart's
               ``appVersion`` are the same string, that the chart's ``version`` is
               ``semver_of(__version__)``, that ``release.yml``'s tag rule would accept
-              ``v<version>``, that ``APPARATUS_VERSION`` is deliberately independent of it, and
-              that the CHANGELOG has a dated header for the current version.
+              ``v<version>``, that ``APPARATUS_VERSION`` is deliberately independent of it,
+              that the CHANGELOG has a dated header for the current version, and that the gate
+              tools (mypy, ruff) are pinned exactly with Dependabot moving them and local
+              coverage output is ignored — a gate's verdict must not drift with the day the
+              environment was resolved.
 How:          Reads the files as text / TOML; no subprocess. ``semver_of`` is the one rule.
 Layer:        tests — docs/ARCHITECTURE.md#74-versioning
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
 Works with:   src/crb/core/version.py (the source of truth), deploy/helm/crb/Chart.yaml
               (``appVersion`` and ``version``), .github/workflows/release.yml (the tag rule),
               docs/RELEASING.md (§1 — the numbers, and this suite as the check),
-              docs/EVIDENCE-AND-CLAIMS.md (the apparatus stamp — why the two versions differ, §4)
+              docs/EVIDENCE-AND-CLAIMS.md (the apparatus stamp — why the two versions
+              differ, §4), .github/dependabot.yml (the ``dev-tooling`` group that bumps the gate tools)
 Tested by:    tests/test_version_consistency.py
 Touch when:   releasing (bump all four and the CHANGELOG together — this suite is the
               checklist); never tie ``APPARATUS_VERSION`` to the package version.
@@ -142,3 +146,35 @@ def test_changelog_has_a_dated_header_for_the_current_version() -> None:
     assert header, f"CHANGELOG.md has no dated header for {__version__}"
     assert "tag pending" not in text.split(header.group(0), 1)[1].split("\n## ", 1)[0]
     assert f"[{__version__}]: https://" in text  # the compare link is present
+
+
+#: The tools whose verdict is a CI gate. A range lets the verdict move with the day the
+#: environment was resolved; an exact pin moves only in a reviewed Dependabot pull request.
+GATE_TOOLS = ("mypy", "ruff")
+
+
+def _dev_extra() -> list[str]:
+    with PYPROJECT.open("rb") as fh:
+        return [str(r) for r in tomllib.load(fh)["project"]["optional-dependencies"]["dev"]]
+
+
+def test_the_gate_tools_are_pinned_exactly_and_dependabot_moves_them() -> None:
+    """``mypy>=1.11`` let a fresh environment and CI's disagree about the same tree
+    (assessment 2026-09-25 §E1). Each gate tool is pinned with ``==`` in the dev extra, and
+    Dependabot's ``dev-tooling`` group is what bumps it."""
+    extra = _dev_extra()
+    for tool in GATE_TOOLS:
+        (spec,) = [r for r in extra if re.match(rf"^{tool}\b", r)]
+        assert re.fullmatch(rf"{tool}==\d+(\.\d+)+", spec), f"{spec!r} is not an exact pin"
+    dependabot = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+    group = re.search(r"dev-tooling:\s*\n\s*patterns:\s*\[([^\]]*)\]", dependabot)
+    assert group, "dependabot.yml has no dev-tooling group"
+    for tool in GATE_TOOLS:
+        assert f'"{tool}"' in group.group(1), f"Dependabot does not bump {tool}"
+
+
+def test_local_coverage_output_is_ignored() -> None:
+    """The CI coverage command writes ``.coverage`` and ``coverage.xml``; a local run of the
+    same command must not leave them untracked in every clone."""
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert ".coverage" in ignored and "coverage.xml" in ignored

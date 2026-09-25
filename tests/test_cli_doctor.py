@@ -550,6 +550,39 @@ class TestDoctorReport:
         )
         assert next(p for p in body["probes"] if p["name"] == "worker")["status"] == "degraded"
 
+    def test_the_report_is_the_same_whether_or_not_the_host_has_a_docker_daemon(
+        self,
+        home: Path,
+        fake_cli: Callable[[bool], None],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        """A report over test fixtures must not read the machine it runs on: the store-only
+        fixture above gave ``overall: warn`` on a developer's laptop and ``overall: fail`` in
+        a container with no docker daemon (assessment 2026-09-25 §E2). A fake ``docker`` first
+        on PATH answers, then refuses; the report is identical both times."""
+        fake_cli(True)
+        monkeypatch.setenv("CRB_ENV", "dev")
+        monkeypatch.setenv("CRB_UI_DIST", str(home / "no-built-ui"))
+        home.mkdir()
+        migrate.upgrade(f"sqlite:///{home / 'crb.db'}")
+        bindir = tmp_path / "fake-docker"
+        bindir.mkdir()
+        docker = bindir / "docker"
+        monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+        reports: list[tuple[int, str]] = []
+        for script in (
+            "#!/bin/sh\necho 99.0\n",
+            "#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2\nexit 1\n",
+        ):
+            docker.write_text(script)
+            docker.chmod(0o755)
+            code = main(["doctor"])
+            reports.append((code, capsys.readouterr().out))
+        assert reports[0] == reports[1]
+        assert reports[0][1].rstrip().endswith("overall: warn") and reports[0][0] == 0
+
     def test_uninitialised_store_fails_and_the_worker_is_not_guessed(
         self, home: Path, fake_cli: Callable[[bool], None], capsys: pytest.CaptureFixture[str]
     ) -> None:

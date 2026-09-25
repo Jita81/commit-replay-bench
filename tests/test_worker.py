@@ -48,6 +48,7 @@ Touch when:   a run kind is added (``stage_for``, a run case here and the queue'
 from __future__ import annotations
 
 import json
+import os
 import stat
 import threading
 import time
@@ -523,9 +524,16 @@ def _realistic_heartbeat(h: Harness, heartbeat_s: float = 2.0) -> None:
 
 
 @pytest.fixture
-def sealed_unconfirmed(monkeypatch: pytest.MonkeyPatch) -> None:
+def sealed_unconfirmed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
     """The worker's docker builder posture with the session doubled: every sealed attempt
-    reports an unconfirmed kill."""
+    reports an unconfirmed kill. The worker runs as uid 0 here (a root container), so the
+    posture must name its non-root user rather than inherit the worker's uid; pytest's base
+    temporary directory is created first because its ownership check reads ``os.getuid``."""
+    tmp_path_factory.getbasetemp()
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "getgid", lambda: 0)
     monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
     monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
     monkeypatch.setattr(adapter_mod, "SEALABLE_BUILDERS", frozenset({"fake"}))
