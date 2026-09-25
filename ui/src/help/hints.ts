@@ -120,6 +120,8 @@ export const HINTS = {
     'Switch between light, dark and your system’s theme. It changes nothing but how the screens look.',
   'button.shell.sign_out':
     'End your session on this browser. Runs in flight carry on without you.',
+  'button.shell.menu':
+    'On a narrow screen the navigation, your role, Help, the theme and Sign out are folded in here. Press it to open them; Escape closes them again.',
   'nav.home':
     'Where this deployment is on the way from an empty install to a change delivered under evidence: the eight tasks and the next one to press.',
   'nav.connect':

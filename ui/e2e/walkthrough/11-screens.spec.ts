@@ -118,6 +118,26 @@ interface Ctx {
 
 const ctx: Ctx = { repo: primary().name, runId: '', taskId: '' }
 
+/** The repository 08 seeds and the approver signs (`SIGNABLE_NAME` in 08-signoff): it has an active attestation to revoke. */
+const SIGNED_REPO = 'walk-signable'
+
+/**
+ * Choose the first real option of the focused `<select>` from the keyboard, by typing the start
+ * of its label — the type-ahead a closed select answers on every platform (ArrowDown changes the
+ * value on Linux but opens the picker on macOS, so it would prove a different thing on each) —
+ * and assert the value changed, so a select a keyboard person cannot operate fails.
+ */
+async function chooseByKeyboard(page: Page, where: string): Promise<void> {
+  const { before, prefix } = await page.evaluate(() => {
+    const sel = document.activeElement as HTMLSelectElement | null
+    const first = sel ? Array.from(sel.options).find((o) => o.value !== '') : undefined
+    return { before: sel?.value ?? '', prefix: (first?.textContent ?? '').trim().split(/\s/)[0] ?? '' }
+  })
+  expect(prefix, `${where}: the focused control is not a select with an option to choose`).not.toBe('')
+  await page.keyboard.type(prefix)
+  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLSelectElement | null)?.value ?? ''), { message: `${where}: typing "${prefix}" did not choose an option` }).not.toBe(before)
+}
+
 /** Every authenticated route; `about: false` marks the help pages, which are the help and carry no About block. */
 function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
   const r = c.repo
@@ -172,6 +192,21 @@ async function shot(page: Page, persona: string, slug: string, width: number): P
 }
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
+
+/**
+ * The phone top bar's ceiling: one row (brand and the Menu button, `py-3`) measures about
+ * 60 px; a wrap to a second row adds 40 or more. 90 fails a wrap and tolerates font metrics.
+ */
+const TOP_BAR_ONE_ROW_PX = 90
+
+/**
+ * How many routes in `routes()` render the journey-position eyebrow as its hinted trigger
+ * (`PageHeader` → `journeyEyebrow`): /connect, /connect/:name, /results, /signoff, /factory and
+ * /factory/intake [measured — n = 10 journey and review routes probed at 375 px on the tier-1
+ * stack, 2026-09-25, apparatus 2.2; Home, Measure, Decisions and Deployment render none]. At
+ * 375 px each must show it with the menu folded; this floor keeps that check from passing on zero.
+ */
+const JOURNEY_EYEBROW_ROUTES = 6
 
 /**
  * Routes that still scroll sideways at 375 px, by slug, each with the gap that tracks it.
@@ -361,6 +396,122 @@ async function keyboardPass(page: Page, where: string, want = 2, maxTabs = 12): 
 }
 
 /**
+ * Keyboard only: press Tab (or Shift+Tab, `backwards`) until the focused element matches
+ * `selector` — never `focus()`, never a click, so the control is proven REACHABLE by a keyboard
+ * person, not only operable once something else put focus on it. `fromTop` (the default, for
+ * the first call after a page load) starts the way a keyboard person starts: the first Tab
+ * must land on the skip link, and Enter follows it (the sequential-focus starting point moves
+ * to `<main>`); otherwise it carries on from wherever focus is. Fails, naming where focus
+ * went, if `maxTabs` presses never reach it: a control that cannot take focus
+ * (`tabindex="-1"`, a `div` with an `onClick`) fails here, which the negative-control test
+ * below proves. Returns the number of presses it took.
+ */
+async function tabTo(page: Page, selector: string, where: string, opts: { fromTop?: boolean; backwards?: boolean; maxTabs?: number } = {}): Promise<number> {
+  const { fromTop = true, backwards = false, maxTabs = 120 } = opts
+  if (fromTop) {
+    await page.keyboard.press('Tab')
+    expect(await page.evaluate(() => document.activeElement?.textContent?.trim()), `${where}: the first Tab after the page loaded did not land on the skip link`).toBe('Skip to content')
+    await page.keyboard.press('Enter')
+  }
+  const trail: string[] = []
+  for (let i = 1; i <= maxTabs; i += 1) {
+    await page.keyboard.press(backwards ? 'Shift+Tab' : 'Tab')
+    const at = await page.evaluate((sel) => {
+      const el = document.activeElement as HTMLElement | null
+      if (!el || el === document.body) return { hit: false, what: '(body)' }
+      const what = `<${el.tagName.toLowerCase()}${el.getAttribute('data-hint') ? ` data-hint=${el.getAttribute('data-hint')}` : ''}> ${(el.getAttribute('aria-label') ?? el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40)}`
+      return { hit: el.matches(sel), what }
+    }, selector)
+    if (at.hit) return i
+    trail.push(at.what)
+  }
+  throw new Error(`${where}: ${maxTabs} ${backwards ? 'Shift+Tab' : 'Tab'} presses never reached ${selector}; focus went: ${trail.slice(-8).join(' → ')}`)
+}
+
+/**
+ * Press Escape until `done` holds, at most `max` times. One Escape closes the innermost open
+ * thing: a hint bubble the focus opened is closed first (Hint spends that press), then the
+ * disclosure, menu or dialog behind it — so a keyboard person needs one press per layer, and
+ * never more than two here.
+ */
+async function escapeUntil(page: Page, done: () => Promise<boolean>, max = 2): Promise<void> {
+  for (let i = 0; i < max && !(await done()); i += 1) await page.keyboard.press('Escape')
+}
+
+/** Whether focus is on `locator`'s element or inside it (a dialog, a menu, a confirmation). */
+async function focusedIs(locator: Locator): Promise<boolean> {
+  return locator.evaluate((el) => el === document.activeElement || el.contains(document.activeElement))
+}
+
+/**
+ * /login, the screen a person signs in from, gets the checks every other route gets — before
+ * sign-in, at both widths (G-192): at 375 the page does not scroll sideways and the Sign in
+ * button is on the first screen (the page renders outside the shell, so it has no top bar to
+ * measure — its analogue is that no chrome pushes the form off a phone's first screen); axe
+ * (WCAG 2.1 AA) is clean; the keyboard pass (Tab from the top: the page has no `#main`) opens
+ * a field's hint on focus and closes it on leaving; and the hint sample opens each hint by
+ * hover or tap with axe clean while it is open.
+ */
+async function loginChecks(page: Page, where: string, width: number): Promise<void> {
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true }), `${where}: the sign-in form did not render`).toBeVisible()
+  if (width === 375) {
+    const w = await widestOverflow(page)
+    expect(w.scroll, `${where}: the page scrolls sideways (scrollWidth ${w.scroll} > innerWidth ${w.inner}); the widest element is ${w.culprit}`).toBeLessThanOrEqual(w.inner)
+    const submit = await page.getByRole('button', { name: 'Sign in', exact: true }).boundingBox()
+    expect(submit ? submit.y + submit.height : Infinity, `${where}: the Sign in button is below a phone's first screen`).toBeLessThanOrEqual(812)
+  }
+  const a11y = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
+  expect(a11y.violations, `${where}: axe: ${JSON.stringify(a11y.violations, null, 2)}`).toEqual([])
+  await keyboardPass(page, where)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await hintSample(page, where, width)
+}
+
+/**
+ * At 375 px the journey and instrument rows, the health pill, the role chip, Help, the theme
+ * and Sign out are folded behind one "Menu" button (F26). On every route: closed, the button
+ * reads `aria-expanded="false"`, the Primary nav and Sign out are hidden and the journey-
+ * position eyebrow (on a journey route) is still on screen; opened, all of it shows, axe
+ * (WCAG 2.1 AA) is clean with it open, and Tab moves focus into it; Escape closes it — after
+ * first closing the hint bubble that focus opened, one press per layer — and focus goes back
+ * to the button. A failure names the route and the step.
+ */
+async function phoneMenu(page: Page, where: string): Promise<boolean> {
+  const button = page.getByTestId('shell-menu-button')
+  const primaryNav = page.getByRole('navigation', { name: 'Primary' })
+  const signOut = page.getByRole('button', { name: 'Sign out' })
+  await expect(button, `${where}: no Menu button at 375 px`).toBeVisible()
+  await expect(button).toHaveAttribute('aria-expanded', 'false')
+  await expect(primaryNav, `${where}: the journey nav is not folded while the menu is closed`).toBeHidden()
+  await expect(signOut, `${where}: Sign out is not folded while the menu is closed`).toBeHidden()
+  // a journey screen's eyebrow ("Journey · 2 of 4 · Baseline") is how a phone reader knows where
+  // they are once the nav is folded: wherever the screen renders one, it is on screen
+  const eyebrow = page.locator('[data-hint="nav.journey_position"]')
+  const journey = (await eyebrow.count()) > 0
+  if (journey) await expect(eyebrow.first(), `${where}: the journey-position eyebrow is not on screen with the menu closed`).toBeVisible()
+  await button.click()
+  await expect(button).toHaveAttribute('aria-expanded', 'true')
+  await expect(primaryNav, `${where}: the menu opened without the journey nav`).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Instrument' })).toBeVisible()
+  await expect(signOut).toBeVisible()
+  await expect(page.getByTestId('user-chip')).toBeVisible()
+  await expect(page.getByRole('banner').getByRole('link', { name: 'Help' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Switch theme/ })).toBeVisible()
+  const a11y = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
+  expect(a11y.violations, `${where}: axe with the menu open: ${JSON.stringify(a11y.violations, null, 2)}`).toEqual([])
+  await page.keyboard.press('Tab')
+  expect(await page.evaluate(() => document.activeElement?.closest('#shell-menu-actions, #shell-nav-primary, #shell-nav-instrument') !== null), `${where}: Tab from the open Menu button did not move into the menu`).toBe(true)
+  await escapeUntil(page, async () => (await button.getAttribute('aria-expanded')) === 'false')
+  await expect(button, `${where}: Escape did not close the menu`).toHaveAttribute('aria-expanded', 'false')
+  expect(await focusedIs(button), `${where}: focus did not return to the Menu button when Escape closed it`).toBe(true)
+  await expect(primaryNav).toBeHidden()
+  // leave the button: its focus hint must not sit open over the next check's sample
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.mouse.move(0, 0)
+  return journey
+}
+
+/**
  * Open a sample of the route's hints — hover at desktop width, a touch pointerdown at phone
  * width, where no hover exists — and assert each bubble shows a full sentence, axe stays
  * clean with it open, and Escape closes it.
@@ -443,21 +594,26 @@ test.describe('11-screens: every route × persona × width, with the About block
       test(`${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen`, async ({ page }) => {
         test.setTimeout(6 * 60_000)
         await page.setViewportSize({ width: vp.width, height: vp.height })
-        // /login as the signed-out screen first
+        // /login as the signed-out screen first — checked like every other route, before
+        // anyone signs in (G-192)
         await page.goto('/login')
         await settle(page)
         await shot(page, persona, 'login', vp.width)
+        await loginChecks(page, `${persona} @ ${vp.width} /login (signed out)`, vp.width)
         await signIn(page, USERNAMES[persona], PASSWORDS[persona])
+        let eyebrows = 0
         for (const r of routes(ctx)) {
           await page.goto(r.path)
           await settle(page)
           await shot(page, persona, r.slug, vp.width)
           if (vp.width === 375) {
-            // the top bar is two rows on a phone (brand; pill · role · help · theme · sign out) —
-            // never three: a third row is ~400 px of chrome before the content
+            // the top bar is ONE row on a phone — the brand and the Menu button; everything else
+            // is folded behind the menu (F26). It was two rows (brand; pill · role · help · theme
+            // · sign out) before, and three nav rows took half the first screen
             const bar = page.getByRole('banner').locator('> div').first()
             const box = await bar.boundingBox()
-            expect(box?.height ?? 0, `${persona} @ 375 ${r.path}: the top bar wrapped past two rows (${box?.height} px)`).toBeLessThan(130)
+            expect(box?.height ?? 0, `${persona} @ 375 ${r.path}: the top bar wrapped past one row (${box?.height} px)`).toBeLessThan(TOP_BAR_ONE_ROW_PX)
+            if (await phoneMenu(page, `${persona} @ 375 ${r.path}`)) eyebrows += 1
             // and the page does not scroll sideways: a phone reader should never have to pan
             // to read a number. Every route, not only the Factory (G-905).
             const width = await widestOverflow(page)
@@ -488,9 +644,178 @@ test.describe('11-screens: every route × persona × width, with the About block
           if (vp.width === 1280) await keyboardPass(page, `${persona} @ 1280 ${r.path}`)
           await hintSample(page, `${persona} @ ${vp.width} ${r.path}`, vp.width)
         }
+        // the eyebrow check is not vacuous: every journey screen that carries one was seen
+        if (vp.width === 375) expect(eyebrows, `${persona} @ 375: journey-position eyebrows seen with the menu closed`).toBeGreaterThanOrEqual(JOURNEY_EYEBROW_ROUTES)
         if (vp.width === 1280 && persona === 'operator') await dialogHints(page, `${persona} @ 1280 /repos`)
         await page.context().clearCookies()
       })
     }
   }
+
+  // ─── the per-screen keyboard steps (G-905) ──────────────────────────────────────────────
+  // The route loop above proves every screen's first hinted controls take focus. These prove
+  // the five controls a keyboard person has to OPERATE, each reached by Tab alone from the
+  // skip link (`tabTo`) and driven by Enter, Space, typing and Escape — no click, no focus().
+  // They change no data: the sign-off form is filled to an enabled Sign off and the revoke
+  // confirmation filled to an enabled Revoke sign-off, then left by Cancel; the freeze dialog
+  // is opened and closed. Pressing those buttons is proven by 08 and 10, on the same native
+  // `<button>`, whose Enter/Space activation the browser guarantees.
+
+  test('keyboard: a map cell opens from the keyboard, and the reason code in it opens and closes (/capability)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
+    await page.goto(`/capability?repo=${encodeURIComponent(ctx.repo)}`)
+    await settle(page)
+    const where = 'operator @ 1280 /capability'
+    await tabTo(page, 'button[data-hint="map.cell.tile"]', where)
+    // the cell explains itself on focus, like every hinted control
+    const cell = page.locator(':focus')
+    await expect(await bubbleOf(page, cell), `${where}: the focused cell's hint did not open`).toBeVisible({ timeout: 1000 })
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId('cell-reason'), `${where}: Enter on a cell did not open its detail`).toBeVisible()
+    // the reason code in the detail card is the next thing a reader wants: reach it by Tab too
+    const reason = 'main [data-testid="cell-reason"] button[aria-expanded]'
+    await tabTo(page, reason, `${where} (reason code)`, { fromTop: false })
+    const disclosure = page.locator(reason)
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+    await page.keyboard.press('Enter')
+    await expect(disclosure, `${where}: Enter did not open the reason code`).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.locator(`[id="${await disclosure.getAttribute('aria-controls')}"]`)).toHaveAttribute('role', 'note')
+    await escapeUntil(page, async () => (await disclosure.getAttribute('aria-expanded')) === 'false')
+    await expect(disclosure, `${where}: Escape did not close the reason code`).toHaveAttribute('aria-expanded', 'false')
+    expect(await focusedIs(disclosure), `${where}: closing the reason code lost focus`).toBe(true)
+  })
+
+  test('keyboard: a reason-code button on Routes is reached by Tab and opens and closes with aria-expanded (/routing)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
+    await page.goto(`/routing?repo=${encodeURIComponent(ctx.repo)}`)
+    await settle(page)
+    const where = 'operator @ 1280 /routing'
+    const sel = 'main button[aria-expanded]:has([data-testid="reason-code"])'
+    await expect(page.locator(sel).first(), `${where}: no reason code on the page — the stack has no route decisions`).toBeVisible()
+    await tabTo(page, sel, where)
+    const disclosure = page.locator(':focus')
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+    await page.keyboard.press('Enter')
+    await expect(disclosure, `${where}: Enter did not open the reason code`).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('note').filter({ hasText: 'glossary' }).first()).toBeVisible()
+    await escapeUntil(page, async () => (await disclosure.getAttribute('aria-expanded')) === 'false')
+    await expect(disclosure, `${where}: Escape did not close the reason code`).toHaveAttribute('aria-expanded', 'false')
+    expect(await focusedIs(disclosure), `${where}: closing the reason code lost focus`).toBe(true)
+  })
+
+  test('keyboard: a term on Oracle opens and closes with aria-expanded (/oracle)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
+    await page.goto(`/oracle?repo=${encodeURIComponent(ctx.repo)}`)
+    await settle(page)
+    const where = 'operator @ 1280 /oracle'
+    const sel = 'main button[aria-expanded][aria-controls]'
+    await tabTo(page, sel, where)
+    const term = page.locator(':focus')
+    const name = ((await term.textContent()) ?? '').trim()
+    await expect(term).toHaveAttribute('aria-expanded', 'false')
+    await page.keyboard.press('Space')
+    await expect(term, `${where}: Space did not open the term "${name}"`).toHaveAttribute('aria-expanded', 'true')
+    const note = page.locator(`[id="${await term.getAttribute('aria-controls')}"]`)
+    await expect(note, `${where}: the term "${name}" opened no definition`).toHaveAttribute('role', 'note')
+    await expect(note).toBeVisible()
+    await escapeUntil(page, async () => (await term.getAttribute('aria-expanded')) === 'false')
+    await expect(term, `${where}: Escape did not close the term "${name}"`).toHaveAttribute('aria-expanded', 'false')
+    await expect(note).toHaveCount(0)
+    expect(await focusedIs(term), `${where}: closing the term lost focus`).toBe(true)
+  })
+
+  test('keyboard: the sign-off form is filled, and the revoke confirmation opened, filled and left, from the keyboard (/signoff)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await signIn(page, USERNAMES.approver, PASSWORDS.approver)
+    await page.goto(`/signoff?repo=${SIGNED_REPO}`)
+    await settle(page)
+    const where = 'approver @ 1280 /signoff'
+    // the form: choose the cell, name an accepted row, affirm, write the statement — by keyboard
+    await tabTo(page, '#signoff-form select', `${where} (Cell)`)
+    await chooseByKeyboard(page, `${where} (Cell)`)
+    const rowSelect = page.getByTestId('attest-row')
+    await expect.poll(async () => (await rowSelect.locator('option').count()) - 1, { message: `${where}: the chosen cell offers no accepted row` }).toBeGreaterThanOrEqual(1)
+    await expect(rowSelect).toBeEnabled()
+    await tabTo(page, 'select[data-testid="attest-row"]', `${where} (Accepted row)`, { fromTop: false, maxTabs: 30 })
+    await chooseByKeyboard(page, `${where} (Accepted row)`)
+    await tabTo(page, 'input[data-testid="attest-read"]', `${where} (I have read)`, { fromTop: false, maxTabs: 10 })
+    await page.keyboard.press('Space')
+    await expect(page.getByTestId('attest-read')).toBeChecked()
+    await tabTo(page, 'textarea[data-testid="attest-statement"]', `${where} (statement)`, { fromTop: false, maxTabs: 30 })
+    await page.keyboard.type('walkthrough 11: filled from the keyboard; not submitted.')
+    // Sign off sits in the gate above the form: Shift+Tab back up to it, reachable and enabled
+    // now the form is complete. It is NOT pressed — 08 records the attestation; this spec
+    // changes no data.
+    await tabTo(page, 'button[form="signoff-form"]', `${where} (Sign off)`, { fromTop: false, backwards: true })
+    await expect(page.locator(':focus'), `${where}: Sign off is not enabled once the form is filled`).toBeEnabled()
+    await expect(page.locator(':focus')).toHaveText('Sign off')
+
+    // the revoke confirmation: Revoke opens it and focus moves INTO it; it is filled, its
+    // confirm button reached, then Cancel leaves it and focus comes back to Revoke
+    await tabTo(page, 'button[data-hint="button.signoff.revoke"]', `${where} (Revoke)`, { fromTop: false, maxTabs: 200 })
+    const revokeId = await page.locator(':focus').getAttribute('data-revoke-id')
+    await page.keyboard.press('Enter')
+    const confirm = page.getByTestId('revoke-confirm')
+    await expect(confirm).toBeVisible()
+    expect(await focusedIs(confirm), `${where}: focus did not move into the revoke confirmation when it opened`).toBe(true)
+    await page.keyboard.type('walkthrough 11: reached from the keyboard; not confirmed.')
+    await page.keyboard.press('Tab')
+    await expect(page.locator(':focus'), `${where}: Tab from the reason did not reach Revoke sign-off`).toHaveText('Revoke sign-off')
+    await expect(page.locator(':focus')).toBeEnabled()
+    await page.keyboard.press('Tab')
+    await expect(page.locator(':focus')).toHaveText('Cancel')
+    await page.keyboard.press('Enter')
+    await expect(confirm).toBeHidden()
+    const back = page.locator(`button[data-revoke-id="${revokeId}"]`)
+    expect(await focusedIs(back), `${where}: Cancel did not return focus to the Revoke button that opened the confirmation`).toBe(true)
+  })
+
+  test('keyboard: the freeze dialog takes focus when it opens and gives it back when it closes (/factory)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
+    await page.goto(`/factory?repo=${encodeURIComponent(ctx.repo)}`)
+    await settle(page)
+    const where = 'operator @ 1280 /factory'
+    const opener = 'button[data-hint="button.factory.freeze"], button[data-hint="button.factory.freeze_revised"]'
+    await tabTo(page, opener, where)
+    const label = ((await page.locator(':focus').textContent()) ?? '').trim()
+    await page.keyboard.press('Enter')
+    const dialog = page.getByRole('dialog', { name: /^Freeze a (revised )?backlog$/ })
+    await expect(dialog, `${where}: Enter on "${label}" did not open the freeze dialog`).toBeVisible()
+    expect(await focusedIs(dialog), `${where}: focus did not move into the freeze dialog when it opened`).toBe(true)
+    // Tab stays inside a modal dialog
+    for (let i = 0; i < 6; i += 1) {
+      await page.keyboard.press('Tab')
+      expect(await focusedIs(dialog), `${where}: Tab ${i + 1} left the modal dialog`).toBe(true)
+    }
+    await escapeUntil(page, async () => !(await dialog.isVisible()))
+    await expect(dialog, `${where}: Escape did not close the freeze dialog`).toBeHidden()
+    await expect(page.locator(':focus'), `${where}: focus did not return to "${label}" when the dialog closed`).toHaveText(label)
+  })
+
+  test('keyboard: the pass fails when a control cannot take focus (negative control)', async ({ page }) => {
+    // A pass that cannot fail proves nothing. Take every map cell out of the tab order — the
+    // defect a keyboard person meets when a control is a div with an onClick, or carries
+    // tabindex="-1" — and `tabTo` must fail on the same page it passes above.
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
+    await page.goto(`/capability?repo=${encodeURIComponent(ctx.repo)}`)
+    await settle(page)
+    const cells = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll<HTMLElement>('button[data-hint="map.cell.tile"]'))
+      for (const el of all) el.tabIndex = -1
+      return all.length
+    })
+    expect(cells, 'the negative control needs a measured cell on the page').toBeGreaterThan(0)
+    let failed = ''
+    try {
+      await tabTo(page, 'button[data-hint="map.cell.tile"]', 'negative control', { maxTabs: 60 })
+    } catch (e) {
+      failed = String(e)
+    }
+    expect(failed, 'tabTo reached a map cell that cannot take focus — the keyboard pass cannot fail').toContain('never reached')
+  })
 })

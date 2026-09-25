@@ -231,6 +231,15 @@ export function useSignoffPreview(repo: string, cell: Record<string, string> | n
     enabled: repo.length > 0 && cell !== null && Boolean(cell.capability_class),
     retry: false,
     staleTime: 5_000,
+    // Naming another row of the SAME cell keeps the cell's preview on screen while the row's
+    // loads. Without it `data` went undefined for the refetch, the Accepted row select (disabled
+    // until a preview exists) was disabled under the keyboard person's focus and focus fell to
+    // the page — found by the walkthrough's keyboard step (G-905). A different cell or
+    // repository starts empty: its rows and refusals are not the old cell's.
+    placeholderData: (previous, previousQuery) => {
+      const k = previousQuery?.queryKey
+      return k && k[1] === repo && JSON.stringify(k[2]) === JSON.stringify(key) ? previous : undefined
+    },
   })
 }
 

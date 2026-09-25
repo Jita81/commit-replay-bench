@@ -483,6 +483,27 @@ describe('FactoryPage — the shipped contract', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === `/runs/${runId}/cancel`)).toBe(true))
   })
 
+  it('the active-run banner arrives inside a polite live region that was already on the page, so it is announced (G-905)', async () => {
+    // before any run: the live region is there, empty
+    mockApi(base({}))
+    const first = renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const idle = await screen.findByTestId('factory-run-live')
+    expect(idle).toHaveAttribute('role', 'status')
+    expect(idle).toHaveAttribute('aria-live', 'polite')
+    expect(within(idle).queryByTestId('factory-active-run')).toBeNull()
+    first.unmount()
+    vi.unstubAllGlobals()
+    // with a run in flight: the banner is inside that same region
+    mockApi(
+      base({
+        'GET /runs': { items: [{ id: 'b'.repeat(32), repo: 'alpha', kind: 'factory', status: 'queued', progress: null, started: null, cost_usd: 0, counts: {}, finished: null }], total: 1, limit: 10, offset: 0 },
+      }),
+    )
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const banner = await screen.findByTestId('factory-active-run')
+    expect(banner.closest('[data-testid="factory-run-live"]')).toHaveAttribute('aria-live', 'polite')
+  })
+
   it('a viewer sees the active-run banner without a Cancel button', async () => {
     mockApi(
       base({

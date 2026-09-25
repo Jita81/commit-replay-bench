@@ -18,7 +18,8 @@
  *               button names the estimate, never a cap (F5b: nothing on this page promises
  *               a ceiling nothing enforces). While
  *               a factory run is active the chain polls and a banner names the run and the
- *               item in hand (J-FAC-5 / J-TEL-9). A built item opens its evidence (F15); a
+ *               item in hand (J-FAC-5 / J-TEL-9), inside a polite live region that is on the
+ *               page before the run starts, so its arrival is announced (G-905). A built item opens its evidence (F15); a
  *               stopped item says the way forward — an evolution that supersedes it, the
  *               route the API serves as `way_forward` (DL-049), one sentence naming what must
  *               be different, and that replacement item already drafted from the stop's own
@@ -541,7 +542,12 @@ export function FactoryPage() {
                     {fmtInt(backlog.data.items.length)} items
                   </Hint>
                 </div>
-                {activeRun && <ActiveRunBanner run={activeRun} tasks={tasks.data ?? []} canCancel={can('operator')} />}
+                {/* a live region that is ALWAYS on the page, so the banner a starting run brings in is
+                    announced to a screen-reader user who pressed Run from the keyboard: a live region
+                    that arrives together with its content is not reliably read (G-905) */}
+                <div role="status" aria-live="polite" data-testid="factory-run-live">
+                  {activeRun && <ActiveRunBanner run={activeRun} tasks={tasks.data ?? []} canCancel={can('operator')} />}
+                </div>
                 {!activeRun && lastRun && <LastRunLine run={lastRun} />}
                 {!activeRun && can('operator') && <BeforeYouStart repo={repo} backlog={backlog.data} tasks={tasks.data} canOverride={can('approver')} />}
               </div>

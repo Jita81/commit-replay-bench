@@ -22,7 +22,7 @@
  * ----------
  * What it is:   The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract),
  *               `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`,
- *               `signIn`, `personaPassword`, `startRun`, `waitForRun`, `runStatus`,
+ *               `signIn`, `signOut`, `personaPassword`, `startRun`, `waitForRun`, `runStatus`,
  *               `expectLogAction`, `stackHealth`.
  * What it does: Makes every spec drive a REAL stack through the UI only — sign-in through the
  *               form (never cookie injection), runs queued through the dialog, completion
@@ -40,7 +40,9 @@
  *               tests/fixtures/pyrepo.py (the tier-1 fixture repository),
  *               ui/src/components/Field.tsx (the `Label *` rendering `field()` matches),
  *               ui/src/components/Layout.tsx (the user chip — display name and role, never
- *               the username, which is why `signIn` records who it signed in as),
+ *               the username, which is why `signIn` records who it signed in as; below
+ *               640 px the chip and Sign out are folded behind the "Menu" button, F26, so
+ *               "signed in" is the chip OR that button and `signOut` opens the menu first),
  *               ui/src/screens/Runs/RunNewDialog.tsx (what `startRun` fills)
  * Tested by:    every spec under ui/e2e/walkthrough (they all import this)
  * Touch when:   a walkthrough variable, a tier target or a form label changes; for a new
@@ -216,22 +218,38 @@ const signedInAs = new WeakMap<Page, string>()
  */
 export async function signIn(page: Page, user = env.user, pass = env.pass): Promise<void> {
   await page.goto('/login')
-  const chip = page.getByTestId('user-chip')
+  const shell = signedInShell(page)
   const username = field(page, 'Username')
   // /login either renders the form or redirects: wait for whichever arrives, so this never
   // races the redirect and then blocks on a form that is no longer coming.
-  await expect(chip.or(username).first()).toBeVisible()
-  if (await chip.isVisible()) {
+  await expect(shell.or(username).first()).toBeVisible()
+  if (await shell.isVisible()) {
     if (signedInAs.get(page) === user) return
-    await page.getByRole('button', { name: 'Sign out' }).click()
-    signedInAs.delete(page)
+    await signOut(page)
     await expect(username).toBeVisible()
   }
   await username.fill(user)
   await field(page, 'Password').fill(pass)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await expect(chip).toBeVisible()
+  await expect(shell).toBeVisible()
   signedInAs.set(page, user)
+}
+
+/**
+ * What a signed-in page shows at any width: the role chip, or — below 640 px, where the chip
+ * is folded into the shell's "Menu" disclosure (F26) — the Menu button. `:visible` because
+ * both are always in the DOM and only one is shown at a time.
+ */
+export function signedInShell(page: Page): Locator {
+  return page.locator('[data-testid="user-chip"]:visible, [data-testid="shell-menu-button"]:visible').first()
+}
+
+/** Sign out through the shell at any width: on a phone, open the Menu first (F26). */
+export async function signOut(page: Page): Promise<void> {
+  const button = page.getByRole('button', { name: 'Sign out' })
+  if (!(await button.isVisible())) await page.getByTestId('shell-menu-button').click()
+  await button.click()
+  signedInAs.delete(page)
 }
 
 /**
