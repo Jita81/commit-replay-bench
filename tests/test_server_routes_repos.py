@@ -11,7 +11,9 @@ What it does: Pins the list shape (probe, counts, last run), pagination, viewer 
               handled), profile computed / cached / refreshed and 409 without a clone, the
               task list with filters, and the pool window: the mined tasks' date range from
               the store and the share of the clone's non-merge history since the oldest task —
-              unknown, with the reason, when the clone is not on this host.
+              unknown, with the reason, when the clone is not on this host; the walk cached
+              on HEAD and the shallow boundary (a deepened shallow clone is re-read); any git
+              failure on the read answers ``git_failed``, never a server error.
 How:          ``make_env`` over the seed; ``fake_jobs`` stands in for ``crb.store.jobs`` and
               persists the run so the API can read it back.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -561,6 +563,65 @@ class TestPool:
             _commit(clone, "2026-08-09T12:00:00+00:00")
             third = env.get(f"/repos/{ALPHA}/pool").json()
             assert third["history_commits"] == 3 and len(walks) == 2
+
+    def test_deepening_a_shallow_clone_is_read_although_head_did_not_move(
+        self, tmp_path: Path
+    ) -> None:
+        """A shallow clone deepened by ``git fetch --deepen`` has more history at the same
+        HEAD, so HEAD alone cannot key the cache: the shallow boundary is part of the key
+        (review of PR #54). Everything the walk reads is in the key."""
+        origin = _dated_repo(
+            tmp_path / "origin",
+            [
+                "2026-06-01T12:00:00+00:00",
+                "2026-07-01T12:00:00+00:00",
+                "2026-08-01T12:00:00+00:00",
+                "2026-08-04T12:00:00+00:00",
+                "2026-08-08T12:00:00+00:00",
+            ],
+        )
+        clone = tmp_path / "shallow"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "2", f"file://{origin}", str(clone)],
+            check=True,
+            capture_output=True,
+        )
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            assert env.get(f"/repos/{ALPHA}/pool").json()["history_commits"] == 2
+            _git(clone, "fetch", "-q", "--deepen=2")
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            assert body["history_commits"] == 4 and body["window_commits"] == 3
+
+    @pytest.mark.parametrize(
+        "failing",
+        [("rev-parse", "--is-inside-work-tree"), ("rev-parse", "--verify"), ("log",)],
+        ids=["is_repo", "head", "walk"],
+    )
+    def test_a_git_failure_anywhere_on_the_read_is_git_failed_not_a_500(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing: tuple[str, ...]
+    ) -> None:
+        """A git call that times out raises ``GitError`` even without ``check=True``; the
+        repository check once ran outside the ``try`` and a timeout there escaped as a server
+        error (review of PR #54). Every git call the pool read makes sits in one ``try``, so
+        any of them failing answers ``git_failed`` with null history fields."""
+        from crb.core.git import GitError, GitRepo
+
+        real_run = GitRepo.run
+
+        def failing_run(self: GitRepo, *args: str, **kw: Any) -> Any:
+            if args[: len(failing)] == failing:
+                raise GitError(list(args), 124, "timed out after 60s")
+            return real_run(self, *args, **kw)
+
+        monkeypatch.setattr(GitRepo, "run", failing_run)
+        clone = _dated_repo(tmp_path / "slow", ["2026-08-01T12:00:00+00:00"])
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            r = env.get(f"/repos/{ALPHA}/pool")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["history_unavailable"] == "git_failed"
+            assert body["history_commits"] is None and body["share"] is None
+            assert body["oldest_authored"] == "2026-08-01T12:00:00+00:00"
 
     def test_viewer_reads_anonymous_401_unknown_404(self, env: Env) -> None:
         login(env.client, "viewer")
