@@ -67,6 +67,7 @@ from crb.core.runners import get_runner
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import Language, RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
+from fixtures.posture import grade_witnessed
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -135,7 +136,7 @@ def _trial(repo: GitRepo, config: RepoConfig, task: TaskSpec, dest: Path) -> Wor
 
 
 def _grade(ws: Workspace, task: TaskSpec, config: RepoConfig, **kw: Any) -> g.GradeResult:
-    return g.grade(
+    return grade_witnessed(
         ws, task, config=config, runner=get_runner(config), executor=LocalExecutor(), **kw
     )
 
@@ -921,7 +922,7 @@ def test_lint_run_is_in_the_evidence_pack_and_survives_the_round_trip(
     d = pack.to_dict()
     assert d["grade"]["lint_run"]["ok"] is False and d["grade"]["repo_lint_clean"] is False
     assert "ghp_" + "b" * 40 not in json.dumps(d)  # redacted at construction
-    assert d["apparatus"]["apparatus_version"] == "2.2"
+    assert d["apparatus"]["apparatus_version"] == "2.3"
     assert os.environ.get("CRB_HOME") is None  # never the live stack
 
 

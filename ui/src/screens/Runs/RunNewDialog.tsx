@@ -36,7 +36,7 @@
  *               repository.
  */
 import { useEffect, useState, type FormEvent } from 'react'
-import { useCreateRun, useRepos, useSettings } from '../../api/hooks'
+import { useCreateRun, useRepoPosture, useRepos, useSettings } from '../../api/hooks'
 import { RUN_KINDS, type GradeMode, type LadderEntry, type LadderRung, type Run, type RunBudget, type RunCreateRequest, type RunKind } from '../../api/types'
 import { Button } from '../../components/Button'
 import { Dialog } from '../../components/Dialog'
@@ -130,6 +130,7 @@ const KIND_HELP: Record<RunKind, string> = {
   label: 'Label mined tasks with an intent class (a model reads the diff; never a grade).',
   factory: 'Work the frozen backlog: readiness → RED proof → build → route-gated delivery → review.',
   probe: 'Prove the toolchain on a known-green scope.',
+  qualify: 'Prove each task in the posture that will grade it — no builder, no model spend.',
 }
 
 /** The kinds that need a builder (and show the builder / ladder / budget block). */
@@ -151,6 +152,9 @@ const BUILDER_CONFIG_HELP: Record<string, string> = {
  * shown is the server’s `sandbox_mode` when the viewer may read `/settings` (admin);
  * otherwise it reads "server default".
  */
+/** The kinds the worker gates on a qualification in the grading posture (ADR-0019). */
+const POSTURE_KINDS: ReadonlySet<RunKind> = new Set<RunKind>(['replay', 'blind', 'oracle', 'controls'])
+
 export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'replay', onCreated }: Props) {
   const repos = useRepos()
   const create = useCreateRun()
@@ -169,6 +173,9 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
   const [pool, setPool] = useState('')
   const [executor, setExecutor] = useState('')
   const [timeout, setTimeoutS] = useState('')
+  // ADR-0019: qualify missing tasks in the grading posture first (no model spend); on by default
+  const [qualifyFirst, setQualifyFirst] = useState(true)
+  const posture = useRepoPosture(repo)
 
   useEffect(() => {
     if (presetRepo) setRepo(presetRepo)
@@ -240,6 +247,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
     if (pool) body.pool = pool
     if (executor) body.executor = executor
     if (timeout) body.timeout = Number(timeout)
+    if (POSTURE_KINDS.has(kind) && !qualifyFirst) body.qualify_first = false
     create.mutate(body, {
       onSuccess: (run) => {
         onCreated?.(run)
@@ -434,6 +442,27 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
           <option value="local">local</option>
         </SelectField>
         <TextField label="Timeout (s)" hint="field.run_new.timeout" type="number" min={1} value={timeout} onChange={(e) => setTimeoutS(e.target.value)} description="Per test run; a timeout is a failure, never a pass" />
+        {POSTURE_KINDS.has(kind) && repo && (
+          <div className="space-y-2 sm:col-span-2" data-testid="run-posture">
+            <p className="text-xs text-on-surface-muted" data-testid="run-posture-line">
+              <Hint id="text.run_new.qualified">
+                {posture.data
+                  ? posture.data.posture_class
+                    ? `Qualified ${posture.data.qualified} of ${posture.data.total} under this posture (${posture.data.posture_class}).`
+                    : `No task is qualified under this posture yet (${posture.data.total} to measure).`
+                  : posture.isError
+                    ? 'The posture reading is unavailable; leave qualify first on and the worker measures what it needs.'
+                    : 'Reading how many tasks are qualified under this posture…'}
+              </Hint>
+            </p>
+            <Hint as="div" id="field.run_new.qualify_first" className="flex items-start gap-2 rounded-[var(--radius-control)] border border-border bg-surface-container px-3 py-2">
+              <input id="crb-qualify-first" type="checkbox" className="mt-0.5" checked={qualifyFirst} onChange={(e) => setQualifyFirst(e.target.checked)} />
+              <label htmlFor="crb-qualify-first" className="text-xs text-on-surface-body">
+                <span className="font-semibold">Qualify first — no model spend</span>: tasks not yet proven in the posture that will grade them are qualified before any builder runs. Off: the run is refused when nothing is qualified.
+              </label>
+            </Hint>
+          </div>
+        )}
         {create.isError && (
           <div className="sm:col-span-2">
             <ErrorState compact error={create.error} />

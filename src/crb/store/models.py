@@ -15,6 +15,9 @@ reviews    — APPEND-ONLY: human post-hoc verdicts on ONE graded row each, hash
 users      — local accounts / OIDC subjects and their role
 workers    — one row per worker process, upserted every heartbeat even when idle (the
              ``/health`` worker probe's liveness source; revision 0007)
+task_qualifications — APPEND-ONLY: each task's qualification per posture (ADR-0019); the
+             latest row for (repo, task, posture) is in force, a revocation is a new row
+             (revision 0011)
 
 Navigation
 ----------
@@ -387,7 +390,41 @@ class WorkerRow(Base):
     )
 
 
+class TaskQualification(Base):
+    """APPEND-ONLY. One task's qualification in one posture (ADR-0019 §2) — the
+    ``crb.core.qualify.Qualification`` record verbatim in ``body_json``, with the columns a
+    gate filters on copied beside it. The latest row (highest ``seq``) for a repository,
+    task and posture is the one in force; a revocation is a new row, never an edit
+    (revision 0011)."""
+
+    __tablename__ = "task_qualifications"
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    qualification_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    repo: Mapped[str] = mapped_column(String(64), nullable=False)
+    task_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    posture_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    posture_class: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    executor: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    image_ref: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    body_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("ix_task_qualifications_lookup", "repo", "task_id", "posture_id", "seq"),
+    )
+
+
 #: Every append-only table of the CURRENT schema. A revision script pins the tuple that
 #: existed at its own revision (a table a later revision adds has no triggers to install
 #: yet); ``init_db`` and ``migrate.upgrade`` use this live one.
-APPEND_ONLY_TABLES: tuple[str, ...] = ("grades", "events", "signoffs", "evidence", "reviews")
+APPEND_ONLY_TABLES: tuple[str, ...] = (
+    "grades",
+    "events",
+    "signoffs",
+    "evidence",
+    "reviews",
+    "task_qualifications",
+)

@@ -59,6 +59,7 @@ from crb.cli.commands import (
     table,
     workdir_of,
 )
+from crb.core.deps import NullDepsProvider
 from crb.core.git import (
     DEFAULT_CLONE_TIMEOUT_S,
     CloneUrlError,
@@ -69,6 +70,8 @@ from crb.core.git import (
     validate_clone_url,
 )
 from crb.core.legacy import import_repo_configs
+from crb.core.posture import resolve_posture
+from crb.core.qualify import JsonlQualifications, qualify_task
 from crb.core.runners import BaseRunner, SetupResult, get_runner
 from crb.core.spec import (
     BELT_AFFECTED_DIRS,
@@ -94,7 +97,7 @@ def _parse_belt_scope(value: str | None) -> str | tuple[str, ...]:
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Add ``crb repo add | setup | probe | import-configs | list``."""
+    """Add ``crb repo add | setup | probe | qualify | import-configs | list``."""
     p = sub.add_parser("repo", help="register repos, probe toolchains, import configs")
     rs = p.add_subparsers(dest="repo_cmd", metavar="<subcommand>")
 
@@ -163,6 +166,22 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     add_executor(pr)
     add_common(pr)
     pr.set_defaults(func=cmd_probe)
+
+    qu = rs.add_parser(
+        "qualify",
+        help=(
+            "prove each task in the posture that will grade it (RED, a two-run baseline, the "
+            "gold twice) — no builder, no model spend"
+        ),
+    )
+    qu.add_argument("name")
+    qu.add_argument("--task", action="append", default=[], help="a task sha or prefix (repeat)")
+    qu.add_argument(
+        "--image", default="", help="the sandbox image to qualify in (with --executor docker)"
+    )
+    add_executor(qu)
+    add_common(qu)
+    qu.set_defaults(func=cmd_qualify)
 
     ic = rs.add_parser("import-configs", help="import a census-style configs.json")
     ic.add_argument("configs", help="path to configs.json ({name: {...}})")
@@ -393,6 +412,71 @@ def cmd_probe(args: argparse.Namespace) -> int:
             + [f"  {f}" for f in sorted(run.failing)[:20]]
         )
     return EXIT_OK if run.green else EXIT_NEGATIVE
+
+
+def cmd_qualify(args: argparse.Namespace) -> int:
+    """ADR-0019: qualify the repository's tasks (or ``--task`` ones) in the live posture and
+    append each record to ``<workdir>/qualifications/<repo>.jsonl``. Exit 0 when at least
+    one task qualified, 1 when none did (each refusal printed with its fix)."""
+    wd = workdir_of(args)
+    config, clone = wd.require_clone(args.name)
+    if args.image:
+        config = RepoConfig.from_dict(
+            config.name, {**config.to_dict(), "sandbox_image": args.image}
+        )
+    repo = GitRepo(clone)
+    runner = bound_runner(config, env_dir_of(wd, args.name))
+    executor = build_executor(args.executor, config)
+    provider = NullDepsProvider()
+    posture = resolve_posture(
+        executor, runner, deps_mode=provider.mode(config, executor.name), root=clone
+    )
+    tasks = (
+        [wd.find_task(args.name, t) for t in args.task] if args.task else wd.load_tasks(args.name)
+    )
+    store = JsonlQualifications(wd.qualification_file(args.name))
+    wd.scratch_dir.mkdir(parents=True, exist_ok=True)
+    records = []
+    for task in tasks:
+        q = qualify_task(
+            repo,
+            config,
+            task,
+            posture=posture,
+            deps=provider,
+            runner=runner,
+            executor=executor,
+            scratch=wd.scratch_dir,
+            timeout=args.timeout,
+        )
+        store.append(q)
+        records.append(q)
+    qualified = [q for q in records if q.is_qualified]
+    out: dict[str, Any] = {
+        "repo": config.name,
+        "posture_id": posture.posture_id,
+        "posture_class": posture.posture_class,
+        "posture": posture.to_dict(),
+        "qualified": len(qualified),
+        "total": len(records),
+        "refusals": [{**q.view(), "task_id": q.task_id} for q in records if not q.is_qualified],
+        "file": str(wd.qualification_file(args.name)),
+        "cost_usd": 0.0,
+    }
+    if args.json:
+        print_json(out)
+    else:
+        lines = [
+            f"{config.name}: qualified {len(qualified)} of {len(records)} in "
+            f"{posture.posture_id} ({posture.posture_class}) — no model spend"
+        ]
+        lines += [
+            f"  {q.task_id[:10]} {q.code}: {q.message[:120]} — {q.fix}"
+            for q in records
+            if not q.is_qualified
+        ]
+        print_lines(lines)
+    return EXIT_OK if qualified else EXIT_NEGATIVE
 
 
 def cmd_import_configs(args: argparse.Namespace) -> int:

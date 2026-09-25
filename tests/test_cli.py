@@ -843,3 +843,35 @@ def test_cli_never_leaks_operator_env_into_test_runs(
     assert "SUPER_SECRET_TOKEN" in os.environ
     code, d = run_json(run, ["repo", "probe", "envrepo"])
     assert code == 0 and d["green"] is True
+
+
+# ---------------------------------------------------------------------------
+# ADR-0019: qualification in the live posture; --adhoc never ledgers
+# ---------------------------------------------------------------------------
+
+
+def test_repo_qualify_records_each_task_in_the_live_posture(
+    mined: CliRepo, run: Run, workdir: Path
+) -> None:
+    code, d = run_json(run, ["repo", "qualify", "demo", "--task", mined.sub_task])
+    assert code == 0, d
+    assert d["qualified"] == 1 and d["total"] == 1 and d["cost_usd"] == 0.0
+    assert str(d["posture_class"]).startswith("local/inplace/")
+    records = [
+        json.loads(line)
+        for line in (workdir / "qualifications" / "demo.jsonl").read_text().splitlines()
+    ]
+    assert records[-1]["task_id"] == mined.sub_task and records[-1]["state"] == "qualified"
+    assert records[-1]["posture_id"] == d["posture_id"]
+
+
+def test_grade_adhoc_never_appends_a_row(mined: CliRepo, run: Run, tmp_path: Path) -> None:
+    dest = tmp_path / "wt-adhoc"
+    assert run(["prep", "demo", mined.sub_task, "--dest", str(dest)])[0] == 0
+    code, _, err = run(
+        ["grade", "demo", mined.sub_task, "--worktree", str(dest), "--adhoc", "--ledger"]
+    )
+    assert code != 0 and "never appends a row" in err
+    code, d = run_json(run, ["grade", "demo", mined.sub_task, "--worktree", str(dest), "--adhoc"])
+    assert code == 1 and d["target_green"] is False
+    assert d["blame_control"] == "unwitnessed"  # a quick look: no witness, so no row

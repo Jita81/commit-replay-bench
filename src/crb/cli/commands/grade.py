@@ -49,6 +49,7 @@ from crb.cli.commands import (
     EXIT_NEGATIVE,
     EXIT_OK,
     CliError,
+    Workdir,
     add_common,
     add_executor,
     build_executor,
@@ -58,10 +59,21 @@ from crb.cli.commands import (
     workdir_of,
 )
 from crb.cli.commands import repo as repo_cmd
+from crb.core.deps import NullDepsProvider
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
+from crb.core.execution import Executor
 from crb.core.git import GitRepo
-from crb.core.grade import MODE_SIGHTED, MODES, GradeResult, grade
+from crb.core.grade import MODE_SIGHTED, MODES, GradeContext, GradeResult, grade
 from crb.core.ledger import GradeRow, JsonlLedger, grade_row_from_result
+from crb.core.posture import resolve_posture
+from crb.core.qualify import (
+    GoldWitness,
+    JsonlQualifications,
+    adhoc_context,
+    context_for,
+    qualify_task,
+)
+from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 
@@ -97,6 +109,14 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     gp.add_argument("--trial", default="", help="trial id within the run")
     gp.add_argument("--actor", default="", help="who ran this (audit)")
     gp.add_argument("--events", action="store_true", help="stream grade.* events on stderr")
+    gp.add_argument(
+        "--adhoc",
+        action="store_true",
+        help=(
+            "grade against the task's discovery values with no witness (a quick look); "
+            "never appends a row"
+        ),
+    )
     add_executor(gp)
     add_common(gp)
     gp.set_defaults(func=cmd_grade)
@@ -186,6 +206,67 @@ def row_from_result(
     )
 
 
+def grade_context(
+    wd: Workdir,
+    name: str,
+    config: RepoConfig,
+    repo: GitRepo,
+    task: TaskSpec,
+    *,
+    runner: BaseRunner,
+    executor: Executor,
+    timeout: int,
+) -> tuple[TaskSpec, GradeContext]:
+    """The task's grade context in the LIVE posture (ADR-0019): its latest qualification
+    there from ``<workdir>/qualifications/<repo>.jsonl``. A task with no record in this
+    posture is qualified first (no builder, no model spend) and the record appended; an
+    unqualified one is refused with its code and what to do."""
+    provider = NullDepsProvider()
+    posture = resolve_posture(
+        executor, runner, deps_mode=provider.mode(config, executor.name), root=repo.path
+    )
+    store = JsonlQualifications(wd.qualification_file(name))
+    q = store.latest(task.task_id, posture.posture_id)
+    if q is None:
+        q = store.append(
+            qualify_task(
+                repo,
+                config,
+                task,
+                posture=posture,
+                deps=provider,
+                runner=runner,
+                executor=executor,
+                scratch=wd.scratch_dir,
+                timeout=timeout,
+            )
+        )
+    if not q.is_qualified:
+        raise CliError(
+            f"{q.code}: {task.short_id} is not qualified in posture {posture.posture_id} "
+            f"({posture.posture_class}): {q.message} — what to do: {q.fix}"
+        )
+    deps = provider.resolve(
+        repo,
+        config,
+        parent=repo.parent(task.task_id),
+        gold=task.task_id,
+        executor_name=executor.name,
+    )
+    witness = GoldWitness(
+        repo,
+        config,
+        task,
+        runner=runner,
+        executor=executor,
+        scratch=wd.scratch_dir,
+        binding=deps.gold,
+        timeout=timeout,
+    )
+    ctx = context_for(task, posture=posture, qualification=q, deps=deps, witness=witness)
+    return ctx.spec(task), ctx
+
+
 def cmd_grade(args: argparse.Namespace) -> int:
     """Grade the worktree; with ``--ledger`` write the pack, then the row."""
     wd = workdir_of(args)
@@ -195,10 +276,27 @@ def cmd_grade(args: argparse.Namespace) -> int:
     runner = repo_cmd.bound_runner(config, repo_cmd.env_dir_of(wd, args.name))
     executor = build_executor(args.executor, config)
     on_event = event_printer(sys.stderr) if args.events else None
+    if args.adhoc and args.ledger is not None:
+        raise CliError("--adhoc grades with no witness and never appends a row; drop --ledger")
+    wd.scratch_dir.mkdir(parents=True, exist_ok=True)
+    if args.adhoc:
+        task, gctx = adhoc_context(task, executor=executor)
+    else:
+        task, gctx = grade_context(
+            wd,
+            args.name,
+            config,
+            repo,
+            task,
+            runner=runner,
+            executor=executor,
+            timeout=args.timeout,
+        )
 
     result = grade(
         ws,
         task,
+        ctx=gctx,
         config=config,
         runner=runner,
         executor=executor,
@@ -216,7 +314,9 @@ def cmd_grade(args: argparse.Namespace) -> int:
         pack = EvidencePack(
             task=task,
             grade=result,
-            apparatus=ApparatusStamp(runner=runner.name, executor=executor.describe()),
+            apparatus=ApparatusStamp(
+                runner=runner.name, executor=executor.describe(), posture=gctx.posture.to_dict()
+            ),
             builder=builder,
             run_id=args.run_id,
             trial=args.trial,

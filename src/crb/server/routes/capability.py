@@ -58,7 +58,8 @@ Claims:       A ``deliver`` cell here is the routing rule's output over measured
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 
 from fastapi import APIRouter, Query
 from sqlalchemy.orm import Session
@@ -80,6 +81,7 @@ from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import DeliveryCounts, FactoryHome, delivery_counts_matching
+from crb.server.posture_view import deployment_posture_class
 from crb.server.routes.oracle import latest_controls_verdict, oracle_by_task, verdict_dict
 from crb.server.routes.repos import cached_profile, get_repo_or_404
 from crb.server.routes.signoffs import load_signoff_records
@@ -94,7 +96,9 @@ from crb.server.schemas_capability import (
     RoutesWithControlsResponse,
     RoutingPolicyWithControlsOut,
 )
+from crb.store import qualifications as store_qualifications
 from crb.store.ledger import DbLedger
+from crb.store.models import Run
 
 router = APIRouter(tags=["capability"])
 _ERR = {"model": ErrorEnvelope}
@@ -126,6 +130,119 @@ def rows_for_apparatus(rows: Iterable[GradeRow], apparatus: str) -> list[GradeRo
         return rs
     want = APPARATUS_VERSION if apparatus in ("", "current") else apparatus
     return [r for r in rs if r.apparatus_version == want]
+
+
+#: ``?posture=`` values beside a posture class: the deployment's own class (the default)
+#: and the explicit pooled view.
+POSTURE_DEPLOYMENT = "deployment"
+POSTURE_ALL = "all"
+#: The class a pre-2.3 row derives from its run's apparatus stamp (``legacy:<executor>``).
+LEGACY_CLASS_PREFIX = "legacy:"
+
+
+@dataclass(frozen=True)
+class PostureFilter:
+    """What :func:`rows_for_posture` kept and why it left the rest out."""
+
+    rows: list[GradeRow]
+    posture_class: str
+    excluded_posture_divergent: int = 0
+    unqualified_posture: int = 0
+
+
+def row_posture_class(row: GradeRow, legacy_executor_of: Callable[[str], str]) -> str:
+    """A row's posture class: its label (apparatus 2.3 and later), else
+    ``legacy:<executor>`` read from its run's apparatus stamp (never from the row)."""
+    if row.posture_class:
+        return row.posture_class
+    return LEGACY_CLASS_PREFIX + (legacy_executor_of(row.run_id) or "local")
+
+
+def rows_for_posture(
+    rows: Iterable[GradeRow],
+    posture: str,
+    *,
+    fingerprints: Callable[[Iterable[str]], Mapping[str, Mapping[str, str]]],
+    legacy_executor_of: Callable[[str], str],
+) -> PostureFilter:
+    """ADR-0019 §8: posture is a filter, never a blend.
+
+    * a row stamped before 2.3 whose run graded it under ``docker`` was graded against a
+      baseline measured somewhere else: excluded from every rate, counted
+      ``unqualified_posture``;
+    * ``posture`` is a posture class (``docker/copy/sealed``): only that class's rows,
+      and a ``legacy:local`` row only under a ``local/…`` class (the host graded it);
+    * ``all``: every class, pooled ONLY over tasks whose qualification fingerprints match
+      in every class present — the rest are counted ``excluded_posture_divergent``.
+    """
+    unqualified = 0
+    classified: list[tuple[str, GradeRow]] = []
+    for r in rows:
+        cls = row_posture_class(r, legacy_executor_of)
+        if cls == LEGACY_CLASS_PREFIX + "docker":
+            unqualified += 1
+            continue
+        classified.append((cls, r))
+    if posture != POSTURE_ALL:
+        kept = [
+            r
+            for cls, r in classified
+            if cls == posture
+            or (cls == LEGACY_CLASS_PREFIX + "local" and posture.startswith("local/"))
+        ]
+        return PostureFilter(kept, posture, unqualified_posture=unqualified)
+    present = sorted({cls for cls, _ in classified if not cls.startswith(LEGACY_CLASS_PREFIX)})
+    if len(present) <= 1:
+        return PostureFilter(
+            [r for _, r in classified], POSTURE_ALL, unqualified_posture=unqualified
+        )
+    fps = fingerprints(present)
+    kept, divergent = [], 0
+    for cls, r in classified:
+        if cls.startswith(LEGACY_CLASS_PREFIX):
+            divergent += 1  # a legacy row has no fingerprint to prove it invariant
+            continue
+        mine = fps.get(cls, {}).get(r.task_id)
+        if mine and all(fps.get(c, {}).get(r.task_id) == mine for c in present):
+            kept.append(r)
+        else:
+            divergent += 1
+    return PostureFilter(kept, POSTURE_ALL, divergent, unqualified)
+
+
+def legacy_executor_lookup(session: Session) -> Callable[[str], str]:
+    """``run_id → executor`` from each run's apparatus stamp (cached per request) — how a
+    pre-2.3 row, which carries no posture of its own, is placed (ADR-0019 §10)."""
+    cache: dict[str, str] = {}
+
+    def of(run_id: str) -> str:
+        if run_id not in cache:
+            run = session.get(Run, run_id) if run_id else None
+            executor = ""
+            if run is not None:
+                stamp = dict(run.apparatus_json or {}).get("executor") or {}
+                executor = str(stamp.get("executor", "") if isinstance(stamp, Mapping) else stamp)
+            cache[run_id] = executor
+        return cache[run_id]
+
+    return of
+
+
+def filter_posture(
+    session: Session, repo: str, rows: Iterable[GradeRow], posture: str, settings: object
+) -> PostureFilter:
+    """:func:`rows_for_posture` against the store: ``deployment`` (the default) is the
+    deployment's own posture class; fingerprints and legacy executors come from the
+    records."""
+    wanted = deployment_posture_class(settings) if posture in ("", POSTURE_DEPLOYMENT) else posture
+    return rows_for_posture(
+        rows,
+        wanted,
+        fingerprints=lambda classes: store_qualifications.latest_fingerprints(
+            session, repo, classes
+        ),
+        legacy_executor_of=legacy_executor_lookup(session),
+    )
 
 
 def rows_for_mode(rows: Iterable[GradeRow], mode: str) -> list[GradeRow]:
@@ -242,6 +359,7 @@ def cell_out(
         reason_code=c.decision.reason_code,
         verification_tier=c.verification_tier or "automated-pass",
         apparatus_versions=list(s.apparatus_versions),
+        posture_ids=list(s.posture_ids),
         belt_set=",".join(c.belt_sets),
         belt_sets=list(c.belt_sets),
         n_builder_red=s.n_builder_red,
@@ -297,11 +415,19 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
     by: str | None = Query(default=None, max_length=128),
     mode: str = Query(default="sighted", pattern="^(sighted|blind|all)$"),
     apparatus: str = Query(default="current", max_length=32),
+    posture: str = Query(default=POSTURE_DEPLOYMENT, max_length=64),
 ) -> CapabilityMapWithControlsOut:
     del viewer
     get_repo_or_404(db, repo)
     projection = parse_by(by)
-    rows = rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus)
+    pf = filter_posture(
+        db,
+        repo,
+        rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus),
+        posture,
+        settings,
+    )
+    rows = pf.rows
     controls = latest_controls_verdict(db, repo)
     cmap, n_signoffs = signed_map(rows, projection, db, repo, controls=controls)
     cells = [c for c in cmap.cells if c.measured]
@@ -334,6 +460,9 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
             false_q1_total=cmap.false_q1_total,
             apparatus_versions=list(cmap.apparatus_versions),
             signoffs_applied=n_signoffs,
+            posture_class=pf.posture_class,
+            excluded_posture_divergent=pf.excluded_posture_divergent,
+            unqualified_posture=pf.unqualified_posture,
         ),
         policy=RoutingPolicyWithControlsOut(**cmap.policy.to_dict()),
         controls=controls_out(controls),
@@ -350,15 +479,23 @@ def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
+    settings: SettingsDep,
     repo: str = Query(min_length=1, max_length=64),
     by: str | None = Query(default=None, max_length=128),
     mode: str = Query(default="sighted", pattern="^(sighted|blind|all)$"),
     apparatus: str = Query(default="current", max_length=32),
+    posture: str = Query(default=POSTURE_DEPLOYMENT, max_length=64),
 ) -> RoutesWithControlsResponse:
     del viewer
     get_repo_or_404(db, repo)
     projection = parse_by(by) if by else PROJECTION_CELL
-    rows = rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus)
+    rows = filter_posture(
+        db,
+        repo,
+        rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus),
+        posture,
+        settings,
+    ).rows
     controls = latest_controls_verdict(db, repo)
     cmap, _ = signed_map(rows, projection, db, repo, controls=controls)
     decisions: list[RouteDecisionWithControlsOut] = []

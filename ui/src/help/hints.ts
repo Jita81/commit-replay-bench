@@ -69,7 +69,7 @@ export const HINTS = {
   'kind.protocol':
     'Attempts a guard refused (tamper, archaeology or network). This is an instrument decision, not a builder failure, and it counts against autonomy until the guard is fixed or the refusal is accepted.',
   'kind.harness':
-    'Attempts that failed in the executor, sandbox, parser, setup or model API. The instrument failed, not the model; they count against autonomy until the instrument is fixed.',
+    'Attempts that failed in the executor, sandbox, parser, setup or model API, or whose failure the humans’ own change also showed when run again in the same posture. The instrument failed, not the model; they count against autonomy until the instrument is fixed.',
   'kind.outage':
     'Calls the model provider refused (a usage limit, a 429 or a dead credential). Nothing was observed, so these sit outside n.',
   'kind.disqualified':
@@ -318,6 +318,8 @@ export const HINTS = {
     'The verdict of the latest negative-controls run for this repository: passed, escaped, thin, failed or not run, over n control rows, stamped with the apparatus and controls version that produced it. Only passed licenses deliver anywhere on the map.',
   'stat.results.oracle_strength':
     'The mean of every scored task’s mutation kill-rate (faults caught over faults planted on the changed lines), over n tasks, under the apparatus shown. It is a mean of per-task scores, so it carries no interval; below the policy bar a cell routes to a human.',
+  'stat.results.posture':
+    'The posture class every rate on this page was graded in. A number from another posture is never blended in, and old sandbox rows graded against a baseline measured elsewhere are excluded and counted.',
   'stat.results.false_q1':
     'The number of rows credited clean whose own recorded belts contradict them, across every measured cell (n = attempts on the map). It must read 0: one such row halts delivery and is refused when written.',
   'button.results.full_map':
@@ -688,6 +690,8 @@ export const HINTS = {
     'Whether the GitHub App is registered, how many installations it has, and that its tokens are minted per use and never stored.',
   'summary.posture.executor':
     'Whether tests run in a sealed docker sandbox (rows count as evidence) or locally (a development reading, not evidence).',
+  'summary.posture.provisioning':
+    'Whether this deployment provisions each task’s dependencies for the sealed sandbox. Off by default: switching it on is an operator’s decision, because it fetches packages from a registry.',
   'summary.posture.builder':
     'Where the builder runs and what network it may reach. Shown to admins.',
   'summary.posture.toolchains':
@@ -784,6 +788,24 @@ export const HINTS = {
     'Queue a toolchain probe: the configured known-green scope runs in the sandbox. Costs nothing; it uses the stored configuration.',
   'pill.repo.probe':
     'The result of the last probe with its detail line, when it ran and the run it came from. Degraded works with a caveat; Down means nothing can be measured yet.',
+  'stat.repo.qualified':
+    'Tasks proven in the posture that will grade them, out of every mined task: RED at the parent, a two-run baseline and the gold passing twice, all measured there. Only these can be replayed; qualifying spends no model money.',
+  'pill.repo.posture_class':
+    'The posture class this reading is for: where the tests run, how the tree is presented and where the dependencies come from. Rates pool only within one class.',
+  'text.repo.posture_image':
+    'The sandbox image the posture runs, by the name the deployment gives it. The posture itself is keyed to the image’s content, so re-pinning the same name to new bytes asks for a new qualification.',
+  'text.repo.posture_toolchain':
+    'The exact toolchain version read inside the posture. A patch release is a different posture, because a test can pass on one and fail on the other.',
+  'pill.repo.provisioning':
+    'Whether this deployment provisions a task’s dependencies for the sealed sandbox. Off means a repository whose tests need a third-party module cannot be qualified there, and says so instead of blaming the model.',
+  'text.repo.posture_stale':
+    'Why this reading is not current: nothing has been qualified here yet, or the records were measured by an older apparatus. Qualify again to replace it.',
+  'pill.repo.refusal_code':
+    'Why some tasks are not qualified in this posture, and how many. The sentence beside it says what to do; a refused task is never built, so it never costs money or blames the model.',
+  'link.repo.refusal_guide':
+    'Opens the operator guide at the section that explains this refusal and its fix.',
+  'button.repo.qualify':
+    'Queue a qualify run: every task is measured in the posture that will grade it. No builder runs and no model is called, so it costs nothing but machine time.',
   'link.repo.probe_run':
     'The run that made this probe reading; its log shows the command the toolchain ran and what it printed.',
   'button.repo.start_run':
@@ -946,6 +968,10 @@ export const HINTS = {
     'Where tests run: the server default, docker (sealed; rows count as evidence) or local (a development reading). Docker fails closed when unavailable.',
   'field.run_new.timeout':
     'The cap on one test run inside the sandbox. A timeout is a failure, never a pass.',
+  'text.run_new.qualified':
+    'How many of the repository’s tasks are proven in the posture that will grade this run, out of how many. A task that is not proven there is never built.',
+  'field.run_new.qualify_first':
+    'On: tasks not yet proven in the posture are measured first, which costs machine time but no model money. Off: the run is refused unless something is already qualified.',
   'button.run_new.queue':
     'Put the run on the queue for the next worker. A replay, blind or factory run spends model budget; you can cancel it from its page.',
 
@@ -1124,6 +1150,8 @@ export const HINTS = {
     'Download the ledger rows behind this map for this repository as CSV.',
   'stat.capability.coverage':
     'The share of this repository’s change volume (its change profile, weighted by commit count) whose cell routes deliver. A coverage of the profile, not a sampled rate, so it carries no interval; each cell’s rate carries its own.',
+  'stat.capability.posture':
+    'The posture class every rate on this map was graded in: where the tests ran, how the tree was presented and where the dependencies came from. Rows from other postures are not pooled, and old sandbox rows graded against a baseline measured elsewhere are excluded and counted.',
   'stat.capability.measured_cells':
     'Cells with at least one graded attempt out of every class and size on the grid, under the apparatus shown.',
   'stat.capability.false_q1':
@@ -1537,7 +1565,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/connect': 8,
   '/connect/:name': 14,
   '/connect/:name/measure': 10,
-  '/results': 30,
+  '/results': 31,
   '/decisions': 6,
   '/signoff': 30,
   '/factory': 28,
@@ -1545,11 +1573,11 @@ export const MIN_HINTS: Record<string, number> = {
   '/posture': 22,
   '/repos': 8,
   // the Overview tab (the state a reader lands on); the Change profile, Tasks and Configuration tabs are held by the ratchet's variants
-  '/repos/:name': 14,
+  '/repos/:name': 21,
   '/runs': 13,
   '/runs/:id': 24,
   '/tasks/:repo/:taskId': 16,
-  '/capability': 28,
+  '/capability': 29,
   '/routing': 20,
   '/oracle': 22,
   '/learn': 26,

@@ -398,6 +398,14 @@ export function CapabilityPage() {
                   data-testid="tile-false-q1"
                 />
                 <ControlsTile verdict={m.controls} policy={m.policy} />
+                <StatTile
+                  label="Posture"
+                  hint="stat.capability.posture"
+                  value={s.posture_class || '—'}
+                  n={s.n_total ?? nTotal}
+                  apparatus={`${fmtInt(s.unqualified_posture ?? 0)} unqualified-posture rows excluded · ${fmtInt(s.excluded_posture_divergent ?? 0)} rows left out where the task's tests differ between postures`}
+                  data-testid="tile-posture"
+                />
               </div>
 
               {((s.false_q1_total ?? 0) > 0 || badCells > 0) && (

@@ -78,6 +78,7 @@ RUN_KINDS: tuple[str, ...] = (
     "controls",
     "probe",
     "factory",
+    "qualify",
 )
 #: Kinds that need a builder (they produce graded attempts).
 BUILD_KINDS: frozenset[str] = frozenset({"replay", "blind", "factory"})
@@ -579,6 +580,15 @@ class RunCreateRequest(BaseModel):
     #: attempts the provider refused (``failure_kind: outage``); ``0`` disables; ``None`` =
     #: the worker's default (3). Stored as ``params.outage_stop`` only when set.
     outage_stop: int | None = Field(default=None, ge=0, le=1000)
+    #: ADR-0019 — build and grading kinds: qualify every task that has no record in the
+    #: posture that will grade it before any builder call (no model spend). ``false`` makes
+    #: the submit refuse the run (409 ``posture_unqualified``) when no task is qualified.
+    #: ``None`` = on. Stored as ``params.qualify_first`` only when set.
+    qualify_first: bool | None = None
+    #: ADR-0019 — stop a build run after this many consecutive attempts whose failure the
+    #: gold also showed in the posture (environment rows); ``0`` disables; ``None`` = the
+    #: worker's default (2). Stored as ``params.env_stop`` only when set.
+    env_stop: int | None = Field(default=None, ge=0, le=1000)
     #: Belt-5 pre-flight for build kinds (``crb.builders.adapter.Preflight``): ``true`` =
     #: apply the repository's own fixers then one bounded repair turn; an object sets
     #: ``{fix, repair_turns}``. OFF when absent. A run with it on is recorded as the
@@ -902,6 +912,9 @@ class CapabilityCellOut(BaseModel):
     reason: str
     verification_tier: str
     apparatus_versions: list[str]
+    #: ADR-0019 §8 — the postures the cell's rows were graded in (listed like the
+    #: apparatus versions; a pre-2.3 row names none).
+    posture_ids: list[str] = []
     belt_set: str
     belt_sets: list[str]
     #: B-9 / F30 — pull requests the factory opened from items in this cell, and how many
@@ -935,6 +948,12 @@ class CapabilitySummary(BaseModel):
     false_q1_total: int
     apparatus_versions: list[str]
     signoffs_applied: int
+    #: ADR-0019 §8 — the posture class the map reads (the deployment's by default), the
+    #: rows ``posture=all`` left out because the task's oracle differs between classes,
+    #: and the pre-2.3 docker rows graded against a baseline measured elsewhere.
+    posture_class: str = ""
+    excluded_posture_divergent: int = 0
+    unqualified_posture: int = 0
 
 
 class CapabilityMapOut(BaseModel):

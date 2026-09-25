@@ -7,6 +7,7 @@ Workdir layout (``./.crb`` by default; ``CRB_HOME`` or ``--workdir`` override)::
     <workdir>/
       repos/<name>.json        RepoConfig.to_dict() + {"path": <clone>}
       tasks/<name>.jsonl       one TaskSpec per line (append-only, idempotent by task_id)
+      qualifications/<name>.jsonl  each task's qualification per posture (append-only)
       ledger.jsonl             the hash-chained GradeRow ledger
       evidence/<pack_hash>.json  evidence packs (measured and imported)
       aggregates.jsonl         imported AggregateRows (reference only, never graded)
@@ -114,6 +115,11 @@ class Workdir:
     def task_file(self, name: str) -> Path:
         """``tasks/<name>.jsonl``."""
         return self.tasks_dir / f"{name}.jsonl"
+
+    def qualification_file(self, name: str) -> Path:
+        """``qualifications/<name>.jsonl`` — each task's qualification per posture
+        (ADR-0019), append-only; the latest row for a task and posture is in force."""
+        return self.root / "qualifications" / f"{name}.jsonl"
 
     def describe(self) -> dict[str, Any]:
         """The layout as ``crb config show`` prints it."""

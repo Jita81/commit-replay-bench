@@ -42,11 +42,13 @@ ADRs:         docs/adr/0019-qualification-is-posture-relative.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/core/runners/base.py (``run_for(deps=…)`` applies a binding to the test
               command), src/crb/core/execution.py (``Command.ro_mounts`` carries the mounts),
-              src/crb/core/grade.py (the grader the bindings reach through the runner),
+              src/crb/core/qualify.py (qualifies a task with the parent's and the gold's
+              bindings), src/crb/core/grade.py (``GradeContext.deps`` and the closure check,
+              belt 1b),
               src/crb/provision/__init__.py (``make_deps_provider`` — the one place
               a deployment's provider is chosen), src/crb/server/worker.py (resolves a task's
               dependencies before it qualifies or builds)
-Tested by:    tests/test_deps_seam.py
+Tested by:    tests/test_deps_seam.py, tests/test_qualify.py, tests/test_grade.py
 Touch when:   a new dependency scheme lands (a constant here, the binding in the provider);
               a refusal code is added (the constant, ``REFUSAL_TEXT`` and ADR-0019's table
               together).

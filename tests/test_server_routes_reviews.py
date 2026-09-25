@@ -47,7 +47,7 @@ import pytest
 from sqlalchemy import select, text
 
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
-from crb.core.grade import Belts, GradeResult
+from crb.core.grade import Belts
 from crb.core.ledger import GradeRow, grade_row_from_result
 from crb.server.routes.grades import (
     HDR_DIFF_SHA,
@@ -63,6 +63,7 @@ from crb.server.routes.grades import (
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run, Task
 from fixtures import pyrepo as pr
+from fixtures.posture import posture_result
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_env
 
 RETAINED_RUN = "9" * 32
@@ -160,7 +161,7 @@ class Retained:
             tpath = tdir / f"{task.short_id}-editblock-deadbeef.json"
             tpath.write_text(json.dumps({"task_id": task.task_id, "outcome": {"transcript": []}}))
             tref = str(tpath)
-        result = GradeResult(
+        result = posture_result(
             task_id=task.task_id,
             repo=ALPHA,
             mode="sighted",

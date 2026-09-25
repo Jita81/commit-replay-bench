@@ -62,7 +62,8 @@ from crb.core.git import GitError, GitRepo
 from crb.core.redact import redact
 from crb.core.spec import SIZE_TIER_NAMES, RepoConfig, TaskSpec
 from crb.server.auth import OperatorDep, ViewerDep, require_role_now
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
+from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
+from crb.server.posture_view import deployment_executor, deployment_image, posture_summary
 from crb.server.routes.runs import (
     append_system_event,
     event_to_dict,
@@ -544,6 +545,35 @@ def list_tasks(
         total=total,
         limit=page.limit,
         offset=page.offset,
+    )
+
+
+@router.get(
+    "/repos/{name}/posture",
+    responses={401: _ERR, 404: _ERR},
+    summary="The repository's posture: qualified N of M, refusals by code with their fixes",
+)
+def get_posture(
+    name: str,
+    viewer: ViewerDep,
+    db: DbDep,
+    settings: SettingsDep,
+    *,
+    executor: str | None = Query(default=None, max_length=16),
+) -> dict[str, Any]:
+    """ADR-0019: the posture most recently recorded for this repository under the
+    deployment's executor and image — how many tasks are proven there, why the rest are
+    not (each code with its fix and guide), how the record differs from other postures,
+    and why it is stale. Read-only; qualifying is ``POST /runs {kind: qualify}``."""
+    del viewer
+    repo = get_repo_or_404(db, name)
+    ex = deployment_executor(settings, executor or "")
+    return posture_summary(
+        db,
+        repo,
+        executor=ex,
+        image_ref=deployment_image(settings, repo),
+        provisioning=settings.provision.view(),
     )
 
 

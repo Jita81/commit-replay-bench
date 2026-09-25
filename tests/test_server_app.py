@@ -265,13 +265,13 @@ class TestFactory:
             assert r.json()["status"] == "down"
             probe = next(p for p in r.json()["probes"] if p["name"] == "append_only")
             assert probe["status"] == "down"
-            assert probe["data"] == {"triggers": 8, "expected": 10}
+            assert probe["data"] == {"triggers": 10, "expected": 12}
         # init_db is idempotent: a restart reinstalls the missing triggers.
         with TestClient(create_app(make_settings(tmp_path), factory)) as c:
             r = c.get(f"{API_PREFIX}/health")
             probe = next(p for p in r.json()["probes"] if p["name"] == "append_only")
             assert probe["status"] == "ok"
-            assert probe["data"] == {"triggers": 10, "expected": 10}
+            assert probe["data"] == {"triggers": 12, "expected": 12}
 
 
 # --- middleware --------------------------------------------------------------------------
