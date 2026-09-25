@@ -168,6 +168,18 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   *whether* each is configured (`crb.server.settings.Settings.redacted_dict`). [measured]
 - Git delivery credentials (forward mode) come from an injected provider; the default
   `NullProvider` fails closed. [measured] `tests/test_factory_delivery.py`
+- The delivery **push** carries its one-shot `Authorization` header in the child's
+  environment (`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`,
+  `crb.core.git.git_config_env`), never on the argv; until 2026-09-25 it was a
+  `-c http.<remote>.extraheader=…` argument, readable in `/proc` and `ps` (assessment D1). A
+  `GitError` redacts every `extraheader` value and every credential shape from the argv and
+  stderr it keeps, whoever built the command line. [measured, n = 3 cases: the push argv
+  carries no header and the environment does, a `GitError` built from a header-bearing argv
+  carries no token, a push that times out raises a `GitError` with no token —
+  `tests/test_factory_delivery.py::test_the_push_token_travels_in_the_environment_never_on_the_argv`,
+  `::test_a_git_error_never_carries_an_auth_header_or_a_token`,
+  `::test_a_push_that_times_out_raises_a_git_error_without_the_token`; recording git doubles
+  and a hanging git binary, apparatus 2.2]
 - Repositories connected through the **GitHub App** (ADR-0014) are cloned — and, where the
   installation grants write, delivered to — with **installation tokens** the worker mints per
   use: scoped to the installation (one hour by GitHub's contract), cached in memory until

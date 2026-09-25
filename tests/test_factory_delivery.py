@@ -369,7 +369,13 @@ class _Argv(GitRepo):
         super().__init__("/nonexistent")
         self.argv: list[list[str]] = []
 
-    def run(self, *args: str, check: bool = False, cwd: str | Path | None = None) -> GitResult:
+    def run(
+        self,
+        *args: str,
+        check: bool = False,
+        cwd: str | Path | None = None,
+        env: Any = None,
+    ) -> GitResult:
         self.argv.append(list(args))
         return GitResult(0, "", "")
 
@@ -377,19 +383,17 @@ class _Argv(GitRepo):
 def test_git_push_fn_builds_the_exact_lease_argv() -> None:
     """Without ``expected`` the bare lease (what makes a FIRST push refuse a branch that
     already exists); with it ``--force-with-lease=<branch>:<sha>`` — the only lease git can
-    hold when the push goes to a URL, where no remote-tracking ref exists."""
+    hold when the push goes to a URL, where no remote-tracking ref exists. The auth header
+    is not on this argv (D1): it travels in the environment."""
     creds = _creds()
-    header = f"http.{REMOTE}.extraheader={creds.basic_auth_header()}"
     repo = _Argv()
     dv.git_push_fn(repo, branch="crb/x", refspec="crb/x:crb/x", credentials=creds)
-    assert repo.argv == [["-c", header, "push", "--force-with-lease", REMOTE, "crb/x:crb/x"]]
+    assert repo.argv == [["push", "--force-with-lease", REMOTE, "crb/x:crb/x"]]
     repo = _Argv()
     dv.git_push_fn(
         repo, branch="crb/x", refspec="crb/x:crb/x", credentials=creds, expected="a" * 40
     )
-    assert repo.argv == [
-        ["-c", header, "push", f"--force-with-lease=crb/x:{'a' * 40}", REMOTE, "crb/x:crb/x"]
-    ]
+    assert repo.argv == [["push", f"--force-with-lease=crb/x:{'a' * 40}", REMOTE, "crb/x:crb/x"]]
     assert dv.force_with_lease_arg("crb/x", None) == "--force-with-lease"
     with pytest.raises(dv.DeliveryError, match="needs the commit"):
         dv.force_with_lease_arg("crb/x", "  ")
@@ -467,17 +471,23 @@ def test_a_push_that_times_out_raises_a_git_error_without_the_token(tmp_path: Pa
 class _ToBare(GitRepo):
     """Runs ``git_push_fn``'s exact argv against a REAL local bare repository: only the
     remote argument is swapped (``REMOTE`` → the bare path); the one-shot auth header for
-    the https remote stays on the command line and is simply not consulted for a path."""
+    the https remote stays in the environment and is simply not consulted for a path."""
 
     def __init__(self, path: Path, bare: Path) -> None:
         super().__init__(path)
         self.bare = bare
         self.argv: list[list[str]] = []
 
-    def run(self, *args: str, check: bool = False, cwd: str | Path | None = None) -> GitResult:
+    def run(
+        self,
+        *args: str,
+        check: bool = False,
+        cwd: str | Path | None = None,
+        env: Any = None,
+    ) -> GitResult:
         self.argv.append(list(args))
         swapped = tuple(str(self.bare) if a == REMOTE else a for a in args)
-        return super().run(*swapped, check=check, cwd=cwd)
+        return super().run(*swapped, check=check, cwd=cwd, env=env)
 
 
 def test_lease_semantics_against_a_real_bare_repository(harness: Harness, tmp_path: Path) -> None:
@@ -508,7 +518,7 @@ def test_lease_semantics_against_a_real_bare_repository(harness: Harness, tmp_pa
     # (1) the first push: bare lease, the branch does not exist on the remote → created
     dv.git_push_fn(repo, branch=branch, refspec=refspec, credentials=creds)
     assert remote.rev_parse(branch) == first
-    assert repo.argv[-1][2:4] == ["push", "--force-with-lease"]
+    assert repo.argv[-1][0:2] == ["push", "--force-with-lease"]
     # (2) the rework's commit — pushed the way B-1b pushed it: rejected, `stale info`
     second = commit_on_branch(first, "rework 1")
     with pytest.raises(dv.DeliveryError, match=r"stale info|rejected"):
@@ -523,7 +533,7 @@ def test_lease_semantics_against_a_real_bare_repository(harness: Harness, tmp_pa
     # (3) the fix: lease against the commit the first delivery pushed → the branch moves
     dv.git_push_fn(repo, branch=branch, refspec=refspec, credentials=creds, expected=first)
     assert remote.rev_parse(branch) == second
-    assert repo.argv[-1][2:4] == ["push", f"--force-with-lease={branch}:{first}"]
+    assert repo.argv[-1][0:2] == ["push", f"--force-with-lease={branch}:{first}"]
     # main never moved on either side
     assert repo.rev_parse("main") == harness.head
     assert not remote.run("rev-parse", "--verify", "refs/heads/main").ok

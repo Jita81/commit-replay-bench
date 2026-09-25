@@ -11,8 +11,9 @@ ratchet.
 Credentials are BYOK behind :class:`GitCredentialsProvider`. The default is
 :class:`NullProvider`, which raises :class:`NoGitCredentialsError` — with no
 credentials wired, delivery **fails closed**, never a silent success-looking
-no-op. Tokens never reach ``.git/config``: the default push seam passes the
-token as a one-shot ``http.extraheader``; the PR seam is GitHub's REST API over
+no-op. Tokens never reach ``.git/config`` nor the argv: the default push seam passes
+the token as a one-shot ``http.extraheader`` in the child's environment
+(``GIT_CONFIG_COUNT``); the PR seam is GitHub's REST API over
 :mod:`urllib` (stdlib). Both are injectable so tests are hermetic; an Azure
 DevOps seam plugs in the same way.
 
@@ -78,7 +79,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from crb.core.evidence import sha256_text, utc_now_iso
-from crb.core.git import GitError, GitRepo
+from crb.core.git import GitError, GitRepo, git_config_env
 from crb.core.redact import redact
 from crb.factory.backlog import BacklogItem
 from crb.factory.build import FACTORY_IDENTITY, BuildResult
@@ -371,18 +372,23 @@ def git_push_fn(
     expected: str | None = None,
 ) -> None:
     """Push ``refspec`` (``branch:branch``, never ``HEAD``) with a one-shot auth
-    header. The token is never written to ``.git/config``. ``expected`` (a re-delivery)
-    is the commit the remote branch must still point at — see :func:`force_with_lease_arg`."""
+    header. The token is never written to ``.git/config`` and never put on the argv: the
+    header travels in the child's environment as ``GIT_CONFIG_COUNT`` /
+    ``GIT_CONFIG_KEY_n`` / ``GIT_CONFIG_VALUE_n`` (:func:`crb.core.git.git_config_env` — an
+    argv is readable by every user on the host through ``/proc`` and ``ps``; D1,
+    docs/SECURITY.md §3.3). ``expected`` (a re-delivery) is the commit the remote branch
+    must still point at — see :func:`force_with_lease_arg`."""
     src, _, dst = refspec.partition(":")
     if src != branch or dst != branch:
         raise DefaultBranchProtectionError(f"refspec {refspec!r} must be {branch}:{branch}")
     res = repo.run(
-        "-c",
-        f"http.{credentials.remote}.extraheader={credentials.basic_auth_header()}",
         "push",
         force_with_lease_arg(branch, expected),
         credentials.remote,
         refspec,
+        env=git_config_env(
+            {f"http.{credentials.remote}.extraheader": credentials.basic_auth_header()}
+        ),
     )
     if not res.ok:
         raise DeliveryError(
