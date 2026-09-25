@@ -11,10 +11,14 @@ Commit Replay Bench (`crb`) finds out which kinds of change an AI coding tool ca
 **your** repository, judged by **your** repository's own tests. It replays real commits
 from the repository's history: it starts from the commit's parent, lets a builder (a model
 driven by an agent such as Claude Code) attempt the change, and grades the result
-mechanically. No model judges another model's work.
+mechanically. No model judges another model's work. This section and the next describe the
+design **[aspiration — as ADR-0001, ADR-0003, ADR-0005 and ADR-0006 record it; what it has
+shown so far is under *What the current evidence licenses*, and what it has not is under
+*Open gaps*]**.
 
-- **Where it runs.** Inside your own tenant, with your own model keys. Tests run in a
-  container with no network. Raw diffs and builder transcripts are not kept by default.
+- **Where it runs.** Inside your own tenant, with your own model keys. The tests can run in
+  a container with no network (the sealed posture), but every number published so far ran
+  on the host (see Open gaps). Raw diffs and builder transcripts are not kept by default.
 - **What it decides.** For each class and size of change it gives one route: `deliver`,
   `calibrate`, `granularize` or `human` ([ADR-0003](adr/0003-one-routing-rule.md)).
 - **What it does with that.** For a class that routes `deliver`, its factory may open a
@@ -26,6 +30,10 @@ mechanically. No model judges another model's work.
 - **Licence.** Apache 2.0, so you can read and re-run the grader that judged your evidence.
 
 ## What it measures
+
+What each check is, by design **[aspiration — ADR-0001 (the belts), ADR-0003 (the routing
+rule), ADR-0009 (the mutation oracle), ADR-0010 (the negative controls) and ADR-0011 (the
+linter belt); their results so far are under *What the current evidence licenses*]**:
 
 | It measures | How |
 |---|---|

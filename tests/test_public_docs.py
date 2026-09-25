@@ -32,9 +32,9 @@ Works with:   docs/SUMMARY.md (the customer summary), README.md (Start here, ste
 Tested by:    (this is a test file)
 Touch when:   the miner's defaults change (update README step 1 and EVIDENCE-AND-CLAIMS §6b in
               the same change); routing.v2 or a belt-5 change lands (rewrite the summary's bar
-              and its Open gaps with the tests that fail); ``crb.core.learn`` gains a path that acts (rewrite README's
-              "What the product is" and this test together); a pull request adds its
-              changelog paragraph.
+              and its Open gaps with the tests that fail); ``crb.core.learn`` gains a path
+              that acts (rewrite README's "What the product is" and this test together); a
+              pull request adds its changelog paragraph.
 """
 
 from __future__ import annotations

@@ -1,6 +1,7 @@
 # Wave report — from `v2.0.0a1` to `main` at `8ab88ad` (pull requests #30 to #48)
 
-*Moved here on 2026-09-25, unchanged apart from its heading levels and two relative links,
+*Moved here on 2026-09-25, unchanged apart from its heading levels, two relative links and
+one claim tag added on review (the four review passes below, tagged as DL-052 tags them),
 from the `Unreleased` section of [CHANGELOG.md](../../CHANGELOG.md). The changelog now grows
 by one paragraph per pull request (CONTRIBUTING, "Documentation"); a wave's narrative — what
 was built, why, and what it found — belongs in a dated report like this one. The claims
@@ -10,7 +11,10 @@ allowlist, so read each tag as its author wrote it.*
 ## 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real
-readiness gate and a real hash chain. What they found was one class of defect rather than a
+readiness gate and a real hash chain **[measured — n = 4 review passes, each reporting
+separately; method: counted from the wave's own record, commit 30f259f, whose message lists
+the four, as DL-052 records it; apparatus 2.2; a count, not a rate, so no interval]**. What
+they found was one class of defect rather than a
 list: the product's statements about its own writes were reassuring rather than true. Fixed
 here, each with the test that would have caught it (ADR-0017 amended, DL-052).
 
