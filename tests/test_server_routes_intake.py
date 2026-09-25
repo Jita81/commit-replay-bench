@@ -7,9 +7,11 @@ What it is:   The intake routes' suite: the role ladder, the default-OFF listene
               and the refusals (listener off, no tracker configured, tracker unreachable).
 What it does: Pins that a viewer can read the column but only an operator can switch the
               listener or poll, that the served state says ``off`` until somebody switches
-              it on, that a poll writes the comment and the label and registers the item,
-              that the served row carries the cell route the ticket was told about, and
-              that the tracker credential is never in a response.
+              it on, that a poll writes the comment and the label and leaves a ready ticket
+              as a draft until an operator's Register act registers it (ADR-0022; a moved
+              revision is refused), that a poll while another pass holds the repository's
+              lease is 409 ``intake_busy``, that the served row carries the cell route the
+              ticket was told about, and that the tracker credential is never in a response.
 How:          The shared ``make_env`` stack with ``CRB_ENABLE_FAKE_TRACKER`` set and the
               file-backed :class:`crb.intake.fake.FileTracker` as the deployment's tracker.
               **No real Azure DevOps or Jira is contacted by this suite or by CI.**
@@ -133,6 +135,14 @@ def test_the_role_ladder_reading_is_a_viewer_switching_and_polling_are_an_operat
         env, "PUT", f"/factory/{ALPHA}/intake", min_role="operator", json={"enabled": False}
     )
     assert_rbac(env, "POST", f"/factory/{ALPHA}/intake/poll", min_role="operator")
+    # ADR-0022: the Register act (a key nothing drafted: the operator gets 409, not 403)
+    assert_rbac(
+        env,
+        "POST",
+        f"/factory/{ALPHA}/intake/9999/register",
+        min_role="operator",
+        json={"revision": "1"},
+    )
 
 
 def test_an_unknown_repository_is_a_404(env: Env) -> None:
@@ -182,14 +192,20 @@ def test_switching_it_off_again_is_recorded_too_and_the_poll_is_then_refused(env
 # --- the poll ---------------------------------------------------------------------------
 
 
-def test_a_poll_comments_labels_and_registers_the_ticket(env: Env, tmp_path: Path) -> None:
+def test_a_poll_comments_and_labels_and_the_register_act_registers_the_ticket(
+    env: Env, tmp_path: Path
+) -> None:
     login(env.client, "operator")
     _switch(env, True)
     r = env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
     assert r.status_code == 200, r.text
     body = dict(r.json())
     assert body["last_poll"]["read"] == 1
-    assert body["last_poll"]["registered"] == 1
+    # ADR-0022: the ready ticket waits for an operator; the Register act registers it
+    assert body["last_poll"]["registered"] == 0 and body["last_poll"]["awaiting"] == 1
+    r = _register(env)
+    assert r.status_code == 200, r.text
+    body = dict(r.json())
     row = body["rows"][0]
     assert row["key"] == "4711"
     assert row["item_id"] == "fake-4711"
@@ -249,6 +265,7 @@ def test_a_ticket_edited_after_a_needs_info_read_registers_as_an_evolution(
     login(env.client, "operator")
     _switch(env, True)
     env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+    assert _register(env).status_code == 200  # ADR-0022: the operator registers the draft
     first = env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").json()
     # the person answers, and the tracker's revision moves
     board = json.loads(path.read_text(encoding="utf-8"))
@@ -256,7 +273,8 @@ def test_a_ticket_edited_after_a_needs_info_read_registers_as_an_evolution(
     board["tickets"]["4711"]["title"] = "Fix the crash when the cart is empty (revised)"
     path.write_text(json.dumps(board), encoding="utf-8")
     body = dict(env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").json())
-    assert body["last_poll"]["registered"] == 1
+    assert body["last_poll"]["awaiting"] == 1  # the evolution is a draft too
+    assert _register(env, revision="2").status_code == 200
     got = env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").json()
     assert [e["id"] for e in got["evolutions"]] == ["fake-4711.r2"]
     assert got["evolutions"][0]["supersedes"] == "fake-4711"
@@ -271,9 +289,11 @@ def test_the_intake_events_are_on_the_repository_evidence_chain(env: Env) -> Non
     login(env.client, "operator")
     _switch(env, True)
     env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+    _register(env)
     chain = env.client.get(f"{API_PREFIX}/factory/{ALPHA}/evidence").json()
     kinds = [e["kind"] for e in chain["items"]]
     assert "intake.feedback.posted" in kinds
+    assert "intake.awaiting_approval" in kinds
     assert "intake.registered" in kinds
     assert "intake.read" in kinds
     assert "intake.polled" in kinds
@@ -444,6 +464,7 @@ def test_the_link_written_on_a_ticket_is_absolute(env: Env) -> None:
     login(env.client, "operator")
     _switch(env, True)
     env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+    _register(env)
     row = _get(env)["rows"][0]
     assert row["item_url"].startswith("http://localhost:8000/factory?repo=")
     board = json.loads(fake_tracker_path(env.settings.home).read_text(encoding="utf-8"))
@@ -561,17 +582,10 @@ def test_a_ready_ticket_lands_as_a_draft_until_an_operator_registers_it(
     assert body["last_poll"]["registered"] == 0 and body["last_poll"]["awaiting"] == 1
     (row,) = body["rows"]
     assert row["awaiting_approval"] is True and row["registered"] is False
-    assert row["label"] == c.LABEL_READY
+    assert row["label"] != c.LABEL_QUEUED  # the product's ready/not-deliverable word, unqueued
     assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
-    # the Register act is an operator's, and it names the revision the operator read
-    assert_rbac(
-        env,
-        "POST",
-        f"/factory/{ALPHA}/intake/4711/register",
-        min_role="operator",
-        json={"revision": "1"},
-    )
-    login(env.client, "operator")
+    # the Register act is an operator's (the role ladder test pins the refusals below it),
+    # and it names the revision the operator read
     r = _register(env)
     assert r.status_code == 200, r.text
     (row,) = r.json()["rows"]

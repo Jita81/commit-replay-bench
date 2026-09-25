@@ -243,9 +243,11 @@ from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.intake import (
+    ApprovalPolicy,
     ListenerState,
     apply_outcome_map,
     build_tracker,
+    intake_lease,
     item_url_for,
     poll_repository,
     post_outcomes_to_tickets,
@@ -824,8 +826,11 @@ class Worker:
         # relative path in somebody else's comment resolves against THEIR host
         item_url = item_url_for(self.settings.public_url, repo)
         # poll_repository writes the view the screen reads, so nothing is returned that this
-        # caller has to remember to persist
-        poll_repository(
+        # caller has to remember to persist. C6 / ADR-0022: the deployment's approval policy
+        # (an operator registers a ready ticket unless its author is allowlisted) and the
+        # repository's lease (one pass at a time — a busy pass does nothing)
+        budget_s = float(self.settings.intake.poll_budget_s)
+        report = poll_repository(
             repo,
             tracker=tracker,
             listener=state,
@@ -836,8 +841,12 @@ class Worker:
             run_active=lambda: self._factory_run_active(repo),
             actor="worker",
             max_tickets=self.settings.intake.max_per_poll,
-            budget_s=float(self.settings.intake.poll_budget_s),
+            budget_s=budget_s,
+            approval=ApprovalPolicy.from_settings(self.settings.intake),
+            lease=intake_lease(self.factory, repo, ttl_s=2 * budget_s + 60),
         )
+        if report.busy:
+            return  # another pass holds this repository: it posts the outcomes too
         # what the loop did with the items this column produced, told to the tickets that
         # produced them: the pull request link when one opened, the refusal and its way
         # forward when the loop stopped. Read from the chain, posted once per marker.

@@ -14,8 +14,11 @@ What it is:   The adapter suite: protocol conformance, the queries, the idempote
 What it does: Pins that a repeated comment writes nothing, that an edited comment is
               PATCHed rather than added, that setting a ``crb:`` label removes the other
               ``crb:`` labels and leaves everybody else's alone, that Jira moves an issue
-              by a real transition and refuses when there is none, and that a 401 is
-              ``unauthorised`` while a 404 is ``column_gone``.
+              by a real transition and refuses when there is none, that a 401 is
+              ``unauthorised`` while a 404 is ``column_gone``, and (C6) that the credential
+              is never sent to another origin, that a 429 waits for ``Retry-After`` within a
+              cap before it is ``unreachable``, and that both adapters read the ticket's
+              creator.
 How:          ``httpx.MockTransport`` handlers that assert on the request and return
               recorded bodies; every call is asserted, so an extra request the adapter
               made would fail the test rather than pass silently.

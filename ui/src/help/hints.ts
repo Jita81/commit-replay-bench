@@ -649,7 +649,7 @@ export const HINTS = {
   'item.intake.cell_route':
     'What this deployment has measured about changes of this kind and size — the cell’s route, how many graded attempts it rests on and the interval around the rate. It is read before any build, never after.',
   'item.intake.item':
-    'The backlog item this ticket is, or would be. Nothing is registered until every question a good acceptance test needs is answered on the ticket.',
+    'The backlog item this ticket is, or would be. Nothing is registered until every question a good acceptance test needs is answered on the ticket and an operator registers the draft.',
   'link.factory.intake':
     'The watched column on your own team’s board: which tickets the product has read, what it understood, what each one still needs answering, and where the ones it accepted went. Reading it is a viewer’s act; switching the listener on is an operator’s.',
   'item.intake.unclassified':
@@ -658,6 +658,12 @@ export const HINTS = {
     'This ticket’s own step stopped, with the reason the tracker or the product recorded and what closes it. Everything else in the column was still read.',
   'link.intake.ticket':
     'Open this ticket on your own board, where the product’s comment and label are.',
+  'button.intake.register':
+    'Put this draft on the frozen backlog as it reads now. The ticket is labelled queued and told, the act is recorded under your name, and a ticket edited since you loaded the page is refused.',
+  'item.intake.author':
+    'Who created the ticket, as the tracker names them. Anyone who can edit a ticket in the watched column writes what becomes the backlog item, so an operator reads it before registering it.',
+  'stat.intake.approval':
+    'Whether a ready ticket waits for an operator to register it. It does by default; a deployment may exempt named ticket authors, and every registration records who approved it.',
   'link.intake.item':
     'Open the backlog item this ticket became, with its whole record: readiness, the failing test, the build and the pull request.',
   'pill.intake.needs_info':
@@ -1541,7 +1547,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/decisions': 6,
   '/signoff': 30,
   '/factory': 28,
-  '/factory/intake': 14,
+  '/factory/intake': 16,
   '/posture': 22,
   '/repos': 8,
   // the Overview tab (the state a reader lands on); the Change profile, Tasks and Configuration tabs are held by the ratchet's variants

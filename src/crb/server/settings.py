@@ -400,6 +400,16 @@ class IntakeSettings(BaseModel):
     #: ``merged``/``closed`` → the state the ticket moves to. EMPTY BY DEFAULT: a
     #: deployment that configures nothing never moves anybody's ticket.
     outcome_map: dict[str, str] = Field(default_factory=dict)
+    #: ADR-0022 — a ready ticket is a DRAFT until an operator registers it on the Intake
+    #: screen (an evented act). ON BY DEFAULT: without it, anyone who can edit a ticket in
+    #: the watched column puts work into the factory. ``false`` registers ready tickets
+    #: unattended (``approved_by: unattended`` on the chain).
+    require_approval: bool = True
+    #: Tracker authors (the ticket's creator — Azure DevOps sign-in name, Jira email or
+    #: account id) whose ready tickets skip the Register act. EMPTY BY DEFAULT. Set as a
+    #: JSON list (``CRB_INTAKE__APPROVE_AUTHORS='["ada@contoso.com"]'``); compared
+    #: case-insensitively; recorded as ``approved_by: allowlist:<author>``.
+    approve_authors: list[str] = Field(default_factory=list)
 
     @property
     def enabled(self) -> bool:
@@ -416,6 +426,16 @@ class IntakeSettings(BaseModel):
         if raw and not raw.lower().startswith("https://"):
             raise ValueError(f"the tracker URL must be https://, got {raw!r}")
         return raw
+
+    @field_validator("approve_authors", mode="before")
+    @classmethod
+    def _authors_list(cls, v: Any) -> Any:
+        # an explicit env mapping (the worker's) hands a raw string: a JSON list, or names
+        # separated by commas; either way blanks are dropped and names compared casefolded
+        if isinstance(v, str):
+            raw = v.strip()
+            v = json.loads(raw) if raw.startswith("[") else raw.split(",")
+        return [str(a).strip().casefold() for a in (v or []) if str(a).strip()]
 
     @field_validator("outcome_map")
     @classmethod
@@ -442,6 +462,8 @@ class IntakeSettings(BaseModel):
             "max_per_poll": self.max_per_poll,
             "poll_budget_s": self.poll_budget_s,
             "outcome_map": dict(self.outcome_map),
+            "require_approval": self.require_approval,
+            "approve_authors": list(self.approve_authors),
             "enabled": self.enabled,
         }
 

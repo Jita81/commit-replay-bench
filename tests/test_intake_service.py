@@ -9,8 +9,12 @@ What it does: Pins that the same column polled twice writes to the ticket once, 
               ticket edited between polls becomes an EVOLUTION rather than an overwrite,
               that a registration arriving while a factory run is active is queued and
               picked up by the next poll rather than 409ing, that every stop is an
-              ``intake.stopped`` event with a published reason and advice, and that an
-              empty outcome map moves no ticket at all.
+              ``intake.stopped`` event with a published reason and advice, that an
+              empty outcome map moves no ticket at all, and (C6, ADR-0022) that a ready
+              ticket waits as a draft until an operator's Register act registers the
+              revision they read, that an allowlisted author bypasses it on the record, and
+              that two overlapping passes register once because a pass takes a lease that
+              expires when its holder dies.
 How:          A real ``FactoryHome`` under ``tmp_path`` (so the hash chain is the real
               one) plus ``fixtures.intake``'s ``FakeTracker``. No HTTP, no
               database, no model — the whole flow is exercised in milliseconds.

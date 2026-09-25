@@ -129,7 +129,15 @@ from crb.server.secrets import SecretsFile
 from crb.server.settings import Settings
 from crb.store.ledger import assert_append_only
 from crb.store.migrate import HeadStatus, head_status_on
-from crb.store.models import APPEND_ONLY_TABLES, Grade, Repo, Run, User, WorkerRow
+from crb.store.models import (
+    APPEND_ONLY_TABLES,
+    LEASE_ROW_PREFIX,
+    Grade,
+    Repo,
+    Run,
+    User,
+    WorkerRow,
+)
 
 try:  # pragma: no cover — extra installed in [server]
     from prometheus_client import CONTENT_TYPE_LATEST
@@ -392,7 +400,14 @@ def probe_worker(
             queued = int(
                 s.execute(select(func.count(Run.id)).where(Run.status == "queued")).scalar_one()
             )
-            rows = list(s.execute(select(WorkerRow).order_by(WorkerRow.worker_id)).scalars())
+            rows = list(
+                s.execute(
+                    select(WorkerRow)
+                    # a lease row (an intake pass holding its repository) is not a worker
+                    .where(~WorkerRow.worker_id.startswith(LEASE_ROW_PREFIX))
+                    .order_by(WorkerRow.worker_id)
+                ).scalars()
+            )
         workers = [
             _worker_view(r, now)
             for r in rows

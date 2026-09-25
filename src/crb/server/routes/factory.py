@@ -37,7 +37,11 @@ recorded before any edit — :mod:`crb.factory.loop`). This module serves its re
 * ``PUT /factory/{repo}/intake`` (operator) — switch this repository's listener on or
   off: the consent gate for reading somebody's board, recorded with the actor.
 * ``POST /factory/{repo}/intake/poll`` (operator) — read the column now, doing what the
-  worker's timer would have done (ADR-0017).
+  worker's timer would have done (ADR-0017), under the repository's lease (409
+  ``intake_busy`` while another pass holds it).
+* ``POST /factory/{repo}/intake/{key}/register`` (operator) — the Register act (ADR-0022):
+  put the draft waiting for ticket ``key`` on the frozen record, as the operator read it at
+  ``revision``; evented on the chain (``approved_by``) and on the repository's system trace.
 
 Running the loop is a run kind: ``POST /runs {kind: "factory"}`` (see ``routes/runs.py``
 and the worker); this module never builds anything.
@@ -106,12 +110,16 @@ from crb.server.factory_state import (
 from crb.server.github_app import GitHubApp, GitHubAppError, permissions_allow_delivery
 from crb.server.intake import CONFIG_KEY as INTAKE_CONFIG_KEY
 from crb.server.intake import (
+    ApprovalPolicy,
+    ApprovalRefused,
     IntakeStore,
     ListenerState,
     build_tracker,
+    intake_lease,
     item_url_for,
     needs_credential,
     poll_repository,
+    register_approved,
 )
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
@@ -1113,6 +1121,10 @@ class IntakeConnectionOut(BaseModel):
     configured: bool = False
     credential_set: bool = False
     credential_fingerprint: str = ""
+    #: ADR-0022 — whether a ready ticket waits for an operator's Register act, and the
+    #: tracker authors whose tickets skip it.
+    require_approval: bool = True
+    approve_authors: list[str] = Field(default_factory=list)
 
 
 class IntakeRowOut(BaseModel):
@@ -1140,6 +1152,10 @@ class IntakeRowOut(BaseModel):
     read_at: str = ""
     stopped: str = ""
     stopped_advice: str = ""
+    #: A ready draft waiting for an operator's Register act (ADR-0022).
+    awaiting_approval: bool = False
+    #: Who created the ticket, as the tracker names them (the allowlist's input).
+    author: str = ""
 
 
 class IntakePollOut(BaseModel):
@@ -1155,10 +1171,13 @@ class IntakePollOut(BaseModel):
     commented: int = 0
     registered: int = 0
     queued: int = 0
+    #: Ready drafts left waiting for an operator's Register act (ADR-0022).
+    awaiting: int = 0
     stopped: str = ""
     detail: str = ""
     advice: str = ""
     at: str = ""
+    busy: bool = False
 
 
 class IntakeOut(BaseModel):
@@ -1179,6 +1198,14 @@ class IntakePollIn(BaseModel):
     still safe to repeat: the comment and the label are idempotent on the tracker."""
 
     force: bool = False
+
+
+class IntakeRegisterIn(BaseModel):
+    """``POST /factory/{repo}/intake/{key}/register``: the revision of the ticket the
+    operator read on the screen. A ticket whose content has moved since is a different
+    draft, and registering it is refused (409 ``revision_moved``)."""
+
+    revision: str = Field(min_length=1, max_length=200)
 
 
 class IntakeListenerIn(BaseModel):
@@ -1202,6 +1229,8 @@ def _intake_connection(settings: Any, secrets: Any) -> IntakeConnectionOut:
         configured=cfg.enabled,
         credential_set=bool(status.present),
         credential_fingerprint=str(getattr(status, "fingerprint", "") or ""),
+        require_approval=bool(getattr(cfg, "require_approval", True)),
+        approve_authors=list(getattr(cfg, "approve_authors", []) or []),
     )
 
 
@@ -1361,9 +1390,11 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
         raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc
     routes = _cell_routes(db, factory, repo)
     home = _home(settings, repo)
+    budget_s = float(settings.intake.poll_budget_s)
     # poll_repository writes the served view itself, so this route reads it back through
-    # `_intake_out` exactly as the GET does — one shape, one writer
-    poll_repository(
+    # `_intake_out` exactly as the GET does — one shape, one writer. C6: the same approval
+    # policy and the same per-repository lease the worker's timed poll uses
+    report = poll_repository(
         repo,
         tracker=tracker,
         listener=listener,
@@ -1381,6 +1412,94 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
         # the same bounds the worker polls under: this one runs inside a request, holding a
         # database session, so a long column may not hold it open for the length of a board
         max_tickets=settings.intake.max_per_poll,
-        budget_s=float(settings.intake.poll_budget_s),
+        budget_s=budget_s,
+        approval=ApprovalPolicy.from_settings(settings.intake),
+        lease=intake_lease(factory, repo, ttl_s=2 * budget_s + 60),
     )
+    if report.busy:
+        raise ApiError(
+            409,
+            "intake_busy",
+            "another pass is reading this repository's column right now (the worker's timer or "
+            "another operator): nothing was read or written — try again in a minute",
+        )
+    return _intake_out(repo, settings, secrets, row)
+
+
+#: The Register act's refusals, as HTTP statuses: all are 409 (the request is sound, the
+#: state does not allow it) — a missing draft, a moved revision, a busy pass, a running
+#: factory, or a frozen record that refused the item.
+_REGISTER_REFUSALS = {
+    "nothing_to_register",
+    "revision_moved",
+    "intake_busy",
+    "factory_run_active",
+    "register_refused",
+}
+
+
+@router.post(
+    "/factory/{repo}/intake/{key}/register",
+    response_model=IntakeOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR, 502: _ERR},
+    summary="Register a ready ticket's draft (operator): the approval act that puts it on the frozen backlog (ADR-0022)",
+)
+def register_intake_ticket(
+    repo: str,
+    key: str,
+    *,
+    body: IntakeRegisterIn,
+    operator: OperatorDep,
+    db: DbDep,
+    factory: SessionFactoryDep,
+    settings: SettingsDep,
+    secrets: SecretsDep,
+) -> IntakeOut:
+    """The operator's Register act: the draft waiting for ticket ``key`` — exactly as the
+    operator read it at ``revision`` — goes on the frozen backlog, the ticket is labelled
+    queued with its note and link, and the act is on the chain (``intake.registered`` with
+    ``approved_by``) and the repository's system trace (``intake.approved``). Refused with
+    409 and the reason when there is nothing waiting, the ticket changed since that
+    revision, another pass holds the repository, a factory run holds the backlog, or the
+    frozen record refuses the item."""
+    row = get_repo_or_404(db, repo)
+    try:
+        tracker = build_tracker(
+            settings.intake,
+            secrets.get(TRACKER_TOKEN_SECRET) or "",
+            home=settings.home,
+        )
+    except TrackerError as exc:
+        raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc
+    approver = f"operator:{operator.display_name or operator.id}"
+    budget_s = float(settings.intake.poll_budget_s)
+    try:
+        registered = register_approved(
+            repo,
+            key,
+            revision=body.revision,
+            tracker=tracker,
+            home=_home(settings, repo),
+            item_url=item_url_for(settings.public_url, repo),
+            approver=approver,
+            run_active=lambda: _active_factory_run(db, repo) is not None,
+            lease=intake_lease(factory, repo, ttl_s=2 * budget_s + 60),
+        )
+    except ApprovalRefused as exc:
+        code = exc.code if exc.code in _REGISTER_REFUSALS else "register_refused"
+        raise ApiError(409, code, exc.message) from exc
+    append_system_event(
+        db,
+        trace_id=system_trace_id("intake", repo),
+        action="intake.approved",
+        repo=repo,
+        actor=operator.id,
+        payload={
+            "key": key,
+            "revision": body.revision,
+            "item_id": registered.item_id,
+            "approved_by": approver,
+        },
+    )
+    db.commit()
     return _intake_out(repo, settings, secrets, row)

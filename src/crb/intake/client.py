@@ -296,6 +296,11 @@ class Ticket:
     links: tuple[str, ...] = ()
     url: str = ""
     state: str = ""
+    #: Who created the ticket, as the tracker names them (Azure DevOps ``System.CreatedBy``
+    #: unique name, Jira ``creator`` email or account id), lower-cased; ``""`` when the
+    #: tracker did not say. The ONE input the operator-approval allowlist reads (ADR-0022) —
+    #: never part of the draft's content digest, so it cannot make a ticket evolve.
+    author: str = ""
     #: Anything else the adapter read and a reader may want on the row. Never parsed.
     extra: Mapping[str, str] = field(default_factory=dict)
 
@@ -304,6 +309,7 @@ class Ticket:
             raise ValueError("a ticket needs a key")
         object.__setattr__(self, "key", str(self.key).strip())
         object.__setattr__(self, "revision", str(self.revision))
+        object.__setattr__(self, "author", str(self.author or "").strip().casefold())
         for attr in ("acceptance_criteria", "tags", "links"):
             object.__setattr__(self, attr, _tuple_of_str(getattr(self, attr)))
         object.__setattr__(
@@ -333,6 +339,7 @@ class Ticket:
             "links": list(self.links),
             "url": self.url,
             "state": self.state,
+            "author": self.author,
             "extra": self.extra_map,
         }
 
@@ -351,6 +358,7 @@ class Ticket:
             links=_tuple_of_str(d.get("links")),
             url=str(d.get("url", "")),
             state=str(d.get("state", "")),
+            author=str(d.get("author", "") or ""),
             extra={str(k): str(v) for k, v in dict(d.get("extra") or {}).items()},
         )
 

@@ -1419,6 +1419,10 @@ export interface IntakeConnection {
   configured: boolean
   credential_set: boolean
   credential_fingerprint: string
+  /** ADR-0022 — a ready ticket waits for an operator's Register act (default true). */
+  require_approval?: boolean
+  /** Tracker authors whose ready tickets skip the Register act (default empty). */
+  approve_authors?: string[]
 }
 
 /** One ticket in the watched column, exactly as the last read saw it. */
@@ -1447,6 +1451,10 @@ export interface IntakeRow {
   /** A published stop reason when this ticket's own step stopped; '' otherwise. */
   stopped: string
   stopped_advice: string
+  /** ADR-0022 — a ready draft waiting for an operator's Register act. */
+  awaiting_approval?: boolean
+  /** Who created the ticket, as the tracker names them (the allowlist's input). */
+  author?: string
 }
 
 /** What the last poll did, and why it stopped if it did. */
@@ -1459,10 +1467,14 @@ export interface IntakePoll {
   commented: number
   registered: number
   queued: number
+  /** Ready drafts left waiting for an operator's Register act (ADR-0022). */
+  awaiting?: number
   stopped: string
   detail: string
   advice: string
   at: string
+  /** Another pass held the repository's lease; this one did nothing. */
+  busy?: boolean
 }
 
 /** `GET /factory/{repo}/intake` — the listener, the connection, the last poll, the column. */

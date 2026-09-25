@@ -11,7 +11,9 @@
  *               and "Post the feedback again" send the poll with and without `force` and
  *               report tickets read, comments posted and items registered, that a stop shows
  *               the server's reason AND the server's advice, that an unmeasured cell is
- *               named rather than shown as zero, and that the credential is never rendered.
+ *               named rather than shown as zero, that the credential is never rendered, and
+ *               (ADR-0022) that a ready draft waits for an operator's Register act, which
+ *               sends the revision on the screen, with no button for a viewer.
  * How:          `mockApi` + `renderApp` at `/factory/intake?repo=alpha`; every response is
  *               the shape `src/crb/server/routes/factory.py` serves.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers

@@ -456,7 +456,7 @@ def test_delivery_on_opens_branch_and_pr_after_the_review_accepts(
     rig = _rig(pyrepo, tmp_path, deliver=True, creds=creds, target_default_branch="main")
     out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
     assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
-    assert out.delivery.branch == "crb/I-1-add-multiply-to-calc" and out.delivery.base == "main"
+    assert out.delivery.branch == "crb/i-1-add-multiply-to-calc" and out.delivery.base == "main"
     assert rig.pushes == [
         {
             "branch": out.delivery.branch,

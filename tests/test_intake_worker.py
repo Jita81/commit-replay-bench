@@ -10,8 +10,10 @@ What it does: Pins that a deployment with no tracker never polls, that a reposit
               configured, that the poll runs on its own timer rather than every idle pass,
               that the worker keeps checking in for as long as a pass lasts (a slow board
               must not read as a stale worker), that a registration arriving during a factory
-              run is queued, and that an exception inside one repository's poll does not
-              touch the others.
+              run is queued, that an exception inside one repository's poll does not
+              touch the others, and (ADR-0022, C6) that the served default leaves a ready
+              ticket waiting for an operator, the deployment's author allowlist is honoured
+              and a timed pass takes the repository's lease.
 How:          A ``Worker`` over a SQLite store under ``tmp_path`` with the file-backed
               fake tracker; nothing here reaches a network, a model or a real tracker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -66,12 +68,16 @@ BOARD: dict[str, Any] = {
 
 
 def _intake(**kw: Any) -> IntakeSettings:
+    """A deployment's intake settings for the timer and registration MECHANICS these tests
+    pin — with operator approval OFF, said here once; the deployment default (approval ON,
+    ADR-0022) is pinned by its own tests below, which pass ``require_approval`` or none."""
     base: dict[str, Any] = {
         "tracker": "fake",
         "url": "https://tracker.invalid",
         "project": "W",
         "column": "Ready",
         "poll_s": 30,
+        "require_approval": False,
     }
     base.update(kw)
     return IntakeSettings(**base)

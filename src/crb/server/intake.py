@@ -20,10 +20,22 @@ a new item superseding the old one. Nothing is ever overwritten.
 writes are idempotent, so a poll that finds nothing changed touches nothing.
 
 **When does money move?** Only when every structural gap is closed *and* the class is
-one the product has questions for. Then the draft is registered through the same
-``FactoryHome`` path ``POST /factory/{repo}/backlog`` uses. A registration that arrives
-while a factory run is active is **queued, not lost**: the ticket keeps ``crb:ready``,
-the chain records why, and the next poll registers it.
+one the product has questions for — **and an operator has approved it** (ADR-0022). By
+default a ready ticket lands as a DRAFT: ``intake.awaiting_approval`` on the chain carries
+the draft item, the revision and the ticket's author, and nothing is registered until an
+operator's evented Register act (:func:`register_approved`) registers exactly that draft —
+bound to the revision the operator read. An explicit allowlist of tracker authors
+(:class:`ApprovalPolicy`, ``CRB_INTAKE__APPROVE_AUTHORS``) may bypass the act, and the
+registration then says ``approved_by: allowlist:<author>``. The draft is registered through
+the same ``FactoryHome`` path ``POST /factory/{repo}/backlog`` uses. A registration that
+arrives while a factory run is active is **queued, not lost**: the ticket keeps
+``crb:ready``, the chain records why, and the next poll registers it.
+
+**One pass at a time.** A pass takes a per-repository lease row (:func:`intake_lease`, a
+``lease:intake:<repo>`` row in the ``workers`` table) before it reads anything; a second
+pass — the worker's timer and an operator's "Re-read" at once — that finds it held does
+nothing at all and says so (``busy``). A lease left by a crashed pass expires after its
+time to live.
 
 Every stop — tracker unreachable, credential missing, a write the tracker refused, the
 column gone — is an ``intake.stopped`` event carrying one of the published reasons, and
@@ -32,17 +44,22 @@ it is what ``/health`` and the intake screen show.
 Navigation
 ----------
 What it is:   The intake service: ``build_tracker``, ``ListenerState``, ``IntakeStore``
-              (the served state file), ``poll_repository`` (the whole flow) and
-              ``apply_outcome_map`` (the merge moves the ticket).
-What it does: Turns a watched column into registered backlog items and gap feedback, once
-              per ticket revision, recording each step on the factory's evidence chain and
-              serving the same rows to the API and the screen.
+              (the served state file), ``poll_repository`` (the whole flow),
+              ``register_approved`` (the operator's Register act), ``intake_lease`` (one
+              pass per repository) and ``apply_outcome_map`` (the merge moves the ticket).
+What it does: Turns a watched column into drafts, gap feedback and — once an operator
+              approves, or the ticket's author is on the deployment's allowlist — registered
+              backlog items, once per ticket revision and one pass at a time, recording each
+              step on the factory's evidence chain and serving the same rows to the API and
+              the screen.
 How:          Plain functions over injected callables (the tracker, the route lookup, the
-              clock, "is a run active") so the whole flow is exercised by a fake tracker
-              with no HTTP, no database and no model; state the screen reads is one JSON
-              file beside the repository's evidence chain.
+              clock, "is a run active") and an injected lease, so the whole flow is exercised
+              by a fake tracker with no HTTP and no model; the lease is a row in the
+              ``workers`` table taken by insert (atomic) and renewed only when expired; state
+              the screen reads is one JSON file beside the repository's evidence chain.
 Layer:        server — docs/ARCHITECTURE.md#43-server
-ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
+ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
+              docs/adr/0022-intake-approval-by-default.md (the Register act, the allowlist)
 Works with:   src/crb/intake/client.py (the six verbs and the stop reasons),
               src/crb/intake/ado.py and src/crb/intake/jira.py (the adapters it builds),
               src/crb/intake/draft.py (ticket → draft item),
@@ -51,8 +68,10 @@ Works with:   src/crb/intake/client.py (the six verbs and the stop reasons),
               src/crb/server/secrets.py (``TRACKER_TOKEN_SECRET``),
               src/crb/server/factory_state.py (``FactoryHome`` — the backlog and the
               chain), src/crb/server/worker.py (calls ``poll_repository`` from the idle
-              loop), src/crb/server/routes/factory.py (serves and configures it)
-Tested by:    tests/test_intake_service.py, tests/test_server_routes_intake.py
+              loop, under the lease), src/crb/server/routes/factory.py (serves and configures
+              it; the Register act), src/crb/store/models.py (``WorkerRow`` — the lease row)
+Tested by:    tests/test_intake_service.py, tests/test_server_routes_intake.py,
+              tests/test_intake_worker.py
 Touch when:   a fifth label or a new stop reason appears (publish it in docs/API.md
               first); never to widen what is written to a ticket without the ADR.
 """
@@ -61,18 +80,24 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+from sqlalchemy import delete, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.evidence import utc_now_iso
 from crb.factory.backlog import BacklogItem
 from crb.factory.evidence import (
+    EV_INTAKE_AWAITING,
     EV_INTAKE_DELIVERED,
     EV_INTAKE_FEEDBACK,
     EV_INTAKE_POLLED,
@@ -106,6 +131,7 @@ from crb.intake.fake import FileTracker, fake_tracker_enabled, fake_tracker_path
 from crb.intake.feedback import render_delivered, render_feedback, render_queued, render_refusal
 from crb.intake.jira import JiraConfig, JiraTracker
 from crb.server.factory_state import FactoryHome
+from crb.store.models import LEASE_ROW_PREFIX, WorkerRow
 
 log = logging.getLogger("crb.server.intake")
 
@@ -120,6 +146,7 @@ EV_QUEUED = EV_INTAKE_QUEUED
 EV_DELIVERED = EV_INTAKE_DELIVERED
 EV_TRANSITIONED = EV_INTAKE_TRANSITIONED
 EV_STOPPED = EV_INTAKE_STOPPED
+EV_AWAITING = EV_INTAKE_AWAITING
 INTAKE_EVENTS: tuple[str, ...] = INTAKE_EVENT_KINDS
 
 #: The bounds a pass is run with when a caller names none. They are the SETTINGS' defaults
@@ -163,6 +190,67 @@ STOPPED_STATUSES: frozenset[str] = frozenset(
 
 class RunActive(RuntimeError):
     """A registration arrived while a factory run holds the repository's backlog hash."""
+
+
+#: The word ``approved_by`` carries when the deployment switched operator approval OFF.
+APPROVED_UNATTENDED = "unattended"
+#: The prefix ``approved_by`` carries when the ticket's author is on the allowlist.
+APPROVED_BY_ALLOWLIST = "allowlist:"
+
+
+@dataclass(frozen=True)
+class ApprovalPolicy:
+    """Who may put a ready ticket on the frozen record (ADR-0022).
+
+    ``required`` (the default, and ``CRB_INTAKE__REQUIRE_APPROVAL``'s): a ready ticket is a
+    DRAFT until an operator's Register act. ``allow_authors`` (``CRB_INTAKE__APPROVE_AUTHORS``,
+    empty by default) names tracker authors whose tickets skip the act — compared with the
+    ticket's creator, case-insensitively; an empty author never matches. The policy's
+    default is the safe one, so a caller that forgets to pass it still gates.
+    """
+
+    required: bool = True
+    allow_authors: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        cleaned = tuple(
+            sorted({str(a).strip().casefold() for a in self.allow_authors if str(a).strip()})
+        )
+        object.__setattr__(self, "allow_authors", cleaned)
+
+    @classmethod
+    def from_settings(cls, intake: Any) -> ApprovalPolicy:
+        """The deployment's policy from ``IntakeSettings`` (missing fields read as the
+        safe default: approval required, nobody allowlisted)."""
+        return cls(
+            required=bool(getattr(intake, "require_approval", True)),
+            allow_authors=tuple(getattr(intake, "approve_authors", ()) or ()),
+        )
+
+    def approver_for(self, author: str) -> str | None:
+        """The ``approved_by`` word when this ticket needs no human act — ``unattended``
+        when approval is off, ``allowlist:<author>`` when its author is listed — or
+        ``None`` when an operator must register it."""
+        if not self.required:
+            return APPROVED_UNATTENDED
+        who = str(author or "").strip().casefold()
+        if who and who in self.allow_authors:
+            return APPROVED_BY_ALLOWLIST + who
+        return None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"required": self.required, "allow_authors": list(self.allow_authors)}
+
+
+class ApprovalRefused(RuntimeError):
+    """The Register act could not register: ``code`` is the API's error word
+    (``nothing_to_register``, ``revision_moved``, ``factory_run_active``,
+    ``intake_busy``, ``register_refused``), ``message`` the sentence a person reads."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+        self.message = message
 
 
 @dataclass(frozen=True)
@@ -228,6 +316,10 @@ class IntakeRow:
     #: Set when this ticket's own step stopped (a write the tracker refused).
     stopped: str = ""
     stopped_advice: str = ""
+    #: A ready draft waiting for an operator's Register act (ADR-0022).
+    awaiting_approval: bool = False
+    #: Who created the ticket, as the tracker names them (the allowlist's input).
+    author: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -251,6 +343,8 @@ class IntakeRow:
             "read_at": self.read_at,
             "stopped": self.stopped,
             "stopped_advice": self.stopped_advice,
+            "awaiting_approval": self.awaiting_approval,
+            "author": self.author,
         }
 
     @classmethod
@@ -276,6 +370,8 @@ class IntakeRow:
             read_at=str(d.get("read_at", "")),
             stopped=str(d.get("stopped", "")),
             stopped_advice=str(d.get("stopped_advice", "")),
+            awaiting_approval=bool(d.get("awaiting_approval", False)),
+            author=str(d.get("author", "")),
         )
 
 
@@ -291,10 +387,14 @@ class PollReport:
     commented: int = 0
     registered: int = 0
     queued: int = 0
+    #: Ready drafts left waiting for an operator's Register act (ADR-0022).
+    awaiting: int = 0
     rows: list[IntakeRow] = field(default_factory=list)
     stopped: str = ""
     detail: str = ""
     at: str = ""
+    #: Another pass held the repository's lease: this one read and wrote nothing.
+    busy: bool = False
 
     @property
     def ok(self) -> bool:
@@ -310,10 +410,12 @@ class PollReport:
             "commented": self.commented,
             "registered": self.registered,
             "queued": self.queued,
+            "awaiting": self.awaiting,
             "stopped": self.stopped,
             "detail": self.detail,
             "advice": STOP_ADVICE.get(self.stopped, "") if self.stopped else "",
             "at": self.at,
+            "busy": self.busy,
         }
 
 
@@ -348,9 +450,19 @@ class IntakeStore:
         return dict(got) if got else None
 
     def write(self, report: PollReport) -> None:
+        self._write({"rows": [r.to_dict() for r in report.rows], "last_poll": report.to_dict()})
+
+    def update_row(self, row: IntakeRow) -> None:
+        """Replace the served row for ``row.key`` (the Register act's outcome), keeping
+        every other row and the last poll as they are."""
+        body = self.read()
+        rows = [r for r in body.get("rows", []) if str(r.get("key")) != row.key]
+        rows.append(row.to_dict())
+        self._write({"rows": rows, "last_poll": body.get("last_poll")})
+
+    def _write(self, body: Mapping[str, Any]) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
-        body = {"rows": [r.to_dict() for r in report.rows], "last_poll": report.to_dict()}
-        tmp = self.path.with_suffix(".json.tmp")
+        tmp = self.path.with_suffix(f".json.{secrets.token_hex(4)}.tmp")
         tmp.write_text(json.dumps(body, sort_keys=True, ensure_ascii=False, indent=1), "utf-8")
         tmp.replace(self.path)
 
@@ -500,6 +612,123 @@ def item_for_ticket(events: Sequence[Any], tracker: str, key: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# one pass at a time: the per-repository lease
+# ---------------------------------------------------------------------------
+
+
+def _iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, UTC).isoformat()
+
+
+def _epoch(stamp: str) -> float | None:
+    try:
+        when = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return when.timestamp()
+
+
+class DbLease:
+    """A named lease held as ONE row of the ``workers`` table (``lease:<name>``).
+
+    ``acquire`` inserts the row — the primary key makes that atomic on SQLite and
+    PostgreSQL alike, so two passes racing for it cannot both win — or, when the row is
+    there but older than its time to live (a pass that crashed without releasing), takes
+    it over with a compare-and-set on the holder and the stamp it read. ``release``
+    deletes the row only while this holder still owns it, so a pass whose lease expired
+    and was taken over cannot drop the new holder's. The health probe does not count
+    these rows as workers (``LEASE_ROW_PREFIX``).
+    """
+
+    def __init__(
+        self,
+        factory: sessionmaker[Session],
+        name: str,
+        *,
+        ttl_s: float,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        if ttl_s <= 0:
+            raise ValueError("a lease needs a positive time to live")
+        self.factory = factory
+        self.key = f"{LEASE_ROW_PREFIX}{name}"[:128]
+        self.ttl_s = float(ttl_s)
+        self.clock = clock
+        self.holder = secrets.token_hex(16)
+        self.held = False
+
+    def acquire(self) -> bool:
+        """Take the lease; ``False`` (and nothing changed) while another holder has it."""
+        now = self.clock()
+        stamp = _iso(now)
+        with self.factory() as s:
+            row = s.get(WorkerRow, self.key)
+            if row is None:
+                s.add(
+                    WorkerRow(
+                        worker_id=self.key,
+                        hostname=self.holder,
+                        executor="lease",
+                        kinds=["lease"],
+                        started=stamp,
+                        heartbeat=stamp,
+                        heartbeat_s=self.ttl_s,
+                    )
+                )
+                try:
+                    s.commit()
+                except IntegrityError:
+                    s.rollback()
+                    return False
+                self.held = True
+                return True
+            seen = _epoch(row.heartbeat)
+            if seen is not None and now - seen <= float(row.heartbeat_s or 0):
+                return False  # held, and not expired
+            taken = s.execute(
+                update(WorkerRow)
+                .where(
+                    WorkerRow.worker_id == self.key,
+                    WorkerRow.hostname == row.hostname,
+                    WorkerRow.heartbeat == row.heartbeat,
+                )
+                .values(
+                    hostname=self.holder, started=stamp, heartbeat=stamp, heartbeat_s=self.ttl_s
+                )
+            )
+            s.commit()
+            self.held = int(getattr(taken, "rowcount", 0) or 0) == 1
+            return self.held
+
+    def release(self) -> None:
+        """Drop the lease if this holder still owns it (never another holder's)."""
+        with self.factory() as s:
+            s.execute(
+                delete(WorkerRow).where(
+                    WorkerRow.worker_id == self.key, WorkerRow.hostname == self.holder
+                )
+            )
+            s.commit()
+        self.held = False
+
+
+def intake_lease(
+    factory: sessionmaker[Session],
+    repo: str,
+    *,
+    ttl_s: float = 2 * DEFAULT_POLL_BUDGET_S + 60,
+    clock: Callable[[], float] = time.time,
+) -> DbLease:
+    """The lease every intake pass over ``repo`` takes — the worker's timed poll, the
+    on-demand poll route and the Register act alike. ``ttl_s`` must outlive the longest
+    pass (its budget plus the calls in flight), so the default is twice the default
+    budget plus a minute; a caller with a longer budget passes a longer one."""
+    return DbLease(factory, f"intake:{repo}", ttl_s=ttl_s, clock=clock)
+
+
+# ---------------------------------------------------------------------------
 # the poll
 # ---------------------------------------------------------------------------
 
@@ -530,8 +759,16 @@ def poll_repository(
     max_tickets: int = DEFAULT_MAX_PER_POLL,
     budget_s: float = DEFAULT_POLL_BUDGET_S,
     clock: Callable[[], float] = time.monotonic,
+    approval: ApprovalPolicy | None = None,
+    lease: DbLease | None = None,
 ) -> PollReport:
     """Read the watched column once and do whatever each ticket has earned.
+
+    ``approval`` is who may register a ready ticket (ADR-0022); ``None`` is the safe
+    default — every ready ticket waits for an operator's Register act. ``lease`` is the
+    repository's :func:`intake_lease`: when another pass holds it this pass reads nothing,
+    writes nothing (not even the served view) and returns ``busy``. Every served caller
+    passes one.
 
     Never raises: a tracker failure is a :class:`PollReport` with ``stopped`` set and an
     ``intake.stopped`` event on the chain, and the next poll retries. Nothing is
@@ -552,30 +789,43 @@ def poll_repository(
     what it got through: this runs in the worker's idle loop, in front of the heartbeat,
     and inside an API request, so it may not take as long as a board is long.
     """
-    report = _poll_column(
-        repo,
-        tracker=tracker,
-        listener=listener,
-        column=column,
-        home=home,
-        route_for=route_for,
-        item_url=item_url,
-        run_active=run_active,
-        actor=actor,
-        now=now,
-        force=force,
-        max_tickets=max_tickets,
-        budget_s=budget_s,
-        clock=clock,
-    )
-    # The served view is written HERE, by the function that reads it, not by each caller in
-    # turn: a poll whose caller was killed before its own write left the screen showing a
-    # ticket it had already commented on as unread, and the two callers could drift.
+    if lease is not None and not lease.acquire():
+        return PollReport(
+            repo=repo,
+            column=column,
+            at=now(),
+            busy=True,
+            detail="another pass is reading this repository's column; this one did nothing",
+        )
     try:
-        store_for(home).write(report)
-    except OSError:  # a cache is not the record; the chain already has every step
-        log.warning("intake state not written", extra={"repo": repo})
-    return report
+        report = _poll_column(
+            repo,
+            tracker=tracker,
+            listener=listener,
+            column=column,
+            home=home,
+            route_for=route_for,
+            item_url=item_url,
+            run_active=run_active,
+            actor=actor,
+            now=now,
+            force=force,
+            max_tickets=max_tickets,
+            budget_s=budget_s,
+            clock=clock,
+            approval=approval if approval is not None else ApprovalPolicy(),
+        )
+        # The served view is written HERE, by the function that reads it, not by each caller
+        # in turn: a poll whose caller was killed before its own write left the screen showing
+        # a ticket it had already commented on as unread, and the two callers could drift.
+        try:
+            store_for(home).write(report)
+        except OSError:  # a cache is not the record; the chain already has every step
+            log.warning("intake state not written", extra={"repo": repo})
+        return report
+    finally:
+        if lease is not None:
+            lease.release()
 
 
 def _poll_column(
@@ -594,6 +844,7 @@ def _poll_column(
     max_tickets: int,
     budget_s: float,
     clock: Callable[[], float],
+    approval: ApprovalPolicy,
 ) -> PollReport:
     """One pass, with no side effect outside the tracker and the chain. See
     :func:`poll_repository`, which is this plus the served view."""
@@ -672,6 +923,7 @@ def _poll_column(
             report=report,
             force=force,
             check_budget=check_budget,
+            approval=approval,
         )
         if row is not None:
             report.rows.append(row)
@@ -762,12 +1014,15 @@ def _handle_ticket(
     report: PollReport,
     force: bool = False,
     check_budget: Callable[[str], None] = lambda step: None,
+    approval: ApprovalPolicy | None = None,
 ) -> IntakeRow | None:
     """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped.
 
     ``check_budget`` is asked before EVERY tracker call (:class:`_BudgetGuard`), so a
-    pass that has run out of time starts no further call on somebody's board.
+    pass that has run out of time starts no further call on somebody's board. ``approval``
+    decides whether a ready draft is registered now or waits for an operator (ADR-0022).
     """
+    policy = approval if approval is not None else ApprovalPolicy()
     del actor
     if not force and already_handled(events, tracker.name, ref.key, ref.revision):
         cached = _row_from_state(home, ref)
@@ -863,6 +1118,7 @@ def _handle_ticket(
         supersedes=draft.item.supersedes,
         cell_route=route,
         read_at=now(),
+        author=ticket.author,
     )
     try:
         check_budget("comment")
@@ -921,6 +1177,13 @@ def _handle_ticket(
                 detail=exc.detail,
             )
             row = _stopped(row, exc)
+    elif feedback.ready_to_register and policy.approver_for(ticket.author) is None:
+        # ADR-0022: a ready ticket is a DRAFT until an operator registers it. The draft goes
+        # on the chain (what the act will register, bound to this revision and content) and
+        # the row says it is waiting; nothing reaches the frozen record from here.
+        _await_approval(draft, tracker=tracker, evidence=evidence, events=events)
+        report.awaiting += 1
+        row = replace_row(row, awaiting_approval=True)
     elif feedback.ready_to_register:
         outcome = _register_and_queue(
             draft,
@@ -932,6 +1195,7 @@ def _handle_ticket(
             report=report,
             row=row,
             check_budget=check_budget,
+            approved_by=policy.approver_for(ticket.author) or "",
         )
         awaiting = outcome == OUTCOME_QUEUED
         if outcome == OUTCOME_REGISTERED:
@@ -985,6 +1249,7 @@ def _register_and_queue(
     report: PollReport,
     row: IntakeRow,
     check_budget: Callable[[str], None] = lambda step: None,
+    approved_by: str = "",
 ) -> str:
     """Register the draft and tell the ticket. One of three words, because these are three
     different things to say to the person reading the screen:
@@ -1026,6 +1291,7 @@ def _register_and_queue(
         how=how,
         supersedes=draft.item.supersedes,
         url=url,
+        approved_by=approved_by,
     )
     try:
         check_budget("queued note")
@@ -1052,6 +1318,203 @@ def _register_and_queue(
             detail=exc.detail,
         )
     return OUTCOME_REGISTERED
+
+
+def _latest(events: Sequence[Any], kind: str, tracker: str, key: str) -> Any:
+    """The newest event of ``kind`` for ``(tracker, key)``, or ``None``."""
+    for e in reversed(list(events)):
+        if (
+            e.kind == kind
+            and str(e.payload.get("tracker")) == tracker
+            and str(e.payload.get("key")) == key
+        ):
+            return e
+    return None
+
+
+def _await_approval(
+    draft: Draft, *, tracker: TrackerClient, evidence: Any, events: Sequence[Any]
+) -> None:
+    """Record the ready draft as waiting for an operator (``intake.awaiting_approval``),
+    unless the same draft — same item, same content — is already the one waiting."""
+    content = draft.item.labels.get("content_revision", "")
+    waiting = _latest(events, EV_AWAITING, tracker.name, draft.ticket.key)
+    if (
+        waiting is not None
+        and str(waiting.item_id) == draft.item.id
+        and str(waiting.payload.get("content_revision", "")) == content
+        and str(waiting.payload.get("revision", "")) == draft.ticket.revision
+    ):
+        return
+    evidence.append(
+        EV_AWAITING,
+        draft.item.id,
+        tracker=tracker.name,
+        key=draft.ticket.key,
+        revision=draft.ticket.revision,
+        content_revision=content,
+        author=draft.ticket.author,
+        item=draft.item.to_dict(),
+    )
+
+
+def register_approved(
+    repo: str,
+    key: str,
+    *,
+    revision: str,
+    tracker: TrackerClient,
+    home: FactoryHome,
+    item_url: Callable[[str], str],
+    approver: str,
+    run_active: Callable[[], bool] = lambda: False,
+    lease: DbLease | None = None,
+) -> IntakeRow:
+    """The operator's Register act (ADR-0022): register the draft waiting for ticket
+    ``key``, as the operator read it at ``revision``.
+
+    Refuses (:class:`ApprovalRefused`) — and registers nothing — when another pass holds
+    the repository's lease (``intake_busy``), when the ticket's content has moved since
+    the revision the operator read (``revision_moved``: a different draft is not what they
+    approved), when no draft is waiting (``nothing_to_register``), when a factory run
+    holds the backlog (``factory_run_active``) or when the frozen record refuses it
+    (``register_refused``). On success the chain carries ``intake.registered`` with
+    ``approved_by``, the ticket is labelled queued with its note and link (a refused
+    courtesy write is an ``intake.stopped``, never an unregistration), and the served row
+    is updated without another poll.
+    """
+    del repo
+    if lease is not None and not lease.acquire():
+        raise ApprovalRefused(
+            "intake_busy", "another pass is reading this repository's column: try again"
+        )
+    try:
+        return _register_approved(
+            key,
+            revision=revision,
+            tracker=tracker,
+            home=home,
+            item_url=item_url,
+            approver=approver,
+            run_active=run_active,
+        )
+    finally:
+        if lease is not None:
+            lease.release()
+
+
+def _register_approved(
+    key: str,
+    *,
+    revision: str,
+    tracker: TrackerClient,
+    home: FactoryHome,
+    item_url: Callable[[str], str],
+    approver: str,
+    run_active: Callable[[], bool],
+) -> IntakeRow:
+    events = _read_events(home)
+    reads = [
+        e
+        for e in events
+        if e.kind == EV_READ
+        and str(e.payload.get("tracker")) == tracker.name
+        and str(e.payload.get("key")) == key
+    ]
+    seen = [e for e in reads if str(e.payload.get("revision")) == str(revision)]
+    if not reads or not seen:
+        raise ApprovalRefused(
+            "revision_moved",
+            f"ticket {key} was never read at revision {revision!r}: reload the column and "
+            "register what it says now",
+        )
+    now_content = str(reads[-1].payload.get("content_revision", ""))
+    if str(seen[-1].payload.get("content_revision", "")) != now_content:
+        raise ApprovalRefused(
+            "revision_moved",
+            f"ticket {key} has changed since revision {revision!r} (now revision "
+            f"{reads[-1].payload.get('revision')!s}): read the new draft before registering it",
+        )
+    waiting = _latest(events, EV_AWAITING, tracker.name, key)
+    registered = _latest(events, EV_REGISTERED, tracker.name, key)
+    if (
+        waiting is None
+        or str(waiting.payload.get("content_revision", "")) != now_content
+        or (registered is not None and events.index(registered) > events.index(waiting))
+    ):
+        raise ApprovalRefused(
+            "nothing_to_register", f"no draft of ticket {key} is waiting to be registered"
+        )
+    if run_active():
+        raise ApprovalRefused(
+            "factory_run_active",
+            "a factory run holds this repository's backlog: register the ticket once it ends",
+        )
+    item = BacklogItem.from_dict(dict(waiting.payload.get("item") or {}))
+    evidence = home.evidence(actor=approver)
+    try:
+        how = _register(home, item, actor=approver)
+    except Exception as exc:  # a frozen-record refusal: say so, register nothing
+        evidence.append(
+            EV_STOPPED,
+            item.id,
+            step="register",
+            key=key,
+            reason=REASON_REFUSED,
+            detail=str(exc)[:300],
+        )
+        raise ApprovalRefused("register_refused", str(exc)[:300]) from exc
+    url = item_url(item.id)
+    evidence.append(
+        EV_REGISTERED,
+        item.id,
+        tracker=tracker.name,
+        key=key,
+        how=how,
+        supersedes=item.supersedes,
+        url=url,
+        approved_by=approver,
+        revision=str(revision),
+    )
+    stopped: TrackerError | None = None
+    try:
+        tracker.label(key, LABEL_QUEUED)
+        tracker.comment(key, render_queued(item.id, url), marker_for(tracker.name, f"{key}:queued"))
+        tracker.link(key, url, LINK_ITEM)
+    except TrackerError as exc:
+        stopped = exc
+        evidence.append(
+            EV_STOPPED, item.id, step="queued", key=key, reason=exc.reason, detail=exc.detail
+        )
+    store = store_for(home)
+    base = next((r for r in store.rows() if r.key == key), None)
+    row = replace_row(
+        base
+        if base is not None
+        else IntakeRow(
+            key=key,
+            title=item.title,
+            url=item.labels.get("url", ""),
+            revision=str(revision),
+            label="",
+            state="",
+            item_id=item.id,
+            item_url=url,
+            feedback="",
+        ),
+        registered=True,
+        awaiting_approval=False,
+        label=LABEL_QUEUED,
+        item_id=item.id,
+        item_url=url,
+    )
+    if stopped is not None:
+        row = _stopped(row, stopped)
+    try:
+        store.update_row(row)
+    except OSError:
+        log.warning("intake state not written", extra={"repo": home.repo})
+    return row
 
 
 def store_for(home: FactoryHome) -> IntakeStore:
@@ -1248,10 +1711,13 @@ def apply_outcome_map(
 
 
 __all__ = [
+    "APPROVED_BY_ALLOWLIST",
+    "APPROVED_UNATTENDED",
     "CONFIG_KEY",
     "CREDENTIAL_FREE_TRACKERS",
     "DEFAULT_MAX_PER_POLL",
     "DEFAULT_POLL_BUDGET_S",
+    "EV_AWAITING",
     "EV_DELIVERED",
     "EV_FEEDBACK",
     "EV_POLLED",
@@ -1268,6 +1734,9 @@ __all__ = [
     "OUTCOME_REGISTERED",
     "STATE_FILE",
     "STOPPED_STATUSES",
+    "ApprovalPolicy",
+    "ApprovalRefused",
+    "DbLease",
     "IntakeRow",
     "IntakeStore",
     "ListenerState",
@@ -1277,6 +1746,7 @@ __all__ = [
     "already_handled",
     "apply_outcome_map",
     "build_tracker",
+    "intake_lease",
     "is_absolute_url",
     "item_for_ticket",
     "item_url_for",
@@ -1285,6 +1755,7 @@ __all__ = [
     "post_delivery",
     "post_outcomes_to_tickets",
     "post_refusal",
+    "register_approved",
     "replace_row",
     "store_for",
 ]

@@ -114,6 +114,9 @@ EV_INTAKE_QUEUED = "intake.queued"
 EV_INTAKE_DELIVERED = "intake.delivered"
 EV_INTAKE_TRANSITIONED = "intake.transitioned"
 EV_INTAKE_STOPPED = "intake.stopped"
+#: A ready ticket drafted and WAITING for an operator's Register act (ADR-0022): the draft
+#: item, the ticket's revision and author — what the act registers, bound to what was read.
+EV_INTAKE_AWAITING = "intake.awaiting_approval"
 INTAKE_EVENT_KINDS: tuple[str, ...] = (
     EV_INTAKE_POLLED,
     EV_INTAKE_READ,
@@ -123,6 +126,7 @@ INTAKE_EVENT_KINDS: tuple[str, ...] = (
     EV_INTAKE_DELIVERED,
     EV_INTAKE_TRANSITIONED,
     EV_INTAKE_STOPPED,
+    EV_INTAKE_AWAITING,
 )
 EVENT_KINDS: tuple[str, ...] = (
     EV_BACKLOG_FROZEN,

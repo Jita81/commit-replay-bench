@@ -48,10 +48,11 @@ What it does: Enforces the hard invariant first (``assert_not_default_branch``, 
               credential is read), then the review (``verdict`` must be ``accept`` —
               ADR-0021), then resolves BYOK credentials (the default provider refuses —
               fail closed), commits the source diff plus the oracle on
-              ``crb/<item>-<slug>``, pushes with a one-shot auth header (never in
-              ``.git/config``, never on the argv), and opens the PR whose body is the
-              redacted evidence summary; ``close_pull_request`` comments the verdict and
-              closes. Push, PR, comment and close are injectable seams.
+              ``crb/<item>-<slug>`` (``[a-z0-9-]`` only), pushes with a one-shot auth header
+              (never in ``.git/config``, never on the argv), and opens the PR whose body is
+              the redacted evidence summary with everything a ticket author wrote inside one
+              fence and whose title is escaped (C6b); ``close_pull_request`` comments the
+              verdict and closes. Push, PR, comment and close are injectable seams.
 How:          ``deliver`` = invariant → verdict → credentials → deliverability →
               ``commit_on_branch`` → ``push_fn`` → ``open_pr_fn`` → ``DeliveryResult``; with
               ``previous`` the push leases against ``previous.commit_sha``, no PR is opened
@@ -258,6 +259,9 @@ def assert_not_default_branch(branch_name: str, target_default_branch: str) -> s
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+#: What a delivery branch may be made of after ``crb/`` (C6b): nothing a ticket author could
+#: use to build an invalid or surprising ref (``..``, ``.lock``, ``@{``, capitals, ``_``).
+DELIVERY_BRANCH_RE = re.compile(r"crb/[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
 def slugify(text: str, *, max_len: int = 40) -> str:
@@ -267,8 +271,45 @@ def slugify(text: str, *, max_len: int = 40) -> str:
 
 
 def delivery_branch_name(item: BacklogItem) -> str:
-    """``crb/<item id>-<title slug>`` — the branch a delivery opens."""
+    """``crb/<item id>-<title slug>``, both halves reduced to ``[a-z0-9-]`` — the branch a
+    delivery opens. An item id may carry capitals, ``.`` and ``_`` (a ticket's key and
+    revision become one: ``fake-4711.r2``), which git refuses in some shapes (``A..B``) and
+    which a ticket author controls; neither reaches a ref (assessment 2026-09-25, C6b)."""
+    branch = f"{DELIVERY_BRANCH_PREFIX}{slugify(item.id, max_len=64)}-{slugify(item.title)}"
+    if not DELIVERY_BRANCH_RE.fullmatch(branch):  # the shape is the contract; never guessed
+        raise DeliveryError(f"could not build a safe delivery branch for {item.id!r}")
+    return branch
+
+
+def legacy_delivery_branch_name(item: BacklogItem) -> str:
+    """The branch name deliveries used before C6b (``crb/<raw id>-<slug>``) — accepted ONLY
+    to update a pull request an earlier run opened under it."""
     return f"{DELIVERY_BRANCH_PREFIX}{item.id}-{slugify(item.title)}"
+
+
+#: CommonMark's backslash-escapable characters (every ASCII punctuation mark).
+_MD_PUNCT_RE = re.compile(r"([\\`*_{}\[\]()#+\-.!|<>~^&\"'@=:;/?%$,])")
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def escape_markdown_line(text: str, *, max_len: int = 200) -> str:
+    """``text`` as ONE line of inert markdown: control characters and newlines collapse to
+    a space and every ASCII punctuation mark is backslash-escaped, so a ticket's title
+    cannot open a code span, emphasis, a link, an HTML tag or a mention (C6b)."""
+    one_line = " ".join(_CONTROL_RE.sub(" ", text).split())[:max_len]
+    return _MD_PUNCT_RE.sub(r"\\\1", one_line)
+
+
+def fenced(lines: list[str], *, info: str = "text") -> list[str]:
+    """``lines`` inside ONE fenced code block whose fence is longer than any run of
+    backticks in them (CommonMark: only a fence of the same character, at least as long,
+    closes it), so nothing inside can end the block and become markup (C6b)."""
+    body = "\n".join(
+        _CONTROL_RE.sub(lambda m: "\n" if "\n" in m.group() else " ", ln) for ln in lines
+    )
+    longest = max((len(r) for r in re.findall(r"`+", body)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return [f"{fence}{info}", *body.split("\n"), fence]
 
 
 # ---------------------------------------------------------------------------
@@ -283,16 +324,28 @@ def pr_body(
     pack_link: str = "",
     route_decision: Mapping[str, Any] | None = None,
 ) -> str:
-    """The PR description: the evidence summary a reviewer needs, every string redacted."""
+    """The PR description: the evidence summary a reviewer needs, every string redacted.
+
+    Everything a ticket author wrote — the title and the acceptance criteria — is DATA,
+    not markup: it appears only inside one fenced block (:func:`fenced`), so it cannot add
+    a heading, a checkbox, a link, a mention or an HTML comment to the customer's pull
+    request (assessment 2026-09-25, C6b)."""
     belts = build.grade.belts.to_dict()
     proof = build.pack.notes.get("red_proof", {})
+    ticket_lines = [f"title: {item.title}"]
+    if item.acceptance_criteria:
+        ticket_lines += ["acceptance criteria:"] + [f"- {c}" for c in item.acceptance_criteria]
     lines = [
-        f"## {item.title}",
+        f"## crb factory: backlog item `{slugify(item.id, max_len=64)}`",
         "",
-        f"Automated proposal from crb factory for backlog item `{item.id}` "
+        f"Automated proposal from crb factory for backlog item `{slugify(item.id, max_len=64)}` "
         f"({item.kind}, {item.level}, class `{item.capability_class}`).",
         "",
         "This targets a NEW branch, never the default branch. A human reviews and merges.",
+        "",
+        "### What was asked (from the backlog item, shown as written)",
+        "",
+        *fenced(ticket_lines),
         "",
         "### Evidence",
         "",
@@ -313,8 +366,6 @@ def pr_body(
             f"- route: **{route_decision.get('route', '')}** — {route_decision.get('reason', '')} "
             f"(policy `{route_decision.get('policy_version', '')}`)"
         )
-    if item.acceptance_criteria:
-        lines += ["", "### Acceptance criteria", ""] + [f"- {c}" for c in item.acceptance_criteria]
     lines += ["", f"changed files: {', '.join(f'`{f}`' for f in build.changed_files) or '(none)'}"]
     return redact("\n".join(lines))
 
@@ -663,7 +714,11 @@ def deliver(
     ``after_verdict`` it answers, the new pack hash and commit) is posted on it. The
     comment runs after the push has moved the remote branch, so its failure is NOT a
     delivery failure: the result is returned ``updated`` with ``comment_error`` set."""
-    branch = assert_not_default_branch(delivery_branch_name(item), target_default_branch)
+    wanted = delivery_branch_name(item)
+    if previous is not None and previous.branch == legacy_delivery_branch_name(item):
+        # a pull request an earlier run opened before C6b keeps its branch
+        wanted = previous.branch
+    branch = assert_not_default_branch(wanted, target_default_branch)
     base = _norm_branch(target_default_branch)
     if not base:
         raise DeliveryError("target_default_branch is required (it is the PR base)")
@@ -695,11 +750,14 @@ def deliver(
     push = push_fn if push_fn is not None else git_push_fn
     open_pr = open_pr_fn if open_pr_fn is not None else github_open_pr_fn
 
-    pr_title = title or f"{item.title} [{item.id}]"
+    # the title a ticket author wrote is escaped into ONE inert line (C6b): GitHub renders
+    # a pull request's title as inline markdown
+    pr_title = title or f"{escape_markdown_line(item.title)} [{item.id}]"
+    subject = " ".join(_CONTROL_RE.sub(" ", item.title).split())[:72] or item.id
     sha = commit_on_branch(
         build,
         branch,
-        message=f"{item.title}\n\ncrb factory item: {item.id}\nevidence pack: {build.pack_hash}\n"
+        message=f"{subject}\n\ncrb factory item: {item.id}\nevidence pack: {build.pack_hash}\n"
         f"oracle: {build.oracle.test_path} sha256 {build.oracle.test_sha256}",
     )
     # belt-and-braces: the refspec is branch:branch — never HEAD, never the base.
@@ -831,6 +889,7 @@ def close_pull_request(
 __all__ = [
     "ALWAYS_PROTECTED_BRANCHES",
     "DELIVERY_BRANCH_PREFIX",
+    "DELIVERY_BRANCH_RE",
     "ClosePrFn",
     "CommentPrFn",
     "DefaultBranchProtectionError",
@@ -851,11 +910,14 @@ __all__ = [
     "commit_on_branch",
     "deliver",
     "delivery_branch_name",
+    "escape_markdown_line",
+    "fenced",
     "force_with_lease_arg",
     "git_push_fn",
     "github_close_pr_fn",
     "github_comment_pr_fn",
     "github_open_pr_fn",
+    "legacy_delivery_branch_name",
     "owner_repo_from_remote",
     "pr_body",
     "rework_comment",

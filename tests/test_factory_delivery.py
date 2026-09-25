@@ -139,7 +139,7 @@ def test_assert_not_default_branch_allows_new_branches() -> None:
 def test_delivery_branch_name_is_never_a_protected_name() -> None:
     for title in ("main", "master", "Main branch", "develop"):
         b = dv.delivery_branch_name(multiply_item(title=title))
-        assert b.startswith("crb/I-1-")
+        assert b.startswith("crb/i-1-")
         assert dv.assert_not_default_branch(b, "develop") == b
 
 
@@ -246,7 +246,7 @@ def test_deliver_commits_source_and_oracle_on_new_branch_and_opens_pr(harness: H
             verdict="accept",
         )
         repo = harness.repo.repo
-        assert res.branch == "crb/I-1-add-multiply-to-calc" and res.base == "main"
+        assert res.branch == "crb/i-1-add-multiply-to-calc" and res.base == "main"
         assert res.pr_url.endswith("/pull/7") and res.pr_number == 7 and res.pr_ref == res.pr_url
         assert res.pack_hash == build.pack_hash
         # the branch exists in the repo, parented at HEAD, with exactly source + oracle
@@ -1004,3 +1004,41 @@ def test_the_delivery_branch_is_lowercase_letters_digits_and_hyphens(item_id: st
         ["git", "check-ref-format", "--branch", branch], capture_output=True, check=False
     )
     assert ok.returncode == 0, branch
+
+
+def test_a_pull_request_opened_under_the_old_branch_name_can_still_be_updated(
+    harness: Harness,
+) -> None:
+    """A pull request an earlier run opened before the branch was reduced to ``[a-z0-9-]``
+    keeps its branch: the re-delivery updates THAT branch rather than refusing it."""
+    item = multiply_item()
+    seams = Seams()
+    legacy = dv.legacy_delivery_branch_name(item)
+    assert legacy == "crb/I-1-add-multiply-to-calc" != dv.delivery_branch_name(item)
+    previous = dv.DeliveryResult(
+        item_id="I-1",
+        branch=legacy,
+        base="main",
+        commit_sha="c" * 40,
+        pr_url="https://github.invalid/acme/calc/pull/3",
+        pr_number=3,
+        pack_hash="p" * 64,
+        body_sha256="",
+    )
+    build = _clean_build(harness)
+    try:
+        res = dv.deliver(
+            harness.repo.repo,
+            item,
+            build,
+            creds=dv.StaticProvider(_creds()),
+            push_fn=seams.push,
+            open_pr_fn=seams.open_pr,
+            target_default_branch="main",
+            previous=previous,
+            verdict="accept",
+        )
+    finally:
+        build.close()
+    assert res.updated and res.branch == legacy and res.pr_number == 3
+    assert seams.pushes[-1]["branch"] == legacy and seams.prs == []
