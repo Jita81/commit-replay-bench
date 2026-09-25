@@ -311,6 +311,44 @@ def _is_opaque(expr: ast.expr) -> bool:
     )
 
 
+def _bindings(scope: ast.AST, own: list[ast.AST]) -> dict[str, list[ast.expr | None]]:
+    """Every binding of every name in ``scope``: the value a plain ``name = v`` /
+    ``name: T = v`` / ``name += v`` gives it, and ``None`` for every other way a name is
+    bound — a parameter, a ``Store`` anywhere else (``with … as``, ``for``, unpacking,
+    ``:=``, a comprehension), ``except … as``, ``import … as`` and a ``match`` capture.
+    Enumerating binding FORMS left gaps (PR #53 review); every ``Store`` is the class."""
+    out: dict[str, list[ast.expr | None]] = {}
+    valued: set[int] = set()
+    for n in own:
+        if isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    out.setdefault(t.id, []).append(n.value)
+                    valued.add(id(t))
+        elif isinstance(n, (ast.AnnAssign, ast.AugAssign)) and isinstance(n.target, ast.Name):
+            out.setdefault(n.target.id, []).append(n.value)
+            valued.add(id(n.target))
+    names: list[str] = []
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        a = scope.args
+        names += [p.arg for p in (*a.posonlyargs, *a.args, *a.kwonlyargs)]
+        names += [p.arg for p in (a.vararg, a.kwarg) if p is not None]
+    for n in own:
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and id(n) not in valued:
+            names.append(n.id)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            names.append(n.name)
+        elif isinstance(n, ast.alias):
+            names.append(n.asname or n.name.split(".")[0])
+        elif isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+            names.append(n.name)
+        elif isinstance(n, ast.MatchMapping) and n.rest:
+            names.append(n.rest)
+    for name in names:
+        out.setdefault(name, []).append(None)
+    return out
+
+
 def worktree_dest_offenders(source: str, rel: str) -> list[str]:
     """Every worktree-creating call in ``source`` whose destination is not drawn by
     ``opaque_dest`` — directly, or through a name EVERY assignment of which (in the same
@@ -330,18 +368,7 @@ def worktree_dest_offenders(source: str, rel: str) -> list[str]:
             own.append(n)
             if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
                 stack.extend(ast.iter_child_nodes(n))
-        assigned: dict[str, list[ast.expr | None]] = {}
-        for n in own:
-            if isinstance(n, ast.Assign):
-                for t in n.targets:
-                    if isinstance(t, ast.Name):
-                        assigned.setdefault(t.id, []).append(n.value)
-            elif isinstance(n, (ast.AnnAssign, ast.AugAssign)) and isinstance(n.target, ast.Name):
-                assigned.setdefault(n.target.id, []).append(n.value)
-            elif isinstance(n, (ast.For, ast.With, ast.NamedExpr)):
-                target = n.target if isinstance(n, (ast.For, ast.NamedExpr)) else None
-                if isinstance(target, ast.Name):
-                    assigned.setdefault(target.id, []).append(None)
+        assigned = _bindings(scope, own)
         for n in own:
             if not isinstance(n, ast.Call):
                 continue
@@ -387,6 +414,63 @@ def test_every_replay_side_worktree_is_named_by_opaque_dest() -> None:
 def test_the_structural_ratchet_catches_every_spelling(body: str) -> None:
     src = f"def f(repo, sha, scratch, task, c, ref, undefined_here=None):\n    {body}\n"
     assert len(worktree_dest_offenders(src, "x.py")) == 1
+
+
+#: An opaque name first, then ``dest`` rebound by a construct that is not a plain assignment.
+_OPAQUE_FIRST = 'dest = opaque_dest(scratch, "run")\n    '
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "with open(sha) as dest:\n        Workspace.create(repo, sha, dest)",
+        "with ctx() as (dest, x):\n        Workspace.create(repo, sha, dest)",
+        "dest, x = scratch / sha, 1\n    Workspace.create(repo, sha, dest)",
+        "x, *dest = [scratch]\n    Workspace.create(repo, sha, dest)",
+        "for dest, x in pairs:\n        Workspace.create(repo, sha, dest)",
+        "try:\n        pass\n    except Exception as dest:\n"
+        "        Workspace.create(repo, sha, dest)",
+        "import os.path as dest\n    Workspace.create(repo, sha, dest)",
+        "match sha:\n        case dest:\n            Workspace.create(repo, sha, dest)",
+        "[Workspace.create(repo, sha, dest) for dest in pairs]",
+    ],
+    ids=[
+        "with",
+        "with-tuple",
+        "tuple",
+        "starred",
+        "for-tuple",
+        "except",
+        "import",
+        "match",
+        "comp",
+    ],
+)
+def test_the_structural_ratchet_sees_every_way_a_name_is_rebound(body: str) -> None:
+    """PR #53 review: the ratchet read only ``=`` / ``:=`` / ``for`` bindings, so ``dest``
+    rebound by ``with … as``, unpacking, ``except … as``, ``import … as``, a ``match``
+    capture or a comprehension kept its earlier opaque assignment and passed. Every binding
+    of a name counts; one that is not an ``opaque_dest(...)`` call makes the name suspect."""
+    src = f"def f(repo, sha, scratch, pairs, ctx):\n    {_OPAQUE_FIRST}{body}\n"
+    assert len(worktree_dest_offenders(src, "x.py")) == 1
+
+
+def test_the_structural_ratchet_sees_async_rebinding_and_parameters() -> None:
+    rebound = (
+        "async def f(repo, sha, scratch, ctx, it):\n"
+        f"    {_OPAQUE_FIRST}async with ctx() as dest:\n"
+        "        Workspace.create(repo, sha, dest)\n"
+        "    async for dest in it():\n"
+        "        Workspace.create(repo, sha, dest)\n"
+    )
+    assert len(worktree_dest_offenders(rebound, "x.py")) == 2
+    # a parameter is the caller's value until the body rebinds it: used first, it is suspect
+    param = (
+        "def f(repo, sha, scratch, dest):\n"
+        "    Workspace.create(repo, sha, dest)\n"
+        '    dest = opaque_dest(scratch, "run")\n'
+    )
+    assert len(worktree_dest_offenders(param, "x.py")) == 1
 
 
 @pytest.mark.parametrize(
