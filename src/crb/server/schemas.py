@@ -42,7 +42,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, Query
 from pydantic import (
@@ -584,6 +584,11 @@ class RunCreateRequest(BaseModel):
     #: ``{fix, repair_turns}``. OFF when absent. A run with it on is recorded as the
     #: builder ``<name>+preflight`` — a different arm, never pooled with plain rows.
     preflight: bool | PreflightIn | None = None
+    #: The prevention loop (ADR-0020): ``"off"`` opts THIS run out of the repository's
+    #: learning switch — no playbook line, no overlay, rows stamped ``learn: off``. A run may
+    #: opt out, never in (the switch is the repository's, thrown by an operator). Stored as
+    #: ``params.learning`` only when set; the Phase B campaign's off arm uses it.
+    learning: Literal["off"] | None = None
     #: ``factory`` runs only: the frozen backlog this run is meant to work. When set it
     #: must equal the repo's ACTIVE backlog hash or the request is refused (409
     #: ``backlog_hash_mismatch``); the active hash is always stamped into
