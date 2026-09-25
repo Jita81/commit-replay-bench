@@ -205,3 +205,9 @@ def test_the_repository_itself_passes_the_gate() -> None:
     """The allowlist is not aspirational: every file on it is clean on this tree."""
     assert cc.check_tree(ROOT, cc.ALLOWLIST) == []
     assert all((ROOT / rel).exists() for rel in cc.ALLOWLIST)
+
+
+def test_the_allowlist_only_grows() -> None:
+    """A page that has been cleaned never leaves the gate. CONTRIBUTING joined when PR #51's
+    review found a verdict claim there that the evidence did not support."""
+    assert {"README.md", "docs/RELEASING.md", "docs/CONTRIBUTING.md"} <= set(cc.ALLOWLIST)
