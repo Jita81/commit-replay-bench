@@ -425,14 +425,30 @@ def test_the_default_user_is_the_workers_own_uid_and_root_is_refused(
     assert BuilderContainerSettings(image="i", user="10001:10001").user == "10001:10001"
 
 
+def _pins_the_uid(node: ast.AST) -> bool:
+    """True for a ``setattr`` call (``monkeypatch.setattr`` or the builtin) that replaces
+    ``getuid``: by attribute name (``setattr(os, "getuid", …)``) or by dotted target
+    (``setattr("os.getuid", …)``)."""
+    if not isinstance(node, ast.Call):
+        return False
+    callee = node.func
+    name = callee.attr if isinstance(callee, ast.Attribute) else getattr(callee, "id", "")
+    if name != "setattr":
+        return False
+    targets = [a.value for a in node.args[:2] if isinstance(a, ast.Constant)]
+    return any(t == "getuid" or (isinstance(t, str) and t.endswith(".getuid")) for t in targets)
+
+
 def _settings_on_the_hosts_uid(path: Path) -> set[str]:
     """Sites in one test file that build builder-container settings without naming a user.
 
     Two shapes: a ``BuilderContainerSettings(...)`` call with no ``user=`` keyword (a
     ``**mapping`` is trusted: the docker suite's ``_settings`` runs as the worker's own uid by
     design and is docker-marked), and a function that sets ``CRB_BUILDER__EXECUTOR`` to
-    ``docker`` without ``CRB_BUILDER__USER``. A function that touches ``getuid`` pins the
-    default on purpose and is exempt.
+    ``docker`` without ``CRB_BUILDER__USER``. A function that PINS the uid —
+    ``setattr(os, "getuid", …)`` or ``setattr("os.getuid", …)``, through ``monkeypatch`` or
+    not — tests the default on purpose and no longer depends on the host, so it is exempt. A
+    function that only reads ``os.getuid()`` or names it in a string pins nothing and is not.
     """
     found: set[str] = set()
     rel = path.relative_to(TESTS_DIR.parent).as_posix()
@@ -444,9 +460,7 @@ def _settings_on_the_hosts_uid(path: Path) -> set[str]:
         strings = {
             n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)
         }
-        if "getuid" in strings or any(
-            isinstance(n, ast.Attribute) and n.attr == "getuid" for n in nodes
-        ):
+        if any(_pins_the_uid(n) for n in nodes):
             continue
         for call in (n for n in nodes if isinstance(n, ast.Call)):
             callee = call.func
