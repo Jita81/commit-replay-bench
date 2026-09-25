@@ -57,6 +57,7 @@ Touch when:   a builder is refused an honest command in a client repository (app
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -378,9 +379,11 @@ def test_where_am_i_is_honest_shell_and_reveals_no_fragment_of_the_task_sha(
     assert set(spawn.outputs) == set(WHERE_AM_I) and spawn.outputs["pwd"].strip()
     files = sorted(transcripts.glob("*.json"))
     assert len(files) == 1
-    text = files[0].read_text(encoding="utf-8")
-    assert spawn.outputs["pwd"].strip() in text  # the model's words reached the transcript
+    # the file's envelope names its task by design (the pack cites the file); the SESSION
+    # inside it is what the builder saw and said, and that is what is scanned
+    session = json.dumps(json.loads(files[0].read_text(encoding="utf-8"))["outcome"])
+    assert spawn.outputs["pwd"].strip() in session  # the model's words reached the transcript
     sha = feat_task.task_id
     assert leaks(sha, *spawn.outputs.values()) == [], spawn.outputs
-    assert leaks(sha, text) == []
+    assert leaks(sha, session) == []
     assert leaks(sha, files[0].name) == []  # the transcript's own file name, too

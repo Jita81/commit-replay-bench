@@ -22,8 +22,9 @@ How:          A ``RunSpec`` over ``pyrepo`` with a ``BuildAttempt`` that perform
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
 Works with:   src/crb/core/run.py (under test), src/crb/core/workspace.py
-              (``enforce_integrity``, ``opaque_dest``), tests/fixtures/leakage.py (the sha scan), tests/test_builders_adapter.py (the full ``run`` end to
-              end), tests/test_grade.py (the same findings at the grader)
+              (``enforce_integrity``, ``opaque_dest``), tests/fixtures/leakage.py (the sha
+              scan), tests/test_builders_adapter.py (the full ``run`` end to end),
+              tests/test_grade.py (the same findings at the grader)
 Tested by:    tests/test_run.py
 Touch when:   a new integrity violation is added to the workspace (mirror the case here so the
               run path and the CLI stay in step); a new place creates a worktree a builder or a

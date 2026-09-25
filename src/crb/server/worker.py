@@ -225,7 +225,7 @@ from crb.core.secrets_file import SecretsStore
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
 from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION, __version__
-from crb.core.workspace import Workspace
+from crb.core.workspace import Workspace, opaque_dest
 from crb.factory.author import author_from_label
 from crb.factory.backlog import BacklogItem
 from crb.factory.delivery import (
@@ -1933,7 +1933,6 @@ class Worker:
             _LOG.exception("ledger health metric failed")
 
     def _run_oracle(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
-        run = ctx.run
         tasks = self._select_tasks(ctx)
         max_mutants = int(ctx.params.get("max_mutants") or DEFAULT_MAX_MUTANTS)
         runner = self._runner(ctx)
@@ -1949,7 +1948,9 @@ class Worker:
                 cancelled = True
                 break
             ctx.task_id = task.task_id
-            dest = self.scratch_dir / f"oracle-{ctx.config.name}-{task.short_id}-{run.id[:8]}"
+            # opaque, never the commit's name (B1); the event maps it back to the task
+            dest = opaque_dest(self.scratch_dir, "oracle", avoid=(task.task_id,))
+            ctx.emit("oracle", "oracle.worktree", task_id=task.task_id, worktree=dest.name)
             with Workspace.create(ctx.git, task.task_id, dest, config=ctx.config) as ws:
                 ws.overlay_tests(task.test_files)
                 ws.overlay_sources(task.src_files)  # the GOLD state: target GREEN

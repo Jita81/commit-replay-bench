@@ -19,7 +19,9 @@ What it does: Pins, on a REAL retained worktree, that the served patch hashes to
               agree, a patch-hash mismatch is 422 ``review_refused``, a row whose pack has no
               diff cannot be reviewed, a regression is never mergeable, redaction, verify
               reporting tamper and a lost anchor, stats joining the standing verdict onto cells
-              and refusing a false-Q1 repo, and the table being append-only.
+              and refusing a false-Q1 repo, and the table being append-only. The retained
+              worktree is found through the run's ``prep.start`` event (its name is opaque and
+              never rebuilt from the sha); a malformed name is never a path.
 How:          ``Retained`` builds a graded row with a real ``pyrepo`` trial (a source edit and
               an untracked new file) under the API's home; ``make_env`` over the seed.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -49,6 +51,7 @@ from sqlalchemy import select, text
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.grade import Belts, GradeResult
 from crb.core.ledger import GradeRow, grade_row_from_result
+from crb.core.workspace import opaque_dest
 from crb.server.routes.grades import (
     HDR_DIFF_SHA,
     HDR_PATCH_SHA,
@@ -102,7 +105,15 @@ def count_over(patch: str, files: list[str]) -> tuple[int, int]:
 class Retained:
     """A graded row with a REAL retained worktree + transcript under the API's home."""
 
-    def __init__(self, env: Env, tmp_path: Path, *, secret: bool = False, transcript: bool = True):
+    def __init__(
+        self,
+        env: Env,
+        tmp_path: Path,
+        *,
+        secret: bool = False,
+        transcript: bool = True,
+        event: bool = True,
+    ):
         self.env = env
         repo = pr.build(tmp_path / "pyrepo")
         task = repo.feat_task(repo=ALPHA)
@@ -138,14 +149,32 @@ class Retained:
                 )
             )
             s.commit()
-        # the worktree exactly where run_task leaves it
-        root = worktree_path(
-            Path(env.settings.home) / "scratch",
-            repo=ALPHA,
-            task_id=task.task_id,
-            run_id=RETAINED_RUN,
-            trial="r1",
-        )
+        # the worktree exactly where run_task leaves it: an opaque name, mapped to the task
+        # and trial by the run's own prep.start event (assessment 2026-09-25 B1)
+        scratch = Path(env.settings.home) / "scratch"
+        self.worktree = opaque_dest(scratch, "run", avoid=(task.task_id,)).name
+        with env.factory() as s:
+            s.add(
+                Event(
+                    event_id="e" * 32,
+                    trace_id=RETAINED_RUN,
+                    seq=1,
+                    timestamp="2026-09-25T10:00:00+00:00",
+                    stage="build",
+                    action="prep.start",
+                    status="in_progress",
+                    task_id=task.task_id,
+                    payload_json={
+                        "trial": "r1",
+                        "rung": "r1",
+                        # event=False: a run whose events name no worktree (pre-B1)
+                        **({"worktree": self.worktree} if event else {}),
+                    },
+                )
+            )
+            s.commit()
+        root = worktree_path(scratch, self.worktree)
+        assert root is not None
         self.ws = repo.trial(root)
         pr.apply_gold(self.ws)
         pr.write_files(self.ws, [("src/calc/extra.py", "def extra():\n    return 1\n")])
@@ -307,6 +336,20 @@ class TestRetainedPatch:
         legacy = next(row for row in env.info.rows if row.belt_set == "v3-legacy")
         res = env.get(f"/grades/{legacy.row_hash}/patch")
         assert res.status_code == 404 and envelope(res)["code"] == "patch_unavailable"
+
+    def test_a_run_whose_events_name_no_worktree_says_so(self, env: Env, tmp_path: Path) -> None:
+        """The name is never rebuilt from the sha: without the event there is no path."""
+        r = Retained(env, tmp_path, event=False)
+        assert r.ws.root.is_dir()  # the directory is there; nothing maps the row to it
+        res = r.patch()
+        assert res.status_code == 404
+        assert "name no worktree" in envelope(res)["detail"]["reason"]
+
+    def test_a_malformed_worktree_name_is_never_turned_into_a_path(self) -> None:
+        scratch = Path("/srv/crb/scratch")
+        assert worktree_path(scratch, "run-0123456789ab") == scratch / "run-0123456789ab"
+        for bad in ("", "../../etc", "run-0123456789ab/..", "run-pyrepo-6dbaf3a727-x-r1"):
+            assert worktree_path(scratch, bad) is None, bad
 
     def test_not_retained_worktree_reason(self, env: Env, tmp_path: Path) -> None:
         r = Retained(env, tmp_path)
