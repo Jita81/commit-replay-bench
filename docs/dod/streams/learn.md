@@ -59,6 +59,7 @@ parked until a second organisation asks.
 | stream-learn.automation.25 | AUTOMATION | Factory builds receive the loop's overlay and lines and record the same `learn*` labels as replay and blind rows | `absent` | unmet | G-538 |
 | stream-learn.measure.26 | MEASURE | Review classes (`review:*`) are measured on anchored reviews of retained patches for the repositories the loop acts on | `absent` | unmet | G-539 |
 | stream-learn.measure.27 | MEASURE | The capability map and `/value` can be read split by the `learn` labels, so rows with and without the loop's changes are never read pooled | `absent` | unmet | G-540 |
+| stream-learn.handoff.28 | HANDOFF | The loop's configuration levers reach a run through the same surfaces a person writes: a change the loop applies switches stream W's `checks` (format step, finish gate) or stream K's `spend` (calibrated budget) on for the repository's next run, under the team's own keys; the row records the switch (`labels.checks`, `labels.budget_profile`); the loop never applies a calibrated budget K's rule cannot calibrate; and the learning curve `GET /value` serves reads the loop's register | `absent` | unmet | G-541 |
 
 ## Gaps
 - **G-532** — the Learn page is read-only: `refusals --apply` is CLI only, the strengthening backlog must be pasted into `POST /factory/{repo}/backlog`, and the re-measurement bodies must be posted by hand · add the three write paths behind the same named-person decision the CLI already requires (accept a line, register the items, queue the plan) · server
@@ -70,3 +71,4 @@ parked until a second organisation asks.
 - **G-538** — factory builds do not receive the loop's overlay or lines: `crb.factory.build` composes its own brief and stamps no `learn*` label · pass the run's learning snapshot to the factory's build and stamp the same labels · factory
 - **G-539** — review classes cannot be measured: no retained patch has an anchored review for cobra, click or koa · merge stream K's retained patches and record reviews against them · server
 - **G-540** — the capability map and `/value` read rows pooled across the `learn` labels · add the labels as a split to both, as K's budget profile will be · server
+- **G-541** — the loop can apply a configuration lever only once streams W and K ship their mechanisms, and nothing yet shows a lever it applied reaching a run · bind `crb.server.prevention_state.mechanisms` to what ships, apply the overlay to the worker's `checks` and `spend` resolution, and read the register behind `crb.core.value.default_register` · server
