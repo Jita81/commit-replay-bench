@@ -69,11 +69,17 @@ What it is:   The grader — the one function (``grade``) that turns a trial wor
 What it does: Evaluates belts 1–5 mechanically against the parent tree and the overlaid oracle;
               credits ``clean`` only when every evaluated belt holds; records harness errors,
               tampering and malformed oracles as non-passes or disqualifications — never a
-              silent pass.
-How:          Integrity check of the git view → tamper scan (target tests, test infrastructure,
-              other tests) → target run → belt-scope run → diff stats → belt 5 plan → result.
+              silent pass. Grades in ONE posture (ADR-0019): belt 3 subtracts the baseline
+              measured there, and a verdict that would blame the builder names a witness run
+              there first (``MisattributionViolation`` otherwise) — a red one is an
+              ``environment:`` error, never a model failure.
+How:          Posture check (spec, context, executor) → integrity check of the git view →
+              tamper scan (target tests, test infrastructure, other tests) → the dependency
+              closure (belt 1b) → the builder's changes and diff, read before any run →
+              target run → belt-scope run → belt 5 plan → the witness → result.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0019-qualification-is-posture-relative.md
 Works with:   src/crb/core/workspace.py (the trial tree and its integrity), src/crb/core/lint.py
               (belt 5), src/crb/core/ledger.py (the row a result becomes),
               src/crb/core/runners/base.py (the test runs), src/crb/core/test_infra.py (belt 1's
@@ -90,17 +96,22 @@ Claims:       A clean grade is a mechanical observation under the belts, not mer
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
+from crb.core.deps import ClosureViolation, DepsBinding, TaskDeps
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.lint import LintRun, run_plan
+from crb.core.posture import Posture, PostureMismatch
 from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner, TestRun
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.test_infra import infra_sections_changed, matching_rule
 from crb.core.workspace import DiffStats, Workspace
+
+if TYPE_CHECKING:  # the record type only; crb.core.qualify imports this module
+    from crb.core.qualify import Qualification
 
 MODE_SIGHTED = "sighted"
 MODE_BLIND = "blind"
@@ -125,6 +136,108 @@ EventFn = Callable[[str, Mapping[str, Any]], None]
 
 class FalseQ1Violation(AssertionError):
     """Raised if anything tries to construct a clean grade with a failed belt."""
+
+
+class MisattributionViolation(AssertionError):
+    """Raised if anything tries to blame the model without a witness (ADR-0019 §5): a
+    grade whose belts fail the builder's patch must name the control, run in the same
+    posture on a tree the builder never touched, that makes the blame true."""
+
+
+#: The witnesses a blamed verdict may name (``labels.blame_control`` on its row):
+#: ``gold_green`` — the gold tree passed the scope the trial failed, now, in this posture;
+#: ``env_probe`` — a factory item (no gold): the environment probe passed on a fresh base
+#: tree; ``no_source`` — no source file changed (a fact about the diff, no control);
+#: ``lint_gold_ok`` — only belt 5 failed and the gold passed belt 5 at qualification.
+BLAME_GOLD_GREEN = "gold_green"
+BLAME_ENV_PROBE = "env_probe"
+BLAME_NO_SOURCE = "no_source"
+BLAME_LINT_GOLD_OK = "lint_gold_ok"
+BLAME_CONTROLS: tuple[str, ...] = (
+    BLAME_GOLD_GREEN,
+    BLAME_ENV_PROBE,
+    BLAME_NO_SOURCE,
+    BLAME_LINT_GOLD_OK,
+)
+#: A blamed grade made with no witness at all (the negative controls, ``crb grade
+#: --adhoc``). Allowed on a ``GradeResult``; the ledger refuses it on a model-failure row.
+BLAME_UNWITNESSED = "unwitnessed"
+
+#: The prefix of the error a grade records when the posture, not the patch, failed —
+#: the unchanged failure-kind rule reads it as ``harness`` (ADR-0019 §5).
+ENVIRONMENT_PREFIX = "environment:"
+#: ``labels.env_code`` of a trial whose gold control was red in its own posture.
+ENV_CODE_GOLD_CONTROL_RED = "GOLD_CONTROL_RED"
+#: ``labels.env_code`` of a lint-only failure whose gold also failed belt 5.
+ENV_CODE_GOLD_LINT = "GOLD_LINT_RED"
+#: ``labels.env_code`` of a trial whose test run could not be given its ground.
+ENV_CODE_TEST_RUN = "TEST_RUN_ENVIRONMENT"
+
+
+@dataclass(frozen=True)
+class ControlRun:
+    """One control run by a :class:`Witness`: which witness (``kind`` — a
+    :data:`BLAME_CONTROLS` name), the scope, whether it witnessed (``green``), and what
+    the toolchain said. ``failing`` / ``timed_out`` / ``parse_error`` say why a red one
+    was red."""
+
+    kind: str
+    scope: tuple[str, ...]
+    green: bool
+    rc: int = 0
+    tail: str = ""
+    duration_s: float = 0.0
+    failing: tuple[str, ...] = ()
+    timed_out: bool = False
+    parse_error: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "scope", tuple(self.scope))
+        object.__setattr__(self, "failing", tuple(sorted(self.failing)))
+        object.__setattr__(self, "tail", redact_and_cap(self.tail, max_chars=2000))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "scope": list(self.scope),
+            "green": self.green,
+            "rc": self.rc,
+            "tail": self.tail,
+            "duration_s": round(self.duration_s, 3),
+            "failing": list(self.failing[:50]),
+            "timed_out": self.timed_out,
+            "parse_error": self.parse_error,
+        }
+
+
+class Witness(Protocol):
+    """Runs a control NOW, in the trial's posture, on a tree the builder never touched.
+
+    ``allow_failing`` is ``None`` for a target control (green means the run is green) and
+    the in-posture baseline for a belt-scope control (green means the run is attributable
+    and nothing outside the baseline fails)."""
+
+    def control(
+        self, scope: Sequence[str], *, why: str, allow_failing: Collection[str] | None = None
+    ) -> ControlRun: ...
+
+
+@dataclass(frozen=True)
+class GradeContext:
+    """What a grade needs besides the tree (ADR-0019 §4): the posture it grades in, the
+    task's qualification in that posture, the task's dependency bindings, and the witness
+    that runs a control when a verdict would blame the model. ``witness=None`` grades
+    unwitnessed (the negative controls, ``crb grade --adhoc``) — never a ledger row that
+    blames the model."""
+
+    posture: Posture
+    qualification: Qualification
+    deps: TaskDeps
+    witness: Witness | None = None
+
+    def spec(self, task: TaskSpec) -> TaskSpec:
+        """The spec to grade ``task`` against: the qualification's projection."""
+        return self.qualification.project(task)
 
 
 @dataclass(frozen=True)
@@ -180,6 +293,18 @@ class GradeResult:
     lint_run: LintRun | None = None
     duration_s: float = 0.0
     extra: Mapping[str, Any] = field(default_factory=dict)
+    #: The posture stamp (ADR-0019): where this grade ran and which qualification it
+    #: subtracted. Empty only on a result built by hand (a test, an import).
+    posture_id: str = ""
+    posture_class: str = ""
+    qualification_id: str = ""
+    #: The witness that makes a blamed verdict true (:data:`BLAME_CONTROLS`), or
+    #: :data:`BLAME_UNWITNESSED`; empty when nothing is blamed.
+    blame_control: str = ""
+    #: The control run behind ``blame_control`` (or behind an environment error).
+    control: ControlRun | None = None
+    #: Why an ``environment:`` error was recorded (``GOLD_CONTROL_RED`` …); else empty.
+    env_code: str = ""
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -189,7 +314,32 @@ class GradeResult:
                 f"refusing to construct a clean grade for {self.task_id[:10]} with belts="
                 f"{self.belts.to_dict()} disqualified={self.disqualified} error={self.error!r}"
             )
+        if self.blame_control and self.blame_control not in (*BLAME_CONTROLS, BLAME_UNWITNESSED):
+            raise ValueError(
+                f"blame_control must be one of {(*BLAME_CONTROLS, BLAME_UNWITNESSED)}, "
+                f"got {self.blame_control!r}"
+            )
+        if self.blamed and not self.blame_control:
+            raise MisattributionViolation(
+                f"refusing to construct a grade for {self.task_id[:10]} that blames the builder "
+                f"(belts={self.belts.to_dict()}) without naming its witness"
+            )
         object.__setattr__(self, "extra", dict(self.extra))
+
+    @property
+    def blamed(self) -> bool:
+        """The verdict charges the builder's patch: not clean, not disqualified, no error,
+        and belt 2, 3, 4 or 5 evaluated ``False``."""
+        b = self.belts
+        return (
+            not self.clean
+            and not self.disqualified
+            and not self.error
+            and any(
+                v is False
+                for v in (b.target_green, b.no_new_failures, b.source_changed, b.repo_lint_clean)
+            )
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -211,6 +361,13 @@ class GradeResult:
             "lint_run": self.lint_run.to_dict() if self.lint_run else None,
             "duration_s": round(self.duration_s, 3),
             "extra": dict(self.extra),
+            # present iff set: a result without a posture hashes as it always did
+            **({"posture_id": self.posture_id} if self.posture_id else {}),
+            **({"posture_class": self.posture_class} if self.posture_class else {}),
+            **({"qualification_id": self.qualification_id} if self.qualification_id else {}),
+            **({"blame_control": self.blame_control} if self.blame_control else {}),
+            **({"control": self.control.to_dict()} if self.control is not None else {}),
+            **({"env_code": self.env_code} if self.env_code else {}),
         }
 
 
@@ -270,13 +427,43 @@ def _redacted(run: TestRun | None) -> TestRun | None:
         run.duration_s,
         run.parse_error,
         run.services,  # which service instance the oracle ran against (C15)
+        run.env_error,
     )
+
+
+def check_posture(task: TaskSpec, ctx: GradeContext, executor: Executor) -> None:
+    """Raise :class:`PostureMismatch` unless the spec, the context and the executor name
+    ONE posture and ONE qualification (ADR-0019 §4). Nothing runs before this holds."""
+    q = ctx.qualification
+    problems = []
+    if not task.posture_id or not task.qualification_ref:
+        problems.append("the spec was not projected from a qualification")
+    if task.posture_id != ctx.posture.posture_id:
+        problems.append(f"spec posture {task.posture_id or '-'} ≠ context {ctx.posture.posture_id}")
+    if q.posture_id != ctx.posture.posture_id:
+        problems.append(f"qualification posture {q.posture_id} ≠ context {ctx.posture.posture_id}")
+    if task.qualification_ref != q.qualification_id:
+        problems.append(
+            f"spec qualification {task.qualification_ref[:12] or '-'} ≠ context "
+            f"{q.qualification_id[:12]}"
+        )
+    if q.task_id != task.task_id:
+        problems.append(f"qualification is for {q.task_id[:10]}, not {task.task_id[:10]}")
+    if ctx.posture.executor != executor.name:
+        problems.append(f"context executor {ctx.posture.executor} ≠ {executor.name}")
+    if problems:
+        raise PostureMismatch(
+            f"posture mismatch for {task.task_id[:10]}: "
+            + "; ".join(problems)
+            + " — nothing was graded (qualify the task in this posture)"
+        )
 
 
 def grade(
     ws: Workspace,
     task: TaskSpec,
     *,
+    ctx: GradeContext,
     config: RepoConfig,
     runner: BaseRunner,
     executor: Executor,
@@ -286,7 +473,14 @@ def grade(
     evaluate_lint: bool = True,
 ) -> GradeResult:
     """Grade the trial worktree ``ws`` for ``task``. Never raises for a test failure;
-    raises :class:`SandboxUnavailable` (infrastructure) so the run can stop.
+    raises :class:`SandboxUnavailable` (infrastructure) so the run can stop — and
+    :class:`PostureMismatch` (one) before anything runs when ``task`` was not projected
+    from ``ctx``'s qualification or ``ctx`` names another executor (ADR-0019 §4).
+
+    ``ctx`` is required: belt 3 subtracts the qualification's baseline (the one measured
+    in this posture), every test run gets the task's dependency binding, and a verdict
+    that would blame the builder asks ``ctx.witness`` for a control first (§5) — a red
+    control turns it into ``error="environment: …"`` (the rule reads ``harness``).
 
     ``evaluate_lint=False`` leaves belt 5 *not evaluated* (``None``, recorded as such)
     whatever the repository configures. The negative controls use it: they measure
@@ -298,9 +492,58 @@ def grade(
     """
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}")
+    check_posture(task, ctx, executor)
     started = time.monotonic()
     belts = Belts()
-    kw: dict[str, Any] = {"task_id": task.task_id, "repo": task.repo, "mode": mode}
+    kw: dict[str, Any] = {
+        "task_id": task.task_id,
+        "repo": task.repo,
+        "mode": mode,
+        "posture_id": ctx.posture.posture_id,
+        "posture_class": ctx.posture.posture_class,
+        "qualification_id": ctx.qualification.qualification_id,
+    }
+    baseline = ctx.qualification.baseline  # the in-posture union, never the discovery set
+
+    def environment(run: TestRun, **changes: Any) -> GradeResult:
+        """The test run could not be given its ground: an environment failure, never a
+        verdict about the patch."""
+        _emit(on_event, "grade.environment", task=task.task_id, env_error=run.env_error)
+        return done(
+            error=redact_and_cap(f"{ENVIRONMENT_PREFIX} {run.env_error}", max_chars=2000),
+            env_code=ENV_CODE_TEST_RUN,
+            **changes,
+        )
+
+    def witness(
+        scope: Sequence[str], *, why: str, allow_failing: Collection[str] | None
+    ) -> dict[str, Any]:
+        """Ask the context's witness for a control; the fields the result carries."""
+        if ctx.witness is None:
+            return {"blame_control": BLAME_UNWITNESSED}
+        run = ctx.witness.control(scope, why=why, allow_failing=allow_failing)
+        _emit(
+            on_event,
+            "grade.control",
+            task=task.task_id,
+            kind=run.kind,
+            why=why,
+            green=run.green,
+            rc=run.rc,
+            duration_s=round(run.duration_s, 3),
+        )
+        if run.green:
+            return {"blame_control": run.kind, "control": run}
+        tail = redact_and_cap(run.tail or run.parse_error, max_chars=600)
+        return {
+            "error": redact_and_cap(
+                f"{ENVIRONMENT_PREFIX} gold control red in {ctx.posture.posture_id}: {why}: {tail}",
+                max_chars=2000,
+            ),
+            "env_code": ENV_CODE_GOLD_CONTROL_RED,
+            "control": run,
+            "extra": {"control": run.to_dict()},
+        }
 
     def done(**changes: Any) -> GradeResult:
         merged: dict[str, Any] = {
@@ -431,10 +674,34 @@ def grade(
                 tamper_files=tuple(infra[:50]),
             )
 
+        # --- belt 1b in a provisioned posture: the trial's own manifests select no
+        #     dependency outside the task's closure (ADR-0019 §6). A trial that moved the
+        #     oracle's ground is disqualified — never credited, never charged. ----------
+        try:
+            binding: DepsBinding = ctx.deps.for_tree(ws.root)
+        except ClosureViolation as cv:
+            _emit(on_event, "grade.tamper", task=task.task_id, kind="closure", detail=cv.detail)
+            belts = Belts(tests_unmodified=False)
+            return done(disqualified=True, dq_reason=f"dependency closure: {cv.detail}"[:500])
+
+        # --- the builder's changes as they stood BEFORE the first test ran: belts 4 and
+        #     5 and the diff read these, so a file a test writes is never the builder's
+        #     (ADR-0019 §7; the 2026-09-25 finding D5). -------------------------------
+        changed = [f for f in touched_pre if f not in task.test_files and not config.is_test(f)]
+        diff = ws.diff_stats(exclude=task.test_files)
+
         # --- belt 2: target green -------------------------------------------------
         target_run = runner.run_for(
-            executor, ws.root, task.target_tests, timeout=timeout, authored=task.authored
+            executor,
+            ws.root,
+            task.target_tests,
+            timeout=timeout,
+            authored=task.authored,
+            deps=binding,
         )
+        if target_run.env_error:
+            belts = Belts(tests_unmodified=True)
+            return environment(target_run, target_run=target_run)
         belts = Belts(tests_unmodified=True, target_green=target_run.green)
         _emit(
             on_event,
@@ -451,12 +718,26 @@ def grade(
                 if target_run.timed_out
                 else f"target not green (rc={target_run.returncode})"
             )
-            return done(target_run=target_run, note=note)
+            return done(
+                target_run=target_run,
+                note=note,
+                diff=diff,
+                changed_files=tuple(changed[:200]),
+                **witness(task.target_tests, why="belt 2: target not green", allow_failing=None),
+            )
 
-        # --- belt 3: no new failures vs baseline ----------------------------------
+        # --- belt 3: no new failures vs the IN-POSTURE baseline ---------------------
         belt_run = runner.run_for(
-            executor, ws.root, task.belt_scope, timeout=timeout, authored=task.authored
+            executor,
+            ws.root,
+            task.belt_scope,
+            timeout=timeout,
+            authored=task.authored,
+            deps=binding,
         )
+        if belt_run.env_error:
+            belts = Belts(tests_unmodified=True, target_green=True)
+            return environment(belt_run, target_run=target_run, belt_run=belt_run)
         if belt_run.timed_out or belt_run.parse_error:
             no_new = False
             new: set[str] = set()
@@ -466,7 +747,7 @@ def grade(
                 else f"belt run unattributed: {belt_run.parse_error}"
             )
         else:
-            new = set(belt_run.failing) - set(task.baseline_failing)
+            new = set(belt_run.failing) - baseline
             no_new = not new
             note = "" if no_new else f"{len(new)} new failure(s)"
         belts = Belts(tests_unmodified=True, target_green=True, no_new_failures=no_new)
@@ -479,9 +760,7 @@ def grade(
             new=sorted(new)[:20],
         )
 
-        # --- belt 4: source actually changed --------------------------------------
-        touched = ws.touched_files()
-        changed = [f for f in touched if f not in task.test_files and not config.is_test(f)]
+        # --- belt 4: source actually changed (read before the first run) ------------
         source_changed = bool(changed)
         belts = Belts(
             tests_unmodified=True,
@@ -528,19 +807,36 @@ def grade(
             repo_lint_clean=lint_run.ok if lint_run is not None else None,
         )
 
-        diff = ws.diff_stats(exclude=task.test_files)
         clean = belts.all_true and not lint_error
-        return done(
-            clean=clean,
-            note=note,
-            error=lint_error,
-            new_failures=tuple(sorted(new)[:50]),
-            changed_files=tuple(changed[:200]),
-            diff=diff,
-            target_run=target_run,
-            belt_run=belt_run,
-            lint_run=lint_run,
-        )
+        blame: dict[str, Any] = {}
+        if not clean and not lint_error:
+            if no_new is False:
+                blame = witness(task.belt_scope, why="belt 3: new failures", allow_failing=baseline)
+            elif source_changed is False:
+                blame = {"blame_control": BLAME_NO_SOURCE}
+            elif belts.repo_lint_clean is False:
+                if ctx.qualification.gold.get("lint") is False:
+                    # a qualified gold never fails belt 5; a context that says it did cannot
+                    # make the builder's lint rejection a witnessed one
+                    blame = {
+                        "error": f"{ENVIRONMENT_PREFIX} the gold failed belt 5 at qualification",
+                        "env_code": ENV_CODE_GOLD_LINT,
+                    }
+                else:
+                    blame = {"blame_control": BLAME_LINT_GOLD_OK}
+        final: dict[str, Any] = {
+            "clean": clean,
+            "note": note,
+            "error": lint_error,
+            "new_failures": tuple(sorted(new)[:50]),
+            "changed_files": tuple(changed[:200]),
+            "diff": diff,
+            "target_run": target_run,
+            "belt_run": belt_run,
+            "lint_run": lint_run,
+        }
+        final.update(blame)
+        return done(**final)
     except SandboxUnavailable:
         raise
     except Exception as exc:  # every harness error is a recorded non-pass

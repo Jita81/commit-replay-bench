@@ -31,7 +31,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from crb.core.grade import Belts, GradeResult
+from crb.core.grade import Belts
 from crb.core.ledger import GENESIS_HASH, LedgerIntegrityError
 from crb.core.review import (
     REFUSAL_NO_DIFF_IN_PACK,
@@ -46,6 +46,7 @@ from crb.core.review import (
 from crb.core.workspace import DiffStats
 from crb.store.db import init_db
 from crb.store.ledger import DbLedger, DbReviewLedger
+from fixtures.posture import posture_result
 
 try:
     from tests.conftest_store import Backend, backend, evidence_pack, grade_row, pg_schema
@@ -80,7 +81,7 @@ def _graded(store: tuple[DbLedger, DbReviewLedger]) -> tuple[str, str, str]:
     """
     ledger, _ = store
     diff_sha = "d" * 64
-    result = GradeResult(
+    result = posture_result(
         "x" * 40,
         "r",
         "sighted",
@@ -177,7 +178,7 @@ def test_append_anchors_to_the_reviewed_rows_pack_never_the_records(
     through the row now, and a record whose pack field is not the row's is refused."""
     ledger, reviews = store
     a_row, a_pack, a_diff = _graded(store)
-    b_result = GradeResult(
+    b_result = posture_result(
         "y" * 40,
         "r",
         "sighted",
@@ -215,7 +216,7 @@ def test_an_explicit_pack_is_only_a_self_certifying_copy_of_the_rows(
     hash recomputes to the row's ``evidence_pack_hash``) — a forged body, or another
     pack, is refused even when the row's own pack is not stored."""
     ledger, reviews = store
-    result = GradeResult(
+    result = posture_result(
         "x" * 40,
         "r",
         "sighted",

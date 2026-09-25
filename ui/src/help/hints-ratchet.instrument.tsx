@@ -54,6 +54,22 @@ export interface InstrumentScreen {
 
 // ─── shared fixtures ─────────────────────────────────────────────────────────────────────
 
+/** ADR-0019 — the Posture panel's reading: one task qualified, one refused with its fix. */
+const REPO_POSTURE = {
+  repo: 'alpha',
+  executor: 'docker',
+  image_ref: 'crb-sandbox-go:main',
+  posture_id: 'pst_' + '1'.repeat(24),
+  posture_class: 'docker/readonly/sealed',
+  posture: { toolchain: 'go version go1.26.8 linux/arm64' },
+  provisioning: { enabled: false },
+  qualified: 1,
+  total: 2,
+  refusals_by_code: [{ code: 'QUAL_ENV_UNLOADABLE', n: 1, message: '', fix: 'the parent cannot load its dependencies offline: switch provisioning on, or fix the module named', doc: 'docs/OPERATOR.md#7a-when-a-posture-is-unqualified' }],
+  delta: [],
+  stale_reason: '',
+}
+
 const REPO = {
   name: 'alpha',
   language: 'python',
@@ -467,7 +483,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     route: '/repos/alpha',
     path: '/repos/:name',
     element: <RepoDetail />,
-    api: { 'GET /repos/alpha': REPO, 'GET /repos/alpha/profile': PROFILE, 'GET /repos/alpha/tasks': TASKS, 'GET /repos/alpha/events': REPO_EVENTS, 'GET /health': HEALTH, 'GET /repos': REPOS },
+    api: { 'GET /repos/alpha': REPO, 'GET /repos/alpha/profile': PROFILE, 'GET /repos/alpha/tasks': TASKS, 'GET /repos/alpha/events': REPO_EVENTS, 'GET /repos/alpha/posture': REPO_POSTURE, 'GET /health': HEALTH, 'GET /repos': REPOS },
     roles: ['viewer', 'operator'],
   },
   '/runs': {

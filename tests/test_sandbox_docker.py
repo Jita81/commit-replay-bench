@@ -68,12 +68,12 @@ import pytest
 
 from crb.core.execution import Command, DockerExecutor, DockerSettings, UnconfirmedKill
 from crb.core.git import GitRepo
-from crb.core.grade import grade
 from crb.core.mine import Candidate, qualify
 from crb.core.runners import get_runner
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
+from fixtures.posture import grade_adhoc as grade
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs

@@ -59,6 +59,7 @@ from fixtures.oracle_repo import (
     make_task,
     make_task_unchecked,
 )
+from fixtures.posture import posture_result
 
 
 # --- fixtures -------------------------------------------------------------------------------
@@ -381,7 +382,7 @@ def test_tamper_guard_rehashes_the_oracle(fixture_repo, fix_task, scratch):
 def _gr(**kw) -> GradeResult:
     base = {"task_id": "a" * 40, "repo": "r", "mode": "sighted", "clean": False, "belts": Belts()}
     base.update(kw)
-    return GradeResult(**base)
+    return posture_result(**base)
 
 
 def test_observe_projection_fails_closed():
@@ -599,3 +600,32 @@ def test_caught_and_escape_notes_name_the_belt_and_the_meaning(control_matrix):
     assert nc._caught_note(nc.OBS_RED, guard, dq).startswith("caught by belt 2")
     assert nc.CONTROLS_VERSION == "controls.v2"
     assert nc.TRANSFORM_LANGUAGES == (Language.PYTHON, Language.GO, Language.JAVASCRIPT)
+
+
+def test_controls_grade_unwitnessed_and_write_no_row(
+    fixture_repo, fix_task, harness, scratch
+) -> None:
+    """ADR-0019: a control's verdict is never a row that blames a model. The controls grade
+    UNWITNESSED even when handed a context that carries a witness, and write no GradeRow."""
+    from fixtures.posture import context
+
+    class _Loud:
+        def control(self, *a, **k):  # pragma: no cover — must never be asked
+            raise AssertionError("a control asked for a witness")
+
+    _, ctx = context(fix_task, harness["executor"], witness=_Loud())
+    rows = nc.controls_for_task(
+        fixture_repo.git,
+        fix_task,
+        scratch=scratch,
+        controls=(nc.GOLD, nc.NOOP),
+        context=ctx,
+        **harness,
+    )
+    by = {r.control: r for r in rows}
+    assert by[nc.GOLD].grade is not None and by[nc.GOLD].grade.clean
+    noop = by[nc.NOOP].grade
+    assert noop is not None and noop.belts.target_green is False
+    assert noop.blame_control == "unwitnessed" and noop.control is None
+    assert noop.qualification_id == ctx.qualification.qualification_id  # the in-posture record
+    assert not hasattr(nc, "GradeRow") and all(not hasattr(r, "row_hash") for r in rows)

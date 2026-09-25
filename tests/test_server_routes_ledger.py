@@ -153,7 +153,7 @@ class TestExport:
         assert len(body) == 50
         first = dict(zip(header, body[0], strict=True))
         assert first["clean"] == "true" and first["source_changed"] == "true"
-        assert json.loads(first["labels"]) == {"rung": "r1"}
+        assert json.loads(first["labels"])["rung"] == "r1"
         legacy = [
             dict(zip(header, b, strict=True))
             for b in body
@@ -288,6 +288,7 @@ class TestImport:
                 "repo": "delta",
                 "row_id": "delta-v5",
                 "clean": False,
+                "apparatus_version": "2.2",  # the first belt-5 apparatus (no posture yet)
                 "belt_set": "v5",
                 "repo_lint_clean": False,
                 "evidence_pack_hash": "b" * 64,

@@ -44,6 +44,7 @@ from crb.store.models import (
     Review,
     Run,
     Signoff,
+    TaskQualification,
 )
 
 try:
@@ -98,6 +99,16 @@ def _one_row(table: str) -> object:
             prev_hash=GENESIS_HASH,
             row_hash="b" * 64,
         )
+    if table == "task_qualifications":
+        return TaskQualification(
+            qualification_id="q" * 32,
+            repo="r",
+            task_id="x" * 40,
+            posture_id="pst_" + "1" * 24,
+            state="qualified",
+            body_json={"state": "qualified"},
+            created="2026-09-25T12:00:00+00:00",
+        )
     raise AssertionError(table)
 
 
@@ -108,6 +119,7 @@ def _pk(table: str) -> str:
         "signoffs": "seq",
         "evidence": "pack_hash",
         "reviews": "seq",
+        "task_qualifications": "seq",
     }[table]
 
 
