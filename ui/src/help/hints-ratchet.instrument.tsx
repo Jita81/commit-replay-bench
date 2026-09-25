@@ -33,6 +33,7 @@ import { CapabilityPage } from '../screens/Capability/CapabilityPage'
 import { FactoryPage } from '../screens/Factory/FactoryPage'
 import { IntakePage } from '../screens/Factory/IntakePage'
 import { LearnPage } from '../screens/Learn/LearnPage'
+import { REGISTER } from '../screens/Learn/register.fixture'
 import { LedgerPage } from '../screens/Ledger/LedgerPage'
 import { OraclePage } from '../screens/Oracle/OraclePage'
 import { PosturePage } from '../screens/Posture/PosturePage'
@@ -509,8 +510,9 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     route: '/learn?repo=alpha',
     path: '/learn',
     element: <LearnPage />,
-    api: { 'GET /learn/refusals': REFUSALS, 'GET /learn/strengthen': STRENGTHEN, 'GET /learn/remeasure': REMEASURE, 'GET /repos': REPOS },
-    roles: ['viewer'],
+    api: { 'GET /learn/register': REGISTER, 'GET /learn/refusals': REFUSALS, 'GET /learn/strengthen': STRENGTHEN, 'GET /learn/remeasure': REMEASURE, 'GET /repos': REPOS },
+    // a viewer sees the register and no control; an operator gets the switch, revert and register
+    roles: ['viewer', 'operator'],
   },
   '/ledger': {
     route: '/ledger?repo=alpha',
