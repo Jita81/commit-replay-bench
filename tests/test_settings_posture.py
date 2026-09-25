@@ -236,3 +236,117 @@ class TestDocuments:
         deployment = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
         assert ALLOW_UNSEALED_PROD_ENV in deployment
         assert (ROOT / "docs" / "adr" / "0023-production-refuses-the-unsealed-posture.md").exists()
+
+
+class TestFactoryBuilds:
+    """A factory build runs the builder on a host worktree, never in a container, so the
+    posture must say what happens to a factory run: refused on a sealed prod posture, run on
+    the host (and stamped) under the override, run on the host in dev."""
+
+    def test_a_sealed_prod_posture_says_factory_runs_are_refused(self) -> None:
+        assert prod().posture()["factory_builds"] == "refused"
+
+    def test_the_override_lets_factory_builds_run_on_the_host_and_says_so(self) -> None:
+        assert prod(allow_unsealed_prod=True).posture()["factory_builds"] == "host"
+        unsealed = prod(builder={"executor": "host"}, allow_unsealed_prod=True)
+        assert unsealed.posture()["factory_builds"] == "host"
+
+    def test_dev_builds_factory_items_on_the_host(self) -> None:
+        assert Settings(env="dev", home=Path("/srv/crb")).posture()["factory_builds"] == "host"
+
+    def test_health_serves_the_factory_posture(self, tmp_path: Path) -> None:
+        engine = make_engine(f"sqlite:///{tmp_path / 'crb.db'}")
+        init_db(engine)
+        body = collect_health(make_session_factory(engine), prod(), role="api")
+        assert body["posture"]["factory_builds"] == "refused"
+
+    def test_the_worker_knows_its_env(self, tmp_path: Path) -> None:
+        args = worker_main.build_parser().parse_args(["--once"])
+        home = str(tmp_path / "h")
+        assert worker_main.settings_from_args(args, {"CRB_HOME": home}).env == "prod"
+        dev = worker_main.settings_from_args(args, {"CRB_HOME": home, "CRB_ENV": "dev"})
+        assert dev.env == "dev"
+
+
+CHART = ROOT / "deploy" / "helm" / "crb"
+
+
+def _rendered_env(docs: list[dict[str, Any]], component: str) -> dict[str, str]:
+    """The environment a component's container starts with: the ConfigMap it loads through
+    ``envFrom``, then its own ``env`` list on top (the order Kubernetes applies)."""
+    maps = {d["metadata"]["name"]: d.get("data") or {} for d in docs if d["kind"] == "ConfigMap"}
+    dep = next(
+        d
+        for d in docs
+        if d["kind"] == "Deployment"
+        and d["metadata"]["labels"].get("app.kubernetes.io/component") == component
+    )
+    (container,) = [
+        c for c in dep["spec"]["template"]["spec"]["containers"] if c["name"] == component
+    ]
+    env: dict[str, str] = {}
+    for src in container.get("envFrom") or []:
+        ref = src.get("configMapRef")
+        if ref:
+            env.update({k: str(v) for k, v in maps[ref["name"]].items()})
+    for item in container.get("env") or []:
+        if "value" in item:
+            env[item["name"]] = str(item["value"])
+    return env
+
+
+def _helm_render(*sets: str) -> list[dict[str, Any]]:
+    import shutil
+    import subprocess
+
+    import yaml
+
+    helm = shutil.which("helm")
+    assert helm is not None
+    args = [
+        helm,
+        "template",
+        "crb",
+        str(CHART),
+        "--set",
+        "networkPolicy.postgres.cidrs={10.0.0.0/8}",
+    ]
+    for s in sets:
+        args += ["--set-string" if s.startswith("config.") else "--set", s]
+    out = subprocess.run(args, capture_output=True, text=True, timeout=120, check=False)
+    assert out.returncode == 0, out.stderr
+    return [d for d in yaml.safe_load_all(out.stdout) if d]
+
+
+@pytest.mark.skipif(__import__("shutil").which("helm") is None, reason="helm not on PATH")
+class TestHelmOneBuilderPosture:
+    """The API serves the posture on /health; the worker runs the builds. If the chart gives
+    them different builder executors, /health says "sealed" while every build runs on the
+    host (the 2026-09-21 drift ADR-0023 names). One value, read by both processes."""
+
+    @pytest.mark.parametrize(
+        "sets",
+        [
+            (),
+            ("worker.builder.executor=host", f"config.{ALLOW_UNSEALED_PROD_ENV}=1"),
+        ],
+        ids=["default", "host-under-the-override"],
+    )
+    def test_the_api_and_the_worker_resolve_the_same_builder_executor(
+        self, sets: tuple[str, ...], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        docs = _helm_render(*sets)
+        api, worker = _rendered_env(docs, "api"), _rendered_env(docs, "worker")
+        assert api.get("CRB_BUILDER__EXECUTOR") == worker.get("CRB_BUILDER__EXECUTOR")
+        # and resolved the way each process resolves it
+        worker_env = {**worker, "CRB_HOME": str(tmp_path / "w")}
+        resolved_worker = worker_main.settings_from_args(
+            worker_main.build_parser().parse_args(["--once"]), worker_env
+        ).builder_executor
+        for k, v in api.items():
+            if k.startswith("CRB_") and k != "CRB_HOME":
+                monkeypatch.setenv(k, v)
+        posture = Settings(home=Path("/srv/crb"), secret_key=KEY).posture()
+        assert posture["builder_executor"] == resolved_worker
+        if sets:
+            assert posture["sealed"] is False and posture["unsealed_prod_override"] is True

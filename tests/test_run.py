@@ -33,6 +33,7 @@ Touch when:   a new integrity violation is added to the workspace (mirror the ca
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 from typing import Any
@@ -264,3 +265,139 @@ def test_no_worktree_destination_is_built_from_a_commit_sha() -> None:
             if rel.startswith("src/crb/builders/") and "short_id" in line:
                 offenders.append(f"{rel}:{n}: {line.strip()}")
     assert offenders == [], "worktree names built from a commit sha:\n" + "\n".join(offenders)
+
+
+# --- the structural ratchet: every replay-side worktree is named by ``opaque_dest`` ----------
+
+#: Files that may create a worktree whose name is not drawn by ``opaque_dest``, each with why.
+_DEST_EXEMPT: dict[str, str] = {
+    "src/crb/core/workspace.py": "the constructors themselves: ``dest`` is their caller's",
+    "src/crb/core/git.py": "``worktree_add`` itself",
+    "src/crb/cli/commands/grade.py": "``crb prep --dest``: the operator names the directory",
+    **dict.fromkeys(
+        _FORWARD_MODE, "forward mode: the harness's own oracle commit, never a held-out answer"
+    ),
+}
+
+
+def _dest_arg(call: ast.Call) -> ast.expr | None:
+    """The destination a worktree-creating call is handed, or ``None`` when ``call`` creates
+    no worktree: ``Workspace.create(repo, sha, dest)`` / ``Workspace.at_ref(repo, ref, dest)``
+    and ``<repo>.worktree_add(dest, ref)``, positional or ``dest=``."""
+    f = call.func
+    if not isinstance(f, ast.Attribute):
+        return None
+    if (
+        f.attr in ("create", "at_ref")
+        and isinstance(f.value, ast.Name)
+        and f.value.id == "Workspace"
+    ):
+        pos = 2
+    elif f.attr == "worktree_add":
+        pos = 0
+    else:
+        return None
+    for kw in call.keywords:
+        if kw.arg == "dest":
+            return kw.value
+    return call.args[pos] if len(call.args) > pos else None
+
+
+def _is_opaque(expr: ast.expr) -> bool:
+    return (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Name)
+        and expr.func.id == "opaque_dest"
+    )
+
+
+def worktree_dest_offenders(source: str, rel: str) -> list[str]:
+    """Every worktree-creating call in ``source`` whose destination is not drawn by
+    ``opaque_dest`` — directly, or through a name EVERY assignment of which (in the same
+    function) is an ``opaque_dest(...)`` call. Structural, so no spelling of the path
+    (``/``, ``Path(a, b)``, ``joinpath``, a name built on another line) gets past it."""
+    tree = ast.parse(source)
+    scopes: list[ast.AST] = [tree] + [
+        n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    offenders: list[str] = []
+    for scope in scopes:
+        # the scope's own statements, not a nested function's (that is its own scope)
+        own: list[ast.AST] = []
+        stack = list(ast.iter_child_nodes(scope))
+        while stack:
+            n = stack.pop()
+            own.append(n)
+            if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                stack.extend(ast.iter_child_nodes(n))
+        assigned: dict[str, list[ast.expr | None]] = {}
+        for n in own:
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    if isinstance(t, ast.Name):
+                        assigned.setdefault(t.id, []).append(n.value)
+            elif isinstance(n, (ast.AnnAssign, ast.AugAssign)) and isinstance(n.target, ast.Name):
+                assigned.setdefault(n.target.id, []).append(n.value)
+            elif isinstance(n, (ast.For, ast.With, ast.NamedExpr)):
+                target = n.target if isinstance(n, (ast.For, ast.NamedExpr)) else None
+                if isinstance(target, ast.Name):
+                    assigned.setdefault(target.id, []).append(None)
+        for n in own:
+            if not isinstance(n, ast.Call):
+                continue
+            dest = _dest_arg(n)
+            if dest is None:
+                continue
+            ok = _is_opaque(dest) or (
+                isinstance(dest, ast.Name)
+                and bool(assigned.get(dest.id))
+                and all(v is not None and _is_opaque(v) for v in assigned[dest.id])
+            )
+            if not ok:
+                offenders.append(f"{rel}:{n.lineno}: {ast.unparse(n)[:120]}")
+    return offenders
+
+
+def test_every_replay_side_worktree_is_named_by_opaque_dest() -> None:
+    """The class, structurally: a new run kind that creates a worktree anywhere in ``crb``
+    without ``opaque_dest`` fails here, however the path is spelled."""
+    root = Path(__file__).resolve().parents[1]
+    offenders: list[str] = []
+    for path in sorted((root / "src" / "crb").rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        if rel in _DEST_EXEMPT:
+            continue
+        offenders += worktree_dest_offenders(path.read_text(encoding="utf-8"), rel)
+    assert offenders == [], "worktrees not named by opaque_dest:\n" + "\n".join(offenders)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        'Workspace.create(repo, sha, Path(scratch, f"run-{task.short_id}"), config=c)',
+        'dest = scratch.joinpath(f"run-{sha[:10]}")\n    Workspace.create(repo, sha, dest)',
+        'name = f"run-{sha[:10]}"\n    dest = scratch / name\n    Workspace.create(repo, sha, dest)',
+        'dest = opaque_dest(scratch, "run")\n    dest = scratch / sha\n    Workspace.create(repo, sha, dest)',
+        'Workspace.at_ref(repo, ref, dest=scratch / "fixed", config=c)',
+        "repo.worktree_add(scratch / sha[:7], sha)",
+        "Workspace.create(repo, sha, undefined_here)",
+    ],
+    ids=["path-ctor", "joinpath", "two-lines", "reassigned", "at-ref-kw", "worktree-add", "param"],
+)
+def test_the_structural_ratchet_catches_every_spelling(body: str) -> None:
+    src = f"def f(repo, sha, scratch, task, c, ref, undefined_here=None):\n    {body}\n"
+    assert len(worktree_dest_offenders(src, "x.py")) == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        'Workspace.create(repo, sha, opaque_dest(scratch, "run"), config=c)',
+        'dest = opaque_dest(scratch, "mine", avoid=(sha,))\n    Workspace.create(repo, sha, dest)',
+        'SealedCheckout.create(ws, scratch / "x", test_files=())',
+    ],
+    ids=["inline", "named", "not-a-worktree-constructor"],
+)
+def test_the_structural_ratchet_admits_an_opaque_name(body: str) -> None:
+    src = f"def f(repo, sha, scratch, c, ws):\n    {body}\n"
+    assert worktree_dest_offenders(src, "x.py") == []

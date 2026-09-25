@@ -43,6 +43,7 @@ import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -61,6 +62,7 @@ from crb.server.routes.grades import (
     HDR_VERIFIED,
     build_retained_patch,
     retained_patch_text,
+    worktree_name,
     worktree_path,
 )
 from crb.store.ledger import DbLedger
@@ -350,6 +352,32 @@ class TestRetainedPatch:
         assert worktree_path(scratch, "run-0123456789ab") == scratch / "run-0123456789ab"
         for bad in ("", "../../etc", "run-0123456789ab/..", "run-pyrepo-6dbaf3a727-x-r1"):
             assert worktree_path(scratch, bad) is None, bad
+
+    def test_the_latest_prep_start_of_a_trial_names_its_worktree(self, env: Env) -> None:
+        """A reclaimed run re-runs its in-flight task: a second ``prep.start`` for the same
+        trial names a new opaque worktree. The row was written by the LATER attempt, so the
+        later event must win; the crashed attempt's worktree is stale."""
+        run_id, task_id = "7e" * 16, "d" * 40
+        stale, live = "run-" + "a" * 12, "run-" + "b" * 12
+        with env.factory() as s:
+            for seq, name in ((1, stale), (2, live)):
+                s.add(
+                    Event(
+                        event_id=f"{seq:032d}",
+                        trace_id=run_id,
+                        seq=seq,
+                        timestamp=f"2026-09-25T10:0{seq}:00+00:00",
+                        stage="build",
+                        action="prep.start",
+                        status="in_progress",
+                        task_id=task_id,
+                        payload_json={"trial": "r1", "rung": "r1", "worktree": name},
+                    )
+                )
+            s.commit()
+        row = SimpleNamespace(run_id=run_id, task_id=task_id, trial="r1")
+        with env.factory() as s:
+            assert worktree_name(s, row) == live  # type: ignore[arg-type]
 
     def test_not_retained_worktree_reason(self, env: Env, tmp_path: Path) -> None:
         r = Retained(env, tmp_path)

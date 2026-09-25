@@ -1768,3 +1768,56 @@ def test_a_prod_worker_refuses_a_run_that_asks_for_the_local_executor(h: Harness
     assert done.status == STATUS_FAILED
     assert done.error.startswith("sandbox unavailable") and "CRB_ALLOW_UNSEALED_PROD" in done.error
     assert list(h.worker.ledger.rows(run_id=run.id)) == [] and FakeBuilder.briefs == []
+
+
+def _sealed_sandbox_stand_in(h: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The test executor a sealed prod worker would use, stood in by a local one: the subject
+    here is where the factory's BUILDER runs, not where the tests run."""
+    monkeypatch.setattr(h.worker, "_executor", lambda ctx: LocalExecutor())
+
+
+def test_a_prod_worker_refuses_a_factory_run_because_factory_builds_run_on_the_host(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A factory build is handed a host worktree and never a container (``_run_factory``
+    passes none to the builder), so a sealed prod posture must not run one: /health says
+    "sealed", and a factory run on the host would make that untrue (ADR-0023)."""
+    _multiply_backlog(h)
+    FakeBuilder.briefs = []
+    _sealed_sandbox_stand_in(h, monkeypatch)
+    h.worker.settings = replace(h.settings, refuse_unsealed=True, builder_executor="docker")
+    run = h.enqueue("factory", ladder_json=["fake:m0"])
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("sandbox unavailable"), done.error
+    assert "factory" in done.error and "CRB_ALLOW_UNSEALED_PROD" in done.error
+    assert list(h.worker.ledger.rows(run_id=run.id)) == [] and FakeBuilder.briefs == []
+
+
+def test_a_prod_worker_under_the_override_stamps_every_factory_run(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the override, a factory run may build on the host, and its apparatus says so —
+    even on a worker whose replay posture is sealed and so carries no override of its own."""
+    _multiply_backlog(h)
+    _sealed_sandbox_stand_in(h, monkeypatch)
+    h.worker.settings = replace(
+        h.settings, env="prod", executor="docker", builder_executor="docker", unsealed_override={}
+    )
+    h.enqueue("factory", ladder_json=["fake:m0"])
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    stamp = done.apparatus_json["unsealed_prod_override"]
+    assert stamp["builder_executor"] == "host" and stamp["run_kind"] == "factory"
+    assert stamp["override"] == "CRB_ALLOW_UNSEALED_PROD" and stamp["adr"] == "0023"
+
+
+def test_a_dev_worker_stamps_no_override_on_a_factory_run(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _multiply_backlog(h)
+    _sealed_sandbox_stand_in(h, monkeypatch)
+    h.enqueue("factory", ladder_json=["fake:m0"])
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert "unsealed_prod_override" not in done.apparatus_json
