@@ -62,6 +62,7 @@ from crb.core.git import CloneUrlError, validate_clone_url
 from crb.core.grade import MODES
 from crb.core.ledger import CELL_FIELDS
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RUNNERS, SIZE_TIER_NAMES
+from crb.core.spend import BUDGET_PROFILES, ESCALATION_POLICIES, validate_spend_config
 
 PAGE_DEFAULT = 50
 PAGE_MAX = 500
@@ -228,6 +229,15 @@ class _RepoConfigFields(BaseModel):
     runner_opts: dict[str, Any] | None = None
     sandbox_image: str | None = Field(default=None, max_length=512)
     mining: dict[str, int] | None = None
+    #: The repository's spend switches (``RepoConfig.spend``, crb.core.spend):
+    #: ``{"budget_profile": "default"|"calibrated", "escalation": "measured"|"always"}``.
+    #: A run's own ``budget_profile`` / ``escalation`` wins.
+    spend: dict[str, str] | None = None
+
+    @field_validator("spend")
+    @classmethod
+    def _spend_known(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        return None if v is None else validate_spend_config(v)
 
     @field_validator("runner")
     @classmethod
@@ -584,6 +594,17 @@ class RunCreateRequest(BaseModel):
     #: ``{fix, repair_turns}``. OFF when absent. A run with it on is recorded as the
     #: builder ``<name>+preflight`` — a different arm, never pooled with plain rows.
     preflight: bool | PreflightIn | None = None
+    #: Build kinds: ``calibrated`` runs each attempt under caps taken from the ledger's own
+    #: clean completions in its cell (p90 × 1.5, never below the run's caps, never above
+    #: twice them, only with ≥ 8 clean rows; crb.core.spend). Changes what the builder is
+    #: given, so OFF (``default``) unless asked; recorded on every row (``budget_profile``,
+    #: ``budget_calibration``, ``budget_tier``). ``None`` = the repository's ``spend`` setting.
+    budget_profile: str | None = None
+    #: Build kinds: ``measured`` (the default) stops a task climbing to the next rung where
+    #: that rung's prior escalations in the cell yielded under 10% clean (with ≥ 10 of them);
+    #: ``always`` climbs every rung. The decision and the rule are on the row.
+    #: ``None`` = the repository's ``spend`` setting, else ``measured``.
+    escalation: str | None = None
     #: ``factory`` runs only: the frozen backlog this run is meant to work. When set it
     #: must equal the repo's ACTIVE backlog hash or the request is refused (409
     #: ``backlog_hash_mismatch``); the active hash is always stamped into
@@ -636,6 +657,20 @@ class RunCreateRequest(BaseModel):
                 )
         if len(json.dumps(v, ensure_ascii=False)) > BUILDER_CONFIG_MAX_BYTES:
             raise ValueError(f"builder_config exceeds {BUILDER_CONFIG_MAX_BYTES} bytes")
+        return v
+
+    @field_validator("budget_profile")
+    @classmethod
+    def _profile_known(cls, v: str | None) -> str | None:
+        if v is not None and v not in BUDGET_PROFILES:
+            raise ValueError(f"budget_profile must be one of {BUDGET_PROFILES}")
+        return v
+
+    @field_validator("escalation")
+    @classmethod
+    def _escalation_known(cls, v: str | None) -> str | None:
+        if v is not None and v not in ESCALATION_POLICIES:
+            raise ValueError(f"escalation must be one of {ESCALATION_POLICIES}")
         return v
 
     @field_validator("mode")

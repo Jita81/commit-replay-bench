@@ -28,7 +28,7 @@ Navigation
 What it is:   The ``/runs`` API — create, list, inspect, cancel a run; its per-task table;
               its stored and streamed StepEvents.
 What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_config, retain,
-              outage_stop, preflight) into a queued ``Run`` row; serves run views with
+              outage_stop, preflight, budget_profile, escalation) into a queued ``Run`` row; serves run views with
               counts re-derived from the ledger when the worker wrote none; streams events
               as SSE with resume-by-seq; cancellation is a flag the worker honours.
 How:          FastAPI handlers over ``JobQueue`` (queue writes) and read-only SQLAlchemy
@@ -576,6 +576,10 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["preflight"] = True
     elif isinstance(body.preflight, PreflightIn):
         params["preflight"] = body.preflight.model_dump()
+    if body.budget_profile is not None:
+        params["budget_profile"] = body.budget_profile
+    if body.escalation is not None:
+        params["escalation"] = body.escalation
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,

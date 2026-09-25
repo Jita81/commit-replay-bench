@@ -255,6 +255,16 @@ class TestUpdate:
             ]
         assert seqs == [1, 2]
 
+    def test_update_sets_the_spend_surface_and_refuses_an_unknown_value(self, env: Env) -> None:
+        """``spend`` is the per-repository switch the prevention loop writes (stream K)."""
+        r = env.put(f"/repos/{ALPHA}", json={"spend": {"escalation": "always"}})
+        assert r.status_code == 200, r.text
+        assert r.json()["config"]["spend"] == {"escalation": "always"}
+        r = env.put(f"/repos/{ALPHA}", json={"spend": {"budget_profile": "generous"}})
+        assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
+        r = env.put(f"/repos/{ALPHA}", json={"spend": {"max_turns": "50"}})
+        assert r.status_code == 422
+
     def test_update_invalid_422(self, env: Env) -> None:
         r = env.put(f"/repos/{ALPHA}", json={"runner": "cargo", "language": "python"})
         assert r.status_code == 200  # cargo is a known runner; config accepts it

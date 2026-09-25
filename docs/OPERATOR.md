@@ -570,8 +570,31 @@ excluded, not counted. A queued run shows its place in the line ("Queued — 3 r
 it"); if the health check's `worker` probe is not `ok`, no worker will take it — see §7.
 
 Every graded task produces an **evidence pack** (redacted; no raw diff, no transcript by
-default) and a **ledger row** that carries the pack's hash. A row cannot be `clean` without
-a pack.
+default), its **kept patch** (the builder's change, redacted, at most 1 MiB, under
+`CRB_HOME/evidence/patches/` — `GET /grades/{row_hash}/patch` serves it with no retained
+worktree; `CRB_RETENTION__PATCHES=false` keeps none) and a **ledger row** that carries the
+pack's hash. A row cannot be `clean` without a pack.
+
+#### 3.0.2 Spend: the calibrated budget and the measured escalation rule
+
+Two switches decide what a build run pays for (`crb.core.spend`). Each is set per run on
+`POST /runs` or per repository on `PUT /repos/{name}` as `spend: {…}`; the run wins, and
+the run's apparatus says which applied and why (`extra.spend.sources`).
+
+| switch | values | default | what it does |
+|---|---|---|---|
+| `escalation` | `measured` · `always` | `measured` | Before a failed attempt climbs to the next rung, look at that rung's earlier escalations in the cell (same builder and model; at least 10). If fewer than 1 in 10 of them came back clean, stop — the retry is not paid for. `always` climbs every rung, as before |
+| `budget_profile` | `default` · `calibrated` | `default` | `calibrated` gives each attempt the caps the ledger's own clean completions in its cell used (p90 × 1.5; at least 8 of them), never less than the run's caps and never more than twice them. It changes what the builder is given, so it stays off until a paired comparison shows it helps |
+
+Why: in the 2026-09-25 export, 40 escalated attempts (a same-model retry: a bare `r2` / `r3`
+rung is the run's own builder and model at the same budget, on a fresh worktree with the same
+brief) produced 2 clean patches for $20.70, against $1.35 per clean patch on a first blind
+attempt; and 47 attempts stopped at their budget cost $28.87 for no output `[measured
+2026-09-25; n = 322 valid of 618 rows, apparatus 2.0–2.2, builder claude_code /
+claude-sonnet-5; method: the product's failure rule over the export,
+scripts/spend_from_export.py]`. Every row a rule shaped says so: `labels.escalation` and
+`labels.escalation_rule` on the row that stopped or climbed, `labels.budget_profile`,
+`labels.budget_calibration` and `labels.budget_tier` on a calibrated attempt.
 
 ### 3.1 Oracle adequacy — mutation scoring
 

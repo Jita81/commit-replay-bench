@@ -143,6 +143,7 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               delivery and the pull-request read), src/crb/server/reaper.py (the durable
               queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
+              tests/test_worker_spend.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py
@@ -216,6 +217,7 @@ from crb.core.oracle.mutation import (
     aggregate_by_cell,
     score_task,
 )
+from crb.core.patches import PatchStore
 from crb.core.redact import redact_and_cap
 from crb.core.run import BuildAttempt, RunSpec, RunSummary
 from crb.core.run import run as core_run
@@ -253,6 +255,7 @@ from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_ha
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.settings import FactorySettings, GitHubAppSettings, IntakeSettings
+from crb.server.spend import SpendHooks, build_spend_hooks, pack_turns
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
@@ -341,6 +344,9 @@ def _reaper_docker() -> str:
 #: Row labels the worker stamps per rung (``_RunLedger``). Hashed like every label.
 LABEL_BUDGET_TIER = "budget_tier"
 LABEL_RUNG_INDEX = "rung_index"
+#: An attempt that ran under a calibrated budget carries this (crb.core.spend) — its own
+#: ``budget_tier`` is then the record, not the rung's declared one.
+LABEL_BUDGET_PROFILE = "budget_profile"
 
 
 def budget_tier(budget: Budget) -> str:
@@ -444,6 +450,9 @@ class WorkerSettings:
     stale_after_s: float = 120.0
     kinds: tuple[str, ...] = ()
     keep_worktrees: bool = False
+    #: Keep every graded attempt's patch, redacted and content-addressed, under
+    #: ``<home>/evidence/patches`` (crb.core.patches) — ``CRB_RETENTION__PATCHES``.
+    store_patches: bool = True
     max_reclaims: int = 3
     #: The worker's own Prometheus exposition (J-TEL-1): every build / grade / cost series
     #: is recorded in THIS process, so the API's ``/metrics`` never carries them. Served by
@@ -567,7 +576,11 @@ class _RunLedger:
         extra = self._trial_labels.get(row.trial)
         if not extra:
             return row
-        return GradeRow(**{**row.fields(), "labels": {**row.labels, **extra}})
+        labels = {**row.labels, **extra}
+        if LABEL_BUDGET_PROFILE in row.labels and LABEL_BUDGET_TIER in row.labels:
+            # a calibrated attempt ran under its own caps: its tier is the record
+            labels[LABEL_BUDGET_TIER] = row.labels[LABEL_BUDGET_TIER]
+        return GradeRow(**{**row.fields(), "labels": labels})
 
     def _pack_body(self, pack_hash: str) -> dict[str, Any] | None:
         try:
@@ -1777,6 +1790,34 @@ class Worker:
                 raise ValueError(f"rung {i} ({rung.label}) has an invalid budget: {exc}") from exc
         return ladder
 
+    def _spend_hooks(self, ctx: RunContext, ladder: EscalationLadder, *, mode: str) -> SpendHooks:
+        """The spend rules bound to this run from the ledger as it stands now (prior rows
+        only): the escalation gate and, when the run or the repository asks for
+        ``budget_profile: calibrated``, the per-attempt budget (crb.server.spend). A ledger
+        that cannot be read (a tampered row the core refuses to construct) measures
+        nothing: the rules then see no history — the ladder climbs as before and a
+        calibrated attempt keeps its floor — and the trace says why."""
+        try:
+            rows = list(self.ledger.rows())
+        except Exception as exc:  # the rules are advisory spend, never a reason to fail a run
+            rows = []
+            ctx.emit(
+                "system",
+                "run.spend_history_unreadable",
+                status=StepStatus.ERROR,
+                error=f"{type(exc).__name__}: {exc}"[:300],
+            )
+        return build_spend_hooks(
+            rows=rows,
+            repo=ctx.run.repo,
+            mode=mode,
+            ladder=ladder,
+            params=ctx.params,
+            repo_spend=dict(ctx.config.spend),
+            tier_fn=budget_tier,
+            turns_for=lambda hashes: pack_turns(self.factory, hashes),
+        )
+
     @staticmethod
     def _budget(ctx: RunContext) -> Budget:
         """The run-level budget: the builder's defaults overlaid with ``params.budget``."""
@@ -1805,6 +1846,7 @@ class Worker:
         # belt-5 pre-flight (adapter.Preflight): OFF unless the run asks; a run with it on is
         # a different arm (builder '<name>+preflight') and the apparatus stamp says so
         preflight = Preflight.from_params(p.get("preflight"))
+        spend = self._spend_hooks(ctx, ladder, mode=mode)
         spec = RunSpec(
             run_id=run.id,
             config=ctx.config,
@@ -1831,6 +1873,7 @@ class Worker:
                     if preflight is not None
                     else {}
                 ),
+                "spend": spend.apparatus(),
                 # one entry per rung, in order: what climbed, under which tier
                 "ladder": [
                     {
@@ -1842,6 +1885,10 @@ class Worker:
                     for i, r in enumerate(ladder)
                 ],
             },
+            patch_store=PatchStore.under(self.evidence_dir)
+            if self.settings.store_patches
+            else None,
+            escalation_gate=spend.escalation_gate,
         )
         self.queue.set_apparatus(run.id, spec.apparatus().to_dict(), worker_id=self.worker_id)
         build_fn = build_fn_for(
@@ -1861,6 +1908,7 @@ class Worker:
             container=container_settings_from_env(),  # CRB_BUILDER__EXECUTOR=docker (ADR-0012)
             preflight=preflight,
             on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
+            budget_for_task=spend.budget_for_task,
         )
         self._progress(ctx, 0, total)
 
@@ -2147,6 +2195,7 @@ class Worker:
             timeout=ctx.timeout,
             max_rework=int(p.get("max_rework", 1)),
             keep_workspaces=bool(retain.get("worktrees", False)),
+            keep_patches=self.settings.store_patches,
         )
         loop = FactoryLoop(spec, ctx.git, emitter=ctx.emitter)
         total = len(backlog.ordered())

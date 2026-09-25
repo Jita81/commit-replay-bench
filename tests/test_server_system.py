@@ -727,7 +727,7 @@ class TestSettingsView:
             assert "oidc-secret-value-123" not in dumped
             # the UI shape (ui/src/api/types.ts `Settings`) …
             assert body["oidc_enabled"] is True
-            assert body["retention"] == {"transcripts_days": 7}
+            assert body["retention"] == {"transcripts_days": 7, "patches": True}
             assert body["sandbox_mode"] == "local"
             assert body["ledger_backend"] == "sqlite"
             assert body["apparatus_version"] and body["policy_version"]
