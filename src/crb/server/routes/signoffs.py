@@ -458,7 +458,8 @@ def cell_false_q1(session: Session, repo: str, scope: CellKey) -> tuple[int, lis
     q = _scope_where(
         select(Grade.row_id).where(Grade.clean.is_(True), FALSE_Q1_PREDICATE), repo, scope
     )
-    ids = [str(r) for r in session.execute(q.order_by(Grade.seq)).scalars()]
+    row_ids: Iterable[str] = session.execute(q.order_by(Grade.seq)).scalars()
+    ids = [str(r) for r in row_ids]
     return len(ids), ids
 
 
@@ -473,7 +474,8 @@ def cell_rows(session: Session, repo: str, scope: CellKey) -> list[GradeRow]:
         .where(Grade.mode == "sighted", Grade.apparatus_version == APPARATUS_VERSION)
         .order_by(Grade.seq)
     )
-    return [GradeRow.from_dict(grade_to_dict(g)) for g in session.execute(q).scalars()]
+    grades: Iterable[Grade] = session.execute(q).scalars()
+    return [GradeRow.from_dict(grade_to_dict(g)) for g in grades]
 
 
 def _projection(scope: CellKey) -> tuple[str, ...]:
@@ -559,7 +561,7 @@ def accepted_rows(
     q = _scope_where(
         select(Grade).where(Grade.clean.is_(True), Grade.disqualified.is_(False)), repo, scope
     )
-    grades = list(session.execute(q.order_by(Grade.seq.desc()).limit(limit)).scalars())
+    grades: list[Grade] = list(session.execute(q.order_by(Grade.seq.desc()).limit(limit)).scalars())
     subjects = _subjects(session, repo, (g.task_id for g in grades))
     return [
         AcceptedRowOut(
