@@ -19,7 +19,10 @@
  *               and a queued replay says it is waiting, with no attempt number. A
  *               reader is offered only the acts their role can take (Decisions' rule): a
  *               viewer reads, and sees who acts. Reached without `?repo=`, the screen chooses
- *               the most recently updated repository itself. Every element a reader meets —
+ *               the most recently updated repository itself. A tile whose request failed says
+ *               "not loaded" with a Try again, because a failed request is not the API saying
+ *               a number is unknown (only a 404 on controls or oracle is "not run"). Every
+ *               element a reader meets —
  *               the in-flight banner's line, each tile, the map's headers and cells, the
  *               licence heading, the throughput callout, every door button and each
  *               decision's kind pill and act — is a hint trigger (`stat.results.*`,
@@ -51,7 +54,7 @@ import { Link } from 'react-router'
 import { useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRepo, useRepoPool, useRun, useSignoffs } from '../../api/hooks'
 import { isApiError } from '../../api/client'
 import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type RepoPool } from '../../api/types'
-import { LinkButton } from '../../components/Button'
+import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
@@ -97,18 +100,47 @@ const POOL_UNAVAILABLE: Record<Exclude<RepoPool['history_unavailable'], ''>, str
   git_failed: 'git could not read the clone’s history, so the share is not known',
 }
 
-/** The pool-window tile's value, method line and footer (assessment 2026-09-25, B4). */
-function poolTile(pool: RepoPool | undefined, pending: boolean): { value: string; apparatus: string; footer: string } {
-  if (!pool) return { value: pending ? '…' : 'unknown', apparatus: 'the mined tasks’ author dates against the clone’s history', footer: '' }
-  if (pool.n_tasks === 0 || !pool.oldest_authored) return { value: 'no tasks', apparatus: 'nothing mined yet', footer: 'mine the repository to see where its tasks come from' }
-  const range = `authored ${day(pool.oldest_authored)} – ${day(pool.newest_authored)}`
-  if (pool.share === null || pool.history_unavailable) {
-    return { value: 'not known', apparatus: range, footer: pool.history_unavailable ? POOL_UNAVAILABLE[pool.history_unavailable] : '' }
+/** A tile's value when its request failed: said as a failure, never as "unknown" (PR #54 review). */
+const NOT_LOADED = 'not loaded'
+
+/**
+ * The line under a tile whose request failed, with the retry: a failed request is not the
+ * API saying the number is unknown, so the reader is told which it is and can ask again.
+ */
+function RetryLine({ onRetry }: { onRetry: () => void }) {
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <span>the request failed, so no value is shown</span>
+      <Button size="sm" variant="ghost" hint="button.results.retry_tile" onClick={onRetry}>
+        Try again
+      </Button>
+    </span>
+  )
+}
+
+/**
+ * The pool-window tile (assessment 2026-09-25, B4): its value, its n, its interval, its method
+ * line and its footer, from one place so the n is always the denominator of the value shown —
+ * the share is `window_commits / history_commits`, so its n is `history_commits`, and the tasks
+ * are counted in the method line (PR #54 review).
+ */
+function poolTile(pool: RepoPool | undefined, pending: boolean, failed: boolean): { value: string; n: number | null; ci?: null; apparatus: string; footer: string } {
+  const method = 'the mined tasks’ author dates against the clone’s history'
+  if (failed) return { value: NOT_LOADED, n: null, apparatus: method, footer: '' }
+  if (!pool) return { value: pending ? '…' : 'unknown', n: null, apparatus: method, footer: '' }
+  if (pool.n_tasks === 0 || !pool.oldest_authored) return { value: 'no tasks', n: 0, apparatus: 'nothing mined yet', footer: 'mine the repository to see where its tasks come from' }
+  const range = `${pool.n_tasks} tasks authored ${day(pool.oldest_authored)} – ${day(pool.newest_authored)}`
+  if (pool.share === null || pool.history_unavailable || pool.history_commits === null) {
+    return { value: 'not known', n: null, apparatus: range, footer: pool.history_unavailable ? POOL_UNAVAILABLE[pool.history_unavailable] : '' }
   }
   return {
     value: pct(pool.share),
-    apparatus: `${range} · the newest ${pool.window_commits} of ${pool.history_commits} non-merge commits`,
-    footer: 'older work, merges and changes made without a test are not in the pool',
+    n: pool.history_commits,
+    ci: null,
+    // an author-date cut: every non-merge commit authored on or after the oldest task, which
+    // is not "the newest N" in history order when author dates and commit order disagree
+    apparatus: `${range} · ${pool.window_commits} of ${pool.history_commits} non-merge commits authored since the oldest task`,
+    footer: 'no interval: an exact count of the clone’s commits, not a sample · older work, merges and changes made without a test are not in the pool',
   }
 }
 
@@ -175,7 +207,10 @@ export function ResultsPage() {
   const oracleMean = oracle.data && oracle.data.tasks.length > 0 ? oracle.data.tasks.reduce((a, t) => a + (t.strength ?? 0), 0) / oracle.data.tasks.length : null
   // the bar is the policy in force, never a constant; the apparatus is the report's own
   const oracleBar = map.data ? map.data.policy.min_oracle_strength : null
-  const poolView = poolTile(pool.data, pool.isPending)
+  // a failed request is not a missing report: only a 404 on controls / oracle means "not run"
+  const controlsFailed = controls.isError && !controlsNotRun
+  const oracleFailed = oracle.isError && !oracleNotRun
+  const poolView = poolTile(pool.data, pool.isPending, pool.isError)
   const oracleApparatus = oracle.data ? `apparatus ${oracle.data.apparatus_versions.join(', ') || '—'} · mean of per-task mutation scores${oracleBar !== null ? ` · ≥ ${pct(oracleBar)} per cell to deliver` : ''}` : 'one mutation score per task, from the oracle run'
 
   return (
@@ -205,33 +240,34 @@ export function ResultsPage() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <StatTile
                 label="Negative controls"
-                value={verdict ? verdict.state : controlsNotRun ? 'not run' : controls.isPending ? '…' : 'unknown'}
+                value={verdict ? verdict.state : controlsNotRun ? 'not run' : controls.isPending ? '…' : controlsFailed ? NOT_LOADED : 'unknown'}
                 n={controls.data?.n_rows ?? null}
                 apparatus={controls.data ? controlsApparatus(controls.data.apparatus) : 'seven deliberate cheats the grader must catch'}
                 tone={verdict ? CONTROLS_TONE[verdict.state] : 'muted'}
                 hint="stat.results.controls"
-                footer={controls.data ? `${controls.data.violations} violations · ${controls.data.escapes} escapes · ${controls.data.not_constructible} not constructible` : verdict ? undefined : 'run the controls from Connect'}
+                footer={controls.data ? `${controls.data.violations} violations · ${controls.data.escapes} escapes · ${controls.data.not_constructible} not constructible` : controlsFailed ? <RetryLine onRetry={() => void controls.refetch()} /> : verdict ? undefined : 'run the controls from Connect'}
                 data-testid="tile-negative-controls"
               />
               <StatTile
                 label="Oracle strength"
-                value={oracleMean === null ? (oracleNotRun ? 'not scored' : oracle.isPending ? '…' : 'unknown') : pct(oracleMean)}
+                value={oracleMean === null ? (oracleNotRun ? 'not scored' : oracle.isPending ? '…' : oracleFailed ? NOT_LOADED : 'unknown') : pct(oracleMean)}
                 n={oracle.data?.tasks.length ?? null}
                 ci={null}
                 apparatus={oracleApparatus}
                 tone={oracleMean === null ? 'muted' : oracleBar !== null && oracleMean >= oracleBar ? 'green' : 'amber'}
                 hint="stat.results.oracle_strength"
-                footer="no interval: a mean of per-task scores, not a rate"
+                footer={oracleFailed ? <RetryLine onRetry={() => void oracle.refetch()} /> : 'no interval: a mean of per-task scores, not a rate'}
                 data-testid="tile-oracle-strength"
               />
               <StatTile
                 label="Where the tasks come from"
                 value={poolView.value}
-                n={pool.data?.n_tasks ?? null}
+                n={poolView.n}
+                ci={poolView.ci}
                 apparatus={poolView.apparatus}
                 tone="muted"
                 hint="stat.results.pool_window"
-                footer={poolView.footer || undefined}
+                footer={pool.isError ? <RetryLine onRetry={() => void pool.refetch()} /> : poolView.footer || undefined}
                 data-testid="tile-pool-window"
               />
               <StatTile label="False-Q1" value={String(map.data.summary.false_q1_total)} n={map.data.summary.n_total} apparatus={apparatus} tone={map.data.summary.false_q1_total === 0 ? 'green' : 'red'} hint="stat.results.false_q1" footer="must be zero; refused at write" />

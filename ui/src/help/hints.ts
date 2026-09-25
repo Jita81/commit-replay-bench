@@ -319,9 +319,11 @@ export const HINTS = {
   'stat.results.oracle_strength':
     'The mean of every scored task’s mutation kill-rate (faults caught over faults planted on the changed lines), over n tasks, under the apparatus shown. It is a mean of per-task scores, so it carries no interval; below the policy bar a cell routes to a human.',
   'stat.results.pool_window':
-    'The stretch of history the mined tasks were drawn from: the oldest and newest task’s author date, and the share of the repository’s non-merge commits since the oldest task. The miner takes the newest commits that change both source and tests, so every rate on this page describes recent, tested work; older work and changes made without a test are not in it.',
+    'The stretch of history the mined tasks were drawn from: the oldest and newest task’s author date, and the share of the repository’s non-merge commits authored since the oldest task, with n the commits it is a share of. The miner takes the newest commits that change both source and tests, so every rate on this page describes recent, tested work; older work and changes made without a test are not in it.',
   'stat.results.false_q1':
     'The number of rows credited clean whose own recorded belts contradict them, across every measured cell (n = attempts on the map). It must read 0: one such row halts delivery and is refused when written.',
+  'button.results.retry_tile':
+    'Asks the server for this number again. The last request failed, so the tile shows no value rather than a guess.',
   'button.results.full_map':
     'The same cells with every number and its method, projections by language and model, and a CSV export of the rows behind them.',
   'stat.results.route_deliver':

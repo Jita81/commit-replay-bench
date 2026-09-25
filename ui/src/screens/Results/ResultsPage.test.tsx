@@ -16,7 +16,10 @@
  *               never an alert; that every tile, header, cell, pill and button carries
  *               a hint, with the false-Q1 tile opening on hover with the registry copy; and
  *               that the oracle card shows the pool's date range and the share of the
- *               repository's non-merge history it covers — or says why the share is unknown.
+ *               repository's non-merge history it covers, with the commits as its n and the
+ *               window described as an author-date cut — or says why the share is unknown;
+ *               and that a failed request on any instrument tile reads "not loaded" with a
+ *               Try again that asks again, never "unknown".
  * How:          `mockApi` + `renderApp` at `/results?repo=alpha`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
@@ -30,9 +33,10 @@
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unhinted } from '../../help/hints-collector'
-import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { ResultsPage } from './ResultsPage'
 
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22', reason_code: 'deliver', verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }
@@ -246,9 +250,16 @@ describe('ResultsPage', () => {
     renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
     const tile = await screen.findByTestId('tile-pool-window')
     await waitFor(() => expect(within(tile).getByText('60%')).toBeInTheDocument())
-    expect(tile).toHaveTextContent('n =8')
-    expect(tile).toHaveTextContent('authored 1 Aug 2026 – 8 Aug 2026')
-    expect(tile).toHaveTextContent('the newest 3 of 5 non-merge commits')
+    // the share is 3 of 5 commits, so its n is the 5 commits it is a share of, not the 8 tasks
+    // (PR #54 review), with the interval's absence said and why
+    expect(tile).toHaveTextContent('n =5')
+    expect(tile).toHaveTextContent('95% CI—')
+    expect(tile).toHaveTextContent('no interval: an exact count of the clone’s commits, not a sample')
+    expect(tile).toHaveTextContent('8 tasks authored 1 Aug 2026 – 8 Aug 2026')
+    // the window is every non-merge commit authored since the oldest task — an author-date
+    // cut, not "the newest" in history order (PR #54 review)
+    expect(tile).toHaveTextContent('3 of 5 non-merge commits authored since the oldest task')
+    expect(tile).not.toHaveTextContent('newest')
     expect(tile).toHaveAttribute('data-hint', 'stat.results.pool_window')
     await expectHintOpens(tile, 'stat.results.pool_window')
   })
@@ -261,5 +272,38 @@ describe('ResultsPage', () => {
     await waitFor(() => expect(within(tile).getByText('not known')).toBeInTheDocument())
     expect(tile).toHaveTextContent('authored 1 Aug 2026 – 8 Aug 2026')
     expect(tile).toHaveTextContent('no clone of the repository on this host')
+  })
+
+  it('a failed pool request says so and offers a retry, never "unknown" (PR #54 review)', async () => {
+    let calls = 0
+    mockApi({
+      ...ROUTES,
+      'GET /repos/alpha/pool': () => (++calls === 1 ? envelope(500, 'internal', 'the server fell over') : json(POOL)),
+    })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const tile = await screen.findByTestId('tile-pool-window')
+    await waitFor(() => expect(within(tile).getByText('not loaded')).toBeInTheDocument())
+    expect(tile).not.toHaveTextContent('unknown')
+    expect(tile).toHaveTextContent('the request failed')
+    await userEvent.click(within(tile).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(within(tile).getByText('60%')).toBeInTheDocument())
+    expect(calls).toBe(2)
+  })
+
+  it('every instrument tile tells a failed request from a missing report, with a retry', async () => {
+    // the class, not one tile: a 5xx on the controls or the oracle report is a failed request
+    // ("not loaded", Try again) — only a 404 is the honest "not run" / "not scored"
+    mockApi({
+      ...ROUTES,
+      'GET /oracle/alpha/controls': () => envelope(500, 'internal', 'boom'),
+      'GET /oracle/alpha': () => envelope(503, 'unavailable', 'boom'),
+      'GET /repos/alpha/pool': POOL,
+    })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    for (const id of ['tile-negative-controls', 'tile-oracle-strength']) {
+      const tile = await screen.findByTestId(id)
+      await waitFor(() => expect(within(tile).getByText('not loaded')).toBeInTheDocument())
+      expect(within(tile).getByRole('button', { name: 'Try again' })).toHaveAttribute('data-hint', 'button.results.retry_tile')
+    }
   })
 })
