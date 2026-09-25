@@ -14,8 +14,13 @@ it **routes** each class of change to `deliver` / `calibrate` / `granularize` / 
 manufactures new work under the same governance.
 
 **What the product is** (DL-044): the **factory** — new changes delivered as branches and
-pull requests only in the cells the evidence licenses — and the **self-improvement loop**
-that turns every refusal, review and re-measurement back into a better next run. Connecting
+pull requests only in the cells the evidence licenses — and the **learning loop** around it.
+On `main` today the loop **proposes** and a **named person** acts: `crb learn` and the
+`/learn` screen derive from the ledger the guard refusals worth a corpus line, the cells whose
+oracle needs strengthening and the re-measurements an apparatus change makes due, each with
+its cost; a person accepts the refusal line, registers the strengthening item or queues the
+re-measurement, and the product does none of those on its own
+([LEARNING-LOOP](docs/LEARNING-LOOP.md#3-what-still-needs-a-human-and-why-that-is-deliberate)). Connecting
 a repository, measuring it and signing a cell off is the on-ramp that earns the baseline
 those two run on. And the end state is a framework the teams using it improve: every
 builder, runner, control, review probe, readiness slot and policy is a documented seam, the
