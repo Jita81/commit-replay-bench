@@ -71,6 +71,7 @@ Touch when:   never for a new repository — set ``runner``, ``belt_scope``, ``r
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import time
@@ -79,6 +80,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from crb.core.deps import DepsBinding
 from crb.core.execution import Command, ExecResult, Executor, LocalExecutor
 from crb.core.lint import LintPlan, lint_disabled, plan_from_config
 from crb.core.redact import redact_and_cap
@@ -128,6 +130,10 @@ class TestRun:
     duration_s: float = 0.0
     parse_error: str = ""
     services: tuple[ServiceRecord, ...] = ()
+    #: The executor could not prepare the ground (ADR-0019: the throwaway tree copy
+    #: failed). The exit code then says nothing about the tests; the grader records an
+    #: environment failure and the qualifier refuses ``QUAL_TREE_COPY_FAILED``.
+    env_error: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "services", tuple(self.services))
@@ -156,6 +162,9 @@ class TestRun:
         # stay byte-identical (content-addressed hashes are part of the evidence).
         if self.services:
             d["services"] = [s.to_dict() for s in self.services]
+        # Present iff set, for the same reason: existing packs stay byte-identical.
+        if self.env_error:
+            d["env_error"] = self.env_error
         return d
 
 
@@ -302,28 +311,27 @@ class SetupSession:
 
 def _with_network(cmd: Command) -> Command:
     # Command is frozen; rebuild it with the network flag set so a sandbox executor can see it.
-    return Command(
-        cmd.argv,
-        cmd.root,
-        cwd_rel=cmd.cwd_rel,
-        env=cmd.env,
-        timeout=cmd.timeout,
-        writable_paths=cmd.writable_paths,
-        network=True,
-    )
+    return dataclasses.replace(cmd, network=True)
 
 
 def _with_env(cmd: Command, base: dict[str, str]) -> Command:
     """``base`` under the command's own environment: what a service exports reaches
     the tests, but the runner's (and ``runner_opts.env``'s) explicit values win."""
-    return Command(
-        cmd.argv,
-        cmd.root,
-        cwd_rel=cmd.cwd_rel,
-        env={**base, **cmd.env},
-        timeout=cmd.timeout,
-        writable_paths=cmd.writable_paths,
-        network=cmd.network,
+    return dataclasses.replace(cmd, env={**base, **cmd.env})
+
+
+def with_deps(cmd: Command, binding: DepsBinding | None, executor_name: str) -> Command:
+    """``cmd`` with a dependency binding applied (ADR-0019 §6): the binding's environment
+    for this executor OVER the runner's own (the binding is what points the toolchain at
+    the sealed set — ``GOMODCACHE``, ``GOPROXY=off``), and its sets as read-only mounts.
+    ``None`` leaves the command exactly as the runner built it."""
+    if binding is None:
+        return cmd
+    env = binding.env_for(executor_name)
+    if not env and not binding.mounts:
+        return cmd
+    return dataclasses.replace(
+        cmd, env={**cmd.env, **env}, ro_mounts=(*cmd.ro_mounts, *binding.mounts)
     )
 
 
@@ -419,6 +427,9 @@ class BaseRunner:
         self.authored: str | None = None
         #: The oracle's services, once started (see :meth:`ensure_services`).
         self._services: ServiceSession | None = None
+        #: The dependency binding of the current call (ADR-0019), bound by :meth:`run_for`
+        #: like ``authored``; ``None`` runs the command as the runner built it.
+        self.deps: DepsBinding | None = None
 
     # --- scopes ------------------------------------------------------------------
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
@@ -476,7 +487,20 @@ class BaseRunner:
         cmd = self.command(root, scope, executor=executor, timeout=t)
         if service_env:
             cmd = _with_env(cmd, service_env)
+        cmd = with_deps(cmd, self.deps, executor.name)
         result = executor.run(cmd)
+        if result.env_error:
+            # the ground was not prepared: the exit code says nothing about the tests
+            return TestRun(
+                result.returncode,
+                frozenset(),
+                tail_of(result.combined),
+                result.timed_out,
+                result.duration_s,
+                parse_error=f"environment: {result.env_error}",
+                services=records,
+                env_error=result.env_error,
+            )
         if result.timed_out:
             # 124 is coreutils `timeout`'s exit code; the grader reads timed_out, not the rc.
             return TestRun(
@@ -512,16 +536,36 @@ class BaseRunner:
         *,
         timeout: int = 0,
         authored: str | None,
+        deps: DepsBinding | None = None,
     ) -> TestRun:
-        """:meth:`run` with the task's author date bound for the call (era
-        selection of a declared service), the previous binding restored after.
-        Additive: every language runner's ``run`` override keeps its signature."""
-        previous = self.authored
+        """:meth:`run` with the task's author date (era selection of a declared service)
+        and its dependency binding (ADR-0019) bound for the call, the previous bindings
+        restored after. Additive: every language runner's ``run`` override keeps its
+        signature."""
+        previous, previous_deps = self.authored, self.deps
         self.authored = authored
+        if deps is not None:
+            self.deps = deps
         try:
             return self.run(executor, root, scope, timeout=timeout)
         finally:
-            self.authored = previous
+            self.authored, self.deps = previous, previous_deps
+
+    # --- the posture (ADR-0019) ----------------------------------------------------
+    def toolchain_argv(self, executor: Executor) -> tuple[str, ...]:
+        """The command that prints the toolchain's exact version inside ``executor`` — part
+        of the posture (a Go 1.26.4 host and a Go 1.26.8 sandbox are two postures). The
+        base runner names none."""
+        return ()
+
+    def env_probe_command(
+        self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
+    ) -> Command | None:
+        """An offline command that proves the posture can LOAD the dependencies the tests
+        at ``root`` need (Go: ``go list -deps -test ./...`` with ``GOPROXY=off``), so a
+        build-failure RED is never "nothing builds here". ``None`` — this runner has no
+        such probe; the qualifier then refuses a build-failure RED in a sealed posture."""
+        return None
 
     def _services_state_dir(self) -> Path | None:
         """Where service fixtures are staged for bind-mounting. ``CRB_SERVICES_DIR``
