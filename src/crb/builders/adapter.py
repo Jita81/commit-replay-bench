@@ -101,6 +101,7 @@ from crb.builders.base import (
     BuildOutcome,
     EscalationLadder,
     EventFn,
+    GitArchaeologyGuard,
     Rung,
     emit,
 )
@@ -118,6 +119,7 @@ from crb.core.execution import Command, Executor, SandboxUnavailable
 from crb.core.grade import MODE_SIGHTED
 from crb.core.ledger import GradeRow, JsonlLedger
 from crb.core.lint import fix_commands, run_plan
+from crb.core.prevention import LearningSnapshot
 from crb.core.redact import redact_and_cap_head
 from crb.core.run import BuildAttempt, BuildFn
 from crb.core.runners.base import BaseRunner
@@ -477,6 +479,7 @@ def build_fn_for(
     session_factory: SessionFactory = ContainerSession,
     preflight: Preflight | None = None,
     on_kill_unconfirmed: KillUnconfirmedFn | None = None,
+    learning: LearningSnapshot | None = None,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -511,6 +514,12 @@ def build_fn_for(
         enforced kill the daemon did not confirm — after the attempt, whether the
         builder returned or raised. Without it the kill is still on the outcome and
         the pack, and logged; the container is nobody's to reap.
+    learning:
+        The prevention loop's snapshot for this run (ADR-0020). Its lines reach a brief only
+        after the held-out rule and the leak gate for that task, and only when the builder's
+        own shell guard accepts every command a line recommends; what was read and what was
+        dropped is stamped on the attempt (``learn_lines`` / ``learn_dropped`` /
+        ``learn_playbook``). ``None`` adds nothing.
     """
     index = rung_index(ladder)
     overrides = dict(builder_overrides or {})
@@ -661,6 +670,18 @@ def build_fn_for(
             harness_command=harness_command,
             config=config,
         )
+        learn_labels: dict[str, str] = {}
+        if learning is not None:
+            texts, ids, dropped = learning.lines_for(
+                task.task_id,
+                target_tests=task.target_tests,
+                test_files=task.test_files,
+                src_files=task.src_files,
+                refuses=GitArchaeologyGuard(ws.root).check_shell,
+            )
+            if texts:
+                brief = replace(brief, playbook=tuple(texts))
+            learn_labels = learning.task_labels(ids, dropped, texts)
         rung_budget = budget_for_rung(rung, budget)
         try:
             if sealed:
@@ -679,6 +700,7 @@ def build_fn_for(
                     budget=rung_budget.to_dict(),
                 ),
                 error=_prefixed(f"builder raised {type(exc).__name__}: ", str(exc)),
+                labels=learn_labels,
             )
             return discard(ws, task, failed)
         labels: dict[str, str] = {}
@@ -691,7 +713,7 @@ def build_fn_for(
             outcome.builder_ref(transcript_ref=ref),
             error=attempt_error(outcome),
             transcript_ref=ref,
-            labels=labels,
+            labels={**labels, **learn_labels},
             notes=attempt_notes(outcome),
         )
         return discard(ws, task, attempt)

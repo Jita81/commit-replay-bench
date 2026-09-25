@@ -576,6 +576,8 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["preflight"] = True
     elif isinstance(body.preflight, PreflightIn):
         params["preflight"] = body.preflight.model_dump()
+    if body.learning is not None:
+        params["learning"] = body.learning
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,

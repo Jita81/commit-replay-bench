@@ -14,7 +14,9 @@ Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0020-a-bug-is-closed-by-prevention.md,
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/core/prevention.py (under test), tests/prevention_fixtures.py (records),
-              src/crb/core/ledger.py (the chain discipline and ``LedgerIntegrityError``)
+              src/crb/core/ledger.py (the chain discipline and ``LedgerIntegrityError``),
+              src/crb/server/prevention_state.py (the events-table store the same chain lives
+              in on a stack), tests/test_server_routes_prevention.py (that store's round trip)
 Tested by:    tests/test_prevention_store.py
 Touch when:   a record kind or a record field is added (the chain must still verify after a
               JSON round trip).

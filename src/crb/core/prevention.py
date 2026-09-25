@@ -57,11 +57,13 @@ Works with:   src/crb/core/ledger.py (the rows, the failure rule the signatures 
               chain helpers), src/crb/core/learn.py (``parse_violations`` and
               ``normalise_command`` — the protocol signature), src/crb/core/playbook.py (the
               closed templates a line is rendered from), src/crb/core/review.py (the standing
-              review a ``review:`` class reads), src/crb/builders/base.py (the brief the lines
-              are rendered in)
+              review a ``review:`` class reads), src/crb/server/prevention_state.py (the events
+              store, the snapshot and the tick on a live stack), src/crb/builders/adapter.py
+              (injects the lines and stamps the labels)
 Tested by:    tests/test_prevention_signatures.py, tests/test_prevention_store.py,
               tests/test_prevention_rule.py, tests/test_prevention_gaming.py,
-              tests/test_prevention_register_seam.py, tests/test_playbook_leakage.py
+              tests/test_prevention_register_seam.py, tests/test_playbook_leakage.py,
+              tests/test_worker_learning.py, tests/test_server_routes_prevention.py
 Touch when:   never for a new repository; a new failure kind or a new belt needs a family
               row here and a bump of ``SIGNATURE_RULES`` (the golden fixture fails
               otherwise); a new process mechanism (stream W or K) enters ``WRITABLE`` and the
