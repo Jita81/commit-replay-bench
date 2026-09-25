@@ -71,14 +71,17 @@ Touch when:   never for a new repository — set ``runner``, ``belt_scope``, ``r
 
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import os
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from crb.core.deps import DepsBinding
 from crb.core.execution import Command, ExecResult, Executor, LocalExecutor
 from crb.core.lint import LintPlan, lint_disabled, plan_from_config
 from crb.core.redact import redact_and_cap
@@ -316,15 +319,7 @@ def _with_network(cmd: Command) -> Command:
 def _with_env(cmd: Command, base: dict[str, str]) -> Command:
     """``base`` under the command's own environment: what a service exports reaches
     the tests, but the runner's (and ``runner_opts.env``'s) explicit values win."""
-    return Command(
-        cmd.argv,
-        cmd.root,
-        cwd_rel=cmd.cwd_rel,
-        env={**base, **cmd.env},
-        timeout=cmd.timeout,
-        writable_paths=cmd.writable_paths,
-        network=cmd.network,
-    )
+    return dataclasses.replace(cmd, env={**base, **cmd.env})
 
 
 def host_check(argv: Sequence[str], root: Path, *, env: dict[str, str] | None = None) -> bool:
@@ -419,6 +414,51 @@ class BaseRunner:
         self.authored: str | None = None
         #: The oracle's services, once started (see :meth:`ensure_services`).
         self._services: ServiceSession | None = None
+        #: The sealed dependency set the next command runs with (ADR-0019), bound by the
+        #: caller like ``env_dir`` — the qualifier and the grader bind the role's (or the
+        #: trial's selected) set; ``None`` keeps today's command exactly.
+        self.deps: DepsBinding | None = None
+
+    # --- dependencies (ADR-0019) ---------------------------------------------------
+    def bind_deps(self, cmd: Command, executor: Executor) -> Command:
+        """``cmd`` with :attr:`deps` applied: the binding's environment for this executor
+        (``env`` in a container, ``local_env`` on the host) over the command's, and — under
+        docker only — its read-only mounts as ``Command.ro_mounts``. Idempotent; a missing
+        or empty binding returns ``cmd`` unchanged."""
+        b = self.deps
+        if b is None or (not b.env and not b.local_env and not b.mounts):
+            return cmd
+        env = {**cmd.env, **b.env_for(executor.name)}
+        mounts = cmd.ro_mounts
+        if executor.name == "docker":
+            mounts = tuple(dict.fromkeys((*cmd.ro_mounts, *b.mounts)))
+        return dataclasses.replace(cmd, env=env, ro_mounts=mounts)
+
+    @contextlib.contextmanager
+    def deps_bound(self, binding: DepsBinding | None) -> Iterator[None]:
+        """Bind ``binding`` for the block, restoring the previous one after."""
+        previous = self.deps
+        self.deps = binding
+        try:
+            yield
+        finally:
+            self.deps = previous
+
+    def env_probe_command(self, root: Path, executor: Executor) -> Command | None:
+        """The offline "can this posture load the dependencies?" command (the
+        qualification's first step), or ``None`` when the language has none. Runs with
+        the bound set; never a fetch."""
+        return None
+
+    def probe_environment(
+        self, executor: Executor, root: Path, *, timeout: int = READY_CHECK_TIMEOUT_S
+    ) -> ExecResult | None:
+        """Run :meth:`env_probe_command` with :attr:`deps` bound; ``None`` when there is
+        none. The caller reads ``ok`` (a probe failure is the posture's, never a verdict)."""
+        cmd = self.env_probe_command(Path(root), executor)
+        if cmd is None:
+            return None
+        return executor.run(dataclasses.replace(self.bind_deps(cmd, executor), timeout=timeout))
 
     # --- scopes ------------------------------------------------------------------
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
@@ -473,7 +513,7 @@ class BaseRunner:
         if self.has_services():
             records = self.ensure_services(executor, root, authored=self.authored)
             service_env = self.service_env()
-        cmd = self.command(root, scope, executor=executor, timeout=t)
+        cmd = self.bind_deps(self.command(root, scope, executor=executor, timeout=t), executor)
         if service_env:
             cmd = _with_env(cmd, service_env)
         result = executor.run(cmd)

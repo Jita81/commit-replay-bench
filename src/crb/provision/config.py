@@ -111,6 +111,12 @@ class ProvisionConfig:
         object.__setattr__(self, "extra_allow_hosts", hosts)
         if self.max_bundle_mb <= 0 or self.fetch_timeout_s <= 0 or self.max_total_gb <= 0:
             raise ValueError("provisioning limits must be positive")
+        proxies = [p.strip() for p in self.go_proxy.replace("|", ",").split(",")]
+        if len(proxies) != 1 or proxies[0] in {"direct", "off", ""}:
+            raise ValueError(
+                "CRB_PROVISION__GO_PROXY must be one proxy URL (or file:// mirror): never "
+                "'direct', 'off' or a list — a fetch never reaches a VCS"
+            )
 
     @classmethod
     def from_env(

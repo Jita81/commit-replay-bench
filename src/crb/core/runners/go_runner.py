@@ -41,6 +41,7 @@ from pathlib import Path
 from crb.core.execution import Command, ExecResult, Executor
 from crb.core.lint import LintPlan, go_plan
 from crb.core.runners.base import (
+    READY_CHECK_TIMEOUT_S,
     BaseRunner,
     SetupResult,
     SetupSession,
@@ -124,29 +125,48 @@ class GoRunner(BaseRunner):
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
-        """``go test -json <packages>``; an empty scope is ``./...`` (bare discovery)."""
+        """``go test -json <packages>``; an empty scope is ``./...`` (bare discovery). With a
+        sealed set bound (ADR-0019) the module cache is that set, read-only and offline
+        (``GOPROXY=off``); without one the command is exactly what it always was."""
         go = self._go(executor)
         pkgs = list(scope) or ["./..."]
+        env = self._env(executor)
+        # go test compiles each package's test binary into its temp dir and execs it:
+        # under the sandbox that is the tmpfs /tmp, which must therefore be exec-mountable.
+        cmd = Command(
+            (go, "test", "-json", *pkgs),
+            root,
+            env=env,
+            timeout=timeout,
+            writable_paths=(),
+            exec_tmp=True,
+        )
+        return self.bind_deps(cmd, executor)
+
+    def _env(self, executor: Executor) -> dict[str, str]:
         env = {
             # -count=1: never a cached "(cached) ok" — a green must come from this tree.
             "GOFLAGS": "-count=1 -mod=mod",
             "GOTOOLCHAIN": "local",
             "CGO_ENABLED": str(self.opts.get("cgo", "0")),
         }
-        writable: tuple[str, ...] = ()
         if executor.name == "docker":
             # The sandbox filesystem is read-only outside /tmp and the writable paths.
             env["GOCACHE"] = "/tmp/gocache"
-            env["GOMODCACHE"] = str(self.opts.get("gomodcache", "/tmp/gomod"))
-            env["GOFLAGS"] = "-count=1 -mod=mod"
-        # go test compiles each package's test binary into its temp dir and execs it:
-        # under the sandbox that is the tmpfs /tmp, which must therefore be exec-mountable.
+            if self.deps is None or not self.deps.sealed:
+                env["GOMODCACHE"] = str(self.opts.get("gomodcache", "/tmp/gomod"))
+        return env
+
+    def env_probe_command(self, root: Path, executor: Executor) -> Command | None:
+        """``go list -deps -test ./...`` offline: every package the tests import, and so
+        every module they need, loads from the bound set — or the posture cannot run
+        this parent at all (``QUAL_ENV_UNLOADABLE``)."""
+        env = {**self._env(executor), "GOPROXY": "off"}
         return Command(
-            (go, "test", "-json", *pkgs),
-            root,
+            (self._go(executor), "list", "-deps", "-test", "./..."),
+            Path(root),
             env=env,
-            timeout=timeout,
-            writable_paths=writable,
+            timeout=READY_CHECK_TIMEOUT_S,
             exec_tmp=True,
         )
 

@@ -91,6 +91,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from crb.core.deps import BundleMount, validate_mount
+
 _LOG = logging.getLogger(__name__)
 
 #: Environment variables passed through from the host to a local command. Everything
@@ -197,7 +199,9 @@ class Command:
     ``exec_tmp`` says the toolchain must RUN what it writes under ``/tmp`` — Go compiles
     every test binary into its temp dir and execs it — so the sandbox's tmpfs is mounted
     ``exec``; the default mounts it ``noexec`` (``nosuid,nodev`` hold either way). A runner
-    declares it for its toolchain, never per repository.
+    declares it for its toolchain, never per repository. ``ro_mounts`` are sealed
+    dependency sets (ADR-0019) a binding adds; only a docker executor renders them, and it
+    re-validates each one first.
     """
 
     argv: tuple[str, ...]
@@ -208,10 +212,12 @@ class Command:
     writable_paths: tuple[str, ...] = ()
     network: bool = False
     exec_tmp: bool = False
+    ro_mounts: tuple[BundleMount, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.argv:
             raise ValueError("argv must not be empty")
+        object.__setattr__(self, "ro_mounts", tuple(self.ro_mounts))
         object.__setattr__(self, "argv", tuple(str(a) for a in self.argv))
         object.__setattr__(self, "root", Path(self.root).resolve())
         object.__setattr__(self, "env", dict(self.env))
@@ -509,6 +515,7 @@ class DockerExecutor:
             argv += ["--mount", f"type=bind,src={host_dir},dst={inside}"]
         for host, inside in s.extra_ro_mounts.items():
             argv += ["--mount", f"type=bind,src={host},dst={inside},readonly"]
+        argv += bundle_mount_args(cmd.ro_mounts)
         for k, v in cmd.env.items():
             argv += ["--env", f"{k}={v}"]
         argv += ["--env", "HOME=/tmp", "--env", "CI=1", "--env", "NO_COLOR=1"]
@@ -961,6 +968,21 @@ class DockerStream:
         return self._stderr
 
 
+def bundle_mount_args(mounts: Sequence[BundleMount]) -> list[str]:
+    """``--mount …,readonly`` for each sealed dependency set, each re-validated first (inside
+    a registered store, a ``dep_`` key, sealed): a mount that fails is
+    :class:`SandboxUnavailable` — never a silent writable or foreign bind."""
+    out: list[str] = []
+    for m in mounts:
+        try:
+            validate_mount(m)
+        except ValueError as exc:
+            raise SandboxUnavailable(str(exc)) from exc
+        src = Path(m.host_path).resolve()
+        out += ["--mount", f"type=bind,src={src},dst={m.container_path},readonly"]
+    return out
+
+
 def make_executor(
     kind: str,
     *,
@@ -1004,6 +1026,7 @@ __all__: Sequence[str] = (
     "LocalExecutor",
     "SandboxUnavailable",
     "UnconfirmedKill",
+    "bundle_mount_args",
     "container_stopped",
     "make_executor",
     "sequence_env",

@@ -284,3 +284,87 @@ def test_parse_build_failure_fails_closed(trial, runner, executor):
     assert run.failing == frozenset()
     assert run.parse_error.startswith("unattributed failure")
     assert "undefined: Sub" in run.tail
+
+
+# ---------------------------------------------------------------------------
+# A sealed dependency set bound to the command (ADR-0019)
+# ---------------------------------------------------------------------------
+
+
+def _sealed_gomod(tmp_path: Path):  # type: ignore[no-untyped-def]
+    from crb.provision.store import BundleStore
+
+    store = BundleStore(tmp_path / "deps")
+    st = store.stage()
+    (st / "out" / "gomod" / "cache").mkdir(parents=True)
+    key = "dep_" + "9" * 64
+    store.seal(st, {"lang": "go", "key": key})
+    return store, key
+
+
+def test_command_binds_the_bundle_offline_under_docker(tmp_path: Path) -> None:
+    from crb.core.deps import DepsBinding
+    from crb.core.execution import DockerExecutor, DockerSettings
+    from crb.provision import go as go_recipe
+
+    store, key = _sealed_gomod(tmp_path)
+    mount = store.mount(key, "go", "gomod", "/deps/gomod")
+    binding = DepsBinding(
+        role="gold",
+        lang="go",
+        scheme="go.modcache.v1",
+        key=key,
+        mounts=(mount,),
+        env=go_recipe.binding_env(),
+        local_env=go_recipe.local_env(mount.host_path),
+    )
+    runner = get_runner(gorepo.config())
+    ex = DockerExecutor(
+        DockerSettings(image="crb-sandbox-go:x", docker_binary="/usr/bin/true"), verify_daemon=False
+    )
+    runner.deps = binding
+    cmd = runner.command(tmp_path, ("./calc",), executor=ex, timeout=60)
+    assert cmd.env == {
+        "GOFLAGS": "-count=1 -mod=mod",
+        "GOTOOLCHAIN": "local",
+        "CGO_ENABLED": "0",
+        "GOCACHE": "/tmp/gocache",
+        "GOMODCACHE": "/deps/gomod",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOVCS": "*:off",
+        "GOWORK": "off",
+        "GOENV": "off",
+    }
+    assert cmd.ro_mounts == (mount,) and cmd.exec_tmp is True
+    argv = ex.build_argv(cmd)
+    assert f"type=bind,src={mount.host_path.resolve()},dst=/deps/gomod,readonly" in argv
+    assert "/tmp/gomod" not in " ".join(argv)
+    # on the host the same binding points at the store's own path, and mounts nothing
+    local = runner.command(tmp_path, ("./calc",), executor=LocalExecutor(), timeout=60)
+    assert local.env["GOMODCACHE"] == str(mount.host_path) and local.env["GOPROXY"] == "off"
+    assert local.ro_mounts == ()
+    # the env probe is `go list -deps -test ./...`, offline, with the same binding
+    probe = runner.bind_deps(runner.env_probe_command(tmp_path, ex), ex)  # type: ignore[arg-type]
+    assert probe.argv == ("go", "list", "-deps", "-test", "./...")
+    assert probe.env["GOPROXY"] == "off" and probe.ro_mounts == (mount,)
+
+
+def test_command_is_unchanged_without_a_binding(tmp_path: Path) -> None:
+    from crb.core.execution import DockerExecutor, DockerSettings
+
+    runner = get_runner(gorepo.config())
+    ex = DockerExecutor(
+        DockerSettings(image="crb-sandbox-go:x", docker_binary="/usr/bin/true"), verify_daemon=False
+    )
+    cmd = runner.command(tmp_path, ("./calc",), executor=ex, timeout=60)
+    assert cmd.env == {
+        "GOFLAGS": "-count=1 -mod=mod",
+        "GOTOOLCHAIN": "local",
+        "CGO_ENABLED": "0",
+        "GOCACHE": "/tmp/gocache",
+        "GOMODCACHE": "/tmp/gomod",
+    }
+    assert cmd.ro_mounts == () and cmd.writable_paths == () and cmd.exec_tmp is True
+    local = runner.command(tmp_path, ("./calc",), executor=LocalExecutor(), timeout=60)
+    assert local.env == {"GOFLAGS": "-count=1 -mod=mod", "GOTOOLCHAIN": "local", "CGO_ENABLED": "0"}
