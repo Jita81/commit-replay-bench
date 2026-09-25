@@ -19,7 +19,9 @@ What it does: Pins that ``prod`` + ``sandbox.executor=local`` and ``prod`` +
               ``redacted_dict`` and by ``/health``; that ``builder.executor`` defaults to
               ``docker`` in ``prod`` and ``host`` in ``dev``; that ``crb worker`` applies the
               same rule and carries the override stamp; that compose and the Helm chart give the
-              worker the sealed builder; and that SECURITY §5 and DEPLOYMENT name the override.
+              worker the sealed builder; that SECURITY §5 and DEPLOYMENT name the override; and
+              that docs/API.md and the UI's ``DeploymentPosture`` type name exactly the keys
+              ``Settings.posture()`` serves.
 How:          ``Settings(**kwargs)`` and ``Settings()`` over a monkeypatched environment;
               ``collect_health`` over a real SQLite store; ``worker_main.settings_from_args``
               with an explicit environment; the deploy files and docs read as text.
@@ -30,10 +32,12 @@ ADRs:         docs/adr/0023-production-refuses-the-unsealed-posture.md,
 Works with:   src/crb/server/settings.py (the rule), src/crb/server/worker_main.py (the
               worker's reading of it), src/crb/server/routes/system.py (``/health``),
               src/crb/server/worker.py (the apparatus stamp; its cases are in
-              tests/test_worker.py), deploy/docker-compose.yml, deploy/helm/crb/values.yaml
+              tests/test_worker.py), deploy/docker-compose.yml, deploy/helm/crb/values.yaml,
+              docs/API.md (the ``posture`` shape), ui/src/api/types.ts (``DeploymentPosture``)
 Tested by:    tests/test_settings_posture.py
 Touch when:   the override changes name, a new executor kind is added (decide whether it is
-              sealed), or the deployment templates change the worker's executors.
+              sealed), a posture key is added (write it in docs/API.md and the UI type too), or
+              the deployment templates change the worker's executors.
 """
 
 from __future__ import annotations
@@ -263,6 +267,25 @@ class TestDocuments:
         deployment = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
         assert ALLOW_UNSEALED_PROD_ENV in deployment
         assert (ROOT / "docs" / "adr" / "0023-production-refuses-the-unsealed-posture.md").exists()
+
+    def test_the_posture_shape_is_the_same_in_the_code_the_api_doc_and_the_ui_type(
+        self,
+    ) -> None:
+        """``Settings.posture()`` is the one source of the shape ``/health`` and ``/settings``
+        serve. docs/API.md's ``posture`` shape and ui/src/api/types.ts's ``DeploymentPosture``
+        must name exactly its keys, so a field added to one cannot go undocumented or untyped
+        (PR #53 review: ``factory_builds`` was served and read but not documented)."""
+        served = set(prod().posture())
+        api = (ROOT / "docs" / "API.md").read_text(encoding="utf-8")
+        shapes = re.findall(r"`posture` = `\{([^}]*)\}`", api)
+        assert shapes, "docs/API.md has no `posture` = `{...}` shape"
+        for shape in shapes:
+            documented = {k.strip() for k in shape.split(",")}
+            assert documented == served, f"docs/API.md posture shape: {documented ^ served}"
+        types = (ROOT / "ui" / "src" / "api" / "types.ts").read_text(encoding="utf-8")
+        body = types.split("export interface DeploymentPosture {", 1)[1].split("\n}", 1)[0]
+        typed = set(re.findall(r"^  (\w+)\??:", body, flags=re.M))
+        assert typed == served, f"ui DeploymentPosture type: {typed ^ served}"
 
 
 class TestFactoryBuilds:
