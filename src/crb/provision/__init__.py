@@ -29,9 +29,10 @@ Layer:        provision — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md, docs/adr/0012-builder-in-a-sealed-container.md
 Works with:   src/crb/core/deps.py (the protocol and types it implements),
               src/crb/core/provision.py (lockfiles and keys), src/crb/provision/store.py (sealed
-              sets), src/crb/provision/fetch.py (the fetch container), src/crb/provision/go.py
-              (the Go recipe), src/crb/provision/config.py (``CRB_PROVISION__*``)
-Tested by:    tests/test_provision_go.py
+              sets), src/crb/provision/fetch.py (the fetch container), src/crb/provision/go.py,
+              src/crb/provision/python.py and src/crb/provision/node.py (the recipes),
+              src/crb/provision/config.py (``CRB_PROVISION__*``)
+Tested by:    tests/test_provision_go.py, tests/test_provision_python.py, tests/test_provision_node.py
 Touch when:   never for a new repository; a new language recipe registers here and in
               src/crb/core/provision.py.
 """
@@ -360,6 +361,10 @@ def make_deps_provider(
         provider.store.visible_to_daemon(provider.docker, probe_image)
     return provider
 
+
+# The language recipes register themselves in RECIPES on import (they import this module).
+from crb.provision import node as _node  # noqa: E402, F401
+from crb.provision import python as _python  # noqa: E402, F401
 
 __all__ = [
     "MODE_HOST",
