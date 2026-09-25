@@ -39,10 +39,14 @@ thereby tagged the sentence around it.
 **A review's actions are records, not prose.** A review under ``docs/reviews/`` that ends in
 an *Actions* table (a heading containing "Actions", then rows whose first cell is a number)
 sets work that must not disappear: every numbered action needs a line in
-``docs/DECISION-LOG.md`` that names the review's file stem, the action and its state —
-``2026-09-13-critical-friend … action #8: [gap] …`` — where the state is ``closed``,
-``open``, ``declined`` or ``[gap]``. A review action with no such record fails the gate. The
-check reads the record's *shape*, not whether the state is true; a person still reads the log.
+``docs/DECISION-LOG.md`` that starts a run of records with the review's file stem in
+backticks and then states each action and its state —
+```` `2026-09-13-critical-friend` action #1: closed …; action #8: [gap] … ```` — where the
+state is the whole word ``closed``, ``open``, ``declined`` or ``[gap]``. The gate reads both
+ways: a review action with no record fails, and so does a record whose review no longer
+lists that action (a deleted row, a renamed *Actions* heading), so neither side can vanish
+alone. The check reads the record's *shape*, not whether the state is true; a person still
+reads the log.
 Two of the critical friend's ten actions (#8, an independent human review of the core; #9,
 rotating a pasted token) sat for twelve days with no record at all, which is what this rule
 stops.
@@ -57,14 +61,15 @@ What it is:   The claim-tag gate over the public pages (stdlib only; CI's ``clai
 What it does: Parses each allowlisted Markdown page into blocks, finds quantified sentences,
               and reports any that carry no permitted tag — and any ``[measured]`` tag
               without an n, a method or an apparatus version; reports every numbered action
-              in a review's Actions table that has no stated record in the decision log;
-              --check exits non-zero.
+              in a review's Actions table that has no stated record in the decision log,
+              and every record whose review no longer lists the action; --check exits
+              non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
               qualifying a plural noun → look for a permitted tag in the block's cover. Then
-              each docs/reviews/*.md Actions table → its action numbers → a
-              ``<stem> … action #N: <state>`` line in docs/DECISION-LOG.md.
+              each docs/reviews/*.md Actions table → its action numbers ⇄ the
+              ``\`<stem>\` action #N: <state>`` records in docs/DECISION-LOG.md.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of),
@@ -83,6 +88,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -441,7 +447,9 @@ _ACTION_ROW_RE = re.compile(r"^\s*\|\s*(\d+)\s*\|")
 _ACTION_STATE_RE = re.compile(
     r"\baction\s+#(\d+)\s*[:\u2014\u2013-]\s*("
     + "|".join(re.escape(s) for s in ACTION_STATES)
-    + r")",
+    # a state is a whole word: "opening" is not "open"; "[gap]" ends in "]", so the
+    # boundary is a lookahead for a non-word character rather than ``\b``
+    + r")(?!\w)",
     re.I,
 )
 
@@ -461,32 +469,64 @@ def review_actions(text: str) -> list[tuple[int, int]]:
     return out
 
 
+#: A record's head: the review's file stem in backticks, directly before ``action #``.
+#: Every record after it on the line belongs to that review until the next head — so a
+#: stem that a record merely mentions (a path in its evidence) never claims the record.
+_RECORD_HEAD_RE = re.compile(r"`([^`\s]+)`\s+(?=action\s+#)", re.I)
+
+
+def _records(line: str) -> Iterator[tuple[str, int]]:
+    """``(review stem, action number)`` for every stated record on one decision-log line."""
+    heads = [(m.start(), m.group(1)) for m in _RECORD_HEAD_RE.finditer(line)]
+    for m in _ACTION_STATE_RE.finditer(line):
+        owner = [stem for start, stem in heads if start < m.start()]
+        if owner:
+            yield owner[-1], int(m.group(1))
+
+
 def recorded_actions(log_text: str, stem: str) -> set[int]:
-    """The action numbers of review ``stem`` that a decision-log line states a state for."""
-    found: set[int] = set()
-    for line in log_text.splitlines():
-        if stem in line:
-            found.update(int(m.group(1)) for m in _ACTION_STATE_RE.finditer(line))
-    return found
+    """The action numbers of review ``stem`` that a decision-log line states a state for,
+    under a head that names it (`` `<stem>` action #N: <state>``)."""
+    return {n for line in log_text.splitlines() for owner, n in _records(line) if owner == stem}
+
+
+def _record_line(log_text: str, stem: str, action: int) -> int:
+    """The first decision-log line that records ``stem``'s action ``action`` (1-based)."""
+    for number, line in enumerate(log_text.splitlines(), start=1):
+        if (stem, action) in set(_records(line)):
+            return number
+    return 0
 
 
 def check_review_actions(root: Path) -> list[Finding]:
-    """A finding for every numbered review action with no stated record in the decision log."""
+    """A finding for every numbered review action with no stated record in the decision log,
+    and for every recorded action its review no longer lists. Checking both ways means
+    neither side can vanish alone: a deleted row or a renamed Actions heading leaves records
+    pointing at nothing, which is a finding against the decision log."""
     reviews = root / REVIEWS_DIR
     if not reviews.is_dir():
         return []
     log_path = root / DECISION_LOG
     log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+    log_rel = log_path.relative_to(root).as_posix()
     findings: list[Finding] = []
     for path in sorted(reviews.glob("*.md")):
         actions = review_actions(path.read_text(encoding="utf-8"))
-        if not actions:
-            continue
         recorded = recorded_actions(log_text, path.stem)
         rel = path.relative_to(root).as_posix()
         for action, line in actions:
             if action not in recorded:
                 findings.append(Finding(rel, line, "", f"review action #{action} has no record"))
+        listed = {action for action, _ in actions}
+        for action in sorted(recorded - listed):
+            findings.append(
+                Finding(
+                    log_rel,
+                    _record_line(log_text, path.stem, action),
+                    "",
+                    f"{path.stem} action #{action} is recorded but the review has no such action",
+                )
+            )
     return findings
 
 

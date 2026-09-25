@@ -178,4 +178,7 @@ reviewer cannot provide.
 - A review that sets numbered actions (an *Actions* table under `docs/reviews/`) gets one
   record per action in `docs/DECISION-LOG.md`, written as
   `` `<review file stem>` action #N: <state> `` with the state `closed`, `open`, `declined`
-  or `[gap]` and the evidence; the `claims` job fails while any action has none (DL-053).
+  or `[gap]` and the evidence; further records on the same line may drop the stem
+  (`action #N: <state>`) until another `` `<stem>` `` head. The `claims` job fails while any
+  action has no record, and while any record names an action its review no longer lists — so
+  deleting a row or renaming the *Actions* heading fails too (DL-053).

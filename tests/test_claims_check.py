@@ -319,3 +319,21 @@ def test_the_critical_friends_ten_actions_are_all_still_listed() -> None:
     assert [n for n, _ in cc.review_actions(text)] == list(range(1, 11))
     log = (ROOT / "docs" / "DECISION-LOG.md").read_text(encoding="utf-8")
     assert cc.recorded_actions(log, CRITICAL_FRIEND) == set(range(1, 11))
+
+
+def test_a_review_the_record_only_mentions_does_not_claim_it(tree: Path) -> None:
+    """A record belongs to the review named in its head (`` `<stem>` action #``); a path to
+    another review inside the evidence neither credits nor debits that other review."""
+    _review_tree(
+        tree,
+        "| DL-002 | `2026-09-13-friend` action #1: closed (see "
+        "`docs/reviews/2026-09-12-guide.md`); action #2: [gap] (as the guide asks). |\n",
+    )
+    _write(tree, "docs/reviews/2026-09-12-guide.md", "# A guide\n\nNo actions here.\n")
+    assert cc.check_review_actions(tree) == []
+    assert (
+        cc.recorded_actions(
+            (tree / "docs" / "DECISION-LOG.md").read_text(encoding="utf-8"), "2026-09-12-guide"
+        )
+        == set()
+    )

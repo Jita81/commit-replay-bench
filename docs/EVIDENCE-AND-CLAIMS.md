@@ -37,7 +37,8 @@ reads only the pages on the allowlist; the script's docstring states both limits
 gap analysis names the pages still ungated. The same job holds a review to its own actions:
 every numbered row of a review's *Actions* table needs a line in the
 [decision log](DECISION-LOG.md) that names the review, the action and its state (`closed`,
-`open`, `declined` or `[gap]`), so an action a reviewer set cannot quietly disappear (DL-053).
+`open`, `declined` or `[gap]`), and every such record needs its action still in the table,
+so an action a reviewer set cannot quietly disappear from either side (DL-053).
 
 A claim moves from `[hypothesis]` to `[measured]` only by a pre-registered measurement whose
 interval excludes a trivial effect and that has been replicated or independently re-run;
