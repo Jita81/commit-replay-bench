@@ -251,3 +251,52 @@ describe('IntakePage', () => {
     expect(screen.getByText(/An admin configures the tracker for the whole deployment/)).toBeInTheDocument()
   })
 })
+
+describe('IntakePage — an operator registers a ready ticket (ADR-0022)', () => {
+  const AWAITING_ROW: Intake['rows'][number] = {
+    ...READY_ROW,
+    key: '4714',
+    label: 'crb:ready',
+    item_id: 'ado-4714',
+    item_url: '/factory?repo=alpha&item=ado-4714',
+    revision: '5',
+    registered: false,
+    awaiting_approval: true,
+    author: 'mallory@example.invalid',
+  }
+  const REGISTERED: Intake = {
+    ...ON,
+    rows: [{ ...AWAITING_ROW, registered: true, awaiting_approval: false, label: 'crb:queued' }],
+  }
+
+  it('a ready ticket waits for an operator, who registers the revision they read', async () => {
+    const api = setup({ ...ON, rows: [AWAITING_ROW] }, { 'POST /factory/alpha/intake/4714/register': REGISTERED })
+    const user = userEvent.setup()
+    const row = await screen.findByTestId('intake-row-4714')
+    expect(row.textContent).toContain('Waiting for an operator to register it')
+    expect(row.textContent).toContain('mallory@example.invalid')
+    expect(row.textContent).not.toContain('Registered as')
+    await user.click(within(row).getByRole('button', { name: /Register this ticket/ }))
+    await waitFor(() => expect(screen.getByTestId('intake-success').textContent).toContain('Registered ticket 4714 as ado-4714'))
+    const post = api.calls.find((c) => c.method === 'POST')
+    expect(post?.path).toBe('/factory/alpha/intake/4714/register')
+    expect(JSON.parse(String(post?.init?.body))).toEqual({ revision: '5' })
+  })
+
+  it('a viewer sees the draft waiting and who can register it, with no Register button', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': REPOS,
+      'GET /factory/alpha/intake': { ...ON, rows: [AWAITING_ROW] },
+    })
+    renderApp(<IntakePage />, { route: '/factory/intake?repo=alpha', path: '/factory/intake' })
+    const row = await screen.findByTestId('intake-row-4714')
+    expect(row.textContent).toContain('Waiting for an operator to register it')
+    expect(within(row).queryByRole('button', { name: /Register this ticket/ })).not.toBeInTheDocument()
+  })
+
+  it('the last read counts the drafts waiting for an operator', async () => {
+    setup({ ...ON, last_poll: { ...ON.last_poll!, registered: 0, awaiting: 2 }, rows: [AWAITING_ROW] })
+    expect(await screen.findByText(/2 waiting for an operator to register them/)).toBeInTheDocument()
+  })
+})
