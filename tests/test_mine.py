@@ -11,7 +11,9 @@ What it does: Pins the pool caps, which commits are candidates (the feat commit,
               declared linter's verdict reaches the gold check only after the core belts hold,
               that support files under the test layout are overlaid but never targets
               (mesh-client, DL-023) and that three consecutive harness-errored candidates stop
-              the run instead of failing it. Toolchain cases pin gofmt / ruff on the gold.
+              the run instead of failing it. Toolchain cases pin gofmt / ruff on the gold, and
+              that the mining worktree's name carries no fragment of the candidate's sha (the
+              mapping is on the ``mine.candidate`` event; assessment 2026-09-25 B1).
 How:          ``iter_candidates`` / ``qualify`` / ``mine`` on ``pyrepo`` through the real
               ``PytestRunner`` and ``LocalExecutor``; a fake lint script stands in for the
               repository's linter.
@@ -19,7 +21,8 @@ Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
 Works with:   src/crb/core/mine.py (under test), tests/fixtures/pyrepo.py (the history and its
               opt-in green / bad-gold commits), src/crb/core/lint.py (the gold's belt 5),
-              src/crb/core/spec.py (``POOL_*`` and ``RepoConfig``), tests/conftest.py
+              src/crb/core/spec.py (``POOL_*`` and ``RepoConfig``), tests/conftest.py,
+              tests/fixtures/leakage.py (the sha-fragment scan)
 Tested by:    tests/test_mine.py
 Touch when:   the candidate rule changes (what counts as coupled source + test, the pools); the
               gold check gains a belt; a new repository layout needs a support-file rule.
@@ -47,6 +50,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import POOL_HARD, POOL_STANDARD, Language, RepoConfig
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.leakage import leaks
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -898,3 +902,42 @@ def test_mine_skips_a_candidate_whose_harness_errored_and_stops_after_three_in_a
                 only=frozenset(shas),
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# B1 (assessment 2026-09-25): the mining worktree is named by an opaque token
+# ---------------------------------------------------------------------------
+
+
+def test_the_mining_worktree_names_no_fragment_of_the_candidate_sha(
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    made: list[Path] = []
+    real = Workspace.create.__func__
+
+    def spy(cls: type[Workspace], repo: GitRepo, sha: str, dest: Path, **kw: Any) -> Workspace:
+        made.append(Path(dest))
+        return real(cls, repo, sha, dest, **kw)
+
+    monkeypatch.setattr(Workspace, "create", classmethod(spy))
+    events, on_event = _collector()
+    cand = _feat_candidate(pyrepo)
+    out = m.qualify(
+        pyrepo.repo,
+        pyrepo.config,
+        cand,
+        runner=runner,
+        executor=executor,
+        scratch=tmp_path / "scratch",
+        on_event=on_event,
+    )
+    assert out.task is not None and made
+    for dest in made:
+        assert leaks(cand.sha, str(dest)) == [], f"mining worktree {dest}"
+    # the mapping lives in the run's events, never in the path
+    (ev,) = [p for a, p in events if a == "mine.candidate"]
+    assert ev["sha"] == cand.sha and ev["worktree"] == made[0].name

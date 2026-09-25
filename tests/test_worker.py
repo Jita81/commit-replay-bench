@@ -27,7 +27,10 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               (the grade stage's test run) reports an unconfirmed kill through the same seam
               (event under the task, note, reaper queue); and that a reap pass is budgeted to
               ``heartbeat_s / 2`` so a daemon that answers nothing cannot hold the loop past
-              the worker's liveness bound — the check-in still lands.
+              the worker's liveness bound — the check-in still lands. And (ADR-0023) that a
+              production worker stamps the unsealed-production override into every run's
+              apparatus and every pack, and refuses a run that asks for the local executor
+              without it.
 How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
               / ``noop`` builder around ``Worker.run_one``; no docker, no network, no model.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -1325,7 +1328,12 @@ def test_stage_routing_and_settings_validation() -> None:
 # --- entrypoint ---------------------------------------------------------------------------------
 
 
-def test_once_main(h: Harness, capsys: pytest.CaptureFixture[str]) -> None:
+def test_once_main(
+    h: Harness, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the local executor is a development worker: in prod (the default) the entrypoint
+    # refuses it without CRB_ALLOW_UNSEALED_PROD (ADR-0023; tests/test_settings_posture.py)
+    monkeypatch.setenv("CRB_ENV", "dev")
     run = h.enqueue("replay")
     argv = [
         "--database-url",
@@ -1710,3 +1718,47 @@ def test_delivery_credentials_follow_a_linked_row_to_its_own_https_remote() -> N
     assert worker._delivery_credentials(linked, "http://github.com/acme/cobra.git") is None
     # a row with no link (a URL-only registration) gets no credentials at all
     assert worker._delivery_credentials({"url": linked["url"]}, linked["url"]) is None
+
+
+# --- ADR-0023: production refuses the unsealed posture ------------------------------------------
+
+OVERRIDE_STAMP = {
+    "env": "prod",
+    "sandbox_executor": "local",
+    "builder_executor": "host",
+    "override": "CRB_ALLOW_UNSEALED_PROD",
+    "adr": "0023",
+}
+
+
+def test_a_prod_worker_stamps_the_unsealed_override_into_the_run_and_every_pack(
+    h: Harness,
+) -> None:
+    h.worker.settings = replace(h.settings, unsealed_override=OVERRIDE_STAMP)
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert done.apparatus_json["extra"]["unsealed_prod_override"] == OVERRIDE_STAMP
+    (row,) = list(h.worker.ledger.rows(run_id=run.id))
+    pack = h.worker.evidence_dir / f"{row.evidence_pack_hash}.json"
+    body = json.loads(pack.read_text(encoding="utf-8"))
+    assert body["apparatus"]["extra"]["unsealed_prod_override"] == OVERRIDE_STAMP
+    # the other kinds carry it on their apparatus too
+    h.enqueue("probe")
+    probe = h.run_one()
+    assert probe.apparatus_json["unsealed_prod_override"] == OVERRIDE_STAMP
+
+
+def test_a_sealed_worker_stamps_nothing(h: Harness) -> None:
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.id == run.id and "unsealed_prod_override" not in done.apparatus_json["extra"]
+
+
+def test_a_prod_worker_refuses_a_run_that_asks_for_the_local_executor(h: Harness) -> None:
+    h.worker.settings = replace(h.settings, executor="docker", refuse_unsealed=True)
+    run = h.enqueue("replay", params_json={"executor": "local"})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("sandbox unavailable") and "CRB_ALLOW_UNSEALED_PROD" in done.error
+    assert list(h.worker.ledger.rows(run_id=run.id)) == [] and FakeBuilder.briefs == []

@@ -152,4 +152,44 @@ describe('PosturePage', () => {
     // admins get the Settings link on rows they can act on
     expect(screen.getAllByRole('link', { name: 'Settings' }).length).toBeGreaterThan(0)
   })
+
+  it('production running unsealed under CRB_ALLOW_UNSEALED_PROD says so to every viewer, from /health (ADR-0023)', async () => {
+    const base = {
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1 },
+      'GET /ledger/verify': { rows: 1, ok: true, false_q1_total: 0, broken_at: null },
+      'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
+      'GET /settings': () => envelope(403, 'forbidden', 'admin only'),
+    }
+    mockApi({
+      ...base,
+      'GET /health': {
+        status: 'ok',
+        probes: [],
+        posture: { env: 'prod', sandbox_executor: 'local', builder_executor: 'host', sealed: false, unsealed_prod_override: true },
+      },
+    })
+    renderApp(<PosturePage />, { route: '/posture' })
+    const row = await screen.findByText(/^unsealed in production under CRB_ALLOW_UNSEALED_PROD=1/)
+    expect(row).toHaveTextContent('tests run local, the builder runs host')
+    expect(row).toHaveTextContent("every run's apparatus carries the override")
+    expect(row).toHaveTextContent('Remove CRB_ALLOW_UNSEALED_PROD')
+  })
+
+  it('a sealed production deployment reads sealed on the posture row', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1 },
+      'GET /ledger/verify': { rows: 1, ok: true, false_q1_total: 0, broken_at: null },
+      'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
+      'GET /settings': () => envelope(403, 'forbidden', 'admin only'),
+      'GET /health': {
+        status: 'ok',
+        probes: [],
+        posture: { env: 'prod', sandbox_executor: 'docker', builder_executor: 'docker', sealed: true, unsealed_prod_override: false },
+      },
+    })
+    renderApp(<PosturePage />, { route: '/posture' })
+    expect(await screen.findByText('sealed — tests and the builder run in docker')).toBeInTheDocument()
+  })
 })

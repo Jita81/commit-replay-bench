@@ -34,13 +34,17 @@ What it does: Pins that every line of ``tests/fixtures/shell_corpus.txt`` (hones
               ``npx`` policy (honest and offline exactly when ``node_modules/.bin/<bin>`` exists in
               the worktree; fail closed without); and that the 19 decider-settled refusal groups
               are pinned with provenance. Baseline before the fix: 45 honest refused / 149
-              refused let through / 15 mislabelled; after: 0 / 0 / 0.
+              refused let through / 15 mislabelled; after: 0 / 0 / 0. And one leakage case
+              (assessment 2026-09-25 B1): a builder that runs ``pwd``, ``basename``
+              and ``ls ..`` in its trial worktree is allowed to, and neither what it saw nor
+              its transcript holds any fragment of the task's sha.
 How:          Both corpora parametrised line by line through ``GitArchaeologyGuard`` with a
               worktree-shaped ``cwd`` (module-scoped) so ``npx`` targets and ``git diff`` paths
               are verified, not guessed.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
-Works with:   src/crb/builders/base.py (the guard under test), tests/fixtures/shell_corpus.txt
+Works with:   src/crb/builders/base.py (the guard under test), tests/fixtures/leakage.py (the
+              sha scan and the command-running spawn), tests/fixtures/shell_corpus.txt
               and tests/fixtures/shell_corpus_refused.txt (the corpora), src/crb/core/learn.py
               (``apply_triage`` appends a human's decisions to these files),
               tests/test_builders_base.py (the guard's unit cases), docs/LEARNING-LOOP.md
@@ -59,7 +63,15 @@ from pathlib import Path
 import pytest
 
 from crb.builders import base
-from crb.builders.base import GitArchaeologyGuard
+from crb.builders.adapter import build_fn_for, ladder_from_spec
+from crb.builders.base import Budget, GitArchaeologyGuard
+from crb.core.execution import LocalExecutor
+from crb.core.ledger import JsonlLedger
+from crb.core.run import RunSpec, run_task
+from crb.core.runners.pytest_runner import PytestRunner
+from crb.core.spec import TaskSpec
+from fixtures import pyrepo as pr
+from fixtures.leakage import RecordingSpawn, leaks
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 if str(_FIXTURES) not in sys.path:
@@ -313,3 +325,62 @@ def test_npx_standard_is_honest_with_the_worktree_cwd_and_fail_closed_without(
     reason = guard.check_shell("git stash && node --test 2>&1 | tail -10; git stash pop")
     assert "git diff > /tmp/mine.patch" in reason and "git apply /tmp/mine.patch" in reason
     assert "shared with every other worktree" in reason
+
+
+#: What a curious builder runs to learn where it is (assessment 2026-09-25 B1).
+WHERE_AM_I = ("pwd", 'basename "$(pwd)"', "ls ..")
+
+
+def test_where_am_i_is_honest_shell_and_reveals_no_fragment_of_the_task_sha(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real ``run_task`` through the ``claude_code`` adapter whose "model" runs ``pwd``,
+    ``basename`` and ``ls ..`` for real in the trial worktree it was given.
+    The guard allows every one (they are honest shell), and the transcript scan — over
+    what the commands printed and over the transcript file the adapter wrote — finds no
+    7-character substring of the task's real sha."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-not-real-0000000000000000")
+    for cmd in WHERE_AM_I:
+        assert GitArchaeologyGuard(cwd=tmp_path).check_shell(cmd) == "", cmd
+    spec = RunSpec(
+        run_id="run-where",
+        config=pyrepo.config,
+        runner=runner,
+        executor=executor,
+        scratch=tmp_path / "scratch",
+        ledger=JsonlLedger(tmp_path / "ledger.jsonl"),
+        evidence_dir=tmp_path / "evidence",
+        ladder=("claude_code:claude-opus-5",),
+    )
+    spawn = RecordingSpawn(WHERE_AM_I)
+    transcripts = tmp_path / "transcripts"
+    build_fn = build_fn_for(
+        ladder_from_spec(["claude_code:claude-opus-5"]),
+        budget=Budget(max_turns=10, max_tool_calls=10, wall_clock_s=60),
+        runner=runner,
+        executor=executor,
+        config=pyrepo.config,
+        transcript_dir=transcripts,
+        builder_overrides={
+            "spawn": spawn,
+            "claude_binary": "/fake/claude",
+            "keep_transcript": True,
+        },
+    )
+    outcome = run_task(spec, pyrepo.repo, feat_task, build_fn)
+    (row,) = outcome.rows
+    assert "archaeology" not in row.error and "network" not in row.error, row.error
+    assert set(spawn.outputs) == set(WHERE_AM_I) and spawn.outputs["pwd"].strip()
+    files = sorted(transcripts.glob("*.json"))
+    assert len(files) == 1
+    text = files[0].read_text(encoding="utf-8")
+    assert spawn.outputs["pwd"].strip() in text  # the model's words reached the transcript
+    sha = feat_task.task_id
+    assert leaks(sha, *spawn.outputs.values()) == [], spawn.outputs
+    assert leaks(sha, text) == []
+    assert leaks(sha, files[0].name) == []  # the transcript's own file name, too
