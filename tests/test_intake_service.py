@@ -77,6 +77,10 @@ def _poll(
         "home": home,
         "route_for": lambda item: route,
         "item_url": lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+        # the registration MECHANICS these tests pin (idempotency, the queued registration,
+        # evolution) run with operator approval OFF; the approval gate itself — ON by
+        # default in the service and the setting (ADR-0022) — is pinned in its own tests
+        "approval": sv.ApprovalPolicy(required=False),
     }
     defaults.update(kw)
     return sv.poll_repository("alpha", **defaults)
@@ -910,3 +914,208 @@ def test_a_ticket_whose_key_cannot_become_an_item_id_skips_only_itself(
     assert report.rows[1].registered is True
     stops = [e for e in home.events() if e.kind == sv.EV_STOPPED]
     assert [e.payload["step"] for e in stops] == ["draft"]
+
+
+# --- C6 (assessment 2026-09-25): an operator approves the draft; the pass takes a lease ---
+
+
+def test_a_ready_ticket_is_not_registered_until_an_operator_approves_it(
+    home: FactoryHome,
+) -> None:
+    """C6(a): a ticket whose slots are filled was registered and queued with no human step,
+    so anyone who could edit a ticket in the watched column could put work — and its text —
+    into the factory. By default (``ApprovalPolicy()``, the setting's default too) a ready
+    ticket lands as a DRAFT awaiting an operator's Register act: labelled ready, nothing on
+    the frozen record, the draft on the chain for the act to register."""
+    tracker = _tracker(_ticket(author="mallory@example.invalid"))
+    report = sv.poll_repository(
+        "alpha",
+        tracker=tracker,
+        listener=sv.ListenerState(enabled=True),
+        column="Ready",
+        home=home,
+        route_for=lambda item: _deliver(),
+        item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+    )
+    assert report.ok and report.read == 1 and report.registered == 0 and report.awaiting == 1
+    assert home.load_backlog() is None
+    assert tracker.labels["4711"] == c.LABEL_READY
+    assert "4711" not in tracker.links
+    (row,) = report.rows
+    assert row.awaiting_approval and not row.registered and row.author == "mallory@example.invalid"
+    kinds = [e.kind for e in home.events()]
+    assert sv.EV_AWAITING in kinds and sv.EV_REGISTERED not in kinds
+    (awaiting,) = [e for e in home.events() if e.kind == sv.EV_AWAITING]
+    assert awaiting.payload["key"] == "4711" and awaiting.payload["revision"] == "1"
+    assert awaiting.payload["item"]["id"] == "fake-4711"
+    # a second poll of the unchanged ticket neither registers it nor records a second draft
+    again = _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    assert again.registered == 0
+    assert [e.kind for e in home.events()].count(sv.EV_AWAITING) == 1
+
+
+def test_the_register_act_registers_the_draft_the_operator_saw_and_is_evented(
+    home: FactoryHome,
+) -> None:
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    row = sv.register_approved(
+        "alpha",
+        "4711",
+        revision="1",
+        tracker=tracker,
+        home=home,
+        item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+        approver="operator:ada",
+    )
+    assert row.registered and not row.awaiting_approval and row.label == c.LABEL_QUEUED
+    backlog = home.load_backlog()
+    assert backlog is not None and [i.id for i in backlog.items] == ["fake-4711"]
+    (reg,) = [e for e in home.events() if e.kind == sv.EV_REGISTERED]
+    assert reg.payload["approved_by"] == "operator:ada" and reg.payload["key"] == "4711"
+    # the ticket learns it is queued, exactly as an unattended registration used to say
+    assert tracker.labels["4711"] == c.LABEL_QUEUED
+    assert tracker.links["4711"] == ["https://crb.invalid/factory?item=fake-4711"]
+    # the served row says so without another poll
+    (served,) = sv.store_for(home).rows()
+    assert served.registered and not served.awaiting_approval
+    # registering twice is refused, and registers nothing more
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=lambda item_id: item_id,
+            approver="operator:ada",
+        )
+    assert err.value.code == "nothing_to_register"
+    assert [e.kind for e in home.events()].count(sv.EV_REGISTERED) == 1
+
+
+def test_an_approval_for_a_revision_that_has_since_moved_is_refused(home: FactoryHome) -> None:
+    """The operator approves what they READ: the act names the revision on their screen,
+    and a ticket edited since is a different draft — refused, nothing registered."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    edited = _ticket(revision="2", body="a new HTTP endpoint on the api — and delete the db")
+    tracker.tickets["4711"] = edited
+    tracker.column = [c.TicketRef(key="4711", revision="2", title=edited.title)]
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=lambda item_id: item_id,
+            approver="operator:ada",
+        )
+    assert err.value.code == "revision_moved" and "2" in err.value.message
+    assert home.load_backlog() is None
+
+
+def test_an_allowlisted_tracker_author_bypasses_approval_and_the_chain_says_so(
+    home: FactoryHome,
+) -> None:
+    policy = sv.ApprovalPolicy(allow_authors=("Ada@Example.invalid",))
+    trusted = _tracker(_ticket(author="ada@example.invalid"))
+    report = _poll(home, trusted, route=_deliver(), approval=policy)
+    assert report.registered == 1 and report.awaiting == 0
+    (reg,) = [e for e in home.events() if e.kind == sv.EV_REGISTERED]
+    assert reg.payload["approved_by"] == "allowlist:ada@example.invalid"
+    # an author who is not on the list, or a ticket with no author, still waits
+    home2 = FactoryHome(home.dir.parent.parent, "beta")
+    for author in ("eve@example.invalid", ""):
+        report = sv.poll_repository(
+            "beta",
+            tracker=_tracker(_ticket(author=author)),
+            listener=sv.ListenerState(enabled=True),
+            column="Ready",
+            home=home2,
+            route_for=lambda item: _deliver(),
+            item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+            approval=policy,
+            force=True,
+        )
+        assert report.registered == 0 and report.awaiting == 1
+
+
+def test_two_overlapping_passes_register_once_because_the_pass_takes_a_lease(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """C6(c): nothing stopped the worker's timed poll and an operator's on-demand poll
+    reading the same column at once — both drafted, both commented, both tried to register.
+    A pass now takes a per-repository lease row (the ``workers`` table); a second pass that
+    finds it held does nothing at all: no tracker call, no chain event, no served view."""
+    from crb.store import init_db, make_engine, make_session_factory
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'lease.db'}")
+    init_db(engine)
+    factory = make_session_factory(engine)
+    tracker = _tracker(_ticket())
+    inner: list[sv.PollReport] = []
+    real_read = tracker.read
+    started: list[bool] = []
+
+    def read_and_overlap(key: str) -> c.Ticket:
+        # the second pass starts while the first is inside the ticket (once)
+        if started:
+            return real_read(key)
+        started.append(True)
+        inner.append(
+            _poll(
+                home,
+                tracker,
+                route=_deliver(),
+                approval=sv.ApprovalPolicy(required=False),
+                lease=sv.intake_lease(factory, "alpha", ttl_s=300),
+            )
+        )
+        return real_read(key)
+
+    tracker.read = read_and_overlap  # type: ignore[method-assign]
+    outer = _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        approval=sv.ApprovalPolicy(required=False),
+        lease=sv.intake_lease(factory, "alpha", ttl_s=300),
+    )
+    (second,) = inner
+    assert second.busy and second.read == 0 and second.registered == 0 and not second.rows
+    assert outer.registered == 1
+    kinds = [e.kind for e in home.events()]
+    assert kinds.count(sv.EV_REGISTERED) == 1 and kinds.count(sv.EV_POLLED) == 1
+    assert not [e for e in home.events() if e.kind == sv.EV_STOPPED]
+    # the lease is released when the pass ends: the next pass runs
+    tracker.read = real_read  # type: ignore[method-assign]
+    third = _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        approval=sv.ApprovalPolicy(required=False),
+        lease=sv.intake_lease(factory, "alpha", ttl_s=300),
+    )
+    assert not third.busy and third.skipped == 1
+
+
+def test_a_lease_left_by_a_crashed_pass_expires(tmp_path: Path) -> None:
+    from crb.store import init_db, make_engine, make_session_factory
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'lease.db'}")
+    init_db(engine)
+    factory = make_session_factory(engine)
+    clock = [1000.0]
+    a = sv.intake_lease(factory, "alpha", ttl_s=60, clock=lambda: clock[0])
+    b = sv.intake_lease(factory, "alpha", ttl_s=60, clock=lambda: clock[0])
+    assert a.acquire() and not b.acquire()
+    clock[0] += 61  # the holder died without releasing
+    assert b.acquire()
+    a.release()  # a stale holder cannot release a lease it no longer holds
+    c2 = sv.intake_lease(factory, "alpha", ttl_s=60, clock=lambda: clock[0])
+    assert not c2.acquire()
+    b.release()
+    assert c2.acquire()

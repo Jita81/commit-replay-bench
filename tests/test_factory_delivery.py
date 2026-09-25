@@ -903,3 +903,104 @@ def test_close_pull_request_comments_the_verdict_then_closes(
             creds=dv.StaticProvider(_creds()),
             close_pr_fn=dv.github_close_pr_fn,
         )
+
+
+# --- C6(b): ticket-derived text is data, never markup; the branch is [a-z0-9-] -------
+
+#: A title and criteria a ticket author controls, written to break out of anything:
+#: inline code, emphasis, an HTML comment, a mention, a link, a fence and a heading.
+HOSTILE_TITLE = "Fix `rm -rf` **now** <!-- hide --> @org/admins [go](http://evil.invalid)"
+HOSTILE_CRITERIA = (
+    "````\n## Injected heading\n- [x] approved by @org/admins",
+    "~~~\n<img src=x onerror=alert(1)>",
+)
+
+
+def _fences(body: str) -> list[tuple[bool, str]]:
+    """``(inside_a_fence, line)`` for every line, by CommonMark's rule: a fence opens with
+    three or more backticks or tildes and closes with the SAME character, at least as many."""
+    out: list[tuple[bool, str]] = []
+    open_char, open_len = "", 0
+    for line in body.split("\n"):
+        stripped = line.lstrip(" ")
+        run = len(stripped) - len(stripped.lstrip(stripped[:1])) if stripped else 0
+        ch = stripped[:1]
+        if open_char:
+            if ch == open_char and run >= open_len and not stripped[run:].strip():
+                out.append((True, line))
+                open_char, open_len = "", 0
+                continue
+            out.append((True, line))
+        elif ch in ("`", "~") and run >= 3:
+            open_char, open_len = ch, run
+            out.append((True, line))
+        else:
+            out.append((False, line))
+    assert not open_char, "a fence was left open"
+    return out
+
+
+def test_ticket_text_in_the_pr_body_is_fenced_and_cannot_become_markup(harness: Harness) -> None:
+    """C6(b): the ticket's title became a ``##`` heading and its acceptance criteria were
+    emitted verbatim as list items, so whoever wrote the ticket wrote markup into the
+    customer's pull request — a fake "approved" checkbox, a mention that pages a team, a
+    heading, a link. Ticket-derived text now sits inside ONE fenced block whose fence is
+    longer than any run inside it, and nowhere else."""
+    item = multiply_item(title=HOSTILE_TITLE, acceptance_criteria=HOSTILE_CRITERIA)
+    build = _clean_build(harness)
+    try:
+        body = dv.pr_body(item, build, pack_link="packs/x.json")
+    finally:
+        build.close()
+    lines = _fences(body)
+    outside = "\n".join(line for inside, line in lines if not inside)
+    for fragment in ("rm -rf", "**now**", "<!--", "@org/admins", "](http", "Injected", "<img"):
+        assert fragment not in outside, fragment
+    inside = "\n".join(line for is_in, line in lines if is_in)
+    assert HOSTILE_TITLE in inside and "## Injected heading" in inside
+    # the evidence the reviewer needs is still there, outside the fence
+    assert build.pack_hash in outside and "never the default branch" in outside
+
+
+def test_the_pull_request_title_escapes_the_ticket_titles_markdown(harness: Harness) -> None:
+    item = multiply_item(title="Fix `x` **now**\nand <b>this</b>")
+    build = _clean_build(harness)
+    seams = Seams()
+    try:
+        dv.deliver(
+            harness.repo.repo,
+            item,
+            build,
+            creds=dv.StaticProvider(_creds()),
+            push_fn=seams.push,
+            open_pr_fn=seams.open_pr,
+            target_default_branch="main",
+            verdict="accept",
+        )
+    finally:
+        build.close()
+    title = seams.prs[0]["title"]
+    assert "\n" not in title
+    assert "`x`" not in title and "**now**" not in title and "<b>" not in title
+    assert "\\`x\\`" in title and "\\*\\*now\\*\\*" in title and "\\<b\\>" in title
+    assert title.endswith("[I-1]")
+
+
+@pytest.mark.parametrize(
+    "item_id",
+    ["I-1", "fake-4711.r2", "A..B", "x.lock", "UPPER_case-9"],
+)
+def test_the_delivery_branch_is_lowercase_letters_digits_and_hyphens(item_id: str) -> None:
+    """C6(b): the branch was ``crb/<item id>-<slug>`` with the id as registered, and an id
+    may carry ``.``, ``_`` and capitals (``A..B``, ``x.lock`` — refs git refuses) . The
+    part after ``crb/`` is now ``[a-z0-9-]`` only, whatever the id, and git accepts it."""
+    import re
+    import subprocess
+
+    branch = dv.delivery_branch_name(multiply_item(id=item_id, title="Fix `this` NOW!"))
+    assert re.fullmatch(r"crb/[a-z0-9-]+", branch), branch
+    assert "--" not in branch and not branch.endswith("-")
+    ok = subprocess.run(
+        ["git", "check-ref-format", "--branch", branch], capture_output=True, check=False
+    )
+    assert ok.returncode == 0, branch

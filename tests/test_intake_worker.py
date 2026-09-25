@@ -321,3 +321,55 @@ def test_a_worker_that_does_not_know_the_deployments_address_writes_nothing(
     assert "CRB_PUBLIC_URL" in last["advice"]
     board = json.loads(fake_tracker_path(stack.home).read_text(encoding="utf-8"))
     assert board["tickets"]["4711"].get("comments") in (None, {})
+
+
+# --- C6 (assessment 2026-09-25): approval by default, the allowlist, the lease -----------
+
+
+def test_the_served_worker_leaves_a_ready_ticket_waiting_for_an_operator(tmp_path: Path) -> None:
+    """The deployment default (``IntakeSettings()`` — no ``require_approval`` given): the
+    worker's timed poll drafts the ready ticket and registers nothing (ADR-0022)."""
+    stack = Stack(
+        tmp_path,
+        IntakeSettings(
+            tracker="fake", url="https://tracker.invalid", project="W", column="Ready", poll_s=30
+        ),
+    )
+    stack.add_repo("alpha", {"enabled": True})
+    stack.worker.poll_intake()
+    home = FactoryHome(stack.home, "alpha")
+    assert home.load_backlog() is None
+    (row,) = IntakeStore(stack.home, "alpha").rows()
+    assert row.awaiting_approval and not row.registered
+
+
+def test_the_worker_honours_the_deployments_author_allowlist(tmp_path: Path) -> None:
+    board = json.loads(json.dumps(BOARD))
+    board["tickets"]["4711"]["author"] = "ada@example.invalid"
+    stack = Stack(tmp_path, _intake(require_approval=True, approve_authors=["ada@example.invalid"]))
+    fake_tracker_path(stack.home).write_text(json.dumps(board), encoding="utf-8")
+    stack.add_repo("alpha", {"enabled": True})
+    stack.worker.poll_intake()
+    backlog = FactoryHome(stack.home, "alpha").load_backlog()
+    assert backlog is not None and [i.id for i in backlog.items] == ["fake-4711"]
+
+
+def test_a_worker_poll_takes_the_repositorys_lease(tmp_path: Path) -> None:
+    """C6(c): a pass the worker starts while another pass holds the repository's lease
+    reads nothing and writes nothing."""
+    from crb.server.intake import intake_lease
+
+    stack = Stack(tmp_path, _intake(require_approval=False))
+    stack.add_repo("alpha", {"enabled": True})
+    held = intake_lease(stack.factory, "alpha", ttl_s=300)
+    assert held.acquire()
+    try:
+        stack.worker.poll_intake()
+        home = FactoryHome(stack.home, "alpha")
+        assert home.load_backlog() is None and home.events() == []
+        board = json.loads(fake_tracker_path(stack.home).read_text(encoding="utf-8"))
+        assert "comments" not in board["tickets"]["4711"]
+    finally:
+        held.release()
+    stack.worker.poll_intake(now=time.time() + 3600)
+    assert FactoryHome(stack.home, "alpha").load_backlog() is not None

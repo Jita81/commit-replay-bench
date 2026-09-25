@@ -530,3 +530,92 @@ def test_the_walkthroughs_fake_board_needs_no_credential_to_switch_on(env: Env) 
     login(env.client, "operator")
     assert _switch(env, True).status_code == 200
     assert _get(env)["listener"]["enabled"] is True
+
+
+# --- C6 (assessment 2026-09-25): approval by default, and one pass at a time ------------
+
+
+def _register(env: Env, key: str = "4711", revision: str = "1") -> Any:
+    return env.client.post(
+        f"{API_PREFIX}/factory/{ALPHA}/intake/{key}/register", json={"revision": revision}
+    )
+
+
+def test_approval_is_required_by_default_and_the_allowlist_is_empty() -> None:
+    """ADR-0022: the deployment default is that an operator registers every ready ticket;
+    only an explicit allowlist of tracker authors may bypass it."""
+    from crb.server.settings import IntakeSettings
+
+    s = IntakeSettings()
+    assert s.require_approval is True and s.approve_authors == []
+    view = s.redacted()
+    assert view["require_approval"] is True and view["approve_authors"] == []
+
+
+def test_a_ready_ticket_lands_as_a_draft_until_an_operator_registers_it(
+    env: Env, tmp_path: Path
+) -> None:
+    login(env.client, "operator")
+    _switch(env, True)
+    body = dict(env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").json())
+    assert body["last_poll"]["registered"] == 0 and body["last_poll"]["awaiting"] == 1
+    (row,) = body["rows"]
+    assert row["awaiting_approval"] is True and row["registered"] is False
+    assert row["label"] == c.LABEL_READY
+    assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
+    # the Register act is an operator's, and it names the revision the operator read
+    assert_rbac(
+        env,
+        "POST",
+        f"/factory/{ALPHA}/intake/4711/register",
+        min_role="operator",
+        json={"revision": "1"},
+    )
+    login(env.client, "operator")
+    r = _register(env)
+    assert r.status_code == 200, r.text
+    (row,) = r.json()["rows"]
+    assert row["registered"] is True and row["awaiting_approval"] is False
+    assert row["label"] == c.LABEL_QUEUED
+    got = env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog")
+    assert got.status_code == 200 and [i["id"] for i in got.json()["items"]] == ["fake-4711"]
+    # the act is evented: on the chain with who approved it
+    chain = env.client.get(f"{API_PREFIX}/factory/{ALPHA}/evidence").json()
+    (reg,) = [e for e in chain["items"] if e["kind"] == "intake.registered"]
+    assert reg["payload"]["approved_by"].startswith("operator")
+    board = json.loads(fake_tracker_path(tmp_path).read_text(encoding="utf-8"))
+    assert c.LABEL_QUEUED in board["tickets"]["4711"]["tags"]
+    # a second Register is refused: there is nothing waiting any more
+    again = _register(env)
+    assert again.status_code == 409 and envelope(again)["code"] == "nothing_to_register"
+
+
+def test_registering_a_revision_that_has_moved_is_refused(env: Env, tmp_path: Path) -> None:
+    login(env.client, "operator")
+    _switch(env, True)
+    env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+    r = _register(env, revision="0")
+    assert r.status_code == 409 and envelope(r)["code"] == "revision_moved"
+    assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
+
+
+def test_a_poll_while_another_pass_holds_the_repositorys_lease_is_refused_as_busy(
+    env: Env,
+) -> None:
+    """C6(c): the on-demand poll takes the same per-repository lease the worker's timed
+    poll takes; while another pass holds it, the route writes nothing and says so."""
+    from crb.server.intake import intake_lease
+
+    login(env.client, "operator")
+    _switch(env, True)
+    held = intake_lease(env.factory, ALPHA, ttl_s=300)
+    assert held.acquire()
+    try:
+        r = env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+        assert r.status_code == 409 and envelope(r)["code"] == "intake_busy"
+        assert _get(env)["rows"] == []
+        reg = _register(env)
+        assert reg.status_code == 409 and envelope(reg)["code"] == "intake_busy"
+    finally:
+        held.release()
+    assert env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").status_code == 200

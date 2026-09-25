@@ -686,3 +686,121 @@ def test_an_error_message_never_repeats_the_trackers_body_or_the_query_string() 
         _ado(handler).read("4711")
     assert "customer name" not in str(err.value)
     assert "?" not in err.value.detail
+
+
+# --- C6 (assessment 2026-09-25): the credential's origin, rate limits, the author -----
+
+
+def test_an_absolute_url_on_another_origin_is_refused_and_never_sent_the_credential() -> None:
+    """C6(e): ``request`` used an absolute URL as-is, so a caller handing it one on another
+    host would have sent the tracker credential there. The request URL's origin (scheme,
+    host, port) must equal ``base_url``'s; anything else is refused before the transport
+    is touched."""
+    from crb.intake.http import TrackerHttp
+
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return _json({"ok": True})
+
+    http = TrackerHttp(f"{ORG}/Widgets", "Basic secret", client=_client(handler))
+    for url in (
+        "https://evil.invalid/steal",
+        "http://dev.azure.invalid/contoso/Widgets/_apis/x",  # same host, another scheme
+        "https://dev.azure.invalid:8443/contoso/_apis/x",  # same host, another port
+        "https://dev.azure.invalid.evil.invalid/_apis/x",  # a lookalike host
+    ):
+        with pytest.raises(c.TrackerError) as err:
+            http.get(url)
+        assert err.value.reason == c.REASON_REFUSED
+        assert "secret" not in str(err.value)
+    assert seen == []
+    # the same origin, absolute or relative, is served
+    assert http.get(f"{ORG}/Widgets/_apis/wit/workitems/1") == {"ok": True}
+    assert http.get("_apis/wit/workitems/1") == {"ok": True}
+    # a relative path that merely STARTS with "http" is a path, not an absolute URL
+    assert http.get("httpbin/x") == {"ok": True}
+    assert seen[-1] == f"{ORG}/Widgets/httpbin/x"
+
+
+def test_a_429_honours_retry_after_with_a_capped_backoff() -> None:
+    """C6(d): HTTP 429 was ``unreachable`` at once, so a busy tracker stopped the pass. A
+    429 now waits for ``Retry-After`` (seconds or an HTTP date) — never longer than the cap
+    — and retries a bounded number of times; with no header the wait doubles from one
+    second. Only after the last retry is it ``unreachable``, and the detail says so."""
+    from crb.intake import http as th
+
+    answers = [
+        httpx.Response(429, headers={"Retry-After": "2"}),
+        httpx.Response(429, headers={"Retry-After": "3600"}),  # far beyond the cap
+        httpx.Response(200, json={"ok": True}),
+    ]
+    slept: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return answers.pop(0)
+
+    http = th.TrackerHttp(ORG, "Basic x", client=_client(handler), sleep=slept.append)
+    assert http.get("_apis/x") == {"ok": True}
+    assert slept == [2.0, th.MAX_RETRY_WAIT_S]
+
+    # no header: 1 s, then 2 s — and after the last retry, unreachable with the reason
+    slept.clear()
+
+    def always_429(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429)
+
+    http = th.TrackerHttp(ORG, "Basic x", client=_client(always_429), sleep=slept.append)
+    with pytest.raises(c.TrackerError) as err:
+        http.get("_apis/x")
+    assert err.value.reason == c.REASON_UNREACHABLE
+    assert "rate" in err.value.detail and "429" in err.value.detail
+    assert slept == [1.0, 2.0][: th.MAX_RETRIES]
+    assert len(slept) == th.MAX_RETRIES
+    assert all(s <= th.MAX_RETRY_WAIT_S for s in slept)
+
+
+def test_a_retry_after_http_date_is_read_and_capped() -> None:
+    from datetime import UTC, datetime, timedelta
+    from email.utils import format_datetime
+
+    from crb.intake import http as th
+
+    when = format_datetime(datetime.now(UTC) + timedelta(seconds=4), usegmt=True)
+    assert 0.0 <= th.retry_after_seconds(when) <= 4.0
+    assert th.retry_after_seconds("7") == 7.0
+    assert th.retry_after_seconds("") is None
+    assert th.retry_after_seconds("soon") is None
+    assert th.retry_after_seconds("-5") == 0.0
+
+
+def test_the_adapters_read_who_created_the_ticket() -> None:
+    """C6(a): the allowlist that may bypass operator approval is a list of tracker AUTHORS,
+    so each adapter reads who created the ticket — Azure DevOps' ``System.CreatedBy``
+    unique name, Jira's ``creator`` email address (its account id when the email is
+    hidden)."""
+
+    def ado_handler(request: httpx.Request) -> httpx.Response:
+        return _json(
+            {
+                "id": 4711,
+                "fields": {
+                    ado.FIELD_TITLE: "Add a route",
+                    "System.CreatedBy": {"displayName": "Ada", "uniqueName": "Ada@Contoso.com"},
+                },
+            }
+        )
+
+    assert _ado(ado_handler).read("4711").author == "ada@contoso.com"
+
+    def jira_handler(request: httpx.Request) -> httpx.Response:
+        assert "creator" in request.url.params["fields"].split(",")
+        return _json(
+            {
+                "key": "WID-12",
+                "fields": {"summary": "x", "creator": {"accountId": "5b10ac8d82e05b22cc7d4ef5"}},
+            }
+        )
+
+    assert _jira(jira_handler).read("WID-12").author == "5b10ac8d82e05b22cc7d4ef5"
