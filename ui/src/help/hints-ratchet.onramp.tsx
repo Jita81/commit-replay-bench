@@ -97,6 +97,18 @@ const RUN = {
 }
 /** A stale sign-off on another cell, so the deliver cell stays "sign-off due" beside it. */
 const STALE = { id: 's1', repo: 'alpha', cell: { capability_class: 'bug.fix', size: 'M' }, revoked: false, active: false, stale: true, apparatus_current: '2.2', approver: 'u9', approver_name: 'Grace', created: '2026-09-01T10:00:00Z', evidence: { n: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, apparatus_versions: ['2.1'] } }
+/** `GET /value` — a measured north star, so the Home tile renders its full evidence. */
+const VALUE = {
+  schema: 'crb.value.v1',
+  repo: null,
+  apparatus: '2.2',
+  apparatus_versions: ['2.2'],
+  pooled: false,
+  rows: 518,
+  usd_per_gbp: 1.35,
+  north_star: { label: 'working changes per pound, blind', per_pound: 0.21, per_pound_low: 0.06, per_pound_high: 0.54, pounds_per_working: 4.85, pounds_per_working_low: 1.84, pounds_per_working_high: 17.2, working_rate: 0.072, working_rate_low: 0.02, working_rate_high: 0.19, working_estimate: 6.77, n_attempts: 260, n_valid: 94, clean: 22, clean_rate: { k: 22, n: 94, point: 0.234, ci_low: 0.16, ci_high: 0.329 }, precision_basis: 'review', precision: { k: 4, n: 13, point: 0.308, ci_low: 0.127, ci_high: 0.576 }, spend_usd: 44.3, spend_gbp: 32.81, usd_per_gbp: 1.35, method: 'estimate' },
+  learning_curve: { source: 'stub:failure-kind', attempts: 278, register: { source: 'stub:failure-kind', n_classes: 29, closed: 0, closed_share: 0 } },
+}
 const HEALTH = { status: 'degraded', probes: [{ name: 'sandbox', status: 'degraded', detail: 'docker not reachable', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: 'configured: claude_code_cli', data: { anthropic: false, claude_code_cli: true } }] }
 
 // ── sign-off: a chosen cell with refusals, an accepted row and an active attestation
@@ -168,6 +180,7 @@ export const ONRAMP_SCREENS: Record<string, OnrampScreen> = {
       'GET /oracle/alpha/controls': CONTROLS,
       'GET /capability-map': MAP,
       'GET /health': HEALTH,
+      'GET /value': VALUE,
       'GET /users': { items: [], total: 0, limit: 50, offset: 0 },
       'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
       'GET /factory/alpha/tasks': [],

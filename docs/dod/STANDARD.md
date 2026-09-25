@@ -145,7 +145,13 @@ person carrying data by hand), **MEASURE** (the product measures the stream's ow
 cost and counts and shows them), **AUTOMATION** (no step needs a person to type what the
 product already knows).
 
-The product adds: **IDENTITY** (one sentence, the same in README, Home and the book),
+The product adds, first, **VALUE** (the product produces working software and gets better
+the more data goes through it: working changes per pound on blind attempts is served with its
+interval, clean → working precision is served, each bug class's recurrence is served and the
+classes the loop removed are counted, every graded row's output is kept, and every change the
+loop makes is scored and retired by data — the operator's two instructions of 2026-09-25; its
+criteria head the product's table and the checker refuses a product artefact where they do
+not), then **IDENTITY** (one sentence, the same in README, Home and the book),
 **GO-LIVE** (every checklist line is proven by the product, not ticked by belief), **CLAIMS**
 (every public claim tagged with its evidence), **RELEASE** (a tagged, signed release exists
 per RELEASING.md), **POSTURE** (SECURITY §5 has no untagged gap), **SUPPORT** (the guides are
@@ -165,9 +171,11 @@ are named and exercised).
 - `GAP-ANALYSIS.md` lists, per level, the status, then the open criteria ranked by
   (level weight × count of criteria the gap blocks, capped at 3 × severity of the category ×
   the state factor), so the first line is the one that unblocks the most "done". The state
-  factor doubles `unmet` everywhere, and doubles `partial` too in TRUTH, CLAIMS, ROLES and
+  factor doubles `unmet` everywhere, and doubles `partial` too in VALUE, TRUTH, CLAIMS, ROLES and
   POSTURE: where the criterion is about telling the truth, built-wrong is not a lesser defect
-  than not-built. The first 25 rows are *the order of work*; *Open gaps by fan-out* repeats
+  than not-built. An open VALUE criterion outranks every other open criterion in the tree —
+  its category weight is set so, and a test holds it — because the value is what the rest is
+  for. The first 25 rows are *the order of work*; *Open gaps by fan-out* repeats
   them as one row per gap, with how many criteria and which levels that one change closes.
 
 ## 6. What this is for

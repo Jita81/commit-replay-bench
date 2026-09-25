@@ -98,6 +98,7 @@ import type {
   TaskSpec,
   User,
   UserCreateRequest,
+  ValueReport,
   Version,
   PreventionRecordOut,
   PreventionRegister,
@@ -146,6 +147,7 @@ export const keys = {
   users: ['users'] as const,
   settings: ['settings'] as const,
   githubApp: ['github', 'app'] as const,
+  value: (repo: string) => ['value', repo] as const,
   githubRepos: (installation: number, q: string, page: number) => ['github', 'repos', installation, q, page] as const,
   learnRegister: (repo: string) => ['learn', repo, 'register'] as const,
 }
@@ -548,6 +550,19 @@ export function useCapabilityMap(repo: string, by: CellField[]): UseQueryResult<
     enabled: repo.length > 0,
     retry: false,
     staleTime: 30_000,
+  })
+}
+
+/**
+ * `GET /value[?repo=]` — the scorecard: working changes per pound (blind) with its n, interval
+ * and apparatus. An empty `repo` reads every repository (the deployment's north star).
+ */
+export function useValue(repo = ''): UseQueryResult<ValueReport, ApiError> {
+  return useQuery({
+    queryKey: keys.value(repo),
+    queryFn: () => api<ValueReport>(`/value${qs({ repo: repo || undefined })}`),
+    retry: false,
+    staleTime: 60_000,
   })
 }
 

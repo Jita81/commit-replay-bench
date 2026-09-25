@@ -1623,3 +1623,54 @@ export interface PreventionRecordOut {
   payload: Record<string, unknown>
   row_hash: string
 }
+
+// ---------------------------------------------------------------------------
+// Value — the scorecard (`GET /value`, crb.core.value.ValueReport.to_dict)
+// ---------------------------------------------------------------------------
+
+/** A rate as the scorecard serves it: `null` point and interval when `n = 0`, never zero. */
+export interface ValueRate {
+  k: number
+  n: number
+  point: number | null
+  ci_low: number | null
+  ci_high: number | null
+}
+
+/** `north_star` — working changes per pound, blind: an estimate (clean rate × precision). */
+export interface ValueNorthStar {
+  label: string
+  per_pound: number | null
+  per_pound_low: number | null
+  per_pound_high: number | null
+  pounds_per_working: number | null
+  pounds_per_working_low: number | null
+  pounds_per_working_high: number | null
+  working_rate: number | null
+  working_rate_low: number | null
+  working_rate_high: number | null
+  working_estimate: number | null
+  n_attempts: number
+  n_valid: number
+  clean: number
+  clean_rate: ValueRate
+  precision_basis: 'review' | 'review_pooled' | 'proxy' | 'none'
+  precision: ValueRate
+  spend_usd: number
+  spend_gbp: number
+  usd_per_gbp: number
+  method: string
+}
+
+/** `GET /value` — only the fields a screen reads are typed; the rest is in docs/API.md. */
+export interface ValueReport {
+  schema: 'crb.value.v1'
+  repo: string | null
+  apparatus: string
+  apparatus_versions: string[]
+  pooled: boolean
+  rows: number
+  usd_per_gbp: number
+  north_star: ValueNorthStar
+  learning_curve: { source: string; attempts: number; register: { source: string; n_classes: number; closed: number; closed_share: number | null } }
+}

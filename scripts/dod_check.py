@@ -94,10 +94,23 @@ EXTRA: dict[str, tuple[str, ...]] = {
     "page": (),
     "journey": ("STEPS", "PROOF", "TIME-COST", "RECOVERY"),
     "stream": ("TRIGGER", "OUTCOME", "HANDOFF", "MEASURE", "AUTOMATION"),
-    "product": ("IDENTITY", "GO-LIVE", "CLAIMS", "RELEASE", "POSTURE", "SUPPORT", "EXTENSIBILITY"),
+    "product": (
+        "VALUE",
+        "IDENTITY",
+        "GO-LIVE",
+        "CLAIMS",
+        "RELEASE",
+        "POSTURE",
+        "SUPPORT",
+        "EXTENSIBILITY",
+    ),
 }
 #: Category weight for the gap ranking — what blocks a governance reviewer outranks polish.
 WEIGHT: dict[str, int] = {
+    # the operator's refocus (2026-09-25): the value is what the rest is for, so an open VALUE
+    # criterion outranks any other open criterion anywhere in the tree — even a product-level
+    # one in a weight-5 category blocking three criteria (4 × 5 × 3 × 2 = 120 < 4 × 16 × 1 × 2)
+    "VALUE": 16,
     "TRIGGER": 5,
     "OUTCOME": 5,
     "TRUTH": 5,
@@ -130,7 +143,7 @@ LEVEL_WEIGHT: dict[str, int] = {"product": 4, "stream": 3, "journey": 2, "page":
 TOP = 25
 #: Categories where a half-built answer is as dishonest as no answer: `partial` scores like
 #: `unmet`. Everywhere else `partial` means "some of it is there" and scores half.
-HONESTY: tuple[str, ...] = ("TRUTH", "CLAIMS", "ROLES", "POSTURE")
+HONESTY: tuple[str, ...] = ("VALUE", "TRUTH", "CLAIMS", "ROLES", "POSTURE")
 #: The layers a gap can be owned by — the last field of a `## Gaps` line (STANDARD.md §2).
 OWNERS: tuple[str, ...] = ("ui", "server", "factory", "docs", "deploy")
 #: The reference prefixes; also the boundary the evidence splitter cuts on, so a `vitest:`
@@ -585,6 +598,12 @@ def validate(arts: list[Artefact]) -> list[str]:
             )
         if not a.criteria:
             errors.append(f"{a.rel}: no criteria table under '## Definition of done'")
+        elif a.level == "product" and "VALUE" in present and a.criteria[0].category != "VALUE":
+            # the value the product exists to deliver heads its definition of done
+            errors.append(
+                f"{a.rel}: the product's VALUE criteria come first — move them to the top "
+                "of the table (STANDARD.md §4)"
+            )
         for c in a.criteria:
             where = f"{a.rel}:{c.line}"
             if not _ID_RE.match(c.id):

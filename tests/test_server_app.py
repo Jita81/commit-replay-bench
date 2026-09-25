@@ -216,6 +216,7 @@ class TestFactory:
             "runs",
             "signoffs",
             "system",
+            "value",
         ]
         with TestClient(app) as c:
             assert c.get(f"{API_PREFIX}/version").status_code == 200
