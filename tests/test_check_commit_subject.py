@@ -16,7 +16,8 @@ What it does: Pins that a well-formed subject passes and that each rule refuses 
               rule needs, so no suffix is exempt ("agreed" is refused); and that CI runs the
               gate on pull requests, again when a title is edited, and on a push to main,
               under a job name shorter than 100 characters, with no trigger that checks
-              nothing, and no push run cancelled by the next push.
+              nothing (read from the steps' ``if:`` conditions, never the whole file), and
+              no push run cancelled by the next push.
 How:          Calls ``check_subject`` directly for the rules; builds a small git repository
               under ``tmp_path`` for ``--range``; reads the workflow files as text.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -243,15 +244,33 @@ def _triggers(text: str) -> set[str]:
     return set(re.findall(r"^  ([a-z_]+):", on.group(1), re.M))
 
 
+def _unchecked_triggers(text: str) -> set[str]:
+    """The triggers of a workflow that no step's ``if:`` condition names. Only the ``if:``
+    lines are read: the concurrency block names events too, and it runs no check."""
+    conditions = re.findall(r"^\s+if: (.+)$", text, re.M)
+    checked = {e for c in conditions for e in re.findall(r"github\.event_name == '([a-z_]+)'", c)}
+    return _triggers(text) - checked
+
+
 def test_every_trigger_of_the_gate_runs_a_check() -> None:
     """Every step that runs the gate is conditioned on an event, so a trigger that no step
     names would run the job, check nothing and report success (review of PR #54: a manual
     ``workflow_dispatch`` did exactly that). Each trigger must be one a gate step runs on."""
     text = _workflow_with("commit-subjects").read_text(encoding="utf-8")
-    checked = set(re.findall(r"github\.event_name == '([a-z_]+)'", text))
-    assert checked, "no gate step names the event it runs on"
-    unchecked = _triggers(text) - checked
+    unchecked = _unchecked_triggers(text)
     assert not unchecked, f"triggers that run no check and would pass: {sorted(unchecked)}"
+
+
+@pytest.mark.parametrize("event", ["push", "pull_request"])
+def test_a_step_that_names_the_wrong_event_is_caught(event: str) -> None:
+    """The check above must read the steps, not the whole file: the concurrency block also
+    names ``push`` and ``pull_request``, so a step condition misspelt as ``'pushed'`` would
+    check nothing on that trigger and still pass a whole-file search (review of PR #54)."""
+    text = _workflow_with("commit-subjects").read_text(encoding="utf-8")
+    step_if = f"        if: github.event_name == '{event}'"
+    assert step_if in text, f"no gate step runs on {event}"
+    broken = text.replace(step_if, f"        if: github.event_name == '{event}ed'")
+    assert _unchecked_triggers(broken) == {event}
 
 
 def _concurrency(text: str) -> tuple[str, str]:
