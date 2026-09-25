@@ -15,28 +15,37 @@ What it does: Pins that a URL-registered repo is cloned into ``<home>/repos/<nam
               credentials in the URL never reach events or errors; and that ``builder_config``
               reaches the builder as constructor overrides and is stamped into the apparatus
               (absent means none), that bare rung labels mean the run's own builder / model and
-              fail closed without a model, and that explicit labels mix with bare ones.
+              fail closed without a model, and that explicit labels mix with bare ones. Also
+              the use-time clone-path rule (D2): a symbolic link off ``<home>/repos`` — planted
+              on the stored path, in ``config_json["path"]``, swapped in after registration, or
+              at the clone destination — is refused before any git process starts; and an AST
+              ratchet holds every use site to ``confined_clone_path``.
 How:          ``fixtures.remote.bare_remote`` over ``pyrepo`` with the developer switch;
-              ``RecordingBuilder`` captures its constructor kwargs; ``test_worker``'s harness.
+              ``RecordingBuilder`` captures its constructor kwargs; ``test_worker``'s harness;
+              ``_spy_git`` records every git process ``crb.core.git`` starts.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   src/crb/server/worker.py (under test), src/crb/core/git.py (``clone_repo`` and
-              the policy), tests/fixtures/remote.py, tests/test_server_routes_w3b.py (the API's
+              the policy), src/crb/server/routes/repos.py (``confined_clone_path``), tests/fixtures/remote.py, tests/test_server_routes_w3b.py (the API's
               half), tests/test_git_clone.py (the policy's own suite), tests/test_worker.py
 Tested by:    tests/test_worker_clone.py
 Touch when:   the clone destination or the URL policy changes (mirror the route and CLI suites);
-              a builder gains a config key the worker must pass through.
+              a builder gains a config key the worker must pass through; a new place opens a
+              stored clone path (add it to ``_USE_SITES``).
 """
 
 from __future__ import annotations
 
+import ast
+import shutil
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
 
 import crb.builders as builders_pkg
-from crb.core.git import LOCAL_CLONE_ENV, GitRepo
+import crb.core.git as git_mod
+from crb.core.git import LOCAL_CLONE_ENV, GitRepo, clone_repo
 from crb.observability.events import StepStatus
 from crb.store.jobs import STATUS_FAILED, STATUS_SUCCEEDED
 from crb.store.models import Repo, Run
@@ -282,3 +291,176 @@ def test_a_clone_path_that_escapes_the_root_at_use_time_fails_the_run(
     assert done.status == STATUS_FAILED
     assert "clone_path_escapes" in (done.error or "")
     assert not [e for e in h.events(run.id) if e.action == "probe.start"]
+
+
+def _spy_git(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Record the argv of every process ``crb.core.git`` starts from now on (each still
+    runs). Called AFTER a test's setup, so only the code under test is counted."""
+    calls: list[list[str]] = []
+    real_run = git_mod.subprocess.run
+
+    def spy(argv: Any, *a: Any, **kw: Any) -> Any:
+        calls.append([str(x) for x in argv])
+        return real_run(argv, *a, **kw)
+
+    monkeypatch.setattr(git_mod.subprocess, "run", spy)
+    return calls
+
+
+def _clone_in_root(h: Harness, remote: str) -> Path:
+    """A real clone of the fixture at ``<home>/repos/<name>`` — where the worker puts one."""
+    dest = h.home / "repos" / pr.REPO_NAME
+    clone_repo(remote, dest)
+    return dest
+
+
+def _swap_for_link(path: Path, target: Path) -> None:
+    """Replace the directory at ``path`` with a symbolic link to ``target``."""
+    shutil.rmtree(path)
+    path.symlink_to(target, target_is_directory=True)
+
+
+def test_a_link_at_the_clone_destination_is_refused_before_any_git_command(
+    h: Harness, remote: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeRabbit on PR #52: a row with a URL and no usable clone is cloned into
+    ``<home>/repos/<name>``; a symbolic link planted THERE (not on the stored path) was
+    followed — ``clone_repo`` reused the repository behind it, ran git in it, and the link
+    was persisted as the clone. The destination is confined like any stored path."""
+    monkeypatch.setenv(LOCAL_CLONE_ENV, "1")
+    add_url_repo(h, remote)  # no clone yet: the worker will clone into repos/<name>
+    dest = h.home / "repos" / pr.REPO_NAME
+    dest.parent.mkdir(parents=True)
+    dest.symlink_to(h.pyrepo.path, target_is_directory=True)  # a git repo off the root
+    calls = _spy_git(monkeypatch)
+    with pytest.raises(LookupError, match="clone_path_escapes"):
+        h.worker._load_repo(pr.REPO_NAME)
+    assert calls == []  # refused before git ran anywhere — in the link's target above all
+    row = h.repo_row()
+    assert row.clone_path == "" and row.config_json["path"] == ""  # the link is not adopted
+
+
+@pytest.mark.parametrize("column", ["clone_path", "config_path"])
+def test_an_escaping_path_planted_after_registration_is_refused_before_any_git_command(
+    h: Harness, remote: str, tmp_path: Path, column: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repository registered with a sound clone whose STORED path is later changed to one
+    under the repositories directory that leads out of it — on the row's ``clone_path`` or
+    in ``config_json["path"]`` (which the worker reads when the column is empty). The worker
+    refuses it on the next run before any git process starts."""
+    monkeypatch.setenv(LOCAL_CLONE_ENV, "1")
+    good = _clone_in_root(h, remote)
+    add_url_repo(h, "", clone_path=str(good))
+    assert h.worker._load_repo(pr.REPO_NAME)[1].path == good.resolve()
+    planted = h.home / "repos" / "other" / "link"
+    planted.parent.mkdir(parents=True)
+    planted.symlink_to(h.pyrepo.path, target_is_directory=True)
+    with h.factory() as s:
+        row = s.get(Repo, pr.REPO_NAME)
+        assert row is not None
+        if column == "clone_path":
+            row.clone_path = str(planted)
+        else:
+            row.clone_path = ""
+            row.config_json = {**dict(row.config_json or {}), "path": str(planted)}
+        s.commit()
+    calls = _spy_git(monkeypatch)
+    with pytest.raises(LookupError, match="clone_path_escapes"):
+        h.worker._load_repo(pr.REPO_NAME)
+    assert calls == []
+
+
+def test_a_link_swapped_in_after_registration_is_refused_before_any_git_command(
+    h: Harness, remote: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stored path does not change, but the directory it names is replaced by a
+    symbolic link to a repository elsewhere after registration (and after a good run).
+    The next run refuses it before any git process starts."""
+    monkeypatch.setenv(LOCAL_CLONE_ENV, "1")
+    good = _clone_in_root(h, remote)
+    add_url_repo(h, "", clone_path=str(good))
+    assert h.worker._load_repo(pr.REPO_NAME)[1].path == good.resolve()
+    _swap_for_link(good, h.pyrepo.path)
+    calls = _spy_git(monkeypatch)
+    with pytest.raises(LookupError, match="clone_path_escapes"):
+        h.worker._load_repo(pr.REPO_NAME)
+    assert calls == []
+    # and through the queue: the run fails closed, nothing of the probe starts
+    h.add_task(h.pyrepo.feat_task())
+    run = h.queue.enqueue(Run(repo=pr.REPO_NAME, kind="probe", actor="tester"))
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and "clone_path_escapes" in (done.error or "")
+    assert not [e for e in h.events(run.id) if e.action == "probe.start"]
+
+
+# ---------------------------------------------------------------------------
+# The prevention ratchet: a stored clone path reaches git only through the use-time rule
+# ---------------------------------------------------------------------------
+
+_SRC = Path(__file__).resolve().parents[1] / "src" / "crb"
+_CONFINERS = {"_confined_clone", "confined_clone_path"}
+#: (module, function) → where a stored clone path is turned into a git handle
+_USE_SITES = [("server/worker.py", "_load_repo"), ("server/routes/repos.py", "compute_profile")]
+
+
+def _func(tree: ast.AST, name: str) -> ast.FunctionDef:
+    return next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name)
+
+
+def _call_name(call: ast.Call) -> str:
+    f = call.func
+    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+
+
+def _is_confined(value: ast.expr) -> bool:
+    """``confiner(…)``, or ``confiner(…) if … else None`` (nothing to open)."""
+    if isinstance(value, ast.IfExp):
+        none = isinstance(value.orelse, ast.Constant) and value.orelse.value is None
+        return none and _is_confined(value.body)
+    return isinstance(value, ast.Call) and _call_name(value) in _CONFINERS
+
+
+@pytest.mark.parametrize(("module", "function"), _USE_SITES)
+def test_git_opens_only_the_confined_path_at_every_use_site(module: str, function: str) -> None:
+    """PR #52 review, as a class: the rule was applied to the stored path but git was
+    handed a different one (the clone destination) — and the path it opened was the
+    WRITTEN one, not the one checked. At each use site every ``GitRepo(…)`` and the
+    destination of every ``clone_repo(…)`` is a name bound to the confiner's result."""
+    fn = _func(ast.parse((_SRC / module).read_text(encoding="utf-8")), function)
+    confined = {
+        t.id
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Assign) and _is_confined(n.value)
+        for t in n.targets
+        if isinstance(t, ast.Name)
+    }
+    opened = [
+        (n.lineno, n.args[{"GitRepo": 0, "clone_repo": 1}[_call_name(n)]])
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Call) and _call_name(n) in {"GitRepo", "clone_repo"}
+    ]
+    assert opened, f"{module}:{function} no longer opens a clone — move this ratchet"
+    bad = [
+        (line, ast.unparse(arg))
+        for line, arg in opened
+        if not (isinstance(arg, ast.Name) and arg.id in confined)
+    ]
+    assert not bad, f"{module}:{function} opens git on an unconfined path: {bad}"
+
+
+def test_the_link_rule_is_called_only_inside_the_confiners() -> None:
+    """``clone_path_escapes`` on its own checks a path but does not say which path git
+    should open; outside the write-time rule and the use-time confiner it is a check that
+    the next line can walk around."""
+    allowed = {("server/routes/repos.py", f) for f in ("confine_clone_path", "confined_clone_path")}
+    found = set()
+    for path in _SRC.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for n in ast.walk(fn):
+                if isinstance(n, ast.Call) and _call_name(n) == "clone_path_escapes":
+                    found.add((path.relative_to(_SRC).as_posix(), fn.name))
+    assert found - allowed == set()
+    assert found == allowed  # both confiners still apply it

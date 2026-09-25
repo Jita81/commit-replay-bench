@@ -24,8 +24,9 @@ What it does: Validates every config through ``RepoConfig.from_dict`` (an invali
               the change profile (measurement INPUT, never a verdict), and pages mined
               tasks; confines a registered ``clone_path`` to ``<home>/repos``
               (``confine_clone_path`` — elsewhere is admin-only and recorded, a symbolic-link
-              escape is refused; ``clone_path_escapes`` re-applies the link rule where the
-              path is used — the profile walk here and the worker's ``_load_repo``). Also the
+              escape is refused; ``confined_clone_path`` re-applies the link rule where the
+              path is used — the profile walk here and the worker's ``_load_repo`` — and
+              hands back the resolved path git then opens). Also the
               home of ``get_repo_or_404`` and ``cached_profile`` that other route modules
               import.
 How:          ``_validated_config`` → ``Repo`` row + ``append_system_event`` on the repo's
@@ -41,7 +42,7 @@ Works with:   src/crb/core/spec.py (``RepoConfig`` — the shape stored in ``con
               src/crb/store/models.py (``Repo``, ``Task``), src/crb/server/routes/github.py
               (connect and link reuse ``get_repo_or_404`` / ``_config_of`` /
               ``_stored_config`` / ``PRESERVED_KEYS`` and write the ``github`` key this
-              module preserves), src/crb/server/worker.py (``clone_path_escapes`` at use),
+              module preserves), src/crb/server/worker.py (``confined_clone_path`` at use),
               docs/OPERATOR.md#20-configuring-a-repository-from-the-ui,
               ui/src/screens/Repos
 Tested by:    tests/test_server_routes_repos.py, tests/test_server_routes_w3b.py,
@@ -195,6 +196,27 @@ def clone_path_escapes(path: str | Path, home: str | Path) -> bool:
     resolved = raw.resolve()
     looks_inside = any(written.is_relative_to(r) and written != r for r in (written_root, root))
     return looks_inside and not (resolved.is_relative_to(root) and resolved != root)
+
+
+def confined_clone_path(
+    path: str | Path, home: str | Path, *, inside_root: bool = False
+) -> Path | None:
+    """The clone-path rule where a stored path is USED — the one way the worker and the
+    profile walk turn a clone path into the path git opens. ``path`` is resolved once and
+    ``None`` returned (refused) when it is written under :func:`clone_root` but resolves
+    outside it (:func:`clone_path_escapes`); with ``inside_root`` (the worker's own clone
+    destination) also when the resolved path is not inside the root, whatever it looks
+    like. Otherwise the RESOLVED path is returned, and the caller opens THAT, so the path
+    git works in is the path that was checked, not whatever the written path names by the
+    time git reads it. tests/test_worker_clone.py holds every use site to this function."""
+    if clone_path_escapes(path, home):
+        return None
+    resolved = Path(path).resolve()
+    if inside_root:
+        root = clone_root(home)
+        if not (resolved.is_relative_to(root) and resolved != root):
+            return None
+    return resolved
 
 
 def _escapes_error(root: Path) -> ApiError:
@@ -583,10 +605,11 @@ def compute_profile(
             f"repo {repo.name!r} has no clone_path to profile",
             detail={"repo": repo.name},
         )
-    if clone_path_escapes(path, home):
+    opened = confined_clone_path(path, home)
+    if opened is None:
         raise _escapes_error(clone_root(home))
-    git = GitRepo(Path(path))
-    if not Path(path).is_dir() or not git.is_repo():
+    git = GitRepo(opened)
+    if not opened.is_dir() or not git.is_repo():
         raise ApiError(
             409,
             "clone_unavailable",

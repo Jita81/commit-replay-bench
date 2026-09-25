@@ -46,7 +46,12 @@ reproduced with a failing test on `main` before it was changed (DL-053).
   refused for everyone (`422 clone_path_escapes`); a relative path is refused. The
   symbolic-link rule is checked again when the path is used — by the worker before a run
   reads the clone, and by the profile walk — because a path that did not exist when it was
-  registered can gain a link later.
+  registered can gain a link later. The review of this change found the worker's own clone
+  destination (`$CRB_HOME/repos/<name>`, used when a repository has a URL and no clone yet)
+  skipped that check, and the clone step reused whatever repository a link there pointed
+  at. The destination is now checked too, git opens the path that was checked rather than
+  the path as written, the clone step refuses a destination that is a symbolic link, and a
+  test holds every place that opens a stored clone to the one checking function.
 - **`claude setup-token` gets an allowlisted environment.** The sign-in helper ran the CLI
   with the API process's whole environment — the secret key, the database URL, the OIDC
   client secret. It now passes `PATH`, `HOME`, a plain terminal, a no-op browser, the
