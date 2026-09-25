@@ -31,12 +31,15 @@ What it is:   The replay orchestrator — ``run`` / ``run_task`` drive one task 
 What it does: Creates a fresh worktree per attempt, overlays the tests in sighted mode only,
               calls the builder, grades the tree under the belts, writes the evidence pack
               before the row (no pack ⇒ no Q1), appends one ledger row per attempt, climbs
-              the escalation ladder only while the grade is neither clean nor disqualified,
-              and skips tasks whose gold is known-bad. A builder crash is recorded and graded
+              the escalation ladder only while the grade is neither clean nor disqualified
+              (and, when a gate is set, only where the measured escalation rule says the
+              next rung pays — the decision is stamped on the row), keeps every attempt's
+              patch before its pack is written, and skips tasks whose gold is known-bad. A builder crash is recorded and graded
               anyway; only a sandbox failure or cancellation stops the run.
 How:          ``run`` iterates tasks (checking ``stop`` and ``gold_clean``) → ``run_task``
               loops the ladder: ``Workspace.create`` → ``build_fn`` → ``grade`` →
-              ``EvidencePack`` → ``write_pack`` → ``ledger.append(row_from(...))`` →
+              ``keep_patch`` → ``escalation_gate`` (not clean) → ``EvidencePack`` →
+              ``write_pack`` → ``ledger.append(row_from(...))`` →
               ``Workspace.remove`` → ``RunSummary`` with first-pass and any-attempt counts
               kept separate.
 Layer:        core — docs/ARCHITECTURE.md#51-a-replay-run-sighted
@@ -46,11 +49,12 @@ ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
 Works with:   src/crb/core/grade.py (the belts), src/crb/core/ledger.py (the row and the
               chain), src/crb/core/evidence.py (the pack and the apparatus stamp),
               src/crb/core/workspace.py (one worktree per attempt), src/crb/builders/adapter.py
-              (turns a Builder into a BuildFn), src/crb/server/worker.py (the server's caller
+              (turns a Builder into a BuildFn), src/crb/core/patches.py (the kept patch),
+              src/crb/core/spend.py (the escalation gate), src/crb/server/worker.py (the server's caller
               — a replay run's ``counts_json`` is the RunSummary), src/crb/cli/commands/grade.py
               (``crb grade``: the same ``grade()`` over a worktree the operator supplies)
 Tested by:    tests/test_run.py, tests/test_builders_adapter.py, tests/test_worker.py,
-              tests/test_worker_budget_ladder.py
+              tests/test_worker_budget_ladder.py, tests/test_patches.py, tests/test_worker_spend.py
 Touch when:   never for a new repository (mode, ladder and budget are run settings); adding a
               stage between build and ledger, or a field to the pack or the row, changes the
               evidence every consumer reads — update src/crb/core/evidence.py, the store
@@ -62,7 +66,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -71,8 +75,11 @@ from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED, MODES, GradeResult, grade
 from crb.core.ledger import PROCESS_REPLAY, GradeRow, JsonlLedger, grade_row_from_result
+from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
+from crb.core.patches import PatchStore, keep_patch
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
+from crb.core.spend import EscalationGate
 from crb.core.workspace import Workspace
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
@@ -123,6 +130,12 @@ class RunSpec:
     policy_version: str = ""
     keep_worktrees: bool = False
     extra: Mapping[str, Any] = field(default_factory=dict)
+    #: Where every graded attempt's patch is kept (:mod:`crb.core.patches`); ``None`` keeps
+    #: none (a deployment with ``retention.patches`` off, and bare core callers).
+    patch_store: PatchStore | None = None
+    #: Asked before a non-clean, non-disqualified attempt climbs to the next rung
+    #: (:func:`crb.core.spend.escalation_decision`); ``None`` climbs every rung (the old rule).
+    escalation_gate: EscalationGate | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -295,6 +308,26 @@ def run_task(
                 timeout=spec.timeout,
                 on_event=on_event,
             )
+            # keep the patch before the pack: the pack's hash then commits to the kept bytes
+            kept = (
+                keep_patch(
+                    ws,
+                    spec.patch_store,
+                    diff_sha256=result.diff.diff_sha256 if result.diff is not None else "",
+                )
+                if spec.patch_store is not None
+                else None
+            )
+            # decide the climb before the row: the rule and the bar go on the row it stops
+            decision = None
+            if (
+                spec.escalation_gate is not None
+                and i < len(spec.ladder)
+                and not result.clean
+                and not result.disqualified
+            ):
+                decision = spec.escalation_gate(task.size, i)
+                attempt = replace(attempt, labels={**attempt.labels, **decision.labels})
             pack = EvidencePack(
                 task=task,
                 grade=result,
@@ -309,6 +342,7 @@ def run_task(
                         {"transcript_ref": attempt.transcript_ref} if attempt.transcript_ref else {}
                     ),
                     **dict(attempt.notes),
+                    **({PATCH_NOTE_KEY: kept} if kept is not None else {}),
                 },
             )
             # pack first, row second: a row exists only for a pack that is on disk
@@ -335,6 +369,15 @@ def run_task(
         # a disqualified attempt is excluded, not retried: climbing would let a
         # tampering builder buy itself another observation
         if clean or disqualified:
+            break
+        if decision is not None and not decision.climb:
+            _emit(
+                on_event,
+                "run.escalation_stopped",
+                task=task.task_id,
+                trial=trial,
+                **dict(decision.labels),
+            )
             break
     return TaskOutcome(
         task.task_id,

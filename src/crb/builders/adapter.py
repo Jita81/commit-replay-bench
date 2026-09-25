@@ -133,6 +133,8 @@ MessageFn = Callable[[TaskSpec], str]
 #: the daemon did not confirm (it may still be running). The worker records the event on
 #: the run's trace and queues the reaper; the callback must not raise into the build.
 KillUnconfirmedFn = Callable[[str, UnconfirmedKill], None]
+#: ``(task, mode, rung, rung_budget) -> (budget, row labels)`` — see ``build_fn_for``.
+BudgetForTaskFn = Callable[[TaskSpec, str, Rung, Budget], tuple[Budget, Mapping[str, str]]]
 
 #: ``BuildOutcome.extra`` keys a sealed attempt stamps when its kill went unconfirmed.
 EXTRA_KILL_CONFIRMED = "kill_confirmed"
@@ -477,6 +479,7 @@ def build_fn_for(
     session_factory: SessionFactory = ContainerSession,
     preflight: Preflight | None = None,
     on_kill_unconfirmed: KillUnconfirmedFn | None = None,
+    budget_for_task: BudgetForTaskFn | None = None,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -506,6 +509,11 @@ def build_fn_for(
         :class:`SealedCheckout` inside a :class:`ContainerSession`; other builders
         (the test-only gold replay) keep the real worktree. ``session_factory``
         exists for tests.
+    budget_for_task:
+        ``(task, mode, rung, rung_budget) -> (budget, labels)`` — the calibrated budget
+        profile (:func:`crb.core.spend.calibrate`, bound by the worker). The attempt runs
+        under the returned budget and ``labels`` go on its row (``budget_profile``,
+        ``budget_calibration``, ``budget_tier``). ``None`` = the rung's budget as declared.
     on_kill_unconfirmed:
         Receives ``(task_id, UnconfirmedKill)`` for every sealed container whose
         enforced kill the daemon did not confirm — after the attempt, whether the
@@ -662,6 +670,10 @@ def build_fn_for(
             config=config,
         )
         rung_budget = budget_for_rung(rung, budget)
+        spend_labels: dict[str, str] = {}
+        if budget_for_task is not None:
+            rung_budget, calibrated = budget_for_task(task, mode, rung, rung_budget)
+            spend_labels = dict(calibrated)
         try:
             if sealed:
                 outcome = sealed_build(ws, task, rung, brief, rung_budget)
@@ -679,13 +691,15 @@ def build_fn_for(
                     budget=rung_budget.to_dict(),
                 ),
                 error=_prefixed(f"builder raised {type(exc).__name__}: ", str(exc)),
+                labels=spend_labels,
             )
             return discard(ws, task, failed)
-        labels: dict[str, str] = {}
+        labels: dict[str, str] = dict(spend_labels)
         if preflight is not None and not outcome.violated and not attempt_error(outcome):
-            outcome, labels = run_preflight(
+            outcome, pf_labels = run_preflight(
                 ws, task, brief, builder, rung, rung_budget, outcome, sealed=sealed
             )
+            labels.update(pf_labels)
         ref = _write_transcript(tdir, task, rung, outcome) if tdir is not None else ""
         attempt = BuildAttempt(
             outcome.builder_ref(transcript_ref=ref),

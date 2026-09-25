@@ -200,6 +200,9 @@ class FactorySpec:
     #: Empty = no override (the default).
     deliver_override_by: str = ""
     keep_workspaces: bool = False
+    #: Keep every graded attempt's patch under ``<evidence_dir>/patches`` (crb.core.patches);
+    #: ``False`` when the deployment keeps no code (``retention.patches`` off).
+    keep_patches: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "ladder", tuple(self.ladder))
@@ -446,6 +449,7 @@ class FactoryLoop:
             timeout=s.timeout,
             trial_prefix=trial_prefix,
             on_event=self._cb(item.id),
+            keep_patches=s.keep_patches,
         )
         for res in results:
             s.evidence.record_build(

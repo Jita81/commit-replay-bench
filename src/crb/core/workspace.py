@@ -178,9 +178,9 @@ class IntegrityViolation:
 @dataclass(frozen=True)
 class DiffStats:
     """What the evidence pack keeps of a builder's diff: the non-test files it touched,
-    the line counts, and the SHA-256 of the full diff text. The diff itself is not
-    retained by default (ADR-0006); the hash lets an auditor who holds it prove it is
-    the one that was graded."""
+    the line counts, and the SHA-256 of the full diff text. The text itself is kept, redacted
+    and capped, by :mod:`crb.core.patches` (ADR-0006 amendment of 2026-09-25), never in the
+    pack; the hash lets an auditor who holds it prove it is the one that was graded."""
 
     files: tuple[str, ...]
     additions: int
@@ -786,19 +786,8 @@ class Workspace:
         carries no bit that would make ``git diff`` skip a file.
         """
         ex = set(exclude)
-        text = self.repo.diff_text(self.parent, cwd=self.root)
-        tracked = set(self.repo.diff_names(self.parent, cwd=self.root))
-        for rel in self.touched_files():  # hash covers the FULL diff; ``exclude`` only
-            if rel in tracked or self.harness_unchanged(rel):  # filters files/counts below
-                continue
-            p = self.root / rel
-            if not p.is_file() or p.is_symlink():
-                continue
-            r = self.repo.run("diff", "--no-index", "--", "/dev/null", rel, cwd=self.root)
-            # --no-index exits 1 when the files differ (always, against /dev/null)
-            if r.stdout:
-                text += ("" if text.endswith("\n") or not text else "\n") + r.stdout
-        adds = dels = 0
+        text = self.patch_text()  # the hash covers the FULL diff; ``exclude`` only
+        adds = dels = 0  # filters the files and counts below
         files: list[str] = []
         current: str | None = None
         for line in text.splitlines():
@@ -813,6 +802,25 @@ class Workspace:
             elif line.startswith("-") and not line.startswith("---"):
                 dels += 1
         return DiffStats(tuple(files), adds, dels, sha256_bytes(text.encode("utf-8")))
+
+    def patch_text(self) -> str:
+        """The unified diff :meth:`diff_stats` hashes: ``git diff <parent>`` plus every
+        untracked, non-ignored file the harness did not write, diffed against
+        ``/dev/null`` and appended in path order. One procedure, so the patch the product
+        keeps (:mod:`crb.core.patches`) is by construction the text the grader hashed."""
+        text = self.repo.diff_text(self.parent, cwd=self.root)
+        tracked = set(self.repo.diff_names(self.parent, cwd=self.root))
+        for rel in self.touched_files():
+            if rel in tracked or self.harness_unchanged(rel):
+                continue
+            p = self.root / rel
+            if not p.is_file() or p.is_symlink():
+                continue
+            r = self.repo.run("diff", "--no-index", "--", "/dev/null", rel, cwd=self.root)
+            # --no-index exits 1 when the files differ (always, against /dev/null)
+            if r.stdout:
+                text += ("" if text.endswith("\n") or not text else "\n") + r.stdout
+        return text
 
     def read(self, rel: str) -> str:
         """``rel``'s text as it is on disk now (undecodable bytes replaced, never raised)."""
