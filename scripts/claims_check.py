@@ -45,8 +45,9 @@ backticks and then states each action and its state —
 state is the whole word ``closed``, ``open``, ``declined`` or ``[gap]``. The gate reads both
 ways: a review action with no record fails, and so does a record whose review no longer
 lists that action (a deleted row, a renamed *Actions* heading, a deleted review file), so
-neither side can vanish alone. A fenced example inside the section is not an action. The check reads the record's *shape*, not whether the state is true; a person still
-reads the log.
+neither side can vanish alone. A fenced example inside the section is not an action. The
+check reads the record's *shape*, not whether the state is true; a person still reads the
+log.
 Two of the critical friend's ten actions (#8, an independent human review of the core; #9,
 rotating a pasted token) sat for twelve days with no record at all, which is what this rule
 stops.
